@@ -1697,7 +1697,101 @@ def test_backupiq_unassigned_company_recovers_from_exact_endpoint_and_ci(tmp_pat
         for _, capability, args in actions.calls
         if capability == "service.ticket.update"
     ]
-    assert {"id": 141679, "configurationItemID": 433} in update_payloads
+    assert {"id": 141679, "configurationItemID": 433} not in update_payloads
+    store.close()
+
+
+def test_backupiq_provider_asset_without_rmm_endpoint_hands_off_human_review(tmp_path: Path):
+    class MissingEndpointReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "endpoint.device.search":
+                return {"status": "succeeded", "evidence": {"resource_matches": []}}
+            if capability == "service.configuration.search":
+                if str(arguments.get("name") or "").casefold() == "sos-50767":
+                    return {
+                        "status": "succeeded",
+                        "evidence": {
+                            "data": {
+                                "items": [
+                                    {
+                                        "id": 433,
+                                        "companyID": 878,
+                                        "isActive": True,
+                                        "referenceNumber": "stale-rmm-uid",
+                                        "referenceTitle": "SOS-50767",
+                                    }
+                                ]
+                            }
+                        },
+                    }
+                return {"status": "succeeded", "evidence": {"data": {"items": []}}}
+            if capability == "backup.endpoint.asset.search":
+                assert arguments["company_id"] == 878
+                assert arguments["name"] == "SOS-50767"
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "items": [
+                                {
+                                    "id": "0XX3NXQH2",
+                                    "name": "SOS-50767",
+                                    "status": "offline",
+                                }
+                            ]
+                        }
+                    },
+                }
+            return super().execute(capability, arguments)
+
+    candidate = QueueCandidate(
+        resource_id="141679",
+        priority=90,
+        source_queue="Jason",
+        owned_by_jason=True,
+        urgent=False,
+        context={
+            "id": 141679,
+            "ticketNumber": "T20260929.0041",
+            "title": "BackupIQ: Backup for asset is not available for Star of the Sea Catholic Church",
+            "description": "Asset: SOS-50767; backup is not available.",
+            "companyID": 0,
+            "configurationItemID": None,
+        },
+    )
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate), reads=MissingEndpointReads(), actions=actions, store=store,
+        promotion_store=PromotionStore(promoted=("backupiq_endpoint_backup",)),
+        max_active_work_items=2, interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+
+    try:
+        worker._admit(candidate, BACKUPIQ_SCOPE)
+    except OperationalAutonomyError as exc:
+        worker._record_admission_failure(candidate, BACKUPIQ_SCOPE, exc)
+    else:
+        raise AssertionError("missing managed endpoint must not be admitted")
+
+    work = store.get(141679)
+    assert work is not None
+    assert work.phase == "escalated"
+    assert work.company_id == 878
+    assert work.configuration_item_id == 433
+    assert work.hostname == "SOS-50767"
+    update_payloads = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert {"id": 141679, "queueID": "Help Desk I", "status": "Human Review"} in update_payloads
+    note_payloads = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert any("Managed Endpoint Missing" in str(payload) for payload in note_payloads)
     store.close()
 
 
