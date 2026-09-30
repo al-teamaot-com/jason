@@ -5316,8 +5316,7 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
         connection.execute("PRAGMA query_only = ON")
         rows = connection.execute(
             """
-            SELECT ticket_id,ticket_number,title,playbook_id,phase,
-                   updated_at,last_reason
+            SELECT ticket_id,ticket_number,playbook_id,phase,updated_at
             FROM autonomy_operational_work
             WHERE phase NOT IN ('complete','escalated')
             ORDER BY
@@ -5330,7 +5329,7 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
                 END,
                 updated_at DESC,
                 ticket_id DESC
-            LIMIT 20
+            LIMIT 5
             """
         ).fetchall()
     except (sqlite3.Error, OSError) as error:
@@ -5357,12 +5356,10 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
             {
                 "ticket_id": int(row["ticket_id"]),
                 "ticket_number": str(row["ticket_number"] or ""),
-                "title": str(row["title"] or ""),
                 "playbook": str(row["playbook_id"] or ""),
                 "phase": phase,
                 "state": state,
                 "updated_at": str(row["updated_at"] or ""),
-                "reason": str(row["last_reason"] or ""),
             }
         )
     counts = connection = None
@@ -5400,7 +5397,7 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
         "status": "succeeded",
         "items": items,
         "items_bounded": True,
-        "item_limit": 20,
+        "item_limit": 5,
         "active_count": int((counts["active_count"] if counts is not None else None) or 0),
         "waiting_count": int((counts["waiting_count"] if counts is not None else None) or 0),
         "blocked_count": int((counts["blocked_count"] if counts is not None else None) or 0),
