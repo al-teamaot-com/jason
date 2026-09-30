@@ -47,6 +47,11 @@ from autonomous_remediation.playbook_autonomy_approval import (
 )
 from autonomous_remediation.datto_edr_av_playbook import PLAYBOOK_VERSION as EDR_PLAYBOOK_VERSION
 from autonomous_remediation.datto_edr_av_runtime_contract import VERIFIED_COMPONENTS
+from autonomous_remediation.deb_availability import (
+    DebAssetSelection,
+    DebAvailabilityState,
+    select_deb_asset,
+)
 
 from .low_disk_analysis import (
     LARGE_FILE_COMMAND,
@@ -861,12 +866,12 @@ class OperationalAutonomyMaintenance:
             datetime.now(timezone.utc) - checked
         ).total_seconds() >= OFFLINE_AUGMENTATION_RECHECK_SECONDS
 
-    def _offline_augmentation_deb_online(
+    def _deb_asset_selection(
         self,
         *,
         company_id: int,
         hostname: str,
-    ) -> bool | None:
+    ) -> DebAssetSelection:
         try:
             data = self._read_data(
                 "backup.endpoint.asset.search",
@@ -877,25 +882,175 @@ class OperationalAutonomyMaintenance:
                 },
             )
         except Exception:
-            return None
+            return DebAssetSelection(
+                state=DebAvailabilityState.UNAVAILABLE,
+                hostname=hostname,
+                exact_match_count=0,
+                asset=None,
+                selected_asset_id=None,
+                selected_status=None,
+                activity_at=None,
+                reason="DEB availability read failed or is unavailable.",
+            )
         items = data.get("items")
         if not isinstance(items, list):
-            return None
-        exact = [
-            item
-            for item in items
-            if isinstance(item, Mapping)
-            and str(item.get("name") or "").strip().casefold()
-            == hostname.casefold()
-        ]
-        if len(exact) != 1:
-            return None
-        status = str(exact[0].get("status") or "").strip().casefold()
-        if status == "online":
+            return DebAssetSelection(
+                state=DebAvailabilityState.UNAVAILABLE,
+                hostname=hostname,
+                exact_match_count=0,
+                asset=None,
+                selected_asset_id=None,
+                selected_status=None,
+                activity_at=None,
+                reason="DEB availability response did not contain an asset list.",
+            )
+        return select_deb_asset(
+            items,
+            hostname=hostname,
+            observed_at=datetime.now(timezone.utc),
+        )
+
+    def _offline_augmentation_deb_online(
+        self,
+        *,
+        company_id: int,
+        hostname: str,
+    ) -> bool | None:
+        selection = self._deb_asset_selection(
+            company_id=company_id,
+            hostname=hostname,
+        )
+        if selection.state is DebAvailabilityState.ONLINE:
             return True
-        if status in {"offline", "inactive", "disconnected"}:
+        if selection.state is DebAvailabilityState.OFFLINE:
             return False
         return None
+
+    def _device_access_state(
+        self,
+        work: OperationalWork,
+        *,
+        endpoint: Mapping[str, Any] | None = None,
+    ) -> tuple[str, DebAssetSelection]:
+        current = (
+            dict(endpoint)
+            if endpoint is not None
+            else self._read_record(
+                "endpoint.device.read", {"resource_id": work.device_uid}
+            )
+        )
+        endpoint_uid = str(
+            current.get("resource_id")
+            or current.get("uid")
+            or current.get("deviceUid")
+            or ""
+        ).strip()
+        endpoint_hostname = str(
+            current.get("hostname")
+            or current.get("hostName")
+            or current.get("name")
+            or ""
+        ).strip()
+        if endpoint_uid != work.device_uid:
+            raise OperationalAutonomyError(
+                "device availability DRMM identity changed during execution"
+            )
+        if endpoint_hostname and endpoint_hostname.casefold() != work.hostname.casefold():
+            raise OperationalAutonomyError(
+                "device availability DRMM hostname changed during execution"
+            )
+
+        if current.get("online") is True:
+            return (
+                "drmm_online",
+                DebAssetSelection(
+                    state=DebAvailabilityState.UNKNOWN,
+                    hostname=work.hostname,
+                    exact_match_count=0,
+                    asset=None,
+                    selected_asset_id=None,
+                    selected_status=None,
+                    activity_at=None,
+                    reason="DEB read not required because DRMM is currently online.",
+                ),
+            )
+
+        deb = self._deb_asset_selection(
+            company_id=work.company_id,
+            hostname=work.hostname,
+        )
+        if deb.state is DebAvailabilityState.ONLINE:
+            return "deb_online_drmm_offline", deb
+        if deb.state is DebAvailabilityState.OFFLINE:
+            return "offline_corroborated", deb
+        return "drmm_offline_unconfirmed", deb
+
+    @staticmethod
+    def _device_wait_reason(
+        state: str,
+        deb: DebAssetSelection,
+    ) -> str:
+        activity = (
+            deb.activity_at.isoformat()
+            if deb.activity_at is not None
+            else "unknown"
+        )
+        if state == "deb_online_drmm_offline":
+            return (
+                "availability=deb_online_drmm_offline; DRMM reports the endpoint "
+                "offline while DEB reports the current device online; waiting for "
+                "DRMM management access rather than device power-on; "
+                f"deb_asset={deb.selected_asset_id or 'unknown'}; "
+                f"deb_activity={activity}."
+            )
+        if state == "offline_corroborated":
+            return (
+                "availability=offline_corroborated; DRMM and DEB independently "
+                "report the endpoint offline; waiting for exact endpoint access; "
+                f"deb_asset={deb.selected_asset_id or 'unknown'}; "
+                f"deb_activity={activity}."
+            )
+        return (
+            "availability=drmm_offline_unconfirmed; DRMM reports the endpoint "
+            f"offline; DEB state={deb.state.value} and did not independently "
+            "confirm whether the device is online; waiting for DRMM/device access."
+        )
+
+    def _document_deb_drmm_conflict(
+        self,
+        work: OperationalWork,
+        deb: DebAssetSelection,
+    ) -> None:
+        activity = (
+            deb.activity_at.isoformat()
+            if deb.activity_at is not None
+            else "unknown"
+        )
+        self._write_note(
+            work,
+            (
+                "STATUS\n"
+                f"{work.hostname} is not being treated as powered off. DEB reports "
+                "the endpoint online while DRMM currently reports it offline.\n\n"
+                "NEXT STEP\n"
+                "Jason will preserve the ticket and wait for the DRMM management "
+                "path when DRMM access is required. If an already-dispatched job "
+                "can be polled safely, Jason may continue that read-only/status "
+                "verification without waiting for DRMM's online flag to change.\n\n"
+                "KEY EVIDENCE\n"
+                "- DRMM online state=No\n"
+                "- DEB online state=Yes\n"
+                f"- DEB asset={deb.selected_asset_id or 'unknown'}\n"
+                f"- DEB most recent activity={activity}\n"
+                f"- Exact DEB hostname matches={deb.exact_match_count}\n\n"
+                "CHANGES MADE\n"
+                "None. Availability evidence only.\n\n"
+                "JASON STATE\n"
+                "waiting for DRMM management access; device itself is independently "
+                "reported online by DEB"
+            ),
+            "Jason - Device Availability - DRMM Access",
+        )
 
     def _offline_augmentation_live_server_witness(
         self,
@@ -1201,9 +1356,10 @@ class OperationalAutonomyMaintenance:
                 continue
             try:
                 if self._pause_active_work_if_endpoint_offline(work, candidate):
+                    state, reason_code = self._classify_persisted_work(work.ticket_id)
                     classifications[work.ticket_id] = (
-                        "waiting_device_access",
-                        "endpoint_offline",
+                        state,
+                        reason_code,
                         candidate.source_version,
                         False,
                     )
@@ -1384,7 +1540,33 @@ class OperationalAutonomyMaintenance:
                     continue
                 if existing.phase.startswith("waiting_device_access:"):
                     waiting_phase = existing.phase
-                    if self._endpoint_is_online(existing.device_uid):
+                    try:
+                        access_state, deb = self._device_access_state(existing)
+                    except Exception:
+                        access_state = "drmm_offline_unconfirmed"
+                        deb = DebAssetSelection(
+                            state=DebAvailabilityState.UNAVAILABLE,
+                            hostname=existing.hostname,
+                            exact_match_count=0,
+                            asset=None,
+                            selected_asset_id=None,
+                            selected_status=None,
+                            activity_at=None,
+                            reason="Availability recheck failed closed.",
+                        )
+
+                    resume_phase = waiting_phase.split(":", 1)[1]
+                    safe_deb_resume = (
+                        access_state == "deb_online_drmm_offline"
+                        and bool(existing.job_uid)
+                        and resume_phase.endswith("_wait")
+                    )
+                    may_resume = access_state == "drmm_online" or safe_deb_resume
+
+                    if access_state == "deb_online_drmm_offline":
+                        self._document_deb_drmm_conflict(existing, deb)
+
+                    if may_resume:
                         if len(self.store.list_open()) < self.max_active_work_items:
                             scope = self._scope_for_work(existing)
                             self.actions.execute(
@@ -1397,14 +1579,19 @@ class OperationalAutonomyMaintenance:
                                     }
                                 },
                             )
-                            resume_phase = waiting_phase.split(":", 1)[1]
                             resume_reason = (
                                 existing.last_reason
                                 if (
                                     existing.playbook_id == BACKUPIQ_SCOPE.playbook_id
                                     and resume_phase == "backupiq_verify_reinstall"
                                 )
-                                else "Exact endpoint is online again; resuming preserved work."
+                                else (
+                                    "DEB independently reports the endpoint online while "
+                                    "DRMM is offline; resuming only the already-dispatched "
+                                    "job polling phase."
+                                    if safe_deb_resume
+                                    else "Exact endpoint is online again; resuming preserved work."
+                                )
                             )
                             existing = self._replace(
                                 existing,
@@ -1435,9 +1622,34 @@ class OperationalAutonomyMaintenance:
                                 False,
                             )
                     else:
+                        reason = self._device_wait_reason(access_state, deb)
+                        prior_reason = str(existing.last_reason or "").strip()
+                        prior_prefix = (
+                            prior_reason.split("availability=", 1)[0].strip(" ;")
+                            if "availability=" in prior_reason
+                            else prior_reason
+                        )
+                        combined_reason = (
+                            f"{prior_prefix}; {reason}"
+                            if prior_prefix
+                            else reason
+                        )
+                        if combined_reason != existing.last_reason:
+                            existing = self._replace(
+                                existing,
+                                last_reason=combined_reason,
+                            )
+                            self.store.put(existing)
+                        reason_code = (
+                            "drmm_access_unavailable_device_online_deb"
+                            if access_state == "deb_online_drmm_offline"
+                            else "endpoint_offline_corroborated_deb"
+                            if access_state == "offline_corroborated"
+                            else "endpoint_offline_deb_unconfirmed"
+                        )
                         classifications[ticket_id] = (
                             "waiting_device_access",
-                            "endpoint_offline",
+                            reason_code,
                             item.source_version,
                             False,
                         )
@@ -1591,16 +1803,26 @@ class OperationalAutonomyMaintenance:
             try:
                 work = self._admit(candidate, scope)
             except Exception as exc:
-                if "endpoint is not currently online" in str(exc).casefold():
+                message = str(exc).casefold()
+                if (
+                    "endpoint is not currently online" in message
+                    or "drmm access unavailable while deb reports endpoint online" in message
+                ):
                     waiting_device += 1
+                    reason_code = (
+                        "drmm_access_unavailable_device_online_deb"
+                        if "drmm access unavailable while deb reports endpoint online" in message
+                        else "endpoint_offline_corroborated_deb"
+                        if "deb corroborated" in message
+                        else "endpoint_offline_deb_unconfirmed"
+                    )
                     classifications[int(candidate.resource_id)] = (
-                        "waiting_device_access", "endpoint_offline",
+                        "waiting_device_access", reason_code,
                         candidate.source_version, False,
                     )
                     self._record_admission_failure(candidate, scope, exc)
-                    # An offline endpoint is local to this ticket. Defer it and keep
-                    # searching for unrelated eligible work; the overall candidate-
-                    # evaluation ceiling bounds provider work for the scan.
+                    # Endpoint/management-path availability is local to this ticket.
+                    # Defer it and keep searching for unrelated eligible work.
                     continue
                 admission_attempts += 1
                 classifications[int(candidate.resource_id)] = (
@@ -1738,30 +1960,25 @@ class OperationalAutonomyMaintenance:
         return endpoint.get("online") is True
 
     def _pause_active_work_if_endpoint_offline(self, work: OperationalWork, candidate) -> bool:
-        # BackupIQ uses dual-source availability. DRMM-only offline is a
-        # contradiction requiring Help Desk I / Human Review, while both DRMM
-        # and Backup.net offline is the only true-offline waiting condition.
+        # BackupIQ owns its full dual-source branch separately.
         if work.playbook_id == BACKUPIQ_SCOPE.playbook_id:
             return False
         if not work.job_uid:
             return False
         if work.phase.startswith("waiting_device_access:"):
             return True
+
         try:
-            endpoint = self._read_record(
-                "endpoint.device.read", {"resource_id": work.device_uid}
-            )
+            access_state, deb = self._device_access_state(work)
         except Exception:
             return False
-        endpoint_uid = str(
-            endpoint.get("resource_id")
-            or endpoint.get("uid")
-            or endpoint.get("deviceUid")
-            or ""
-        ).strip()
-        if endpoint_uid != work.device_uid:
+
+        if access_state == "drmm_online":
             return False
-        if endpoint.get("online") is not False:
+        if access_state == "deb_online_drmm_offline":
+            # A job is already dispatched. DEB proves the machine is alive, so
+            # polling the existing provider job is safe and does not redispatch.
+            self._document_deb_drmm_conflict(work, deb)
             return False
 
         scope = self._scope_for_work(work)
@@ -1783,10 +2000,7 @@ class OperationalAutonomyMaintenance:
             self._replace(
                 work,
                 phase=f"waiting_device_access:{work.phase}",
-                last_reason=(
-                    "Exact endpoint went offline after job dispatch; preserving "
-                    "the outstanding job and releasing the active-work slot."
-                ),
+                last_reason=self._device_wait_reason(access_state, deb),
             )
         )
         return True
@@ -1829,7 +2043,15 @@ class OperationalAutonomyMaintenance:
         if current.phase == "complete":
             return "not_actionable", "already_complete"
         if current.phase.startswith("waiting_device_access:"):
-            return "waiting_device_access", "endpoint_offline"
+            reason = str(current.last_reason or "")
+            if "availability=deb_online_drmm_offline" in reason:
+                return (
+                    "waiting_device_access",
+                    "drmm_access_unavailable_device_online_deb",
+                )
+            if "availability=offline_corroborated" in reason:
+                return "waiting_device_access", "endpoint_offline_corroborated_deb"
+            return "waiting_device_access", "endpoint_offline_deb_unconfirmed"
         if current.phase.startswith("waiting_recheck:"):
             return "waiting_recheck", "scheduled_recheck"
         return "eligible_now", "active_work"
@@ -2341,7 +2563,21 @@ class OperationalAutonomyMaintenance:
             endpoint.get("online") is not True
             and scope.playbook_id not in offline_wait_scopes
         ):
-            raise OperationalAutonomyError("endpoint is not currently online")
+            deb = self._deb_asset_selection(
+                company_id=company_id,
+                hostname=hostname,
+            )
+            if deb.state is DebAvailabilityState.ONLINE:
+                raise OperationalAutonomyError(
+                    "DRMM access unavailable while DEB reports endpoint online"
+                )
+            if deb.state is DebAvailabilityState.OFFLINE:
+                raise OperationalAutonomyError(
+                    "endpoint is not currently online (DEB corroborated)"
+                )
+            raise OperationalAutonomyError(
+                "endpoint is not currently online (DEB unconfirmed)"
+            )
 
         return OperationalWork(
             ticket_id=ticket_id,
@@ -2714,6 +2950,7 @@ class OperationalAutonomyMaintenance:
         )
 
         if endpoint.get("online") is False:
+            access_state, deb = self._device_access_state(work, endpoint=endpoint)
             self.actions.execute(
                 self._scope_for_work(work),
                 "service.ticket.update",
@@ -2724,18 +2961,33 @@ class OperationalAutonomyMaintenance:
                     }
                 },
             )
+            if access_state == "deb_online_drmm_offline":
+                self._document_deb_drmm_conflict(work, deb)
+                status_text = (
+                    f"{work.hostname} is independently online in DEB, but DRMM "
+                    "management access is currently unavailable."
+                )
+            elif access_state == "offline_corroborated":
+                status_text = (
+                    f"{work.hostname} is reported offline by both DRMM and DEB."
+                )
+            else:
+                status_text = (
+                    f"{work.hostname} is offline in DRMM; DEB could not independently "
+                    "confirm the endpoint state."
+                )
             note = (
                 "STATUS\n"
-                f"{work.hostname} is offline and Idle Log Off diagnostics are waiting "
-                "for exact device access.\n\n"
-                "NEXT STEP\n"
+                + status_text
+                + "\n\nNEXT STEP\n"
                 "Keep the ticket in the Jason queue and resume "
-                "idle_log_off_investigate automatically when the exact DRMM endpoint "
-                "is online.\n\n"
+                "idle_log_off_investigate automatically when the exact DRMM management "
+                "path is available.\n\n"
                 "KEY EVIDENCE\n"
                 f"- Device={work.hostname}\n"
                 f"- DRMM UID={work.device_uid}\n"
                 "- DRMM online state=No\n"
+                f"- DEB state={deb.state.value}\n"
                 "- No setter, alert resolution, forced logoff, reboot, policy change, "
                 "or generic PowerShell was attempted.\n\n"
                 "JASON STATE\n"
@@ -2750,10 +3002,7 @@ class OperationalAutonomyMaintenance:
                 self._replace(
                     work,
                     phase="waiting_device_access:idle_log_off_investigate",
-                    last_reason=(
-                        "Idle Log Off diagnostics are waiting for exact endpoint access; "
-                        "Jason retains queue ownership and releases the active-work slot."
-                    ),
+                    last_reason=self._device_wait_reason(access_state, deb),
                 )
             )
             return
@@ -3860,19 +4109,19 @@ class OperationalAutonomyMaintenance:
             self._block(work, "Low-disk device identity changed during execution.")
             return
         if endpoint.get("online") is not True:
+            access_state, deb = self._device_access_state(work, endpoint=endpoint)
             self.actions.execute(
                 self._scope_for_work(work),
                 "service.ticket.update",
                 {"payload": {"id": work.ticket_id, "status": "Waiting Device Access"}},
             )
+            if access_state == "deb_online_drmm_offline":
+                self._document_deb_drmm_conflict(work, deb)
             self.store.put(
                 self._replace(
                     work,
                     phase="waiting_device_access:low_disk_investigate",
-                    last_reason=(
-                        "Low-disk endpoint is offline; waiting for exact device access "
-                        "without consuming the active-work slot."
-                    ),
+                    last_reason=self._device_wait_reason(access_state, deb),
                 )
             )
             return
@@ -4334,25 +4583,21 @@ class OperationalAutonomyMaintenance:
         self,
         work: OperationalWork,
     ) -> Mapping[str, Any] | None:
-        asset_data = self._read_data(
-            "backup.endpoint.asset.search",
-            {
-                "company_id": work.company_id,
-                "name": work.hostname,
-                "page_size": 100,
-            },
+        selection = self._deb_asset_selection(
+            company_id=work.company_id,
+            hostname=work.hostname,
         )
-        items = asset_data.get("items")
-        if not isinstance(items, list):
-            return None
-        exact_assets = [
-            item
-            for item in items
-            if isinstance(item, Mapping)
-            and str(item.get("name") or "").strip().casefold()
-            == work.hostname.casefold()
-        ]
-        return exact_assets[0] if len(exact_assets) == 1 else None
+        return (
+            dict(selection.asset)
+            if isinstance(selection.asset, Mapping)
+            and selection.state
+            not in {
+                DebAvailabilityState.AMBIGUOUS,
+                DebAvailabilityState.NOT_FOUND,
+                DebAvailabilityState.UNAVAILABLE,
+            }
+            else None
+        )
 
     def _investigate_backupiq(
         self,
@@ -4378,51 +4623,42 @@ class OperationalAutonomyMaintenance:
             self._block(work, "BackupIQ device identity changed during execution.")
             return
 
-        asset_data = self._read_data(
-            "backup.endpoint.asset.search",
-            {
-                "company_id": work.company_id,
-                "name": work.hostname,
-                "page_size": 100,
-            },
+        asset_selection = self._deb_asset_selection(
+            company_id=work.company_id,
+            hostname=work.hostname,
         )
-        items = asset_data.get("items")
-        if not isinstance(items, list):
-            self._block(work, "BackupIQ provider asset evidence is unavailable or malformed.")
-            return
-        exact_assets = [
-            item for item in items
-            if isinstance(item, Mapping)
-            and str(item.get("name") or "").strip().casefold() == work.hostname.casefold()
-        ]
-        if len(exact_assets) != 1:
+        asset = asset_selection.asset
+        if not isinstance(asset, Mapping):
             classification = (
                 "asset_identity_or_lifecycle_issue"
-                if len(exact_assets) == 0
+                if asset_selection.state is DebAvailabilityState.NOT_FOUND
                 else "duplicate_or_ambiguous_provider_asset"
+                if asset_selection.state is DebAvailabilityState.AMBIGUOUS
+                else "provider_asset_evidence_unavailable"
             )
             self._write_note(
                 work,
                 (
                     "Jason autonomous BackupIQ diagnostic stopped before remediation. "
-                    f"Device={work.hostname}; ExactProviderAssetMatches={len(exact_assets)}; "
-                    f"Classification={classification}. Exact DRMM/provider asset identity "
-                    "was not uniquely proven. No reinstall, clean install, policy change, "
-                    "backup deletion, retention change, or other modifying backup action "
-                    "was attempted."
+                    f"Device={work.hostname}; ExactProviderAssetMatches="
+                    f"{asset_selection.exact_match_count}; "
+                    f"Classification={classification}; "
+                    f"SelectionReason={asset_selection.reason}. Exact DRMM/provider asset "
+                    "identity was not safely established. No reinstall, clean install, "
+                    "policy change, backup deletion, retention change, or other modifying "
+                    "backup action was attempted."
                 ),
                 "Jason - BackupIQ - Asset Validation",
             )
             self._persist_human_review_escalation(
                 work,
                 reason=(
-                    "BackupIQ provider asset identity was not uniquely established; "
+                    "BackupIQ provider asset identity was not safely established; "
                     "technician review required."
                 ),
             )
             return
 
-        asset = exact_assets[0]
         provider_status = str(asset.get("status") or "").strip().casefold()
         provider_online = provider_status == "online"
         backup_enabled = asset.get("backupEnabled") is True
@@ -4975,19 +5211,19 @@ class OperationalAutonomyMaintenance:
             self._block(work, "Unexpected-shutdown device identity changed during execution.")
             return
         if endpoint.get("online") is not True:
+            access_state, deb = self._device_access_state(work, endpoint=endpoint)
             self.actions.execute(
                 self._scope_for_work(work),
                 "service.ticket.update",
                 {"payload": {"id": work.ticket_id, "status": "Waiting Device Access"}},
             )
+            if access_state == "deb_online_drmm_offline":
+                self._document_deb_drmm_conflict(work, deb)
             self.store.put(
                 self._replace(
                     work,
                     phase="waiting_device_access:shutdown_investigate",
-                    last_reason=(
-                        "Unexpected-shutdown endpoint is offline; waiting for exact "
-                        "device access without consuming the active-work slot."
-                    ),
+                    last_reason=self._device_wait_reason(access_state, deb),
                 )
             )
             return
@@ -5939,7 +6175,11 @@ class OperationalAutonomyMaintenance:
         # Autotask exactly once. The queue source continues to reconcile
         # Waiting Device Access tickets, so the normal claim path restores In
         # Progress automatically as soon as the exact DRMM endpoint is online.
-        if "endpoint is not currently online" in str(error).casefold():
+        message = str(error).casefold()
+        if (
+            "endpoint is not currently online" in message
+            or "drmm access unavailable while deb reports endpoint online" in message
+        ):
             status_label = str(
                 candidate.context.get("_jason_source_status_label") or ""
             ).strip()
@@ -5962,7 +6202,6 @@ class OperationalAutonomyMaintenance:
         # Missing/invalid ticket identity prerequisites outside Jason are not a
         # durable failure. They can be corrected by normal PSA triage; keeping a
         # terminal row would suppress reconsideration forever.
-        message = str(error).casefold()
         if (
             str(candidate.source_queue).strip().casefold() != "jason"
             and (
