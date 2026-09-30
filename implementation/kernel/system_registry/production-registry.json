@@ -7933,9 +7933,9 @@
       "lifecycle_status": "registered",
       "declared_state": {
         "provider_id": "darkwebid",
-        "provider_lifecycle": "planned",
-        "health": "unknown",
-        "approval": "pilot",
+        "provider_lifecycle": "available",
+        "health": "healthy",
+        "approval": "approved",
         "capability_count": "2"
       },
       "dependencies": [
@@ -7945,7 +7945,8 @@
         "credential.openbao.darkwebid"
       ],
       "verification_methods": [
-        "live-darkwebid-connector-acceptance-v1"
+        "live-darkwebid-connector-acceptance-v1",
+        "live-darkwebid-central-orchestrator-and-mcp-acceptance-v1"
       ],
       "steward": "technology-steward",
       "authority_references": [
@@ -7956,7 +7957,7 @@
       "evidence_references": [
         "docs/sessions/Dark-Web-ID-Connector-Foundation-2026-09-30.md"
       ],
-      "source_version": "2026-09-30.1",
+      "source_version": "2026-09-30.2",
       "created_at": "2026-09-30T15:19:43Z",
       "created_by": "Jason governed provider integration"
     }

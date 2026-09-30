@@ -421,6 +421,25 @@
       "evidence_references": [
         "docs/sessions/Dark-Web-ID-Connector-Foundation-2026-09-30.md"
       ]
+    },
+    {
+      "event_id": "lifecycle.2026-09-30t155648z.provider.darkwebid.verified",
+      "registry_id": "provider.darkwebid",
+      "from_lifecycle": "configured",
+      "to_lifecycle": "verified",
+      "effective_at": "2026-09-30T15:56:48+00:00",
+      "principal_id": "person-al",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "reason": "Production runtime and MCP were activated with the dedicated Dark Web ID AppRole, an organization-scoped observe provider-read grant was installed after durable backup, the live Central Orchestrator selected darkwebid and returned 15 organizations, and the externally connected Jason MCP repeated the canonical read successfully with no provider mutation.",
+      "evidence_references": [
+        "docs/sessions/Dark-Web-ID-Connector-Foundation-2026-09-30.md"
+      ],
+      "verification_method": "live-darkwebid-central-orchestrator-and-mcp-acceptance-v1",
+      "verification_outcome": "verified"
     }
   ]
 }

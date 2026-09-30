@@ -8,7 +8,7 @@
 - Lifecycle history: `implementation/kernel/system_registry/production-lifecycle-events.json`
 - Environment(s): `production-pilot`
 - Registered entities: `235`
-- Effective lifecycle counts: `configured=10, registered=210, verified=15`
+- Effective lifecycle counts: `configured=9, registered=210, verified=16`
 
 ## Verified current operational entities
 
@@ -28,6 +28,7 @@
 | `credential.openbao.darkwebid` | `credential_reference` | `live-openbao-approle-mount-proof-v1` | `docs/sessions/Dark-Web-ID-Connector-Foundation-2026-09-30.md` |
 | `deployment.jason-chatgpt-mcp-observability-pilot` | `deployment` | `mcp-observability-production-pilot-proof-v1` | `docs/sessions/ChatGPT-Jason-MCP-Durability-Acceptance-2026-09-09.md`<br>`docs/sessions/Jason-Command-Center-Usage-Attribution-Deployment-Proof-2026-09-09.md`<br>`docs/sessions/Jason-Operational-Reconciliation-Snapshot-2026-09-09.md` |
 | `deployment.jason-single-host-pilot` | `deployment` | `production-host-proof` | `docs/sessions/Direct-Teams-Gateway-Production-Proof-2026-08-15.md` |
+| `provider.darkwebid` | `provider` | `live-darkwebid-central-orchestrator-and-mcp-acceptance-v1` | `docs/sessions/Dark-Web-ID-Connector-Foundation-2026-09-30.md` |
 | `resource.aws-zerotier-relay` | `resource` | `public-caddy-host-route-and-rejection-proof-v1` | `docs/sessions/Existing-AWS-ZeroTier-Relay-MCP-Reuse-Assessment-2026-09-08.md`<br>`docs/sessions/MCP-Edge-Discovery-2026-09-08.md`<br>`docs/sessions/ChatGPT-Jason-MCP-Durability-Acceptance-2026-09-09.md` |
 
 ## Registered but not yet verified
@@ -237,7 +238,6 @@
 | `provider.autotask-ticket-update` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
 | `provider.aws-ses` | `provider` | `registered` | `governed-cap007-provider-proof` |
 | `provider.backup-net` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
-| `provider.darkwebid` | `provider` | `configured` | `live-darkwebid-connector-acceptance-v1` |
 | `provider.datto-edr` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
 | `provider.datto-edr-scan-execution` | `provider` | `registered` | `live-execution-provider-registry-proof-v1` |
 | `provider.datto-rmm` | `provider` | `registered` | `governed-provider-read` |
