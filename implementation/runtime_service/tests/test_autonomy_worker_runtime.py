@@ -3919,6 +3919,82 @@ def test_missing_ci_multi_signal_tie_fails_closed(tmp_path: Path):
     store.close()
 
 
+
+def test_structured_vulscan_duplicate_hostname_uses_multi_signal_score(tmp_path: Path):
+    class StructuredScoredReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.search":
+                if arguments == {"company_id": 827, "name": "PC-1", "page_size": 25}:
+                    return {
+                        "status": "succeeded",
+                        "evidence": {"data": {"items": [
+                            {
+                                "id": 35,
+                                "companyID": 827,
+                                "isActive": True,
+                                "referenceNumber": "device-a",
+                                "referenceTitle": "PC-1",
+                            },
+                            {
+                                "id": 36,
+                                "companyID": 827,
+                                "isActive": True,
+                                "referenceNumber": "device-b",
+                                "referenceTitle": "PC-1",
+                            },
+                        ]}},
+                    }
+            if capability == "endpoint.device.search":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"resource_matches": [
+                        {
+                            "resource_id": "device-a",
+                            "hostname": "PC-1",
+                            "lan_ip": "192.168.1.10",
+                            "mac_address": "AA:BB:CC:DD:EE:01",
+                        },
+                        {
+                            "resource_id": "device-b",
+                            "hostname": "PC-1",
+                            "lan_ip": "192.168.1.20",
+                            "mac_address": "AA:BB:CC:DD:EE:02",
+                        },
+                    ]}},
+                }
+            return super().execute(capability, arguments)
+
+    item = candidate(
+        title=(
+            "Vulnerability Detected by VulScan - PC-1 "
+            "(192.168.1.20 / AA:BB:CC:DD:EE:02)"
+        )
+    )
+    item.context["companyID"] = 827
+    item.context.pop("configurationItemID", None)
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=StructuredScoredReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    scope = worker._match_scope(item.context)
+    assert scope is not None
+
+    ci_id = worker._associate_exact_ticket_device(
+        candidate=item, scope=scope, company_id=827
+    )
+
+    assert ci_id == 36
+    store.close()
+
+
 def test_internal_autotask_company_zero_preserves_exact_ticket_ci_boundary(tmp_path: Path):
     class InternalCompanyReads(Reads):
         def execute(self, capability, arguments):
