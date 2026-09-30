@@ -2332,6 +2332,91 @@ class OperationalAutonomyMaintenance:
             )
         return ci_id
 
+    def _associate_backupiq_unassigned_ticket_device(
+        self, *, candidate, scope: PlaybookScope
+    ) -> tuple[int, int] | None:
+        """Recover a BackupIQ ticket that arrived without an authoritative company.
+
+        BackupIQ email-created tickets can arrive as company 0 even when the exact
+        managed endpoint and Autotask configuration belong to a client company.
+        Recover only when one exact DRMM endpoint and one exact active Autotask CI
+        prove the same identity. Never guess across multiple companies/devices.
+        """
+        material = " ".join(
+            (
+                str(candidate.context.get("title") or ""),
+                str(candidate.context.get("description") or ""),
+            )
+        )
+        hints: list[str] = []
+        structured_hostname = self._structured_ticket_hostname(
+            str(candidate.context.get("title") or "")
+        )
+        if structured_hostname:
+            hints.append(structured_hostname)
+        for token in re.findall(r"\b[A-Za-z0-9][A-Za-z0-9._-]{2,62}\b", material):
+            if not any(ch.isalpha() for ch in token) or not any(ch.isdigit() for ch in token):
+                continue
+            if token.casefold() not in {item.casefold() for item in hints}:
+                hints.append(token)
+            if len(hints) >= 8:
+                break
+        if not hints:
+            return None
+
+        endpoints: dict[str, Mapping[str, Any]] = {}
+        for hint in hints:
+            data = self._read_data("endpoint.device.search", {"hostname": hint})
+            raw = data.get("resource_matches") or data.get("records") or data.get("items") or ()
+            if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+                continue
+            for item in raw:
+                if not isinstance(item, Mapping):
+                    continue
+                hostname = str(
+                    item.get("hostname") or item.get("hostName") or item.get("name") or ""
+                ).strip()
+                uid = str(
+                    item.get("resource_id") or item.get("uid") or item.get("deviceUid") or ""
+                ).strip()
+                if hostname.casefold() == hint.casefold() and uid:
+                    endpoints[uid] = item
+        if len(endpoints) != 1:
+            return None
+
+        endpoint_uid, endpoint = next(iter(endpoints.items()))
+        hostname = str(
+            endpoint.get("hostname") or endpoint.get("hostName") or endpoint.get("name") or ""
+        ).strip()
+        if not hostname:
+            return None
+
+        data = self._read_data(
+            "service.configuration.search",
+            {"name": hostname, "page_size": 25},
+        )
+        raw_items = data.get("items")
+        if not isinstance(raw_items, list):
+            return None
+        matches = [
+            item
+            for item in raw_items
+            if isinstance(item, Mapping)
+            and item.get("isActive") is True
+            and str(item.get("referenceNumber") or "").strip() == endpoint_uid
+            and str(item.get("referenceTitle") or "").strip().casefold() == hostname.casefold()
+        ]
+        if len(matches) != 1:
+            return None
+        company_id = self._company_id(matches[0].get("companyID"))
+        if company_id <= 0:
+            return None
+        ci_id = self._positive_int(matches[0].get("id"), "configuration item id")
+        self._write_verified_ci_association(
+            candidate=candidate, scope=scope, ci_id=ci_id
+        )
+        return ci_id, company_id
+
     def _associate_exact_ticket_device(
         self, *, candidate, scope: PlaybookScope, company_id: int
     ) -> int:
@@ -2508,7 +2593,18 @@ class OperationalAutonomyMaintenance:
         ticket_id = self._positive_int(ticket.get("id"), "ticket id")
         company_id = self._company_id(ticket.get("companyID"))
         ci_value = ticket.get("configurationItemID")
-        if ci_value in (None, "", 0, "0"):
+        recovered_backupiq_identity = None
+        if (
+            scope.playbook_id == BACKUPIQ_SCOPE.playbook_id
+            and company_id == 0
+            and ci_value in (None, "", 0, "0")
+        ):
+            recovered_backupiq_identity = self._associate_backupiq_unassigned_ticket_device(
+                candidate=candidate, scope=scope
+            )
+        if recovered_backupiq_identity is not None:
+            ci_id, company_id = recovered_backupiq_identity
+        elif ci_value in (None, "", 0, "0"):
             ci_id = self._associate_exact_ticket_device(
                 candidate=candidate,
                 scope=scope,

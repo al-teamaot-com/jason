@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 from autonomous_remediation.autonomous_queue_worker import QueueCandidate
 from jason_runtime.autonomy_worker_runtime import (
+    BACKUPIQ_SCOPE,
     OperationalAutonomyError,
     OperationalAutonomyMaintenance,
     OperationalWork,
@@ -1591,6 +1592,164 @@ def backupiq_candidate():
             "createDate": "2026-09-25T09:00:00Z",
         },
     )
+
+
+def test_backupiq_unassigned_company_recovers_from_exact_endpoint_and_ci(tmp_path: Path):
+    class RecoveryReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "endpoint.device.search":
+                if str(arguments.get("hostname") or "").casefold() == "sos-50767":
+                    return {
+                        "status": "succeeded",
+                        "evidence": {
+                            "resource_matches": [
+                                {
+                                    "resource_id": "a241a6c6-c477-e7d3-4d1f-c878aaf92ce2",
+                                    "hostname": "SOS-50767",
+                                }
+                            ]
+                        },
+                    }
+                return {"status": "succeeded", "evidence": {"resource_matches": []}}
+            if capability == "service.configuration.search":
+                assert "company_id" not in arguments
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "items": [
+                                {
+                                    "id": 433,
+                                    "companyID": 878,
+                                    "isActive": True,
+                                    "referenceNumber": "a241a6c6-c477-e7d3-4d1f-c878aaf92ce2",
+                                    "referenceTitle": "SOS-50767",
+                                }
+                            ]
+                        }
+                    },
+                }
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "item": {
+                                "id": 433,
+                                "companyID": 878,
+                                "isActive": True,
+                                "referenceNumber": "a241a6c6-c477-e7d3-4d1f-c878aaf92ce2",
+                                "referenceTitle": "SOS-50767",
+                            }
+                        }
+                    },
+                }
+            if capability == "endpoint.device.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "record": {
+                            "resource_id": "a241a6c6-c477-e7d3-4d1f-c878aaf92ce2",
+                            "hostname": "SOS-50767",
+                            "online": False,
+                        }
+                    },
+                }
+            return super().execute(capability, arguments)
+
+    candidate = QueueCandidate(
+        resource_id="141679",
+        priority=90,
+        source_queue="Jason",
+        owned_by_jason=True,
+        urgent=False,
+        context={
+            "id": 141679,
+            "ticketNumber": "T20260929.0041",
+            "title": "BackupIQ: Backup for asset is not available for Star of the Sea Catholic Church",
+            "description": "Asset: SOS-50767; backup is not available.",
+            "companyID": 0,
+            "configurationItemID": None,
+            "createDate": "2026-09-30T00:52:00Z",
+        },
+    )
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate),
+        reads=RecoveryReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("backupiq_endpoint_backup",)),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    work = worker._admit(candidate, BACKUPIQ_SCOPE)
+
+    assert work.company_id == 878
+    assert work.configuration_item_id == 433
+    assert work.device_uid == "a241a6c6-c477-e7d3-4d1f-c878aaf92ce2"
+    assert work.hostname == "SOS-50767"
+    update_payloads = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert {"id": 141679, "configurationItemID": 433} in update_payloads
+    store.close()
+
+
+def test_backupiq_unassigned_company_does_not_guess_ambiguous_endpoint(tmp_path: Path):
+    class AmbiguousReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "endpoint.device.search":
+                if str(arguments.get("hostname") or "").casefold() == "sos-50767":
+                    return {
+                        "status": "succeeded",
+                        "evidence": {
+                            "resource_matches": [
+                                {"resource_id": "uid-1", "hostname": "SOS-50767"},
+                                {"resource_id": "uid-2", "hostname": "SOS-50767"},
+                            ]
+                        },
+                    }
+                return {"status": "succeeded", "evidence": {"resource_matches": []}}
+            if capability == "service.configuration.search":
+                return {"status": "succeeded", "evidence": {"data": {"items": []}}}
+            return super().execute(capability, arguments)
+
+    candidate = QueueCandidate(
+        resource_id="141679",
+        priority=90,
+        source_queue="Jason",
+        owned_by_jason=True,
+        urgent=False,
+        context={
+            "id": 141679,
+            "ticketNumber": "T20260929.0041",
+            "title": "BackupIQ: Backup for asset is not available for Star of the Sea Catholic Church",
+            "description": "Asset: SOS-50767; backup is not available.",
+            "companyID": 0,
+            "configurationItemID": None,
+        },
+    )
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate), reads=AmbiguousReads(), actions=actions, store=store,
+        promotion_store=PromotionStore(promoted=("backupiq_endpoint_backup",)),
+        max_active_work_items=2, interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+
+    try:
+        worker._admit(candidate, BACKUPIQ_SCOPE)
+    except OperationalAutonomyError:
+        pass
+    else:
+        raise AssertionError("ambiguous endpoint correlation must fail closed")
+    store.close()
 
 
 def test_backupiq_scope_is_owner_approved_version_1_2_0():
