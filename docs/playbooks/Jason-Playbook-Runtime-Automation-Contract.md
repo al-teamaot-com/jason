@@ -306,6 +306,10 @@ Rules:
 - known managed peers are preferred over blind address-range scanning;
 - ping failure is not proof of offline because ICMP may be filtered;
 - cross-client evidence never satisfies site presence;
+- DRMM offline is not, by itself, proof that the operating system/device is offline when an independent provider such as Datto Endpoint Backup can report current device activity;
+- waiting-device rechecks should classify at least: `drmm_online`, `offline_corroborated` (DRMM + DEB offline), `deb_online_drmm_offline` (device independently online but DRMM management path unavailable), and `drmm_offline_unconfirmed` (DEB missing/unavailable/ambiguous);
+- `deb_online_drmm_offline` must not be described as "waiting for the device to power on"; it is a management-path conflict. Jason may safely poll an already-dispatched job, but it must not use DEB online status as authority to dispatch a new DRMM action while DRMM still reports the endpoint offline;
+- exact-name duplicate DEB assets are resolved conservatively: one recent online asset may supersede older offline history only when its activity is fresh and newer than all stale duplicates; genuinely current/conflicting duplicates remain ambiguous and fail closed;
 - the runtime should expose this evidence so Low Disk, BackupIQ, EDR/AV, VulScan, patching, offline, and future playbooks can consume one consistent availability model.
 
 ## 8B. Response Urgency and Time-to-Awareness Contract
