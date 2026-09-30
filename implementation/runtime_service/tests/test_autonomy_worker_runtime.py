@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 from autonomous_remediation.autonomous_queue_worker import QueueCandidate
 from jason_runtime.autonomy_worker_runtime import (
+    OperationalAutonomyError,
     OperationalAutonomyMaintenance,
     OperationalWork,
     SQLiteOperationalWorkStore,
