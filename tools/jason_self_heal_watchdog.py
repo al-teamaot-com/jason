@@ -286,7 +286,10 @@ def main() -> int:
         state_payload["state"] = "owner_action_required"
         state_payload["escalation_path"] = str(escalation_path)
     atomic_json(state_path, state_payload)
-    return 1
+    # Degradation is persisted state, not watchdog process failure. Keeping the
+    # oneshot unit successful prevents the watchdog from creating a secondary
+    # failed-systemd-unit condition while it is already handling the primary fault.
+    return 0
 
 
 if __name__ == "__main__":
