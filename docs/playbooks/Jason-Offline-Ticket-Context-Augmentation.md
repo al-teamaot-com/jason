@@ -1,5 +1,7 @@
 # Jason Playbook: Offline Ticket Context Augmentation
 
+Status: Source implementation complete in PR #658; registry activation remains `shadow` pending controlled acceptance and exact durable owner promotion for unattended internal-note creation.
+
 ## Standard Manifest
 
 ```yaml
