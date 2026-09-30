@@ -25,8 +25,9 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REPO = Path('/home/al/projects/jason')
 DEFAULT_SPOOL = Path('/var/lib/jason/openclaw/support-repair')
 SUPPORT_ROW = re.compile(r'^\|\s*(SUPPORT-[^|]+?)\s*\|\s*(P\d)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|')
-META = re.compile(r'(?im)^\s*-\s*Support item\s*:\s*(SUPPORT-[A-Z]+-[0-9]+)\s*$')
-SUPPORT_ID_IN_TITLE = re.compile(r'\b(SUPPORT-[A-Z]+-[0-9]+)\b', re.IGNORECASE)
+SUPPORT_ID_PATTERN = r'SUPPORT-(?:[A-Z]+-[0-9]+|AUTO-[A-F0-9]{12})'
+META = re.compile(rf'(?im)^\s*-\s*Support item\s*:\s*({SUPPORT_ID_PATTERN})\s*$')
+SUPPORT_ID_IN_TITLE = re.compile(rf'\b({SUPPORT_ID_PATTERN})\b', re.IGNORECASE)
 PRIORITY = {'P0': 0, 'P1': 1, 'P2': 2, 'P3': 3}
 
 
@@ -156,6 +157,62 @@ def open_support_issue_ids(repo: Path) -> set[str]:
 
 def eligible_support_items(items: list[dict[str, str]], open_issue_ids: set[str]) -> list[dict[str, str]]:
     return [item for item in items if item['id'] in open_issue_ids]
+
+
+def load_self_heal_incidents(root: Path = Path('/var/lib/jason/openclaw/self-heal')) -> list[dict[str, str]]:
+    incidents: list[dict[str, str]] = []
+    directory = root / 'incidents'
+    if not directory.exists():
+        return incidents
+    for path in sorted(directory.glob('*.json'))[:100]:
+        try:
+            value = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(value, Mapping) or value.get('state') != 'repair_required':
+            continue
+        item_id = str(value.get('support_item') or '').strip().upper()
+        if not re.fullmatch(r'SUPPORT-AUTO-[A-F0-9]{12}', item_id):
+            continue
+        incidents.append({
+            'id': item_id,
+            'priority': str(value.get('priority') or 'P1').upper(),
+            'status': 'Open - self-heal incident',
+            'title': str(value.get('title') or 'Jason self-heal incident')[:240],
+            'evidence': str(value.get('evidence') or '')[:1600],
+            'acceptance': str(value.get('acceptance') or '')[:1600],
+        })
+    incidents.sort(key=lambda item: (PRIORITY.get(item['priority'], 99), item['id']))
+    return incidents
+
+
+def ensure_support_issue(repo: Path, item: Mapping[str, str]) -> None:
+    existing = gh_json([
+        'issue', 'list', '--state', 'open', '--search', f"{item['id']} in:title",
+        '--limit', '10', '--json', 'number,title'
+    ], cwd=repo) or []
+    if any(item['id'].casefold() in str(issue.get('title') or '').casefold() for issue in existing):
+        return
+    body = (
+        'Automatically created by Jason self-heal after bounded recovery did not restore '
+        'an already-approved function.\n\n'
+        f"- Support item: {item['id']}\n"
+        f"- Evidence: {item['evidence']}\n"
+        f"- Acceptance: {item['acceptance']}\n"
+        '- Authority expansion: none\n'
+        '- Host reboot/shutdown authority: none\n'
+    )
+    with tempfile.NamedTemporaryFile('w', encoding='utf-8', delete=False) as handle:
+        handle.write(body)
+        body_path = Path(handle.name)
+    try:
+        run([
+            'gh', 'issue', 'create',
+            '--title', f"{item['id']} - {item['title'][:120]}",
+            '--body-file', str(body_path),
+        ], cwd=repo)
+    finally:
+        body_path.unlink(missing_ok=True)
 
 
 def repair_pr_for(item_id: str, prs: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -405,6 +462,13 @@ def create_closure_pr(repo: Path, item: Mapping[str, str], merge_sha: str, accep
         lines[index] = '|'.join(parts)
         changed = True
         break
+    if not changed and item['id'].startswith('SUPPORT-AUTO-'):
+        lines.append(
+            f"| {item['id']} | {item['priority']} | Closed {date} - production verified | "
+            f"{item['title'].replace('|', '/')} | {evidence} | "
+            f"{item['acceptance'].replace('|', '/')} |"
+        )
+        changed = True
     if not changed:
         raise WorkerError('support closure row not found')
     support.write_text('\n'.join(lines) + '\n', encoding='utf-8')
@@ -554,8 +618,17 @@ def main() -> int:
     run(['git', 'fetch', '--no-tags', 'origin', 'main'], cwd=repo)
     support_text = run(['git', 'show', 'origin/main:SUPPORT.md'], cwd=repo)
     parsed_support = parse_support(support_text)
+    auto_incidents = load_self_heal_incidents()
+    for item in auto_incidents:
+        ensure_support_issue(repo, item)
     open_issue_ids = open_support_issue_ids(repo)
     support = eligible_support_items(parsed_support, open_issue_ids)
+    support.extend(
+        item for item in auto_incidents
+        if item['id'] in open_issue_ids
+        and item['id'] not in {existing['id'] for existing in support}
+    )
+    support.sort(key=lambda item: (PRIORITY.get(item['priority'], 99), item['id']))
     state['support_state_mismatches'] = {
         'support_open_issue_not_open': sorted(
             item['id'] for item in parsed_support if item['id'] not in open_issue_ids
