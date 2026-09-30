@@ -1,6 +1,6 @@
 # Jason Playbook: Server / Site Offline Correlation & Recovery
 
-Version: 0.2.0-design
+Version: 0.3.0-design
 Playbook ID: server_site_offline
 Status: Owner-approved design direction; source-controlled draft only. No autonomous remediation authority is granted by this document.
 
@@ -9,7 +9,7 @@ Status: Owner-approved design direction; source-controlled draft only. No autono
 playbook:
   id: server_site_offline
   name: Jason - Server / Site Offline Correlation & Recovery
-  version: 0.2.0-design
+  version: 0.3.0-design
   owner: AOT IT Operations
   target_type: ticket
   trigger:
@@ -72,6 +72,28 @@ Primary triggers:
 - a technician requests availability/site correlation for a named client/site/device.
 
 Jason must confirm the current condition rather than assuming the trigger remains true.
+
+## 2A. Ticket Augmentation Mode
+
+Offline-ticket context augmentation is implemented as a separate lightweight playbook:
+`offline_ticket_context_augmentation@0.1.0`.
+
+It may run on an open technician-owned offline ticket before this full incident playbook takes ownership. Its purpose is to answer a fast contextual question:
+
+**Does current evidence say the site is up, likely up, likely down, partially affected, or still unknown?**
+
+The augmentation path:
+- does not move the ticket;
+- does not change status/work type/resource assignment;
+- does not consume an active-work slot;
+- uses the shared availability/site-presence model;
+- may use one fresh governed read-only command on a fixed same-site server as the strongest site-up witness;
+- treats failed PC ping as inconclusive;
+- excludes mobile/roaming laptops from site-health proof;
+- may use DEB as independent target-availability corroboration;
+- writes only a duplicate-suppressed internal note when evidence changes.
+
+If augmentation produces `site_likely_down` or `partial_or_segment_outage_suspected`, this full playbook may independently admit the event and enter its rapid outage clock.
 
 ## 3. Scope and Boundaries
 
