@@ -4,7 +4,7 @@
 playbook:
   id: low_disk_space
   name: Jason - Windows Low Disk Space
-  version: 1.2.0
+  version: 1.3.0
   owner: AOT IT Operations
   target_type: ticket
   trigger:
@@ -29,6 +29,7 @@ playbook:
       - root_cause_diagnostics
       - classification_only
       - one_exact_safe_cleanup
+      - recurring_capacity_client_notification
     approval_bound_branches:
       - exact standing-safe cleanup component execution
     disruptive_branches: []
@@ -53,7 +54,8 @@ playbook:
 - technician-facing notes put classification and required action before diagnostic detail;
 - workstation remediation is independently verified against current free space and the authoritative monitor;
 - server cleanup/remediation remains human-reviewed unless a separately approved server-safe branch exists;
-- arbitrary deletion is never used to make the alert disappear.
+- arbitrary deletion is never used to make the alert disappear;
+- when the same endpoint/volume reaches the approved recurrence threshold and evidence shows legitimate retained data/capacity constraint, the company primary contact is attached and the approved capacity-upgrade note is sent exactly once per recommendation cycle.
 
 ## 2. Trigger
 
@@ -82,7 +84,8 @@ When the ticket is created, AOT's existing Autotask automation may already dispa
 - reboot, service interruption, forced logoff, or another user-disruptive action;
 - storage-health risk;
 - persistent monitoring mismatch that cannot be reconciled safely;
-- recurring low-space condition that indicates capacity/root-cause work rather than another cleanup.
+- recurring low-space condition that indicates capacity/root-cause work rather than another cleanup;
+- client-facing capacity communication after the approved recurrence/capacity trigger, using only the exact approved canned note and duplicate suppression.
 
 ### Out of Scope
 - deleting arbitrary files because they are large;
@@ -250,6 +253,8 @@ Default recurrence threshold:
 
 At or above that threshold, classify `recurring_accumulation` unless stronger evidence supports storage-health risk, monitoring mismatch, or another specific cause. Cleanup may still be described as temporary relief, but recurrence requires root-cause/capacity review rather than repeated autonomous cleanup.
 
+When the recurrence threshold is met **and** current evidence establishes that the dominant remaining footprint is legitimate retained user/application/business data or otherwise proves an undersized system drive, Jason may enter the governed client-notification branch. Before sending anything client-facing, Jason must attach the Autotask company primary contact to the ticket when not already present, confirm the approved canned template fingerprint/version, and verify that an equivalent capacity-upgrade recommendation has not already been sent for the same endpoint/volume recommendation cycle.
+
 Do not invent growth rates when historical free-space readings are unavailable.
 
 ### Step 7: Reconcile monitor versus current free space
@@ -348,6 +353,32 @@ Set state storage_health_risk. Do not focus on space recovery alone. Escalate fo
 
 When the low-space condition remains, no approved waste is material, and the dominant footprint appears to be legitimate retained user/application/business data, do not delete the data. Route to Help Desk I / Human Review with a concise capacity recommendation. Include current capacity/free space, the few material consumers that justify the conclusion, recurrence when relevant, physical-disk health/identity when useful, and a recommendation to replace/upgrade with a larger drive if the data is expected to remain.
 
+If the same endpoint/volume has reached **3 or more reliable low-disk incidents within 60 days**, the evidence supports `legitimate_retained_data_capacity_constraint` or an equivalent recurring-capacity conclusion, and there is no unresolved storage-health/monitoring-mismatch/unknown-data condition, Jason may also perform the approved client-communication branch:
+1. resolve the Autotask company primary contact;
+2. attach that contact to the ticket if not already attached;
+3. verify no equivalent capacity-upgrade communication has already been sent for the same endpoint/volume recommendation cycle;
+4. create exactly one client-visible/external note using the approved canned template below, with only the approved placeholders substituted;
+5. read back the ticket/note/contact state and record the communication fingerprint in persisted playbook state;
+6. leave the ticket in Help Desk I / Human Review for the commercial/technician follow-up unless a separately approved workflow governs the next action.
+
+**Approved canned client note — Recurring Low Disk / Capacity Upgrade Recommendation**
+
+> Hi [First Name],
+>
+> We’ve been monitoring the available storage space on [Device Name]. We have performed cleanup and maintenance, but the drive continues to run low on available space.
+>
+> At this point, the remaining storage usage appears to be legitimate data rather than temporary files that can safely be removed. Because this has become a recurring issue, we recommend upgrading the system drive to a larger SSD rather than continuing to remove data simply to recover space.
+>
+> AOT can assist with the drive upgrade and migration of the existing system and data.
+>
+> Please let us know if you would like us to proceed with the upgrade recommendation.
+>
+> Thank you,
+>
+> Atlantic Office Technologies
+
+Allowed substitutions are limited to `[First Name]` from the resolved company primary contact and `[Device Name]` from the exact associated endpoint/CI. Jason must not improvise additional claims, pricing, timing, hardware model, or scope in this canned branch.
+
 ### G. Monitoring mismatch
 
 Set state monitoring_mismatch. Investigate the monitor/provider condition. Do not continue deleting data when current authoritative free-space evidence is healthy.
@@ -355,6 +386,8 @@ Set state monitoring_mismatch. Investigate the monitor/provider condition. Do no
 ### H. Recurring accumulation
 
 Set state recurring_accumulation. Document recurrence count/window, current capacity/free space, dominant legitimate footprint, and prior cleanup recovery where authoritative evidence exists. Recommend root-cause or capacity action rather than repeated cleanup. Any cleanup in this branch requires explicit technician review unless a future separately approved recurrence-specific policy exists.
+
+When recurrence is paired with proven legitimate retained data / undersized-drive evidence, follow the approved client-notification branch in section 9F. Recurrence by itself is not sufficient to send the note.
 
 ## 10. Retry Policy
 
@@ -433,7 +466,9 @@ Suggested titles:
 - Jason - Low Disk Space - Verification
 - Jason - Low Disk Space - Escalation
 
-Avoid unnecessary end-user communication for ordinary workstation monitoring remediation unless the action is disruptive, user input is needed, or client policy requires contact.
+Avoid unnecessary end-user communication for ordinary workstation monitoring remediation unless the action is disruptive, user input is needed, client policy requires contact, or the exact recurring-capacity client-notification branch is satisfied.
+
+For the recurring-capacity client note, persist a normalized duplicate-suppression fingerprint containing at minimum company, endpoint/CI, volume, template identifier/version, and recommendation cycle. A subsequent unchanged recheck must not send another client-visible note. A new communication requires materially new evidence or a new recommendation cycle under an approved policy.
 
 ## 15. Failure Handling
 
@@ -508,13 +543,16 @@ Include:
 ## 20. Required Capabilities
 
 - service.ticket.read/search/update
-- service.ticket.note.create
+- service.ticket.note.create, including approved client-visible/external note creation
 - service.configuration.read/search
 - endpoint.device.read/search
 - endpoint.audit.read
 - endpoint.alert.search/history
 - endpoint.powershell.read for classifier-approved read-only storage diagnostics
 - service.ticket.search for recurrence context
+- Autotask company primary-contact read/resolve
+- Autotask ticket-contact/additional-contact association update with post-write readback
+- approved canned communication template registry/fingerprint verification
 - automation.component.execute only for exact standing-safe cleanup components
 - automation.job.read
 - automation.job.output.read
@@ -550,7 +588,10 @@ Prove:
 18. recurring accumulation routes to capacity/root-cause review instead of repeated autonomous cleanup;
 19. technician notes expose CLASSIFICATION near the top and remain relevance-filtered;
 20. #261 remains regression-covered as a fixed authorization path; stale/unknown job state fails closed without duplicate dispatch;
-21. candidate AOT-owned cleanup classes remain non-autonomous until exact component implementation, fingerprint governance, acceptance, and owner promotion are complete.
+21. candidate AOT-owned cleanup classes remain non-autonomous until exact component implementation, fingerprint governance, acceptance, and owner promotion are complete;
+22. at 3+ reliable incidents in 60 days with proven legitimate retained data/capacity constraint, Jason resolves and attaches the company primary contact, sends exactly one approved client-visible capacity-upgrade note, verifies readback, and suppresses duplicates;
+23. recurrence alone, unknown-data, storage-health-risk, or monitoring-mismatch conditions do not send the client capacity note;
+24. only `[First Name]` and `[Device Name]` are substituted in the canned note and no pricing/timing/hardware claims are invented.
 
 No unrelated production object may be modified.
 
@@ -560,7 +601,7 @@ No unrelated production object may be modified.
 
 Design/implementation approval owner: person-al.
 Design approval date: 2026-09-30.
-Source scope: exact `low_disk_space@1.2.0` branch using governed endpoint/device/audit/alert/ticket reads, classifier-approved read-only PowerShell, internal ticket work-start/note/update, explicit classification, recurrence/monitor reconciliation, and at most one standing-safe Sysmon cleanup when its deterministic preconditions are met. SoftwareDistribution backup cleanup is evidence/recommendation only and remains human-review bound.
+Source scope: exact `low_disk_space@1.3.0` branch using governed endpoint/device/audit/alert/ticket reads, classifier-approved read-only PowerShell, internal ticket work-start/note/update, explicit classification, recurrence/monitor reconciliation, the exact recurring-capacity canned client communication with contact association and duplicate suppression, and at most one standing-safe Sysmon cleanup when its deterministic preconditions are met. SoftwareDistribution backup cleanup is evidence/recommendation only and remains human-review bound.
 
 The branch may not delete arbitrary/user/business/application data; clear VSS; disable hibernation; resize partitions; empty Recycle Bin; clear active Windows Update cache; delete ISO/IMG/install media, PST/OST, VHD/VHDX, Downloads, arbitrary temp/cache content, or unknown data; alter BitLocker; stop services/processes; reboot; or perform any other unrelated/disruptive action.
 
@@ -571,7 +612,7 @@ A material version/capability/component-fingerprint change requires a new durabl
 ## 22. Section Goal Closure
 
 Close after:
-- playbook 1.2 source and runtime are merged;
+- playbook 1.3 source and runtime are merged;
 - deterministic/unit/security validation passes;
 - explicit six-way classification is production-proven;
 - recurrence and monitoring-mismatch branches are production-proven;
@@ -579,6 +620,6 @@ Close after:
 - the SoftwareDistribution cleanup component is explicitly recorded as review-bound and cannot be dispatched unattended;
 - a separate implementation item defines the first AOT-owned safe-cleanup catalog candidates and acceptance rules without granting authority prematurely;
 - exact `low_disk_space@1.2.0` playbook autonomy promotion is reviewed after source/runtime validation;
-- controlled workstation acceptance proves grace, diagnostics, classification, one-cleanup ceiling, verification, recurrence/capacity routing, monitoring mismatch, and Human Review routing;
+- controlled workstation acceptance proves grace, diagnostics, classification, one-cleanup ceiling, verification, recurrence/capacity routing, one-time governed client capacity communication, duplicate suppression, monitoring mismatch, and Human Review routing;
 - production runtime is deployed and live readback proves 1.2 is executing;
 - Grafana/Project Jason status and remaining TODOs are updated.
