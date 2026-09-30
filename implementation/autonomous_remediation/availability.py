@@ -207,15 +207,17 @@ def assess_endpoint_availability(
             )
         if observation.peer_probe.attempted_without_success:
             return result(
-                AvailabilityState.OFFLINE_LIKELY,
+                AvailabilityState.INCONCLUSIVE,
                 offline_age=age,
                 peer_required=False,
                 recheck=True,
                 next_at=observation.observed_at + policy.retry_after,
                 agent_suspected=False,
                 summary=(
-                    "Peer probe could not reach the endpoint. Offline is more likely, "
-                    "but ping failure is not definitive; keep a persisted recheck."
+                    "Peer ICMP probes did not reach the endpoint. For ordinary PCs, "
+                    "failed ping is inconclusive because host policy/firewall may block "
+                    "ICMP; keep a persisted recheck and use independent provider or "
+                    "site/infrastructure evidence."
                 ),
             )
         return result(

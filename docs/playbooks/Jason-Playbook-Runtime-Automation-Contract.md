@@ -275,6 +275,63 @@ The classification and its evidence fingerprint are persisted.
 
 ---
 
+
+## 8A. Shared Availability and Site-Presence Contract
+
+Availability is a reusable runtime concern and must not be reimplemented independently by every playbook.
+
+The runtime should represent at least these independent facts:
+
+- device_online: whether the endpoint is probably running/reachable based on current multi-source evidence;
+- device_on_site: whether current network evidence places that endpoint on the affected client site;
+- site_presence_confidence: confirmed, probable, not_confirmed, remote, or unknown;
+- site_witness: true only when device_online=true and site_presence_confidence=confirmed.
+
+Evidence may include, when available:
+- DRMM current state and last seen;
+- Datto Endpoint Backup asset status / last online;
+- VulScan recent contact or scan freshness;
+- Datto EDR/AV endpoint last contact;
+- current external/public IP;
+- current private IP/subnet/default gateway;
+- approved read-only local ping/network probes;
+- known same-site managed peer evidence;
+- network-device/site-provider evidence.
+
+Rules:
+- device_online does not imply device_on_site;
+- an online roaming laptop or remote user must not prove the office/site is healthy;
+- current network identity may override historical site assignment for site-witness purposes;
+- only confirmed same-client on-site endpoints may serve as strong site witnesses;
+- known managed peers are preferred over blind address-range scanning;
+- ping failure is not proof of offline because ICMP may be filtered;
+- cross-client evidence never satisfies site presence;
+- the runtime should expose this evidence so Low Disk, BackupIQ, EDR/AV, VulScan, patching, offline, and future playbooks can consume one consistent availability model.
+
+## 8B. Response Urgency and Time-to-Awareness Contract
+
+Diagnosis completeness and incident awareness are separate concerns.
+
+A playbook may declare a response-urgency policy when delaying communication would materially affect service, safety, security, or business operations.
+
+The runtime should support separate clocks for:
+- time to first useful classification;
+- time to technician/operations awareness;
+- time to full diagnosis;
+- time to remediation;
+- time to authoritative resolution.
+
+Rules:
+- a high-impact incident must not remain silent solely because Jason is still collecting evidence;
+- early communication should state the current evidence, probable scope, confidence, next step, and whether human action is required;
+- preliminary classification must be explicitly updateable as new evidence arrives;
+- "investigation not complete" is context, not an acceptable substitute for a useful current status;
+- early notification never expands execution authority or bypasses disruption/approval gates;
+- approved client-facing communication remains separately governed from internal AOT notification;
+- timers and thresholds are declared by the individual playbook or service policy rather than hard-coded globally.
+
+This contract is especially applicable to site outages, security incidents, backup infrastructure failures, and other conditions where time-to-awareness matters independently of time-to-resolution.
+
 ## 9. Waiting Is First-Class
 
 Waiting is legitimate operational work.

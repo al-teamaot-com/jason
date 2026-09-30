@@ -93,8 +93,9 @@ def test_failed_pings_are_not_definitive():
         ),
         POLICY,
     )
-    assert r.state == AvailabilityState.OFFLINE_LIKELY
+    assert r.state == AvailabilityState.INCONCLUSIVE
     assert r.recheck_required
+    assert "failed ping is inconclusive" in r.summary
 
 
 def test_unknown_last_seen_does_not_wait_forever():

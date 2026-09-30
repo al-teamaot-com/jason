@@ -139,6 +139,37 @@
       }
     },
     {
+      "id": "drmm_recent_alert_reconciliation",
+      "name": "Jason - DRMM Recent Alert Reconciliation",
+      "version": "1.0.0",
+      "lifecycle": "production",
+      "enabled": true,
+      "source": "docs/playbooks/Jason-DRMM-Recent-Alert-Reconciliation.md",
+      "trigger": {
+        "provider": "datto_rmm",
+        "scheduled": true,
+        "lookback_hours": 24
+      },
+      "review_status": "daily_recent_alert_verified_reconciliation",
+      "autonomy": {
+        "activation": "autonomous",
+        "required_gates": [
+          "recent_window",
+          "identity",
+          "registered_verifier",
+          "current_state_healthy",
+          "governance_precheck",
+          "autonomy_approved"
+        ],
+        "allowed_capabilities": [
+          "endpoint.alert.resolve",
+          "service.ticket.note.create",
+          "service.ticket.update"
+        ],
+        "policy_id": "playbook-autonomy:drmm_recent_alert_reconciliation"
+      }
+    },
+    {
       "id": "idle_log_off",
       "name": "Jason - Windows Idle Log Off Compliance / Repair",
       "version": "1.1.0",
@@ -233,6 +264,45 @@
           "status": "Human Review",
           "status_id": 37
         }
+      }
+    },
+    {
+      "id": "offline_ticket_context_augmentation",
+      "name": "Jason - Offline Ticket Context Augmentation",
+      "version": "0.1.0",
+      "lifecycle": "pilot",
+      "enabled": true,
+      "source": "docs/playbooks/Jason-Offline-Ticket-Context-Augmentation.md",
+      "trigger": {
+        "title_contains": [
+          "offline",
+          "unreachable",
+          "not responding",
+          "lost contact",
+          "lost connection"
+        ]
+      },
+      "review_status": "owner_design_approved_acceptance_and_durable_promotion_required",
+      "autonomy": {
+        "activation": "shadow",
+        "required_gates": [
+          "trigger",
+          "exact_existing_ci",
+          "same_client_identity",
+          "site_context_evidence",
+          "governance_precheck",
+          "autonomy_approved"
+        ],
+        "allowed_capabilities": [
+          "service.ticket.note.create"
+        ],
+        "policy_id": "playbook-autonomy:offline_ticket_context_augmentation",
+        "allowed_branches": [
+          "read_only_context",
+          "internal_note_augmentation"
+        ],
+        "approval_bound_branches": [],
+        "disruptive_branches": []
       }
     },
     {
@@ -415,37 +485,6 @@
             "notification_history_verification_required": true
           }
         ]
-      }
-    },
-    {
-      "id": "drmm_recent_alert_reconciliation",
-      "name": "Jason - DRMM Recent Alert Reconciliation",
-      "version": "1.0.0",
-      "lifecycle": "production",
-      "enabled": true,
-      "source": "docs/playbooks/Jason-DRMM-Recent-Alert-Reconciliation.md",
-      "trigger": {
-        "provider": "datto_rmm",
-        "scheduled": true,
-        "lookback_hours": 24
-      },
-      "review_status": "daily_recent_alert_verified_reconciliation",
-      "autonomy": {
-        "activation": "autonomous",
-        "required_gates": [
-          "recent_window",
-          "identity",
-          "registered_verifier",
-          "current_state_healthy",
-          "governance_precheck",
-          "autonomy_approved"
-        ],
-        "allowed_capabilities": [
-          "endpoint.alert.resolve",
-          "service.ticket.note.create",
-          "service.ticket.update"
-        ],
-        "policy_id": "playbook-autonomy:drmm_recent_alert_reconciliation"
       }
     }
   ]
