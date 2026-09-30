@@ -16,14 +16,14 @@ This record is updated by Jason's post-success documentation reconciliation proc
 
 ## Latest production alignment
 
-- Revision: `6837fe62bd9d883891575342b54be6b97237bf45`
+- Revision: `dbe38195f509196b401876df58b9922d2b35c46d`
 - Status: `aligned_and_healthy`
 - Runtime: `healthy`; restarts `0`
 - MCP: `running`; restart policy `unless-stopped`
-- Host release: `/opt/jason/releases/6837fe62bd9d883891575342b54be6b97237bf45`
+- Host release: `/opt/jason/releases/dbe38195f509196b401876df58b9922d2b35c46d`
 - Required host units active: `10`
 - Failed systemd units: `0`
-- Observed: `2026-09-29T14:42:19+00:00`
+- Observed: `2026-09-30T15:37:59+00:00`
 
 ## Interpretation
 
