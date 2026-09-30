@@ -1752,39 +1752,39 @@ class OperationalAutonomyMaintenance:
                 == structured_hostname.casefold()
                 and str(item.get("referenceNumber") or "").strip()
             ]
-            if len(matches) != 1:
-                raise OperationalAutonomyError(
-                    "structured hostname did not resolve to one active same-company configuration item"
+            if len(matches) == 1:
+                ci = matches[0]
+                ci_id = self._positive_int(ci.get("id"), "configuration item id")
+                endpoint_uid = str(ci.get("referenceNumber") or "").strip()
+                endpoint = self._read_record(
+                    "endpoint.device.read", {"resource_id": endpoint_uid}
                 )
-            ci = matches[0]
-            ci_id = self._positive_int(ci.get("id"), "configuration item id")
-            endpoint_uid = str(ci.get("referenceNumber") or "").strip()
-            endpoint = self._read_record(
-                "endpoint.device.read", {"resource_id": endpoint_uid}
-            )
-            read_uid = str(
-                endpoint.get("resource_id")
-                or endpoint.get("uid")
-                or endpoint.get("deviceUid")
-                or ""
-            ).strip()
-            read_hostname = str(
-                endpoint.get("hostname")
-                or endpoint.get("hostName")
-                or endpoint.get("name")
-                or ""
-            ).strip()
-            if read_uid != endpoint_uid:
-                raise OperationalAutonomyError(
-                    "same-company configuration Datto identity readback mismatch"
+                read_uid = str(
+                    endpoint.get("resource_id")
+                    or endpoint.get("uid")
+                    or endpoint.get("deviceUid")
+                    or ""
+                ).strip()
+                read_hostname = str(
+                    endpoint.get("hostname")
+                    or endpoint.get("hostName")
+                    or endpoint.get("name")
+                    or ""
+                ).strip()
+                if read_uid != endpoint_uid:
+                    raise OperationalAutonomyError(
+                        "same-company configuration Datto identity readback mismatch"
+                    )
+                if read_hostname.casefold() != structured_hostname.casefold():
+                    raise OperationalAutonomyError(
+                        "same-company configuration and Datto hostname do not match"
+                    )
+                return self._write_verified_ci_association(
+                    candidate=candidate, scope=scope, ci_id=ci_id
                 )
-            if read_hostname.casefold() != structured_hostname.casefold():
-                raise OperationalAutonomyError(
-                    "same-company configuration and Datto hostname do not match"
-                )
-            return self._write_verified_ci_association(
-                candidate=candidate, scope=scope, ci_id=ci_id
-            )
+            # Zero or multiple same-company exact-title CIs are not guessed.
+            # Continue into multi-signal endpoint correlation, which still must
+            # produce one uniquely winning endpoint and one exact same-company CI.
 
         material = " ".join(
             (
@@ -1793,6 +1793,8 @@ class OperationalAutonomyMaintenance:
             )
         )
         hints: list[str] = []
+        if structured_hostname:
+            hints.append(structured_hostname)
         for token in re.findall(r"\b[A-Za-z0-9][A-Za-z0-9._-]{2,62}\b", material):
             if not any(ch.isalpha() for ch in token) or not any(ch.isdigit() for ch in token):
                 continue
