@@ -128,3 +128,66 @@ def test_failed_jason_units_are_detected(monkeypatch):
     assert module.failed_jason_user_units() == [
         "jason-provider-health-canary.service"
     ]
+
+
+def test_stale_client_notification_verification_is_detected(tmp_path):
+    db = tmp_path / "work.sqlite3"
+    import sqlite3
+
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE autonomy_operational_work ("
+        "ticket_id INTEGER,ticket_number TEXT,playbook_id TEXT,phase TEXT,"
+        "updated_at TEXT,last_reason TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO autonomy_operational_work VALUES (?,?,?,?,?,?)",
+        (
+            123,
+            "T20260930.0001",
+            "vulscan_missing_patch",
+            "vulscan_client_notification_verify_complete",
+            (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat(),
+            "notification_baseline_id=42",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    failures, evidence = module.stale_operational_work_failures(db)
+
+    assert failures == [
+        "workflow_outcome_stale:vulscan_missing_patch:"
+        "vulscan_client_notification_verify_complete:ticket=123"
+    ]
+    assert evidence[0]["ticket_number"] == "T20260930.0001"
+
+
+def test_recent_client_notification_verification_is_not_stale(tmp_path):
+    db = tmp_path / "work.sqlite3"
+    import sqlite3
+
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE autonomy_operational_work ("
+        "ticket_id INTEGER,ticket_number TEXT,playbook_id TEXT,phase TEXT,"
+        "updated_at TEXT,last_reason TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO autonomy_operational_work VALUES (?,?,?,?,?,?)",
+        (
+            124,
+            "T20260930.0002",
+            "vulscan_missing_patch",
+            "vulscan_client_notification_verify_monitoring",
+            datetime.now(timezone.utc).isoformat(),
+            "notification_baseline_id=43",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    failures, evidence = module.stale_operational_work_failures(db)
+
+    assert failures == []
+    assert evidence[0]["phase"] == "vulscan_client_notification_verify_monitoring"
