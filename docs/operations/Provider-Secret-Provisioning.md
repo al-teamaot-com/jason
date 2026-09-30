@@ -386,6 +386,31 @@ Verify the authenticated session:
 
 DNSFilter requires periodic user re-authentication. If refresh/re-authentication fails, the MCP provider must fail closed; there is no service-account fallback.
 
+## SaaS Alerts read-only API credential contract
+
+Logical secret: `saas_alerts.readonly`
+
+Approved provider path:
+
+`secret/data/connectors/saas-alerts/production/read-only`
+
+Durable OpenBao fields:
+
+- `api_key`
+- `partner_id`
+
+Runtime identity:
+
+- policy: `jason-saas-alerts-read`
+- AppRole: `jason-saas-alerts-read`
+- protected runtime artifacts: `/var/lib/jason/runtime-secrets/openbao/saas-alerts-read-approle/`
+- directory ownership/mode: `root:1000` / `0750`
+- credential file ownership/mode: `root:1000` / `0640`
+
+The SaaS Alerts Reports API credential is read-only at the Jason capability layer. The provider documents API-key based extraction of event information and identifies the Partner ID separately for partner-scoped integrations. The credential profile stores only those two provider-issued values; API endpoint selection remains connector configuration, not secret data.
+
+Provisioning this secret does not activate a SaaS Alerts connector or grant provider mutation authority. Live reads still require an approved connector adapter, client-boundary model, Central Orchestrator registration, and controlled provider-backed acceptance.
+
 ## Safety and failure rules
 
 - Never paste provider credentials into chat, Git, command arguments, normal logs, or evidence.
