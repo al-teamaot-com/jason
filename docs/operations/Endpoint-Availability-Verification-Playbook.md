@@ -3,13 +3,14 @@
 **Status:** Decision/state implementation complete; production peer-probe and durable scheduler dependencies open
 **Default offline threshold:** 2 hours
 **Default post-threshold recheck:** 1 hour
+**ICMP rule:** success is positive reachability evidence; failure on ordinary PCs is inconclusive
 **Implementation:** `implementation/autonomous_remediation/availability.py`
 **Tests:** `implementation/autonomous_remediation/test_availability.py`
 **Tracked dependency:** `TODO-OPS-001 — Durable deferred-work recheck scheduler`
 
 ## 1. Section Goal
 
-Jason must not treat a DRMM offline flag as conclusive proof that an endpoint is powered off. If a device remains offline longer than the configured threshold, Jason should automatically attempt additional read-only verification from a suitable online managed endpoint at the same client/site when one is available. If no peer is available, the workflow remains pending with a persisted recheck instead of relying on technician memory.
+Jason must not treat a DRMM offline flag or a failed PC ping as conclusive proof that an endpoint is powered off. If a device remains offline longer than the configured threshold, Jason should automatically attempt additional read-only verification from a suitable online managed endpoint at the same client/site when one is available. If no peer is available, the workflow remains pending with a persisted recheck instead of relying on technician memory.
 
 ## 2. Trigger
 
@@ -41,7 +42,7 @@ Persist: online, recently_offline, peer_verification_due, peer_unavailable, reac
 6. If none exists, return peer_unavailable and persist another recheck.
 7. If a peer exists, resolve target hostname, ping hostname, and ping last-known IP when available using an approved read-only capability.
 8. If either ping succeeds while DRMM reports offline, return reachable_outside_drmm and route toward DRMM agent/service/path diagnostics.
-9. If attempted pings fail, return offline_likely but do not claim power-off is proven; persist another recheck.
+9. If attempted pings fail, return inconclusive for ordinary endpoints; host firewall/policy may block ICMP. Persist another recheck and seek independent provider/site/infrastructure evidence.
 10. Partial/contradictory probes return inconclusive and recheck.
 
 ## 8. Decision Gates
@@ -100,7 +101,7 @@ DRMM managed-device read including Last Seen; client/site association; same-site
 
 ## 21. Acceptance Test
 
-Demonstrate: recent offline defers to threshold; threshold-exceeded requests peer verification; no peer produces peer_unavailable plus recheck; successful peer ping produces reachable_outside_drmm; failed ping produces offline_likely not confirmed_offline; unknown Last Seen does not wait forever; resume fields persist; cross-client peer is rejected; duplicate rechecks are suppressed.
+Demonstrate: recent offline defers to threshold; threshold-exceeded requests peer verification; no peer produces peer_unavailable plus recheck; successful peer ping produces reachable_outside_drmm; failed PC ping remains inconclusive; unknown Last Seen does not wait forever; resume fields persist; cross-client peer is rejected; duplicate rechecks are suppressed.
 
 ## 22. Section Goal Closure
 
