@@ -4,13 +4,14 @@
 **Default offline threshold:** 2 hours
 **Default post-threshold recheck:** 1 hour
 **ICMP rule:** success is positive reachability evidence; failure on ordinary PCs is inconclusive
-**Implementation:** `implementation/autonomous_remediation/availability.py`
-**Tests:** `implementation/autonomous_remediation/test_availability.py`
+**DEB rule:** DRMM offline + current DEB online means device-alive/DRMM-path conflict, not true offline
+**Implementation:** `implementation/autonomous_remediation/availability.py`, `implementation/autonomous_remediation/deb_availability.py`
+**Tests:** `implementation/autonomous_remediation/test_availability.py`, `implementation/autonomous_remediation/test_deb_availability.py`
 **Tracked dependency:** `TODO-OPS-001 — Durable deferred-work recheck scheduler`
 
 ## 1. Section Goal
 
-Jason must not treat a DRMM offline flag or a failed PC ping as conclusive proof that an endpoint is powered off. If a device remains offline longer than the configured threshold, Jason should automatically attempt additional read-only verification from a suitable online managed endpoint at the same client/site when one is available. If no peer is available, the workflow remains pending with a persisted recheck instead of relying on technician memory.
+Jason must not treat a DRMM offline flag or a failed PC ping as conclusive proof that an endpoint is powered off. Before calling a waiting-device state a true endpoint-offline condition, Jason should use independent Datto Endpoint Backup availability when an exact same-client asset can be resolved. DRMM offline + current DEB online is a management-path conflict, not a powered-off device. If DEB cannot establish the state and the device remains offline longer than the configured threshold, Jason should automatically attempt additional read-only verification from a suitable online managed endpoint at the same client/site when one is available. If no peer is available, the workflow remains pending with a persisted recheck instead of relying on technician memory.
 
 ## 2. Trigger
 
@@ -31,6 +32,17 @@ Healthy means the intended managed endpoint is online/current in DRMM or indepen
 ## 6. State Model
 
 Persist: online, recently_offline, peer_verification_due, peer_unavailable, reachable_outside_drmm, offline_likely, inconclusive, identification_blocked, or escalated. Persist observed time, Last Seen, offline age, peer used, probe results, next recheck time, and interpretation.
+
+### Shared DRMM + DEB waiting-device gate
+
+Before an existing Jason work item remains in `Waiting Device Access`, evaluate:
+
+- **DRMM online** -> resume normal work.
+- **DRMM offline + DEB offline** -> `offline_corroborated`; waiting for device access is supported by two independent providers.
+- **DRMM offline + DEB online** -> `deb_online_drmm_offline`; the device is independently alive, but DRMM management access is unavailable. Do not say the device is powered off. An already-dispatched provider job may be polled safely; do not dispatch a new DRMM action until DRMM access is restored.
+- **DRMM offline + DEB not found/unavailable/ambiguous** -> `drmm_offline_unconfirmed`; preserve waiting/recheck behavior but label the endpoint state as unconfirmed.
+
+When duplicate exact-name DEB assets exist, prefer one online record only when its activity is recent and newer than every stale offline duplicate. If multiple current/conflicting records remain, fail closed as ambiguous.
 
 ## 7. Diagnostic Workflow
 
