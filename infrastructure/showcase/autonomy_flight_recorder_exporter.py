@@ -35,6 +35,11 @@ WORKER_DB = Path(os.environ.get("JASON_AUTONOMY_WORKER_DB", "/var/lib/jason/open
 PRINCIPAL = os.environ.get("JASON_AUTONOMY_PRINCIPAL", "jason-autonomy-worker")
 ENRICHMENT_PATH = Path(os.environ.get("JASON_AUTONOMY_FLIGHT_RECORDER_ENRICHMENT", "/app/flight_recorder_enrichment.json"))
 
+_EVENT_GROUP_QUERY = (
+    "SELECT event_type,execution_id,correlation_id,capability_name,stage,payload,occurred_at "
+    "FROM orchestration_events WHERE principal_id=? ORDER BY rowid DESC LIMIT 4000"
+)
+
 SENSITIVE_KEY = re.compile(r"(?i)(secret|password|passwd|token|api[_-]?key|credential|authorization|cookie|private[_-]?key|client[_-]?secret)")
 SENSITIVE_TEXT = re.compile(r"(?i)(bearer\s+[A-Za-z0-9._~+/=-]{12,}|basic\s+[A-Za-z0-9+/=]{12,})")
 MAX_STRING = 8000
@@ -360,11 +365,7 @@ def _event_groups() -> dict[str, list[dict[str, Any]]]:
         return groups
     c = _db(EVENT_DB)
     try:
-        rows = c.execute(
-            "SELECT event_type,execution_id,correlation_id,capability_name,stage,payload,occurred_at "
-            "FROM orchestration_events WHERE principal_id=? ORDER BY occurred_at DESC LIMIT 4000",
-            (PRINCIPAL,),
-        ).fetchall()
+        rows = c.execute(_EVENT_GROUP_QUERY, (PRINCIPAL,)).fetchall()
         for row in rows:
             d = dict(row)
             d["payload"] = _json(d.get("payload"), {}) or {}
