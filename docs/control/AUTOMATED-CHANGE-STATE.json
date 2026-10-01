@@ -1,7 +1,7 @@
 {
   "production": {
     "failed_systemd_units": 0,
-    "host_release": "/opt/jason/releases/6837fe62bd9d883891575342b54be6b97237bf45",
+    "host_release": "/opt/jason/releases/d266912382e65e3061c43c87c88f254738ccb4ac",
     "host_units": {
       "jason-client-posture-exporter.service": "active",
       "jason-delegation-maintenance.timer": "active",
@@ -16,25 +16,25 @@
     },
     "mcp": {
       "restart_policy": "unless-stopped",
-      "source_revision": "6837fe62bd9d883891575342b54be6b97237bf45",
+      "source_revision": "d266912382e65e3061c43c87c88f254738ccb4ac",
       "state": "running"
     },
-    "observed_at": "2026-09-29T14:42:19+00:00",
-    "revision": "6837fe62bd9d883891575342b54be6b97237bf45",
+    "observed_at": "2026-09-30T15:53:44+00:00",
+    "revision": "d266912382e65e3061c43c87c88f254738ccb4ac",
     "runtime": {
       "health": "healthy",
       "restart_count": 0,
-      "source_revision": "6837fe62bd9d883891575342b54be6b97237bf45"
+      "source_revision": "d266912382e65e3061c43c87c88f254738ccb4ac"
     },
     "status": "aligned_and_healthy"
   },
   "schema_version": "1.0",
   "validated_source": {
-    "observed_at": "2026-09-29T13:49:32+00:00",
-    "revision": "64eec637a8ab79c3b37db198d1891d86600e230c",
+    "observed_at": "2026-09-30T13:17:14+00:00",
+    "revision": "33e229219ddf2c1afcd66f2068a14efa2a723808",
     "status": "ci_passed",
     "workflow": "Validate Jason",
-    "workflow_run_id": "36577618673",
-    "workflow_url": "https://github.com/al-teamaot-com/jason/actions/runs/36577618673"
+    "workflow_run_id": "36715644159",
+    "workflow_url": "https://github.com/al-teamaot-com/jason/actions/runs/36715644159"
   }
 }

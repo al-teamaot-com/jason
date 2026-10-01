@@ -186,7 +186,8 @@ Availability is a two-source decision. DRMM and Backup.net must be evaluated ind
    - document and move to **Help Desk I + Human Review**
 
 7. **Provider asset missing/ambiguous/duplicate**
-   - classify=`asset_identity_or_lifecycle_issue`
+   - first apply the shared DEB duplicate-resolution rule: one recent online exact-name asset may supersede older offline history when its activity is fresh and newer than every stale duplicate
+   - if multiple current/conflicting exact-name assets remain, classify=`asset_identity_or_lifecycle_issue`
    - do not guess, clean-install, or create a replacement asset autonomously
    - document and move to **Help Desk I + Human Review**
 

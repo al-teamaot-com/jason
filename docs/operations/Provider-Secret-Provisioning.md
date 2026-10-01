@@ -334,6 +334,44 @@ Live selection also requires `JASON_BACKUP_NET_ENABLED=true` and a validated Jas
 
 For the controlled acceptance case, Autotask company search independently resolved **Deborah Gittens Virtuol Designs LLC** to company ID **1627**. Ticket `T20260922.0063` itself currently reports `companyID=0`, so the ticket field must not be used as the Backup.net boundary source.
 
+## Dark Web ID API credential contract
+
+Lifecycle provider key: `darkwebid`
+
+Logical secret: `darkwebid.runtime`
+
+Approved provider path:
+
+`secret/data/connectors/darkwebid/production/runtime`
+
+Durable OpenBao fields:
+
+- `username`
+- `password`
+
+Runtime secret identity:
+
+- policy: `jason-darkwebid-secret-read`
+- AppRole: `jason-darkwebid-secret-read`
+- protected runtime artifacts: `/var/lib/jason/runtime-secrets/openbao/darkwebid-approle/`
+- directory ownership/mode: `root:1000` / `0750`
+- credential file ownership/mode: `root:1000` / `0640`
+
+Dark Web ID authenticates its External API with HTTP Basic Authentication using a partner-user email address and that user's Dark Web ID-specific password. API access additionally requires `Permit access to web services` and the calling system's static public IPv4 address in the user's IP Address whitelist. The approved production API base is `https://secure.darkwebid.com/`.
+
+The credential contract is intentionally named `runtime` rather than `readonly` because the current Dark Web ID v2 API includes organization/domain provisioning operations in addition to read/search operations. Provider-side credential permission does not grant Jason mutation authority. Initial Jason connector activation remains read-only; provisioning or other write capabilities require separate governed capability registration, exact target/payload binding, authorization, and post-action verification.
+
+For the dedicated AOT integration identity, use `jason@teamaot.com` with its Dark Web ID-specific API password. Never use the KaseyaOne password or paste the Dark Web ID password into chat, Git, command arguments, logs, or evidence.
+
+Provision and verify with the canonical lifecycle:
+
+```bash
+clear
+cd /home/al/projects/jason
+sudo python3 tools/provider_secret.py create darkwebid
+sudo python3 tools/provider_secret.py verify darkwebid
+```
+
 ## DNSFilter read-only API contract
 
 Logical secret: `dnsfilter.readonly`
@@ -385,6 +423,55 @@ Verify the authenticated session:
 `python3 tools/dnsfilter_mcp_oauth.py verify`
 
 DNSFilter requires periodic user re-authentication. If refresh/re-authentication fails, the MCP provider must fail closed; there is no service-account fallback.
+
+## SaaS Alerts read-only API credential contract
+
+Logical secret: `saas_alerts.readonly`
+
+Approved provider path:
+
+`secret/data/connectors/saas-alerts/production/read-only`
+
+Durable OpenBao fields:
+
+- `api_key`
+- `partner_id`
+
+Runtime identity:
+
+- policy: `jason-saas-alerts-read`
+- AppRole: `jason-saas-alerts-read`
+- protected runtime artifacts: `/var/lib/jason/runtime-secrets/openbao/saas-alerts-read-approle/`
+- directory ownership/mode: `root:1000` / `0750`
+- credential file ownership/mode: `root:1000` / `0640`
+
+The SaaS Alerts Reports API credential is read-only at the Jason capability layer. The provider documents API-key based extraction of event information and identifies the Partner ID separately for partner-scoped integrations. The credential profile stores only those two provider-issued values; API endpoint selection remains connector configuration, not secret data.
+
+Provisioning this secret does not activate a SaaS Alerts connector or grant provider mutation authority. Live reads still require an approved connector adapter, client-boundary model, Central Orchestrator registration, and controlled provider-backed acceptance.
+
+## VulScan read-only API credential contract
+
+Logical secret: `vulscan.readonly`
+
+Approved provider path:
+
+`secret/data/connectors/vulscan/production/read-only`
+
+Durable OpenBao field:
+
+- `api_key`
+
+Runtime identity:
+
+- policy: `jason-vulscan-read`
+- AppRole: `jason-vulscan-read`
+- protected runtime artifacts: `/var/lib/jason/runtime-secrets/openbao/vulscan-read-approle/`
+- directory ownership/mode: `root:1000` / `0750`
+- credential file ownership/mode: `root:1000` / `0640`
+
+Kaseya documents a VulScan API key generated from the RapidFire Tools portal for VulScan integrations. The provider-secret profile stores only that key. API endpoint selection and request semantics remain connector configuration and must be validated separately before live provider activation.
+
+Provisioning this secret does not activate a VulScan connector or grant provider mutation authority. Live reads still require an approved connector adapter, client-boundary model, Central Orchestrator registration, and controlled provider-backed acceptance.
 
 ## Safety and failure rules
 

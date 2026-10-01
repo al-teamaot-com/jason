@@ -47,6 +47,11 @@ from autonomous_remediation.playbook_autonomy_approval import (
 )
 from autonomous_remediation.datto_edr_av_playbook import PLAYBOOK_VERSION as EDR_PLAYBOOK_VERSION
 from autonomous_remediation.datto_edr_av_runtime_contract import VERIFIED_COMPONENTS
+from autonomous_remediation.deb_availability import (
+    DebAssetSelection,
+    DebAvailabilityState,
+    select_deb_asset,
+)
 
 from .low_disk_analysis import (
     LARGE_FILE_COMMAND,
@@ -81,6 +86,13 @@ from .unexpected_shutdown_analysis import (
     storage_health_risk as shutdown_storage_health_risk,
 )
 from .approved_client_messages import resolve_approved_client_message
+from autonomous_remediation.offline_ticket_augmentation import (
+    SiteContextEvidence,
+    SiteWitness,
+    classify_site_context,
+    is_offline_ticket,
+    render_site_context_note,
+)
 from .vulscan_client_policy import resolve_vulscan_policy
 
 
@@ -197,6 +209,14 @@ IDLE_LOG_OFF_SCOPE = PlaybookScope(
         "service.ticket.update",
     ),
 )
+OFFLINE_AUGMENTATION_SCOPE = PlaybookScope(
+    playbook_id="offline_ticket_context_augmentation",
+    playbook_version="0.1.0",
+    policy_id="playbook-autonomy:offline_ticket_context_augmentation",
+    required_action_capabilities=(
+        "service.ticket.note.create",
+    ),
+)
 PLAYBOOK_SCOPES = {
     EDR_SCOPE.playbook_id: EDR_SCOPE,
     DNS_SCOPE.playbook_id: DNS_SCOPE,
@@ -208,6 +228,7 @@ PLAYBOOK_SCOPES = {
     VULSCAN_SCOPE.playbook_id: VULSCAN_SCOPE,
     DISK_BAD_BLOCK_SCOPE.playbook_id: DISK_BAD_BLOCK_SCOPE,
     IDLE_LOG_OFF_SCOPE.playbook_id: IDLE_LOG_OFF_SCOPE,
+    OFFLINE_AUGMENTATION_SCOPE.playbook_id: OFFLINE_AUGMENTATION_SCOPE,
 }
 
 HEALTH_COMPONENT_NAME = "Check Datto EDR/AV Status AOT Ver 12122025-1"
@@ -230,10 +251,26 @@ RECOVERABLE_BLOCK_RETRY_SECONDS = 300
 VULSCAN_APPROVAL_RECHECK_SECONDS = 24 * 60 * 60
 VULSCAN_APPROVAL_ESCALATION_SECONDS = 10 * 24 * 60 * 60
 VULSCAN_PATCH_WINDOW_RECHECK_SECONDS = 6 * 60 * 60
+OFFLINE_AUGMENTATION_RECHECK_SECONDS = 10 * 60
+OFFLINE_AUGMENTATION_NOTE_TITLE = "Jason - Offline Ticket Context"
+OFFLINE_AUGMENTATION_WITNESS_COMMAND = "Get-NetIPConfiguration"
 
 
 class OperationalAutonomyError(RuntimeError):
     pass
+
+
+class BackupIQManagedEndpointMissing(OperationalAutonomyError):
+    def __init__(self, *, company_id: int, ci_id: int, hostname: str, provider_status: str) -> None:
+        self.company_id = int(company_id)
+        self.ci_id = int(ci_id)
+        self.hostname = str(hostname)
+        self.provider_status = str(provider_status)
+        super().__init__(
+            "BackupIQ provider asset is uniquely proven but the managed DRMM endpoint is absent; "
+            f"company_id={self.company_id}; ci_id={self.ci_id}; hostname={self.hostname}; "
+            f"provider_status={self.provider_status or 'unknown'}"
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -329,6 +366,16 @@ class SQLiteOperationalWorkStore:
         fingerprint TEXT NOT NULL,
         documented_at TEXT NOT NULL,
         PRIMARY KEY(ticket_id, playbook_id, note_title)
+    );
+
+    CREATE TABLE IF NOT EXISTS autonomy_ticket_augmentation_state (
+        ticket_id INTEGER NOT NULL,
+        augmentation_id TEXT NOT NULL,
+        source_version TEXT,
+        classification TEXT NOT NULL,
+        evidence_fingerprint TEXT NOT NULL,
+        checked_at TEXT NOT NULL,
+        PRIMARY KEY(ticket_id, augmentation_id)
     );
 
     CREATE TABLE IF NOT EXISTS autonomy_ticket_activity (
@@ -618,6 +665,51 @@ class SQLiteOperationalWorkStore:
                 ),
             )
 
+    def augmentation_state(
+        self,
+        ticket_id: int,
+        augmentation_id: str,
+    ) -> Mapping[str, Any] | None:
+        row = self._connection.execute(
+            "SELECT source_version,classification,evidence_fingerprint,checked_at "
+            "FROM autonomy_ticket_augmentation_state "
+            "WHERE ticket_id=? AND augmentation_id=?",
+            (int(ticket_id), str(augmentation_id)),
+        ).fetchone()
+        return None if row is None else dict(row)
+
+    def remember_augmentation_state(
+        self,
+        *,
+        ticket_id: int,
+        augmentation_id: str,
+        source_version: str | None,
+        classification: str,
+        evidence_fingerprint: str,
+    ) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO autonomy_ticket_augmentation_state(
+                    ticket_id,augmentation_id,source_version,classification,
+                    evidence_fingerprint,checked_at
+                ) VALUES (?,?,?,?,?,?)
+                ON CONFLICT(ticket_id,augmentation_id) DO UPDATE SET
+                    source_version=excluded.source_version,
+                    classification=excluded.classification,
+                    evidence_fingerprint=excluded.evidence_fingerprint,
+                    checked_at=excluded.checked_at
+                """,
+                (
+                    int(ticket_id),
+                    str(augmentation_id),
+                    str(source_version or "") or None,
+                    str(classification),
+                    str(evidence_fingerprint),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+
     def close(self) -> None:
         self._connection.close()
 
@@ -745,6 +837,451 @@ class OperationalAutonomyMaintenance:
         self._next_due = 0.0
         self._resource_automation_cache: dict[int, bool] = {}
 
+    def request_reconcile(self, reason: str) -> None:
+        """Request a full queue reconciliation on the next maintenance tick."""
+        del reason
+        self._next_due = 0.0
+
+    @staticmethod
+    def _offline_augmentation_role(
+        endpoint: Mapping[str, Any],
+    ) -> tuple[str, bool, bool]:
+        material = " ".join(
+            (
+                json.dumps(endpoint.get("device_type"), sort_keys=True, default=str),
+                str(endpoint.get("operatingSystem") or endpoint.get("operating_system") or ""),
+            )
+        ).casefold()
+        if any(token in material for token in ("laptop", "notebook", "portable")):
+            return "laptop", False, True
+        if "server" in material:
+            return "server", True, False
+        if any(token in material for token in ("desktop", "workstation", "main system chassis")):
+            return "desktop", True, False
+        return "unknown", False, False
+
+    def _offline_augmentation_due(self, candidate) -> bool:
+        ticket_id = int(candidate.resource_id)
+        state = self.store.augmentation_state(
+            ticket_id,
+            OFFLINE_AUGMENTATION_SCOPE.playbook_id,
+        )
+        if state is None:
+            return True
+        observed_version = str(candidate.source_version or "").strip() or None
+        recorded_version = str(state.get("source_version") or "").strip() or None
+        if observed_version != recorded_version:
+            return True
+        checked = self._parse_iso_timestamp(state.get("checked_at"))
+        if checked is None:
+            return True
+        return (
+            datetime.now(timezone.utc) - checked
+        ).total_seconds() >= OFFLINE_AUGMENTATION_RECHECK_SECONDS
+
+    def _deb_asset_selection(
+        self,
+        *,
+        company_id: int,
+        hostname: str,
+    ) -> DebAssetSelection:
+        try:
+            data = self._read_data(
+                "backup.endpoint.asset.search",
+                {
+                    "company_id": company_id,
+                    "name": hostname,
+                    "page_size": 100,
+                },
+            )
+        except Exception:
+            return DebAssetSelection(
+                state=DebAvailabilityState.UNAVAILABLE,
+                hostname=hostname,
+                exact_match_count=0,
+                asset=None,
+                selected_asset_id=None,
+                selected_status=None,
+                activity_at=None,
+                reason="DEB availability read failed or is unavailable.",
+            )
+        items = data.get("items")
+        if not isinstance(items, list):
+            return DebAssetSelection(
+                state=DebAvailabilityState.UNAVAILABLE,
+                hostname=hostname,
+                exact_match_count=0,
+                asset=None,
+                selected_asset_id=None,
+                selected_status=None,
+                activity_at=None,
+                reason="DEB availability response did not contain an asset list.",
+            )
+        return select_deb_asset(
+            items,
+            hostname=hostname,
+            observed_at=datetime.now(timezone.utc),
+        )
+
+    def _offline_augmentation_deb_online(
+        self,
+        *,
+        company_id: int,
+        hostname: str,
+    ) -> bool | None:
+        selection = self._deb_asset_selection(
+            company_id=company_id,
+            hostname=hostname,
+        )
+        if selection.state is DebAvailabilityState.ONLINE:
+            return True
+        if selection.state is DebAvailabilityState.OFFLINE:
+            return False
+        return None
+
+    def _device_access_state(
+        self,
+        work: OperationalWork,
+        *,
+        endpoint: Mapping[str, Any] | None = None,
+    ) -> tuple[str, DebAssetSelection]:
+        current = (
+            dict(endpoint)
+            if endpoint is not None
+            else self._read_record(
+                "endpoint.device.read", {"resource_id": work.device_uid}
+            )
+        )
+        endpoint_uid = str(
+            current.get("resource_id")
+            or current.get("uid")
+            or current.get("deviceUid")
+            or ""
+        ).strip()
+        endpoint_hostname = str(
+            current.get("hostname")
+            or current.get("hostName")
+            or current.get("name")
+            or ""
+        ).strip()
+        if endpoint_uid != work.device_uid:
+            raise OperationalAutonomyError(
+                "device availability DRMM identity changed during execution"
+            )
+        if endpoint_hostname and endpoint_hostname.casefold() != work.hostname.casefold():
+            raise OperationalAutonomyError(
+                "device availability DRMM hostname changed during execution"
+            )
+
+        if current.get("online") is True:
+            return (
+                "drmm_online",
+                DebAssetSelection(
+                    state=DebAvailabilityState.UNKNOWN,
+                    hostname=work.hostname,
+                    exact_match_count=0,
+                    asset=None,
+                    selected_asset_id=None,
+                    selected_status=None,
+                    activity_at=None,
+                    reason="DEB read not required because DRMM is currently online.",
+                ),
+            )
+
+        deb = self._deb_asset_selection(
+            company_id=work.company_id,
+            hostname=work.hostname,
+        )
+        if deb.state is DebAvailabilityState.ONLINE:
+            return "deb_online_drmm_offline", deb
+        if deb.state is DebAvailabilityState.OFFLINE:
+            return "offline_corroborated", deb
+        return "drmm_offline_unconfirmed", deb
+
+    @staticmethod
+    def _device_wait_reason(
+        state: str,
+        deb: DebAssetSelection,
+    ) -> str:
+        activity = (
+            deb.activity_at.isoformat()
+            if deb.activity_at is not None
+            else "unknown"
+        )
+        if state == "deb_online_drmm_offline":
+            return (
+                "availability=deb_online_drmm_offline; DRMM reports the endpoint "
+                "offline while DEB reports the current device online; waiting for "
+                "DRMM management access rather than device power-on; "
+                f"deb_asset={deb.selected_asset_id or 'unknown'}; "
+                f"deb_activity={activity}."
+            )
+        if state == "offline_corroborated":
+            return (
+                "availability=offline_corroborated; DRMM and DEB independently "
+                "report the endpoint offline; waiting for exact endpoint access; "
+                f"deb_asset={deb.selected_asset_id or 'unknown'}; "
+                f"deb_activity={activity}."
+            )
+        return (
+            "availability=drmm_offline_unconfirmed; DRMM reports the endpoint "
+            f"offline; DEB state={deb.state.value} and did not independently "
+            "confirm whether the device is online; waiting for DRMM/device access."
+        )
+
+    def _document_deb_drmm_conflict(
+        self,
+        work: OperationalWork,
+        deb: DebAssetSelection,
+    ) -> None:
+        activity = (
+            deb.activity_at.isoformat()
+            if deb.activity_at is not None
+            else "unknown"
+        )
+        self._write_note(
+            work,
+            (
+                "STATUS\n"
+                f"{work.hostname} is not being treated as powered off. DEB reports "
+                "the endpoint online while DRMM currently reports it offline.\n\n"
+                "NEXT STEP\n"
+                "Jason will preserve the ticket and wait for the DRMM management "
+                "path when DRMM access is required. If an already-dispatched job "
+                "can be polled safely, Jason may continue that read-only/status "
+                "verification without waiting for DRMM's online flag to change.\n\n"
+                "KEY EVIDENCE\n"
+                "- DRMM online state=No\n"
+                "- DEB online state=Yes\n"
+                f"- DEB asset={deb.selected_asset_id or 'unknown'}\n"
+                f"- DEB most recent activity={activity}\n"
+                f"- Exact DEB hostname matches={deb.exact_match_count}\n\n"
+                "CHANGES MADE\n"
+                "None. Availability evidence only.\n\n"
+                "JASON STATE\n"
+                "waiting for DRMM management access; device itself is independently "
+                "reported online by DEB"
+            ),
+            "Jason - Device Availability - DRMM Access",
+        )
+
+    def _offline_augmentation_live_server_witness(
+        self,
+        *,
+        device_uid: str,
+    ) -> bool:
+        try:
+            data = self._read_data(
+                "endpoint.powershell.read",
+                {
+                    "device_uid": device_uid,
+                    "command": OFFLINE_AUGMENTATION_WITNESS_COMMAND,
+                    "timeout_seconds": 30,
+                },
+            )
+        except Exception:
+            return False
+        stdout = str(data.get("stdout") or data.get("text") or "").strip()
+        return bool(stdout)
+
+    def _augment_offline_ticket_context(self, candidate) -> None:
+        ticket = candidate.context
+        ticket_id = int(candidate.resource_id)
+        ci_raw = ticket.get("configurationItemID")
+        try:
+            ci_id = int(ci_raw)
+        except (TypeError, ValueError):
+            ci_id = 0
+
+        if not is_offline_ticket(
+            title=str(ticket.get("title") or ""),
+            description=str(ticket.get("description") or ""),
+            has_device_context=ci_id > 0,
+        ):
+            return
+        if not self._offline_augmentation_due(candidate):
+            return
+
+        classification = "identity_unavailable"
+        evidence_fingerprint = ""
+        try:
+            if ci_id <= 0:
+                return
+
+            company_id = self._company_id(ticket.get("companyID"))
+            ci = self._read_data(
+                "service.configuration.read",
+                {"resource_id": ci_id},
+            )
+            if isinstance(ci.get("item"), Mapping):
+                ci = dict(ci["item"])
+            if (
+                int(ci.get("id") or 0) != ci_id
+                or self._company_id(ci.get("companyID")) != company_id
+                or ci.get("isActive") is not True
+            ):
+                return
+
+            device_uid = str(ci.get("referenceNumber") or "").strip()
+            hostname = str(ci.get("referenceTitle") or "").strip()
+            if not device_uid or not hostname:
+                return
+
+            endpoint = self._read_record(
+                "endpoint.device.read",
+                {"resource_id": device_uid},
+            )
+            observed_uid = str(
+                endpoint.get("resource_id")
+                or endpoint.get("uid")
+                or endpoint.get("deviceUid")
+                or ""
+            ).strip()
+            if observed_uid != device_uid:
+                return
+            target_drmm_online = (
+                True if endpoint.get("online") is True
+                else False if endpoint.get("online") is False
+                else None
+            )
+            target_deb_online = self._offline_augmentation_deb_online(
+                company_id=company_id,
+                hostname=hostname,
+            )
+            site = str(endpoint.get("site") or "").strip() or None
+
+            witnesses: list[SiteWitness] = []
+            live_server_found = False
+            if site:
+                site_data = self._read_data(
+                    "endpoint.device.search",
+                    {"site": site},
+                )
+                matches = site_data.get("resource_matches")
+                if isinstance(matches, list):
+                    for raw_peer in matches[:20]:
+                        if not isinstance(raw_peer, Mapping):
+                            continue
+                        peer_uid = str(
+                            raw_peer.get("resource_id")
+                            or raw_peer.get("uid")
+                            or raw_peer.get("deviceUid")
+                            or ""
+                        ).strip()
+                        if not peer_uid or peer_uid == device_uid:
+                            continue
+
+                        peer = dict(raw_peer)
+                        role, fixed, mobile = self._offline_augmentation_role(peer)
+                        peer_online = (
+                            True if peer.get("online") is True
+                            else False if peer.get("online") is False
+                            else None
+                        )
+                        if role == "unknown" or peer_online is None:
+                            try:
+                                peer = self._read_record(
+                                    "endpoint.device.read",
+                                    {"resource_id": peer_uid},
+                                )
+                            except Exception:
+                                continue
+                            role, fixed, mobile = self._offline_augmentation_role(peer)
+                            peer_online = (
+                                True if peer.get("online") is True
+                                else False if peer.get("online") is False
+                                else None
+                            )
+
+                        peer_hostname = str(
+                            peer.get("hostname")
+                            or peer.get("hostName")
+                            or peer.get("name")
+                            or peer_uid
+                        ).strip()
+                        if not peer_hostname:
+                            continue
+
+                        live_read = False
+                        site_confirmed = fixed and not mobile
+                        if (
+                            role == "server"
+                            and peer_online is True
+                            and not live_server_found
+                        ):
+                            live_read = self._offline_augmentation_live_server_witness(
+                                device_uid=peer_uid,
+                            )
+                            if live_read:
+                                live_server_found = True
+                                site_confirmed = True
+
+                        witnesses.append(
+                            SiteWitness(
+                                device_uid=peer_uid,
+                                hostname=peer_hostname,
+                                role=role,
+                                online=peer_online,
+                                fixed=fixed,
+                                mobile=mobile,
+                                site_presence_confirmed=site_confirmed,
+                                live_read_succeeded=live_read,
+                            )
+                        )
+
+            evidence = SiteContextEvidence(
+                target_hostname=hostname,
+                target_drmm_online=target_drmm_online,
+                target_deb_online=target_deb_online,
+                site_name=site,
+                witnesses=tuple(witnesses),
+            )
+            assessment = classify_site_context(evidence)
+            body = render_site_context_note(
+                assessment,
+                target_drmm_online=target_drmm_online,
+                target_deb_online=target_deb_online,
+                site_name=site,
+            )
+            evidence_fingerprint = assessment.fingerprint()
+            classification = assessment.state.value
+
+            prior = self.store.last_note_fingerprint(
+                ticket_id,
+                OFFLINE_AUGMENTATION_SCOPE.playbook_id,
+                OFFLINE_AUGMENTATION_NOTE_TITLE,
+            )
+            if prior != evidence_fingerprint:
+                self.actions.execute(
+                    OFFLINE_AUGMENTATION_SCOPE,
+                    "service.ticket.note.create",
+                    {
+                        "payload": {
+                            "ticketID": ticket_id,
+                            "title": OFFLINE_AUGMENTATION_NOTE_TITLE,
+                            "description": body,
+                            "noteType": 3,
+                            "publish": 1,
+                        }
+                    },
+                )
+                self.store.remember_note_fingerprint(
+                    ticket_id,
+                    OFFLINE_AUGMENTATION_SCOPE.playbook_id,
+                    OFFLINE_AUGMENTATION_NOTE_TITLE,
+                    evidence_fingerprint,
+                )
+        finally:
+            self.store.remember_augmentation_state(
+                ticket_id=ticket_id,
+                augmentation_id=OFFLINE_AUGMENTATION_SCOPE.playbook_id,
+                source_version=(
+                    str(candidate.source_version or "").strip() or None
+                ),
+                classification=classification,
+                evidence_fingerprint=evidence_fingerprint,
+            )
+
     def tick(self) -> None:
         now = self.monotonic()
         if now < self._next_due:
@@ -758,6 +1295,24 @@ class OperationalAutonomyMaintenance:
             # A later cadence retry will reconcile again.
             return
         by_id = {int(item.resource_id): item for item in candidates}
+
+        # Ticket augmentation is deliberately independent of queue ownership and
+        # active-work capacity. It may add read-only context to a technician-owned
+        # offline ticket, but it never claims, requeues, or changes ticket status.
+        if self._scope_is_promoted(OFFLINE_AUGMENTATION_SCOPE):
+            for item in candidates[: self.max_candidate_evaluations_per_scan]:
+                try:
+                    self._augment_offline_ticket_context(item)
+                except Exception as exc:
+                    if self.audit is not None:
+                        self.audit.record(
+                            "autonomy.offline_ticket_augmentation.failed",
+                            {
+                                "ticket_id": int(item.resource_id),
+                                "error_type": type(exc).__name__,
+                            },
+                        )
+
         classifications: dict[
             int, tuple[str, str, str | None, bool]
         ] = {}
@@ -814,9 +1369,10 @@ class OperationalAutonomyMaintenance:
                 continue
             try:
                 if self._pause_active_work_if_endpoint_offline(work, candidate):
+                    state, reason_code = self._classify_persisted_work(work.ticket_id)
                     classifications[work.ticket_id] = (
-                        "waiting_device_access",
-                        "endpoint_offline",
+                        state,
+                        reason_code,
                         candidate.source_version,
                         False,
                     )
@@ -895,6 +1451,19 @@ class OperationalAutonomyMaintenance:
                 ):
                     self.store.delete(ticket_id)
                     existing = None
+                elif existing.phase == "blocked":
+                    try:
+                        self._synchronize_blocked_ticket_lifecycle(existing, item)
+                    except Exception as exc:
+                        if self.audit is not None:
+                            self.audit.record(
+                                "autonomy.blocked_ticket_lifecycle_sync.failed",
+                                {
+                                    "ticket_id": ticket_id,
+                                    "error_type": type(exc).__name__,
+                                },
+                            )
+                    existing = self.store.get(ticket_id)
             if existing is not None and existing.phase in TERMINAL_PHASES:
                 observed_version = str(item.source_version or "").strip() or None
                 # A human-review handoff remains terminal while it stays outside
@@ -997,7 +1566,33 @@ class OperationalAutonomyMaintenance:
                     continue
                 if existing.phase.startswith("waiting_device_access:"):
                     waiting_phase = existing.phase
-                    if self._endpoint_is_online(existing.device_uid):
+                    try:
+                        access_state, deb = self._device_access_state(existing)
+                    except Exception:
+                        access_state = "drmm_offline_unconfirmed"
+                        deb = DebAssetSelection(
+                            state=DebAvailabilityState.UNAVAILABLE,
+                            hostname=existing.hostname,
+                            exact_match_count=0,
+                            asset=None,
+                            selected_asset_id=None,
+                            selected_status=None,
+                            activity_at=None,
+                            reason="Availability recheck failed closed.",
+                        )
+
+                    resume_phase = waiting_phase.split(":", 1)[1]
+                    safe_deb_resume = (
+                        access_state == "deb_online_drmm_offline"
+                        and bool(existing.job_uid)
+                        and resume_phase.endswith("_wait")
+                    )
+                    may_resume = access_state == "drmm_online" or safe_deb_resume
+
+                    if access_state == "deb_online_drmm_offline":
+                        self._document_deb_drmm_conflict(existing, deb)
+
+                    if may_resume:
                         if len(self.store.list_open()) < self.max_active_work_items:
                             scope = self._scope_for_work(existing)
                             self.actions.execute(
@@ -1010,14 +1605,19 @@ class OperationalAutonomyMaintenance:
                                     }
                                 },
                             )
-                            resume_phase = waiting_phase.split(":", 1)[1]
                             resume_reason = (
                                 existing.last_reason
                                 if (
                                     existing.playbook_id == BACKUPIQ_SCOPE.playbook_id
                                     and resume_phase == "backupiq_verify_reinstall"
                                 )
-                                else "Exact endpoint is online again; resuming preserved work."
+                                else (
+                                    "DEB independently reports the endpoint online while "
+                                    "DRMM is offline; resuming only the already-dispatched "
+                                    "job polling phase."
+                                    if safe_deb_resume
+                                    else "Exact endpoint is online again; resuming preserved work."
+                                )
                             )
                             existing = self._replace(
                                 existing,
@@ -1048,9 +1648,34 @@ class OperationalAutonomyMaintenance:
                                 False,
                             )
                     else:
+                        reason = self._device_wait_reason(access_state, deb)
+                        prior_reason = str(existing.last_reason or "").strip()
+                        prior_prefix = (
+                            prior_reason.split("availability=", 1)[0].strip(" ;")
+                            if "availability=" in prior_reason
+                            else prior_reason
+                        )
+                        combined_reason = (
+                            f"{prior_prefix}; {reason}"
+                            if prior_prefix
+                            else reason
+                        )
+                        if combined_reason != existing.last_reason:
+                            existing = self._replace(
+                                existing,
+                                last_reason=combined_reason,
+                            )
+                            self.store.put(existing)
+                        reason_code = (
+                            "drmm_access_unavailable_device_online_deb"
+                            if access_state == "deb_online_drmm_offline"
+                            else "endpoint_offline_corroborated_deb"
+                            if access_state == "offline_corroborated"
+                            else "endpoint_offline_deb_unconfirmed"
+                        )
                         classifications[ticket_id] = (
                             "waiting_device_access",
-                            "endpoint_offline",
+                            reason_code,
                             item.source_version,
                             False,
                         )
@@ -1204,16 +1829,26 @@ class OperationalAutonomyMaintenance:
             try:
                 work = self._admit(candidate, scope)
             except Exception as exc:
-                if "endpoint is not currently online" in str(exc).casefold():
+                message = str(exc).casefold()
+                if (
+                    "endpoint is not currently online" in message
+                    or "drmm access unavailable while deb reports endpoint online" in message
+                ):
                     waiting_device += 1
+                    reason_code = (
+                        "drmm_access_unavailable_device_online_deb"
+                        if "drmm access unavailable while deb reports endpoint online" in message
+                        else "endpoint_offline_corroborated_deb"
+                        if "deb corroborated" in message
+                        else "endpoint_offline_deb_unconfirmed"
+                    )
                     classifications[int(candidate.resource_id)] = (
-                        "waiting_device_access", "endpoint_offline",
+                        "waiting_device_access", reason_code,
                         candidate.source_version, False,
                     )
                     self._record_admission_failure(candidate, scope, exc)
-                    # An offline endpoint is local to this ticket. Defer it and keep
-                    # searching for unrelated eligible work; the overall candidate-
-                    # evaluation ceiling bounds provider work for the scan.
+                    # Endpoint/management-path availability is local to this ticket.
+                    # Defer it and keep searching for unrelated eligible work.
                     continue
                 admission_attempts += 1
                 classifications[int(candidate.resource_id)] = (
@@ -1351,30 +1986,25 @@ class OperationalAutonomyMaintenance:
         return endpoint.get("online") is True
 
     def _pause_active_work_if_endpoint_offline(self, work: OperationalWork, candidate) -> bool:
-        # BackupIQ uses dual-source availability. DRMM-only offline is a
-        # contradiction requiring Help Desk I / Human Review, while both DRMM
-        # and Backup.net offline is the only true-offline waiting condition.
+        # BackupIQ owns its full dual-source branch separately.
         if work.playbook_id == BACKUPIQ_SCOPE.playbook_id:
             return False
         if not work.job_uid:
             return False
         if work.phase.startswith("waiting_device_access:"):
             return True
+
         try:
-            endpoint = self._read_record(
-                "endpoint.device.read", {"resource_id": work.device_uid}
-            )
+            access_state, deb = self._device_access_state(work)
         except Exception:
             return False
-        endpoint_uid = str(
-            endpoint.get("resource_id")
-            or endpoint.get("uid")
-            or endpoint.get("deviceUid")
-            or ""
-        ).strip()
-        if endpoint_uid != work.device_uid:
+
+        if access_state == "drmm_online":
             return False
-        if endpoint.get("online") is not False:
+        if access_state == "deb_online_drmm_offline":
+            # A job is already dispatched. DEB proves the machine is alive, so
+            # polling the existing provider job is safe and does not redispatch.
+            self._document_deb_drmm_conflict(work, deb)
             return False
 
         scope = self._scope_for_work(work)
@@ -1396,32 +2026,75 @@ class OperationalAutonomyMaintenance:
             self._replace(
                 work,
                 phase=f"waiting_device_access:{work.phase}",
-                last_reason=(
-                    "Exact endpoint went offline after job dispatch; preserving "
-                    "the outstanding job and releasing the active-work slot."
-                ),
+                last_reason=self._device_wait_reason(access_state, deb),
             )
         )
         return True
 
-    def _recoverable_block_retry_due(self, work: OperationalWork) -> bool:
+    @staticmethod
+    def _block_is_retryable(work: OperationalWork) -> bool:
         reason = str(work.last_reason or "").casefold()
-        retryable = any(
+        return any(
             token in reason
             for token in (
                 "governed read failed",
                 "database is locked",
                 "execution_plan_authorization_rejected",
                 "datto_component_autonomy_requires_standing_safe",
+                "provider_http_status_500",
+                "provider_http_status_502",
+                "provider_http_status_503",
+                "provider_http_status_504",
             )
         )
-        if not retryable:
+
+    def _recoverable_block_retry_due(self, work: OperationalWork) -> bool:
+        if not self._block_is_retryable(work):
             return False
         updated = self._parse_iso_timestamp(work.updated_at)
         if updated is None:
             return False
         age = (datetime.now(timezone.utc) - updated).total_seconds()
         return age >= RECOVERABLE_BLOCK_RETRY_SECONDS
+
+    def _synchronize_blocked_ticket_lifecycle(self, work: OperationalWork, candidate) -> None:
+        if str(candidate.source_queue).strip().casefold() != "jason":
+            return
+        status_label = str(
+            candidate.context.get("_jason_source_status_label") or ""
+        ).strip()
+        if self._block_is_retryable(work):
+            if status_label.casefold() == "new":
+                self.actions.execute(
+                    self._scope_for_work(work),
+                    "service.ticket.update",
+                    {
+                        "payload": {
+                            "id": work.ticket_id,
+                            "status": "In Progress",
+                        }
+                    },
+                )
+            return
+
+        self._write_note(
+            work,
+            (
+                "Jason cannot safely continue this ticket automatically. "
+                f"Blocker: {work.last_reason}. "
+                "The ticket is being returned to Help Desk I for technician review "
+                "instead of remaining untriaged in the Jason queue."
+            ),
+            "Jason - Human Review Required",
+        )
+        self._handoff_to_helpdesk(work, status="Human Review")
+        self.store.put(
+            self._replace(
+                work,
+                phase="escalated",
+                last_reason=work.last_reason,
+            )
+        )
 
     def _classify_persisted_work(self, ticket_id: int) -> tuple[str, str]:
         current = self.store.get(ticket_id)
@@ -1442,7 +2115,15 @@ class OperationalAutonomyMaintenance:
         if current.phase == "complete":
             return "not_actionable", "already_complete"
         if current.phase.startswith("waiting_device_access:"):
-            return "waiting_device_access", "endpoint_offline"
+            reason = str(current.last_reason or "")
+            if "availability=deb_online_drmm_offline" in reason:
+                return (
+                    "waiting_device_access",
+                    "drmm_access_unavailable_device_online_deb",
+                )
+            if "availability=offline_corroborated" in reason:
+                return "waiting_device_access", "endpoint_offline_corroborated_deb"
+            return "waiting_device_access", "endpoint_offline_deb_unconfirmed"
         if current.phase.startswith("waiting_recheck:"):
             return "waiting_recheck", "scheduled_recheck"
         return "eligible_now", "active_work"
@@ -1598,8 +2279,108 @@ class OperationalAutonomyMaintenance:
         ):
             match = re.search(pattern, title, flags=re.IGNORECASE)
             if match:
-                return match.group(1).strip()
+                value = match.group(1).strip()
+                if re.fullmatch(r"(?:\d{1,3}\.){3}\d{1,3}", value):
+                    continue
+                return value
         return None
+
+    @staticmethod
+    def _normalized_mac(value: object) -> str:
+        return re.sub(r"[^0-9A-Fa-f]", "", str(value or "")).casefold()
+
+    @classmethod
+    def _ticket_identity_evidence(cls, candidate) -> Mapping[str, set[str]]:
+        material = " ".join(
+            (
+                str(candidate.context.get("title") or ""),
+                str(candidate.context.get("description") or ""),
+            )
+        )
+        ips = {
+            value
+            for value in re.findall(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", material)
+            if all(0 <= int(part) <= 255 for part in value.split("."))
+        }
+        macs = {
+            cls._normalized_mac(value)
+            for value in re.findall(
+                r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b", material
+            )
+        }
+        serials = {
+            value.casefold()
+            for value in re.findall(
+                r"\bserial(?:\s+number)?\s*[:=#-]?\s*([A-Za-z0-9._-]{4,64})",
+                material,
+                flags=re.IGNORECASE,
+            )
+        }
+        tokens = {
+            value.casefold()
+            for value in re.findall(r"\b[A-Za-z0-9][A-Za-z0-9._-]{2,127}\b", material)
+        }
+        return {
+            "ips": ips,
+            "macs": {value for value in macs if value},
+            "serials": serials,
+            "tokens": tokens,
+        }
+
+    @classmethod
+    def _endpoint_identity_score(
+        cls,
+        endpoint: Mapping[str, Any],
+        *,
+        hints: Sequence[str],
+        evidence: Mapping[str, set[str]],
+    ) -> tuple[int, tuple[str, ...], tuple[str, ...]]:
+        matched: list[str] = []
+        conflicts: list[str] = []
+        hostname = str(
+            endpoint.get("hostname") or endpoint.get("hostName") or endpoint.get("name") or ""
+        ).strip()
+        if hostname and hostname.casefold() in {hint.casefold() for hint in hints}:
+            matched.append("hostname")
+
+        endpoint_uid = str(
+            endpoint.get("resource_id") or endpoint.get("uid") or endpoint.get("deviceUid") or ""
+        ).strip()
+        if endpoint_uid and endpoint_uid.casefold() in evidence.get("tokens", set()):
+            matched.append("device_uid")
+
+        endpoint_ips = {
+            str(endpoint.get(key) or "").strip()
+            for key in ("lan_ip", "wan_ip", "intIpAddress", "extIpAddress")
+            if str(endpoint.get(key) or "").strip()
+        }
+        if endpoint_ips & evidence.get("ips", set()):
+            matched.append("ip")
+
+        endpoint_mac = cls._normalized_mac(
+            endpoint.get("mac_address") or endpoint.get("macAddress") or endpoint.get("mac")
+        )
+        ticket_macs = evidence.get("macs", set())
+        if endpoint_mac and ticket_macs:
+            if endpoint_mac in ticket_macs:
+                matched.append("mac")
+            else:
+                conflicts.append("mac")
+
+        endpoint_serial = str(
+            endpoint.get("serial_number")
+            or endpoint.get("serialNumber")
+            or endpoint.get("serial")
+            or ""
+        ).strip().casefold()
+        ticket_serials = evidence.get("serials", set())
+        if endpoint_serial and ticket_serials:
+            if endpoint_serial in ticket_serials:
+                matched.append("serial")
+            else:
+                conflicts.append("serial")
+
+        return len(set(matched)), tuple(sorted(set(matched))), tuple(sorted(set(conflicts)))
 
     def _write_verified_ci_association(
         self, *, candidate, scope: PlaybookScope, ci_id: int
@@ -1622,6 +2403,134 @@ class OperationalAutonomyMaintenance:
                 "device association write was not verified by provider readback"
             )
         return ci_id
+
+    def _associate_backupiq_unassigned_ticket_device(
+        self, *, candidate, scope: PlaybookScope
+    ) -> tuple[int, int] | None:
+        """Recover a BackupIQ ticket that arrived without an authoritative company.
+
+        BackupIQ email-created tickets can arrive as company 0 even when the exact
+        managed endpoint and Autotask configuration belong to a client company.
+        Recover only when one exact DRMM endpoint and one exact active Autotask CI
+        prove the same identity. Never guess across multiple companies/devices.
+        """
+        material = " ".join(
+            (
+                str(candidate.context.get("title") or ""),
+                str(candidate.context.get("description") or ""),
+            )
+        )
+        hints: list[str] = []
+        structured_hostname = self._structured_ticket_hostname(
+            str(candidate.context.get("title") or "")
+        )
+        if structured_hostname:
+            hints.append(structured_hostname)
+        for token in re.findall(r"\b[A-Za-z0-9][A-Za-z0-9._-]{2,62}\b", material):
+            if not any(ch.isalpha() for ch in token) or not any(ch.isdigit() for ch in token):
+                continue
+            if token.casefold() not in {item.casefold() for item in hints}:
+                hints.append(token)
+            if len(hints) >= 8:
+                break
+        if not hints:
+            return None
+
+        endpoints: dict[str, Mapping[str, Any]] = {}
+        for hint in hints:
+            data = self._read_data("endpoint.device.search", {"hostname": hint})
+            raw = data.get("resource_matches") or data.get("records") or data.get("items") or ()
+            if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+                continue
+            for item in raw:
+                if not isinstance(item, Mapping):
+                    continue
+                hostname = str(
+                    item.get("hostname") or item.get("hostName") or item.get("name") or ""
+                ).strip()
+                uid = str(
+                    item.get("resource_id") or item.get("uid") or item.get("deviceUid") or ""
+                ).strip()
+                if hostname.casefold() == hint.casefold() and uid:
+                    endpoints[uid] = item
+        if len(endpoints) == 0:
+            ci_matches: list[Mapping[str, Any]] = []
+            for hint in hints:
+                data = self._read_data(
+                    "service.configuration.search",
+                    {"name": hint, "page_size": 25},
+                )
+                raw_items = data.get("items")
+                if not isinstance(raw_items, list):
+                    continue
+                for item in raw_items:
+                    if not isinstance(item, Mapping) or item.get("isActive") is not True:
+                        continue
+                    if str(item.get("referenceTitle") or "").strip().casefold() != hint.casefold():
+                        continue
+                    ci_matches.append(item)
+            unique_ci = {int(item.get("id")): item for item in ci_matches if item.get("id")}
+            if len(unique_ci) == 1:
+                ci = next(iter(unique_ci.values()))
+                company_id = self._company_id(ci.get("companyID"))
+                ci_id = self._positive_int(ci.get("id"), "configuration item id")
+                hostname = str(ci.get("referenceTitle") or "").strip()
+                if company_id > 0 and hostname:
+                    asset_data = self._read_data(
+                        "backup.endpoint.asset.search",
+                        {"company_id": company_id, "name": hostname, "page_size": 25},
+                    )
+                    asset_items = asset_data.get("items")
+                    if isinstance(asset_items, list):
+                        exact_assets = [
+                            item for item in asset_items
+                            if isinstance(item, Mapping)
+                            and str(item.get("name") or "").strip().casefold() == hostname.casefold()
+                        ]
+                        if len(exact_assets) == 1:
+                            raise BackupIQManagedEndpointMissing(
+                                company_id=company_id,
+                                ci_id=ci_id,
+                                hostname=hostname,
+                                provider_status=str(exact_assets[0].get("status") or ""),
+                            )
+            return None
+        if len(endpoints) != 1:
+            return None
+
+        endpoint_uid, endpoint = next(iter(endpoints.items()))
+        hostname = str(
+            endpoint.get("hostname") or endpoint.get("hostName") or endpoint.get("name") or ""
+        ).strip()
+        if not hostname:
+            return None
+
+        data = self._read_data(
+            "service.configuration.search",
+            {"name": hostname, "page_size": 25},
+        )
+        raw_items = data.get("items")
+        if not isinstance(raw_items, list):
+            return None
+        matches = [
+            item
+            for item in raw_items
+            if isinstance(item, Mapping)
+            and item.get("isActive") is True
+            and str(item.get("referenceNumber") or "").strip() == endpoint_uid
+            and str(item.get("referenceTitle") or "").strip().casefold() == hostname.casefold()
+        ]
+        if len(matches) != 1:
+            return None
+        company_id = self._company_id(matches[0].get("companyID"))
+        if company_id <= 0:
+            return None
+        ci_id = self._positive_int(matches[0].get("id"), "configuration item id")
+        # The inbound BackupIQ ticket may legitimately be company 0 even when
+        # provider/CI evidence proves the client. Do not attempt a cross-company
+        # CI mutation: Autotask rejects it and the ticket field is not authority.
+        # Carry the independently proven company/CI inside governed work instead.
+        return ci_id, company_id
 
     def _associate_exact_ticket_device(
         self, *, candidate, scope: PlaybookScope, company_id: int
@@ -1652,39 +2561,39 @@ class OperationalAutonomyMaintenance:
                 == structured_hostname.casefold()
                 and str(item.get("referenceNumber") or "").strip()
             ]
-            if len(matches) != 1:
-                raise OperationalAutonomyError(
-                    "structured hostname did not resolve to one active same-company configuration item"
+            if len(matches) == 1:
+                ci = matches[0]
+                ci_id = self._positive_int(ci.get("id"), "configuration item id")
+                endpoint_uid = str(ci.get("referenceNumber") or "").strip()
+                endpoint = self._read_record(
+                    "endpoint.device.read", {"resource_id": endpoint_uid}
                 )
-            ci = matches[0]
-            ci_id = self._positive_int(ci.get("id"), "configuration item id")
-            endpoint_uid = str(ci.get("referenceNumber") or "").strip()
-            endpoint = self._read_record(
-                "endpoint.device.read", {"resource_id": endpoint_uid}
-            )
-            read_uid = str(
-                endpoint.get("resource_id")
-                or endpoint.get("uid")
-                or endpoint.get("deviceUid")
-                or ""
-            ).strip()
-            read_hostname = str(
-                endpoint.get("hostname")
-                or endpoint.get("hostName")
-                or endpoint.get("name")
-                or ""
-            ).strip()
-            if read_uid != endpoint_uid:
-                raise OperationalAutonomyError(
-                    "same-company configuration Datto identity readback mismatch"
+                read_uid = str(
+                    endpoint.get("resource_id")
+                    or endpoint.get("uid")
+                    or endpoint.get("deviceUid")
+                    or ""
+                ).strip()
+                read_hostname = str(
+                    endpoint.get("hostname")
+                    or endpoint.get("hostName")
+                    or endpoint.get("name")
+                    or ""
+                ).strip()
+                if read_uid != endpoint_uid:
+                    raise OperationalAutonomyError(
+                        "same-company configuration Datto identity readback mismatch"
+                    )
+                if read_hostname.casefold() != structured_hostname.casefold():
+                    raise OperationalAutonomyError(
+                        "same-company configuration and Datto hostname do not match"
+                    )
+                return self._write_verified_ci_association(
+                    candidate=candidate, scope=scope, ci_id=ci_id
                 )
-            if read_hostname.casefold() != structured_hostname.casefold():
-                raise OperationalAutonomyError(
-                    "same-company configuration and Datto hostname do not match"
-                )
-            return self._write_verified_ci_association(
-                candidate=candidate, scope=scope, ci_id=ci_id
-            )
+            # Zero or multiple same-company exact-title CIs are not guessed.
+            # Continue into multi-signal endpoint correlation, which still must
+            # produce one uniquely winning endpoint and one exact same-company CI.
 
         material = " ".join(
             (
@@ -1693,6 +2602,8 @@ class OperationalAutonomyMaintenance:
             )
         )
         hints: list[str] = []
+        if structured_hostname:
+            hints.append(structured_hostname)
         for token in re.findall(r"\b[A-Za-z0-9][A-Za-z0-9._-]{2,62}\b", material):
             if not any(ch.isalpha() for ch in token) or not any(ch.isdigit() for ch in token):
                 continue
@@ -1723,11 +2634,32 @@ class OperationalAutonomyMaintenance:
                 endpoint_matches[
                     str(item.get("resource_id") or item.get("uid") or item.get("deviceUid"))
                 ] = item
-        if len(endpoint_matches) != 1:
+        if not endpoint_matches:
             raise OperationalAutonomyError(
-                "configuration item id is missing and endpoint hostname correlation is ambiguous"
+                "configuration item id is missing and endpoint hostname correlation found no exact endpoint"
             )
-        endpoint_uid, endpoint = next(iter(endpoint_matches.items()))
+        if len(endpoint_matches) == 1:
+            endpoint_uid, endpoint = next(iter(endpoint_matches.items()))
+        else:
+            evidence = self._ticket_identity_evidence(candidate)
+            scored: list[tuple[int, str, Mapping[str, Any], tuple[str, ...]]] = []
+            for uid, item in endpoint_matches.items():
+                score, matched, conflicts = self._endpoint_identity_score(
+                    item, hints=hints, evidence=evidence
+                )
+                if conflicts:
+                    continue
+                scored.append((score, uid, item, matched))
+            scored.sort(key=lambda value: (-value[0], value[1]))
+            if not scored or scored[0][0] < 2:
+                raise OperationalAutonomyError(
+                    "configuration item id is missing and endpoint correlation lacks two independent matching identifiers"
+                )
+            if len(scored) > 1 and scored[1][0] == scored[0][0]:
+                raise OperationalAutonomyError(
+                    "configuration item id is missing and endpoint correlation remains ambiguous after multi-signal scoring"
+                )
+            _, endpoint_uid, endpoint, _ = scored[0]
         hostname = str(
             endpoint.get("hostname") or endpoint.get("hostName") or endpoint.get("name") or ""
         ).strip()
@@ -1776,7 +2708,18 @@ class OperationalAutonomyMaintenance:
         ticket_id = self._positive_int(ticket.get("id"), "ticket id")
         company_id = self._company_id(ticket.get("companyID"))
         ci_value = ticket.get("configurationItemID")
-        if ci_value in (None, "", 0, "0"):
+        recovered_backupiq_identity = None
+        if (
+            scope.playbook_id == BACKUPIQ_SCOPE.playbook_id
+            and company_id == 0
+            and ci_value in (None, "", 0, "0")
+        ):
+            recovered_backupiq_identity = self._associate_backupiq_unassigned_ticket_device(
+                candidate=candidate, scope=scope
+            )
+        if recovered_backupiq_identity is not None:
+            ci_id, company_id = recovered_backupiq_identity
+        elif ci_value in (None, "", 0, "0"):
             ci_id = self._associate_exact_ticket_device(
                 candidate=candidate,
                 scope=scope,
@@ -1831,7 +2774,21 @@ class OperationalAutonomyMaintenance:
             endpoint.get("online") is not True
             and scope.playbook_id not in offline_wait_scopes
         ):
-            raise OperationalAutonomyError("endpoint is not currently online")
+            deb = self._deb_asset_selection(
+                company_id=company_id,
+                hostname=hostname,
+            )
+            if deb.state is DebAvailabilityState.ONLINE:
+                raise OperationalAutonomyError(
+                    "DRMM access unavailable while DEB reports endpoint online"
+                )
+            if deb.state is DebAvailabilityState.OFFLINE:
+                raise OperationalAutonomyError(
+                    "endpoint is not currently online (DEB corroborated)"
+                )
+            raise OperationalAutonomyError(
+                "endpoint is not currently online (DEB unconfirmed)"
+            )
 
         return OperationalWork(
             ticket_id=ticket_id,
@@ -2204,6 +3161,7 @@ class OperationalAutonomyMaintenance:
         )
 
         if endpoint.get("online") is False:
+            access_state, deb = self._device_access_state(work, endpoint=endpoint)
             self.actions.execute(
                 self._scope_for_work(work),
                 "service.ticket.update",
@@ -2214,18 +3172,33 @@ class OperationalAutonomyMaintenance:
                     }
                 },
             )
+            if access_state == "deb_online_drmm_offline":
+                self._document_deb_drmm_conflict(work, deb)
+                status_text = (
+                    f"{work.hostname} is independently online in DEB, but DRMM "
+                    "management access is currently unavailable."
+                )
+            elif access_state == "offline_corroborated":
+                status_text = (
+                    f"{work.hostname} is reported offline by both DRMM and DEB."
+                )
+            else:
+                status_text = (
+                    f"{work.hostname} is offline in DRMM; DEB could not independently "
+                    "confirm the endpoint state."
+                )
             note = (
                 "STATUS\n"
-                f"{work.hostname} is offline and Idle Log Off diagnostics are waiting "
-                "for exact device access.\n\n"
-                "NEXT STEP\n"
+                + status_text
+                + "\n\nNEXT STEP\n"
                 "Keep the ticket in the Jason queue and resume "
-                "idle_log_off_investigate automatically when the exact DRMM endpoint "
-                "is online.\n\n"
+                "idle_log_off_investigate automatically when the exact DRMM management "
+                "path is available.\n\n"
                 "KEY EVIDENCE\n"
                 f"- Device={work.hostname}\n"
                 f"- DRMM UID={work.device_uid}\n"
                 "- DRMM online state=No\n"
+                f"- DEB state={deb.state.value}\n"
                 "- No setter, alert resolution, forced logoff, reboot, policy change, "
                 "or generic PowerShell was attempted.\n\n"
                 "JASON STATE\n"
@@ -2240,10 +3213,7 @@ class OperationalAutonomyMaintenance:
                 self._replace(
                     work,
                     phase="waiting_device_access:idle_log_off_investigate",
-                    last_reason=(
-                        "Idle Log Off diagnostics are waiting for exact endpoint access; "
-                        "Jason retains queue ownership and releases the active-work slot."
-                    ),
+                    last_reason=self._device_wait_reason(access_state, deb),
                 )
             )
             return
@@ -3350,19 +4320,19 @@ class OperationalAutonomyMaintenance:
             self._block(work, "Low-disk device identity changed during execution.")
             return
         if endpoint.get("online") is not True:
+            access_state, deb = self._device_access_state(work, endpoint=endpoint)
             self.actions.execute(
                 self._scope_for_work(work),
                 "service.ticket.update",
                 {"payload": {"id": work.ticket_id, "status": "Waiting Device Access"}},
             )
+            if access_state == "deb_online_drmm_offline":
+                self._document_deb_drmm_conflict(work, deb)
             self.store.put(
                 self._replace(
                     work,
                     phase="waiting_device_access:low_disk_investigate",
-                    last_reason=(
-                        "Low-disk endpoint is offline; waiting for exact device access "
-                        "without consuming the active-work slot."
-                    ),
+                    last_reason=self._device_wait_reason(access_state, deb),
                 )
             )
             return
@@ -3824,25 +4794,21 @@ class OperationalAutonomyMaintenance:
         self,
         work: OperationalWork,
     ) -> Mapping[str, Any] | None:
-        asset_data = self._read_data(
-            "backup.endpoint.asset.search",
-            {
-                "company_id": work.company_id,
-                "name": work.hostname,
-                "page_size": 100,
-            },
+        selection = self._deb_asset_selection(
+            company_id=work.company_id,
+            hostname=work.hostname,
         )
-        items = asset_data.get("items")
-        if not isinstance(items, list):
-            return None
-        exact_assets = [
-            item
-            for item in items
-            if isinstance(item, Mapping)
-            and str(item.get("name") or "").strip().casefold()
-            == work.hostname.casefold()
-        ]
-        return exact_assets[0] if len(exact_assets) == 1 else None
+        return (
+            dict(selection.asset)
+            if isinstance(selection.asset, Mapping)
+            and selection.state
+            not in {
+                DebAvailabilityState.AMBIGUOUS,
+                DebAvailabilityState.NOT_FOUND,
+                DebAvailabilityState.UNAVAILABLE,
+            }
+            else None
+        )
 
     def _investigate_backupiq(
         self,
@@ -3868,51 +4834,42 @@ class OperationalAutonomyMaintenance:
             self._block(work, "BackupIQ device identity changed during execution.")
             return
 
-        asset_data = self._read_data(
-            "backup.endpoint.asset.search",
-            {
-                "company_id": work.company_id,
-                "name": work.hostname,
-                "page_size": 100,
-            },
+        asset_selection = self._deb_asset_selection(
+            company_id=work.company_id,
+            hostname=work.hostname,
         )
-        items = asset_data.get("items")
-        if not isinstance(items, list):
-            self._block(work, "BackupIQ provider asset evidence is unavailable or malformed.")
-            return
-        exact_assets = [
-            item for item in items
-            if isinstance(item, Mapping)
-            and str(item.get("name") or "").strip().casefold() == work.hostname.casefold()
-        ]
-        if len(exact_assets) != 1:
+        asset = asset_selection.asset
+        if not isinstance(asset, Mapping):
             classification = (
                 "asset_identity_or_lifecycle_issue"
-                if len(exact_assets) == 0
+                if asset_selection.state is DebAvailabilityState.NOT_FOUND
                 else "duplicate_or_ambiguous_provider_asset"
+                if asset_selection.state is DebAvailabilityState.AMBIGUOUS
+                else "provider_asset_evidence_unavailable"
             )
             self._write_note(
                 work,
                 (
                     "Jason autonomous BackupIQ diagnostic stopped before remediation. "
-                    f"Device={work.hostname}; ExactProviderAssetMatches={len(exact_assets)}; "
-                    f"Classification={classification}. Exact DRMM/provider asset identity "
-                    "was not uniquely proven. No reinstall, clean install, policy change, "
-                    "backup deletion, retention change, or other modifying backup action "
-                    "was attempted."
+                    f"Device={work.hostname}; ExactProviderAssetMatches="
+                    f"{asset_selection.exact_match_count}; "
+                    f"Classification={classification}; "
+                    f"SelectionReason={asset_selection.reason}. Exact DRMM/provider asset "
+                    "identity was not safely established. No reinstall, clean install, "
+                    "policy change, backup deletion, retention change, or other modifying "
+                    "backup action was attempted."
                 ),
                 "Jason - BackupIQ - Asset Validation",
             )
             self._persist_human_review_escalation(
                 work,
                 reason=(
-                    "BackupIQ provider asset identity was not uniquely established; "
+                    "BackupIQ provider asset identity was not safely established; "
                     "technician review required."
                 ),
             )
             return
 
-        asset = exact_assets[0]
         provider_status = str(asset.get("status") or "").strip().casefold()
         provider_online = provider_status == "online"
         backup_enabled = asset.get("backupEnabled") is True
@@ -4465,19 +5422,19 @@ class OperationalAutonomyMaintenance:
             self._block(work, "Unexpected-shutdown device identity changed during execution.")
             return
         if endpoint.get("online") is not True:
+            access_state, deb = self._device_access_state(work, endpoint=endpoint)
             self.actions.execute(
                 self._scope_for_work(work),
                 "service.ticket.update",
                 {"payload": {"id": work.ticket_id, "status": "Waiting Device Access"}},
             )
+            if access_state == "deb_online_drmm_offline":
+                self._document_deb_drmm_conflict(work, deb)
             self.store.put(
                 self._replace(
                     work,
                     phase="waiting_device_access:shutdown_investigate",
-                    last_reason=(
-                        "Unexpected-shutdown endpoint is offline; waiting for exact "
-                        "device access without consuming the active-work slot."
-                    ),
+                    last_reason=self._device_wait_reason(access_state, deb),
                 )
             )
             return
@@ -5429,7 +6386,49 @@ class OperationalAutonomyMaintenance:
         # Autotask exactly once. The queue source continues to reconcile
         # Waiting Device Access tickets, so the normal claim path restores In
         # Progress automatically as soon as the exact DRMM endpoint is online.
-        if "endpoint is not currently online" in str(error).casefold():
+        message = str(error).casefold()
+        if isinstance(error, BackupIQManagedEndpointMissing):
+            ticket_id = int(candidate.resource_id)
+            context = candidate.context
+            work = OperationalWork(
+                ticket_id=ticket_id,
+                ticket_number=str(context.get("ticketNumber") or ticket_id),
+                title=str(context.get("title") or ""),
+                playbook_id=scope.playbook_id,
+                source_queue=str(candidate.source_queue),
+                company_id=error.company_id,
+                configuration_item_id=error.ci_id,
+                device_uid="",
+                hostname=error.hostname,
+                phase="escalated",
+                last_reason=str(error)[:500],
+                source_version=(str(candidate.source_version or "").strip() or None),
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            )
+            self._write_note(
+                work,
+                (
+                    "Jason verified the BackupIQ provider asset and Autotask configuration, "
+                    "but the corresponding managed Datto RMM endpoint is no longer present. "
+                    f"Device={error.hostname}; AutotaskCompanyID={error.company_id}; "
+                    f"ConfigurationItemID={error.ci_id}; BackupProviderStatus={error.provider_status or 'unknown'}. "
+                    "No reinstall, backup deletion, retention change, or endpoint mutation was attempted. "
+                    "Technician review is required to determine whether the device was retired, replaced, "
+                    "or needs to be restored to managed RMM coverage."
+                ),
+                "Jason - BackupIQ - Managed Endpoint Missing",
+            )
+            self._persist_human_review_escalation(
+                work,
+                reason=(
+                    "BackupIQ asset and Autotask CI are proven, but no managed Datto RMM endpoint exists."
+                ),
+            )
+            return
+        if (
+            "endpoint is not currently online" in message
+            or "drmm access unavailable while deb reports endpoint online" in message
+        ):
             status_label = str(
                 candidate.context.get("_jason_source_status_label") or ""
             ).strip()
@@ -5452,7 +6451,6 @@ class OperationalAutonomyMaintenance:
         # Missing/invalid ticket identity prerequisites outside Jason are not a
         # durable failure. They can be corrected by normal PSA triage; keeping a
         # terminal row would suppress reconsideration forever.
-        message = str(error).casefold()
         if (
             str(candidate.source_queue).strip().casefold() != "jason"
             and (
@@ -5487,6 +6485,17 @@ class OperationalAutonomyMaintenance:
             updated_at=datetime.now(timezone.utc).isoformat(),
         )
         self.store.put(work)
+        try:
+            self._synchronize_blocked_ticket_lifecycle(work, candidate)
+        except Exception as exc:
+            if self.audit is not None:
+                self.audit.record(
+                    "autonomy.blocked_ticket_lifecycle_sync.failed",
+                    {
+                        "ticket_id": ticket_id,
+                        "error_type": type(exc).__name__,
+                    },
+                )
 
     def _write_note(self, work: OperationalWork, body: str, title: str) -> bool:
         normalized_title = " ".join(str(title).split())

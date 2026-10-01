@@ -16,11 +16,16 @@ from autonomous_remediation.autotask_queue_source import (
 from autonomous_remediation.playbook_autonomy_approval import (
     SQLitePlaybookAutonomyApprovalStore,
 )
+from autonomous_remediation.targeted_recheck import SQLiteTargetedWakeStore
 from kernel.capabilities import CapabilityRegistryService
 from kernel.identity_authority import IdentityAuthorityService
 from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
 
 from .autonomy_shadow_runtime import GovernedAutonomyReadPort
+from .autonomy_targeted_wake_runtime import (
+    CompositeAutonomyMaintenance,
+    TargetedWakeMaintenance,
+)
 from .autonomy_worker_runtime import (
     GovernedAutonomyActionPort,
     OperationalAutonomyMaintenance,
@@ -38,9 +43,11 @@ def build_autonomy_worker_maintenance(
     orchestrator,
     work_db: Path,
     promotion_db: Path,
+    targeted_wake_db: Path,
     owned_autotask_resource_ids: Iterable[int] = (),
     max_active_work_items: int = 2,
     interval_seconds: int = 60,
+    targeted_wake_retry_seconds: int = 300,
     audit=None,
     completion_notifier=None,
 ):
@@ -93,7 +100,7 @@ def build_autonomy_worker_maintenance(
         orchestrator=orchestrator,
         promotion_store=promotion_store,
     )
-    return OperationalAutonomyMaintenance(
+    worker = OperationalAutonomyMaintenance(
         queue_source=queue_source,
         reads=reads,
         actions=actions,
@@ -104,3 +111,15 @@ def build_autonomy_worker_maintenance(
         audit=audit,
         completion_notifier=completion_notifier,
     )
+    targeted_reads = GovernedAutonomyReadPort(
+        request_factory=request_factory,
+        orchestrator=orchestrator,
+        policy_id="autonomous-targeted-read-v1",
+    )
+    targeted = TargetedWakeMaintenance(
+        store=SQLiteTargetedWakeStore(targeted_wake_db),
+        reads=targeted_reads,
+        queue_attention=worker,
+        retry_seconds=targeted_wake_retry_seconds,
+    )
+    return CompositeAutonomyMaintenance(targeted, worker)

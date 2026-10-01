@@ -4,10 +4,14 @@ import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import pytest
 from types import SimpleNamespace
 
 from autonomous_remediation.autonomous_queue_worker import QueueCandidate
 from jason_runtime.autonomy_worker_runtime import (
+    BACKUPIQ_SCOPE,
+    OperationalAutonomyError,
     OperationalAutonomyMaintenance,
     OperationalWork,
     SQLiteOperationalWorkStore,
@@ -273,6 +277,50 @@ class OfflineReads(Reads):
                         "resource_id": "device-uid-1",
                         "hostname": "PC-1",
                         "online": False,
+                    }
+                },
+            }
+        return super().execute(capability, arguments)
+
+
+class DebOnlineWhileDrmmOfflineReads(OfflineReads):
+    def execute(self, capability, arguments):
+        if capability == "backup.endpoint.asset.search":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "items": [
+                            {
+                                "id": "deb-current",
+                                "name": "PC-1",
+                                "status": "online",
+                                "backupEnabled": True,
+                                "lastSuccessfulBackupTimestamp": "2026-09-30T17:20:00Z",
+                            }
+                        ]
+                    }
+                },
+            }
+        return super().execute(capability, arguments)
+
+
+class DebOfflineWhileDrmmOfflineReads(OfflineReads):
+    def execute(self, capability, arguments):
+        if capability == "backup.endpoint.asset.search":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "items": [
+                            {
+                                "id": "deb-offline",
+                                "name": "PC-1",
+                                "status": "offline",
+                                "backupEnabled": True,
+                                "lastOnlineTimestamp": "2026-09-29T17:20:00Z",
+                            }
+                        ]
                     }
                 },
             }
@@ -1544,6 +1592,258 @@ def backupiq_candidate():
             "createDate": "2026-09-25T09:00:00Z",
         },
     )
+
+
+def test_backupiq_unassigned_company_recovers_from_exact_endpoint_and_ci(tmp_path: Path):
+    class RecoveryReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "endpoint.device.search":
+                if str(arguments.get("hostname") or "").casefold() == "sos-50767":
+                    return {
+                        "status": "succeeded",
+                        "evidence": {
+                            "resource_matches": [
+                                {
+                                    "resource_id": "a241a6c6-c477-e7d3-4d1f-c878aaf92ce2",
+                                    "hostname": "SOS-50767",
+                                }
+                            ]
+                        },
+                    }
+                return {"status": "succeeded", "evidence": {"resource_matches": []}}
+            if capability == "service.configuration.search":
+                assert "company_id" not in arguments
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "items": [
+                                {
+                                    "id": 433,
+                                    "companyID": 878,
+                                    "isActive": True,
+                                    "referenceNumber": "a241a6c6-c477-e7d3-4d1f-c878aaf92ce2",
+                                    "referenceTitle": "SOS-50767",
+                                }
+                            ]
+                        }
+                    },
+                }
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "item": {
+                                "id": 433,
+                                "companyID": 878,
+                                "isActive": True,
+                                "referenceNumber": "a241a6c6-c477-e7d3-4d1f-c878aaf92ce2",
+                                "referenceTitle": "SOS-50767",
+                            }
+                        }
+                    },
+                }
+            if capability == "endpoint.device.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "record": {
+                            "resource_id": "a241a6c6-c477-e7d3-4d1f-c878aaf92ce2",
+                            "hostname": "SOS-50767",
+                            "online": False,
+                        }
+                    },
+                }
+            return super().execute(capability, arguments)
+
+    candidate = QueueCandidate(
+        resource_id="141679",
+        priority=90,
+        source_queue="Jason",
+        owned_by_jason=True,
+        urgent=False,
+        context={
+            "id": 141679,
+            "ticketNumber": "T20260929.0041",
+            "title": "BackupIQ: Backup for asset is not available for Star of the Sea Catholic Church",
+            "description": "Asset: SOS-50767; backup is not available.",
+            "companyID": 0,
+            "configurationItemID": None,
+            "createDate": "2026-09-30T00:52:00Z",
+        },
+    )
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate),
+        reads=RecoveryReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("backupiq_endpoint_backup",)),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    work = worker._admit(candidate, BACKUPIQ_SCOPE)
+
+    assert work.company_id == 878
+    assert work.configuration_item_id == 433
+    assert work.device_uid == "a241a6c6-c477-e7d3-4d1f-c878aaf92ce2"
+    assert work.hostname == "SOS-50767"
+    update_payloads = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert {"id": 141679, "configurationItemID": 433} not in update_payloads
+    store.close()
+
+
+def test_backupiq_provider_asset_without_rmm_endpoint_hands_off_human_review(tmp_path: Path):
+    class MissingEndpointReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "endpoint.device.search":
+                return {"status": "succeeded", "evidence": {"resource_matches": []}}
+            if capability == "service.configuration.search":
+                if str(arguments.get("name") or "").casefold() == "sos-50767":
+                    return {
+                        "status": "succeeded",
+                        "evidence": {
+                            "data": {
+                                "items": [
+                                    {
+                                        "id": 433,
+                                        "companyID": 878,
+                                        "isActive": True,
+                                        "referenceNumber": "stale-rmm-uid",
+                                        "referenceTitle": "SOS-50767",
+                                    }
+                                ]
+                            }
+                        },
+                    }
+                return {"status": "succeeded", "evidence": {"data": {"items": []}}}
+            if capability == "backup.endpoint.asset.search":
+                assert arguments["company_id"] == 878
+                assert arguments["name"] == "SOS-50767"
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "items": [
+                                {
+                                    "id": "0XX3NXQH2",
+                                    "name": "SOS-50767",
+                                    "status": "offline",
+                                }
+                            ]
+                        }
+                    },
+                }
+            return super().execute(capability, arguments)
+
+    candidate = QueueCandidate(
+        resource_id="141679",
+        priority=90,
+        source_queue="Jason",
+        owned_by_jason=True,
+        urgent=False,
+        context={
+            "id": 141679,
+            "ticketNumber": "T20260929.0041",
+            "title": "BackupIQ: Backup for asset is not available for Star of the Sea Catholic Church",
+            "description": "Asset: SOS-50767; backup is not available.",
+            "companyID": 0,
+            "configurationItemID": None,
+        },
+    )
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate), reads=MissingEndpointReads(), actions=actions, store=store,
+        promotion_store=PromotionStore(promoted=("backupiq_endpoint_backup",)),
+        max_active_work_items=2, interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+
+    try:
+        worker._admit(candidate, BACKUPIQ_SCOPE)
+    except OperationalAutonomyError as exc:
+        worker._record_admission_failure(candidate, BACKUPIQ_SCOPE, exc)
+    else:
+        raise AssertionError("missing managed endpoint must not be admitted")
+
+    work = store.get(141679)
+    assert work is not None
+    assert work.phase == "escalated"
+    assert work.company_id == 878
+    assert work.configuration_item_id == 433
+    assert work.hostname == "SOS-50767"
+    update_payloads = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert {"id": 141679, "queueID": "Help Desk I", "status": "Human Review"} in update_payloads
+    note_payloads = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert any("Managed Endpoint Missing" in str(payload) for payload in note_payloads)
+    store.close()
+
+
+def test_backupiq_unassigned_company_does_not_guess_ambiguous_endpoint(tmp_path: Path):
+    class AmbiguousReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "endpoint.device.search":
+                if str(arguments.get("hostname") or "").casefold() == "sos-50767":
+                    return {
+                        "status": "succeeded",
+                        "evidence": {
+                            "resource_matches": [
+                                {"resource_id": "uid-1", "hostname": "SOS-50767"},
+                                {"resource_id": "uid-2", "hostname": "SOS-50767"},
+                            ]
+                        },
+                    }
+                return {"status": "succeeded", "evidence": {"resource_matches": []}}
+            if capability == "service.configuration.search":
+                return {"status": "succeeded", "evidence": {"data": {"items": []}}}
+            return super().execute(capability, arguments)
+
+    candidate = QueueCandidate(
+        resource_id="141679",
+        priority=90,
+        source_queue="Jason",
+        owned_by_jason=True,
+        urgent=False,
+        context={
+            "id": 141679,
+            "ticketNumber": "T20260929.0041",
+            "title": "BackupIQ: Backup for asset is not available for Star of the Sea Catholic Church",
+            "description": "Asset: SOS-50767; backup is not available.",
+            "companyID": 0,
+            "configurationItemID": None,
+        },
+    )
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate), reads=AmbiguousReads(), actions=actions, store=store,
+        promotion_store=PromotionStore(promoted=("backupiq_endpoint_backup",)),
+        max_active_work_items=2, interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+
+    try:
+        worker._admit(candidate, BACKUPIQ_SCOPE)
+    except OperationalAutonomyError:
+        pass
+    else:
+        raise AssertionError("ambiguous endpoint correlation must fail closed")
+    store.close()
 
 
 def test_backupiq_scope_is_owner_approved_version_1_2_0():
@@ -3800,6 +4100,201 @@ def test_structured_letters_only_hostname_correlates_within_company_before_datto
     store.close()
 
 
+
+def test_missing_ci_ambiguous_hostname_uses_two_signal_identity_score(tmp_path: Path):
+    class ScoredCorrelationReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "endpoint.device.search":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"resource_matches": [
+                        {
+                            "resource_id": "device-a",
+                            "hostname": "PC-1",
+                            "lan_ip": "192.168.1.10",
+                            "mac_address": "AA:BB:CC:DD:EE:01",
+                            "serial_number": "SERIAL-A",
+                        },
+                        {
+                            "resource_id": "device-b",
+                            "hostname": "PC-1",
+                            "lan_ip": "192.168.1.20",
+                            "mac_address": "AA:BB:CC:DD:EE:02",
+                            "serial_number": "SERIAL-B",
+                        },
+                    ]}},
+                }
+            if capability == "service.configuration.search":
+                assert arguments == {"company_id": 507, "name": "PC-1", "page_size": 25}
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"items": [{
+                        "id": 1583,
+                        "companyID": 507,
+                        "isActive": True,
+                        "referenceNumber": "device-b",
+                        "referenceTitle": "PC-1",
+                    }]}},
+                }
+            return super().execute(capability, arguments)
+
+    item = candidate(
+        title="[Monitor] Antivirus status issue PC-1 192.168.1.20 AA:BB:CC:DD:EE:02"
+    )
+    item.context.pop("configurationItemID", None)
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=ScoredCorrelationReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    scope = worker._match_scope(item.context)
+    assert scope is not None
+
+    ci_id = worker._associate_exact_ticket_device(
+        candidate=item, scope=scope, company_id=507
+    )
+
+    assert ci_id == 1583
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert updates == [{"id": 140933, "configurationItemID": 1583}]
+    store.close()
+
+
+def test_missing_ci_multi_signal_tie_fails_closed(tmp_path: Path):
+    class TiedCorrelationReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "endpoint.device.search":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"resource_matches": [
+                        {
+                            "resource_id": "device-a",
+                            "hostname": "PC-1",
+                            "lan_ip": "192.168.1.20",
+                        },
+                        {
+                            "resource_id": "device-b",
+                            "hostname": "PC-1",
+                            "lan_ip": "192.168.1.20",
+                        },
+                    ]}},
+                }
+            return super().execute(capability, arguments)
+
+    item = candidate(title="[Monitor] Antivirus status issue PC-1 192.168.1.20")
+    item.context.pop("configurationItemID", None)
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=TiedCorrelationReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    scope = worker._match_scope(item.context)
+    assert scope is not None
+
+    with pytest.raises(
+        OperationalAutonomyError,
+        match="remains ambiguous after multi-signal scoring",
+    ):
+        worker._associate_exact_ticket_device(
+            candidate=item, scope=scope, company_id=507
+        )
+    store.close()
+
+
+
+def test_structured_vulscan_duplicate_hostname_uses_multi_signal_score(tmp_path: Path):
+    class StructuredScoredReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.search":
+                if arguments == {"company_id": 827, "name": "PC-1", "page_size": 25}:
+                    return {
+                        "status": "succeeded",
+                        "evidence": {"data": {"items": [
+                            {
+                                "id": 35,
+                                "companyID": 827,
+                                "isActive": True,
+                                "referenceNumber": "device-a",
+                                "referenceTitle": "PC-1",
+                            },
+                            {
+                                "id": 36,
+                                "companyID": 827,
+                                "isActive": True,
+                                "referenceNumber": "device-b",
+                                "referenceTitle": "PC-1",
+                            },
+                        ]}},
+                    }
+            if capability == "endpoint.device.search":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"resource_matches": [
+                        {
+                            "resource_id": "device-a",
+                            "hostname": "PC-1",
+                            "lan_ip": "192.168.1.10",
+                            "mac_address": "AA:BB:CC:DD:EE:01",
+                        },
+                        {
+                            "resource_id": "device-b",
+                            "hostname": "PC-1",
+                            "lan_ip": "192.168.1.20",
+                            "mac_address": "AA:BB:CC:DD:EE:02",
+                        },
+                    ]}},
+                }
+            return super().execute(capability, arguments)
+
+    item = candidate(
+        title=(
+            "Vulnerability Detected by VulScan - PC-1 "
+            "(192.168.1.20 / AA:BB:CC:DD:EE:02)"
+        )
+    )
+    item.context["companyID"] = 827
+    item.context.pop("configurationItemID", None)
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=StructuredScoredReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    scope = worker._match_scope(item.context)
+    assert scope is not None
+
+    ci_id = worker._associate_exact_ticket_device(
+        candidate=item, scope=scope, company_id=827
+    )
+
+    assert ci_id == 36
+    store.close()
+
+
 def test_internal_autotask_company_zero_preserves_exact_ticket_ci_boundary(tmp_path: Path):
     class InternalCompanyReads(Reads):
         def execute(self, capability, arguments):
@@ -4155,6 +4650,114 @@ def test_dispatched_job_resumes_same_job_when_endpoint_returns_online(tmp_path: 
     store.close()
 
 
+def test_waiting_job_uses_deb_online_to_poll_existing_job_without_redispatch(
+    tmp_path: Path,
+):
+    item = _owned_device_candidate(status_label="Waiting Device Access")
+    reads = DebOnlineWhileDrmmOfflineReads()
+    reads.job_status = "active"
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    work = _active_dispatched_work()
+    store.put(replace(work, phase="waiting_device_access:health_wait"))
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=reads,
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    current = store.get(140933)
+    assert current is not None
+    assert current.phase == "health_wait"
+    assert current.job_uid == "job-existing"
+    assert "DEB independently reports the endpoint online" in current.last_reason
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert updates == [{"id": 140933, "status": "In Progress"}]
+    notes = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert len(notes) == 1
+    assert notes[0]["title"] == "Jason - Device Availability - DRMM Access"
+    assert "DEB online state=Yes" in notes[0]["description"]
+    assert not any(
+        capability == "automation.component.execute"
+        for _, capability, _ in actions.calls
+    )
+    store.close()
+
+
+def test_waiting_device_access_is_corroborated_when_drmm_and_deb_are_offline(
+    tmp_path: Path,
+):
+    item = _owned_device_candidate(status_label="Waiting Device Access")
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    work = _active_dispatched_work()
+    store.put(replace(work, phase="waiting_device_access:health_wait"))
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=DebOfflineWhileDrmmOfflineReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    current = store.get(140933)
+    assert current is not None
+    assert current.phase == "waiting_device_access:health_wait"
+    assert "availability=offline_corroborated" in current.last_reason
+    assert store.list_open() == ()
+    assert actions.calls == []
+    store.close()
+
+
+def test_waiting_device_access_records_unconfirmed_when_deb_is_unavailable(
+    tmp_path: Path,
+):
+    item = _owned_device_candidate(status_label="Waiting Device Access")
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    work = _active_dispatched_work()
+    store.put(replace(work, phase="waiting_device_access:health_wait"))
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=OfflineReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    current = store.get(140933)
+    assert current is not None
+    assert current.phase == "waiting_device_access:health_wait"
+    assert "availability=drmm_offline_unconfirmed" in current.last_reason
+    assert actions.calls == []
+    store.close()
+
+
 def test_assigned_new_ticket_with_api_resource_note_can_be_claimed(tmp_path: Path):
     item = candidate()
     item.context["_jason_assigned_elsewhere"] = True
@@ -4475,3 +5078,81 @@ def test_operational_work_store_appends_ticket_activity_and_seeds_existing_state
     assert [(row["phase"], row["reason"], row["occurred_at"]) for row in seeded] == [
         ("complete", "verified complete", "2026-09-29T01:05:00+00:00")
     ]
+
+
+def _owned_vulscan_candidate(*, status_label: str = "New") -> QueueCandidate:
+    return QueueCandidate(
+        resource_id="149001",
+        priority=100,
+        source_queue="Jason",
+        owned_by_jason=True,
+        urgent=False,
+        context={
+            "id": 149001,
+            "ticketNumber": "T20260930.9001",
+            "title": "Vulnerability Detected by VulScan - PC-1",
+            "companyID": 507,
+            "configurationItemID": 1583,
+            "_jason_source_status_label": status_label,
+        },
+    )
+
+
+class InactiveConfigurationReads(Reads):
+    def execute(self, capability, arguments):
+        if capability == "service.configuration.read":
+            result = super().execute(capability, arguments)
+            result["evidence"]["data"]["item"]["isActive"] = False
+            return result
+        return super().execute(capability, arguments)
+
+
+def test_owned_nonretryable_admission_block_hands_off_instead_of_staying_new(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(_owned_vulscan_candidate()),
+        reads=InactiveConfigurationReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("vulscan_missing_patch",)),
+        interval_seconds=60,
+    )
+
+    worker.tick()
+
+    persisted = store.get(149001)
+    assert persisted is not None
+    assert persisted.phase == "escalated"
+    updates = [call[2]["payload"] for call in actions.calls if call[1] == "service.ticket.update"]
+    assert {"id": 149001, "queueID": "Help Desk I", "status": "Human Review"} in updates
+    assert any(call[1] == "service.ticket.note.create" for call in actions.calls)
+
+
+class Provider500ConfigurationReads(Reads):
+    def execute(self, capability, arguments):
+        if capability == "service.configuration.read":
+            return {"status": "failed", "error_code": "PROVIDER_HTTP_STATUS_500"}
+        return super().execute(capability, arguments)
+
+
+def test_owned_retryable_provider_block_leaves_new_status_and_retries_under_jason(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(_owned_vulscan_candidate()),
+        reads=Provider500ConfigurationReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("vulscan_missing_patch",)),
+        interval_seconds=60,
+    )
+
+    worker.tick()
+
+    persisted = store.get(149001)
+    assert persisted is not None
+    assert persisted.phase == "blocked"
+    updates = [call[2]["payload"] for call in actions.calls if call[1] == "service.ticket.update"]
+    assert {"id": 149001, "status": "In Progress"} in updates
+    assert not any(payload.get("queueID") == "Help Desk I" for payload in updates)

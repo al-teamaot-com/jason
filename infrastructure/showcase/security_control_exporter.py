@@ -23,6 +23,14 @@ SAFE_TERMINATION_REASONS = {
     "execution_plan_mismatch",
 }
 
+SECURITY_EVENT_TYPES = (
+    "orchestration.execution_plan.denied",
+    "orchestration.idempotency.deduplicated",
+    "orchestration.authority_context.denied",
+    "orchestration.approval.consumed",
+    "orchestration.request.terminated",
+)
+
 
 def _safe_reason(payload: dict) -> str | None:
     values = payload.get("reason_codes")
@@ -46,7 +54,12 @@ def collect_counts(db: Path = DB) -> tuple[int, Counter[str], Counter[str], int]
         return available, controls, terminations, blocked_provider_invocations
     try:
         connection = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-        rows = connection.execute("select event_type, payload from orchestration_events").fetchall()
+        placeholders = ",".join("?" for _ in SECURITY_EVENT_TYPES)
+        rows = connection.execute(
+            f"select event_type, payload from orchestration_events "
+            f"where event_type in ({placeholders})",
+            SECURITY_EVENT_TYPES,
+        ).fetchall()
         connection.close()
         available = 1
     except sqlite3.Error:

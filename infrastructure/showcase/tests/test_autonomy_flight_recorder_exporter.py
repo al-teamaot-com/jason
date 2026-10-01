@@ -145,3 +145,31 @@ def test_timeline_rows_are_flat_human_readable_strings():
 
 def test_display_playbook_is_human_readable():
     assert mod._display_playbook('autonomy_execution_acceptance') == 'Autonomy Execution Acceptance'
+
+
+def test_event_group_query_does_not_require_temp_sort(tmp_path):
+    import sqlite3
+
+    db = tmp_path / "events.sqlite3"
+    connection = sqlite3.connect(db)
+    connection.execute(
+        """create table orchestration_events (
+            event_id text primary key,
+            event_type text not null,
+            execution_id text not null,
+            correlation_id text not null,
+            principal_id text not null,
+            capability_name text not null,
+            stage text not null,
+            payload text not null,
+            occurred_at text not null
+        )"""
+    )
+    plan = connection.execute(
+        "EXPLAIN QUERY PLAN " + mod._EVENT_GROUP_QUERY,
+        (mod.PRINCIPAL,),
+    ).fetchall()
+    connection.close()
+
+    details = " ".join(str(row[-1]) for row in plan)
+    assert "USE TEMP B-TREE" not in details

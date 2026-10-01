@@ -172,6 +172,64 @@ def test_dnsfilter_contract_uses_canonical_readonly_path_and_fields() -> None:
     assert spec["credential_file_mode"] == 0o640
 
 
+def test_darkwebid_contract_uses_canonical_runtime_path_and_fields() -> None:
+    spec = PROVIDERS["darkwebid"]
+    assert spec["logical_name"] == "darkwebid.runtime"
+    assert spec["secret_path"] == (
+        "secret/data/connectors/darkwebid/production/runtime"
+    )
+    assert spec["fields"] == ("username", "password")
+    assert spec["required_fields"] == ("username", "password")
+    assert spec["policy_name"] == "jason-darkwebid-secret-read"
+    assert spec["role_name"] == "jason-darkwebid-secret-read"
+    assert spec["connector_identity"] == "darkwebid"
+    assert Path(spec["credential_dir"]) == Path(
+        "/var/lib/jason/runtime-secrets/openbao/darkwebid-approle"
+    )
+    assert spec["credential_uid"] == 0
+    assert spec["credential_gid"] == 1000
+    assert spec["credential_dir_mode"] == 0o750
+    assert spec["credential_file_mode"] == 0o640
+
+
+def test_saas_alerts_contract_uses_canonical_readonly_path_and_fields() -> None:
+    spec = PROVIDERS["saas_alerts"]
+    assert spec["logical_name"] == "saas_alerts.readonly"
+    assert spec["secret_path"] == (
+        "secret/data/connectors/saas-alerts/production/read-only"
+    )
+    assert spec["fields"] == ("api_key", "partner_id")
+    assert spec["required_fields"] == ("api_key", "partner_id")
+    assert spec["policy_name"] == "jason-saas-alerts-read"
+    assert spec["role_name"] == "jason-saas-alerts-read"
+    assert Path(spec["credential_dir"]) == Path(
+        "/var/lib/jason/runtime-secrets/openbao/saas-alerts-read-approle"
+    )
+    assert spec["credential_uid"] == 0
+    assert spec["credential_gid"] == 1000
+    assert spec["credential_dir_mode"] == 0o750
+    assert spec["credential_file_mode"] == 0o640
+
+
+def test_vulscan_contract_uses_canonical_readonly_path_and_fields() -> None:
+    spec = PROVIDERS["vulscan"]
+    assert spec["logical_name"] == "vulscan.readonly"
+    assert spec["secret_path"] == (
+        "secret/data/connectors/vulscan/production/read-only"
+    )
+    assert spec["fields"] == ("api_key",)
+    assert spec["required_fields"] == ("api_key",)
+    assert spec["policy_name"] == "jason-vulscan-read"
+    assert spec["role_name"] == "jason-vulscan-read"
+    assert Path(spec["credential_dir"]) == Path(
+        "/var/lib/jason/runtime-secrets/openbao/vulscan-read-approle"
+    )
+    assert spec["credential_uid"] == 0
+    assert spec["credential_gid"] == 1000
+    assert spec["credential_dir_mode"] == 0o750
+    assert spec["credential_file_mode"] == 0o640
+
+
 def test_provider_policies_are_read_only_except_self_revoke() -> None:
     for provider, spec in PROVIDERS.items():
         policy = provider_policy_text(provider)
@@ -276,6 +334,7 @@ def test_canonical_resolver_self_revokes_runtime_token() -> None:
     assert '"kyocera_kfs.readonly"' in source
     assert '"backup_net.readonly"' in source
     assert '"backup_net.fullaccess"' in source
+    assert '"darkwebid.runtime"' in source
     assert '"aws_ses.sendmail"' in source
 
 

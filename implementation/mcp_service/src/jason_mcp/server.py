@@ -685,7 +685,16 @@ def _project_endpoint_search(output: Mapping[str, Any]) -> dict[str, Any]:
 
         match: dict[str, Any] = {}
 
-        for key in ("resource_id", "hostname", "site", "site_id"):
+        for key in (
+            "resource_id",
+            "hostname",
+            "site",
+            "site_id",
+            "serial_number",
+            "mac_address",
+            "lan_ip",
+            "wan_ip",
+        ):
             value = item.get(key)
             if value is not None and str(value).strip():
                 match[key] = _safe(value)
@@ -780,8 +789,10 @@ def _project_endpoint_read(output: Mapping[str, Any]) -> dict[str, Any]:
         ("site", ("site", "siteName")),
         ("site_id", ("site_id", "siteUid", "siteId")),
         ("device_type", ("deviceType",)),
-        ("lan_ip", ("intIpAddress", "lan_ip")),
-        ("wan_ip", ("extIpAddress", "wan_ip")),
+        ("serial_number", ("serialNumber", "serial_number", "serial")),
+        ("mac_address", ("macAddress", "mac_address", "mac")),
+        ("lan_ip", ("intIpAddress", "internalIpAddress", "lanIpAddress", "lan_ip")),
+        ("wan_ip", ("extIpAddress", "externalIpAddress", "wanIpAddress", "wan_ip")),
         ("operating_system", ("operatingSystem", "operating_system")),
         ("last_logged_in_user", ("lastLoggedInUser", "last_logged_in_user")),
         ("domain", ("domain",)),
@@ -5316,21 +5327,28 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
         connection.execute("PRAGMA query_only = ON")
         rows = connection.execute(
             """
-            SELECT ticket_id,ticket_number,title,playbook_id,phase,
-                   updated_at,last_reason
+            SELECT ticket_id,ticket_number,playbook_id,phase,updated_at
             FROM autonomy_operational_work
             WHERE phase NOT IN ('complete','escalated')
             ORDER BY
                 CASE
                     WHEN phase NOT LIKE 'waiting_device_access:%'
-                         AND phase NOT IN ('approval_pending','blocked') THEN 0
+                         AND phase NOT LIKE 'waiting_recheck:%'
+                         AND phase NOT IN (
+                             'approval_pending','blocked','waiting_patch_approval',
+                             'waiting_patch_window','waiting_client_notification_authority'
+                         ) THEN 0
                     WHEN phase LIKE 'waiting_device_access:%'
-                         OR phase = 'approval_pending' THEN 1
+                         OR phase LIKE 'waiting_recheck:%'
+                         OR phase IN (
+                             'approval_pending','waiting_patch_approval',
+                             'waiting_patch_window','waiting_client_notification_authority'
+                         ) THEN 1
                     ELSE 2
                 END,
                 updated_at DESC,
                 ticket_id DESC
-            LIMIT 20
+            LIMIT 5
             """
         ).fetchall()
     except (sqlite3.Error, OSError) as error:
@@ -5346,10 +5364,17 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
     items = []
     for row in rows:
         phase = str(row["phase"] or "")
-        if phase.startswith("waiting_device_access:") or phase in {
-            "approval_pending",
-            "blocked",
-        }:
+        if (
+            phase.startswith("waiting_device_access:")
+            or phase.startswith("waiting_recheck:")
+            or phase in {
+                "approval_pending",
+                "waiting_patch_approval",
+                "waiting_patch_window",
+                "waiting_client_notification_authority",
+                "blocked",
+            }
+        ):
             state = "WAITING" if phase != "blocked" else "BLOCKED"
         else:
             state = "ACTIVE"
@@ -5357,12 +5382,10 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
             {
                 "ticket_id": int(row["ticket_id"]),
                 "ticket_number": str(row["ticket_number"] or ""),
-                "title": str(row["title"] or ""),
                 "playbook": str(row["playbook_id"] or ""),
                 "phase": phase,
                 "state": state,
                 "updated_at": str(row["updated_at"] or ""),
-                "reason": str(row["last_reason"] or ""),
             }
         )
     counts = connection = None
@@ -5379,11 +5402,20 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
             SELECT
                 SUM(CASE
                     WHEN phase NOT LIKE 'waiting_device_access:%'
-                         AND phase NOT IN ('approval_pending','blocked','complete','escalated')
+                         AND phase NOT LIKE 'waiting_recheck:%'
+                         AND phase NOT IN (
+                             'approval_pending','blocked','complete','escalated',
+                             'waiting_patch_approval','waiting_patch_window',
+                             'waiting_client_notification_authority'
+                         )
                     THEN 1 ELSE 0 END) AS active_count,
                 SUM(CASE
                     WHEN phase LIKE 'waiting_device_access:%'
-                         OR phase = 'approval_pending'
+                         OR phase LIKE 'waiting_recheck:%'
+                         OR phase IN (
+                             'approval_pending','waiting_patch_approval',
+                             'waiting_patch_window','waiting_client_notification_authority'
+                         )
                     THEN 1 ELSE 0 END) AS waiting_count,
                 SUM(CASE WHEN phase = 'blocked' THEN 1 ELSE 0 END) AS blocked_count
             FROM autonomy_operational_work
@@ -5400,7 +5432,7 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
         "status": "succeeded",
         "items": items,
         "items_bounded": True,
-        "item_limit": 20,
+        "item_limit": 5,
         "active_count": int((counts["active_count"] if counts is not None else None) or 0),
         "waiting_count": int((counts["waiting_count"] if counts is not None else None) or 0),
         "blocked_count": int((counts["blocked_count"] if counts is not None else None) or 0),

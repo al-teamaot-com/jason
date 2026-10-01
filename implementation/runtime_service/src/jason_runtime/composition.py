@@ -25,6 +25,7 @@ from connectors.datto_rmm.connector import DattoRmmConnector
 from connectors.datto_rmm.capability_manifest import build_datto_rmm_manifest
 from connectors.dnsfilter.connector import DnsFilterConnector
 from connectors.dnsfilter.mcp_connector import DnsFilterMcpConnector
+from connectors.darkwebid.connector import DarkWebIdConnector
 from connectors.dnsfilter.mcp_oauth import DnsFilterMcpOAuthStore
 from jason_runtime.dnsfilter_mcp_mutation import (
     build_dnsfilter_mcp_mutation_invoker,
@@ -136,6 +137,12 @@ from orchestrator.backup_capability_catalog import (
     BACKUP_ENDPOINT_BACKUP_SEARCH,
     BACKUP_NET_PROVIDER,
     register_backup_resource_foundation,
+)
+from orchestrator.darkwebid_capability_catalog import (
+    CREDENTIAL_EXPOSURE_ORGANIZATION_READ,
+    CREDENTIAL_EXPOSURE_ORGANIZATION_SEARCH,
+    DARKWEBID_PROVIDER,
+    register_darkwebid_resource_foundation,
 )
 from orchestrator.dns_protection_capability_catalog import (
     DNSFILTER_MCP_PROVIDER,
@@ -402,6 +409,13 @@ class RuntimeSettings:
     dnsfilter_openbao_secret_id_path: Path = Path(
         "/run/jason-secrets/openbao/dnsfilter/secret_id"
     )
+    darkwebid_enabled: bool = False
+    darkwebid_openbao_role_id_path: Path = Path(
+        "/run/jason-secrets/openbao/darkwebid/role_id"
+    )
+    darkwebid_openbao_secret_id_path: Path = Path(
+        "/run/jason-secrets/openbao/darkwebid/secret_id"
+    )
     dnsfilter_mcp_enabled: bool = False
     dnsfilter_mcp_oauth_db: Path = Path(
         "/var/lib/jason/openclaw/dnsfilter-mcp/oauth.sqlite3"
@@ -667,6 +681,21 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_DNSFILTER_OPENBAO_SECRET_ID_PATH",
                     "/run/jason-secrets/openbao/dnsfilter/secret_id",
+                )
+            ),
+            darkwebid_enabled=os.getenv(
+                "JASON_DARKWEBID_ENABLED", "false"
+            ).strip().lower() in {"1", "true", "yes", "on"},
+            darkwebid_openbao_role_id_path=Path(
+                os.getenv(
+                    "JASON_DARKWEBID_OPENBAO_ROLE_ID_PATH",
+                    "/run/jason-secrets/openbao/darkwebid/role_id",
+                )
+            ),
+            darkwebid_openbao_secret_id_path=Path(
+                os.getenv(
+                    "JASON_DARKWEBID_OPENBAO_SECRET_ID_PATH",
+                    "/run/jason-secrets/openbao/darkwebid/secret_id",
                 )
             ),
             dnsfilter_mcp_enabled=os.getenv(
@@ -1144,6 +1173,12 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         enabled=settings.dnsfilter_enabled,
         mcp_enabled=settings.dnsfilter_mcp_enabled,
     )
+    register_darkwebid_resource_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+        enabled=settings.darkwebid_enabled,
+    )
     dnsfilter_mutation_activation = (
         register_dnsfilter_mcp_mutation_runtime_foundation(
             capabilities=capabilities,
@@ -1609,6 +1644,24 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         },
     )
 
+    darkwebid_openbao = OpenBaoSecretResolver(
+        base_url=settings.openbao_url,
+        role_id_path=settings.darkwebid_openbao_role_id_path,
+        secret_id_path=settings.darkwebid_openbao_secret_id_path,
+    )
+    darkwebid = DarkWebIdConnector(
+        secrets=darkwebid_openbao,
+        transport=http_transport,
+        audit=ConnectorEventAudit(orchestration_events),
+    )
+    darkwebid_invoker = GovernedConnectorCapabilityInvoker(
+        connectors={DARKWEBID_PROVIDER: darkwebid},
+        provider_capability_map={
+            (DARKWEBID_PROVIDER, CREDENTIAL_EXPOSURE_ORGANIZATION_SEARCH): "darkwebid.organization.search",
+            (DARKWEBID_PROVIDER, CREDENTIAL_EXPOSURE_ORGANIZATION_READ): "darkwebid.organization.read",
+        },
+    )
+
     dnsfilter_mcp_oauth = DnsFilterMcpOAuthStore(
         settings.dnsfilter_mcp_oauth_db
     )
@@ -1759,6 +1812,8 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     invokers.register(DNS_PROTECTION_POLICY_SEARCH, dnsfilter_invoker)
     invokers.register(DNS_PROTECTION_AGENT_SEARCH, dnsfilter_invoker)
     invokers.register(DNS_PROTECTION_AGENT_COUNTS_READ, dnsfilter_invoker)
+    invokers.register(CREDENTIAL_EXPOSURE_ORGANIZATION_SEARCH, darkwebid_invoker)
+    invokers.register(CREDENTIAL_EXPOSURE_ORGANIZATION_READ, darkwebid_invoker)
     invokers.register(DNS_INVESTIGATION_QUERY_SEARCH, dnsfilter_mcp_invoker)
     invokers.register(DNS_INVESTIGATION_QUERY_EXPLAIN, dnsfilter_mcp_invoker)
     invokers.register(DNS_INVESTIGATION_BLOCKED_TRAFFIC_SEARCH, dnsfilter_mcp_invoker)
@@ -1991,6 +2046,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         interval_seconds=settings.autonomy_shadow_interval_seconds,
         failure_retry_seconds=settings.autonomy_shadow_failure_retry_seconds,
         targeted_wake_retry_seconds=settings.autonomy_targeted_wake_retry_seconds,
+        process_targeted_wakes=not settings.autonomy_worker_enabled,
     )
     autonomous_completion_notifier = build_autonomous_completion_notifier(
         enabled=autonomous_completion_notifications_enabled,
@@ -2039,9 +2095,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         orchestrator=orchestrator,
         work_db=settings.autonomy_worker_db,
         promotion_db=settings.autonomy_promotion_db,
+        targeted_wake_db=settings.autonomy_targeted_wake_db,
         owned_autotask_resource_ids=settings.autonomy_owned_autotask_resource_ids,
         max_active_work_items=settings.autonomy_max_active_work_items,
         interval_seconds=settings.autonomy_worker_interval_seconds,
+        targeted_wake_retry_seconds=settings.autonomy_targeted_wake_retry_seconds,
         audit=reflection_audit,
         completion_notifier=autonomous_completion_notifier,
     )

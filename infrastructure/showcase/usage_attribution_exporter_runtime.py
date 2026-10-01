@@ -140,11 +140,11 @@ def _governed_requests(events: list[dict]) -> dict[str, dict[str, str]]:
     return result
 
 
-def _orchestration_events() -> list[dict]:
+def _orchestration_events(now: datetime | None = None) -> list[dict]:
     """Load orchestration events and prepare read-only correlation indexes."""
 
     global _REQUEST_BY_CORRELATION, _DIRECTORY_EMAILS
-    events = _ORIGINAL_ORCHESTRATION_EVENTS()
+    events = _ORIGINAL_ORCHESTRATION_EVENTS(now)
     _REQUEST_BY_CORRELATION = _governed_requests(events)
     _DIRECTORY_EMAILS = _directory_emails(events)
     return events

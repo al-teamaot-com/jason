@@ -7894,6 +7894,72 @@
       "source_version": "2026-09-26.1",
       "created_at": "2026-09-26T23:00:00Z",
       "created_by": "Jason Constitutional Certification"
+    },
+    {
+      "registry_id": "credential.openbao.darkwebid",
+      "entity_type": "credential_reference",
+      "display_name": "Dark Web ID AppRole Reference",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider": "openbao",
+        "logical_name": "darkwebid.runtime",
+        "app_role_profile": "darkwebid"
+      },
+      "dependencies": [
+        "component.openbao",
+        "governance.jkd-003"
+      ],
+      "verification_methods": [
+        "live-openbao-approle-mount-proof-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "JKD-003",
+        "J-002 Article XIX"
+      ],
+      "evidence_references": [
+        "docs/sessions/Dark-Web-ID-Connector-Foundation-2026-09-30.md"
+      ],
+      "source_version": "2026-09-30.1",
+      "created_at": "2026-09-30T15:19:43Z",
+      "created_by": "Jason governed provider integration"
+    },
+    {
+      "registry_id": "provider.darkwebid",
+      "entity_type": "provider",
+      "display_name": "Kaseya Dark Web ID External API",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "provider_id": "darkwebid",
+        "provider_lifecycle": "available",
+        "health": "healthy",
+        "approval": "approved",
+        "capability_count": "2"
+      },
+      "dependencies": [
+        "component.jason-runtime",
+        "component.central-orchestrator",
+        "governance.jkd-001",
+        "credential.openbao.darkwebid"
+      ],
+      "verification_methods": [
+        "live-darkwebid-connector-acceptance-v1",
+        "live-darkwebid-central-orchestrator-and-mcp-acceptance-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-405"
+      ],
+      "evidence_references": [
+        "docs/sessions/Dark-Web-ID-Connector-Foundation-2026-09-30.md"
+      ],
+      "source_version": "2026-09-30.2",
+      "created_at": "2026-09-30T15:19:43Z",
+      "created_by": "Jason governed provider integration"
     }
   ]
 }

@@ -192,6 +192,54 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "credential_dir_mode": 0o750,
         "credential_file_mode": 0o640,
     },
+    "darkwebid": {
+        "logical_name": "darkwebid.runtime",
+        "secret_path": "secret/data/connectors/darkwebid/production/runtime",
+        "fields": ("username", "password"),
+        "required_fields": ("username", "password"),
+        "policy_name": "jason-darkwebid-secret-read",
+        "role_name": "jason-darkwebid-secret-read",
+        "connector_identity": "darkwebid",
+        "credential_dir": Path(
+            "/var/lib/jason/runtime-secrets/openbao/darkwebid-approle"
+        ),
+        "credential_uid": 0,
+        "credential_gid": 1000,
+        "credential_dir_mode": 0o750,
+        "credential_file_mode": 0o640,
+    },
+    "saas_alerts": {
+        "logical_name": "saas_alerts.readonly",
+        "secret_path": "secret/data/connectors/saas-alerts/production/read-only",
+        "fields": ("api_key", "partner_id"),
+        "required_fields": ("api_key", "partner_id"),
+        "policy_name": "jason-saas-alerts-read",
+        "role_name": "jason-saas-alerts-read",
+        "connector_identity": "saas-alerts-read",
+        "credential_dir": Path(
+            "/var/lib/jason/runtime-secrets/openbao/saas-alerts-read-approle"
+        ),
+        "credential_uid": 0,
+        "credential_gid": 1000,
+        "credential_dir_mode": 0o750,
+        "credential_file_mode": 0o640,
+    },
+    "vulscan": {
+        "logical_name": "vulscan.readonly",
+        "secret_path": "secret/data/connectors/vulscan/production/read-only",
+        "fields": ("api_key",),
+        "required_fields": ("api_key",),
+        "policy_name": "jason-vulscan-read",
+        "role_name": "jason-vulscan-read",
+        "connector_identity": "vulscan-read",
+        "credential_dir": Path(
+            "/var/lib/jason/runtime-secrets/openbao/vulscan-read-approle"
+        ),
+        "credential_uid": 0,
+        "credential_gid": 1000,
+        "credential_dir_mode": 0o750,
+        "credential_file_mode": 0o640,
+    },
 }
 
 DEFAULT_ADDRESS = "http://127.0.0.1:8200"
