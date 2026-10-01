@@ -79,6 +79,7 @@ class ExchangeReadWorkerClient:
         microsoft_tenant_id: str,
         organization: str,
         operation: str,
+        exchange_access_token: str,
         arguments: Mapping[str, Any] | None = None,
         correlation_id: str,
     ) -> Mapping[str, Any]:
@@ -98,11 +99,16 @@ class ExchangeReadWorkerClient:
             )
         if not correlation_id.strip():
             raise ValueError("correlation_id is required")
+        if not exchange_access_token.strip():
+            raise ExchangeWorkerAuthorizationError(
+                "Exchange Online access token is unavailable."
+            )
 
         payload = {
             "tenant_id": tenant_id,
             "organization": primary_domain,
             "operation": operation_name,
+            "exchange_access_token": exchange_access_token.strip(),
             "arguments": supplied,
             "correlation_id": correlation_id.strip(),
         }
