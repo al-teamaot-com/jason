@@ -149,6 +149,47 @@ def operational_outcome_contract_failures(root: Path) -> tuple[list[str], list[d
     return sorted(set(failures)), evidence
 
 
+
+def autonomy_admission_failures(
+    db_path: Path = AUTONOMY_WORK_DB,
+) -> tuple[list[str], dict[str, Any]]:
+    if not db_path.exists():
+        return [], {}
+    try:
+        connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
+        connection.row_factory = sqlite3.Row
+        row = connection.execute(
+            "SELECT cycle_id,scanned_at,eligible,active_slots,selected "
+            "FROM autonomy_ticket_scan_cycle ORDER BY scanned_at DESC LIMIT 1"
+        ).fetchone()
+    except sqlite3.Error as exc:
+        return ["autonomy_admission_health_read_failed"], {
+            "error_class": type(exc).__name__
+        }
+    finally:
+        try:
+            connection.close()
+        except (UnboundLocalError, sqlite3.Error):
+            pass
+
+    if row is None:
+        return [], {}
+    evidence = {
+        "cycle_id": str(row["cycle_id"] or ""),
+        "scanned_at": str(row["scanned_at"] or ""),
+        "eligible": int(row["eligible"] or 0),
+        "active_slots": int(row["active_slots"] or 0),
+        "selected": int(row["selected"] or 0),
+    }
+    failures: list[str] = []
+    if (
+        evidence["eligible"] > 0
+        and evidence["active_slots"] > 0
+        and evidence["selected"] == 0
+    ):
+        failures.append("autonomy_admission_stalled:eligible_work_not_selected")
+    return failures, evidence
+
 def stale_operational_work_failures(
     db_path: Path = AUTONOMY_WORK_DB,
 ) -> tuple[list[str], list[dict[str, Any]]]:
@@ -285,6 +326,10 @@ def detect(root: Path = DEFAULT_ROOT) -> tuple[list[str], dict[str, Any]]:
     workflow_failures, workflow_evidence = stale_operational_work_failures()
     evidence["stale_operational_work"] = workflow_evidence
     failures.extend(workflow_failures)
+
+    admission_failures, admission_evidence = autonomy_admission_failures()
+    evidence["autonomy_admission"] = admission_evidence
+    failures.extend(admission_failures)
 
     metrics, metric_error = health_metrics()
     evidence["health_exporter_error"] = metric_error
