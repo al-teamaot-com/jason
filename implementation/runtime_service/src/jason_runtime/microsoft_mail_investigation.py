@@ -49,7 +49,7 @@ def build_microsoft_mail_investigation_runtime(
         boundaries=boundaries,
         credentials=credentials,
         application_factory=default_msal_application_factory,
-        logical_secret="microsoft_graph.mail_investigation_read",
+        logical_secret="microsoft_graph.mail_read",
         provider_name=MICROSOFT_MAIL_INVESTIGATION_BOUNDARY_PROVIDER,
         profile_name="mail-investigation-read",
     )
@@ -63,7 +63,7 @@ def build_microsoft_mail_investigation_runtime(
         boundaries=boundaries,
         credentials=credentials,
         application_factory=default_msal_application_factory,
-        logical_secret="microsoft_graph.mail_investigation_read",
+        logical_secret="microsoft_graph.mail_read",
         provider_name=MICROSOFT_MAIL_INVESTIGATION_BOUNDARY_PROVIDER,
         profile_name="mail-investigation-read",
         scope=EXCHANGE_DEFAULT_SCOPE,
