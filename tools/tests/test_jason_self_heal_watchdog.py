@@ -245,3 +245,83 @@ def test_no_admission_stall_when_work_selected(tmp_path):
 
     assert failures == []
     assert evidence["selected"] == 1
+
+
+def _create_behavior_db(path: Path, rows: list[tuple]) -> None:
+    import sqlite3
+
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE autonomy_ticket_scan_cycle ("
+        "cycle_id TEXT,scanned_at TEXT,evaluated INTEGER,eligible INTEGER,"
+        "unsupported INTEGER,governance_blocked INTEGER,assigned_elsewhere INTEGER,"
+        "active_slots INTEGER,selected INTEGER,waiting_device INTEGER,human_review INTEGER)"
+    )
+    conn.executemany(
+        "INSERT INTO autonomy_ticket_scan_cycle VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        rows,
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_generic_invariant_selected_cannot_exceed_eligible(tmp_path):
+    db = tmp_path / "behavior.sqlite3"
+    now_iso = datetime.now(timezone.utc).isoformat()
+    _create_behavior_db(
+        db,
+        [("c1", now_iso, 4, 1, 0, 0, 0, 2, 2, 0, 0)],
+    )
+
+    failures, evidence = module.autonomy_behavior_anomalies(db)
+
+    assert any("selected_gt_eligible" in item for item in failures)
+    assert evidence["cycles"][0]["cycle_id"] == "c1"
+
+
+def test_behavior_baseline_detects_unexpected_selection_efficiency_collapse(tmp_path):
+    db = tmp_path / "behavior.sqlite3"
+    rows = []
+    base = datetime.now(timezone.utc) - timedelta(hours=1)
+    for i in range(9):
+        rows.append(
+            (
+                f"b{i}",
+                (base + timedelta(minutes=i)).isoformat(),
+                10, 10, 0, 0, 0, 2, 2, 0, 0,
+            )
+        )
+    for i in range(3):
+        rows.append(
+            (
+                f"r{i}",
+                (base + timedelta(minutes=20 + i)).isoformat(),
+                10, 10, 0, 0, 0, 2, 0, 0, 0,
+            )
+        )
+    _create_behavior_db(db, rows)
+
+    failures, evidence = module.autonomy_behavior_anomalies(db)
+
+    assert "autonomy_behavior_anomaly:selection_efficiency_collapse" in failures
+    assert evidence["selection_efficiency_baseline_median"] > 0
+    assert evidence["selection_efficiency_recent_median"] == 0
+
+
+def test_behavior_baseline_does_not_flag_consistent_low_activity(tmp_path):
+    db = tmp_path / "behavior.sqlite3"
+    rows = []
+    base = datetime.now(timezone.utc) - timedelta(hours=1)
+    for i in range(12):
+        rows.append(
+            (
+                f"c{i}",
+                (base + timedelta(minutes=i)).isoformat(),
+                10, 10, 0, 0, 0, 2, 0, 0, 0,
+            )
+        )
+    _create_behavior_db(db, rows)
+
+    failures, evidence = module.autonomy_behavior_anomalies(db)
+
+    assert "autonomy_behavior_anomaly:selection_efficiency_collapse" not in failures
