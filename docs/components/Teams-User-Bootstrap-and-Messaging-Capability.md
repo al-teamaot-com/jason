@@ -80,6 +80,14 @@ Send a governed Teams message after ensuring the target conversation exists.
 4. Delivery receipt is captured.
 5. Audit event records message purpose, target identity, result, message ID, and conversation reference by reference.
 
+### Owner routing and formatting policy
+
+- Owner-directed Jason notifications must use the governed `communication.teams.message.send` / Jason Approval Bot proactive path. Generic Microsoft Teams self-chat / Notes (`48:notes`) is not an owner-notification fallback.
+- The target Entra object ID and tenant ID must be explicit and bound before send; recipient substitution is prohibited.
+- Structured operational data such as meter counts, tickets, approvals, alerts, and status summaries must be rendered for Teams readability. Prefer a supported Adaptive Card for tabular or multi-row data. If plain text is used, render one item per line with bullets or short labeled lines.
+- Do not send Markdown-style pipe tables as plain text because Teams may collapse them into a dense paragraph.
+- Post-send evidence/readback must confirm the intended Jason bot conversation and readable content.
+
 ## Idempotency
 
 - App installation must be treated as idempotent.
