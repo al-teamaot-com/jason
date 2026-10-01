@@ -71,7 +71,7 @@ Check independent production health evidence, exact service/container state, fai
 Detection layers are:
 1. **Infrastructure health** — containers/services, source/image contract, timers/exporters, filesystem/runtime dependencies.
 2. **Capability health** — missing/erroring capability discovery, unexpected authorization/read/write failure, provider/canary failure, failed readback.
-3. **Workflow health** — stuck active/verification states, work that exceeds its expected state deadline, queue/worker state contradictions.
+3. **Workflow health** — stuck active/verification states, work that exceeds its expected state deadline, queue/worker state contradictions, and admission stalls where the latest scan reports eligible work plus available active slots but selects zero tickets.
 4. **Semantic outcome health** — an action is not healthy until the promised result is independently verified (for example, a client notification requires NotificationHistory evidence; ticket completion requires PSA readback; cleanup requires current free-space improvement and monitor reconciliation).
 5. **Outcome/anomaly health** — material operational deviations such as repeated identical failures or a pipeline producing implausibly no progress should generate a reviewable health signal rather than silently appearing healthy.
 
