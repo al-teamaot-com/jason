@@ -435,11 +435,16 @@ def runtime_microsoft_mail_investigation_from_env(*, transport: HttpTransport):
     )
 
 
-def runtime_microsoft_exchange_from_env(*, transport: HttpTransport, audit: AuditSink):
+def runtime_microsoft_exchange_from_env(
+    *,
+    transport: HttpTransport,
+    audit: AuditSink,
+    mail_investigation_runtime,
+):
     enabled = os.getenv(
         _RUNTIME_MICROSOFT_EXCHANGE_WORKER_ENABLED_ENV, ""
     ).strip().casefold() in {"1", "true", "yes", "on"}
-    if not enabled:
+    if not enabled or mail_investigation_runtime is None:
         return None
 
     token_path = Path(
@@ -448,21 +453,14 @@ def runtime_microsoft_exchange_from_env(*, transport: HttpTransport, audit: Audi
             "/run/jason-secrets/microsoft-exchange/worker-token",
         )
     )
-    boundary_db = Path(
-        os.getenv(
-            _RUNTIME_MICROSOFT_BOUNDARY_ENV,
-            "/var/lib/jason/authority/client-boundaries.sqlite3",
-        )
-    )
-    store = SQLiteClientBoundaryStore(boundary_db)
-    boundaries = SQLiteClientBoundaryRepository(store)
     worker = ExchangeReadWorkerClient(
         transport=transport,
         worker_token=read_worker_token(token_path),
     )
     return MicrosoftExchangeReadConnector(
         worker=worker,
-        boundaries=boundaries,
+        exchange_tokens=mail_investigation_runtime.exchange_tokens,
+        boundaries=mail_investigation_runtime.boundaries,
         audit=audit,
     )
 
@@ -536,6 +534,9 @@ def build_provider_read_invoker(
         )
 
     raw_microsoft_bindings = runtime_principal_bindings_from_env()
+    mail_investigation_runtime = runtime_microsoft_mail_investigation_from_env(
+        transport=transport
+    )
     effective_bindings = (
         bindings
         if bindings is not None
@@ -570,9 +571,6 @@ def build_provider_read_invoker(
             bindings=raw_microsoft_bindings,
             approved_mailboxes=runtime_approved_mailboxes_from_env(),
             audit=audit,
-        )
-        mail_investigation_runtime = runtime_microsoft_mail_investigation_from_env(
-            transport=transport
         )
         mail_investigation_connector = (
             MicrosoftGraphMailInvestigationConnector(
@@ -612,6 +610,7 @@ def build_provider_read_invoker(
     microsoft_exchange = runtime_microsoft_exchange_from_env(
         transport=transport,
         audit=audit,
+        mail_investigation_runtime=mail_investigation_runtime,
     )
     if microsoft_exchange is not None:
         connectors[MICROSOFT_EXCHANGE_PROVIDER] = microsoft_exchange
