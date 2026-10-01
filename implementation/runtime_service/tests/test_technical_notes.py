@@ -56,3 +56,19 @@ def test_legacy_adapter_preserves_detail_and_extracts_next_action():
     assert "No forced installation or reboot was attempted." in body
     assert "Playbook=vulscan_missing_patch" in body
     assert "Phase=waiting_patch_approval" in body
+
+
+def test_lifecycle_phase_overrides_legacy_title_for_handoff():
+    note = legacy_technical_note(
+        title="Jason - BackupIQ - Managed Endpoint Missing",
+        body="Technician review is required to determine managed coverage.",
+        issue="Backup unavailable",
+        scope=["Ticket=T3", "Device=SOS-50767"],
+        playbook="backupiq_endpoint_backup",
+        phase="escalated",
+        reason="technician review required",
+    )
+    assert note.kind == "human_review"
+    assert note.status == "Human Review Required"
+    assert canonical_title(note.kind) == "Jason - Human Review Required"
+    assert note.next_action == "Technician review is required before Jason can continue safely."

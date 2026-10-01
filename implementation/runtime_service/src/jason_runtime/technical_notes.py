@@ -159,6 +159,23 @@ def legacy_technical_note(
     reason: str,
 ) -> TechnicalNote:
     kind = infer_kind(title)
+    normalized_phase = _clean(phase).casefold()
+    normalized_reason = _clean(reason).casefold()
+    if normalized_phase == "escalated" or "human review" in normalized_reason or "technician review" in normalized_reason:
+        kind = "human_review"
+    elif normalized_phase.startswith("waiting_"):
+        kind = "waiting"
+    elif normalized_phase == "complete":
+        kind = "resolution"
+
+    status = infer_status(title, body)
+    if kind == "human_review":
+        status = "Human Review Required"
+    elif kind == "waiting":
+        status = "Waiting"
+    elif kind == "resolution":
+        status = "Resolved / Verified"
+
     actions: list[str] = []
     for sentence in re.split(r"(?<=[.!?])\s+", _clean(body)):
         lower = sentence.casefold()
@@ -173,7 +190,7 @@ def legacy_technical_note(
         state.append(f"Reason={_clean(reason)}")
     return TechnicalNote(
         kind=kind,
-        status=infer_status(title, body),
+        status=status,
         issue=issue,
         scope=scope,
         findings=findings,
