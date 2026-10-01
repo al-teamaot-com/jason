@@ -1,0 +1,33 @@
+name: Finance Reconciliation Foundation
+
+on:
+  push:
+    paths:
+      - "implementation/finance_reconciliation/**"
+      - "config/finance_reconciliation/**"
+      - ".github/workflows/finance-reconciliation-foundation.yml"
+  pull_request:
+    paths:
+      - "implementation/finance_reconciliation/**"
+      - "config/finance_reconciliation/**"
+      - ".github/workflows/finance-reconciliation-foundation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  foundation:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest
+      - name: Compile isolated finance reconciliation foundation
+        run: python -m compileall -q implementation/finance_reconciliation
+      - name: Test isolated finance reconciliation foundation
+        run: python -m pytest implementation/finance_reconciliation/tests -q
