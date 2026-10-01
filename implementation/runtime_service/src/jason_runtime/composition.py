@@ -304,6 +304,7 @@ from .kfs_meter_history import (
 from .autonomy_shadow_composition import build_autonomy_shadow_maintenance
 from .autonomy_worker_composition import build_autonomy_worker_maintenance
 from .daily_drmm_alert_reconciliation_composition import build_daily_drmm_alert_reconciliation_maintenance
+from .windows_time_source_shadow_composition import build_windows_time_source_shadow_maintenance
 from .autonomy_targeted_wake_runtime import CompositeAutonomyMaintenance
 from .datto_component_approval_registry import approval_owner_identities
 from .playbook_autonomy_review import (
@@ -485,6 +486,11 @@ class RuntimeSettings:
     )
     drmm_recent_alert_reconciliation_lookback_hours: int = 24
     drmm_recent_alert_reconciliation_cadence_hours: int = 24
+    windows_time_source_shadow_enabled: bool = False
+    windows_time_source_shadow_db: Path = Path(
+        "/var/lib/jason/openclaw/windows-time-source-shadow.sqlite3"
+    )
+    windows_time_source_shadow_cadence_minutes: int = 15
     autonomy_review_enabled: bool = False
     autonomy_review_db: Path = Path(
         "/var/lib/jason/openclaw/playbook-autonomy-review.sqlite3"
@@ -865,6 +871,18 @@ class RuntimeSettings:
             drmm_recent_alert_reconciliation_cadence_hours=int(
                 os.getenv("JASON_DRMM_RECENT_ALERT_RECONCILIATION_CADENCE_HOURS", "24")
             ),
+            windows_time_source_shadow_enabled=os.getenv(
+                "JASON_WINDOWS_TIME_SOURCE_SHADOW_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            windows_time_source_shadow_db=Path(
+                os.getenv(
+                    "JASON_WINDOWS_TIME_SOURCE_SHADOW_DB",
+                    "/var/lib/jason/openclaw/windows-time-source-shadow.sqlite3",
+                )
+            ),
+            windows_time_source_shadow_cadence_minutes=int(
+                os.getenv("JASON_WINDOWS_TIME_SOURCE_SHADOW_CADENCE_MINUTES", "15")
+            ),
             autonomy_review_enabled=os.getenv(
                 "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED", "false"
             ).strip().casefold() in {"1", "true", "yes", "on"},
@@ -939,6 +957,8 @@ class RuntimeSettings:
             raise ValueError("JASON_DRMM_RECENT_ALERT_RECONCILIATION_LOOKBACK_HOURS must be 1..168")
         if self.drmm_recent_alert_reconciliation_cadence_hours < 1:
             raise ValueError("JASON_DRMM_RECENT_ALERT_RECONCILIATION_CADENCE_HOURS must be at least 1")
+        if self.windows_time_source_shadow_cadence_minutes < 1:
+            raise ValueError("JASON_WINDOWS_TIME_SOURCE_SHADOW_CADENCE_MINUTES must be at least 1")
         if self.autonomy_review_interval_seconds < 60:
             raise ValueError(
                 "JASON_PLAYBOOK_AUTONOMY_REVIEW_INTERVAL_SECONDS must be at least 60"
@@ -2165,6 +2185,18 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         cadence_hours=settings.drmm_recent_alert_reconciliation_cadence_hours,
         audit=reflection_audit,
     )
+    windows_time_source_shadow_maintenance = build_windows_time_source_shadow_maintenance(
+        enabled=settings.windows_time_source_shadow_enabled,
+        identity_authority=identity_authority,
+        capabilities=capabilities,
+        approvals=approval_repository,
+        execution_ledger=governed_execution_ledger,
+        orchestrator=orchestrator,
+        state_db=settings.windows_time_source_shadow_db,
+        promotion_db=settings.autonomy_promotion_db,
+        cadence_minutes=settings.windows_time_source_shadow_cadence_minutes,
+        audit=reflection_audit,
+    )
     autonomy_maintenance = CompositeAutonomyMaintenance(
         playbook_review_maintenance,
         autonomous_deployment_completion_notification_maintenance,
@@ -2173,6 +2205,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         autonomous_repair_deployment_maintenance,
         operational_autonomy_maintenance,
         drmm_recent_alert_reconciliation_maintenance,
+        windows_time_source_shadow_maintenance,
         shadow_autonomy_maintenance,
     )
 
