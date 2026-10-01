@@ -338,6 +338,18 @@ The historical proactive bootstrap facts remain:
 
 Inbound and outbound transport topology must not be conflated merely because they use the same Teams application identity.
 
+### Owner notification routing and presentation
+
+For proactive messages to the AOT owner, use only Jason's governed `communication.teams.message.send` capability through the direct Teams gateway / Jason Approval Bot conversation. Do not route owner notifications through generic Teams connector self-chat / Notes (`48:notes`) or substitute another chat when the governed target is available.
+
+Presentation rules for operational summaries:
+
+- use Adaptive Cards for multi-row/tabular content when supported;
+- otherwise use one item per line with bullets or compact labels;
+- avoid plain-text Markdown pipe tables because Teams can collapse them into a dense paragraph;
+- separate exceptions/unresolved items into their own section; and
+- verify post-send readback against the intended Jason bot conversation.
+
 ## 13. Security and hardening follow-up
 
 The routing workstream is production-proven. Remaining hardening includes:
