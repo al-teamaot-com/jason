@@ -179,3 +179,21 @@ def test_composite_maintenance_runs_services_on_same_tick():
     assert composite.tick() is True
     assert first.calls == 1
     assert second.calls == 1
+
+
+def test_composite_maintenance_isolates_service_failure():
+    class FailingService:
+        def __init__(self):
+            self.calls = 0
+
+        def tick(self):
+            self.calls += 1
+            raise RuntimeError("synthetic maintenance failure")
+
+    first = FailingService()
+    second = Service(True)
+    composite = CompositeAutonomyMaintenance(first, second)
+
+    assert composite.tick() is True
+    assert first.calls == 1
+    assert second.calls == 1
