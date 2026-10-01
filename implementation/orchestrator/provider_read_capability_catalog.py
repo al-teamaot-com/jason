@@ -28,6 +28,7 @@ from kernel.execution_providers import (
 IT_GLUE_PROVIDER = "it_glue"
 AUTOTASK_PROVIDER = "autotask"
 MICROSOFT_GRAPH_PROVIDER = "microsoft_graph"
+MICROSOFT_EXCHANGE_PROVIDER = "microsoft_exchange_online"
 
 DOCUMENTATION_ORGANIZATION_SEARCH = "documentation.organization.search"
 DOCUMENTATION_ORGANIZATION_READ = "documentation.organization.read"
@@ -89,6 +90,16 @@ IDENTITY_DIRECTORY_ROLE_MEMBERS_SEARCH = "identity.directory.role.members.search
 COMMUNICATION_MAIL_MESSAGE_SEARCH = "communication.mail.message.search"
 COMMUNICATION_MAIL_MESSAGE_READ = "communication.mail.message.read"
 COMMUNICATION_MAIL_ATTACHMENT_SEARCH = "communication.mail.attachment.search"
+COMMUNICATION_MAIL_TRACE_SEARCH = "communication.mail.trace.search"
+COMMUNICATION_MAIL_TRACE_DETAIL = "communication.mail.trace.detail"
+COMMUNICATION_MAILBOX_FORWARDING_READ = "communication.mailbox.forwarding.read"
+COMMUNICATION_MAILBOX_INBOX_RULES_READ = "communication.mailbox.inbox_rules.read_hidden"
+COMMUNICATION_MAILBOX_FULL_ACCESS_READ = "communication.mailbox.full_access.read"
+COMMUNICATION_MAILBOX_SEND_AS_READ = "communication.mailbox.send_as.read"
+COMMUNICATION_MAILBOX_SEND_ON_BEHALF_READ = "communication.mailbox.send_on_behalf.read"
+COMMUNICATION_MAILBOX_TRANSPORT_RULES_READ = "communication.mailbox.transport_rules.read"
+COMMUNICATION_MAILBOX_MOBILE_DEVICES_READ = "communication.mailbox.mobile_devices.read"
+COMMUNICATION_MAILBOX_RETENTION_AUDIT_READ = "communication.mailbox.retention_audit_config.read"
 
 
 IT_GLUE_CAPABILITIES = frozenset(
@@ -171,6 +182,21 @@ MICROSOFT_GRAPH_MAIL_CAPABILITIES = frozenset(
 
 MICROSOFT_GRAPH_CAPABILITIES = (
     MICROSOFT_GRAPH_DIRECTORY_CAPABILITIES | MICROSOFT_GRAPH_MAIL_CAPABILITIES
+)
+
+MICROSOFT_EXCHANGE_CAPABILITIES = frozenset(
+    {
+        COMMUNICATION_MAIL_TRACE_SEARCH,
+        COMMUNICATION_MAIL_TRACE_DETAIL,
+        COMMUNICATION_MAILBOX_FORWARDING_READ,
+        COMMUNICATION_MAILBOX_INBOX_RULES_READ,
+        COMMUNICATION_MAILBOX_FULL_ACCESS_READ,
+        COMMUNICATION_MAILBOX_SEND_AS_READ,
+        COMMUNICATION_MAILBOX_SEND_ON_BEHALF_READ,
+        COMMUNICATION_MAILBOX_TRANSPORT_RULES_READ,
+        COMMUNICATION_MAILBOX_MOBILE_DEVICES_READ,
+        COMMUNICATION_MAILBOX_RETENTION_AUDIT_READ,
+    }
 )
 
 
@@ -1016,6 +1042,133 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             collection_fact="mail attachment metadata",
             canonical_facts="id,name,content_type,size,is_inline,modified_at",
         ),
+        _read_capability(
+            now=now,
+            capability_name=COMMUNICATION_MAIL_TRACE_SEARCH,
+            display_name="Search Exchange Message Trace",
+            business_purpose="Search bounded Exchange Online message-trace evidence for one governed client tenant.",
+            resource_types="communication_mail_trace,email_delivery_trace",
+            operation="search",
+            selector_keys="sender,recipients,subject,start,end,result_size",
+            fact_hints="message trace,delivery status,delivered,failed,quarantined,redirected,email delivery",
+            authoritative_change_sources=("Exchange Online PowerShell documentation",),
+            collection_fact="message trace records",
+            client_isolation_required=True,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=COMMUNICATION_MAIL_TRACE_DETAIL,
+            display_name="Read Exchange Message Trace Detail",
+            business_purpose="Read detailed Exchange Online processing events for one exact traced recipient.",
+            resource_types="communication_mail_trace_detail,email_delivery_event",
+            operation="read",
+            selector_keys="message_trace_id,recipient",
+            fact_hints="message trace detail,transport event,rule,redirect,deliver,spam processing",
+            authoritative_change_sources=("Exchange Online PowerShell documentation",),
+            client_isolation_required=True,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=COMMUNICATION_MAILBOX_FORWARDING_READ,
+            display_name="Read Mailbox Forwarding",
+            business_purpose="Read mailbox-level forwarding and retain-copy configuration.",
+            resource_types="communication_mailbox,mailbox_forwarding",
+            operation="read",
+            selector_keys="mailbox",
+            fact_hints="mailbox forwarding,forwarding address,deliver and forward",
+            authoritative_change_sources=("Exchange Online PowerShell documentation",),
+            client_isolation_required=True,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=COMMUNICATION_MAILBOX_INBOX_RULES_READ,
+            display_name="Read Hidden and Visible Inbox Rules",
+            business_purpose="Read visible and hidden Inbox rules for a governed mailbox.",
+            resource_types="communication_mailbox_rule,inbox_rule",
+            operation="read",
+            selector_keys="mailbox",
+            fact_hints="Inbox rule,hidden rule,move,delete,redirect,forward",
+            authoritative_change_sources=("Exchange Online PowerShell documentation",),
+            collection_fact="inbox rules",
+            client_isolation_required=True,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=COMMUNICATION_MAILBOX_FULL_ACCESS_READ,
+            display_name="Read Mailbox FullAccess Delegates",
+            business_purpose="Read FullAccess delegates for a governed mailbox.",
+            resource_types="communication_mailbox_permission,mailbox_delegate",
+            operation="read",
+            selector_keys="mailbox",
+            fact_hints="FullAccess,delegate,mailbox permission",
+            authoritative_change_sources=("Exchange Online PowerShell documentation",),
+            collection_fact="full access delegates",
+            client_isolation_required=True,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=COMMUNICATION_MAILBOX_SEND_AS_READ,
+            display_name="Read Mailbox SendAs Delegates",
+            business_purpose="Read SendAs delegates for a governed mailbox.",
+            resource_types="communication_mailbox_permission,mailbox_delegate",
+            operation="read",
+            selector_keys="mailbox",
+            fact_hints="SendAs,send as,delegate,mailbox permission",
+            authoritative_change_sources=("Exchange Online PowerShell documentation",),
+            collection_fact="send as delegates",
+            client_isolation_required=True,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=COMMUNICATION_MAILBOX_SEND_ON_BEHALF_READ,
+            display_name="Read Mailbox SendOnBehalf Delegates",
+            business_purpose="Read SendOnBehalf delegates for a governed mailbox.",
+            resource_types="communication_mailbox_permission,mailbox_delegate",
+            operation="read",
+            selector_keys="mailbox",
+            fact_hints="SendOnBehalf,send on behalf,delegate,mailbox permission",
+            authoritative_change_sources=("Exchange Online PowerShell documentation",),
+            collection_fact="send on behalf delegates",
+            client_isolation_required=True,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=COMMUNICATION_MAILBOX_TRANSPORT_RULES_READ,
+            display_name="Read Exchange Transport Rules",
+            business_purpose="Read Exchange transport-rule evidence needed to explain mail-flow handling.",
+            resource_types="communication_transport_rule,mail_flow_rule",
+            operation="read",
+            selector_keys="",
+            fact_hints="transport rule,mail flow rule,SCL,header,stop processing",
+            authoritative_change_sources=("Exchange Online PowerShell documentation",),
+            collection_fact="transport rules",
+            client_isolation_required=True,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=COMMUNICATION_MAILBOX_MOBILE_DEVICES_READ,
+            display_name="Read Mailbox Mobile Devices",
+            business_purpose="Read Exchange mobile-device partnerships and last-sync evidence for a governed mailbox.",
+            resource_types="communication_mobile_device,mailbox_device",
+            operation="read",
+            selector_keys="mailbox",
+            fact_hints="mobile device,iPhone,iPad,ActiveSync,last sync,device access",
+            authoritative_change_sources=("Exchange Online PowerShell documentation",),
+            collection_fact="mobile devices",
+            client_isolation_required=True,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=COMMUNICATION_MAILBOX_RETENTION_AUDIT_READ,
+            display_name="Read Mailbox Retention and Audit Configuration",
+            business_purpose="Read retention, archive, hold, and mailbox-audit configuration for a governed mailbox.",
+            resource_types="communication_mailbox_posture,mailbox_audit,mailbox_retention",
+            operation="read",
+            selector_keys="mailbox",
+            fact_hints="audit retention,DefaultAuditSet,AuditOwner,AuditDelegate,AuditAdmin,archive,litigation hold,retention policy",
+            authoritative_change_sources=("Exchange Online PowerShell documentation",),
+            client_isolation_required=True,
+        ),
     )
 
 
@@ -1109,5 +1262,18 @@ def register_provider_read_foundation(
             capabilities=MICROSOFT_GRAPH_CAPABILITIES,
             authority="identity_directory",
             vendor_change_sources=("Microsoft Graph v1.0 documentation",),
+        )
+    )
+    providers.register(
+        _provider(
+            now=now,
+            provider_id=MICROSOFT_EXCHANGE_PROVIDER,
+            display_name="Microsoft Exchange Online",
+            capabilities=MICROSOFT_EXCHANGE_CAPABILITIES,
+            authority="mail_flow_and_mailbox_configuration",
+            vendor_change_sources=(
+                "Exchange Online PowerShell documentation",
+                "Exchange Online Admin API documentation",
+            ),
         )
     )
