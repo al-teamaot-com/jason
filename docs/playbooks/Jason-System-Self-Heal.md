@@ -73,7 +73,7 @@ Detection layers are:
 2. **Capability health** — missing/erroring capability discovery, unexpected authorization/read/write failure, provider/canary failure, failed readback.
 3. **Workflow health** — stuck active/verification states, work that exceeds its expected state deadline, queue/worker state contradictions, and admission stalls where the latest scan reports eligible work plus available active slots but selects zero tickets.
 4. **Semantic outcome health** — an action is not healthy until the promised result is independently verified (for example, a client notification requires NotificationHistory evidence; ticket completion requires PSA readback; cleanup requires current free-space improvement and monitor reconciliation).
-5. **Outcome/anomaly health** — material operational deviations such as repeated identical failures or a pipeline producing implausibly no progress should generate a reviewable health signal rather than silently appearing healthy.
+5. **Outcome/anomaly health** — enforce generic structural invariants and compare recent operational behavior against Jason's own prior healthy-looking baseline. Material deviations such as contradictory counts, impossible state transitions, repeated no-progress cycles, or a collapse in normal work-selection efficiency should generate a reviewable health signal even when no named failure signature exists.
 
 ## 8. Decision Gates
 Recovery must remain within existing approved authority; must target an exact Jason component; must not broaden provider/client scope; must not expose secrets; and must not require host reboot/shutdown.
