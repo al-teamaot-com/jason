@@ -327,12 +327,17 @@ class PlaybookAutonomyApprovalInteractionFlow:
         *,
         approval_id: str,
         decision: str,
+        selections: Mapping[str, str] | None = None,
         microsoft_tenant_id: str,
         microsoft_object_id: str,
         conversation_id: str,
         channel_response_id: str,
         decided_at: datetime,
     ) -> Mapping[str, object]:
+        if selections:
+            raise PermissionError(
+                "playbook autonomy approval does not accept mutable card selections"
+            )
         binding = self.bindings.find(
             microsoft_tenant_id=microsoft_tenant_id,
             microsoft_object_id=microsoft_object_id,

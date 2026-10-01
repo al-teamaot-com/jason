@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any, Mapping, Protocol
+from urllib.parse import urlsplit
 
 from orchestrator.teams_conversation_flow import (
     ConversationClarificationRequiredError,
@@ -34,12 +35,38 @@ class GovernedConversationFlow(Protocol):
     def handle(self, request: TeamsConversationRequest) -> GovernedConversationFlowResult: ...
 
 
+class GovernedProcurementInteractionFlow(Protocol):
+    def handle_url(
+        self,
+        *,
+        url: str,
+        microsoft_tenant_id: str,
+        microsoft_object_id: str,
+        conversation_id: str,
+        message_id: str,
+        occurred_at: datetime,
+    ) -> Mapping[str, Any]: ...
+
+    def handle_submit(
+        self,
+        *,
+        submission_id: str,
+        selections: Mapping[str, str],
+        microsoft_tenant_id: str,
+        microsoft_object_id: str,
+        conversation_id: str,
+        channel_response_id: str,
+        submitted_at: datetime,
+    ) -> Mapping[str, Any]: ...
+
+
 class GovernedApprovalInteractionFlow(Protocol):
     def handle(
         self,
         *,
         approval_id: str,
         decision: str,
+        selections: Mapping[str, str],
         microsoft_tenant_id: str,
         microsoft_object_id: str,
         conversation_id: str,
@@ -52,7 +79,51 @@ class GovernedApprovalInteractionFlow(Protocol):
 class ApprovalSubmitEvidence:
     approval_id: str
     decision: str
+    selections: Mapping[str, str]
     channel_response_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProcurementSubmitEvidence:
+    submission_id: str
+    selections: Mapping[str, str]
+    channel_response_id: str
+
+
+def _standalone_https_url(text: str) -> str | None:
+    value = str(text or "").strip()
+    if not value or any(char.isspace() for char in value):
+        return None
+    parsed = urlsplit(value)
+    if parsed.scheme.casefold() != "https" or not parsed.hostname:
+        return None
+    return value
+
+
+def _validated_card_selections(value: Any) -> dict[str, str]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError("approval selections must be an object")
+    if len(value) > 32:
+        raise ValueError("approval selections exceed bounded field count")
+
+    normalized: dict[str, str] = {}
+    for raw_key, raw_value in value.items():
+        key = str(raw_key).strip()
+        if not key or len(key) > 64:
+            raise ValueError("approval selection key is invalid")
+        if not key[0].isalpha() or any(
+            not (char.isalnum() or char in "_.-") for char in key
+        ):
+            raise ValueError("approval selection key is invalid")
+        if not isinstance(raw_value, (str, int, float, bool)):
+            raise ValueError("approval selection value is invalid")
+        item = str(raw_value).strip()
+        if len(item) > 512:
+            raise ValueError("approval selection value exceeds bounded size")
+        normalized[key] = item
+    return normalized
 
 
 def _conversation_failure_diagnostic(error: Exception) -> dict[str, object]:
@@ -90,6 +161,7 @@ class OpenClawTeamsConversationEnvelope:
     conversation_id: str
     message_id: str
     approval_submit: ApprovalSubmitEvidence | None = None
+    procurement_submit: ProcurementSubmitEvidence | None = None
 
     @classmethod
     def from_mapping(cls, envelope: Mapping[str, Any]) -> "OpenClawTeamsConversationEnvelope":
@@ -170,31 +242,59 @@ class OpenClawTeamsConversationEnvelope:
             )
 
         approval_submit = None
+        procurement_submit = None
         interaction = envelope.get("interaction")
         if interaction is not None:
             if not isinstance(interaction, Mapping):
                 raise ValueError("conversation interaction object is invalid")
+            kind = str(interaction.get("kind") or "").strip()
             allowed_interaction_keys = {
-                "kind", "approval_id", "decision", "channel_response_id"
+                "kind", "approval_id", "decision", "submission_id",
+                "selections", "channel_response_id",
             }
             if set(interaction) - allowed_interaction_keys:
-                raise PermissionError("conversation interaction contains unsupported authority fields")
-            if str(interaction.get("kind") or "").strip() != "approval.submit":
-                raise ValueError("conversation interaction kind is invalid")
-            approval_id = str(interaction.get("approval_id") or "").strip()
-            decision = str(interaction.get("decision") or "").strip().casefold()
-            channel_response_id = str(interaction.get("channel_response_id") or "").strip()
-            if not approval_id or len(approval_id) > 256:
-                raise ValueError("approval interaction id is invalid")
-            if decision not in {"approve", "deny", "request_changes"}:
-                raise ValueError("approval interaction decision is invalid")
+                raise PermissionError(
+                    "conversation interaction contains unsupported authority fields"
+                )
+            selections = _validated_card_selections(interaction.get("selections"))
+            channel_response_id = str(
+                interaction.get("channel_response_id") or ""
+            ).strip()
             if not channel_response_id or channel_response_id != values["message_id"]:
-                raise ValueError("approval interaction response id does not match Teams message")
-            approval_submit = ApprovalSubmitEvidence(
-                approval_id=approval_id,
-                decision=decision,
-                channel_response_id=channel_response_id,
-            )
+                raise ValueError(
+                    "interaction response id does not match Teams message"
+                )
+
+            if kind == "approval.submit":
+                approval_id = str(interaction.get("approval_id") or "").strip()
+                decision = str(interaction.get("decision") or "").strip().casefold()
+                if not approval_id or len(approval_id) > 256:
+                    raise ValueError("approval interaction id is invalid")
+                if decision not in {"approve", "deny", "request_changes"}:
+                    raise ValueError("approval interaction decision is invalid")
+                approval_submit = ApprovalSubmitEvidence(
+                    approval_id=approval_id,
+                    decision=decision,
+                    selections=selections,
+                    channel_response_id=channel_response_id,
+                )
+            elif kind == "procurement.submit":
+                submission_id = str(
+                    interaction.get("submission_id") or ""
+                ).strip()
+                if not submission_id or len(submission_id) > 256:
+                    raise ValueError("procurement submission id is invalid")
+                if interaction.get("approval_id") or interaction.get("decision"):
+                    raise PermissionError(
+                        "procurement submission cannot assert approval authority"
+                    )
+                procurement_submit = ProcurementSubmitEvidence(
+                    submission_id=submission_id,
+                    selections=selections,
+                    channel_response_id=channel_response_id,
+                )
+            else:
+                raise ValueError("conversation interaction kind is invalid")
 
         issued_at = _parse_utc(str(envelope.get("issued_at", "")))
         expires_at = _parse_utc(str(envelope.get("expires_at", "")))
@@ -211,6 +311,7 @@ class OpenClawTeamsConversationEnvelope:
             conversation_id=values["conversation_id"],
             message_id=values["message_id"],
             approval_submit=approval_submit,
+            procurement_submit=procurement_submit,
         )
 
 
@@ -230,6 +331,7 @@ class GovernedOpenClawTeamsConversationIngress:
     flow: GovernedConversationFlow
     allowed_machine_identities: frozenset[str]
     approval_flow: GovernedApprovalInteractionFlow | None = None
+    procurement_flow: GovernedProcurementInteractionFlow | None = None
     max_clock_skew_seconds: int = 60
 
     def handle(self, envelope: Mapping[str, Any]) -> dict[str, Any]:
@@ -333,6 +435,7 @@ class GovernedOpenClawTeamsConversationIngress:
                     self.approval_flow.handle(
                         approval_id=parsed.approval_submit.approval_id,
                         decision=parsed.approval_submit.decision,
+                        selections=parsed.approval_submit.selections,
                         microsoft_tenant_id=parsed.microsoft_tenant_id,
                         microsoft_object_id=parsed.microsoft_object_id,
                         conversation_id=parsed.conversation_id,
@@ -381,6 +484,72 @@ class GovernedOpenClawTeamsConversationIngress:
             approval_result.setdefault("request_id", parsed.request_id)
             approval_result.setdefault("correlation_id", parsed.correlation_id)
             return approval_result
+
+        procurement_url = _standalone_https_url(parsed.text)
+        if parsed.procurement_submit is not None or (
+            procurement_url is not None and self.procurement_flow is not None
+        ):
+            if self.procurement_flow is None:
+                return self._reject(
+                    request_id=parsed.request_id,
+                    correlation_id=parsed.correlation_id,
+                    reason="procurement_interaction_not_configured",
+                    machine_identity=machine_identity,
+                )
+            try:
+                if parsed.procurement_submit is not None:
+                    procurement_result = dict(
+                        self.procurement_flow.handle_submit(
+                            submission_id=parsed.procurement_submit.submission_id,
+                            selections=parsed.procurement_submit.selections,
+                            microsoft_tenant_id=parsed.microsoft_tenant_id,
+                            microsoft_object_id=parsed.microsoft_object_id,
+                            conversation_id=parsed.conversation_id,
+                            channel_response_id=parsed.procurement_submit.channel_response_id,
+                            submitted_at=parsed.issued_at,
+                        )
+                    )
+                else:
+                    procurement_result = dict(
+                        self.procurement_flow.handle_url(
+                            url=procurement_url or "",
+                            microsoft_tenant_id=parsed.microsoft_tenant_id,
+                            microsoft_object_id=parsed.microsoft_object_id,
+                            conversation_id=parsed.conversation_id,
+                            message_id=parsed.message_id,
+                            occurred_at=parsed.issued_at,
+                        )
+                    )
+            except PermissionError as error:
+                return self._deny(
+                    parsed=parsed,
+                    machine_identity=machine_identity,
+                    reason="procurement_interaction_denied",
+                    diagnostic={
+                        "error_type": type(error).__name__,
+                        "error_message": str(error)[:500],
+                    },
+                )
+            except Exception as error:
+                self.audit.append(
+                    "openclaw.teams_procurement_interaction_failed",
+                    {
+                        "request_id": parsed.request_id,
+                        "correlation_id": parsed.correlation_id,
+                        "machine_identity": machine_identity,
+                        "error_type": type(error).__name__,
+                        "error_message": str(error)[:500],
+                    },
+                )
+                return {
+                    "request_id": parsed.request_id,
+                    "correlation_id": parsed.correlation_id,
+                    "status": "failed",
+                    "error_code": "procurement_interaction_failed",
+                }
+            procurement_result.setdefault("request_id", parsed.request_id)
+            procurement_result.setdefault("correlation_id", parsed.correlation_id)
+            return procurement_result
 
         request = TeamsConversationRequest(
             text=parsed.text,

@@ -199,6 +199,7 @@ from orchestrator.teams_conversation_flow import TeamsConversationFlow
 from orchestrator.teams_identity_binding import JasonTeamsIdentityBinder
 from orchestrator.teams_identity_binding_sqlite import (
     AuthorityIdentityRecordReader,
+    AutoEnrollingMicrosoftIdentityBindingStore,
     DirectoryEnrichedMicrosoftIdentityBindingResolver,
     SQLiteMicrosoftIdentityBindingStore,
 )
@@ -279,6 +280,11 @@ from .teams_message_send import (
     CAPABILITY as TEAMS_MESSAGE_SEND,
     build_invoker as build_teams_message_send_invoker,
     register_foundation as register_teams_message_send_foundation,
+)
+from .procurement_web_read import (
+    CAPABILITY as PROCUREMENT_WEB_PRODUCT_READ,
+    build_invoker as build_procurement_web_read_invoker,
+    register_foundation as register_procurement_web_read_foundation,
 )
 from .datto_alert_resolution import (
     build_datto_alert_resolution_invoker,
@@ -1176,7 +1182,20 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         transport=http_transport,
     )
 
-    bindings = SQLiteMicrosoftIdentityBindingStore(settings.bindings_db)
+    durable_bindings = SQLiteMicrosoftIdentityBindingStore(settings.bindings_db)
+    bindings = AutoEnrollingMicrosoftIdentityBindingStore(
+        bindings=durable_bindings,
+        directory=microsoft_directory.directory,
+        authority_store=authority_store,
+        allowed_domains=frozenset(
+            item.strip().casefold()
+            for item in os.getenv(
+                "JASON_TEAMS_AUTOENROLL_DOMAINS",
+                "teamaot.com,teamaom.com",
+            ).split(",")
+            if item.strip()
+        ),
+    )
     identity_binder = JasonTeamsIdentityBinder(
         bindings=bindings,
         identities=AuthorityIdentityRecordReader(authority_store),
@@ -1310,6 +1329,9 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         now=now,
     )
     register_teams_message_send_foundation(
+        capabilities=capabilities, providers=providers, now=now,
+    )
+    register_procurement_web_read_foundation(
         capabilities=capabilities, providers=providers, now=now,
     )
     register_datto_alert_resolution_runtime_foundation(
@@ -1839,6 +1861,10 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         invoker=datto_powershell_read_invoker,
     )
     invokers.register(TEAMS_MESSAGE_SEND, build_teams_message_send_invoker())
+    invokers.register(
+        PROCUREMENT_WEB_PRODUCT_READ,
+        build_procurement_web_read_invoker(),
+    )
     register_datto_alert_resolution_invoker(
         invokers=invokers,
         invoker=datto_alert_resolution_invoker,

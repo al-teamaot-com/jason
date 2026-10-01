@@ -62,6 +62,8 @@ class OpenClawReturnPathConversationIngress:
         result = dict(self.ingress.handle(envelope))
         if result.get("status") != "completed":
             return result
+        if isinstance(result.get("reply"), Mapping):
+            return result
 
         # The inner governed ingress exposes the opaque transport_message_id returned
         # by TeamsConversationFlow. Consume the staged reply by that id. Do not use

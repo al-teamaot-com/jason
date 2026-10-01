@@ -1,0 +1,476 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from hashlib import sha256
+from html.parser import HTMLParser
+import http.client
+import ipaddress
+import json
+import os
+import socket
+import ssl
+from typing import Any, Mapping
+from urllib.parse import urljoin, urlsplit
+
+from kernel.capabilities import (
+    CapabilityApproval,
+    CapabilityDefinition,
+    CapabilityEvidence,
+    CapabilityLifecycle,
+    CapabilityRisk,
+    CapabilityStewardship,
+    IdempotencyBehavior,
+)
+from kernel.execution_providers import (
+    ExecutionProvider,
+    ExecutionProviderRegistryService,
+    ProviderApproval,
+    ProviderFeatures,
+    ProviderHealth,
+    ProviderLifecycle,
+    ProviderLimits,
+    ProviderStewardship,
+    ProviderType,
+)
+from orchestrator.service import InvocationResult
+
+CAPABILITY = "procurement.web.product.read"
+PROVIDER = "public_web_procurement"
+PROFILE_ENV = "JASON_PROCUREMENT_WEB_READ_PROFILE"
+PROFILE = "aot-procurement-web-v1"
+DEFAULT_MAX_BYTES = 1_500_000
+HARD_MAX_BYTES = 2_000_000
+MAX_REDIRECTS = 3
+
+
+class ProcurementWebReadError(RuntimeError):
+    pass
+
+
+def _resolve_public_host(host: str) -> None:
+    try:
+        records = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise ProcurementWebReadError("product URL host could not be resolved") from exc
+    addresses = {record[4][0] for record in records}
+    if not addresses:
+        raise ProcurementWebReadError("product URL host returned no addresses")
+    for raw in addresses:
+        try:
+            address = ipaddress.ip_address(raw)
+        except ValueError as exc:
+            raise ProcurementWebReadError("product URL resolved to an invalid address") from exc
+        if not address.is_global:
+            raise ProcurementWebReadError(
+                "product URL resolved to a non-public address"
+            )
+
+
+def validate_public_https_url(url: str) -> str:
+    value = str(url or "").strip()
+    if not value or len(value) > 4096:
+        raise ProcurementWebReadError("product URL is missing or too long")
+    parsed = urlsplit(value)
+    if parsed.scheme.casefold() != "https":
+        raise ProcurementWebReadError("product URL must use HTTPS")
+    if not parsed.hostname or parsed.username or parsed.password:
+        raise ProcurementWebReadError("product URL authority is invalid")
+    if parsed.port not in (None, 443):
+        raise ProcurementWebReadError("product URL must use the standard HTTPS port")
+    _resolve_public_host(parsed.hostname)
+    return parsed.geturl()
+
+
+class _ProductPageParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.title_parts: list[str] = []
+        self.meta: dict[str, str] = {}
+        self.jsonld: list[str] = []
+        self.text_parts: list[str] = []
+        self._in_title = False
+        self._in_jsonld = False
+        self._jsonld_parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        values = {str(k).casefold(): str(v or "") for k, v in attrs}
+        lowered = tag.casefold()
+        if lowered == "title":
+            self._in_title = True
+        elif lowered == "meta":
+            key = (
+                values.get("property")
+                or values.get("name")
+                or values.get("itemprop")
+                or ""
+            ).strip().casefold()
+            content = values.get("content", "").strip()
+            if key and content and len(key) <= 128 and len(content) <= 4096:
+                self.meta.setdefault(key, content)
+        elif lowered == "script":
+            script_type = values.get("type", "").strip().casefold()
+            if script_type == "application/ld+json":
+                self._in_jsonld = True
+                self._jsonld_parts = []
+
+    def handle_endtag(self, tag: str) -> None:
+        lowered = tag.casefold()
+        if lowered == "title":
+            self._in_title = False
+        elif lowered == "script" and self._in_jsonld:
+            value = "".join(self._jsonld_parts).strip()
+            if value and sum(len(item) for item in self.jsonld) < 300_000:
+                self.jsonld.append(value[:150_000])
+            self._jsonld_parts = []
+            self._in_jsonld = False
+
+    def handle_data(self, data: str) -> None:
+        value = " ".join(str(data).split())
+        if not value:
+            return
+        if self._in_title:
+            self.title_parts.append(value)
+        elif self._in_jsonld:
+            self._jsonld_parts.append(data)
+        elif len(" ".join(self.text_parts)) < 40_000:
+            self.text_parts.append(value)
+
+
+def _walk_json(value: Any):
+    if isinstance(value, Mapping):
+        yield value
+        for child in value.values():
+            yield from _walk_json(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _walk_json(child)
+
+
+def _name(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value.strip() or None
+    if isinstance(value, Mapping):
+        return str(value.get("name") or "").strip() or None
+    return None
+
+
+def _address(value: Any) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        return {}
+    fields = {
+        "street": "streetAddress",
+        "city": "addressLocality",
+        "state": "addressRegion",
+        "postal_code": "postalCode",
+        "country": "addressCountry",
+    }
+    result = {}
+    for target, source in fields.items():
+        raw = str(value.get(source) or "").strip()
+        if raw:
+            result[target] = raw
+    return result
+
+
+def extract_product_page(html: str) -> dict[str, Any]:
+    parser = _ProductPageParser()
+    parser.feed(html)
+    products: list[dict[str, Any]] = []
+    organizations: list[dict[str, Any]] = []
+
+    decoded: list[Any] = []
+    for raw in parser.jsonld:
+        try:
+            decoded.append(json.loads(raw))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+    for obj in _walk_json(decoded):
+        raw_type = obj.get("@type")
+        types = (
+            {str(item).casefold() for item in raw_type}
+            if isinstance(raw_type, list)
+            else {str(raw_type or "").casefold()}
+        )
+        if "product" in types:
+            offer = obj.get("offers")
+            if isinstance(offer, list):
+                offer = next((item for item in offer if isinstance(item, Mapping)), {})
+            if not isinstance(offer, Mapping):
+                offer = {}
+            product = {
+                "name": _name(obj.get("name")),
+                "description": _name(obj.get("description")),
+                "sku": _name(obj.get("sku")),
+                "mpn": _name(obj.get("mpn")),
+                "brand": _name(obj.get("brand")),
+                "price": _name(offer.get("price") or offer.get("lowPrice")),
+                "currency": _name(offer.get("priceCurrency")),
+                "availability": _name(offer.get("availability")),
+                "seller": _name(offer.get("seller")),
+            }
+            cleaned = {k: v for k, v in product.items() if v}
+            if cleaned:
+                products.append(cleaned)
+
+        if "organization" in types or "corporation" in types or "localbusiness" in types:
+            org = {
+                "name": _name(obj.get("name")),
+                "url": _name(obj.get("url")),
+                "phone": _name(obj.get("telephone")),
+                "email": _name(obj.get("email")),
+                "address": _address(obj.get("address")),
+            }
+            cleaned = {
+                k: v for k, v in org.items()
+                if v not in (None, "", {})
+            }
+            if cleaned:
+                organizations.append(cleaned)
+
+    title = " ".join(parser.title_parts).strip()
+    excerpt = " ".join(parser.text_parts)
+    if len(excerpt) > 40_000:
+        excerpt = excerpt[:40_000]
+
+    products.sort(key=lambda item: len(item), reverse=True)
+    organizations.sort(
+        key=lambda item: (bool(item.get("address")), len(item)),
+        reverse=True,
+    )
+    return {
+        "page_title": title or None,
+        "meta": dict(sorted(parser.meta.items())),
+        "products": products[:10],
+        "organizations": organizations[:10],
+        "visible_text_excerpt": excerpt,
+    }
+
+
+def _fetch_html(url: str, *, max_bytes: int) -> tuple[str, str, bool]:
+    current = validate_public_https_url(url)
+    context = ssl.create_default_context()
+    for redirect_count in range(MAX_REDIRECTS + 1):
+        parsed = urlsplit(current)
+        host = parsed.hostname or ""
+        _resolve_public_host(host)
+        path = parsed.path or "/"
+        if parsed.query:
+            path += "?" + parsed.query
+
+        connection = http.client.HTTPSConnection(
+            host,
+            port=443,
+            timeout=15,
+            context=context,
+        )
+        try:
+            connection.request(
+                "GET",
+                path,
+                headers={
+                    "User-Agent": "Project-Jason-Procurement/1.0",
+                    "Accept": "text/html,application/xhtml+xml",
+                    "Accept-Encoding": "identity",
+                },
+            )
+            response = connection.getresponse()
+            status = int(response.status)
+            if status in {301, 302, 303, 307, 308}:
+                location = response.getheader("Location")
+                response.read(4096)
+                if not location or redirect_count >= MAX_REDIRECTS:
+                    raise ProcurementWebReadError("product URL redirect chain is invalid")
+                current = validate_public_https_url(urljoin(current, location))
+                continue
+            if status != 200:
+                raise ProcurementWebReadError(
+                    f"product URL returned HTTP {status}"
+                )
+            content_type = str(response.getheader("Content-Type") or "").casefold()
+            if not (
+                content_type.startswith("text/html")
+                or content_type.startswith("application/xhtml+xml")
+            ):
+                raise ProcurementWebReadError(
+                    "product URL did not return an HTML document"
+                )
+            payload = response.read(max_bytes + 1)
+            truncated = len(payload) > max_bytes
+            payload = payload[:max_bytes]
+            charset = "utf-8"
+            if "charset=" in content_type:
+                charset = content_type.split("charset=", 1)[1].split(";", 1)[0].strip()
+            try:
+                html = payload.decode(charset or "utf-8", errors="replace")
+            except LookupError:
+                html = payload.decode("utf-8", errors="replace")
+            return current, html, truncated
+        finally:
+            connection.close()
+    raise ProcurementWebReadError("product URL exceeded redirect limit")
+
+
+@dataclass(frozen=True, slots=True)
+class ProcurementWebReadInvoker:
+    def invoke(self, *, request, resolution):
+        if request.capability_name != CAPABILITY:
+            raise PermissionError("procurement web capability mismatch")
+        if resolution.selected_provider_id != PROVIDER:
+            raise PermissionError("procurement web provider mismatch")
+        args = dict(request.arguments or {})
+        if set(args) - {"url", "max_bytes"}:
+            raise ValueError("unsupported procurement web arguments")
+        raw_max = args.get("max_bytes", DEFAULT_MAX_BYTES)
+        if isinstance(raw_max, bool):
+            raise ValueError("max_bytes must be an integer")
+        max_bytes = int(raw_max)
+        if max_bytes < 32_768 or max_bytes > HARD_MAX_BYTES:
+            raise ValueError("max_bytes is outside the bounded range")
+
+        source_url = validate_public_https_url(str(args.get("url") or ""))
+        final_url, html, truncated = _fetch_html(source_url, max_bytes=max_bytes)
+        facts = extract_product_page(html)
+        captured_at = datetime.now(timezone.utc).isoformat()
+        digest = sha256(html.encode("utf-8", errors="replace")).hexdigest()
+        return InvocationResult(
+            output={
+                "provider": PROVIDER,
+                "source_url": source_url,
+                "final_url": final_url,
+                "source_host": urlsplit(final_url).hostname,
+                "captured_at": captured_at,
+                "content_sha256": digest,
+                "truncated": truncated,
+                **facts,
+            },
+            attempts=1,
+        )
+
+
+def register_foundation(*, capabilities, providers, now: datetime) -> None:
+    capability = CapabilityDefinition(
+        capability_name=CAPABILITY,
+        version="1.0",
+        display_name="Read Public Procurement Product Page",
+        lifecycle_status=CapabilityLifecycle.BUILDING,
+        business_purpose=(
+            "Read one public HTTPS product page for AOT procurement evidence, "
+            "pricing, vendor verification, and catalog normalization."
+        ),
+        owner_service="Jason Procurement",
+        architectural_capability_ids=frozenset({"JAC-005", "JAC-013"}),
+        risk_level=CapabilityRisk.LOW,
+        data_classifications=frozenset({"public", "internal"}),
+        permitted_execution_modes=frozenset({"deterministic"}),
+        input_schema_reference="schema://jason/procurement-web-product-read/1.0",
+        output_schema_reference="schema://jason/procurement-web-product-read-result/1.0",
+        invoking_roles=frozenset({"orchestrator"}),
+        approval=CapabilityApproval(required=False),
+        evidence=CapabilityEvidence(
+            required=True,
+            requirements=("source URL", "capture timestamp", "content digest"),
+            verification_requirements=(
+                "HTTPS only",
+                "all resolved addresses are public",
+                "bounded response size and redirects",
+            ),
+        ),
+        dependencies=frozenset({"identity.authorization.resolve"}),
+        idempotency_behavior=IdempotencyBehavior.IDEMPOTENT,
+        idempotency_key_required=False,
+        timeout_seconds=30,
+        maximum_attempts=1,
+        failure_behavior=(
+            "Fail closed without credentials, private-address access, "
+            "redirect bypass, or non-HTML fallback."
+        ),
+        tenant_isolation_required=True,
+        client_isolation_required=False,
+        stewardship=CapabilityStewardship(
+            steward="technology-steward",
+            business_justification=(
+                "Allow technicians to paste a public product URL into the governed "
+                "procurement workflow without granting Jason general browser authority."
+            ),
+            review_interval_days=30,
+            retirement_criteria=("Public URL containment cannot be proven.",),
+            authoritative_change_sources=("Python standard library",),
+            last_reviewed_at=now,
+            operational_owner="AOT IT Operations",
+            approval_owner="AOT Owner",
+        ),
+        created_at=now,
+        metadata={
+            "provider_neutral": "true",
+            "read_only": "true",
+            "resource_types": "procurement_product_page,public_web_page",
+            "operation": "read",
+            "selector_keys": "url,max_bytes",
+            "fact_hints": (
+                "product url website retailer vendor price availability sku mpn "
+                "manufacturer model address phone email"
+            ),
+            "canonical_facts": (
+                "page_title,products,organizations,meta,final_url,captured_at"
+            ),
+        },
+    )
+    capabilities.register(capability)
+
+    provider = ExecutionProvider(
+        provider_id=PROVIDER,
+        display_name="Bounded Public Procurement Web",
+        provider_type=ProviderType.EXTERNAL_CONNECTOR,
+        lifecycle_status=ProviderLifecycle.PLANNED,
+        health_status=ProviderHealth.UNKNOWN,
+        approval_status=ProviderApproval.PILOT,
+        execution_modes=frozenset({"deterministic"}),
+        capabilities=frozenset({CAPABILITY}),
+        supported_classifications=frozenset({"public", "internal"}),
+        regions=frozenset(),
+        limits=ProviderLimits(
+            maximum_concurrent_executions=2,
+            maximum_requests_per_minute=30,
+            maximum_execution_seconds=30,
+        ),
+        features=ProviderFeatures(structured_output=True),
+        pricing_profile_id="zero-cost-foundation",
+        stewardship=ProviderStewardship(
+            technology_steward="technology-steward",
+            business_justification=(
+                "Use a bounded credential-free HTTPS reader for procurement evidence."
+            ),
+            review_interval_days=30,
+            last_reviewed_at=now,
+            retirement_criteria=("Public-network containment cannot be proven.",),
+            vendor_change_sources=("Python standard library",),
+            operational_owner="AOT IT Operations",
+            approval_owner="AOT Owner",
+        ),
+        created_at=now,
+        metadata={"read_only": "true"},
+    )
+    providers.register(provider)
+    if os.getenv(PROFILE_ENV, "").strip().casefold() == PROFILE:
+        capabilities.set_lifecycle(
+            capability_name=CAPABILITY,
+            version="1.0",
+            lifecycle_status=CapabilityLifecycle.ACTIVE,
+        )
+        providers.set_approval(
+            provider_id=PROVIDER,
+            approval_status=ProviderApproval.APPROVED,
+        )
+        providers.set_health(
+            provider_id=PROVIDER,
+            health_status=ProviderHealth.HEALTHY,
+        )
+        providers.set_lifecycle(
+            provider_id=PROVIDER,
+            lifecycle_status=ProviderLifecycle.AVAILABLE,
+        )
+
+
+def build_invoker() -> ProcurementWebReadInvoker:
+    return ProcurementWebReadInvoker()
