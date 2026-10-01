@@ -49,6 +49,7 @@ def _validate_request(value: Any) -> dict[str, Any]:
         "tenant_id",
         "organization",
         "operation",
+        "exchange_access_token",
         "arguments",
         "correlation_id",
     }
@@ -72,6 +73,10 @@ def _validate_request(value: Any) -> dict[str, Any]:
     if operation not in _ALLOWED_OPERATIONS:
         raise ValueError("operation is not allowlisted")
 
+    exchange_access_token = str(value.get("exchange_access_token") or "").strip()
+    if not exchange_access_token or len(exchange_access_token) > 16384:
+        raise ValueError("exchange access token is invalid")
+
     arguments = value.get("arguments")
     if arguments is None:
         arguments = {}
@@ -86,6 +91,7 @@ def _validate_request(value: Any) -> dict[str, Any]:
         "tenant_id": tenant_id,
         "organization": organization,
         "operation": operation,
+        "exchange_access_token": exchange_access_token,
         "arguments": arguments,
         "correlation_id": correlation_id,
     }
