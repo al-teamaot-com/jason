@@ -417,13 +417,13 @@ def runtime_microsoft_mail_investigation_from_env(*, transport: HttpTransport):
     role_id_path = Path(
         os.getenv(
             _RUNTIME_MICROSOFT_MAIL_INVESTIGATION_ROLE_ENV,
-            "/run/jason-secrets/openbao/microsoft-mail-investigation/role_id",
+            "/run/jason-secrets/openbao/microsoft-mail/role_id",
         )
     )
     secret_id_path = Path(
         os.getenv(
             _RUNTIME_MICROSOFT_MAIL_INVESTIGATION_SECRET_ENV,
-            "/run/jason-secrets/openbao/microsoft-mail-investigation/secret_id",
+            "/run/jason-secrets/openbao/microsoft-mail/secret_id",
         )
     )
     return build_microsoft_mail_investigation_runtime(
