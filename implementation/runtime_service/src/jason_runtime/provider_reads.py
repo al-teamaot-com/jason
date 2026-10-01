@@ -13,11 +13,15 @@ from connectors.datto_rmm.connector import DattoRmmConnector
 from connectors.it_glue.capability_manifest import build_it_glue_manifest
 from connectors.it_glue.connector import ItGlueConnector
 from connectors.microsoft_graph.capability_manifest import build_microsoft_graph_manifest
+from connectors.microsoft_exchange.capability_manifest import build_microsoft_exchange_manifest
+from connectors.microsoft_exchange.connector import MicrosoftExchangeReadConnector
+from connectors.microsoft_exchange.worker_client import ExchangeReadWorkerClient, read_worker_token
 from connectors.microsoft_graph.directory_connector import MicrosoftGraphDirectoryConnector
 from connectors.microsoft_graph.mailbox_connector import MicrosoftGraphMailboxConnector
 from connectors.microsoft_graph.security_posture import MicrosoftGraphSecurityPostureReader
 from connectors.microsoft_graph.security_posture_connector import MicrosoftGraphSecurityPostureConnector
 from kernel.capabilities import CapabilityRegistryService
+from kernel.client_boundaries import SQLiteClientBoundaryRepository, SQLiteClientBoundaryStore
 from kernel.execution_providers import ExecutionProviderRegistryService
 from orchestrator.autotask_information_authorizer import (
     AutotaskImpersonationInformationAuthorizer,
@@ -67,6 +71,18 @@ from orchestrator.provider_read_capability_catalog import (
     IT_GLUE_PROVIDER,
     MICROSOFT_GRAPH_CAPABILITIES,
     MICROSOFT_GRAPH_PROVIDER,
+    MICROSOFT_EXCHANGE_CAPABILITIES,
+    MICROSOFT_EXCHANGE_PROVIDER,
+    COMMUNICATION_MAIL_TRACE_SEARCH,
+    COMMUNICATION_MAIL_TRACE_DETAIL,
+    COMMUNICATION_MAILBOX_FORWARDING_READ,
+    COMMUNICATION_MAILBOX_INBOX_RULES_READ,
+    COMMUNICATION_MAILBOX_FULL_ACCESS_READ,
+    COMMUNICATION_MAILBOX_SEND_AS_READ,
+    COMMUNICATION_MAILBOX_SEND_ON_BEHALF_READ,
+    COMMUNICATION_MAILBOX_TRANSPORT_RULES_READ,
+    COMMUNICATION_MAILBOX_MOBILE_DEVICES_READ,
+    COMMUNICATION_MAILBOX_RETENTION_AUDIT_READ,
     SERVICE_COMPANY_READ,
     SERVICE_COMPANY_SEARCH,
     SERVICE_CONFIGURATION_READ,
@@ -176,6 +192,16 @@ _PROVIDER_CAPABILITY_MAP = {
     (MICROSOFT_GRAPH_PROVIDER, IDENTITY_CONDITIONAL_ACCESS_SEARCH): "microsoft_graph.conditional_access.list",
     (MICROSOFT_GRAPH_PROVIDER, IDENTITY_DIRECTORY_ROLE_SEARCH): "microsoft_graph.directory_roles.list",
     (MICROSOFT_GRAPH_PROVIDER, IDENTITY_DIRECTORY_ROLE_MEMBERS_SEARCH): "microsoft_graph.directory_role_members.list",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAIL_TRACE_SEARCH): "microsoft_exchange.message_trace.search",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAIL_TRACE_DETAIL): "microsoft_exchange.message_trace.detail",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAILBOX_FORWARDING_READ): "microsoft_exchange.mailbox.forwarding.read",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAILBOX_INBOX_RULES_READ): "microsoft_exchange.mailbox.inbox_rules.read_hidden",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAILBOX_FULL_ACCESS_READ): "microsoft_exchange.mailbox.full_access.read",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAILBOX_SEND_AS_READ): "microsoft_exchange.mailbox.send_as.read",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAILBOX_SEND_ON_BEHALF_READ): "microsoft_exchange.mailbox.send_on_behalf.read",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAILBOX_TRANSPORT_RULES_READ): "microsoft_exchange.mailbox.transport_rules.read",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAILBOX_MOBILE_DEVICES_READ): "microsoft_exchange.mailbox.mobile_devices.read",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAILBOX_RETENTION_AUDIT_READ): "microsoft_exchange.mailbox.retention_audit_config.read",
 }
 
 _DATTO_AUTOMATION_CAPABILITIES = frozenset(
@@ -209,6 +235,8 @@ _RUNTIME_MICROSOFT_SECRET_ENV = "JASON_MICROSOFT_OPENBAO_SECRET_ID_PATH"
 _RUNTIME_MICROSOFT_MAIL_ROLE_ENV = "JASON_MICROSOFT_MAIL_OPENBAO_ROLE_ID_PATH"
 _RUNTIME_MICROSOFT_MAIL_SECRET_ENV = "JASON_MICROSOFT_MAIL_OPENBAO_SECRET_ID_PATH"
 _RUNTIME_MICROSOFT_MAILBOXES_ENV = "JASON_MICROSOFT_MAIL_APPROVED_MAILBOXES"
+_RUNTIME_MICROSOFT_EXCHANGE_WORKER_ENABLED_ENV = "JASON_MICROSOFT_EXCHANGE_READ_ENABLED"
+_RUNTIME_MICROSOFT_EXCHANGE_WORKER_TOKEN_FILE_ENV = "JASON_MICROSOFT_EXCHANGE_WORKER_TOKEN_FILE"
 
 
 def register_provider_read_runtime_foundation(
@@ -228,6 +256,7 @@ def register_provider_read_runtime_foundation(
     integration_broker.register(build_it_glue_manifest())
     integration_broker.register(build_autotask_manifest())
     integration_broker.register(build_microsoft_graph_manifest())
+    integration_broker.register(build_microsoft_exchange_manifest())
     apply_provider_read_activation_from_env(
         capabilities=capabilities,
         providers=providers,
@@ -340,6 +369,38 @@ def runtime_microsoft_mail_from_env(*, transport: HttpTransport):
         role_id_path=role_id_path,
         secret_id_path=secret_id_path,
         transport=transport,
+    )
+
+
+def runtime_microsoft_exchange_from_env(*, transport: HttpTransport, audit: AuditSink):
+    enabled = os.getenv(
+        _RUNTIME_MICROSOFT_EXCHANGE_WORKER_ENABLED_ENV, ""
+    ).strip().casefold() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return None
+
+    token_path = Path(
+        os.getenv(
+            _RUNTIME_MICROSOFT_EXCHANGE_WORKER_TOKEN_FILE_ENV,
+            "/run/jason-secrets/microsoft-exchange/worker-token",
+        )
+    )
+    boundary_db = Path(
+        os.getenv(
+            _RUNTIME_MICROSOFT_BOUNDARY_ENV,
+            "/var/lib/jason/authority/client-boundaries.sqlite3",
+        )
+    )
+    store = SQLiteClientBoundaryStore(boundary_db)
+    boundaries = SQLiteClientBoundaryRepository(store)
+    worker = ExchangeReadWorkerClient(
+        transport=transport,
+        worker_token=read_worker_token(token_path),
+    )
+    return MicrosoftExchangeReadConnector(
+        worker=worker,
+        boundaries=boundaries,
+        audit=audit,
     )
 
 
@@ -462,6 +523,13 @@ def build_provider_read_invoker(
                 return directory_connector.execute(request)
         connectors[MICROSOFT_GRAPH_PROVIDER] = _MicrosoftCompositeConnector()
 
+    microsoft_exchange = runtime_microsoft_exchange_from_env(
+        transport=transport,
+        audit=audit,
+    )
+    if microsoft_exchange is not None:
+        connectors[MICROSOFT_EXCHANGE_PROVIDER] = microsoft_exchange
+
     delegate = GovernedConnectorCapabilityInvoker(
         connectors=connectors,
         provider_capability_map=_PROVIDER_CAPABILITY_MAP,
@@ -485,6 +553,8 @@ def build_provider_read_invoker(
         | AUTOTASK_CAPABILITIES
         | MICROSOFT_GRAPH_CAPABILITIES
     )
+    if microsoft_exchange is not None:
+        standard_capabilities = standard_capabilities | MICROSOFT_EXCHANGE_CAPABILITIES
     routes: dict[str, CapabilityInvoker] = {
         capability: governed_provider_reads
         for capability in standard_capabilities
@@ -526,6 +596,7 @@ def register_provider_read_invokers(
         IT_GLUE_CAPABILITIES
         | AUTOTASK_CAPABILITIES
         | MICROSOFT_GRAPH_CAPABILITIES
+        | MICROSOFT_EXCHANGE_CAPABILITIES
     )
 
     if isinstance(invoker, CanonicalCapabilityRoutingInvoker):
