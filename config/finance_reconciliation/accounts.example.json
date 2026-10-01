@@ -1,0 +1,20 @@
+{
+  "accounts": [
+    {
+      "account_id": "example-operating-001",
+      "display_name": "Example Operating Account",
+      "institution": "Example Bank",
+      "account_type": "bank_checking",
+      "masked_identifier": "****1234",
+      "parser_profile": "example-bank-v1",
+      "statement_cadence": "monthly",
+      "source_intake_location": "sharepoint://finance/reconciliation/inbox/example-operating-001",
+      "output_workbook": "sharepoint://finance/reconciliation/reconciliation.xlsx",
+      "output_target": "Operating!Transactions",
+      "reviewer": "finance-reviewer",
+      "status": "pilot",
+      "date_tolerance_days": 3,
+      "currency": "USD"
+    }
+  ]
+}
