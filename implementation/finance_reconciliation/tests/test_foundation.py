@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
@@ -82,15 +83,13 @@ def extraction(transactions, *, closing="1150.00", declared_increase=None, decla
 
 def test_account_registry_adds_and_removes_accounts_by_configuration():
     first = account()
-    second = FinanceAccountConfig(
-        **{
-            **first.__dict__,
-            "account_id": "card-001",
-            "display_name": "Test Card",
-            "masked_identifier": "****9876",
-            "account_type": AccountType.CREDIT_CARD,
-            "status": AccountStatus.ACTIVE,
-        }
+    second = replace(
+        first,
+        account_id="card-001",
+        display_name="Test Card",
+        masked_identifier="****9876",
+        account_type=AccountType.CREDIT_CARD,
+        status=AccountStatus.ACTIVE,
     )
     registry = FinanceAccountRegistry.from_records([first, second])
     assert [item.account_id for item in registry.enabled_accounts()] == [
