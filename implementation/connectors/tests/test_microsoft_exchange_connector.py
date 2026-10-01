@@ -21,6 +21,12 @@ class Worker:
         return {"items": [], "count": 0}
 
 
+class Tokens:
+    def access_token_for_tenant(self, *, microsoft_tenant_id):
+        assert microsoft_tenant_id == "f7054323-d52b-4863-8c2f-1898f0b6077c"
+        return "exo-token"
+
+
 class Audit:
     def record(self, *args, **kwargs):
         pass
@@ -40,7 +46,7 @@ def boundary(profile="mail-investigation-read", scopes=("exchange_org:absolnet.o
     return ClientBoundary(
         id="boundary-1",
         client_id="0",
-        provider="microsoft_graph",
+        provider="microsoft_365_mail_investigation",
         external_tenant_id="f7054323-d52b-4863-8c2f-1898f0b6077c",
         primary_domain="teamaot.com",
         profile=profile,
@@ -67,6 +73,7 @@ def test_connector_derives_tenant_and_exchange_domain_from_client_boundary():
     worker = Worker()
     connector = MicrosoftExchangeReadConnector(
         worker=worker,
+        exchange_tokens=Tokens(),
         boundaries=Boundaries(boundary()),
         audit=Audit(),
     )
@@ -80,11 +87,13 @@ def test_connector_derives_tenant_and_exchange_domain_from_client_boundary():
     assert call["microsoft_tenant_id"] == "f7054323-d52b-4863-8c2f-1898f0b6077c"
     assert call["organization"] == "absolnet.onmicrosoft.com"
     assert call["operation"] == "mailbox.forwarding.read"
+    assert call["exchange_access_token"] == "exo-token"
 
 
 def test_conversation_cannot_override_tenant_or_exchange_organization():
     connector = MicrosoftExchangeReadConnector(
         worker=Worker(),
+        exchange_tokens=Tokens(),
         boundaries=Boundaries(boundary()),
         audit=Audit(),
     )
@@ -105,6 +114,7 @@ def test_conversation_cannot_override_tenant_or_exchange_organization():
 def test_connector_requires_mail_investigation_profile():
     connector = MicrosoftExchangeReadConnector(
         worker=Worker(),
+        exchange_tokens=Tokens(),
         boundaries=Boundaries(boundary(profile="directory-read")),
         audit=Audit(),
     )
@@ -120,6 +130,7 @@ def test_connector_requires_mail_investigation_profile():
 def test_connector_requires_exchange_organization_binding():
     connector = MicrosoftExchangeReadConnector(
         worker=Worker(),
+        exchange_tokens=Tokens(),
         boundaries=Boundaries(boundary(scopes=())),
         audit=Audit(),
     )
