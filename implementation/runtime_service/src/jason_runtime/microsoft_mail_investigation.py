@@ -17,6 +17,7 @@ from kernel.client_boundaries import SQLiteClientBoundaryRepository, SQLiteClien
 class MicrosoftMailInvestigationRuntime:
     store: SQLiteClientBoundaryStore
     boundaries: SQLiteClientBoundaryRepository
+    tokens: GovernedTenantApplicationTokenProvider
     reader: MicrosoftGraphMailboxReader
 
 
@@ -56,6 +57,7 @@ def build_microsoft_mail_investigation_runtime(
     return MicrosoftMailInvestigationRuntime(
         store=store,
         boundaries=boundaries,
+        tokens=tenant_tokens,
         reader=MicrosoftGraphMailboxReader(
             tokens=tenant_tokens,
             transport=transport,
