@@ -21,6 +21,8 @@ from connectors.microsoft_graph.mailbox_connector import MicrosoftGraphMailboxCo
 from connectors.microsoft_graph.mail_investigation_connector import MicrosoftGraphMailInvestigationConnector
 from connectors.microsoft_graph.security_posture import MicrosoftGraphSecurityPostureReader
 from connectors.microsoft_graph.security_posture_connector import MicrosoftGraphSecurityPostureConnector
+from connectors.microsoft_purview.connector import MicrosoftPurviewMailInvestigationConnector
+from connectors.microsoft_purview.exchange_audit_reader import MicrosoftPurviewExchangeAuditReader
 from kernel.capabilities import CapabilityRegistryService
 from kernel.client_boundaries import SQLiteClientBoundaryRepository, SQLiteClientBoundaryStore
 from kernel.execution_providers import ExecutionProviderRegistryService
@@ -92,6 +94,9 @@ from orchestrator.provider_read_capability_catalog import (
     COMMUNICATION_MAILBOX_TRANSPORT_RULES_READ,
     COMMUNICATION_MAILBOX_MOBILE_DEVICES_READ,
     COMMUNICATION_MAILBOX_RETENTION_AUDIT_READ,
+    COMMUNICATION_MAILBOX_AUDIT_SEARCH,
+    MICROSOFT_PURVIEW_CAPABILITIES,
+    MICROSOFT_PURVIEW_PROVIDER,
     SERVICE_COMPANY_READ,
     SERVICE_COMPANY_SEARCH,
     SERVICE_CONFIGURATION_READ,
@@ -215,6 +220,7 @@ _PROVIDER_CAPABILITY_MAP = {
     (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAILBOX_TRANSPORT_RULES_READ): "microsoft_exchange.mailbox.transport_rules.read",
     (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAILBOX_MOBILE_DEVICES_READ): "microsoft_exchange.mailbox.mobile_devices.read",
     (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAILBOX_RETENTION_AUDIT_READ): "microsoft_exchange.mailbox.retention_audit_config.read",
+    (MICROSOFT_PURVIEW_PROVIDER, COMMUNICATION_MAILBOX_AUDIT_SEARCH): "microsoft_purview.mailbox.audit.search",
 }
 
 _DATTO_AUTOMATION_CAPABILITIES = frozenset(
@@ -608,6 +614,22 @@ def build_provider_read_invoker(
     if microsoft_exchange is not None:
         connectors[MICROSOFT_EXCHANGE_PROVIDER] = microsoft_exchange
 
+    microsoft_purview = None
+    if (
+        raw_microsoft_bindings is not None
+        and "mail_investigation_runtime" in locals()
+        and mail_investigation_runtime is not None
+    ):
+        microsoft_purview = MicrosoftPurviewMailInvestigationConnector(
+            reader=MicrosoftPurviewExchangeAuditReader(
+                tokens=mail_investigation_runtime.tokens,
+                transport=transport,
+            ),
+            boundaries=mail_investigation_runtime.boundaries,
+            audit=audit,
+        )
+        connectors[MICROSOFT_PURVIEW_PROVIDER] = microsoft_purview
+
     delegate = GovernedConnectorCapabilityInvoker(
         connectors=connectors,
         provider_capability_map=_PROVIDER_CAPABILITY_MAP,
@@ -645,6 +667,8 @@ def build_provider_read_invoker(
         )
     if microsoft_exchange is not None:
         standard_capabilities = standard_capabilities | MICROSOFT_EXCHANGE_CAPABILITIES
+    if microsoft_purview is not None:
+        standard_capabilities = standard_capabilities | MICROSOFT_PURVIEW_CAPABILITIES
     routes: dict[str, CapabilityInvoker] = {
         capability: governed_provider_reads
         for capability in standard_capabilities
@@ -688,6 +712,7 @@ def register_provider_read_invokers(
         | MICROSOFT_GRAPH_CAPABILITIES
         | MICROSOFT_GRAPH_MAIL_INVESTIGATION_CAPABILITIES
         | MICROSOFT_EXCHANGE_CAPABILITIES
+        | MICROSOFT_PURVIEW_CAPABILITIES
     )
 
     if isinstance(invoker, CanonicalCapabilityRoutingInvoker):
