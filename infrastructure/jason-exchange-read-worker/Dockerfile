@@ -7,8 +7,6 @@ RUN apt-get update \
 
 ENV JASON_EXCHANGE_WORKER_HOST=0.0.0.0 \
     JASON_EXCHANGE_WORKER_PORT=8091 \
-    JASON_EXCHANGE_CERTIFICATE_PFX=/run/jason-secrets/microsoft-exchange/certificate.pfx \
-    JASON_EXCHANGE_CERTIFICATE_PASSWORD_FILE=/run/jason-secrets/microsoft-exchange/certificate-password \
     JASON_EXCHANGE_WORKER_TOKEN_FILE=/run/jason-secrets/microsoft-exchange/worker-token
 
 WORKDIR /app
