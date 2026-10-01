@@ -66,3 +66,35 @@ def test_reasoning_maintenance_rejects_tampered_request(tmp_path: Path):
     response = json.loads((tmp_path / 'reasoning' / 'responses' / f"{request['request_id']}.json").read_text())
     assert response['status'] == 'failed'
     assert 'fingerprint' in response['error']
+
+
+def test_completed_requests_do_not_starve_later_pending_request(tmp_path: Path):
+    client = Client()
+    request_dir = tmp_path / 'reasoning' / 'requests'
+    response_dir = tmp_path / 'reasoning' / 'responses'
+    request_dir.mkdir(parents=True)
+    response_dir.mkdir(parents=True)
+
+    # Four alphabetically earlier requests are already complete. The bounded
+    # processor must select from unresolved requests rather than slicing first.
+    for index in range(4):
+        name = f'0{index}.json'
+        (request_dir / name).write_text('{}', encoding='utf-8')
+        (response_dir / name).write_text('{"status":"succeeded"}', encoding='utf-8')
+
+    request = _request('search_plan')
+    pending_path = request_dir / f"{request['request_id']}.json"
+    pending_path.write_text(json.dumps(request), encoding='utf-8')
+
+    maintenance = SupportRepairReasoningMaintenance(
+        structured_client=client,
+        spool=tmp_path,
+        interval_seconds=1,
+    )
+
+    assert maintenance.tick() is True
+    response_path = response_dir / pending_path.name
+    assert response_path.exists()
+    response = json.loads(response_path.read_text(encoding='utf-8'))
+    assert response['status'] == 'succeeded'
+    assert len(client.calls) == 1
