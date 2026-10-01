@@ -17,6 +17,7 @@ import {
 } from "./bridge-core.mjs";
 import { createApprovalDecisionStore } from "./approval-decision-store.mjs";
 import { resolveProactiveSendResult } from "./proactive-send-result.mjs";
+import { ensureTeamsUserBootstrap, TeamsBootstrapError } from "./teams-user-bootstrap.mjs";
 
 const PORT = Number(process.env.PORT ?? 3979);
 const OPENCLAW_CONFIG_PATH =
@@ -36,6 +37,12 @@ const PROACTIVE_STORE_PATH = process.env.JASON_TEAMS_PROACTIVE_STORE_PATH ?? "/v
 const APPROVAL_DECISION_STORE_PATH = process.env.JASON_TEAMS_APPROVAL_DECISION_STORE_PATH ?? "/var/lib/jason-teams/approval-decisions.json";
 const PROACTIVE_TOKEN_FILE = nonBlank(process.env.JASON_TEAMS_PROACTIVE_TOKEN_FILE);
 const PROACTIVE_TOKEN = loadProactiveToken();
+const TEAMS_CATALOG_APP_ID = nonBlank(process.env.JASON_TEAMS_CATALOG_APP_ID) ?? "1b24025a-201f-439d-a4ef-e308c7f3d853";
+const LEGACY_TEAMS_CATALOG_APP_IDS = (nonBlank(process.env.JASON_TEAMS_LEGACY_CATALOG_APP_IDS) ?? "686aa9d3-e41b-4af2-9fbf-74f83a7ffc32")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const ACCEPTED_TEAMS_CATALOG_APP_IDS = [TEAMS_CATALOG_APP_ID, ...LEGACY_TEAMS_CATALOG_APP_IDS];
 const approvalDecisions = createApprovalDecisionStore({ path: APPROVAL_DECISION_STORE_PATH });
 
 function loadProactiveToken() {
@@ -429,12 +436,24 @@ server.post("/internal/proactive/send", async (req, res) => {
     res.status(403).json({ status: "rejected", error_code: "tenant_mismatch" });
     return;
   }
+  if (!isUuid(TEAMS_CATALOG_APP_ID) || ACCEPTED_TEAMS_CATALOG_APP_IDS.some((appId) => !isUuid(appId))) {
+    res.status(500).json({ status: "failed", error_code: "app_not_published" });
+    return;
+  }
   const record = loadProactiveStore()[aadObjectId.toLowerCase()];
   if (record && record.tenantId?.toLowerCase() !== tenantId.toLowerCase()) {
     res.status(403).json({ status: "rejected", error_code: "stored_tenant_mismatch" });
     return;
   }
   try {
+    const bootstrap = await ensureTeamsUserBootstrap({
+      aadObjectId,
+      tenantId,
+      clientId: auth.clientId,
+      clientSecret: auth.clientSecret,
+      catalogAppId: TEAMS_CATALOG_APP_ID,
+      acceptedCatalogAppIds: ACCEPTED_TEAMS_CATALOG_APP_IDS,
+    });
     let messageId;
     let evidenceType = null;
     let syntheticMessageId = false;
@@ -466,10 +485,21 @@ server.post("/internal/proactive/send", async (req, res) => {
       message_id_synthetic: syntheticMessageId,
       conversation_id: conversationId,
       bootstrap_created: bootstrapCreated,
+      app_installation: bootstrap.appInstallation,
     });
   } catch (error) {
-    console.error(JSON.stringify({ event: "jason_teams_proactive_failed", aadObjectId, error: String(error?.message ?? error) }));
-    res.status(502).json({ status: "failed", error_code: "teams_send_failed" });
+    const bootstrapCode = error instanceof TeamsBootstrapError ? error.code : null;
+    console.error(JSON.stringify({
+      event: "jason_teams_proactive_failed",
+      aadObjectId,
+      errorCode: bootstrapCode ?? "teams_send_failed",
+      error: String(error?.message ?? error),
+    }));
+    const status = bootstrapCode === "identity_not_found" ? 404
+      : bootstrapCode === "identity_not_authorized" ? 403
+      : bootstrapCode === "conversation_pending" ? 503
+      : 502;
+    res.status(status).json({ status: "failed", error_code: bootstrapCode ?? "teams_send_failed" });
   }
 });
 
