@@ -209,7 +209,7 @@ def test_aot_spending_authority_must_use_company_zero_contact() -> None:
         requester_name="Adam Navrat",
         requester_contact_id=30684918,
         requester_company_id=1156,
-        spending_limit=Decimal("1000"),
+        spending_limit=Decimal("1375.42"),
         vendor=_verified_vendor(),
         lines=(_it_line(),),
     )
@@ -217,34 +217,32 @@ def test_aot_spending_authority_must_use_company_zero_contact() -> None:
         submission.validate()
 
 
-def test_at_or_below_spend_limit_requires_no_owner_approval() -> None:
+@pytest.mark.parametrize(
+    ("udf_limit", "commitment", "requires_approval"),
+    (
+        ("0.00", "0.01", True),
+        ("250.00", "250.00", False),
+        ("250.00", "250.01", True),
+        ("1732.45", "1732.45", False),
+        ("1732.45", "1732.46", True),
+    ),
+)
+def test_spend_authority_uses_current_autotask_udf_value(
+    udf_limit: str,
+    commitment: str,
+    requires_approval: bool,
+) -> None:
+    total = Decimal(commitment)
     submission = ProcurementSubmission(
         requester_name="Adam Navrat",
         requester_contact_id=30684918,
         requester_company_id=0,
-        spending_limit=Decimal("1000"),
+        spending_limit=Decimal(udf_limit),
         vendor=_verified_vendor(),
-        lines=(_it_line("900.00"),),
-        freight=Decimal("50.00"),
-        tax=Decimal("50.00"),
+        lines=(_it_line(str(total)),),
     )
-    assert submission.total_commitment == Decimal("1000.00")
-    assert submission.requires_owner_approval is False
-
-
-def test_one_cent_over_spend_limit_requires_owner_approval() -> None:
-    submission = ProcurementSubmission(
-        requester_name="Adam Navrat",
-        requester_contact_id=30684918,
-        requester_company_id=0,
-        spending_limit=Decimal("1000"),
-        vendor=_verified_vendor(),
-        lines=(_it_line("900.00"),),
-        freight=Decimal("50.00"),
-        tax=Decimal("50.01"),
-    )
-    assert submission.total_commitment == Decimal("1000.01")
-    assert submission.requires_owner_approval is True
+    assert submission.total_commitment == total
+    assert submission.requires_owner_approval is requires_approval
 
 
 def test_customer_bound_it_must_be_billed_to_exact_ticket() -> None:
@@ -299,7 +297,7 @@ def test_digest_changes_when_material_selection_changes() -> None:
         requester_name="Adam Navrat",
         requester_contact_id=30684918,
         requester_company_id=0,
-        spending_limit=Decimal("1000"),
+        spending_limit=Decimal("1375.42"),
         vendor=_verified_vendor(),
         lines=(_it_line("900.00"),),
     )
@@ -307,7 +305,7 @@ def test_digest_changes_when_material_selection_changes() -> None:
         requester_name="Adam Navrat",
         requester_contact_id=30684918,
         requester_company_id=0,
-        spending_limit=Decimal("1000"),
+        spending_limit=Decimal("1375.42"),
         vendor=_verified_vendor(),
         lines=(_it_line("901.00"),),
     )
