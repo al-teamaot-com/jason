@@ -66,3 +66,5 @@ The first production migration should be one existing low-risk playbook in shado
 ## Documentation impact
 
 This runtime adds a new machine-readable playbook representation and administration surface while preserving the existing canonical Markdown playbooks during incremental migration.
+
+Activation changes registry state only; separate Jason authority remains mandatory for every governed capability execution.
