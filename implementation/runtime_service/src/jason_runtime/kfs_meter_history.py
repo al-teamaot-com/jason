@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo
 
+from kernel.identity_authority import AuthorityGrant, PermissionMode
 from kernel.resolution import CapabilityResolutionResult
 from orchestrator.contracts import OrchestrationRequest
 from orchestrator.print_capability_catalog import (
@@ -14,6 +15,39 @@ from orchestrator.print_capability_catalog import (
     PRINT_METER_USAGE_READ,
 )
 from orchestrator.service import InvocationResult
+
+
+METER_HISTORY_AUTHORITY_GRANTS = (
+    ("production-kfs-read-print-meter-history-search", PRINT_METER_HISTORY_SEARCH),
+    ("production-kfs-read-print-meter-usage-read", PRINT_METER_USAGE_READ),
+)
+
+
+def ensure_meter_history_read_authority(identity_authority, *, enabled: bool) -> tuple[str, ...]:
+    """Seed the same AOT organization-wide observe authority as current KFS reads."""
+    if not enabled:
+        return ()
+    created: list[str] = []
+    for grant_id, capability in METER_HISTORY_AUTHORITY_GRANTS:
+        grant = AuthorityGrant(
+            grant_id=grant_id,
+            subject_id="organization:aot",
+            capability=capability,
+            organization_id="aot",
+            client_id=None,
+            permission=PermissionMode.OBSERVE,
+            approval_required=False,
+            status="active",
+        )
+        existing = identity_authority.grants.get(grant.grant_id)
+        if existing is None:
+            identity_authority.grants.put(grant)
+            created.append(grant.grant_id)
+        elif existing != grant:
+            raise RuntimeError(
+                f"KFS meter-history authority grant conflicts: {grant.grant_id}"
+            )
+    return tuple(created)
 
 
 DEFAULT_COUNTERS = (

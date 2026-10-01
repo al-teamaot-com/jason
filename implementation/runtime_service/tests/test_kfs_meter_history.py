@@ -4,6 +4,7 @@ import pytest
 
 from jason_runtime.kfs_meter_history import (
     GovernedKfsMeterHistoryInvoker,
+    ensure_meter_history_read_authority,
     resolve_period,
 )
 from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
@@ -12,6 +13,22 @@ from orchestrator.print_capability_catalog import (
     PRINT_METER_HISTORY_SEARCH,
     PRINT_METER_USAGE_READ,
 )
+
+
+class FakeGrantRepository:
+    def __init__(self):
+        self.values = {}
+
+    def get(self, grant_id):
+        return self.values.get(grant_id)
+
+    def put(self, grant):
+        self.values[grant.grant_id] = grant
+
+
+class FakeAuthority:
+    def __init__(self):
+        self.grants = FakeGrantRepository()
 
 
 class FakeStore:
@@ -60,6 +77,37 @@ def resolution(capability):
         selected_provider_id=KYOCERA_KFS_PROVIDER,
         capability_name=capability,
     )
+
+
+def test_meter_history_authority_seeds_exact_aot_observe_grants():
+    authority = FakeAuthority()
+    created = ensure_meter_history_read_authority(authority, enabled=True)
+
+    assert created == (
+        "production-kfs-read-print-meter-history-search",
+        "production-kfs-read-print-meter-usage-read",
+    )
+    grants = list(authority.grants.values.values())
+    assert {grant.capability for grant in grants} == {
+        PRINT_METER_HISTORY_SEARCH,
+        PRINT_METER_USAGE_READ,
+    }
+    assert all(grant.subject_id == "organization:aot" for grant in grants)
+    assert all(grant.organization_id == "aot" for grant in grants)
+    assert all(grant.client_id is None for grant in grants)
+    assert all(grant.permission.value == "observe" for grant in grants)
+    assert all(grant.approval_required is False for grant in grants)
+
+
+def test_meter_history_authority_is_idempotent_and_disabled_by_default():
+    authority = FakeAuthority()
+    assert ensure_meter_history_read_authority(authority, enabled=False) == ()
+    assert authority.grants.values == {}
+
+    first = ensure_meter_history_read_authority(authority, enabled=True)
+    second = ensure_meter_history_read_authority(authority, enabled=True)
+    assert len(first) == 2
+    assert second == ()
 
 
 def test_month_resolves_in_business_timezone():
