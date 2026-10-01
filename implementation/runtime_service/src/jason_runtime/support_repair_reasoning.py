@@ -204,10 +204,13 @@ class SupportRepairReasoningMaintenance:
         response_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
 
         processed = False
-        for path in sorted(request_dir.glob('*.json'))[:4]:
+        pending = [
+            path
+            for path in sorted(request_dir.glob('*.json'))
+            if not (response_dir / path.name).exists()
+        ]
+        for path in pending[:4]:
             response_path = response_dir / path.name
-            if response_path.exists():
-                continue
             try:
                 raw = json.loads(path.read_text(encoding='utf-8'))
                 if not isinstance(raw, Mapping):
