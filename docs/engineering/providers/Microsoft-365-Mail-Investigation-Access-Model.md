@@ -109,6 +109,62 @@ The onboarding implementation should create and validate an Exchange Application
 
 If a client contract requires narrower scope, the Kernel Client Boundary may reference a client-specific approved scope.
 
+## 6. Exchange Execution Transport
+
+Jason core remains Python/API-driven. Technicians do not run PowerShell and the Central Orchestrator must not accept or execute arbitrary PowerShell text.
+
+Some CAP-003 evidence is available through supported HTTP APIs and should be read directly:
+
+- Microsoft Graph: mailbox message/folder evidence, sign-ins, directory/service-principal/OAuth correlation;
+- Microsoft Purview Audit Search Graph API: mailbox audit events.
+
+Exchange-specific evidence that is only exposed through Exchange Online management cmdlets must run through a dedicated governed provider adapter.
+
+### Recommended implementation
+
+Run a small **Exchange Online read worker** beside the Jason runtime.
+
+The worker may use PowerShell 7 + the pinned ExchangeOnlineManagement module internally, including on the Linux Jason host/container. PowerShell is an implementation dependency of this provider worker, not a technician-facing tool and not an unrestricted Jason shell capability.
+
+The Python provider adapter sends typed operations such as:
+
+- `message_trace.search`
+- `message_trace.detail`
+- `mailbox.forwarding.read`
+- `mailbox.inbox_rules.read_hidden`
+- `mailbox.full_access.read`
+- `mailbox.send_as.read`
+- `mailbox.send_on_behalf.read`
+- `mailbox.transport_rules.read`
+- `mailbox.mobile_devices.read`
+- `mailbox.retention_audit_config.read`
+
+The worker maps each operation to a fixed, allowlisted Exchange command and fixed argument schema. It must reject arbitrary cmdlet names, arbitrary scripts, pipelines, command strings, file execution, and mutation commands.
+
+### Authentication and session behavior
+
+- authenticate app-only with the AOT certificate identity;
+- derive the tenant only from the validated Kernel Client Boundary;
+- retrieve certificate material only from the approved secret boundary;
+- automatically create/refresh Exchange sessions;
+- optionally pool healthy tenant sessions with bounded idle lifetime;
+- reconnect automatically when a session expires;
+- never prompt a technician for Microsoft authentication;
+- never persist client credentials or interactive refresh tokens.
+
+A provider reconnect is normal runtime behavior and must not be surfaced as "reauthentication required" unless tenant consent, RBAC, certificate validity, or the client boundary is actually broken.
+
+### Packaging
+
+Prefer a pinned container/sidecar image containing:
+
+- PowerShell 7;
+- a reviewed ExchangeOnlineManagement module version;
+- the narrow worker wrapper;
+- no interactive shell exposure to agents or technicians.
+
+This makes Exchange module/version changes independently testable and avoids coupling Jason core Python dependencies to Microsoft PowerShell module behavior.
+
 ## 6. Exchange Read Role Group
 
 Create one client-local Exchange role group for the service principal:
