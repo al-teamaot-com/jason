@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from connectors.core.contracts import ConnectorTransportError
+
 
 DEFAULT_SPOOL = Path('/var/lib/jason/openclaw/support-repair')
 _ALLOWED_KINDS = {'search_plan', 'edit_plan', 'acceptance_review'}
@@ -116,10 +118,11 @@ class SupportRepairReasoningMaintenance:
     deterministically validates every proposed path and exact-text replacement.
     """
 
-    def __init__(self, *, structured_client, spool: Path = DEFAULT_SPOOL, interval_seconds: int = 5, now=None) -> None:
+    def __init__(self, *, structured_client, fallback_structured_client=None, spool: Path = DEFAULT_SPOOL, interval_seconds: int = 5, now=None) -> None:
         if interval_seconds < 1:
             raise ValueError('support repair reasoning interval must be positive')
         self.structured_client = structured_client
+        self.fallback_structured_client = fallback_structured_client
         self.spool = Path(spool)
         self.interval_seconds = int(interval_seconds)
         self.now = now or (lambda: datetime.now(timezone.utc))
@@ -185,12 +188,23 @@ class SupportRepairReasoningMaintenance:
             sort_keys=True,
             ensure_ascii=False,
         )
-        return self.structured_client.complete(
-            system=system,
-            user=user,
-            schema=schema,
-            max_output_tokens=4096,
-        )
+        try:
+            return self.structured_client.complete(
+                system=system,
+                user=user,
+                schema=schema,
+                max_output_tokens=4096,
+            )
+        except ConnectorTransportError as exc:
+            transient = exc.status_code is None or exc.status_code in {408, 425, 429, 500, 502, 503, 504}
+            if self.fallback_structured_client is None or not transient:
+                raise
+            return self.fallback_structured_client.complete(
+                system=system,
+                user=user,
+                schema=schema,
+                max_output_tokens=4096,
+            )
 
     def tick(self) -> bool:
         current = self.now()
@@ -204,13 +218,43 @@ class SupportRepairReasoningMaintenance:
         response_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
 
         processed = False
+        def should_process(path: Path) -> bool:
+            response_path = response_dir / path.name
+            if not response_path.exists():
+                return True
+            try:
+                prior = json.loads(response_path.read_text(encoding='utf-8'))
+            except (OSError, ValueError, json.JSONDecodeError):
+                return False
+            if not isinstance(prior, Mapping) or prior.get('status') != 'failed':
+                return False
+            attempts = int(prior.get('attempts') or 0)
+            error = str(prior.get('error') or '')
+            transient = (
+                prior.get('error_type') == 'ConnectorTransportError'
+                and (
+                    'status 429' in error
+                    or any(f'status {code}' in error for code in (408, 425, 500, 502, 503, 504))
+                    or 'status ' not in error
+                )
+            )
+            return transient and attempts < 2
+
         pending = [
             path
             for path in sorted(request_dir.glob('*.json'))
-            if not (response_dir / path.name).exists()
+            if should_process(path)
         ]
         for path in pending[:4]:
             response_path = response_dir / path.name
+            prior_attempts = 0
+            if response_path.exists():
+                try:
+                    prior_payload = json.loads(response_path.read_text(encoding='utf-8'))
+                    if isinstance(prior_payload, Mapping):
+                        prior_attempts = int(prior_payload.get('attempts') or 0)
+                except (OSError, ValueError, json.JSONDecodeError):
+                    prior_attempts = 0
             try:
                 raw = json.loads(path.read_text(encoding='utf-8'))
                 if not isinstance(raw, Mapping):
@@ -231,6 +275,7 @@ class SupportRepairReasoningMaintenance:
                     'request_id': path.stem,
                     'error_type': type(exc).__name__,
                     'error': str(exc)[:800],
+                    'attempts': prior_attempts + 1,
                     'completed_at': _now(),
                 }
             _atomic_json(response_path, payload)
@@ -238,11 +283,12 @@ class SupportRepairReasoningMaintenance:
         return processed
 
 
-def build_support_repair_reasoning_maintenance(*, enabled: bool, structured_client, spool: Path = DEFAULT_SPOOL):
+def build_support_repair_reasoning_maintenance(*, enabled: bool, structured_client, fallback_structured_client=None, spool: Path = DEFAULT_SPOOL):
     if not enabled or structured_client is None:
         return None
     return SupportRepairReasoningMaintenance(
         structured_client=structured_client,
+        fallback_structured_client=fallback_structured_client,
         spool=spool,
         interval_seconds=int(os.getenv('JASON_SUPPORT_REPAIR_REASONING_INTERVAL_SECONDS', '5')),
     )
