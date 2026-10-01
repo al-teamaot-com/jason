@@ -16,6 +16,8 @@ from orchestrator.print_capability_catalog import (
     PRINT_DEVICE_READ,
     PRINT_DEVICE_SEARCH,
     PRINT_METER_READ,
+    PRINT_METER_HISTORY_SEARCH,
+    PRINT_METER_USAGE_READ,
     PRINT_SUPPLIES_READ,
     kyocera_kfs_provider,
     print_capabilities,
@@ -33,6 +35,8 @@ def test_print_capability_catalog_is_read_only_and_aot_internal_scoped() -> None
         PRINT_DEVICE_SEARCH,
         PRINT_DEVICE_READ,
         PRINT_METER_READ,
+        PRINT_METER_HISTORY_SEARCH,
+        PRINT_METER_USAGE_READ,
         PRINT_SUPPLIES_READ,
         PRINT_ALERT_SEARCH,
     }
@@ -86,6 +90,8 @@ def test_register_print_foundation_registers_all_capabilities_and_provider() -> 
         PRINT_DEVICE_SEARCH,
         PRINT_DEVICE_READ,
         PRINT_METER_READ,
+        PRINT_METER_HISTORY_SEARCH,
+        PRINT_METER_USAGE_READ,
         PRINT_SUPPLIES_READ,
         PRINT_ALERT_SEARCH,
     ):
