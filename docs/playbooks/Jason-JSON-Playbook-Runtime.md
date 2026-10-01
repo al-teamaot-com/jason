@@ -62,3 +62,7 @@ Do not bulk-convert all existing playbooks without per-playbook acceptance.
 The v1 interpreter is intentionally bounded. It supports deterministic ordered steps, finite decisions, bounded retries, wait/recheck declarations, capability calls, explicit verification steps, and terminal outcomes. Arbitrary code, inline PowerShell/shell, dynamic provider URLs, and direct-provider execution are prohibited.
 
 The first production migration should be one existing low-risk playbook in shadow mode. This proves matching, state persistence, capability resolution, documentation, verification, and rollback before broader migration.
+
+## Documentation impact
+
+This runtime adds a new machine-readable playbook representation and administration surface while preserving the existing canonical Markdown playbooks during incremental migration.
