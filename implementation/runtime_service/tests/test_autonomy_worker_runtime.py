@@ -1791,7 +1791,11 @@ def test_backupiq_provider_asset_without_rmm_endpoint_hands_off_human_review(tmp
         for _, capability, args in actions.calls
         if capability == "service.ticket.note.create"
     ]
-    assert any("Managed Endpoint Missing" in str(payload) for payload in note_payloads)
+    assert any(payload["title"] == "Jason - Human Review Required" for payload in note_payloads)
+    assert any(
+        "managed Datto RMM endpoint is no longer present" in payload["description"]
+        for payload in note_payloads
+    )
     store.close()
 
 
@@ -2043,8 +2047,13 @@ def test_backupiq_offline_endpoint_waits_for_device_without_consuming_slot(tmp_p
         if capability == "service.ticket.note.create"
     ]
     assert len(note_calls) == 1
-    assert note_calls[0]["title"] == "Jason - BackupIQ - Diagnostic"
-    assert "Classification=true_offline_both_sources" in note_calls[0]["description"]
+    assert note_calls[0]["title"] == "Jason - Technical Review"
+    description = note_calls[0]["description"]
+    assert "STATUS:" in description
+    assert "FINDINGS:" in description
+    assert "NEXT ACTION:" in description
+    assert "JASON STATE:" in description
+    assert "Classification=true_offline_both_sources" in description
     update_calls = [
         args["payload"]
         for _, capability, args in actions.calls
@@ -3767,7 +3776,7 @@ def test_idle_logoff_monitor_failure_is_diagnostic_only(tmp_path: Path):
     notes=[x[2]["payload"] for x in actions.calls if x[1]=="service.ticket.note.create"]
     assert len(notes)==1
     assert "Classification=monitor_execution_failure" in notes[0]["description"]
-    assert notes[0]["title"] == "Jason - Idle Log Off - Diagnostic"
+    assert notes[0]["title"] == "Jason - Technical Review"
     assert "setter" in notes[0]["description"].casefold()
     store.close()
 
@@ -3854,10 +3863,11 @@ def test_idle_logoff_true_noncompliance_runs_exact_setter_and_waits_for_monitor_
     assert component_calls[0]["variables"]=={}
     notes=[x[2]["payload"] for x in actions.calls if x[1]=="service.ticket.note.create"]
     assert [n["title"] for n in notes]==[
-        "Jason - Idle Log Off - Diagnostic",
-        "Jason - Idle Log Off - Remediation",
-        "Jason - Idle Log Off - Verification",
+        "Jason - Technical Review",
+        "Jason - Remediation Result",
+        "Jason - Remediation Result",
     ]
+    assert all("NEXT ACTION:" in n["description"] for n in notes)
     assert not any(
         "powershell" in str(call).casefold()
         for call in component_calls
@@ -4690,7 +4700,7 @@ def test_waiting_job_uses_deb_online_to_poll_existing_job_without_redispatch(
         if capability == "service.ticket.note.create"
     ]
     assert len(notes) == 1
-    assert notes[0]["title"] == "Jason - Device Availability - DRMM Access"
+    assert notes[0]["title"] == "Jason - Waiting State"
     assert "DEB online state=Yes" in notes[0]["description"]
     assert not any(
         capability == "automation.component.execute"
