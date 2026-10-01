@@ -191,3 +191,57 @@ def test_recent_client_notification_verification_is_not_stale(tmp_path):
 
     assert failures == []
     assert evidence[0]["phase"] == "vulscan_client_notification_verify_monitoring"
+
+
+def _create_admission_db(path: Path, *, eligible: int, active_slots: int, selected: int) -> None:
+    import sqlite3
+
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE autonomy_ticket_scan_cycle ("
+        "cycle_id TEXT,scanned_at TEXT,eligible INTEGER,active_slots INTEGER,selected INTEGER)"
+    )
+    conn.execute(
+        "INSERT INTO autonomy_ticket_scan_cycle VALUES (?,?,?,?,?)",
+        (
+            "cycle-1",
+            datetime.now(timezone.utc).isoformat(),
+            eligible,
+            active_slots,
+            selected,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_admission_stall_with_eligible_work_is_detected(tmp_path):
+    db = tmp_path / "work.sqlite3"
+    _create_admission_db(db, eligible=4, active_slots=2, selected=0)
+
+    failures, evidence = module.autonomy_admission_failures(db)
+
+    assert failures == ["autonomy_admission_stalled:eligible_work_not_selected"]
+    assert evidence["eligible"] == 4
+    assert evidence["active_slots"] == 2
+    assert evidence["selected"] == 0
+
+
+def test_no_admission_stall_when_no_eligible_work(tmp_path):
+    db = tmp_path / "work.sqlite3"
+    _create_admission_db(db, eligible=0, active_slots=2, selected=0)
+
+    failures, evidence = module.autonomy_admission_failures(db)
+
+    assert failures == []
+    assert evidence["eligible"] == 0
+
+
+def test_no_admission_stall_when_work_selected(tmp_path):
+    db = tmp_path / "work.sqlite3"
+    _create_admission_db(db, eligible=3, active_slots=2, selected=1)
+
+    failures, evidence = module.autonomy_admission_failures(db)
+
+    assert failures == []
+    assert evidence["selected"] == 1
