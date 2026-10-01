@@ -54,3 +54,21 @@ test("approval card submit path supports request_changes and signs structured in
   assert.match(source, /kind: "approval\.submit"/);
   assert.match(source, /channel_response_id: messageId/);
 });
+
+test("proactive preflight diagnostics expose bounded reason codes without secrets", () => {
+  for (const code of [
+    "unauthorized",
+    "invalid_request",
+    "tenant_mismatch",
+    "app_not_published",
+    "stored_tenant_mismatch",
+  ]) {
+    assert.match(source, new RegExp(`jason_teams_proactive_rejected[^\\n]*${code}`));
+  }
+  assert.match(source, /jason_teams_proactive_preflight_passed/);
+  const diagnosticLines = source
+    .split("\n")
+    .filter((line) => line.includes("jason_teams_proactive_rejected") || line.includes("jason_teams_proactive_preflight_passed"))
+    .join("\n");
+  assert.doesNotMatch(diagnosticLines, /PROACTIVE_TOKEN|authorization|clientSecret|message|card|text/);
+});
