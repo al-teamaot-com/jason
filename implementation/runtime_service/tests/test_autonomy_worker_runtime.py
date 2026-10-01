@@ -2043,8 +2043,13 @@ def test_backupiq_offline_endpoint_waits_for_device_without_consuming_slot(tmp_p
         if capability == "service.ticket.note.create"
     ]
     assert len(note_calls) == 1
-    assert note_calls[0]["title"] == "Jason - BackupIQ - Diagnostic"
-    assert "Classification=true_offline_both_sources" in note_calls[0]["description"]
+    assert note_calls[0]["title"] == "Jason - Technical Review"
+    description = note_calls[0]["description"]
+    assert "STATUS:" in description
+    assert "FINDINGS:" in description
+    assert "NEXT ACTION:" in description
+    assert "JASON STATE:" in description
+    assert "Classification=true_offline_both_sources" in description
     update_calls = [
         args["payload"]
         for _, capability, args in actions.calls
