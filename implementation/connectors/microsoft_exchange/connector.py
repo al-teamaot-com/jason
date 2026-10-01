@@ -12,6 +12,7 @@ from connectors.core.contracts import (
     require_capability,
 )
 from kernel.client_boundaries import BoundaryStatus, ClientBoundaryRepository
+from connectors.microsoft_graph.service_catalog import MICROSOFT_MAIL_INVESTIGATION_BOUNDARY_PROVIDER
 
 from .worker_client import ExchangeReadWorkerClient
 
@@ -58,7 +59,7 @@ class MicrosoftExchangeReadConnector:
             )
         boundary = self.boundaries.find_active_for_client(
             client_id=client_id,
-            provider="microsoft_graph",
+            provider=MICROSOFT_MAIL_INVESTIGATION_BOUNDARY_PROVIDER,
         )
         if boundary is None or boundary.status is not BoundaryStatus.VALIDATED:
             raise ConnectorAuthorizationError(
