@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -585,6 +586,62 @@ def test_duplicate_note_is_suppressed_across_terminal_work_reconsideration(tmp_p
         if capability == "service.ticket.note.create"
     ]
     assert len(note_calls) == 1
+    store.close()
+
+
+def test_legacy_note_fingerprint_seeds_canonical_key_without_duplicate_write(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    work = OperationalWork(
+        ticket_id=140933,
+        ticket_number="T20260925.9999",
+        title="[Monitor] Antivirus status issue",
+        playbook_id="datto_edr_av",
+        source_queue="Jason",
+        company_id=507,
+        configuration_item_id=1583,
+        device_uid="device-uid-1",
+        hostname="PC-1",
+        phase="escalated",
+        last_reason="technician review required",
+    )
+    legacy_title = "Jason - Diagnostic"
+    legacy_body = "Same result."
+    legacy_encoded = json.dumps(
+        {"title": legacy_title, "body": legacy_body},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    legacy_fingerprint = hashlib.sha256(legacy_encoded).hexdigest()
+    store.remember_note_fingerprint(
+        work.ticket_id,
+        work.playbook_id,
+        legacy_title,
+        legacy_fingerprint,
+    )
+
+    assert worker._write_note(work, legacy_body, legacy_title) is False
+    assert not [
+        args for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    canonical_fingerprint = store.last_note_fingerprint(
+        work.ticket_id,
+        work.playbook_id,
+        "Jason - Human Review Required",
+    )
+    assert canonical_fingerprint
+    assert canonical_fingerprint != legacy_fingerprint
     store.close()
 
 
