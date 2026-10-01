@@ -296,7 +296,11 @@ from .datto_site_variable_management import (
     register_site_variable_runtime_foundation,
 )
 from .http import RuntimeHttpApplication
-from .kfs_meter_history import GovernedKfsMeterHistoryInvoker, KfsMeterHistoryStore
+from .kfs_meter_history import (
+    GovernedKfsMeterHistoryInvoker,
+    KfsMeterHistoryStore,
+    ensure_meter_history_read_authority,
+)
 from .autonomy_shadow_composition import build_autonomy_shadow_maintenance
 from .autonomy_worker_composition import build_autonomy_worker_maintenance
 from .daily_drmm_alert_reconciliation_composition import build_daily_drmm_alert_reconciliation_maintenance
@@ -1314,6 +1318,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             capabilities=capabilities, providers=providers
         ),
     )
+    ensure_meter_history_read_authority(
+        identity_authority,
+        enabled=settings.kfs_enabled,
+    )
+
     if autonomous_repair_deployment_activation.enabled:
         ensure_autonomous_repair_authority(identity_authority)
 
