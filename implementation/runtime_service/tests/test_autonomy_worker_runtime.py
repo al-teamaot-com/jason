@@ -5585,3 +5585,85 @@ def test_waiting_device_access_schedules_exact_endpoint_wake(tmp_path: Path):
     assert '"resource_id":"device-uid-1"' in rows[0]["payload"]
     wake_store.close()
     store.close()
+
+
+def test_unsupported_helpdesk_ticket_gets_one_gpt_insights_note_when_promoted(tmp_path: Path):
+    class InsightReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.ticket.search":
+                return {"status": "succeeded", "evidence": {"data": {"items": []}}}
+            if capability == "endpoint.powershell.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"stdout": json.dumps({
+                        "Name": "Ethernet",
+                        "PhysicalMediaType": "802.3",
+                        "Profile": "Rigginsco.local",
+                    })}},
+                }
+            return super().execute(capability, arguments)
+
+    item = QueueCandidate(
+        resource_id="140999",
+        priority=50,
+        source_queue="Help Desk I",
+        owned_by_jason=False,
+        urgent=False,
+        context={
+            "id": 140999,
+            "ticketNumber": "T20261001.0099",
+            "title": "My PC keeps disconnecting from the network",
+            "description": "Connection drops randomly.",
+            "companyID": 507,
+            "configurationItemID": 1583,
+        },
+    )
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=InsightReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("gpt_insights_tech_assist",)),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+
+    notes = [args["payload"] for _, capability, args in actions.calls if capability == "service.ticket.note.create"]
+    assert len(notes) == 1
+    assert notes[0]["title"] == "GPT Insights"
+    assert "Wired: Ethernet (Rigginsco.local)" in notes[0]["description"]
+    assert "do not ask the technician or user to rediscover it" in notes[0]["description"]
+    assert not any(capability == "service.ticket.update" for _, capability, _ in actions.calls)
+    store.close()
+
+
+def test_unsupported_helpdesk_ticket_does_not_write_without_exact_promotion(tmp_path: Path):
+    item = QueueCandidate(
+        resource_id="140998",
+        priority=50,
+        source_queue="Help Desk I",
+        owned_by_jason=False,
+        urgent=False,
+        context={
+            "id": 140998,
+            "ticketNumber": "T20261001.0098",
+            "title": "General question Jason cannot classify",
+            "description": "Please call me.",
+            "companyID": 507,
+            "configurationItemID": 1583,
+        },
+    )
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item), reads=Reads(), actions=actions, store=store,
+        promotion_store=PromotionStore(promoted=()), max_active_work_items=2,
+        interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    assert actions.calls == []
+    store.close()

@@ -538,6 +538,44 @@
           "domain_controller_time_configuration"
         ]
       }
+    },
+    {
+      "id": "gpt_insights_tech_assist",
+      "name": "GPT Insights - Help Desk Tech Assist",
+      "version": "0.1.0",
+      "lifecycle": "production",
+      "enabled": true,
+      "source": "docs/playbooks/Jason-GPT-Insights-Tech-Assist.md",
+      "trigger": {
+        "queue_in": [
+          "Help Desk I",
+          "Help Desk II"
+        ],
+        "no_applicable_promoted_playbook": true
+      },
+      "review_status": "owner_approved_2026-10-01",
+      "autonomy": {
+        "activation": "autonomous",
+        "required_gates": [
+          "help_desk_queue",
+          "unsupported_by_promoted_playbook",
+          "evidence_first",
+          "no_avoidable_human_question",
+          "internal_note_only",
+          "autonomy_approved"
+        ],
+        "allowed_capabilities": [
+          "service.ticket.note.create"
+        ],
+        "policy_id": "playbook-autonomy:gpt_insights_tech_assist",
+        "allowed_branches": [
+          "read_only_evidence_collection",
+          "internal_note_create",
+          "material_update_note"
+        ],
+        "approval_bound_branches": [],
+        "disruptive_branches": []
+      }
     }
   ]
 }

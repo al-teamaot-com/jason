@@ -100,6 +100,16 @@ from autonomous_remediation.offline_ticket_augmentation import (
     render_site_context_note,
 )
 from .vulscan_client_policy import resolve_vulscan_policy
+from .gpt_insights import (
+    AUGMENTATION_ID as GPT_INSIGHTS_AUGMENTATION_ID,
+    InsightEvidence,
+    NETWORK_COMMAND as GPT_INSIGHTS_NETWORK_COMMAND,
+    classify_ticket as classify_gpt_insights_ticket,
+    connection_summary as gpt_insights_connection_summary,
+    material_fingerprint as gpt_insights_fingerprint,
+    note_title as gpt_insights_note_title,
+    render_insight as render_gpt_insight,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -223,6 +233,12 @@ OFFLINE_AUGMENTATION_SCOPE = PlaybookScope(
         "service.ticket.note.create",
     ),
 )
+GPT_INSIGHTS_SCOPE = PlaybookScope(
+    playbook_id="gpt_insights_tech_assist",
+    playbook_version="0.1.0",
+    policy_id="playbook-autonomy:gpt_insights_tech_assist",
+    required_action_capabilities=("service.ticket.note.create",),
+)
 PLAYBOOK_SCOPES = {
     EDR_SCOPE.playbook_id: EDR_SCOPE,
     DNS_SCOPE.playbook_id: DNS_SCOPE,
@@ -235,6 +251,7 @@ PLAYBOOK_SCOPES = {
     DISK_BAD_BLOCK_SCOPE.playbook_id: DISK_BAD_BLOCK_SCOPE,
     IDLE_LOG_OFF_SCOPE.playbook_id: IDLE_LOG_OFF_SCOPE,
     OFFLINE_AUGMENTATION_SCOPE.playbook_id: OFFLINE_AUGMENTATION_SCOPE,
+    GPT_INSIGHTS_SCOPE.playbook_id: GPT_INSIGHTS_SCOPE,
 }
 
 HEALTH_COMPONENT_NAME = "Check Datto EDR/AV Status AOT Ver 12122025-1"
@@ -2025,6 +2042,14 @@ class OperationalAutonomyMaintenance:
                 continue
             scope = self._match_scope(item.context)
             if scope is None:
+                try:
+                    self._maybe_write_gpt_insights(item)
+                except Exception as exc:
+                    if self.audit is not None:
+                        self.audit.record(
+                            "gpt_insights.review.failed",
+                            {"ticket_id": ticket_id, "error_type": type(exc).__name__},
+                        )
                 unsupported += 1
                 classifications[ticket_id] = (
                     "unsupported_capability", "no_applicable_promoted_playbook",
@@ -6594,6 +6619,143 @@ class OperationalAutonomyMaintenance:
         if not verified:
             raise OperationalAutonomyError(
                 "human-review handoff readback did not verify queue and status"
+            )
+
+    def _maybe_write_gpt_insights(self, candidate) -> None:
+        """Add one evidence-first technician-assist note for unsupported Help Desk work."""
+        if str(candidate.source_queue).strip().casefold() not in {"help desk i", "help desk ii"}:
+            return
+        if not self._scope_is_promoted(GPT_INSIGHTS_SCOPE):
+            return
+
+        ticket_id = int(candidate.resource_id)
+        context = candidate.context
+        title = str(context.get("title") or "").strip()
+        description = str(context.get("description") or "").strip()
+        category = classify_gpt_insights_ticket(title, description)
+
+        notes = self._read_data("service.ticket.notes.search", {"ticket_id": ticket_id}).get("items")
+        notes = notes if isinstance(notes, list) else []
+        has_base = any(
+            isinstance(note, Mapping) and str(note.get("title") or "").strip().casefold() == "gpt insights"
+            for note in notes
+        )
+
+        company_id = self._company_id(context.get("companyID"))
+        device_name = None
+        device_online = None
+        last_seen = None
+        operating_system = None
+        connection = None
+        unresolved = None
+        ci_value = context.get("configurationItemID")
+        if ci_value not in (None, "", 0, "0"):
+            try:
+                ci_id = self._positive_int(ci_value, "configuration item id")
+                ci = self._read_data("service.configuration.read", {"resource_id": ci_id})
+                if isinstance(ci.get("item"), Mapping):
+                    ci = dict(ci["item"])
+                if self._company_id(ci.get("companyID")) == company_id and ci.get("isActive") is True:
+                    device_uid = str(ci.get("referenceNumber") or "").strip()
+                    device_name = str(ci.get("referenceTitle") or "").strip() or None
+                    if device_uid:
+                        endpoint = self._read_record("endpoint.device.read", {"resource_id": device_uid})
+                        device_online = endpoint.get("online") if isinstance(endpoint.get("online"), bool) else None
+                        operating_system = str(endpoint.get("operatingSystem") or endpoint.get("operating_system") or "").strip() or None
+                        last_seen = str(endpoint.get("lastSeen") or endpoint.get("last_seen") or endpoint.get("lastAuditDate") or endpoint.get("last_audit_date") or "").strip() or None
+                        if category == "network" and device_online is True:
+                            try:
+                                data = self._read_data(
+                                    "endpoint.powershell.read",
+                                    {"device_uid": device_uid, "command": GPT_INSIGHTS_NETWORK_COMMAND, "timeout_seconds": 45},
+                                )
+                                records = parse_json_records(data.get("stdout") or data.get("text") or "")
+                                connection = gpt_insights_connection_summary(records)
+                            except Exception:
+                                connection = None
+                else:
+                    unresolved = "The associated configuration item could not be verified as one active same-company device."
+            except Exception:
+                unresolved = "Device evidence could not be safely resolved from the ticket association."
+        else:
+            unresolved = "No configuration item is associated and Jason could not safely infer a device from authoritative ticket fields."
+
+        related_titles: list[str] = []
+        if company_id > 0:
+            try:
+                data = self._read_data("service.ticket.search", {"company_id": company_id, "page_size": 100})
+                items = data.get("items") if isinstance(data.get("items"), list) else data.get("tickets")
+                if isinstance(items, list):
+                    tokens = {token for token in re.findall(r"[a-z0-9]{4,}", f"{title} {description}".casefold()) if token not in {"with", "from", "this", "that", "have", "user", "computer"}}
+                    for other in items:
+                        if not isinstance(other, Mapping) or int(other.get("id") or 0) == ticket_id:
+                            continue
+                        other_title = str(other.get("title") or "").strip()
+                        other_tokens = set(re.findall(r"[a-z0-9]{4,}", other_title.casefold()))
+                        if tokens and len(tokens & other_tokens) >= 1:
+                            related_titles.append(other_title)
+            except Exception:
+                pass
+        site_correlation = None
+        if category == "network":
+            site_correlation = (
+                "Multiple potentially related same-company tickets are visible; confirm site/peer-device correlation before treating this as endpoint-only."
+                if len(related_titles) >= 2
+                else "No site-wide conclusion is established from the currently available correlated ticket evidence."
+            )
+
+        evidence = InsightEvidence(
+            category=category,
+            ticket_number=str(context.get("ticketNumber") or candidate.resource_id),
+            ticket_title=title,
+            device_name=device_name,
+            device_online=device_online,
+            last_seen=last_seen,
+            operating_system=operating_system,
+            connection_summary=connection,
+            related_ticket_count=len(related_titles),
+            related_ticket_titles=tuple(related_titles[:3]),
+            site_correlation=site_correlation,
+            unresolved_reason=unresolved,
+        )
+        fingerprint = gpt_insights_fingerprint(evidence)
+        prior = self.store.augmentation_state(ticket_id, GPT_INSIGHTS_AUGMENTATION_ID)
+        prior_fingerprint = str(prior.get("evidence_fingerprint") or "") if prior else ""
+
+        # If Autotask already has the base note but local state is absent, seed state
+        # rather than creating an ungrounded duplicate/update after a database reset.
+        if has_base and not prior:
+            self.store.remember_augmentation_state(
+                ticket_id=ticket_id, augmentation_id=GPT_INSIGHTS_AUGMENTATION_ID,
+                source_version=str(candidate.source_version or "") or None,
+                classification=category, evidence_fingerprint=fingerprint,
+            )
+            return
+        if prior_fingerprint == fingerprint:
+            return
+
+        update = has_base
+        body = render_gpt_insight(evidence)
+        self.actions.execute(
+            GPT_INSIGHTS_SCOPE,
+            "service.ticket.note.create",
+            {"payload": {
+                "ticketID": ticket_id,
+                "title": gpt_insights_note_title(update=update),
+                "description": body,
+                "noteType": 3,
+                "publish": 1,
+            }},
+        )
+        self.store.remember_augmentation_state(
+            ticket_id=ticket_id, augmentation_id=GPT_INSIGHTS_AUGMENTATION_ID,
+            source_version=str(candidate.source_version or "") or None,
+            classification=category, evidence_fingerprint=fingerprint,
+        )
+        if self.audit is not None:
+            self.audit.record(
+                "gpt_insights.note.created",
+                {"ticket_id": ticket_id, "update": update, "category": category},
             )
 
     def _assigned_new_ticket_is_unworked(self, candidate) -> bool:
