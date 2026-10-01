@@ -4700,7 +4700,7 @@ def test_waiting_job_uses_deb_online_to_poll_existing_job_without_redispatch(
         if capability == "service.ticket.note.create"
     ]
     assert len(notes) == 1
-    assert notes[0]["title"] == "Jason - Work Update"
+    assert notes[0]["title"] == "Jason - Waiting State"
     assert "DEB online state=Yes" in notes[0]["description"]
     assert not any(
         capability == "automation.component.execute"
