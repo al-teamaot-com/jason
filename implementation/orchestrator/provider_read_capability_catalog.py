@@ -614,8 +614,8 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             resource_types="service_ticket,ticket",
             operation="search",
             selector_keys=(
-                "ticket_number,company_id,status,resource_id,filters,page_size,"
-                "after_resource_id"
+                "ticket_number,company_id,status,created_after,created_before,"
+                "resource_id,filters,page_size,after_resource_id"
             ),
             fact_hints=(
                 "ticket,tickets,ticket number,title,status,queue,priority,assigned,"
@@ -634,7 +634,10 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             ),
             resource_types="service_ticket,ticket",
             operation="count",
-            selector_keys="ticket_number,company_id,status,resource_id,filters",
+            selector_keys=(
+                "ticket_number,company_id,status,created_after,created_before,"
+                "resource_id,filters"
+            ),
             fact_hints=(
                 "count,how many,number of tickets,ticket count,tickets,status,new tickets,"
                 "open tickets,company"

@@ -89,6 +89,14 @@ def build_autotask_manifest() -> IntegrationManifest:
         SelectorDefinition("is_billed", "Whether an Autotask ticket charge has already been approved and posted."),
         SelectorDefinition("filters", "Bounded schema-driven equality filters."),
         SelectorDefinition(
+            "created_after",
+            "Inclusive lower bound for resource creation time; ISO-8601 datetime.",
+        ),
+        SelectorDefinition(
+            "created_before",
+            "Inclusive upper bound for resource creation time; ISO-8601 datetime.",
+        ),
+        SelectorDefinition(
             "page_size",
             "Maximum records returned by one Autotask query; bounded to 1-500.",
         ),
@@ -198,6 +206,8 @@ def build_autotask_manifest() -> IntegrationManifest:
                             "ticket_number",
                             "company_id",
                             "status",
+                            "created_after",
+                            "created_before",
                             "filters",
                             "page_size",
                             "after_resource_id",
@@ -217,6 +227,8 @@ def build_autotask_manifest() -> IntegrationManifest:
                             "ticket_number",
                             "company_id",
                             "status",
+                            "created_after",
+                            "created_before",
                             "filters",
                             "resource_id",
                         ),
