@@ -27,6 +27,9 @@ from orchestrator.provider_read_capability_catalog import (
     MICROSOFT_GRAPH_MAIL_CAPABILITIES,
     MICROSOFT_EXCHANGE_CAPABILITIES,
     MICROSOFT_EXCHANGE_PROVIDER,
+    MICROSOFT_GRAPH_MAIL_INVESTIGATION_CAPABILITIES,
+    MICROSOFT_PURVIEW_CAPABILITIES,
+    MICROSOFT_PURVIEW_PROVIDER,
     SERVICE_COMPANY_READ,
     SERVICE_CONTRACT_READ,
     SERVICE_CONTRACT_SEARCH,
@@ -518,6 +521,10 @@ def test_exchange_investigation_reads_activate_only_in_v10() -> None:
     )
     assert v10.enabled is True
     assert MICROSOFT_EXCHANGE_CAPABILITIES.issubset(set(v10.capability_names))
+    assert MICROSOFT_GRAPH_MAIL_INVESTIGATION_CAPABILITIES.issubset(
+        set(v10.capability_names)
+    )
+    assert MICROSOFT_PURVIEW_CAPABILITIES.issubset(set(v10.capability_names))
     assert set(v10.capability_names) == set(
         PROVIDER_READ_M365_MAIL_INVESTIGATION_CATALOG_CAPABILITIES
     )
@@ -525,3 +532,7 @@ def test_exchange_investigation_reads_activate_only_in_v10() -> None:
     assert exchange.lifecycle_status is ProviderLifecycle.AVAILABLE
     assert exchange.health_status is ProviderHealth.HEALTHY
     assert exchange.approval_status is ProviderApproval.APPROVED
+    purview = providers.get(MICROSOFT_PURVIEW_PROVIDER)
+    assert purview.lifecycle_status is ProviderLifecycle.AVAILABLE
+    assert purview.health_status is ProviderHealth.HEALTHY
+    assert purview.approval_status is ProviderApproval.APPROVED
