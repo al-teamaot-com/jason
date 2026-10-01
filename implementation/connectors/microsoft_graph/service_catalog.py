@@ -180,11 +180,26 @@ MICROSOFT_PERMISSION_PROFILES: dict[str, MicrosoftPermissionProfile] = {
     ),
     "mail-investigation-read": MicrosoftPermissionProfile(
         name="mail-investigation-read",
-        description="Read-only mailbox and mail-flow investigation profile using bounded metadata plus separately scoped Exchange content authority.",
-        services=frozenset({MicrosoftService.GRAPH, MicrosoftService.EXCHANGE}),
+        description=(
+            "Pre-consented read-only Microsoft 365 mail investigation profile for "
+            "mailbox content, Exchange configuration/trace, Entra sign-ins and "
+            "directory correlation, and Exchange audit evidence."
+        ),
+        services=frozenset(
+            {
+                MicrosoftService.GRAPH,
+                MicrosoftService.ENTRA,
+                MicrosoftService.EXCHANGE,
+                MicrosoftService.PURVIEW,
+            }
+        ),
         application_permissions=(
-            "Mail.ReadBasic.All",
+            "AuditLog.Read.All",
+            "Directory.Read.All",
+            "AuditLogsQuery-Exchange.Read.All",
+            "Office 365 Exchange Online: Exchange.ManageAsApp",
             "Exchange Application RBAC: Application Mail.Read",
+            "Exchange Custom RBAC: Jason Mail Investigation Read",
         ),
         maximum_mode=MicrosoftOperationMode.READ,
     ),
