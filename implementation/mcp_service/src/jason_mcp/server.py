@@ -123,6 +123,12 @@ from jason_runtime.datto_component_scope import (
     resolve_datto_component,
 )
 from jason_mcp.ticket_work_claim_store import TicketWorkClaimStore
+from jason_mcp.json_playbook_admin import (
+    open_registry as open_json_playbook_registry,
+    parse_payload as parse_json_playbook_payload,
+    validate_payload as validate_json_playbook_payload,
+)
+from autonomous_remediation.playbook_document import PlaybookValidationError
 from jason_runtime.datto_component_approval_registry import (
     approval_owner_identities,
     approve_component as persist_component_approval,
@@ -5437,6 +5443,128 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
         "waiting_count": int((counts["waiting_count"] if counts is not None else None) or 0),
         "blocked_count": int((counts["blocked_count"] if counts is not None else None) or 0),
     }
+
+
+@mcp.tool()
+def validate_json_playbook(payload_json: str) -> dict[str, Any]:
+    """Validate a declarative JSON playbook without storing or activating it."""
+    try:
+        _authenticated_identity()
+        app = _runtime()
+        known = {item.capability_name for item in app.capabilities.list_all()}
+        return validate_json_playbook_payload(payload_json, known_capabilities=known)
+    except (PermissionError, ValueError, RuntimeError, PlaybookValidationError) as exc:
+        errors = list(getattr(exc, "errors", ()) or ())
+        return {
+            "status": "rejected",
+            "error_code": errors[0] if errors else str(exc),
+            "errors": errors,
+        }
+
+
+@mcp.tool()
+def stage_json_playbook(payload_json: str) -> dict[str, Any]:
+    """Stage an immutable JSON playbook draft; staging creates no execution authority."""
+    registry = None
+    try:
+        principal, organization, _, _ = _authenticated_write_identity()
+        if organization != "aot":
+            raise PermissionError("PLAYBOOK_STAGE_ORGANIZATION_MISMATCH")
+        app = _runtime()
+        known = {item.capability_name for item in app.capabilities.list_all()}
+        registry = open_json_playbook_registry()
+        stored = registry.stage(
+            parse_json_playbook_payload(payload_json),
+            actor=principal,
+            known_capabilities=known,
+        )
+        return {"status": "succeeded", **registry.summary(stored), "authority_effect": "none"}
+    except (PermissionError, ValueError, RuntimeError, PlaybookValidationError) as exc:
+        errors = list(getattr(exc, "errors", ()) or ())
+        return {
+            "status": "rejected",
+            "error_code": errors[0] if errors else str(exc),
+            "errors": errors,
+        }
+    finally:
+        if registry is not None:
+            registry.close()
+
+
+@mcp.tool()
+def list_json_playbooks() -> dict[str, Any]:
+    """List durable JSON playbook versions and the current active version."""
+    registry = None
+    try:
+        _authenticated_identity()
+        registry = open_json_playbook_registry()
+        return {
+            "status": "succeeded",
+            "generation": registry.generation(),
+            "playbooks": [registry.summary(item) for item in registry.list_all()],
+        }
+    except (PermissionError, ValueError, RuntimeError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+    finally:
+        if registry is not None:
+            registry.close()
+
+
+@mcp.tool()
+def activate_json_playbook(
+    playbook_id: str,
+    version: str,
+    expected_fingerprint: str = "",
+) -> dict[str, Any]:
+    """Owner-only: activate one exact staged JSON version without rebuilding Jason."""
+    registry = None
+    try:
+        principal, organization = _authority_admin_owner()
+        if organization != "aot":
+            raise PermissionError("PLAYBOOK_ACTIVATE_ORGANIZATION_MISMATCH")
+        registry = open_json_playbook_registry()
+        stored = registry.activate(
+            playbook_id,
+            version,
+            actor=principal,
+            expected_fingerprint=(str(expected_fingerprint).strip() or None),
+        )
+        return {
+            "status": "succeeded",
+            **registry.summary(stored),
+            "registry_generation": registry.generation(),
+            "authority_effect": "none; execution authority remains separately governed",
+            "reload_required": False,
+        }
+    except (PermissionError, ValueError, RuntimeError, KeyError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+    finally:
+        if registry is not None:
+            registry.close()
+
+
+@mcp.tool()
+def retire_json_playbook(playbook_id: str) -> dict[str, Any]:
+    """Owner-only: retire the active JSON playbook version without a service reload."""
+    registry = None
+    try:
+        principal, organization = _authority_admin_owner()
+        if organization != "aot":
+            raise PermissionError("PLAYBOOK_RETIRE_ORGANIZATION_MISMATCH")
+        registry = open_json_playbook_registry()
+        changed = registry.retire(playbook_id, actor=principal)
+        return {
+            "status": "succeeded",
+            "playbook_id": str(playbook_id).strip(),
+            "retired": changed,
+            "registry_generation": registry.generation(),
+            "reload_required": False,
+        }
+    except (PermissionError, ValueError, RuntimeError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+    finally:
+        if registry is not None:
+            registry.close()
 
 
 @mcp.tool()
