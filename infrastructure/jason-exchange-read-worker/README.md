@@ -10,26 +10,22 @@ It accepts only the fixed operations implemented in `invoke_exchange_read.ps1`. 
 
 The worker:
 
-- uses app-only certificate authentication;
+- receives a short-lived tenant-specific Exchange Online access token minted by Jason's governed MSAL/OpenBao identity layer;
+- never receives the application certificate or private key;
 - connects only to a validated primary `.onmicrosoft.com` organization supplied by the governed Jason client boundary;
 - imports only the read cmdlets named by `Connect-ExchangeOnline -CommandName`;
 - returns normalized JSON;
 - is intended to have no host-published port;
-- requires an internal bearer token in addition to Docker-network isolation.
+- requires an internal bearer token in addition to Docker-network isolation;
+- never logs the Exchange access token or request body.
 
-## Runtime secrets
+## Runtime secret
 
 Mount read-only:
 
-- `/run/jason-secrets/microsoft-exchange/certificate.pfx`
-- `/run/jason-secrets/microsoft-exchange/certificate-password`
 - `/run/jason-secrets/microsoft-exchange/worker-token`
 
-Non-secret:
-
-- `JASON_EXCHANGE_APP_ID`
-
-The PFX is an implementation bridge for Exchange Online PowerShell. The long-term credential source remains the approved Jason secret boundary; production deployment should materialize the PFX into a short-lived read-only runtime mount and never persist it in the repository or image.
+The Microsoft certificate credential remains in the approved Jason/OpenBao credential boundary. Jason exchanges it for a short-lived Exchange Online token and sends only that token to the worker for the immediate request.
 
 ## Module version
 
