@@ -29,6 +29,7 @@ IT_GLUE_PROVIDER = "it_glue"
 AUTOTASK_PROVIDER = "autotask"
 MICROSOFT_GRAPH_PROVIDER = "microsoft_graph"
 MICROSOFT_EXCHANGE_PROVIDER = "microsoft_exchange_online"
+MICROSOFT_PURVIEW_PROVIDER = "microsoft_purview"
 
 DOCUMENTATION_ORGANIZATION_SEARCH = "documentation.organization.search"
 DOCUMENTATION_ORGANIZATION_READ = "documentation.organization.read"
@@ -104,6 +105,7 @@ COMMUNICATION_MAILBOX_SEND_ON_BEHALF_READ = "communication.mailbox.send_on_behal
 COMMUNICATION_MAILBOX_TRANSPORT_RULES_READ = "communication.mailbox.transport_rules.read"
 COMMUNICATION_MAILBOX_MOBILE_DEVICES_READ = "communication.mailbox.mobile_devices.read"
 COMMUNICATION_MAILBOX_RETENTION_AUDIT_READ = "communication.mailbox.retention_audit_config.read"
+COMMUNICATION_MAILBOX_AUDIT_SEARCH = "communication.mailbox.audit.search"
 
 
 IT_GLUE_CAPABILITIES = frozenset(
@@ -213,6 +215,12 @@ MICROSOFT_EXCHANGE_CAPABILITIES = frozenset(
         COMMUNICATION_MAILBOX_TRANSPORT_RULES_READ,
         COMMUNICATION_MAILBOX_MOBILE_DEVICES_READ,
         COMMUNICATION_MAILBOX_RETENTION_AUDIT_READ,
+    }
+)
+
+MICROSOFT_PURVIEW_CAPABILITIES = frozenset(
+    {
+        COMMUNICATION_MAILBOX_AUDIT_SEARCH,
     }
 )
 
@@ -1115,6 +1123,20 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
         ),
         _read_capability(
             now=now,
+            capability_name=COMMUNICATION_MAILBOX_AUDIT_SEARCH,
+            display_name="Search Exchange Mailbox Audit Events",
+            business_purpose="Search bounded Microsoft Purview Exchange audit evidence to attribute mailbox move/delete/update activity.",
+            resource_types="communication_mailbox_audit,mailbox_audit_event",
+            operation="search",
+            selector_keys="mailbox,start,end,subject,internet_message_id,operations,maximum_records",
+            fact_hints="who deleted email,who moved email,mailbox audit,MoveToDeletedItems,HardDelete,SoftDelete,Outlook client,client IP",
+            authoritative_change_sources=("Microsoft Purview Audit Search Graph API documentation",),
+            collection_fact="Exchange mailbox audit events",
+            canonical_facts="created_at,operation,actor,client_ip,client,app_id,client_app_id,device_id,mailbox_owner,folder,affected_items",
+            client_isolation_required=True,
+        ),
+        _read_capability(
+            now=now,
             capability_name=COMMUNICATION_MAIL_TRACE_SEARCH,
             display_name="Search Exchange Message Trace",
             business_purpose="Search bounded Exchange Online message-trace evidence for one governed client tenant.",
@@ -1345,6 +1367,19 @@ def register_provider_read_foundation(
             vendor_change_sources=(
                 "Exchange Online PowerShell documentation",
                 "Exchange Online Admin API documentation",
+            ),
+        )
+    )
+
+    providers.register(
+        _provider(
+            now=now,
+            provider_id=MICROSOFT_PURVIEW_PROVIDER,
+            display_name="Microsoft Purview Audit",
+            capabilities=MICROSOFT_PURVIEW_CAPABILITIES,
+            authority="exchange_mailbox_audit",
+            vendor_change_sources=(
+                "Microsoft Purview Audit Search Graph API documentation",
             ),
         )
     )
