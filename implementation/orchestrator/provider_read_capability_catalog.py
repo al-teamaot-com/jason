@@ -90,6 +90,10 @@ IDENTITY_DIRECTORY_ROLE_MEMBERS_SEARCH = "identity.directory.role.members.search
 COMMUNICATION_MAIL_MESSAGE_SEARCH = "communication.mail.message.search"
 COMMUNICATION_MAIL_MESSAGE_READ = "communication.mail.message.read"
 COMMUNICATION_MAIL_ATTACHMENT_SEARCH = "communication.mail.attachment.search"
+COMMUNICATION_MAIL_INVESTIGATION_MESSAGE_SEARCH = "communication.mail.investigation.message.search"
+COMMUNICATION_MAIL_INVESTIGATION_MESSAGE_READ = "communication.mail.investigation.message.read"
+COMMUNICATION_MAIL_INVESTIGATION_FOLDER_SEARCH = "communication.mail.investigation.folder.search"
+COMMUNICATION_MAIL_INVESTIGATION_FOLDER_READ = "communication.mail.investigation.folder.read"
 COMMUNICATION_MAIL_TRACE_SEARCH = "communication.mail.trace.search"
 COMMUNICATION_MAIL_TRACE_DETAIL = "communication.mail.trace.detail"
 COMMUNICATION_MAILBOX_FORWARDING_READ = "communication.mailbox.forwarding.read"
@@ -182,6 +186,19 @@ MICROSOFT_GRAPH_MAIL_CAPABILITIES = frozenset(
 
 MICROSOFT_GRAPH_CAPABILITIES = (
     MICROSOFT_GRAPH_DIRECTORY_CAPABILITIES | MICROSOFT_GRAPH_MAIL_CAPABILITIES
+)
+
+MICROSOFT_GRAPH_MAIL_INVESTIGATION_CAPABILITIES = frozenset(
+    {
+        COMMUNICATION_MAIL_INVESTIGATION_MESSAGE_SEARCH,
+        COMMUNICATION_MAIL_INVESTIGATION_MESSAGE_READ,
+        COMMUNICATION_MAIL_INVESTIGATION_FOLDER_SEARCH,
+        COMMUNICATION_MAIL_INVESTIGATION_FOLDER_READ,
+    }
+)
+
+MICROSOFT_GRAPH_ALL_CAPABILITIES = (
+    MICROSOFT_GRAPH_CAPABILITIES | MICROSOFT_GRAPH_MAIL_INVESTIGATION_CAPABILITIES
 )
 
 MICROSOFT_EXCHANGE_CAPABILITIES = frozenset(
@@ -1044,6 +1061,60 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
         ),
         _read_capability(
             now=now,
+            capability_name=COMMUNICATION_MAIL_INVESTIGATION_MESSAGE_SEARCH,
+            display_name="Search Client Mailbox Messages",
+            business_purpose="Search bounded message metadata in a governed client mailbox for a missing-mail investigation.",
+            resource_types="communication_mail_investigation_message,email_message,mailbox_message",
+            operation="search",
+            selector_keys="mailbox,sender,received_after,received_before,page_size",
+            fact_hints="missing email,message location,email search,mailbox message,delivery investigation",
+            authoritative_change_sources=("Microsoft Graph v1.0 documentation",),
+            collection_fact="mail investigation messages",
+            canonical_facts="id,subject,sender,received_at,parent_folder_id,is_read,importance,categories,internet_message_id",
+            client_isolation_required=True,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=COMMUNICATION_MAIL_INVESTIGATION_MESSAGE_READ,
+            display_name="Read Client Mailbox Message",
+            business_purpose="Read one exact governed client mailbox message after unique identification.",
+            resource_types="communication_mail_investigation_message,email_message,mailbox_message",
+            operation="read",
+            selector_keys="mailbox,message_id",
+            fact_hints="message details,email body,mailbox message,missing email",
+            authoritative_change_sources=("Microsoft Graph v1.0 documentation",),
+            canonical_facts="id,subject,sender,received_at,parent_folder_id,is_read,importance,categories,body",
+            client_isolation_required=True,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=COMMUNICATION_MAIL_INVESTIGATION_FOLDER_SEARCH,
+            display_name="Search Client Mailbox Folder Messages",
+            business_purpose="Search an allowlisted mailbox folder to establish the current location of a message.",
+            resource_types="communication_mail_investigation_folder,email_folder,mailbox_message",
+            operation="search",
+            selector_keys="mailbox,folder,sender,received_after,received_before,page_size",
+            fact_hints="Inbox,Deleted Items,Junk Email,Archive,folder location,missing message",
+            authoritative_change_sources=("Microsoft Graph v1.0 documentation",),
+            collection_fact="folder messages",
+            canonical_facts="folder,id,subject,sender,received_at,parent_folder_id,is_read,importance,categories",
+            client_isolation_required=True,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=COMMUNICATION_MAIL_INVESTIGATION_FOLDER_READ,
+            display_name="Resolve Client Mailbox Folder",
+            business_purpose="Resolve one exact Microsoft Graph folder identifier to its current display name and parent.",
+            resource_types="communication_mail_investigation_folder,email_folder",
+            operation="read",
+            selector_keys="mailbox,folder_id",
+            fact_hints="folder id,folder name,parent folder,message location",
+            authoritative_change_sources=("Microsoft Graph v1.0 documentation",),
+            canonical_facts="id,display_name,parent_folder_id,total_item_count,unread_item_count",
+            client_isolation_required=True,
+        ),
+        _read_capability(
+            now=now,
             capability_name=COMMUNICATION_MAIL_TRACE_SEARCH,
             display_name="Search Exchange Message Trace",
             business_purpose="Search bounded Exchange Online message-trace evidence for one governed client tenant.",
@@ -1259,8 +1330,8 @@ def register_provider_read_foundation(
             now=now,
             provider_id=MICROSOFT_GRAPH_PROVIDER,
             display_name="Microsoft Entra Directory",
-            capabilities=MICROSOFT_GRAPH_CAPABILITIES,
-            authority="identity_directory",
+            capabilities=MICROSOFT_GRAPH_ALL_CAPABILITIES,
+            authority="identity_directory_and_governed_mail",
             vendor_change_sources=("Microsoft Graph v1.0 documentation",),
         )
     )
