@@ -157,3 +157,16 @@ def test_tick_is_bounded_by_15_minute_cadence(tmp_path):
         now=lambda: NOW + timedelta(minutes=14),
     )
     assert second.tick() is False
+
+
+def test_offline_endpoint_enters_waiting_without_history_or_mutation(tmp_path):
+    reads = Reads([time_alert()], online=False)
+    svc = build(tmp_path, reads)
+    summary = svc.run_once(now=NOW)
+    assert summary["matched"] == 1
+    assert summary["identified"] == 1
+    assert summary["waiting_device_access"] == 1
+    assert summary["recurring"] == 0
+    assert summary["mutations"] == 0
+    assert svc.audit.events[0][1]["classification"] == "WAITING_DEVICE_ACCESS"
+    assert all(call[0] != "endpoint.alert.history.search" for call in reads.calls)

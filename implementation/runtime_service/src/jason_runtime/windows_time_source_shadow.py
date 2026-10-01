@@ -234,6 +234,7 @@ class WindowsTimeSourceShadowMaintenance:
             "matched": 0,
             "identified": 0,
             "recurring": 0,
+            "waiting_device_access": 0,
             "inconclusive": 0,
             "changed": 0,
             "mutations": 0,
@@ -256,6 +257,8 @@ class WindowsTimeSourceShadowMaintenance:
             summary["identified"] += 1
             if decision.classification == "RECURRING_FAILURE":
                 summary["recurring"] += 1
+            if decision.classification == "WAITING_DEVICE_ACCESS":
+                summary["waiting_device_access"] += 1
             changed = self.state.put(decision, when=now)
             if changed:
                 summary["changed"] += 1
@@ -315,6 +318,35 @@ class WindowsTimeSourceShadowMaintenance:
         ).strip()
         if resolved_uid != device_uid or resolved_host.casefold() != hostname.casefold():
             return None
+
+        if record.get("online") is not True:
+            reason = "endpoint is offline in authoritative DRMM state; diagnostics and remediation are deferred"
+            material = {
+                "alert_uid": alert_uid,
+                "device_uid": device_uid,
+                "hostname": hostname,
+                "site": site,
+                "observed_source": observed,
+                "approved_sources": approved,
+                "recurrence_count": 0,
+                "classification": "WAITING_DEVICE_ACCESS",
+                "reason": reason,
+            }
+            fingerprint = hashlib.sha256(
+                json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+            return TimeSourceDecision(
+                alert_uid=alert_uid,
+                device_uid=device_uid,
+                hostname=hostname,
+                site=site,
+                observed_source=observed,
+                approved_sources=approved,
+                recurrence_count=0,
+                classification="WAITING_DEVICE_ACCESS",
+                reason=reason,
+                fingerprint=fingerprint,
+            )
 
         history = self.reads.execute(
             "endpoint.alert.history.search",
