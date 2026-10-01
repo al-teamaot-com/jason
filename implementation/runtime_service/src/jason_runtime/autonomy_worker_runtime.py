@@ -6527,6 +6527,18 @@ class OperationalAutonomyMaintenance:
                 )
 
     def _write_note(self, work: OperationalWork, body: str, title: str) -> bool:
+        legacy_normalized_title = " ".join(str(title).split())
+        legacy_normalized_body = " ".join(str(body).split())
+        legacy_encoded = json.dumps(
+            {
+                "title": legacy_normalized_title,
+                "body": legacy_normalized_body,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        legacy_fingerprint = hashlib.sha256(legacy_encoded).hexdigest()
+
         structured = legacy_technical_note(
             title=title,
             body=body,
@@ -6556,6 +6568,20 @@ class OperationalAutonomyMaintenance:
             work.ticket_id, work.playbook_id, normalized_title
         )
         if prior == fingerprint:
+            return False
+
+        legacy_prior = self.store.last_note_fingerprint(
+            work.ticket_id,
+            work.playbook_id,
+            legacy_normalized_title,
+        )
+        if legacy_prior == legacy_fingerprint:
+            self.store.remember_note_fingerprint(
+                work.ticket_id,
+                work.playbook_id,
+                normalized_title,
+                fingerprint,
+            )
             return False
 
         self.actions.execute(
