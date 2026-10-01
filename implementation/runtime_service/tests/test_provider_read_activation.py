@@ -25,6 +25,8 @@ from orchestrator.provider_read_capability_catalog import (
     IT_GLUE_CAPABILITIES,
     IT_GLUE_PROVIDER,
     MICROSOFT_GRAPH_MAIL_CAPABILITIES,
+    MICROSOFT_EXCHANGE_CAPABILITIES,
+    MICROSOFT_EXCHANGE_PROVIDER,
     SERVICE_COMPANY_READ,
     SERVICE_CONTRACT_READ,
     SERVICE_CONTRACT_SEARCH,
@@ -45,6 +47,8 @@ from jason_runtime.provider_read_activation import (
     PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_CATALOG_PROFILE,
     PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_ATTACHMENT_CATALOG_PROFILE,
     PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_ATTACHMENT_RESOURCE_CATALOG_PROFILE,
+    PROVIDER_READ_M365_MAIL_INVESTIGATION_CATALOG_CAPABILITIES,
+    PROVIDER_READ_M365_MAIL_INVESTIGATION_CATALOG_PROFILE,
     PROVIDER_READ_DOCUMENT_CAPABILITIES,
     PROVIDER_READ_DOCUMENT_PROFILE,
     PROVIDER_READ_GOVERNED_CATALOG_CAPABILITIES,
@@ -493,3 +497,31 @@ def test_service_resource_reads_are_dormant_in_v8_and_activate_only_in_v9() -> N
     )
     assert SERVICE_RESOURCE_SEARCH in set(v9.capability_names)
     assert SERVICE_RESOURCE_READ in set(v9.capability_names)
+
+
+def test_exchange_investigation_reads_activate_only_in_v10() -> None:
+    capabilities, providers = _registries()
+    v9 = apply_provider_read_activation_profile(
+        capabilities=capabilities,
+        providers=providers,
+        profile=PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_ATTACHMENT_RESOURCE_CATALOG_PROFILE,
+    )
+    assert MICROSOFT_EXCHANGE_CAPABILITIES.isdisjoint(set(v9.capability_names))
+    exchange = providers.get(MICROSOFT_EXCHANGE_PROVIDER)
+    assert exchange.lifecycle_status is ProviderLifecycle.PLANNED
+
+    capabilities, providers = _registries()
+    v10 = apply_provider_read_activation_profile(
+        capabilities=capabilities,
+        providers=providers,
+        profile=PROVIDER_READ_M365_MAIL_INVESTIGATION_CATALOG_PROFILE,
+    )
+    assert v10.enabled is True
+    assert MICROSOFT_EXCHANGE_CAPABILITIES.issubset(set(v10.capability_names))
+    assert set(v10.capability_names) == set(
+        PROVIDER_READ_M365_MAIL_INVESTIGATION_CATALOG_CAPABILITIES
+    )
+    exchange = providers.get(MICROSOFT_EXCHANGE_PROVIDER)
+    assert exchange.lifecycle_status is ProviderLifecycle.AVAILABLE
+    assert exchange.health_status is ProviderHealth.HEALTHY
+    assert exchange.approval_status is ProviderApproval.APPROVED
