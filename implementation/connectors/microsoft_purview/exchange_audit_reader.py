@@ -174,9 +174,24 @@ class MicrosoftPurviewExchangeAuditReader:
     @staticmethod
     def _project_record(record: Mapping[str, Any]) -> Mapping[str, Any]:
         audit = record.get("auditData")
-        audit_data = audit if isinstance(audit, Mapping) else {}
+        audit_data = dict(audit) if isinstance(audit, Mapping) else {}
+        dynamic = audit_data.get("dynamicProperties")
+        if isinstance(dynamic, Mapping):
+            for key, value in dynamic.items():
+                if key != "@odata.type" and key not in audit_data:
+                    audit_data[str(key)] = value
 
-        affected = audit_data.get("AffectedItems")
+        def pick(*names: str):
+            for name in names:
+                if name in audit_data:
+                    return audit_data.get(name)
+            lowered = {str(key).casefold(): value for key, value in audit_data.items()}
+            for name in names:
+                if name.casefold() in lowered:
+                    return lowered[name.casefold()]
+            return None
+
+        affected = pick("AffectedItems", "affectedItems")
         affected_items = []
         if isinstance(affected, list):
             for item in affected:
@@ -193,7 +208,7 @@ class MicrosoftPurviewExchangeAuditReader:
                     }
                 )
 
-        folder = audit_data.get("Folder")
+        folder = pick("Folder", "folder")
         folder_data = folder if isinstance(folder, Mapping) else {}
 
         return {
@@ -201,16 +216,16 @@ class MicrosoftPurviewExchangeAuditReader:
             "created_at": record.get("createdDateTime"),
             "operation": record.get("operation"),
             "actor": record.get("userPrincipalName") or record.get("userId"),
-            "client_ip": record.get("clientIp") or audit_data.get("ClientIPAddress"),
+            "client_ip": record.get("clientIp") or pick("ClientIPAddress", "ClientIP"),
             "service": record.get("service"),
-            "mailbox_owner": audit_data.get("MailboxOwnerUPN"),
-            "client": audit_data.get("ClientInfoString"),
-            "app_id": audit_data.get("AppId"),
-            "client_app_id": audit_data.get("ClientAppId"),
-            "device_id": audit_data.get("DeviceId"),
-            "logon_type": audit_data.get("LogonType"),
-            "internal_logon_type": audit_data.get("InternalLogonType"),
-            "external_access": audit_data.get("ExternalAccess"),
+            "mailbox_owner": pick("MailboxOwnerUPN"),
+            "client": pick("ClientInfoString"),
+            "app_id": pick("AppId"),
+            "client_app_id": pick("ClientAppId"),
+            "device_id": pick("DeviceId"),
+            "logon_type": pick("LogonType"),
+            "internal_logon_type": pick("InternalLogonType"),
+            "external_access": pick("ExternalAccess"),
             "folder": folder_data.get("Path"),
             "affected_items": affected_items,
         }
