@@ -13,6 +13,7 @@ from connectors.core.contracts import (
 )
 from kernel.client_boundaries import BoundaryStatus, ClientBoundaryRepository
 from connectors.microsoft_graph.service_catalog import MICROSOFT_MAIL_INVESTIGATION_BOUNDARY_PROVIDER
+from connectors.microsoft_graph.tenant_tokens import GovernedTenantApplicationTokenProvider
 
 from .worker_client import ExchangeReadWorkerClient
 
@@ -45,6 +46,7 @@ _PROVIDER_TO_WORKER = {
 @dataclass(frozen=True, slots=True)
 class MicrosoftExchangeReadConnector:
     worker: ExchangeReadWorkerClient
+    exchange_tokens: GovernedTenantApplicationTokenProvider
     boundaries: ClientBoundaryRepository
     audit: AuditSink
 
@@ -113,10 +115,14 @@ class MicrosoftExchangeReadConnector:
                 "exchange_organization": organization,
             },
         )
+        exchange_access_token = self.exchange_tokens.access_token_for_tenant(
+            microsoft_tenant_id=boundary.external_tenant_id
+        )
         data = self.worker.execute(
             microsoft_tenant_id=boundary.external_tenant_id,
             organization=organization,
             operation=operation,
+            exchange_access_token=exchange_access_token,
             arguments=arguments,
             correlation_id=request.context.correlation_id,
         )
