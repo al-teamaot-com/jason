@@ -2070,6 +2070,9 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     support_repair_reasoning_maintenance = build_support_repair_reasoning_maintenance(
         enabled=settings.support_repair_autonomy_enabled,
         structured_client=hosted_conversation_client or ollama_client,
+        fallback_structured_client=(
+            ollama_client if hosted_conversation_client is not None else None
+        ),
         spool=settings.support_repair_spool,
     )
     autonomous_repair_deployment_maintenance = (
