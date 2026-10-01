@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sqlite3
+import statistics
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,6 +25,8 @@ DEFAULT_ROOT = Path("/var/lib/jason/openclaw/self-heal")
 HEALTH_URL = "http://127.0.0.1:9467/metrics"
 LOCAL_RECOVERY_CONTAINERS = ("jason-runtime", "jason-mcp-pilot")
 MAX_RECOVERY_ATTEMPTS = 2
+AUTONOMY_ANOMALY_WINDOW = 12
+AUTONOMY_RECENT_WINDOW = 3
 OUTCOME_CONTRACT_DIRNAME = "contracts"
 AUTONOMY_WORK_DB = Path("/var/lib/jason/openclaw/autonomy-operational-work.sqlite3")
 WORKFLOW_STALE_SECONDS = {
@@ -149,6 +152,86 @@ def operational_outcome_contract_failures(root: Path) -> tuple[list[str], list[d
     return sorted(set(failures)), evidence
 
 
+
+
+def autonomy_behavior_anomalies(
+    db_path: Path = AUTONOMY_WORK_DB,
+    *,
+    history_window: int = AUTONOMY_ANOMALY_WINDOW,
+    recent_window: int = AUTONOMY_RECENT_WINDOW,
+) -> tuple[list[str], dict[str, Any]]:
+    if not db_path.exists():
+        return [], {}
+    try:
+        connection = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5)
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute(
+            "SELECT cycle_id,scanned_at,evaluated,eligible,unsupported,"
+            "governance_blocked,assigned_elsewhere,active_slots,selected,"
+            "waiting_device,human_review "
+            "FROM autonomy_ticket_scan_cycle ORDER BY scanned_at DESC LIMIT ?",
+            (max(history_window, recent_window),),
+        ).fetchall()
+    except sqlite3.Error as exc:
+        return ["autonomy_behavior_health_read_failed"], {
+            "error_class": type(exc).__name__
+        }
+    finally:
+        try:
+            connection.close()
+        except (UnboundLocalError, sqlite3.Error):
+            pass
+
+    records = [dict(row) for row in rows]
+    failures: list[str] = []
+    evidence: dict[str, Any] = {"cycles": records[:history_window]}
+    if not records:
+        return failures, evidence
+
+    # Generic invariants: these are structural truths, not enumerated incident types.
+    for row in records[:recent_window]:
+        cycle = str(row.get("cycle_id") or "unknown")
+        numeric = {
+            key: int(row.get(key) or 0)
+            for key in (
+                "evaluated", "eligible", "unsupported", "governance_blocked",
+                "assigned_elsewhere", "active_slots", "selected",
+                "waiting_device", "human_review",
+            )
+        }
+        if any(value < 0 for value in numeric.values()):
+            failures.append(f"autonomy_invariant_violation:negative_count:{cycle}")
+        if numeric["eligible"] > numeric["evaluated"]:
+            failures.append(f"autonomy_invariant_violation:eligible_gt_evaluated:{cycle}")
+        if numeric["selected"] > numeric["eligible"]:
+            failures.append(f"autonomy_invariant_violation:selected_gt_eligible:{cycle}")
+        if numeric["selected"] > numeric["active_slots"]:
+            failures.append(f"autonomy_invariant_violation:selected_gt_active_slots:{cycle}")
+
+    # Generic behavioral baseline: compare recent selection efficiency with Jason's
+    # own older healthy-looking cycles instead of hard-coding a particular failure.
+    chronological = list(reversed(records[:history_window]))
+    baseline_rows = chronological[:-recent_window] if len(chronological) > recent_window else []
+    recent_rows = chronological[-recent_window:]
+    baseline_ratios = [
+        int(row.get("selected") or 0) / max(1, int(row.get("eligible") or 0))
+        for row in baseline_rows
+        if int(row.get("eligible") or 0) > 0 and int(row.get("active_slots") or 0) > 0
+    ]
+    recent_ratios = [
+        int(row.get("selected") or 0) / max(1, int(row.get("eligible") or 0))
+        for row in recent_rows
+        if int(row.get("eligible") or 0) > 0 and int(row.get("active_slots") or 0) > 0
+    ]
+    if len(baseline_ratios) >= 4 and len(recent_ratios) == recent_window:
+        baseline_median = statistics.median(baseline_ratios)
+        recent_median = statistics.median(recent_ratios)
+        evidence["selection_efficiency_baseline_median"] = baseline_median
+        evidence["selection_efficiency_recent_median"] = recent_median
+        if baseline_median >= 0.10 and recent_median <= max(0.01, baseline_median * 0.20):
+            failures.append("autonomy_behavior_anomaly:selection_efficiency_collapse")
+
+    return sorted(set(failures)), evidence
 
 def autonomy_admission_failures(
     db_path: Path = AUTONOMY_WORK_DB,
@@ -330,6 +413,10 @@ def detect(root: Path = DEFAULT_ROOT) -> tuple[list[str], dict[str, Any]]:
     admission_failures, admission_evidence = autonomy_admission_failures()
     evidence["autonomy_admission"] = admission_evidence
     failures.extend(admission_failures)
+
+    behavior_failures, behavior_evidence = autonomy_behavior_anomalies()
+    evidence["autonomy_behavior"] = behavior_evidence
+    failures.extend(behavior_failures)
 
     metrics, metric_error = health_metrics()
     evidence["health_exporter_error"] = metric_error
