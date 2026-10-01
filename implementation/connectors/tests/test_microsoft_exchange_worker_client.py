@@ -30,6 +30,7 @@ def test_trace_search_posts_typed_operation_to_fixed_worker_url():
         microsoft_tenant_id="f7054323-d52b-4863-8c2f-1898f0b6077c",
         organization="absolnet.onmicrosoft.com",
         operation="message_trace.search",
+        exchange_access_token="exo-token",
         arguments={
             "sender": "admin@teamaot.com",
             "subject": "Toner Delivery Follow-Up",
@@ -44,6 +45,7 @@ def test_trace_search_posts_typed_operation_to_fixed_worker_url():
     assert call["method"] == "POST"
     assert call["json"]["operation"] == "message_trace.search"
     assert call["json"]["organization"] == "absolnet.onmicrosoft.com"
+    assert call["json"]["exchange_access_token"] == "exo-token"
     assert call["headers"]["Authorization"] == "Bearer internal-token"
 
 
@@ -63,6 +65,7 @@ def test_arbitrary_or_mutating_operations_are_rejected(operation):
             microsoft_tenant_id="f7054323-d52b-4863-8c2f-1898f0b6077c",
             organization="absolnet.onmicrosoft.com",
             operation=operation,
+            exchange_access_token="exo-token",
             arguments={},
             correlation_id="corr-1",
         )
@@ -74,6 +77,7 @@ def test_operation_rejects_extra_arguments_that_could_be_command_injection():
             microsoft_tenant_id="f7054323-d52b-4863-8c2f-1898f0b6077c",
             organization="absolnet.onmicrosoft.com",
             operation="mailbox.forwarding.read",
+            exchange_access_token="exo-token",
             arguments={"mailbox": "lori@teamaot.com", "script": "Remove-Mailbox *"},
             correlation_id="corr-1",
         )
@@ -89,6 +93,7 @@ def test_organization_must_be_validated_onmicrosoft_domain_shape(organization):
             microsoft_tenant_id="f7054323-d52b-4863-8c2f-1898f0b6077c",
             organization=organization,
             operation="mailbox.transport_rules.read",
+            exchange_access_token="exo-token",
             arguments={},
             correlation_id="corr-1",
         )
