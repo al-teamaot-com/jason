@@ -171,6 +171,8 @@ from orchestrator.print_capability_catalog import (
     PRINT_DEVICE_READ,
     PRINT_DEVICE_SEARCH,
     PRINT_METER_READ,
+    PRINT_METER_HISTORY_SEARCH,
+    PRINT_METER_USAGE_READ,
     PRINT_SUPPLIES_READ,
     register_print_resource_foundation,
 )
@@ -294,6 +296,7 @@ from .datto_site_variable_management import (
     register_site_variable_runtime_foundation,
 )
 from .http import RuntimeHttpApplication
+from .kfs_meter_history import GovernedKfsMeterHistoryInvoker, KfsMeterHistoryStore
 from .autonomy_shadow_composition import build_autonomy_shadow_maintenance
 from .autonomy_worker_composition import build_autonomy_worker_maintenance
 from .daily_drmm_alert_reconciliation_composition import build_daily_drmm_alert_reconciliation_maintenance
@@ -387,6 +390,13 @@ class RuntimeSettings:
     )
     kfs_openbao_secret_id_path: Path = Path(
         "/run/jason-secrets/openbao/kyocera-kfs/secret_id"
+    )
+    kfs_history_host: str = "jason-kfs-postgres"
+    kfs_history_port: int = 5432
+    kfs_history_database: str = "kfs_collector"
+    kfs_history_user: str = "kfs_reader"
+    kfs_history_password_file: Path = Path(
+        "/run/jason-secrets/kfs-history/password"
     )
     backup_net_enabled: bool = False
     backup_net_access_profile: str = "read_only"
@@ -636,6 +646,22 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_KFS_OPENBAO_SECRET_ID_PATH",
                     "/run/jason-secrets/openbao/kyocera-kfs/secret_id",
+                )
+            ),
+            kfs_history_host=os.getenv(
+                "JASON_KFS_HISTORY_HOST", "jason-kfs-postgres"
+            ).strip(),
+            kfs_history_port=int(os.getenv("JASON_KFS_HISTORY_PORT", "5432")),
+            kfs_history_database=os.getenv(
+                "JASON_KFS_HISTORY_DATABASE", "kfs_collector"
+            ).strip(),
+            kfs_history_user=os.getenv(
+                "JASON_KFS_HISTORY_USER", "kfs_reader"
+            ).strip(),
+            kfs_history_password_file=Path(
+                os.getenv(
+                    "JASON_KFS_HISTORY_PASSWORD_FILE",
+                    "/run/jason-secrets/kfs-history/password",
                 )
             ),
             backup_net_enabled=os.getenv(
@@ -1575,6 +1601,15 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         transport=http_transport,
         audit=ConnectorEventAudit(orchestration_events),
     )
+    kfs_history_invoker = GovernedKfsMeterHistoryInvoker(
+        store=KfsMeterHistoryStore(
+            host=settings.kfs_history_host,
+            port=settings.kfs_history_port,
+            database=settings.kfs_history_database,
+            user=settings.kfs_history_user,
+            password_file=settings.kfs_history_password_file,
+        )
+    )
     kfs_invoker = GovernedConnectorCapabilityInvoker(
         connectors={KYOCERA_KFS_PROVIDER: kfs},
         provider_capability_map={
@@ -1801,6 +1836,8 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     invokers.register(PRINT_DEVICE_SEARCH, kfs_invoker)
     invokers.register(PRINT_DEVICE_READ, kfs_invoker)
     invokers.register(PRINT_METER_READ, kfs_invoker)
+    invokers.register(PRINT_METER_HISTORY_SEARCH, kfs_history_invoker)
+    invokers.register(PRINT_METER_USAGE_READ, kfs_history_invoker)
     invokers.register(PRINT_SUPPLIES_READ, kfs_invoker)
     invokers.register(PRINT_ALERT_SEARCH, kfs_invoker)
     invokers.register(BACKUP_ENDPOINT_ASSET_SEARCH, backup_net_invoker)

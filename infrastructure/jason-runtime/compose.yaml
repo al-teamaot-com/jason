@@ -79,6 +79,11 @@ services:
       JASON_KFS_ENABLED: ${JASON_KFS_ENABLED:-false}
       JASON_KFS_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/kyocera-kfs/role_id
       JASON_KFS_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/kyocera-kfs/secret_id
+      JASON_KFS_HISTORY_HOST: ${JASON_KFS_HISTORY_HOST:-jason-kfs-postgres}
+      JASON_KFS_HISTORY_PORT: ${JASON_KFS_HISTORY_PORT:-5432}
+      JASON_KFS_HISTORY_DATABASE: ${JASON_KFS_HISTORY_DATABASE:-kfs_collector}
+      JASON_KFS_HISTORY_USER: ${JASON_KFS_HISTORY_USER:-kfs_reader}
+      JASON_KFS_HISTORY_PASSWORD_FILE: /run/jason-secrets/kfs-history/password
       JASON_BACKUP_NET_ENABLED: ${JASON_BACKUP_NET_ENABLED:-false}
       JASON_BACKUP_NET_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/backup-net/role_id
       JASON_BACKUP_NET_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/backup-net/secret_id
@@ -118,6 +123,7 @@ services:
       - ${JASON_AUTOTASK_WRITE_OPENBAO_SECRET_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/autotask-write-approle/secret-id}:/run/jason-secrets/openbao/autotask-write/secret_id:ro
       - ${JASON_KFS_OPENBAO_ROLE_ID_HOST_PATH:-/opt/jason/bootstrap/secrets/openbao/kyocera-kfs-read-approle/role-id}:/run/jason-secrets/openbao/kyocera-kfs/role_id:ro
       - ${JASON_KFS_OPENBAO_SECRET_ID_HOST_PATH:-/opt/jason/bootstrap/secrets/openbao/kyocera-kfs-read-approle/secret-id}:/run/jason-secrets/openbao/kyocera-kfs/secret_id:ro
+      - ${JASON_KFS_HISTORY_PASSWORD_HOST_PATH:-/home/al/jason-secrets/kfs/reader_password}:/run/jason-secrets/kfs-history/password:ro
       - ${JASON_BACKUP_NET_OPENBAO_ROLE_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/backup-net-read-approle/role-id}:/run/jason-secrets/openbao/backup-net/role_id:ro
       - ${JASON_BACKUP_NET_OPENBAO_SECRET_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/backup-net-read-approle/secret-id}:/run/jason-secrets/openbao/backup-net/secret_id:ro
       - ${JASON_DNSFILTER_OPENBAO_ROLE_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/dnsfilter-read-approle/role-id}:/run/jason-secrets/openbao/dnsfilter/role_id:ro
