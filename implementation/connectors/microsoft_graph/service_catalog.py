@@ -5,6 +5,9 @@ from enum import Enum
 from typing import Iterable
 
 
+MICROSOFT_MAIL_INVESTIGATION_BOUNDARY_PROVIDER = "microsoft_365_mail_investigation"
+
+
 class MicrosoftCloud(Enum):
     PUBLIC = "public"
 
