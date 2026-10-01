@@ -43,22 +43,10 @@ try {
         throw "OPERATION_NOT_ALLOWED"
     }
 
-    $appId = [string]$env:JASON_EXCHANGE_APP_ID
-    $certificatePath = [string]$env:JASON_EXCHANGE_CERTIFICATE_PFX
-    $passwordPath = [string]$env:JASON_EXCHANGE_CERTIFICATE_PASSWORD_FILE
-    if (
-        [string]::IsNullOrWhiteSpace($appId) -or
-        [string]::IsNullOrWhiteSpace($certificatePath) -or
-        [string]::IsNullOrWhiteSpace($passwordPath)
-    ) {
-        throw "WORKER_CREDENTIAL_CONFIGURATION_MISSING"
+    $exchangeAccessToken = [string]$request.exchange_access_token
+    if ([string]::IsNullOrWhiteSpace($exchangeAccessToken)) {
+        throw "WORKER_EXCHANGE_TOKEN_MISSING"
     }
-
-    $certificatePassword = (Get-Content -LiteralPath $passwordPath -Raw).Trim()
-    if ([string]::IsNullOrWhiteSpace($certificatePassword)) {
-        throw "WORKER_CERTIFICATE_PASSWORD_MISSING"
-    }
-    $securePassword = ConvertTo-SecureString -String $certificatePassword -AsPlainText -Force
 
     $commandNames = @(
         "Get-MessageTraceV2",
@@ -74,9 +62,7 @@ try {
     )
 
     $connectParameters = @{
-        AppId = $appId
-        CertificateFilePath = $certificatePath
-        CertificatePassword = $securePassword
+        AccessToken = $exchangeAccessToken
         Organization = [string]$request.organization
         CommandName = $commandNames
         ShowBanner = $false
