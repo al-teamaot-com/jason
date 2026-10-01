@@ -18,6 +18,8 @@ from .provider_read_capability_catalog import (
     MICROSOFT_EXCHANGE_PROVIDER,
     MICROSOFT_GRAPH_MAIL_INVESTIGATION_CAPABILITIES,
     MICROSOFT_GRAPH_PROVIDER,
+    MICROSOFT_PURVIEW_CAPABILITIES,
+    MICROSOFT_PURVIEW_PROVIDER,
 )
 from .service import CapabilityInvoker, InvocationResult
 
@@ -78,7 +80,15 @@ class MicrosoftMailInvestigationInformationAuthorizer:
             provider_id == MICROSOFT_EXCHANGE_PROVIDER
             and capability in MICROSOFT_EXCHANGE_CAPABILITIES
         )
-        if not (is_graph_investigation or is_exchange_investigation):
+        is_purview_investigation = (
+            provider_id == MICROSOFT_PURVIEW_PROVIDER
+            and capability in MICROSOFT_PURVIEW_CAPABILITIES
+        )
+        if not (
+            is_graph_investigation
+            or is_exchange_investigation
+            or is_purview_investigation
+        ):
             return invocation
         if not _requester_authorized(request=request, bindings=self.bindings):
             return invocation
