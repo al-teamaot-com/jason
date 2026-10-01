@@ -21,6 +21,7 @@ from connectors.microsoft_graph.mailbox_connector import MicrosoftGraphMailboxCo
 from connectors.microsoft_graph.mail_investigation_connector import MicrosoftGraphMailInvestigationConnector
 from connectors.microsoft_graph.security_posture import MicrosoftGraphSecurityPostureReader
 from connectors.microsoft_graph.security_posture_connector import MicrosoftGraphSecurityPostureConnector
+from connectors.microsoft_purview.capability_manifest import build_microsoft_purview_manifest
 from connectors.microsoft_purview.connector import MicrosoftPurviewMailInvestigationConnector
 from connectors.microsoft_purview.exchange_audit_reader import MicrosoftPurviewExchangeAuditReader
 from kernel.capabilities import CapabilityRegistryService
@@ -279,6 +280,7 @@ def register_provider_read_runtime_foundation(
     integration_broker.register(build_autotask_manifest())
     integration_broker.register(build_microsoft_graph_manifest())
     integration_broker.register(build_microsoft_exchange_manifest())
+    integration_broker.register(build_microsoft_purview_manifest())
     apply_provider_read_activation_from_env(
         capabilities=capabilities,
         providers=providers,
