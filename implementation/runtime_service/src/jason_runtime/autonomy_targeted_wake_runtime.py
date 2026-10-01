@@ -114,5 +114,10 @@ class CompositeAutonomyMaintenance:
     def tick(self) -> bool:
         handled = False
         for service in self.services:
-            handled = bool(service.tick()) or handled
+            try:
+                handled = bool(service.tick()) or handled
+            except Exception:
+                # One maintenance surface must fail closed without starving
+                # independent maintenance services later in the same cycle.
+                continue
         return handled
