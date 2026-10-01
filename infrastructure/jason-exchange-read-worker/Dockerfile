@@ -15,7 +15,7 @@ WORKDIR /app
 COPY infrastructure/jason-exchange-read-worker/worker.py /app/worker.py
 COPY infrastructure/jason-exchange-read-worker/invoke_exchange_read.ps1 /app/invoke_exchange_read.ps1
 
-RUN useradd --system --uid 10001 --create-home --shell /usr/sbin/nologin jason-worker \
+RUN useradd --system --uid 10001 --user-group --create-home --shell /usr/sbin/nologin jason-worker \
     && chown -R jason-worker:jason-worker /app
 
 USER 10001:10001
