@@ -28,6 +28,49 @@ export function canonicalSignedPayload(envelope) {
   return Buffer.from(JSON.stringify(canonicalize(unsigned)), "utf8");
 }
 
+function normalizeInteractionSelections(value) {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("interaction selections must be an object");
+  }
+  const forbidden = new Set([
+    "principal_id", "organization_id", "client_id", "capability",
+    "capability_name", "provider", "provider_id", "connector",
+    "connector_id", "authority_context_id", "requested_by",
+  ]);
+  const normalized = {};
+  for (const [rawKey, rawValue] of Object.entries(value)) {
+    const key = String(rawKey ?? "").trim();
+    if (!key || !/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(key)) {
+      throw new Error("interaction selection key is invalid");
+    }
+    if (forbidden.has(key)) {
+      throw new Error("interaction selection contains authority field");
+    }
+    if (Object.keys(normalized).length >= 32) {
+      throw new Error("interaction selections exceed bounded field count");
+    }
+    if (!["string", "number", "boolean"].includes(typeof rawValue)) {
+      throw new Error("interaction selection value is invalid");
+    }
+    const clean = String(rawValue).trim();
+    if (clean.length > 512) {
+      throw new Error("interaction selection value is too long");
+    }
+    normalized[key] = clean;
+  }
+  return normalized;
+}
+
+function assertOnlyKeys(value, allowed, label) {
+  for (const key of Object.keys(value)) {
+    if (!allowed.has(key)) {
+      throw new Error(label + " interaction field is invalid");
+    }
+  }
+}
+
+
 export function buildConversationEnvelope({
   text,
   microsoftTenantId,
@@ -63,23 +106,78 @@ export function buildConversationEnvelope({
     if (typeof interaction !== "object" || Array.isArray(interaction)) {
       throw new Error("interaction must be an object");
     }
-    if (interaction.kind !== "approval.submit") {
+
+    const kind = String(interaction.kind ?? "").trim();
+    const channelResponseId = String(interaction.channel_response_id ?? "").trim();
+    if (!channelResponseId) throw new Error("interaction response id is required");
+
+    if (kind === "approval.submit") {
+      assertOnlyKeys(
+        interaction,
+        new Set([
+          "kind", "approval_id", "decision", "selections", "channel_response_id",
+        ]),
+        "approval",
+      );
+      const approvalId = String(interaction.approval_id ?? "").trim();
+      const decision = String(interaction.decision ?? "").trim().toLowerCase();
+      if (!approvalId || approvalId.length > 256) {
+        throw new Error("approval interaction id is invalid");
+      }
+      if (!["approve", "deny", "request_changes"].includes(decision)) {
+        throw new Error("approval interaction decision is invalid");
+      }
+      const selections = normalizeInteractionSelections(interaction.selections);
+      cleanInteraction = {
+        kind,
+        approval_id: approvalId,
+        decision,
+        ...(Object.keys(selections).length ? { selections } : {}),
+        channel_response_id: channelResponseId,
+      };
+    } else if (kind === "procurement.submit") {
+      assertOnlyKeys(
+        interaction,
+        new Set([
+          "kind", "submission_id", "selections", "channel_response_id",
+        ]),
+        "procurement",
+      );
+      const submissionId = String(interaction.submission_id ?? "").trim();
+      if (!submissionId || submissionId.length > 256) {
+        throw new Error("procurement submission id is invalid");
+      }
+      cleanInteraction = {
+        kind,
+        submission_id: submissionId,
+        selections: normalizeInteractionSelections(interaction.selections),
+        channel_response_id: channelResponseId,
+      };
+    } else if (kind === "hardware.billing.disposition") {
+      assertOnlyKeys(
+        interaction,
+        new Set([
+          "kind", "case_key", "disposition", "channel_response_id",
+        ]),
+        "hardware billing disposition",
+      );
+      const caseKey = String(interaction.case_key ?? "").trim();
+      const disposition = String(interaction.disposition ?? "").trim().toLowerCase();
+      if (!caseKey || caseKey.length > 256) {
+        throw new Error("hardware billing case key is invalid");
+      }
+      if (!["charge_needed", "not_billable", "already_handled"].includes(disposition)) {
+        throw new Error("hardware billing disposition is invalid");
+      }
+      cleanInteraction = {
+        kind,
+        case_key: caseKey,
+        disposition,
+        channel_response_id: channelResponseId,
+      };
+    } else {
       throw new Error("interaction kind is invalid");
     }
-    const approvalId = String(interaction.approval_id ?? "").trim();
-    const decision = String(interaction.decision ?? "").trim().toLowerCase();
-    const channelResponseId = String(interaction.channel_response_id ?? "").trim();
-    if (!approvalId || approvalId.length > 256) throw new Error("approval interaction id is invalid");
-    if (!["approve", "deny", "request_changes"].includes(decision)) {
-      throw new Error("approval interaction decision is invalid");
-    }
-    if (!channelResponseId) throw new Error("approval interaction response id is required");
-    cleanInteraction = {
-      kind: "approval.submit",
-      approval_id: approvalId,
-      decision,
-      channel_response_id: channelResponseId,
-    };
   }
 
   const expires = new Date(now.getTime() + ttlMs);
