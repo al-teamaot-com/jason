@@ -133,3 +133,13 @@ Target root / is accepted only when every mutating bootstrap layer receives the 
 The read-only candidate_host_preflight command should run before the first host-mode install. A blank host is blocked when prior Jason deployment markers or installed Jason units are detected.
 
 This enables the same deterministic bootstrap code used in non-production filesystem tests to become the installer for the eventual dedicated Jason-B Ubuntu host without adding a generic bypass flag.
+
+## Candidate service dependency layout
+
+The host install keeps immutable release content separate from mutable dependency state.
+
+OpenBao reads its released configuration from /opt/jason/current but stores candidate Raft, audit, and log state under /var/lib/jason/openbao.
+
+Ollama stores its reconstructable model cache under /var/lib/jason/cache/ollama.
+
+Candidate Runtime and MCP use explicit candidate-only loopback ports and protected mount inventories. Optional Production integration mounts are not inherited into the candidate container merely because they exist in the Production Compose file.
