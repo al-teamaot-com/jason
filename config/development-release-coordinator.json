@@ -88,6 +88,7 @@
     "completion_requires_release_state": "closed",
     "completion_requires_production_verified": true,
     "protected_core_requires_exact_owner_approval": true,
-    "support_first": true
+    "support_first": true,
+    "playbook_path": "docs/playbooks/Jason-Governed-TODO-Engineering-Intake.md"
   }
 }
