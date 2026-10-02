@@ -7,6 +7,7 @@ on:
       - "tools/delegation_maintenance.py"
       - "tools/openclaw_authority_operational_health.py"
       - "tools/openclaw_authority_health_snapshot.py"
+      - "tools/tests/test_openclaw_authority_health_snapshot.py"
       - "tools/openclaw_ed25519_rotation_proof.py"
       - "tools/tests/test_openclaw_ed25519_rotation_proof.py"
       - "tools/install_openclaw_authority_operations.sh"
@@ -21,6 +22,7 @@ on:
       - "tools/delegation_maintenance.py"
       - "tools/openclaw_authority_operational_health.py"
       - "tools/openclaw_authority_health_snapshot.py"
+      - "tools/tests/test_openclaw_authority_health_snapshot.py"
       - "tools/openclaw_ed25519_rotation_proof.py"
       - "tools/tests/test_openclaw_ed25519_rotation_proof.py"
       - "tools/install_openclaw_authority_operations.sh"
@@ -50,6 +52,7 @@ jobs:
             tools/delegation_maintenance.py \
             tools/openclaw_authority_operational_health.py \
             tools/openclaw_authority_health_snapshot.py \
+            tools/tests/test_openclaw_authority_health_snapshot.py \
             tools/openclaw_ed25519_rotation_proof.py \
             tools/tests/test_openclaw_ed25519_rotation_proof.py \
             infrastructure/showcase/status_exporter.py \
@@ -62,5 +65,7 @@ jobs:
         run: python -m pytest infrastructure/showcase/tests/test_status_exporter.py -q
       - name: Test signing-key rotation proof invariants
         run: python -m pytest tools/tests/test_openclaw_ed25519_rotation_proof.py -q
+      - name: Test authority health snapshot timeout contract
+        run: python -m pytest tools/tests/test_openclaw_authority_health_snapshot.py -q
       - name: Verify CatchMeUp renders without protected state
         run: python tools/catch_me_up.py --stdout-only > /tmp/catchmeup.md

@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 
 DEFAULT_OUTPUT = Path('/var/lib/jason/openclaw/operational-health.json')
+SOURCE_HEALTH_TIMEOUT_SECONDS = 120
 
 
 def main() -> int:
@@ -23,7 +24,10 @@ def main() -> int:
         capture_output=True,
         text=True,
         check=False,
-        timeout=30,
+        # Full SQLite integrity checks include the multi-GB orchestration audit
+        # database. Keep the check bounded, but allow enough time for the full
+        # verification rather than failing merely because the audit store grew.
+        timeout=SOURCE_HEALTH_TIMEOUT_SECONDS,
     )
     if not completed.stdout.strip():
         raise SystemExit('operational health tool returned no JSON output')
