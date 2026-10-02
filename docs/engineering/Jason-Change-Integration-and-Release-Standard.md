@@ -86,9 +86,11 @@ A production promotion must preserve:
 
 ### 6. Autonomous repair exception
 
-Production promotion normally requires human approval. J-CHANGE-002 defines a narrow pre-authorized Autonomous Repair Release class for restoring previously approved Jason behavior without new capability, authority, security, provider, dependency, schema, topology, client-scope, or disruptive-operational change.
+J-CHANGE-002 remains a narrow autonomous repair classification and preparation lane for restoring previously approved Jason behavior without new capability, authority, security, provider, dependency, schema, topology, client-scope, or disruptive-operational change.
 
-A candidate that does not satisfy every J-CHANGE-002 criterion remains in the normal human-approved release lane.
+J-CHANGE-002 may autonomously classify, validate, package, and advance an eligible repair to READY FOR PRODUCTION.
+
+J-CHANGE-003 controls final Production execution. Every Production promotion, including an eligible Autonomous Repair Release, requires explicit Owner approval bound to the exact promotion plan. A previously approved behavior or repair classification does not substitute for that Production promotion approval.
 
 ### 7. Verification after promotion
 
@@ -120,12 +122,16 @@ Before merging a material PR:
 
 Before production promotion:
 
-1. Select an exact merged `main` SHA.
-2. Run the production release preflight for that SHA.
-3. Confirm expected current production revision.
-4. Promote only the selected SHA.
-5. Verify live revision and health.
-6. Record success or roll back to the known prior accepted revision.
+1. Select an exact merged main SHA and immutable candidate artifact.
+2. Run the production release preflight for that exact candidate.
+3. Confirm expected current production revision and deployment manifest.
+4. Produce the exact machine-readable Production promotion plan and fingerprint.
+5. Confirm rollback and any required state backup/checkpoint are ready.
+6. Obtain explicit Owner approval bound to that exact promotion-plan fingerprint under J-CHANGE-003.
+7. Atomically reserve/consume the governed approval immediately before material mutation.
+8. Promote only the approved candidate and plan.
+9. Verify live revision, deployment manifest, governance, and required health/JAT checks.
+10. Record success or follow the approved rollback/failure path.
 
 ## Boundaries and dependencies
 
@@ -185,5 +191,6 @@ Retirement requires an equal or stronger mechanism that preserves exact-source r
 
 ## Revision notes
 
+- 2026-10-02: Added J-CHANGE-003 as the controlling exact-plan Owner approval boundary for every Production promotion, including autonomous repair candidates.
 - 2026-09-28: Added J-CHANGE-002 autonomous repair release exception for previously approved behavior restorations.
 - 2026-09-28: Initial active standard created to prevent concurrent Project Jason workstreams from stepping on one another during merge and production promotion.
