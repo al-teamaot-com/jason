@@ -167,9 +167,12 @@ The initial enforcement suite proves:
 
 ## 14. Current Reference Behavior
 
-The existing autonomy worker already demonstrates the desired caller style: it requests canonical names such as `service.ticket.note.create` through its governed action executor rather than implementing the Autotask TicketNote API inside the playbook decision path.
+Two different operational families now demonstrate the intended pattern:
 
-That pattern should become universal.
+- approval/procurement workflows depend on provider-neutral approval contracts and shared Teams delivery/transport boundaries rather than owning Teams HTTP;
+- autonomous repair candidate discovery requests `source.repository.pull_request.search` and `source.repository.commit.read` through the governed observe path rather than owning GitHub HTTP/token handling.
+
+This is intentional evidence that canonical capability reuse is not limited to one provider or one workflow family.
 
 ## 15. Production Boundary
 
