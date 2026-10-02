@@ -3,7 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from threading import Event, Thread
 
-from jason_openclaw.conversation_ingress import GovernedOpenClawTeamsConversationIngress
+from jason_openclaw.conversation_ingress import (
+    GovernedOpenClawTeamsConversationIngress,
+    _procurement_url_context,
+)
 from orchestrator.contracts import ExecutionStage, OrchestrationResult, OrchestrationStatus
 from connectors.core.contracts import ConnectorTransportError
 from orchestrator.teams_conversation_flow import (
@@ -801,3 +804,25 @@ def test_hardware_billing_disposition_response_id_must_match_authenticated_messa
     assert result["status"] == "rejected"
     assert result["error_code"] == "invalid_conversation_contract"
     assert billing.calls == []
+
+
+def test_procurement_url_context_accepts_url_with_single_ticket():
+    url, ticket = _procurement_url_context(
+        "XYZ procurement test https://www.newegg.com/p/2VF-0046-00012 for ticket T20191013.0001"
+    )
+    assert url == "https://www.newegg.com/p/2VF-0046-00012"
+    assert ticket == "T20191013.0001"
+
+
+def test_procurement_url_context_preserves_standalone_url_behavior():
+    url, ticket = _procurement_url_context("https://www.newegg.com/p/2VF-0046-00012")
+    assert url == "https://www.newegg.com/p/2VF-0046-00012"
+    assert ticket is None
+
+
+def test_procurement_url_context_does_not_hijack_unrelated_link_message():
+    url, ticket = _procurement_url_context(
+        "Please review https://example.com/status when you have a chance"
+    )
+    assert url is None
+    assert ticket is None
