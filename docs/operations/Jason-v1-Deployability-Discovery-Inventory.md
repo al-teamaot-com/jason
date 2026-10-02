@@ -322,6 +322,8 @@ No change was made.
 11. Installed production systemd state is not fully source-identical: two OpenBao backup units and `jason-core.service` are host-only, and the production-health exporter has an installed configuration drift from the repository copy.
 12. Live container Compose metadata is insufficient to reconstruct deployment origin/configuration for all core components.
 13. The runtime exposes a large environment-driven configuration surface that is not yet governed by one explicit v1.0 configuration schema.
+14. Durable database/schema migration behavior is distributed across runtime modules and lacks a single deployment-level compatibility/version manifest.
+15. KFS deployment currently contains operator-home-specific paths for secrets and user-systemd installation.
 
 ## Systemd reconciliation pass
 
@@ -391,12 +393,54 @@ For v1.0, configuration schema validation must explicitly distinguish:
 
 Destination: #748 and #749.
 
+## Database and schema initialization findings
+
+Jason currently uses a mixture of SQLite-backed state stores plus provider/business-specific databases such as the KFS PostgreSQL database.
+
+A repository scan found schema creation and migration behavior distributed across individual modules, including:
+
+- autonomy operational state;
+- Teams identity bindings;
+- dynamic conversation context;
+- governed execution approvals/ledger;
+- client boundaries;
+- attention scheduler/autonomous work items;
+- model-usage ledger;
+- reflection/event stores and other runtime state.
+
+Several of these modules perform bounded in-place migrations with `ALTER TABLE` or create-if-missing logic at runtime.
+
+This is useful for backward compatibility, but deployability and rollback require one higher-level contract that can answer:
+
+- what schema version each durable store is at;
+- which application release can read/write that schema;
+- whether startup will mutate schema;
+- whether downgrade is safe;
+- whether backup is required before migration;
+- how a failed migration is detected and recovered.
+
+There is not yet one deployment-level schema manifest covering all durable stores.
+
+Destination: #751 and #752.
+
+### KFS-specific deployment coupling
+
+The KFS collector is more tightly host-coupled than the desired v1.0 platform model:
+
+- its Compose definition uses `/home/al/jason-secrets/kfs/postgres_password`;
+- its installer targets `/home/al/.config/systemd/user`;
+- the clean host currently does not show active Jason user-systemd units under the inspected operator context.
+
+These values should become explicit deployment/MSP inputs or be installed through a canonical system-level deployment path.
+
+Destination: #748 and #749.
+
 ## Next discovery steps
 
 - reconcile every installed Jason systemd unit against a repository-controlled source — **initial pass complete; host-only/drift items identified above**;
 - reconcile every runtime bind mount against a declared platform/configuration/secret/state class;
 - identify every host-local file used by a running service/container that is not part of a versioned release;
-- enumerate required database schemas/migrations and initialization commands;
+- enumerate required database schemas/migrations and initialization commands — **initial scan complete; distributed runtime migration model identified**;
 - enumerate required provider/client configuration inputs without reading secret values;
 - identify which observability/local-model components are mandatory vs optional for v1.0;
 - define the initial canonical dependency inventory consumed by #749.
