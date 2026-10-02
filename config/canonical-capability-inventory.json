@@ -116,7 +116,7 @@
     {
       "family": "source_repository",
       "canonical_capabilities": [
-        "source.repository.pull_request.search",
+        "source.repository.pullrequest.search",
         "source.repository.commit.read"
       ],
       "caller_rule": "Release, repair, and engineering processes consume source-control evidence through canonical reads; GitHub transport and repository authorization remain behind the provider boundary."
