@@ -1863,6 +1863,24 @@ class OperationalAutonomyMaintenance:
                     state, reason_code, item.source_version, state == "eligible_now"
                 )
                 continue
+            # Broad open-status discovery is useful for read-only assessment, but
+            # autonomous admission outside Jason is limited to intake states.
+            # This prevents a matching playbook from claiming work already being
+            # handled by a technician simply because it appears in the open view.
+            source_status = str(
+                item.context.get("_jason_source_status_label") or ""
+            ).strip().casefold()
+            if (
+                str(item.source_queue).strip().casefold() != "jason"
+                and source_status not in {"new", "emergency"}
+            ):
+                classifications[ticket_id] = (
+                    "not_actionable",
+                    "discovery_status_not_admissible",
+                    item.source_version,
+                    False,
+                )
+                continue
             scope = self._match_scope(item.context)
             if scope is None:
                 unsupported += 1
