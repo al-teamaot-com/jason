@@ -72,5 +72,22 @@
     "host_service": "jason-pr-integration-reconciler.service",
     "host_timer": "jason-pr-integration-reconciler.timer",
     "systemd_scope": "user"
+  },
+  "todo_autonomy": {
+    "enabled": true,
+    "owner_approved": true,
+    "eligibility_statuses": [
+      "Planned",
+      "In progress"
+    ],
+    "max_active_items": 1,
+    "max_open_todo_issues": 1,
+    "intake_worker": "jason-todo-engineering-intake",
+    "development_worker": "jason-owner-approved-development-worker",
+    "release_manager_required": true,
+    "completion_requires_release_state": "closed",
+    "completion_requires_production_verified": true,
+    "protected_core_requires_exact_owner_approval": true,
+    "support_first": true
   }
 }
