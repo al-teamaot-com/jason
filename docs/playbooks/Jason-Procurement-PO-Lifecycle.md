@@ -574,9 +574,37 @@ Do not broaden capabilities solely for convenience.
 
 This section reconciles GitHub issues `#727`, `#728`, and `#731` into this single lifecycle. No separate procurement, quote, inventory-release, or billing-audit workflow may bypass this state model.
 
+### Procurement source hierarchy and convergence
+
+All procurement inputs are first-class evidence sources, but they do not create separate purchasing workflows. Every source must normalize into the same vendor/product record before duplicate prevention, ticket resolution, allocation, approval, quote/PO creation, receiving, billing reconciliation, or release.
+
+Preferred acquisition order:
+
+1. **Authenticated vendor API** — preferred when available for account-specific SKU/MPN, price, availability, order status, tracking, invoice, and related supplier facts.
+2. **Structured vendor files** — CSV/Excel or equivalent feeds/exports.
+3. **Vendor documents** — PDF/document quotes, invoices, order confirmations, and packing slips after bounded extraction.
+4. **Product URLs with structured/simple HTTP evidence** — schema/metadata first, then generic rendered commerce labels.
+5. **Browser-acquired public product pages** — used when simple HTTP is blocked or a page is client-rendered.
+6. **Manual normalized entry** — last resort and lowest-confidence source.
+
+The normalized source record must persist:
+- source kind and immutable source reference;
+- acquisition method;
+- evidence/confidence tier;
+- source capture timestamp and digest when available;
+- evidence mode;
+- vendor identity evidence;
+- product name, manufacturer part number, vendor SKU, UPC when available, and price/cost evidence.
+
+Manufacturer part number remains the preferred primary product code when available. UPC and vendor SKU are secondary correlation identifiers; they must not silently replace a valid MPN.
+
+Confidence controls evidence preference, not authority. A higher-confidence source may be preferred when sources agree or duplicate data exists, but conflicting vendor/product/price evidence must be surfaced for review rather than silently overwritten.
+
+Vendor-specific parsers are not the default design. Common commerce labels such as MPN/Mfg #/Mfr Part Number/Model, Item/SKU/Product #, UPC, seller/manufacturer, and price should be normalized generically. Sites that reject simple HTTP or withhold usable product evidence must return a richer-acquisition state such as browser/API/document required rather than guessed product data.
+
 ### Vendor quote / invoice / URL branch
 
-The normalized source record may originate from a vendor quote, vendor invoice, or pasted product URL. All sources converge on the same product/vendor normalization, duplicate prevention, ticket resolution, allocation, approval, and audit path.
+Vendor quote, vendor invoice, vendor API, structured-file, and URL-derived records all converge on the same product/vendor normalization, duplicate prevention, ticket resolution, allocation, approval, and audit path.
 
 The Teams card exposes independent controls:
 
