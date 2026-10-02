@@ -1157,7 +1157,11 @@ class ProcurementTeamsFlow:
             arguments={"email": email, "page_size": 20},
             correlation_id=correlation_id,
         )
-        matches = _items(result)
+        matches = [
+            item
+            for item in _items(result)
+            if item.get("isActive") is not False
+        ]
         if len(matches) != 1:
             raise ProcurementFlowError(
                 "Client quote requester must resolve to exactly one active Autotask resource."
