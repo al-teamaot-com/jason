@@ -125,7 +125,7 @@ KFS credentials.
 
 Collector artifacts are written under:
 
-`/home/al/jason-evidence/kfs-runs/<UTC-run-id>/`
+`/var/lib/jason/evidence/kfs-runs/<UTC-run-id>/`
 
 Each run contains redacted request/response evidence, logs, a manifest,
 `results.json`, and `summary.json`. Secret values must never be persisted

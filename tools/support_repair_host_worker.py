@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_REPO = Path('/home/al/projects/jason')
+DEFAULT_REPO = Path(os.environ.get('JASON_SOURCE_ROOT', '/var/lib/jason/source'))
 DEFAULT_SPOOL = Path('/var/lib/jason/openclaw/support-repair')
 SUPPORT_ROW = re.compile(r'^\|\s*(SUPPORT-[^|]+?)\s*\|\s*(P\d)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|')
 SUPPORT_ID_PATTERN = r'SUPPORT-(?:[A-Z]+-[0-9]+|AUTO-[A-F0-9]{12})'
@@ -231,7 +231,7 @@ def branch_name(item_id: str) -> str:
 
 
 def ensure_worktree(repo: Path, item_id: str, branch: str | None = None) -> Path:
-    root = Path('/home/al/jason-worktrees/support-repair')
+    root = Path(os.environ.get('JASON_WORKTREE_ROOT', '/var/lib/jason/worktrees')) / 'support-repair'
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = root / item_id.casefold()
     if path.exists():
@@ -329,7 +329,7 @@ def validate_patch(worktree: Path, test_paths: list[str], gate, policy: Mapping[
         raise WorkerError('autonomous support repair requires a changed regression test')
     declared = [str(path) for path in test_paths if str(path) in files and gate.is_test_path(str(path), dict(policy))]
     selected = declared or tests
-    python = Path('/home/al/projects/jason/.venv/bin/python')
+    python = Path(os.environ.get('JASON_ENGINEERING_PYTHON', '/opt/jason/venv/bin/python'))
     python_cmd = str(python) if python.exists() else 'python3'
     py_files = [path for path in files if path.endswith('.py')]
     if py_files:
@@ -435,7 +435,7 @@ def production_state_from_main(repo: Path) -> dict[str, Any]:
 
 def create_closure_pr(repo: Path, item: Mapping[str, str], merge_sha: str, acceptance_reason: str) -> int:
     run(['git', 'fetch', '--no-tags', 'origin', 'main'], cwd=repo)
-    root = Path('/home/al/jason-worktrees/support-repair-closure')
+    root = Path(os.environ.get('JASON_WORKTREE_ROOT', '/var/lib/jason/worktrees')) / 'support-repair-closure'
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = root / item['id'].casefold()
     if path.exists():

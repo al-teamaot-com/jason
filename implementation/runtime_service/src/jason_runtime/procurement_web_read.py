@@ -39,7 +39,7 @@ from orchestrator.service import InvocationResult
 CAPABILITY = "procurement.web.product.read"
 PROVIDER = "public_web_procurement"
 PROFILE_ENV = "JASON_PROCUREMENT_WEB_READ_PROFILE"
-PROFILE = "aot-procurement-web-v1"
+PROFILE = "procurement-web-v1"
 DEFAULT_MAX_BYTES = 1_500_000
 HARD_MAX_BYTES = 2_000_000
 MAX_REDIRECTS = 3

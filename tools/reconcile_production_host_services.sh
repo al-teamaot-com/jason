@@ -7,7 +7,11 @@ if [ "$#" -ne 1 ]; then
 fi
 
 SOURCE_REVISION="$1"
-REPO_ROOT="/home/al/projects/jason"
+REPO_ROOT="${JASON_SOURCE_ROOT:-/var/lib/jason/source}"
+SERVICE_USER="${JASON_SERVICE_USER:-jason}"
+SERVICE_HOME="${JASON_SERVICE_HOME:-/var/lib/jason/service-home}"
+WORKTREE_ROOT="${JASON_WORKTREE_ROOT:-/var/lib/jason/worktrees}"
+JASON_REPOSITORY="${JASON_REPOSITORY:-}"
 RELEASE_ROOT="/opt/jason/releases"
 RELEASE_DIR="$RELEASE_ROOT/$SOURCE_REVISION"
 CURRENT_LINK="/opt/jason/current"
@@ -116,7 +120,7 @@ for unit in "${EXPORTER_UNITS[@]}"; do
 done
 
 for script_name in "${EXPORTER_SCRIPTS[@]}"; do
-  mapfile -t pids < <(pgrep -u al -f "$script_name" || true)
+  mapfile -t pids < <(pgrep -u "$SERVICE_USER" -f "$script_name" || true)
   for pid in "${pids[@]}"; do
     [ -n "$pid" ] || continue
     kill "$pid" >/dev/null 2>&1 || true
@@ -172,7 +176,7 @@ done
 for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}"; do
   wd="$(systemctl show "$unit" -p WorkingDirectory --value)"
   ex="$(systemctl show "$unit" -p ExecStart --value)"
-  if printf '%s %s' "$wd" "$ex" | grep -qE '/home/al/(projects/jason|jason-worktrees/)'; then
+  if printf '%s %s' "$wd" "$ex" | grep -qE '/home/'; then
     echo "ERROR: developer checkout dependency remains in $unit" >&2
     exit 6
   fi
@@ -188,11 +192,17 @@ if [ ! -x "$DOC_PUBLISHER" ]; then
   echo "ERROR: post-success documentation publisher is missing: $DOC_PUBLISHER" >&2
   exit 8
 fi
-if ! runuser -u al -- env \
-  HOME=/home/al \
+if [ -z "$JASON_REPOSITORY" ]; then
+  echo "ERROR: JASON_REPOSITORY must be configured for documentation publication." >&2
+  exit 8
+fi
+if ! runuser -u "$SERVICE_USER" -- env \
+  HOME="$SERVICE_HOME" \
   PATH=/usr/local/bin:/usr/bin:/bin \
-  JASON_DOCUMENTATION_REPO_ROOT=/home/al/projects/jason \
-  JASON_DOCUMENTATION_WORKTREE_ROOT=/home/al/jason-worktrees \
+  GH_CONFIG_DIR=/var/lib/jason/runtime-secrets/github/gh \
+  JASON_REPOSITORY="$JASON_REPOSITORY" \
+  JASON_DOCUMENTATION_REPO_ROOT="$REPO_ROOT" \
+  JASON_DOCUMENTATION_WORKTREE_ROOT="$WORKTREE_ROOT" \
   bash "$DOC_PUBLISHER" production "$SOURCE_REVISION"; then
   echo "ERROR: production succeeded but documentation reconciliation publication failed" >&2
   exit 8

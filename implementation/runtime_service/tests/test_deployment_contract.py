@@ -24,7 +24,8 @@ def test_runtime_compose_mounts_dedicated_read_only_ses_approle_and_non_secret_c
     compose = (_repo_root() / "infrastructure/jason-runtime/compose.yaml").read_text(encoding="utf-8")
 
     assert "JASON_SES_REGION: us-east-1" in compose
-    assert "JASON_SES_DEFAULT_SENDER: jason@teamaot.com" in compose
+    assert "JASON_SES_DEFAULT_SENDER must be configured" in compose
+    assert "jason@teamaot.com" not in compose
     assert "JASON_SES_OPENBAO_ROLE_ID_HOST_PATH" in compose
     assert "JASON_SES_OPENBAO_SECRET_ID_HOST_PATH" in compose
     assert "/run/jason-secrets/openbao/aws-ses/role_id:ro" in compose

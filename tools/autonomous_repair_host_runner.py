@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
-DEFAULT_REPO = Path("/home/al/projects/jason")
+DEFAULT_REPO = Path(os.environ.get("JASON_SOURCE_ROOT", "/var/lib/jason/source"))
 DEFAULT_SPOOL = Path("/var/lib/jason/openclaw/autonomous-repair")
 LIVE_CONTAINER = "jason-runtime"
 PROFILE = "autonomous-repair-v1"
@@ -253,8 +253,14 @@ def _independent_classification(
             "autonomous repair production execution is not enabled by policy",
         )
 
+    repository = os.environ.get("GITHUB_REPOSITORY", "").strip()
+    if "/" not in repository:
+        raise RepairRunnerError(
+            "GITHUB_REPOSITORY_REQUIRED",
+            "GITHUB_REPOSITORY must identify the configured Jason source repository",
+        )
     api = gate.Api(
-        os.environ.get("GITHUB_REPOSITORY", "al-teamaot-com/jason"),
+        repository,
         os.environ.get("GITHUB_TOKEN", ""),
     )
     pr_number = int(request["pr_number"])
@@ -328,7 +334,7 @@ def _independent_classification(
 
 
 def _worktree(repo: Path, candidate: str) -> Path:
-    root = Path("/home/al/jason-worktrees/autonomous-repair")
+    root = Path(os.environ.get("JASON_WORKTREE_ROOT", "/var/lib/jason/worktrees")) / "autonomous-repair"
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     path = root / candidate
     if path.exists():

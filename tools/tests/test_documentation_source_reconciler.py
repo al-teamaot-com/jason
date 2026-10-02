@@ -1,3 +1,6 @@
+import os
+os.environ["JASON_REPOSITORY"] = "example/jason"
+
 from tools.documentation_source_reconciler import is_material
 
 
@@ -78,7 +81,7 @@ def test_successful_main_runs_uses_actions_api_shape(monkeypatch):
     assert calls == [(
         "api",
         (
-            "repos/al-teamaot-com/jason/actions/workflows/validate.yml/runs"
+            "repos/example/jason/actions/workflows/validate.yml/runs"
             "?branch=main&event=push&status=success&per_page=100"
         ),
     )]
@@ -297,7 +300,7 @@ def test_merge_race_becoming_behind_refreshes_instead_of_failing(monkeypatch, ca
     from tools.documentation_source_reconciler import merge_ready_automation_prs
 
     assert merge_ready_automation_prs() == "waiting"
-    assert ("gh", "pr", "update-branch", "668", "--repo", "al-teamaot-com/jason") in calls
+    assert ("gh", "pr", "update-branch", "668", "--repo", "example/jason") in calls
     assert "DOCUMENTATION_PR_UPDATED_TO_MAIN=668" in capsys.readouterr().out
 
 
