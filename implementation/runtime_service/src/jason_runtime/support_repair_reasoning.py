@@ -227,7 +227,7 @@ class SupportRepairReasoningMaintenance:
                 system=system,
                 user=user,
                 schema=schema,
-                max_output_tokens=4096,
+                max_output_tokens=1024,
             )
 
     def tick(self) -> bool:
@@ -262,7 +262,11 @@ class SupportRepairReasoningMaintenance:
                     or 'status ' not in error
                 )
             )
-            return transient and attempts < 2
+            fallback_budget_mismatch = (
+                prior.get('error_type') == 'ValueError'
+                and error == 'Ollama structured reasoning output budget is invalid'
+            )
+            return (transient or fallback_budget_mismatch) and attempts < 2
 
         pending = [
             path

@@ -170,3 +170,30 @@ def test_transient_failed_response_retries_with_local_fallback(tmp_path: Path):
     assert response['result']['search_terms'] == ['queueName', 'queueID']
     assert primary.calls == 1
     assert len(fallback.calls) == 1
+    assert fallback.calls[0]['max_output_tokens'] == 1024
+
+
+def test_previous_ollama_budget_failure_is_bounded_retry_candidate(tmp_path: Path):
+    request_dir = tmp_path / 'reasoning' / 'requests'
+    response_dir = tmp_path / 'reasoning' / 'responses'
+    request_dir.mkdir(parents=True)
+    response_dir.mkdir(parents=True)
+    request = _request('search_plan')
+    request_path = request_dir / f"{request['request_id']}.json"
+    response_path = response_dir / request_path.name
+    request_path.write_text(json.dumps(request), encoding='utf-8')
+    response_path.write_text(json.dumps({
+        'status': 'failed',
+        'request_id': request['request_id'],
+        'error_type': 'ValueError',
+        'error': 'Ollama structured reasoning output budget is invalid',
+        'attempts': 1,
+    }), encoding='utf-8')
+    maintenance = SupportRepairReasoningMaintenance(
+        structured_client=Client(),
+        spool=tmp_path,
+        interval_seconds=1,
+    )
+    assert maintenance.tick() is True
+    response = json.loads(response_path.read_text(encoding='utf-8'))
+    assert response['status'] == 'succeeded'
