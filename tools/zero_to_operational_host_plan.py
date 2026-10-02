@@ -17,6 +17,14 @@ from cryptography.hazmat.primitives.serialization import (
 from jsonschema import Draft202012Validator
 
 from bootstrap.candidate_host_preflight import preflight_candidate_host
+from bootstrap.candidate_runtime import (
+    load_candidate_runtime_config,
+    validate_candidate_runtime_environment_file,
+)
+from bootstrap.candidate_mcp import (
+    load_candidate_mcp_config,
+    validate_candidate_mcp_environment,
+)
 from bootstrap.clean_install import read_json, validate_json_document
 from bootstrap.secret_requirements import (
     build_secret_requirements,
@@ -40,6 +48,9 @@ class HostAcceptancePlanResult:
     current_release_sha256: str | None
     next_release_sha256: str | None
     recovery_keys_valid: bool
+    runtime_environment_valid: bool
+    mcp_environment_valid: bool
+    ollama_model: str | None
     second_clean_environment_required: bool
     production_authorized: bool
     blockers: tuple[str, ...]
@@ -248,6 +259,38 @@ def preflight_host_acceptance_plan(
         missing = sorted(set(required_secret_references) - available)
         blockers.extend("secret_reference_missing:" + item for item in missing)
 
+    runtime_environment_valid = False
+    ollama_model: str | None = None
+    try:
+        runtime_config = load_candidate_runtime_config(
+            repo / "config/candidate-runtime.v1.json",
+            repo / "config/schemas/candidate-runtime.schema.json",
+        )
+        runtime_summary = validate_candidate_runtime_environment_file(
+            env_file=str(plan["candidate_runtime_env"]),
+            runtime_config=runtime_config,
+        )
+        ollama_model = str(runtime_summary["ollama_model"])
+        runtime_environment_valid = True
+    except Exception as exc:
+        blockers.append("candidate_runtime_env:" + str(exc))
+
+    mcp_environment_valid = False
+    if runtime_environment_valid:
+        try:
+            mcp_config = load_candidate_mcp_config(
+                repo / "config/candidate-mcp.v1.json",
+                repo / "config/schemas/candidate-mcp.schema.json",
+            )
+            validate_candidate_mcp_environment(
+                env_file=str(plan["candidate_runtime_env"]),
+                runtime_config=runtime_config,
+                mcp_config=mcp_config,
+            )
+            mcp_environment_valid = True
+        except Exception as exc:
+            blockers.append("candidate_mcp_env:" + str(exc))
+
     recovery_keys_valid = False
     try:
         _validate_recovery_keys(
@@ -284,6 +327,9 @@ def preflight_host_acceptance_plan(
         current_release_sha256=current_digest,
         next_release_sha256=next_digest,
         recovery_keys_valid=recovery_keys_valid,
+        runtime_environment_valid=runtime_environment_valid,
+        mcp_environment_valid=mcp_environment_valid,
+        ollama_model=ollama_model,
         second_clean_environment_required=True,
         production_authorized=False,
         blockers=tuple(blockers),

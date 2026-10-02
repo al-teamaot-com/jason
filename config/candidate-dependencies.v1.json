@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "openbao_image": "ghcr.io/openbao/openbao:2.6.1",
+  "ollama_image": "ollama/ollama:0.32.5",
+  "openbao_host_port": 8200,
+  "ollama_host_port": 11434,
+  "networks": [
+    "jason-core",
+    "jason-observability",
+    "openclaw_default"
+  ]
+}

@@ -18,7 +18,8 @@ from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
 from orchestrator.provider_health_canary_policy import (
     PROVIDER_HEALTH_CANARY_POLICY_ID,
     PROVIDER_HEALTH_CANARY_PRINCIPAL,
-    PROVIDER_HEALTH_CANARY_SPECS,
+    enabled_provider_health_canary_specs,
+    provider_health_canary_organization_id,
 )
 
 from . import server
@@ -68,7 +69,7 @@ def _run_one(spec: Mapping[str, Any]) -> dict[str, Any]:
             request_id=execution_id,
             correlation_id=correlation_id,
             principal_id=PROVIDER_HEALTH_CANARY_PRINCIPAL,
-            organization_id="aot",
+            organization_id=provider_health_canary_organization_id(),
             client_id=None,
             capability=capability_name,
             requested_mode=PermissionMode.OBSERVE,
@@ -99,7 +100,7 @@ def _run_one(spec: Mapping[str, Any]) -> dict[str, Any]:
         execution_id=execution_id,
         correlation_id=correlation_id,
         principal_id=PROVIDER_HEALTH_CANARY_PRINCIPAL,
-        organization_id="aot",
+        organization_id=provider_health_canary_organization_id(),
         client_id=None,
         capability_name=capability_name,
         capability_version=capability.version,
@@ -151,7 +152,7 @@ def _run_one(spec: Mapping[str, Any]) -> dict[str, Any]:
 
 def run_canaries() -> dict[str, Any]:
     results = []
-    for spec in PROVIDER_HEALTH_CANARY_SPECS:
+    for spec in enabled_provider_health_canary_specs():
         try:
             results.append(_run_one(spec))
         except Exception:

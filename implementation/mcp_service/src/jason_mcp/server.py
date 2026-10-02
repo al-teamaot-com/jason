@@ -4050,6 +4050,10 @@ def _provider_health_canary_grant_ids(
     app: Any,
     organization: str,
 ) -> dict[str, str]:
+    capabilities = sorted(
+        str(item["capability_name"])
+        for item in enabled_provider_health_canary_specs()
+    )
     return {
         capability: _authority_grant_id(
             subject=PROVIDER_HEALTH_CANARY_PRINCIPAL,
@@ -4059,7 +4063,7 @@ def _provider_health_canary_grant_ids(
             permission=PermissionMode.OBSERVE,
             approval_required=False,
         )
-        for capability in sorted(PROVIDER_HEALTH_CANARY_CAPABILITIES)
+        for capability in capabilities
     }
 
 
@@ -4095,7 +4099,7 @@ def provider_health_canary_status() -> dict[str, Any]:
         "principal": PROVIDER_HEALTH_CANARY_PRINCIPAL,
         "policy_id": PROVIDER_HEALTH_CANARY_POLICY_ID,
         "identity_active": bool(identity is not None and identity.status == "active"),
-        "required_capabilities": sorted(PROVIDER_HEALTH_CANARY_CAPABILITIES),
+        "required_capabilities": sorted(expected),
         "grants": grants,
     }
 
@@ -4105,7 +4109,7 @@ def approve_provider_health_canaries() -> dict[str, Any]:
     """Owner-only: grant exact observe-only authority for synthetic provider canaries."""
     try:
         admin, organization = _authority_admin_owner()
-        if organization != "aot":
+        if organization != provider_health_canary_organization_id():
             raise PermissionError("PROVIDER_CANARY_ORGANIZATION_MISMATCH")
         app = _runtime()
         identity = app.identity_authority.identities.get(
@@ -4127,7 +4131,10 @@ def approve_provider_health_canaries() -> dict[str, Any]:
             raise ValueError("PROVIDER_CANARY_IDENTITY_CONFLICT")
 
         created = []
-        for capability in sorted(PROVIDER_HEALTH_CANARY_CAPABILITIES):
+        for capability in sorted(
+            str(item["capability_name"])
+            for item in enabled_provider_health_canary_specs()
+        ):
             exact_capability = _exact_authority_capability(app, capability)
             grant_id = _authority_grant_id(
                 subject=PROVIDER_HEALTH_CANARY_PRINCIPAL,

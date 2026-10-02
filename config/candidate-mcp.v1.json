@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "dockerfile_relative_path": "opt/jason/current/infrastructure/jason-mcp/Dockerfile",
+  "candidate_image_prefix": "jason-mcp:candidate-",
+  "candidate_container_name": "jason-mcp-candidate",
+  "host_health_port": 18000,
+  "health_url": "http://127.0.0.1:18000/healthz",
+  "networks": [
+    "jason-core",
+    "openclaw_default"
+  ]
+}

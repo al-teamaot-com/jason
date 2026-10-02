@@ -39,6 +39,7 @@ class CandidateRuntimePlan:
     container_name: str
     image: str
     external_networks: tuple[str, ...]
+    host_health_port: int
     health_url: str
 
 
@@ -92,19 +93,149 @@ def _safe_env_file(path: Path) -> None:
         )
 
 
+
+
+def _read_env_file(path: Path) -> dict[str, str]:
+    _safe_env_file(path)
+    values: dict[str, str] = {}
+    for line_number, raw in enumerate(
+        path.read_text(encoding="utf-8").splitlines(),
+        start=1,
+    ):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            raise CandidateRuntimeError(
+                f"candidate runtime env line {line_number} is invalid"
+            )
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key or key in values:
+            raise CandidateRuntimeError(
+                f"candidate runtime env key is invalid or duplicate: {key!r}"
+            )
+        lowered = key.casefold()
+        is_path_reference = key.endswith("_HOST_PATH") or key.endswith("_FILE")
+        if (
+            any(marker in lowered for marker in ("password", "token", "private_key"))
+            and not is_path_reference
+        ):
+            raise CandidateRuntimeError(
+                f"candidate runtime env may not contain direct sensitive key {key}"
+            )
+        if "secret" in lowered and not is_path_reference:
+            raise CandidateRuntimeError(
+                f"candidate runtime env may not contain direct sensitive key {key}"
+            )
+        values[key] = value
+    return values
+
+
+def _private_mount_source(path: Path, *, variable: str) -> None:
+    if not path.is_absolute():
+        raise CandidateRuntimeError(
+            f"candidate mount {variable} must be absolute"
+        )
+    if path.is_symlink() or not path.is_file():
+        raise CandidateRuntimeError(
+            f"candidate mount {variable} is unavailable"
+        )
+    mode = stat.S_IMODE(path.stat().st_mode)
+    if mode & 0o022:
+        raise CandidateRuntimeError(
+            f"candidate mount {variable} is writable by group/world"
+        )
+
+
 def _overlay_text(
     *,
     service: str,
     container_name: str,
     image: str,
+    host_health_port: int,
+    root: Path,
+    runtime_config: Mapping[str, Any],
+    environment: Mapping[str, str],
 ) -> str:
-    return (
-        "services:\n"
-        f"  {service}:\n"
-        f"    image: {image}\n"
-        f"    container_name: {container_name}\n"
-        "    restart: \"no\"\n"
-    )
+    lines = [
+        "services:",
+        f"  {service}:",
+        f"    image: {image}",
+        f"    container_name: {container_name}",
+        '    restart: "no"',
+        "    ports:",
+        f'      - "127.0.0.1:{host_health_port}:8080"',
+        "    volumes: !override",
+    ]
+    for item in runtime_config["state_mounts"]:
+        relative = _safe_relative(
+            str(item["source_relative_path"]),
+            label="state mount source",
+        )
+        source = root / relative
+        source.mkdir(parents=True, exist_ok=True)
+        destination = str(item["destination"])
+        mode = str(item["mode"])
+        lines.append(f"      - {source}:{destination}:{mode}")
+
+    for item in runtime_config["secret_mounts"]:
+        variable = str(item["environment_variable"])
+        source_value = environment.get(variable, "").strip()
+        if not source_value:
+            raise CandidateRuntimeError(
+                f"candidate runtime env is missing {variable}"
+            )
+        source = Path(source_value)
+        _private_mount_source(source, variable=variable)
+        destination = str(item["destination"])
+        mode = str(item["mode"])
+        lines.append(f"      - {source}:{destination}:{mode}")
+
+    return "\n".join(lines) + "\n"
+
+
+
+
+def validate_candidate_runtime_environment_file(
+    *,
+    env_file: str | Path,
+    runtime_config: Mapping[str, Any],
+) -> dict[str, Any]:
+    environment_file = Path(env_file)
+    environment = _read_env_file(environment_file)
+    for required_name in (
+        "JASON_OLLAMA_MODEL",
+        "JASON_SES_DEFAULT_SENDER",
+    ):
+        if not environment.get(required_name, "").strip():
+            raise CandidateRuntimeError(
+                f"candidate runtime env is missing {required_name}"
+            )
+
+    mount_count = 0
+    for item in runtime_config["secret_mounts"]:
+        variable = str(item["environment_variable"])
+        source_value = environment.get(variable, "").strip()
+        if not source_value:
+            raise CandidateRuntimeError(
+                f"candidate runtime env is missing {variable}"
+            )
+        _private_mount_source(
+            Path(source_value),
+            variable=variable,
+        )
+        mount_count += 1
+
+    return {
+        "ollama_model": environment["JASON_OLLAMA_MODEL"].strip(),
+        "ses_default_sender": environment[
+            "JASON_SES_DEFAULT_SENDER"
+        ].strip(),
+        "secret_mount_count": mount_count,
+        "direct_secret_values_observed": False,
+    }
 
 
 def build_candidate_runtime_plan(
@@ -160,7 +291,20 @@ def build_candidate_runtime_plan(
         )
 
     environment_file = Path(env_file)
-    _safe_env_file(environment_file)
+    runtime_environment = validate_candidate_runtime_environment_file(
+        env_file=environment_file,
+        runtime_config=runtime_config,
+    )
+    environment = _read_env_file(environment_file)
+
+    host_health_port = int(runtime_config["host_health_port"])
+    expected_health_url = (
+        f"http://127.0.0.1:{host_health_port}/healthz"
+    )
+    if str(runtime_config["runtime_health_url"]) != expected_health_url:
+        raise CandidateRuntimeError(
+            "candidate runtime health URL does not match host health port"
+        )
 
     source_sha = str(manifest["platform"]["source_sha"])
     image = str(runtime_config["candidate_image_prefix"]) + source_sha[:12]
@@ -171,6 +315,10 @@ def build_candidate_runtime_plan(
             service=str(runtime_config["service"]),
             container_name=str(runtime_config["candidate_container_name"]),
             image=image,
+            host_health_port=host_health_port,
+            root=root,
+            runtime_config=runtime_config,
+            environment=environment,
         ),
         encoding="utf-8",
     )
@@ -187,6 +335,7 @@ def build_candidate_runtime_plan(
         service=str(runtime_config["service"]),
         container_name=str(runtime_config["candidate_container_name"]),
         image=image,
+        host_health_port=host_health_port,
         external_networks=tuple(
             str(item) for item in runtime_config["external_networks"]
         ),

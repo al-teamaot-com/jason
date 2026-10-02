@@ -109,7 +109,19 @@ def prepare_root(tmp_path: Path):
     )
     env = root / "etc/jason/runtime.env"
     env.parent.mkdir(parents=True)
-    env.write_text("JASON_SES_DEFAULT_SENDER=test@example.invalid\n")
+    env_lines = [
+        "JASON_SES_DEFAULT_SENDER=test@example.invalid",
+        "JASON_OLLAMA_MODEL=qwen-test",
+    ]
+    for index, item in enumerate(config()["secret_mounts"]):
+        source = root / "var/lib/jason/runtime-secrets/test" / str(index)
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("synthetic")
+        source.chmod(0o600)
+        env_lines.append(
+            str(item["environment_variable"]) + "=" + str(source)
+        )
+    env.write_text("\n".join(env_lines) + "\n")
     env.chmod(0o640)
 
     msp = {
@@ -143,6 +155,12 @@ def test_candidate_runtime_plan_uses_candidate_overlay_and_complete_secrets(tmp_
     overlay = Path(plan.overlay_file).read_text()
     assert "jason-runtime-candidate" in overlay
     assert "restart: \"no\"" in overlay
+    assert "127.0.0.1:18080:8080" in overlay
+    assert "volumes: !override" in overlay
+    assert "/run/jason-secrets/openbao/role_id:ro" in overlay
+    assert "/run/jason-secrets/openbao/autotask/secret_id:ro" in overlay
+    assert plan.host_health_port == 18080
+    assert plan.health_url == "http://127.0.0.1:18080/healthz"
     assert "production-deploy.sh" not in overlay
 
 
@@ -241,4 +259,48 @@ def test_runtime_health_identity_mismatch_times_out(tmp_path):
             ),
             health_timeout_seconds=0,
             poll_interval_seconds=0,
+        )
+
+
+def test_health_port_and_url_must_match(tmp_path):
+    root, _, attestation, env, msp = prepare_root(tmp_path)
+    runtime = config()
+    runtime["runtime_health_url"] = "http://127.0.0.1:9999/healthz"
+    with pytest.raises(
+        CandidateRuntimeError,
+        match="health URL does not match",
+    ):
+        build_candidate_runtime_plan(
+            target_root=root,
+            candidate_identity=identity(),
+            runtime_config=runtime,
+            msp_configuration=msp,
+            secret_presence_attestation_path=attestation,
+            env_file=env,
+        )
+
+
+def test_missing_candidate_mount_file_blocks_runtime_plan(tmp_path):
+    root, _, attestation, env, msp = prepare_root(tmp_path)
+    runtime = config()
+    variable = runtime["secret_mounts"][0]["environment_variable"]
+    lines = env.read_text().splitlines()
+    rewritten = []
+    for line in lines:
+        if line.startswith(variable + "="):
+            rewritten.append(variable + "=" + str(root / "missing"))
+        else:
+            rewritten.append(line)
+    env.write_text("\n".join(rewritten) + "\n")
+    with pytest.raises(
+        CandidateRuntimeError,
+        match="candidate mount .* is unavailable",
+    ):
+        build_candidate_runtime_plan(
+            target_root=root,
+            candidate_identity=identity(),
+            runtime_config=runtime,
+            msp_configuration=msp,
+            secret_presence_attestation_path=attestation,
+            env_file=env,
         )

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jason.local/schemas/candidate-dependencies.schema.json",
+  "title": "Jason Candidate Dependencies",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "openbao_image",
+    "ollama_image",
+    "openbao_host_port",
+    "ollama_host_port",
+    "networks"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "openbao_image": { "type": "string", "minLength": 1 },
+    "ollama_image": { "type": "string", "minLength": 1 },
+    "openbao_host_port": {
+      "type": "integer",
+      "minimum": 1024,
+      "maximum": 65535
+    },
+    "ollama_host_port": {
+      "type": "integer",
+      "minimum": 1024,
+      "maximum": 65535
+    },
+    "networks": {
+      "type": "array",
+      "minItems": 3,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 },
+      "contains": { "const": "jason-core" }
+    }
+  }
+}

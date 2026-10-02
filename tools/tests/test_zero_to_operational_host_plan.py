@@ -67,6 +67,30 @@ def plan_fixture(tmp_path: Path):
         (ROOT / "config/examples/msp-policy.example.json").read_text()
     )
 
+    runtime_env = tmp_path / "candidate-runtime.env"
+    runtime_config = json.loads(
+        (ROOT / "config/candidate-runtime.v1.json").read_text()
+    )
+    runtime_lines = [
+        "JASON_SES_DEFAULT_SENDER=test@example.invalid",
+        "JASON_OLLAMA_MODEL=qwen-test",
+        "JASON_MCP_ENTRA_TENANT_ID=tenant-test",
+        "JASON_MCP_ENTRA_CLIENT_ID=client-test",
+        "JASON_MCP_RESOURCE_URL=http://127.0.0.1:18000/mcp",
+        "JASON_PROVIDER_HEALTH_CANARY_ORGANIZATION_ID=0",
+        "JASON_PROVIDER_HEALTH_CANARY_PROVIDERS=autotask,datto_rmm",
+    ]
+    for index, mount in enumerate(runtime_config["secret_mounts"]):
+        source = tmp_path / "runtime-mounts" / str(index)
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("synthetic")
+        source.chmod(0o600)
+        runtime_lines.append(
+            str(mount["environment_variable"]) + "=" + str(source)
+        )
+    runtime_env.write_text("\n".join(runtime_lines) + "\n")
+    runtime_env.chmod(0o640)
+
     attestation = tmp_path / "secret-attestation.json"
     attestation.write_text(
         json.dumps(
@@ -119,6 +143,7 @@ def plan_fixture(tmp_path: Path):
         "msp_configuration": str(config),
         "msp_policy": str(policy),
         "secret_presence_attestation": str(attestation),
+        "candidate_runtime_env": str(runtime_env),
         "recovery_recipient_public_key": str(public),
         "recovery_signer_private_key": str(signer_private),
         "provider_canary": {
@@ -157,6 +182,9 @@ def test_complete_blank_host_plan_is_ready(tmp_path):
         "datto_rmm.readonly",
     )
     assert result.recovery_keys_valid is True
+    assert result.runtime_environment_valid is True
+    assert result.mcp_environment_valid is True
+    assert result.ollama_model == "qwen-test"
     assert result.production_authorized is False
 
 
@@ -237,5 +265,59 @@ def test_signer_private_key_permissions_must_be_private(tmp_path):
     assert any(
         item.startswith("recovery_keys:")
         and "permissions are too broad" in item
+        for item in result.blockers
+    )
+
+
+def test_missing_runtime_mount_blocks_host_preflight(tmp_path):
+    blank = tmp_path / "blank"
+    blank.mkdir()
+    plan, payload = plan_fixture(tmp_path)
+    env = Path(payload["candidate_runtime_env"])
+    lines = env.read_text().splitlines()
+    index = next(
+        i for i, line in enumerate(lines)
+        if line.split("=", 1)[0].endswith("_HOST_PATH")
+    )
+    variable, _ = lines[index].split("=", 1)
+    lines[index] = variable + "=" + str(tmp_path / "missing")
+    env.write_text("\n".join(lines) + "\n")
+    result = preflight_host_acceptance_plan(
+        plan_path=plan,
+        repository_root=ROOT,
+        target_root=blank,
+        host=host(),
+        effective_uid=0,
+    )
+    assert result.status == "blocked"
+    assert any(
+        item.startswith("candidate_runtime_env:")
+        and "is unavailable" in item
+        for item in result.blockers
+    )
+
+
+def test_wrong_mcp_resource_url_blocks_host_preflight(tmp_path):
+    blank = tmp_path / "blank"
+    blank.mkdir()
+    plan, payload = plan_fixture(tmp_path)
+    env = Path(payload["candidate_runtime_env"])
+    env.write_text(
+        env.read_text().replace(
+            "http://127.0.0.1:18000/mcp",
+            "http://127.0.0.1:8000/mcp",
+        )
+    )
+    result = preflight_host_acceptance_plan(
+        plan_path=plan,
+        repository_root=ROOT,
+        target_root=blank,
+        host=host(),
+        effective_uid=0,
+    )
+    assert result.status == "blocked"
+    assert any(
+        item.startswith("candidate_mcp_env:")
+        and "resource URL" in item
         for item in result.blockers
     )

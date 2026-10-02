@@ -13,6 +13,7 @@
     "msp_configuration",
     "msp_policy",
     "secret_presence_attestation",
+    "candidate_runtime_env",
     "recovery_recipient_public_key",
     "recovery_signer_private_key",
     "provider_canary",
@@ -21,25 +22,61 @@
     "production_authorized"
   ],
   "properties": {
-    "schema_version": { "const": "1.0" },
-    "scenario_id": { "type": "string", "minLength": 1 },
-    "candidate_host_identity": { "type": "string", "minLength": 1 },
-    "current_release": { "$ref": "#/$defs/release" },
-    "next_release": { "$ref": "#/$defs/release" },
-    "msp_configuration": { "type": "string", "minLength": 1 },
-    "msp_policy": { "type": "string", "minLength": 1 },
-    "secret_presence_attestation": { "type": "string", "minLength": 1 },
-    "recovery_recipient_public_key": { "type": "string", "minLength": 1 },
-    "recovery_signer_private_key": { "type": "string", "minLength": 1 },
+    "schema_version": {
+      "const": "1.0"
+    },
+    "scenario_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "candidate_host_identity": {
+      "type": "string",
+      "minLength": 1
+    },
+    "current_release": {
+      "$ref": "#/$defs/release"
+    },
+    "next_release": {
+      "$ref": "#/$defs/release"
+    },
+    "msp_configuration": {
+      "type": "string",
+      "minLength": 1
+    },
+    "msp_policy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "secret_presence_attestation": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recovery_recipient_public_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "recovery_signer_private_key": {
+      "type": "string",
+      "minLength": 1
+    },
     "provider_canary": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["container", "required_providers"],
+      "required": [
+        "container",
+        "required_providers"
+      ],
       "properties": {
-        "container": { "type": "string", "minLength": 1 },
+        "container": {
+          "type": "string",
+          "minLength": 1
+        },
         "required_providers": {
           "type": "array",
-          "items": { "type": "string", "minLength": 1 },
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
           "uniqueItems": true
         }
       }
@@ -53,21 +90,44 @@
         "mutation_expected"
       ],
       "properties": {
-        "capability": { "type": "string", "minLength": 1 },
-        "organization_id": { "type": "string", "minLength": 1 },
-        "mutation_expected": { "const": false }
+        "capability": {
+          "type": "string",
+          "minLength": 1
+        },
+        "organization_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mutation_expected": {
+          "const": false
+        }
       }
     },
-    "second_clean_environment_required": { "const": true },
-    "production_authorized": { "const": false }
+    "second_clean_environment_required": {
+      "const": true
+    },
+    "production_authorized": {
+      "const": false
+    },
+    "candidate_runtime_env": {
+      "type": "string",
+      "minLength": 1
+    }
   },
   "$defs": {
     "release": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["archive", "sha256", "source_sha"],
+      "required": [
+        "archive",
+        "sha256",
+        "source_sha"
+      ],
       "properties": {
-        "archive": { "type": "string", "minLength": 1 },
+        "archive": {
+          "type": "string",
+          "minLength": 1
+        },
         "sha256": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
