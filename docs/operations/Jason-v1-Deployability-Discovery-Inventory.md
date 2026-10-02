@@ -324,6 +324,8 @@ No change was made.
 13. The runtime exposes a large environment-driven configuration surface that is not yet governed by one explicit v1.0 configuration schema.
 14. Durable database/schema migration behavior is distributed across runtime modules and lacks a single deployment-level compatibility/version manifest.
 15. KFS deployment currently contains operator-home-specific paths for secrets and user-systemd installation.
+16. Live runtime code and helper executables remain under /home/al and are not represented by same-named repository artifacts.
+17. User cron directly references operator-home helper executables, so scheduling/runtime provenance is not yet fully release-controlled.
 
 ## Systemd reconciliation pass
 
@@ -448,3 +450,54 @@ Destination: #748 and #749.
 ## Production status
 
 No production mutation was performed during this discovery pass.
+
+
+## Host-local runtime provenance follow-up
+
+A later read-only pass checked the actual bind-source and executable provenance of running Jason services.
+
+### Confirmed operator-home dependencies
+
+The following live bind sources are under `/home/al` rather than a versioned Jason release/state root:
+
+- `/home/al/jason-runtime-tools/work_item_exporter.py`;
+- `/home/al/jason-secrets/kfs/postgres_password`;
+- `/home/al/jason-secrets/kfs/reader_password`.
+
+The following executable helper files are also present under the operator home and have no same-named repository file:
+
+- `/home/al/.local/bin/jason-client-posture-exporter-start`;
+- `/home/al/.local/bin/jason-resolution-memory-exporter-start`;
+- `/home/al/.local/bin/jason-security-control-exporter-start`;
+- `/home/al/jason-runtime-tools/work_item_exporter.py`.
+
+Two of those helper paths are directly referenced by the current user crontab.
+
+This is concrete proof of production behavior that cannot yet be reconstructed from a released Jason artifact alone.
+
+Destination: #748/#749.
+
+### Bind-source categories
+
+Running containers currently consume bind mounts from four materially different classes:
+
+1. versioned/release-controlled `/opt/jason/releases` and `/opt/jason/observability/releases`;
+2. durable operational state under `/var/lib/jason`;
+3. bootstrap/service state under `/opt/jason/bootstrap` and `/opt/jason/services`;
+4. ephemeral staged credentials under `/run/jason-runtime-credentials`.
+
+That separation is useful, but the install contract must make each root intentional and must eliminate operator-home runtime dependencies.
+
+### Service provenance requiring normalization
+
+Several installed services intentionally execute outside `/opt/jason/current`, including CCC and observability release pointers. Those are versioned through their own current/release roots and should become component entries in the Deployment Manifest (#750).
+
+Other service paths need stronger reproducibility treatment:
+
+- `jason-boot-recovery.service` invokes `/usr/local/sbin/jason-boot-recovery`;
+- `jason-openbao-backup.service` invokes a host-installed OpenBao backup script;
+- `jason-core.service` remains the sleep-infinity placeholder already identified.
+
+These paths are not automatically wrong, but the clean installer must either install them from immutable released artifacts/templates or remove them from the required deployment model.
+
+No files, services, schedules, secrets, or containers were changed during this pass.
