@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jason.local/schemas/upgrade-migration-catalog.schema.json",
+  "title": "Jason Upgrade Migration Catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "migrations"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "migrations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "store",
+          "from_version",
+          "to_version",
+          "reversible",
+          "rollback_strategy"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "store": { "type": "string", "minLength": 1 },
+          "from_version": { "type": "string", "minLength": 1 },
+          "to_version": { "type": "string", "minLength": 1 },
+          "reversible": { "type": "boolean" },
+          "rollback_strategy": {
+            "enum": ["reverse_migration", "restore_checkpoint"]
+          }
+        }
+      }
+    }
+  }
+}
