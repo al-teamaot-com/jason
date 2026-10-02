@@ -297,12 +297,13 @@ Controlled source/non-production acceptance must prove:
 2. Support-first scheduling blocks TODO admission when repair capacity exists;
 3. duplicate TODO issues are suppressed;
 4. generated issue carries exact TODO metadata and owner-approved development marker;
-5. existing development worker remains unchanged;
-6. merged issue/PR correlation yields exact merge SHA;
-7. bridge invokes Release Manager prepare rather than deployment plumbing;
-8. TODO closure rejects any release state other than closed;
-9. closure changes only the targeted TODO section;
-10. scheduler order is Support repair -> TODO intake -> development worker -> release bridge.
+5. generated issue readback proves GitHub author_association=OWNER before the shared development worker is activated for TODO intake;
+6. existing development worker remains unchanged;
+7. merged issue/PR correlation yields exact merge SHA;
+8. bridge invokes Release Manager prepare rather than deployment plumbing;
+9. TODO closure rejects any release state other than closed;
+10. closure changes only the targeted TODO section;
+11. scheduler order is Support repair -> TODO intake -> development worker -> release bridge.
 
 Production activation is separate and must wait for the current Release Manager P0 acceptance path to be healthy.
 
