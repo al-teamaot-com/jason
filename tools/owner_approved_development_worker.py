@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import tempfile
 from datetime import datetime, timezone
@@ -39,7 +40,7 @@ def todo_policy_approved(repo: Path, body: str) -> bool:
     match = TODO_META.search(body)
     if not match:
         return False
-    config = support.load_json(repo / 'config' / 'development-release-coordinator.json')
+    config = json.loads((repo / 'config' / 'development-release-coordinator.json').read_text(encoding='utf-8'))
     policy = config.get('todo_autonomy') if isinstance(config.get('todo_autonomy'), Mapping) else {}
     if not policy or policy.get('enabled') is not True or policy.get('owner_approved') is not True:
         return False
