@@ -596,6 +596,7 @@ def test_orphaned_waiting_device_completed_ticket_retires_local_wait(tmp_path: P
 
 
 def test_orphaned_waiting_device_read_failure_does_not_abort_scan_with_append_only_audit(tmp_path: Path):
+    # Regression for production issue #787: append-only audit sinks must preserve scan continuity.
     class EmptyQueueSource:
         def reconcile_candidates(self):
             return ()
