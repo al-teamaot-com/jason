@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "compose_relative_path": "opt/jason/current/infrastructure/jason-runtime/compose.yaml",
+  "service": "jason-runtime",
+  "candidate_container_name": "jason-runtime-candidate",
+  "candidate_image_prefix": "jason-runtime:candidate-",
+  "external_networks": [
+    "openclaw_default",
+    "jason-core",
+    "jason-observability"
+  ],
+  "runtime_health_url": "http://127.0.0.1:8080/healthz"
+}

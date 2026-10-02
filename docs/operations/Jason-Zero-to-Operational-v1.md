@@ -67,3 +67,45 @@ Before a blank-host install, the read-only candidate host preflight requires an 
 The same authorization object is threaded through canonical layout creation, immutable release staging, durable state initialization, portable systemd staging, secret-requirement staging, and Deployment Manifest generation.
 
 Without that identity, all existing live-root guards remain fail-closed.
+
+## Host acceptance plan preflight
+
+The host acceptance runner now has a read-only preflight bundle.
+
+Before a blank host is mutated, the plan must prove:
+
+- an authorized Candidate Host Identity;
+- a genuinely clean supported host;
+- immutable current and next release archives with exact SHA-256 and source SHA;
+- safe release archive members;
+- valid MSP configuration and MSP policy;
+- a secret-presence attestation containing every enabled-provider logical secret reference;
+- an X25519 recovery recipient public key;
+- a privately stored Ed25519 recovery signer private key;
+- provider canary coverage exactly matching enabled providers;
+- a declared governed read workflow for acceptance;
+- the second-clean-environment requirement;
+- production_authorized=false.
+
+The host-preflight CLI performs no deployment mutation.
+
+## Candidate runtime startup
+
+Host-mode acceptance does not reuse Production deployment scripts.
+
+The candidate runtime starter:
+
+- requires an authorized Candidate Host Identity;
+- requires the candidate Deployment Manifest instance to match that identity;
+- requires complete logical secret-reference attestation;
+- requires a protected runtime environment file;
+- generates a candidate-only Compose overlay;
+- uses a candidate image tag and candidate container name;
+- sets restart=no for the acceptance runtime;
+- ensures declared external networks exist;
+- runs docker compose config --quiet before startup;
+- starts only the candidate runtime service;
+- waits for /healthz;
+- requires runtime health to return the exact expected Deployment Manifest identity.
+
+A runtime process that is merely running, or healthy under the wrong deployment identity, does not satisfy the start phase.

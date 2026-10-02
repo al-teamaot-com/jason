@@ -10,6 +10,10 @@ from tools.zero_to_operational import receipt_to_json
 from tools.zero_to_operational_synthetic import (
     run_synthetic_zero_to_operational,
 )
+from tools.zero_to_operational_host_plan import (
+    preflight_host_acceptance_plan,
+    result_json as host_preflight_json,
+)
 
 
 def _root() -> Path:
@@ -33,9 +37,22 @@ def main() -> int:
     synthetic.add_argument("--workspace", required=True)
     synthetic.add_argument("--output", required=True)
 
+    host_preflight = sub.add_parser(
+        "host-preflight",
+        help="validate a blank-host acceptance plan without mutating the host",
+    )
+    host_preflight.add_argument("--plan", required=True)
+    host_preflight.add_argument("--target-root", default="/")
+
     args = parser.parse_args()
-    if args.mode != "synthetic":
-        parser.error("unsupported acceptance mode")
+    if args.mode == "host-preflight":
+        result = preflight_host_acceptance_plan(
+            plan_path=args.plan,
+            repository_root=repo,
+            target_root=args.target_root,
+        )
+        print(host_preflight_json(result), end="")
+        return 0 if result.status == "ready_for_host_acceptance" else 3
 
     receipt = run_synthetic_zero_to_operational(
         repository_root=repo,

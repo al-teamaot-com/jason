@@ -48,3 +48,10 @@ def test_synthetic_cli_writes_valid_non_proving_receipt(tmp_path):
     assert receipt["mode"] == "synthetic"
     assert receipt["deployability_proven"] is False
     assert receipt["production_authorized"] is False
+
+def test_host_preflight_subcommand_is_exposed():
+    source = (
+        ROOT / "tools/jason_zero_to_operational.py"
+    ).read_text(encoding="utf-8")
+    assert '"host-preflight"' in source
+    assert "preflight_host_acceptance_plan" in source
