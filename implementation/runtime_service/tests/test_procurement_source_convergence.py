@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from jason_runtime.procurement_teams_flow import (
+    PROCUREMENT_WRITE_CAPABILITIES,
     ProcurementTeamsFlow,
     SQLiteProcurementSubmissionStore,
     _card,
@@ -211,3 +212,8 @@ def test_requester_resource_ignores_inactive_email_duplicates(tmp_path):
     )
     assert resource["id"] == 29682885
     assert resource["isActive"] is True
+
+
+
+def test_procurement_worker_authority_includes_vendor_creation():
+    assert "service.vendor.create" in PROCUREMENT_WRITE_CAPABILITIES
