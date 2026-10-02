@@ -103,3 +103,84 @@ def test_init_permissions_must_be_private(tmp_path):
     ):
         governed_key_export_adapter("signing-key-material", {}, root)
     assert "governed_key_export" not in discover_builtin_adapter_names(root)
+
+
+def prepare_kfs_backup(root: Path):
+    from tools.kfs_postgresql_backup import KfsPostgresqlBackupResult
+
+    dump = root / "var/lib/jason/recovery/kfs/kfs-postgresql.dump"
+    dump.parent.mkdir(parents=True)
+    dump.write_bytes(b"PGDMP-synthetic-kfs-backup")
+    dump.chmod(0o600)
+    digest = hashlib.sha256(dump.read_bytes()).hexdigest()
+    receipt = dump.with_suffix(".dump.receipt.json")
+    receipt.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "output_path": str(dump),
+                "sha256": digest,
+                "size_bytes": dump.stat().st_size,
+                "database": "kfs_collector",
+                "host": "127.0.0.1",
+                "port": 5432,
+                "user": "kfs_collector",
+                "format": "postgresql-custom",
+                "verified": True,
+            }
+        )
+    )
+    receipt.chmod(0o600)
+    return dump, receipt
+
+
+def test_kfs_backup_adapter_packages_only_verified_custom_dump(tmp_path):
+    from tools.full_recovery_builtin_adapters import (
+        kfs_postgresql_backup_adapter,
+    )
+
+    root = tmp_path / "candidate"
+    dump, receipt = prepare_kfs_backup(root)
+    payloads, metadata = kfs_postgresql_backup_adapter(
+        "kfs-postgresql",
+        {},
+        root,
+    )
+    assert metadata == ()
+    assert payloads[0].data == dump.read_bytes()
+    assert payloads[0].metadata["verified"] is True
+    assert payloads[0].metadata["format"] == "postgresql-custom"
+    assert payloads[1].data == receipt.read_bytes()
+    assert "kfs_postgresql_backup" in discover_builtin_adapter_names(root)
+
+
+def test_kfs_backup_adapter_rejects_receipt_digest_mismatch(tmp_path):
+    from tools.full_recovery_builtin_adapters import (
+        kfs_postgresql_backup_adapter,
+    )
+
+    root = tmp_path / "candidate"
+    dump, receipt = prepare_kfs_backup(root)
+    payload = json.loads(receipt.read_text())
+    payload["sha256"] = "0" * 64
+    receipt.write_text(json.dumps(payload))
+    receipt.chmod(0o600)
+    with pytest.raises(
+        BuiltinRecoveryAdapterError,
+        match="digest does not match",
+    ):
+        kfs_postgresql_backup_adapter("kfs-postgresql", {}, root)
+
+
+def test_missing_kfs_backup_is_optional_source_unavailable(tmp_path):
+    from tools.full_recovery_builtin_adapters import (
+        kfs_postgresql_backup_adapter,
+    )
+    from tools.full_recovery_export import OptionalRecoverySourceUnavailable
+
+    with pytest.raises(OptionalRecoverySourceUnavailable):
+        kfs_postgresql_backup_adapter(
+            "kfs-postgresql",
+            {},
+            tmp_path / "candidate",
+        )

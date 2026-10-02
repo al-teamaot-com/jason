@@ -138,3 +138,30 @@ The governed key adapter:
 The recovery CLI now exposes export-from-root for non-live roots. The command requires an X25519 recovery-recipient public key and Ed25519 signer private key, writes the resulting package atomically with mode 0600, and emits only non-secret summary metadata.
 
 The implementation still refuses export-from-root when target-root is the live filesystem root. Production export activation remains a separate exact-plan Owner-approved operation.
+
+## KFS PostgreSQL native recovery
+
+KFS history is recovered through PostgreSQL-native artifacts rather than by copying the live PostgreSQL data directory.
+
+The KFS backup helper:
+
+- uses pg_dump custom format;
+- uses PGPASSFILE so the database password is never placed on the command line;
+- uses --no-owner and --no-acl for portability;
+- verifies the artifact with pg_restore --list before accepting it;
+- writes the dump and receipt with private permissions;
+- records SHA-256, size, database, host, port, user, format, and verified status;
+- refuses the live filesystem root in the non-production implementation.
+
+The Full Recovery Export built-in KFS adapter includes only a verified dump whose digest and size match the receipt.
+
+The matching restore helper:
+
+- requires explicit candidate database-restore authorization;
+- requires the target host/database/user/port to match the backup receipt;
+- verifies the dump again with pg_restore --list;
+- restores with --single-transaction, --clean, --if-exists, --no-owner, --no-acl, and --exit-on-error;
+- uses PGPASSFILE and never emits the password value;
+- refuses the live filesystem root.
+
+If no KFS backup artifact exists, the v1 collection records KFS as optional-missing rather than copying PostgreSQL volume files.

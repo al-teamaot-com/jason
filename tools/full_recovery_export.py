@@ -19,6 +19,10 @@ class FullRecoveryExportError(ValueError):
     pass
 
 
+class OptionalRecoverySourceUnavailable(FullRecoveryExportError):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class CollectedPayload:
     state_class: str
@@ -223,11 +227,17 @@ def collect_full_recovery_state(
                     )
                 optional_missing.append(source_id)
                 continue
-            adapter_payloads, adapter_metadata = adapter(
-                source_id,
-                raw,
-                root,
-            )
+            try:
+                adapter_payloads, adapter_metadata = adapter(
+                    source_id,
+                    raw,
+                    root,
+                )
+            except OptionalRecoverySourceUnavailable:
+                if required:
+                    raise
+                optional_missing.append(source_id)
+                continue
             payloads.extend(adapter_payloads)
             metadata_only.extend(adapter_metadata)
             adapters_used.append(adapter_name)

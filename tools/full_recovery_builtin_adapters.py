@@ -6,7 +6,11 @@ import stat
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from tools.full_recovery_export import CollectedMetadata, CollectedPayload
+from tools.full_recovery_export import (
+    CollectedMetadata,
+    CollectedPayload,
+    OptionalRecoverySourceUnavailable,
+)
 
 
 class BuiltinRecoveryAdapterError(ValueError):
@@ -192,9 +196,98 @@ def governed_key_export_adapter(
     return tuple(payloads), ()
 
 
+
+
+def kfs_postgresql_backup_adapter(
+    source_id: str,
+    source: Mapping[str, Any],
+    root: Path,
+) -> tuple[Sequence[CollectedPayload], Sequence[CollectedMetadata]]:
+    dump_path = root / "var/lib/jason/recovery/kfs/kfs-postgresql.dump"
+    receipt_path = dump_path.with_suffix(dump_path.suffix + ".receipt.json")
+    if not dump_path.exists() and not receipt_path.exists():
+        raise OptionalRecoverySourceUnavailable(
+            "KFS PostgreSQL backup artifact is not available"
+        )
+
+    dump_bytes = _private_regular_file(
+        dump_path,
+        label="KFS PostgreSQL backup artifact",
+    )
+    receipt_bytes = _private_regular_file(
+        receipt_path,
+        label="KFS PostgreSQL backup receipt",
+    )
+    try:
+        receipt = json.loads(receipt_bytes)
+    except json.JSONDecodeError as exc:
+        raise BuiltinRecoveryAdapterError(
+            "KFS PostgreSQL backup receipt is invalid JSON"
+        ) from exc
+
+    if receipt.get("schema_version") != "1.0":
+        raise BuiltinRecoveryAdapterError(
+            "KFS PostgreSQL backup receipt schema is unsupported"
+        )
+    if receipt.get("verified") is not True:
+        raise BuiltinRecoveryAdapterError(
+            "KFS PostgreSQL backup receipt is not verified"
+        )
+    if receipt.get("format") != "postgresql-custom":
+        raise BuiltinRecoveryAdapterError(
+            "KFS PostgreSQL backup receipt format is not postgresql-custom"
+        )
+    observed = hashlib.sha256(dump_bytes).hexdigest()
+    if receipt.get("sha256") != observed:
+        raise BuiltinRecoveryAdapterError(
+            "KFS PostgreSQL backup digest does not match its receipt"
+        )
+    if int(receipt.get("size_bytes") or -1) != len(dump_bytes):
+        raise BuiltinRecoveryAdapterError(
+            "KFS PostgreSQL backup size does not match its receipt"
+        )
+
+    return (
+        (
+            CollectedPayload(
+                state_class="business-operational-state",
+                member_name="state/kfs-postgresql/kfs-postgresql.dump",
+                restore_relative_path=(
+                    "var/lib/jason/recovery/kfs/kfs-postgresql.dump"
+                ),
+                data=dump_bytes,
+                metadata={
+                    "adapter": "kfs_postgresql_backup",
+                    "format": "postgresql-custom",
+                    "sha256": observed,
+                    "database": str(receipt.get("database") or ""),
+                    "host": str(receipt.get("host") or ""),
+                    "port": int(receipt.get("port") or 0),
+                    "user": str(receipt.get("user") or ""),
+                    "verified": True,
+                },
+            ),
+            CollectedPayload(
+                state_class="business-operational-state",
+                member_name="state/kfs-postgresql/kfs-postgresql.dump.receipt.json",
+                restore_relative_path=(
+                    "var/lib/jason/recovery/kfs/kfs-postgresql.dump.receipt.json"
+                ),
+                data=receipt_bytes,
+                metadata={
+                    "adapter": "kfs_postgresql_backup",
+                    "source": "backup-receipt",
+                },
+            ),
+        ),
+        (),
+    )
+
+
 BUILTIN_ADAPTERS = {
     "governed_secret_export": governed_secret_export_adapter,
     "governed_key_export": governed_key_export_adapter,
+    "kfs_postgresql_backup": kfs_postgresql_backup_adapter,
 }
 
 
@@ -218,4 +311,11 @@ def discover_builtin_adapter_names(target_root: str | Path) -> tuple[str, ...]:
         pass
     else:
         available.append("governed_key_export")
+
+    try:
+        kfs_postgresql_backup_adapter("kfs-postgresql", {}, root)
+    except Exception:
+        pass
+    else:
+        available.append("kfs_postgresql_backup")
     return tuple(sorted(available))
