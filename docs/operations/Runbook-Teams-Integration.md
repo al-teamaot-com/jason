@@ -338,6 +338,24 @@ The historical proactive bootstrap facts remain:
 
 Inbound and outbound transport topology must not be conflated merely because they use the same Teams application identity.
 
+### Company-wide proactive staff bootstrap
+
+For any governed proactive send to an AOT staff member, the direct Teams gateway must validate the target Entra object in the AOT tenant before Teams-side effects. The user must exist, be enabled, and have `userType=Member`; missing, disabled, or guest identities fail closed.
+
+If the Jason organization-catalog app is not installed for the target user, the gateway uses its approved Microsoft Graph application identity to install exactly catalog app `1b24025a-201f-439d-a4ef-e308c7f3d853` in that user's personal scope, polls with bounded retries until the installation is visible, then creates/reuses the personal Jason Approval Bot conversation and sends the message. Repeated sends must reuse the existing installation/conversation rather than duplicate bootstrap work. Jason must never substitute `48:notes`, a different recipient, or send-as-owner when bot bootstrap fails.
+
+### Owner notification routing and presentation
+
+For proactive messages to the AOT owner, use only Jason's governed `communication.teams.message.send` capability through the direct Teams gateway / Jason Approval Bot conversation. Do not route owner notifications through generic Teams connector self-chat / Notes (`48:notes`) or substitute another chat when the governed target is available.
+
+Presentation rules for operational summaries:
+
+- use Adaptive Cards for multi-row/tabular content when supported;
+- otherwise use one item per line with bullets or compact labels;
+- avoid plain-text Markdown pipe tables because Teams can collapse them into a dense paragraph;
+- separate exceptions/unresolved items into their own section; and
+- verify post-send readback against the intended Jason bot conversation.
+
 ## 13. Security and hardening follow-up
 
 The routing workstream is production-proven. Remaining hardening includes:

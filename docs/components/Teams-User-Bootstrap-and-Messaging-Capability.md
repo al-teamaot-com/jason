@@ -1,12 +1,12 @@
 # Capability Specification - Teams User Bootstrap and Messaging
 
-**Draft status:** Ready for implementation based on successful 2026-08-10 proof-of-concept.
+**Status:** Production implementation in progress as of 2026-10-01, based on the successful 2026-08-10 proof-of-concept and the company-wide proactive messaging requirement.
 
 ## Capability 1 - `ensure_teams_conversation`
 
 ### Purpose
 
-Ensure Jason can proactively communicate with an authorized Microsoft Entra user through Microsoft Teams.
+Ensure Jason can proactively communicate with any enabled AOT Microsoft Entra member through Microsoft Teams without requiring prior manual bot installation or a pre-existing Jason conversation.
 
 ### Request
 
@@ -31,15 +31,15 @@ Ensure Jason can proactively communicate with an authorized Microsoft Entra user
 
 ### Capability behavior
 
-1. Validate target user belongs to the expected tenant.
+1. Validate the target identity exists in the AOT tenant, is enabled, and is an Entra `Member`; disabled, missing, or guest identities fail closed before Teams-side effects.
 2. Check central conversation/bootstrap registry for a known Teams conversation.
-3. If known, return `ready` without changing anything.
-4. If unknown, obtain an ephemeral Microsoft Graph app-only token via certificate/secret reference.
-5. Query `users/{id}/teamwork/installedApps` for the Jason Teams catalog app.
-6. If not installed, install the app.
-7. Poll/wait for Teams/OpenClaw conversation availability with bounded retries.
-8. Store non-secret conversation metadata centrally.
-9. Return structured status.
+3. Obtain an ephemeral Microsoft Graph app-only token inside the gateway capability boundary.
+4. Query `users/{id}/teamwork/installedApps` for the Jason Teams catalog app (`1b24025a-201f-439d-a4ef-e308c7f3d853`).
+5. If not installed, install exactly that approved catalog app in the target user's personal scope.
+6. Poll the installation with bounded retries until Graph reports it available.
+7. If a usable stored conversation exists, reuse it; otherwise create the personal Jason bot conversation.
+8. Store only non-secret conversation metadata centrally.
+9. Return structured status including whether the app installation and/or conversation bootstrap were newly created.
 
 ### Example result
 
@@ -79,6 +79,14 @@ Send a governed Teams message after ensuring the target conversation exists.
 3. Teams capability invokes OpenClaw messaging provider.
 4. Delivery receipt is captured.
 5. Audit event records message purpose, target identity, result, message ID, and conversation reference by reference.
+
+### Owner routing and formatting policy
+
+- Owner-directed Jason notifications must use the governed `communication.teams.message.send` / Jason Approval Bot proactive path. Generic Microsoft Teams self-chat / Notes (`48:notes`) is not an owner-notification fallback.
+- The target Entra object ID and tenant ID must be explicit and bound before send; recipient substitution is prohibited.
+- Structured operational data such as meter counts, tickets, approvals, alerts, and status summaries must be rendered for Teams readability. Prefer a supported Adaptive Card for tabular or multi-row data. If plain text is used, render one item per line with bullets or short labeled lines.
+- Do not send Markdown-style pipe tables as plain text because Teams may collapse them into a dense paragraph.
+- Post-send evidence/readback must confirm the intended Jason bot conversation and readable content.
 
 ## Idempotency
 

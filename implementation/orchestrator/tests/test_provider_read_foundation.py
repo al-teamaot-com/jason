@@ -43,6 +43,7 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_PURCHASE_ORDER_SEARCH,
     SERVICE_PURCHASE_ORDER_READ,
     SERVICE_PURCHASE_ORDER_ITEM_SEARCH,
+    SERVICE_TICKET_COUNT,
     SERVICE_TICKET_NOTES_SEARCH,
     SERVICE_TICKET_READ,
     SERVICE_TICKET_SEARCH,
@@ -429,6 +430,58 @@ def test_autotask_ticket_search_canonicalizes_queue_name_filter() -> None:
             {"op": "eq", "field": "status", "value": "In Progress"},
         ],
     }
+
+
+def test_autotask_ticket_search_supports_bounded_created_range() -> None:
+    search = json.loads(
+        adapt_autotask_arguments(
+            SERVICE_TICKET_SEARCH,
+            {
+                "filters": {"source": 4},
+                "created_after": "2026-07-03T16:45:00Z",
+                "created_before": "2026-10-01T16:45:00Z",
+                "page_size": 100,
+            },
+        )["search"]
+    )
+    assert search == {
+        "MaxRecords": 100,
+        "filter": [
+            {"op": "eq", "field": "source", "value": 4},
+            {
+                "op": "gte",
+                "field": "createDate",
+                "value": "2026-07-03T16:45:00Z",
+            },
+            {
+                "op": "lte",
+                "field": "createDate",
+                "value": "2026-10-01T16:45:00Z",
+            },
+        ],
+    }
+
+    count_search = json.loads(
+        adapt_autotask_arguments(
+            SERVICE_TICKET_COUNT,
+            {
+                "filters": {"source": 4},
+                "created_after": "2026-07-03T16:45:00Z",
+                "created_before": "2026-10-01T16:45:00Z",
+            },
+        )["search"]
+    )
+    assert count_search == {"filter": search["filter"]}
+
+
+def test_autotask_ticket_search_rejects_invalid_created_range_values() -> None:
+    for selector in ("created_after", "created_before"):
+        for invalid in ("", True, 123):
+            with pytest.raises(ValueError, match=selector):
+                adapt_autotask_arguments(
+                    SERVICE_TICKET_SEARCH,
+                    {selector: invalid},
+                )
 
 
 def test_autotask_continuation_uses_durable_id_without_provider_url() -> None:

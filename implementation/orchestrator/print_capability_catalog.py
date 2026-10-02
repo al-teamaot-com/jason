@@ -28,6 +28,8 @@ from kernel.execution_providers import (
 PRINT_DEVICE_SEARCH = "print.device.search"
 PRINT_DEVICE_READ = "print.device.read"
 PRINT_METER_READ = "print.meter.read"
+PRINT_METER_HISTORY_SEARCH = "print.meter.history.search"
+PRINT_METER_USAGE_READ = "print.meter.usage.read"
 PRINT_SUPPLIES_READ = "print.supplies.read"
 PRINT_ALERT_SEARCH = "print.alert.search"
 KYOCERA_KFS_PROVIDER = "kyocera_kfs"
@@ -36,6 +38,8 @@ _PRINT_CAPABILITIES = (
     PRINT_DEVICE_SEARCH,
     PRINT_DEVICE_READ,
     PRINT_METER_READ,
+    PRINT_METER_HISTORY_SEARCH,
+    PRINT_METER_USAGE_READ,
     PRINT_SUPPLIES_READ,
     PRINT_ALERT_SEARCH,
 )
@@ -141,6 +145,26 @@ def print_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             operation="read",
             selector_keys="resource_id,device_id,serial_number",
             fact_hints="meter count copy count print count mono black white color total impressions scan fax",
+        ),
+        _read_capability(
+            now=now,
+            name=PRINT_METER_HISTORY_SEARCH,
+            display_name="Search Print Device Meter History",
+            purpose="Read historical governed meter snapshots for an authorized managed print device.",
+            resource_types="print_meter,print_device",
+            operation="search",
+            selector_keys="resource_id,device_id,serial_number,month,start,end,timezone,counters,limit",
+            fact_hints="historical meter readings prior readings meter history trend monthly usage past usage",
+        ),
+        _read_capability(
+            now=now,
+            name=PRINT_METER_USAGE_READ,
+            display_name="Read Print Device Usage",
+            purpose="Calculate bounded print, copy, color, mono, and scan usage for a managed print device over a requested period.",
+            resource_types="print_meter,print_device",
+            operation="read",
+            selector_keys="resource_id,device_id,serial_number,month,start,end,timezone,counters",
+            fact_hints="monthly usage last month meter delta impressions pages copies prints color mono scans period usage",
         ),
         _read_capability(
             now=now,

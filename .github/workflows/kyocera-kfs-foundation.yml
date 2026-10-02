@@ -10,6 +10,11 @@ on:
       - 'implementation/orchestrator/print_capability_catalog.py'
       - 'implementation/orchestrator/tests/test_print_capability_catalog.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
+      - 'implementation/runtime_service/src/jason_runtime/kfs_meter_history.py'
+      - 'implementation/runtime_service/tests/test_kfs_meter_history.py'
+      - 'implementation/runtime_service/pyproject.toml'
+      - 'infrastructure/jason-runtime/**'
+      - 'infrastructure/kfs-collector/**'
       - 'tools/provider_secret_provision.py'
       - 'tools/tests/test_provider_secret_provision.py'
       - '.github/workflows/kyocera-kfs-foundation.yml'
@@ -22,6 +27,11 @@ on:
       - 'implementation/orchestrator/print_capability_catalog.py'
       - 'implementation/orchestrator/tests/test_print_capability_catalog.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
+      - 'implementation/runtime_service/src/jason_runtime/kfs_meter_history.py'
+      - 'implementation/runtime_service/tests/test_kfs_meter_history.py'
+      - 'implementation/runtime_service/pyproject.toml'
+      - 'infrastructure/jason-runtime/**'
+      - 'infrastructure/kfs-collector/**'
       - 'tools/provider_secret_provision.py'
       - 'tools/tests/test_provider_secret_provision.py'
       - '.github/workflows/kyocera-kfs-foundation.yml'
@@ -46,6 +56,7 @@ jobs:
         run: |
           python -m pytest implementation/connectors/tests/test_kyocera_kfs_connector.py -q
           python -m pytest implementation/orchestrator/tests/test_print_capability_catalog.py -q
+          python -m pytest implementation/runtime_service/tests/test_kfs_meter_history.py -q
           python -m pytest tools/tests/test_provider_secret_provision.py -q
       - name: Verify KFS remains credential-safe and fail-closed by default
         run: |

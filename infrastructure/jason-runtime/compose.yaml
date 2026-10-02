@@ -61,6 +61,9 @@ services:
       JASON_DRMM_RECENT_ALERT_RECONCILIATION_DB: /var/lib/jason/openclaw/drmm-recent-alert-reconciliation.sqlite3
       JASON_DRMM_RECENT_ALERT_RECONCILIATION_LOOKBACK_HOURS: ${JASON_DRMM_RECENT_ALERT_RECONCILIATION_LOOKBACK_HOURS:-24}
       JASON_DRMM_RECENT_ALERT_RECONCILIATION_CADENCE_HOURS: ${JASON_DRMM_RECENT_ALERT_RECONCILIATION_CADENCE_HOURS:-24}
+      JASON_WINDOWS_TIME_SOURCE_SHADOW_ENABLED: ${JASON_WINDOWS_TIME_SOURCE_SHADOW_ENABLED:-true}
+      JASON_WINDOWS_TIME_SOURCE_SHADOW_DB: /var/lib/jason/openclaw/windows-time-source-shadow.sqlite3
+      JASON_WINDOWS_TIME_SOURCE_SHADOW_CADENCE_MINUTES: ${JASON_WINDOWS_TIME_SOURCE_SHADOW_CADENCE_MINUTES:-15}
       JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED: ${JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED:-true}
       JASON_SUPPORT_REPAIR_SPOOL: /var/lib/jason/openclaw/support-repair
       JASON_AUTONOMY_OWNED_AUTOTASK_RESOURCE_IDS: ${JASON_AUTONOMY_OWNED_AUTOTASK_RESOURCE_IDS:-}
@@ -79,6 +82,11 @@ services:
       JASON_KFS_ENABLED: ${JASON_KFS_ENABLED:-false}
       JASON_KFS_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/kyocera-kfs/role_id
       JASON_KFS_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/kyocera-kfs/secret_id
+      JASON_KFS_HISTORY_HOST: ${JASON_KFS_HISTORY_HOST:-jason-kfs-postgres}
+      JASON_KFS_HISTORY_PORT: ${JASON_KFS_HISTORY_PORT:-5432}
+      JASON_KFS_HISTORY_DATABASE: ${JASON_KFS_HISTORY_DATABASE:-kfs_collector}
+      JASON_KFS_HISTORY_USER: ${JASON_KFS_HISTORY_USER:-kfs_reader}
+      JASON_KFS_HISTORY_PASSWORD_FILE: /run/jason-secrets/kfs-history/password
       JASON_BACKUP_NET_ENABLED: ${JASON_BACKUP_NET_ENABLED:-false}
       JASON_BACKUP_NET_OPENBAO_ROLE_ID_PATH: /run/jason-secrets/openbao/backup-net/role_id
       JASON_BACKUP_NET_OPENBAO_SECRET_ID_PATH: /run/jason-secrets/openbao/backup-net/secret_id
@@ -102,8 +110,8 @@ services:
       - ${JASON_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/secret_id:ro
       - ${JASON_DATTO_EDR_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_DATTO_EDR_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/datto-edr/role_id:ro
       - ${JASON_DATTO_EDR_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_DATTO_EDR_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/datto-edr/secret_id:ro
-      - ${JASON_DATTO_EXECUTION_OPENBAO_ROLE_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/datto-rmm-execution-approle/role-id}:/run/jason-secrets/openbao/datto-rmm-execution/role_id:ro
-      - ${JASON_DATTO_EXECUTION_OPENBAO_SECRET_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/datto-rmm-execution-approle/secret-id}:/run/jason-secrets/openbao/datto-rmm-execution/secret_id:ro
+      - ${JASON_DATTO_EXECUTION_OPENBAO_ROLE_ID_HOST_PATH:-/opt/jason/bootstrap/secrets/openbao/datto-rmm-execution-approle/role-id}:/run/jason-secrets/openbao/datto-rmm-execution/role_id:ro
+      - ${JASON_DATTO_EXECUTION_OPENBAO_SECRET_ID_HOST_PATH:-/opt/jason/bootstrap/secrets/openbao/datto-rmm-execution-approle/secret-id}:/run/jason-secrets/openbao/datto-rmm-execution/secret_id:ro
       - ${JASON_SES_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_SES_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/aws-ses/role_id:ro
       - ${JASON_SES_OPENBAO_SECRET_ID_HOST_PATH:?set JASON_SES_OPENBAO_SECRET_ID_HOST_PATH}:/run/jason-secrets/openbao/aws-ses/secret_id:ro
       - ${JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH:?set JASON_MICROSOFT_OPENBAO_ROLE_ID_HOST_PATH}:/run/jason-secrets/openbao/microsoft-graph/role_id:ro
@@ -118,6 +126,7 @@ services:
       - ${JASON_AUTOTASK_WRITE_OPENBAO_SECRET_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/autotask-write-approle/secret-id}:/run/jason-secrets/openbao/autotask-write/secret_id:ro
       - ${JASON_KFS_OPENBAO_ROLE_ID_HOST_PATH:-/opt/jason/bootstrap/secrets/openbao/kyocera-kfs-read-approle/role-id}:/run/jason-secrets/openbao/kyocera-kfs/role_id:ro
       - ${JASON_KFS_OPENBAO_SECRET_ID_HOST_PATH:-/opt/jason/bootstrap/secrets/openbao/kyocera-kfs-read-approle/secret-id}:/run/jason-secrets/openbao/kyocera-kfs/secret_id:ro
+      - ${JASON_KFS_HISTORY_PASSWORD_HOST_PATH:-/home/al/jason-secrets/kfs/reader_password}:/run/jason-secrets/kfs-history/password:ro
       - ${JASON_BACKUP_NET_OPENBAO_ROLE_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/backup-net-read-approle/role-id}:/run/jason-secrets/openbao/backup-net/role_id:ro
       - ${JASON_BACKUP_NET_OPENBAO_SECRET_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/backup-net-read-approle/secret-id}:/run/jason-secrets/openbao/backup-net/secret_id:ro
       - ${JASON_DNSFILTER_OPENBAO_ROLE_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/dnsfilter-read-approle/role-id}:/run/jason-secrets/openbao/dnsfilter/role_id:ro

@@ -66,15 +66,21 @@ Preserve:
 
 Before proposing or changing a PO:
 1. Identify the requester.
-2. Resolve the vendor.
-3. Resolve any named customer/company.
-4. Search for an existing PO, invoice, order confirmation, quote, or vendor order number.
-5. Search likely open Autotask tickets for the customer/request context.
-6. Read the likely ticket description and notes where authorized.
-7. Present a likely ticket as: `TICKET-NUMBER — Ticket Title`.
-8. Record why the candidate matched: customer, requester, vendor, product/SKU, device, title, notes, quote/order reference, or other grounded evidence.
-9. Detect possible duplicate orders or existing inventory before proposing purchase.
-10. If more than one material candidate remains, present the bounded candidate list instead of guessing.
+2. Resolve the vendor to an exact Autotask vendor company ID.
+3. Extract available vendor identity data from the quote, invoice, URL, or vendor website and reconcile it against Autotask before procurement continues. Compare, where present: legal/display name, website/domain, street/city/state/postal address, phone, vendor/account number, email, and other procurement-relevant identity fields.
+4. Treat the incoming source as a freshness check on the Autotask vendor master record:
+   - matching values become verification evidence;
+   - source fields missing in Autotask become proposed vendor-master updates;
+   - conflicting non-empty values require `state = vendor_review` and must not be silently overwritten;
+   - absence of a field in the source is not evidence that the Autotask value is wrong.
+5. Resolve any named customer/company.
+6. Search for an existing PO, invoice, order confirmation, quote, or vendor order number.
+7. Search likely open Autotask tickets for the customer/request context.
+8. Read the likely ticket description and notes where authorized.
+9. Present a likely ticket as: `TICKET-NUMBER — Ticket Title`.
+10. Record why the candidate matched: customer, requester, vendor, product/SKU, device, title, notes, quote/order reference, or other grounded evidence.
+11. Detect possible duplicate orders or existing inventory before proposing purchase.
+12. If more than one material candidate remains, present the bounded candidate list instead of guessing.
 
 If the procurement object, vendor, customer, or allocation cannot be identified confidently:
 
@@ -85,7 +91,8 @@ If the procurement object, vendor, customer, or allocation cannot be identified 
 ## 5. Expected State
 
 A healthy procurement case has:
-- one resolved vendor;
+- one resolved vendor with an exact Autotask vendor company ID;
+- vendor master data compared against the current source evidence, with confirmed fields recorded and meaningful drift resolved or explicitly reviewed;
 - one durable PO when a PO is required;
 - normalized PO lines linked to approved catalog records;
 - every ordered quantity explicitly allocated;
@@ -140,6 +147,28 @@ Do not repeat already completed steps after a restart, recheck, or handoff.
 ---
 
 ## 7. Diagnostic Workflow
+
+### Step 0: Resolve and verify vendor
+
+**Purpose:** Confirm the supplier exists as the correct Autotask vendor entity and use the current source as a vendor-master freshness check.
+
+**Evidence source:** Quote/invoice contents, pasted product URL, vendor website, and Autotask company/vendor reads.
+
+**Expected result:** One exact Autotask vendor company ID with reconciled vendor identity evidence.
+
+Compare available source fields to Autotask, including:
+- legal/display name;
+- website/domain;
+- address;
+- phone;
+- email;
+- vendor/account number;
+- other stable procurement identifiers present in the source.
+
+If no exact vendor exists -> propose vendor creation under governed approval before product or PO creation.
+If Autotask is missing a value that is present in authoritative current source evidence -> propose a vendor-master update.
+If both source and Autotask contain conflicting values -> `state = vendor_review`; do not silently update or continue financial commitment.
+If the source does not expose a field -> retain the Autotask value and record that the source could not verify it.
 
 ### Step 1: Resolve catalog and existing procurement
 
@@ -225,7 +254,9 @@ Email evidence must not by itself mark physical inventory received.
 
 Before PO creation:
 - requester identity resolved;
-- vendor resolved;
+- requester delegated spending authority resolved from the AOT internal Autotask contact (`companyID = 0`) and its `Spending limit` UDF;
+- vendor resolved to an exact Autotask vendor company ID;
+- vendor source-vs-Autotask reconciliation completed with no unresolved conflicting identity data;
 - duplicate check complete;
 - catalog match/create proposal resolved;
 - customer context resolved when applicable;
@@ -233,7 +264,8 @@ Before PO creation:
 - allocation reconciles exactly;
 - billable quantity explicitly determined or explicitly deferred;
 - financial totals supported by evidence;
-- required approval available.
+- total AOT cost commitment includes product cost, freight, tax, and fees;
+- required approval available only when the total commitment exceeds the requester's delegated `Spending limit`; at or below the limit, do not generate approval noise merely to state that approval was unnecessary.
 
 Before ticket billing:
 - exact ticket resolved;
@@ -274,7 +306,10 @@ Use `PurchaseOrderItemReceiving`; do not directly patch a PO to Received Full.
 
 ### Teams approval
 Approval evidence must include:
-- vendor;
+- submitted by / requester;
+- requester Autotask contact ID and spending limit used for the decision;
+- vendor and exact Autotask vendor company ID;
+- vendor verification/drift summary;
 - PO/order reference;
 - customer;
 - ticket number + title;
@@ -385,6 +420,9 @@ Suggested note titles:
 ## 15. Failure Handling
 
 Treat as first-class failures:
+- pasted URL cannot be safely retrieved or resolved;
+- vendor cannot be matched to an exact Autotask vendor company;
+- vendor source data conflicts with the Autotask master record;
 - mailbox read unavailable;
 - email cannot be correlated safely;
 - ticket match ambiguous;

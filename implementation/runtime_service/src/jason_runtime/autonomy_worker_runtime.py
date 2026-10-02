@@ -86,6 +86,7 @@ from .unexpected_shutdown_analysis import (
     storage_health_risk as shutdown_storage_health_risk,
 )
 from .approved_client_messages import resolve_approved_client_message
+from .technical_notes import TechnicalNote, canonical_title, legacy_technical_note, render_technical_note
 from autonomous_remediation.offline_ticket_augmentation import (
     SiteContextEvidence,
     SiteWitness,
@@ -252,12 +253,17 @@ VULSCAN_APPROVAL_RECHECK_SECONDS = 24 * 60 * 60
 VULSCAN_APPROVAL_ESCALATION_SECONDS = 10 * 24 * 60 * 60
 VULSCAN_PATCH_WINDOW_RECHECK_SECONDS = 6 * 60 * 60
 OFFLINE_AUGMENTATION_RECHECK_SECONDS = 10 * 60
-OFFLINE_AUGMENTATION_NOTE_TITLE = "Jason - Offline Ticket Context"
 OFFLINE_AUGMENTATION_WITNESS_COMMAND = "Get-NetIPConfiguration"
 
 
 class OperationalAutonomyError(RuntimeError):
     pass
+
+
+class DeviceAccessDeferred(OperationalAutonomyError):
+    def __init__(self, *, work: "OperationalWork", reason: str) -> None:
+        self.work = work
+        super().__init__(reason)
 
 
 class BackupIQManagedEndpointMissing(OperationalAutonomyError):
@@ -471,6 +477,14 @@ class SQLiteOperationalWorkStore:
             ") "
             "AND phase NOT LIKE 'waiting_device_access:%' "
             "AND phase NOT LIKE 'waiting_recheck:%' "
+            "ORDER BY updated_at,ticket_id"
+        ).fetchall()
+        return tuple(self._row(row) for row in rows)
+
+    def list_waiting_device_access(self) -> tuple[OperationalWork, ...]:
+        rows = self._connection.execute(
+            "SELECT * FROM autonomy_operational_work "
+            "WHERE phase LIKE 'waiting_device_access:%' "
             "ORDER BY updated_at,ticket_id"
         ).fetchall()
         return tuple(self._row(row) for row in rows)
@@ -841,6 +855,62 @@ class OperationalAutonomyMaintenance:
         """Request a full queue reconciliation on the next maintenance tick."""
         del reason
         self._next_due = 0.0
+
+    def _reconcile_orphaned_waiting_device_rows(
+        self,
+        candidates_by_id: Mapping[int, Any],
+    ) -> None:
+        """Stop stale waiting rows without overriding authoritative PSA changes."""
+        for work in self.store.list_waiting_device_access():
+            if work.ticket_id in candidates_by_id:
+                continue
+            try:
+                data = self._read_data(
+                    "service.ticket.read",
+                    {"resource_id": work.ticket_id},
+                )
+                items = data.get("items")
+                if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], Mapping):
+                    raise OperationalAutonomyError(
+                        "waiting-device reconciliation requires exactly one ticket readback"
+                    )
+                ticket = dict(items[0])
+                if int(ticket.get("id") or 0) != work.ticket_id:
+                    raise OperationalAutonomyError(
+                        "waiting-device reconciliation ticket identity mismatch"
+                    )
+                if ticket.get("completedDate"):
+                    self.store.put(
+                        self._replace(
+                            work,
+                            phase="complete",
+                            last_reason=(
+                                "Autotask ticket is complete; stale Waiting Device Access "
+                                "worker state was retired without a PSA mutation."
+                            ),
+                        )
+                    )
+                    continue
+                self.store.put(
+                    self._replace(
+                        work,
+                        phase="escalated",
+                        last_reason=(
+                            "Autotask no longer presents this ticket in Jason's governed "
+                            "Waiting Device Access candidate set. Autonomous waiting/resume "
+                            "was stopped to preserve authoritative PSA/human state."
+                        ),
+                    )
+                )
+            except Exception as exc:
+                if self.audit is not None:
+                    self.audit.record(
+                        "autonomy.waiting_device_reverse_reconcile.failed",
+                        {
+                            "ticket_id": work.ticket_id,
+                            "error_type": type(exc).__name__,
+                        },
+                    )
 
     @staticmethod
     def _offline_augmentation_role(
@@ -1237,19 +1307,48 @@ class OperationalAutonomyMaintenance:
                 witnesses=tuple(witnesses),
             )
             assessment = classify_site_context(evidence)
-            body = render_site_context_note(
+            legacy_body = render_site_context_note(
                 assessment,
                 target_drmm_online=target_drmm_online,
                 target_deb_online=target_deb_online,
                 site_name=site,
             )
-            evidence_fingerprint = assessment.fingerprint()
             classification = assessment.state.value
+            note_title = canonical_title("technical_review")
+            body = render_technical_note(
+                TechnicalNote(
+                    kind="technical_review",
+                    status="Offline Context Assessed",
+                    issue=str(candidate.context.get("title") or "Offline endpoint availability"),
+                    scope=[
+                        f"Ticket={candidate.context.get('ticketNumber') or ticket_id}",
+                        f"CompanyID={candidate.context.get('companyID') or 0}",
+                        f"Device={hostname or 'not resolved'}",
+                        f"Site={site or 'not resolved'}",
+                    ],
+                    findings=[legacy_body],
+                    evidence=[
+                        f"Classification={classification}",
+                        f"DRMMOnline={target_drmm_online}",
+                        f"DEBOnline={target_deb_online}",
+                        f"SiteWitnessCount={len(witnesses)}",
+                    ],
+                    actions_taken=["No endpoint remediation performed; this note records read-only availability correlation."],
+                    verification=["Provider availability evidence was classified and fingerprinted."],
+                    next_action="Continue according to the ticket playbook; this augmentation does not broaden execution authority.",
+                    jason_state=[
+                        f"Playbook={OFFLINE_AUGMENTATION_SCOPE.playbook_id}",
+                        "Phase=offline_context_augmentation",
+                        f"Classification={classification}",
+                    ],
+                )
+            )
+            evidence_fingerprint = assessment.fingerprint()
 
             prior = self.store.last_note_fingerprint(
                 ticket_id,
                 OFFLINE_AUGMENTATION_SCOPE.playbook_id,
-                OFFLINE_AUGMENTATION_NOTE_TITLE,
+                note_title,
             )
             if prior != evidence_fingerprint:
                 self.actions.execute(
@@ -1258,7 +1357,7 @@ class OperationalAutonomyMaintenance:
                     {
                         "payload": {
                             "ticketID": ticket_id,
-                            "title": OFFLINE_AUGMENTATION_NOTE_TITLE,
+                            "title": note_title,
                             "description": body,
                             "noteType": 3,
                             "publish": 1,
@@ -1268,7 +1367,7 @@ class OperationalAutonomyMaintenance:
                 self.store.remember_note_fingerprint(
                     ticket_id,
                     OFFLINE_AUGMENTATION_SCOPE.playbook_id,
-                    OFFLINE_AUGMENTATION_NOTE_TITLE,
+                    note_title,
                     evidence_fingerprint,
                 )
         finally:
@@ -1295,6 +1394,7 @@ class OperationalAutonomyMaintenance:
             # A later cadence retry will reconcile again.
             return
         by_id = {int(item.resource_id): item for item in candidates}
+        self._reconcile_orphaned_waiting_device_rows(by_id)
 
         # Ticket augmentation is deliberately independent of queue ownership and
         # active-work capacity. It may add read-only context to a technician-owned
@@ -2766,31 +2866,8 @@ class OperationalAutonomyMaintenance:
             raise OperationalAutonomyError(
                 "Autotask CI and DRMM hostname do not match"
             )
-        offline_wait_scopes = {
-            BACKUPIQ_SCOPE.playbook_id,
-            IDLE_LOG_OFF_SCOPE.playbook_id,
-        }
-        if (
-            endpoint.get("online") is not True
-            and scope.playbook_id not in offline_wait_scopes
-        ):
-            deb = self._deb_asset_selection(
-                company_id=company_id,
-                hostname=hostname,
-            )
-            if deb.state is DebAvailabilityState.ONLINE:
-                raise OperationalAutonomyError(
-                    "DRMM access unavailable while DEB reports endpoint online"
-                )
-            if deb.state is DebAvailabilityState.OFFLINE:
-                raise OperationalAutonomyError(
-                    "endpoint is not currently online (DEB corroborated)"
-                )
-            raise OperationalAutonomyError(
-                "endpoint is not currently online (DEB unconfirmed)"
-            )
 
-        return OperationalWork(
+        work = OperationalWork(
             ticket_id=ticket_id,
             ticket_number=str(ticket.get("ticketNumber") or ticket.get("ticket_number") or ticket_id),
             title=str(ticket.get("title") or ""),
@@ -2804,6 +2881,27 @@ class OperationalAutonomyMaintenance:
             source_version=(str(candidate.source_version or "").strip() or None),
             updated_at=datetime.now(timezone.utc).isoformat(),
         )
+        offline_wait_scopes = {
+            BACKUPIQ_SCOPE.playbook_id,
+            IDLE_LOG_OFF_SCOPE.playbook_id,
+        }
+        if (
+            endpoint.get("online") is not True
+            and scope.playbook_id not in offline_wait_scopes
+        ):
+            deb = self._deb_asset_selection(
+                company_id=company_id,
+                hostname=hostname,
+            )
+            if deb.state is DebAvailabilityState.ONLINE:
+                reason = "DRMM access unavailable while DEB reports endpoint online"
+            elif deb.state is DebAvailabilityState.OFFLINE:
+                reason = "endpoint is not currently online (DEB corroborated)"
+            else:
+                reason = "endpoint is not currently online (DEB unconfirmed)"
+            raise DeviceAccessDeferred(work=work, reason=reason)
+
+        return work
 
     def _advance(self, work: OperationalWork, ticket: Mapping[str, Any]) -> None:
         scope = self._scope_for_work(work)
@@ -6447,6 +6545,13 @@ class OperationalAutonomyMaintenance:
                         }
                     },
                 )
+            if isinstance(error, DeviceAccessDeferred):
+                waiting_work = self._replace(
+                    error.work,
+                    phase="waiting_device_access:claim",
+                    last_reason=str(error)[:500],
+                )
+                self.store.put(waiting_work)
             return
         # Missing/invalid ticket identity prerequisites outside Jason are not a
         # durable failure. They can be corrected by normal PSA triage; keeping a
@@ -6498,6 +6603,35 @@ class OperationalAutonomyMaintenance:
                 )
 
     def _write_note(self, work: OperationalWork, body: str, title: str) -> bool:
+        legacy_normalized_title = " ".join(str(title).split())
+        legacy_normalized_body = " ".join(str(body).split())
+        legacy_encoded = json.dumps(
+            {
+                "title": legacy_normalized_title,
+                "body": legacy_normalized_body,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        legacy_fingerprint = hashlib.sha256(legacy_encoded).hexdigest()
+
+        structured = legacy_technical_note(
+            title=title,
+            body=body,
+            issue=work.title,
+            scope=[
+                f"Ticket={work.ticket_number}",
+                f"CompanyID={work.company_id}",
+                f"Device={work.hostname or 'not resolved'}",
+                f"ConfigurationItemID={work.configuration_item_id or 'not associated'}",
+                f"EndpointUID={work.device_uid or 'not resolved'}",
+            ],
+            playbook=work.playbook_id,
+            phase=work.phase,
+            reason=work.last_reason,
+        )
+        title = canonical_title(structured.kind)
+        body = render_technical_note(structured)
         normalized_title = " ".join(str(title).split())
         normalized_body = " ".join(str(body).split())
         encoded = json.dumps(
@@ -6510,6 +6644,20 @@ class OperationalAutonomyMaintenance:
             work.ticket_id, work.playbook_id, normalized_title
         )
         if prior == fingerprint:
+            return False
+
+        legacy_prior = self.store.last_note_fingerprint(
+            work.ticket_id,
+            work.playbook_id,
+            legacy_normalized_title,
+        )
+        if legacy_prior == legacy_fingerprint:
+            self.store.remember_note_fingerprint(
+                work.ticket_id,
+                work.playbook_id,
+                normalized_title,
+                fingerprint,
+            )
             return False
 
         self.actions.execute(
