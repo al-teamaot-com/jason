@@ -74,15 +74,23 @@ def inspect_python(path: str, source: str, policy: dict[str, Any]) -> list[Viola
         ]
 
     forbidden_imports = tuple(policy.get("forbidden_import_prefixes_for_callers", []))
+    forbidden_runtime_prefixes = tuple(
+        policy.get("forbidden_runtime_module_prefixes_for_callers", [])
+    )
     forbidden_calls = set(policy.get("forbidden_call_names_for_callers", []))
     violations: list[Violation] = []
 
-    def import_forbidden(module: str) -> bool:
-        return any(
+    def import_forbidden(module: str, *, relative_level: int = 0) -> bool:
+        if any(
             module == prefix.rstrip(".")
             or module.startswith(prefix)
             for prefix in forbidden_imports
-        )
+        ):
+            return True
+        leaf = module.split(".")[-1]
+        if relative_level > 0 or module.startswith("jason_runtime."):
+            return any(leaf.startswith(prefix) for prefix in forbidden_runtime_prefixes)
+        return False
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -101,7 +109,7 @@ def inspect_python(path: str, source: str, policy: dict[str, Any]) -> list[Viola
                     )
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
-            if import_forbidden(module):
+            if import_forbidden(module, relative_level=node.level):
                 violations.append(
                     Violation(
                         path=path,
