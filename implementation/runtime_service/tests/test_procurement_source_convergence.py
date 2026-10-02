@@ -217,3 +217,100 @@ def test_requester_resource_ignores_inactive_email_duplicates(tmp_path):
 
 def test_procurement_worker_authority_includes_vendor_creation():
     assert "service.vendor.create" in PROCUREMENT_WRITE_CAPABILITIES
+
+
+def test_vendor_api_source_converges_on_same_draft_with_high_confidence(tmp_path):
+    flow = _flow(tmp_path)
+    normalized = {
+        "source_kind": "vendor_api",
+        "source_reference": "api:vendor/item/USBC-TVGA",
+        "source_capture_sha256": "b" * 64,
+        "source_captured_at": NOW.isoformat(),
+        "source_acquisition": "vendor_api",
+        "source_confidence": "vendor_api",
+        "source_evidence_mode": "authenticated_vendor_api",
+        "vendor": {"name": "Staples"},
+        "product": {
+            "name": "USB-C VGA Adapter",
+            "mpn": "USBC-TVGA",
+            "sku": "VENDOR-123",
+            "upc": "819927012221",
+            "unit_cost": "19.95",
+        },
+    }
+    result = flow.handle_normalized_source(
+        normalized=normalized,
+        microsoft_tenant_id="tenant",
+        microsoft_object_id="object",
+        conversation_id="conv",
+        message_id="msg",
+        occurred_at=NOW,
+    )
+    payload = flow.store.get(result["submission_id"])
+    assert payload["status"] == "draft"
+    assert payload["source_kind"] == "vendor_api"
+    assert payload["source_acquisition"] == "vendor_api"
+    assert payload["source_confidence"] == "vendor_api"
+    assert payload["source_confidence_score"] == 100
+    assert payload["source_evidence_mode"] == "authenticated_vendor_api"
+    assert payload["product"]["mpn"] == "USBC-TVGA"
+    assert payload["product"]["upc"] == "819927012221"
+
+
+def test_structured_file_source_converges_without_parallel_execution_path(tmp_path):
+    flow = _flow(tmp_path)
+    normalized = {
+        "source_kind": "vendor_csv",
+        "source_reference": "csv:vendor-feed-20261002.csv#row=42",
+        "source_capture_sha256": "c" * 64,
+        "source_captured_at": NOW.isoformat(),
+        "source_acquisition": "structured_file",
+        "source_confidence": "structured_file",
+        "source_evidence_mode": "csv_row",
+        "vendor": {"name": "Staples"},
+        "product": {
+            "name": "USB-C Dock",
+            "mpn": "DOCK-MPN-1",
+            "sku": "ROW-42",
+            "unit_cost": "120.00",
+        },
+    }
+    result = flow.handle_normalized_source(
+        normalized=normalized,
+        microsoft_tenant_id="tenant",
+        microsoft_object_id="object",
+        conversation_id="conv",
+        message_id="msg",
+        occurred_at=NOW,
+    )
+    payload = flow.store.get(result["submission_id"])
+    assert payload["status"] == "draft"
+    assert payload["source_kind"] == "vendor_csv"
+    assert payload["source_acquisition"] == "structured_file"
+    assert payload["source_confidence"] == "structured_file"
+    assert payload["source_confidence_score"] == 90
+    assert "create_po" not in payload
+    assert "create_client_quote" not in payload
+
+
+def test_document_defaults_preserve_existing_quote_invoice_behavior(tmp_path):
+    flow = _flow(tmp_path)
+    normalized = {
+        "source_kind": "vendor_invoice",
+        "source_reference": "invoice:INV-201",
+        "vendor": {"name": "Staples"},
+        "product": {"name": "USB-C Dock", "unit_cost": "120.00"},
+    }
+    result = flow.handle_vendor_document(
+        normalized=normalized,
+        microsoft_tenant_id="tenant",
+        microsoft_object_id="object",
+        conversation_id="conv",
+        message_id="msg",
+        occurred_at=NOW,
+    )
+    payload = flow.store.get(result["submission_id"])
+    assert payload["source_acquisition"] == "document_extraction"
+    assert payload["source_confidence"] == "document_verified"
+    assert payload["source_confidence_score"] == 85
+    assert payload["source_evidence_mode"] == "document_normalized"

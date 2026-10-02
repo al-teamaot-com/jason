@@ -310,3 +310,36 @@ def test_digest_changes_when_material_selection_changes() -> None:
         lines=(_it_line("901.00"),),
     )
     assert base.canonical_digest != changed.canonical_digest
+
+
+def test_product_source_supports_permanent_procurement_source_hierarchy() -> None:
+    source = ProductSource(
+        source_type="vendor_api",
+        source_reference="api:vendor/item/123",
+        captured_at=datetime(2026, 10, 2, 15, 0, tzinfo=timezone.utc),
+        acquisition_method="vendor_api",
+        confidence="vendor_api",
+        capture_sha256="d" * 64,
+    )
+    source.validate()
+
+    structured = ProductSource(
+        source_type="vendor_csv",
+        source_reference="csv:feed.csv#row=3",
+        captured_at=datetime(2026, 10, 2, 15, 0, tzinfo=timezone.utc),
+        acquisition_method="structured_file",
+        confidence="structured_file",
+    )
+    structured.validate()
+
+
+def test_product_source_rejects_unknown_acquisition_method() -> None:
+    source = ProductSource(
+        source_type="website_url",
+        source_reference="https://vendor.example/item",
+        captured_at=datetime(2026, 10, 2, 15, 0, tzinfo=timezone.utc),
+        acquisition_method="vendor_magic",
+        confidence="manual",
+    )
+    with pytest.raises(ProcurementWorkflowError, match="acquisition method"):
+        source.validate()
