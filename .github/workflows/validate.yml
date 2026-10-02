@@ -172,6 +172,13 @@ jobs:
         run: python3 -B -m unittest tools.tests.test_change_integration_gate
       - name: Test development release coordinator
         run: python3 -B -m unittest tools.tests.test_development_release_coordinator
+      - name: Test canonical capability boundary gate
+        run: python3 -B -m unittest tools.tests.test_canonical_capability_boundary_gate
+      - name: Enforce canonical capability boundary on changed callers
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 tools/canonical_capability_boundary_gate.py --base "$BASE_SHA"
       - name: Test host PR integration reconciler
         run: python3 -B -m unittest tools.tests.test_pr_integration_source_reconciler
       - name: Test autonomous repair release classifier
