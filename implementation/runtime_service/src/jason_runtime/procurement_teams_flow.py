@@ -508,6 +508,7 @@ def _card(payload: Mapping[str, Any]) -> dict[str, Any]:
                 "id": "ticket_number",
                 "label": "Ticket # (required for customer qty or client quote)",
                 "placeholder": "T20261001.0001",
+                "value": str(payload.get("ticket_number_hint") or ""),
             },
             {
                 "type": "Input.ChoiceSet",
@@ -842,6 +843,7 @@ class ProcurementTeamsFlow:
         source_org: Mapping[str, Any],
         product: Mapping[str, Any],
         correlation_id: str,
+        ticket_number_hint: str | None = None,
     ) -> Mapping[str, Any]:
         normalized_kind = str(source_kind or "").strip().casefold()
         if normalized_kind not in PROCUREMENT_SOURCE_KINDS:
@@ -946,6 +948,7 @@ class ProcurementTeamsFlow:
             "source_confidence": normalized_confidence,
             "source_confidence_score": PROCUREMENT_SOURCE_CONFIDENCE[normalized_confidence],
             "source_evidence_mode": str(source_evidence_mode or "").strip(),
+            "ticket_number_hint": str(ticket_number_hint or "").strip().upper(),
             "vendor": {
                 "id": int(vendor["id"]) if vendor is not None else None,
                 "name": str(
@@ -1006,6 +1009,7 @@ class ProcurementTeamsFlow:
         conversation_id: str,
         message_id: str,
         occurred_at: datetime,
+        ticket_number_hint: str | None = None,
     ) -> Mapping[str, Any]:
         principal, evidence = self._principal(
             tenant=microsoft_tenant_id,
@@ -1014,6 +1018,18 @@ class ProcurementTeamsFlow:
             message_id=message_id,
         )
         correlation = self.request_factory.new_correlation_id()
+        verified_ticket_number = ""
+        if ticket_number_hint:
+            requested_ticket = str(ticket_number_hint).strip().upper()
+            ticket = self._ticket(
+                number=requested_ticket,
+                principal=principal,
+                evidence=evidence,
+                correlation_id=correlation,
+            )
+            verified_ticket_number = str(
+                ticket.get("ticketNumber") or requested_ticket
+            ).strip().upper()
         web = self._read(
             principal=principal,
             evidence=evidence,
@@ -1071,6 +1087,7 @@ class ProcurementTeamsFlow:
             source_org=source_org,
             product=product,
             correlation_id=correlation,
+            ticket_number_hint=verified_ticket_number,
         )
 
     def handle_normalized_source(
