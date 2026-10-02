@@ -1878,6 +1878,24 @@ class OperationalAutonomyMaintenance:
                     item.source_version, False,
                 )
                 continue
+            # Broad open-status discovery is useful for read-only assessment, but
+            # autonomous admission outside Jason is limited to intake states.
+            # This prevents a matching playbook from claiming work already being
+            # handled by a technician simply because it appears in the open view.
+            source_status = str(
+                item.context.get("_jason_source_status_label") or ""
+            ).strip().casefold()
+            if (
+                str(item.source_queue).strip().casefold() != "jason"
+                and source_status not in {"new", "emergency"}
+            ):
+                classifications[ticket_id] = (
+                    "not_actionable",
+                    "discovery_status_not_admissible",
+                    item.source_version,
+                    False,
+                )
+                continue
             if item.context.get("_jason_assigned_elsewhere") is True:
                 assigned_elsewhere += 1
                 if not self._assigned_new_ticket_is_unworked(item):
