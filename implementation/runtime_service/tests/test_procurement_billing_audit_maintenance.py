@@ -44,6 +44,10 @@ class Notifications:
         self.tech = []
         self.lori_messages = []
 
+    def identity_for_email(self, *, email_address):
+        binding = self.bindings.find_active_by_email(email_address=email_address)
+        return None if binding is None else binding.jason_identity_id
+
     def technician(self, **kwargs):
         self.tech.append(kwargs)
         return "msg-tech"
