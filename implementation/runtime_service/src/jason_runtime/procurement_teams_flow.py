@@ -1301,7 +1301,7 @@ class ProcurementTeamsFlow:
         if payload is None:
             raise PermissionError("procurement submission was not found")
         submission_status = str(payload.get("status") or "")
-        if submission_status not in {"draft", "failed_retryable"}:
+        if submission_status not in {"draft", "failed_retryable", "submitted"}:
             if submission_status == "executing":
                 raise ProcurementFlowError("procurement submission is already executing")
             raise PermissionError("procurement submission is no longer pending")
@@ -1317,7 +1317,7 @@ class ProcurementTeamsFlow:
         if principal.principal_id != payload.get("requester_principal_id"):
             raise PermissionError("procurement requester identity changed")
 
-        if submission_status == "failed_retryable":
+        if submission_status in {"failed_retryable", "submitted"}:
             result = self.execute_submission_with_retry_state(
                 payload,
                 owner_approval_id=(

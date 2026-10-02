@@ -285,3 +285,41 @@ def test_failed_retryable_card_submit_resumes_without_duplicate_vendor(tmp_path)
     assert persisted["execution_attempts"] == 2
     assert persisted["result"]["vendor_id"] == 700
     assert persisted["result"]["product_id"] == 701
+
+
+def test_legacy_submitted_card_can_resume_after_upgrade(tmp_path):
+    store = SQLiteProcurementSubmissionStore(tmp_path / "legacy-submitted.sqlite3")
+    submission = _retryable_missing_vendor_submission()
+    assert submission["status"] == "submitted"
+    store.put_new(submission["submission_id"], submission)
+
+    worker = VendorWorker()
+    flow = ProcurementTeamsFlow(
+        identity_binder=RetryBinder(),
+        request_factory=None,
+        orchestrator=None,
+        store=store,
+        worker=worker,
+        approval_service=None,
+        approval_sender=None,
+        owner_ids=(),
+    )
+    result = flow.handle_submit(
+        submission_id=submission["submission_id"],
+        selections={},
+        microsoft_tenant_id="tenant-1",
+        microsoft_object_id="object-1",
+        conversation_id="conversation-1",
+        channel_response_id="message-upgrade-retry",
+        submitted_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+    )
+
+    assert result["status"] == "completed"
+    assert [call[0] for call in worker.calls] == [
+        "service.vendor.create",
+        "service.product.create",
+        "service.product.vendor.create",
+    ]
+    persisted = store.get(submission["submission_id"])
+    assert persisted["status"] == "catalog_ready"
+    assert persisted["execution_attempts"] == 1
