@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jason.local/schemas/full-recovery-payload-manifest.schema.json",
+  "title": "Jason Full Recovery Payload Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_deployment_identity_sha256",
+    "entries"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "source_deployment_identity_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state_class",
+          "member_name",
+          "restore_relative_path",
+          "sha256",
+          "size_bytes",
+          "source_metadata"
+        ],
+        "properties": {
+          "state_class": { "type": "string", "minLength": 1 },
+          "member_name": { "type": ["string", "null"] },
+          "restore_relative_path": { "type": ["string", "null"] },
+          "sha256": {
+            "type": ["string", "null"],
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "size_bytes": { "type": "integer", "minimum": 0 },
+          "source_metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": ["string", "number", "boolean", "null"]
+            }
+          }
+        }
+      }
+    }
+  }
+}
