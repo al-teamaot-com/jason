@@ -67,7 +67,7 @@ class AutonomousRepairDeploymentTests(unittest.TestCase):
             "building",
         )
 
-    def test_exact_profile_activates_both_capabilities(self):
+    def test_exact_profile_activates_status_but_keeps_production_apply_blocked(self):
         capabilities = CapabilityRegistryService(registry=InMemoryCapabilityRegistry())
         providers = ExecutionProviderRegistryService(registry=InMemoryExecutionProviderRegistry())
         with patch.dict(os.environ, {AUTONOMOUS_REPAIR_PROFILE_ENV: AUTONOMOUS_REPAIR_PROFILE}):
@@ -77,14 +77,14 @@ class AutonomousRepairDeploymentTests(unittest.TestCase):
                 now=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
             )
         self.assertTrue(state.enabled)
-        self.assertEqual(
-            capabilities.get_current(capability_name=DEPLOYMENT_REPAIR_APPLY).lifecycle_status.value,
-            "active",
-        )
+        apply_capability = capabilities.get(capability_name=DEPLOYMENT_REPAIR_APPLY, version="1.0")
+        self.assertEqual(apply_capability.lifecycle_status.value, "building")
+        self.assertTrue(apply_capability.approval.required)
         self.assertEqual(
             capabilities.get_current(capability_name=DEPLOYMENT_REPAIR_STATUS).lifecycle_status.value,
             "active",
         )
+        self.assertEqual(state.capability_names, (DEPLOYMENT_REPAIR_STATUS,))
 
     def test_only_autonomous_workload_can_queue(self):
         with tempfile.TemporaryDirectory() as td:

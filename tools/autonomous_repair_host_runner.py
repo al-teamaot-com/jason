@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Host-side executor for J-CHANGE-002 autonomous repair deployments.
+"""Legacy repair host runner constrained by the J-CHANGE-003 Production gate.
 
-The Jason runtime never receives Docker or host-shell authority. It writes an
-exact governed request into a host bind. This runner independently verifies the
-request, current production revision, merged PR, protected checks, J-CHANGE-002
-eligibility, and rollback target before building and deploying an exact commit.
+The runtime never receives Docker or host-shell authority. The runner may inspect
+an exact prebuilt candidate and independently revalidate repair metadata, but any
+Production mutation must still traverse the signed exact-plan permit gate. It does
+not build candidates on Production and does not execute deployment code from the
+candidate commit.
 """
 
 from __future__ import annotations
@@ -15,10 +16,8 @@ import hashlib
 import importlib.util
 import json
 import os
-import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -327,64 +326,71 @@ def _independent_classification(
     return result
 
 
-def _worktree(repo: Path, candidate: str) -> Path:
-    root = Path("/home/al/jason-worktrees/autonomous-repair")
-    root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    path = root / candidate
-    if path.exists():
-        shutil.rmtree(path)
-    _run(["git", "worktree", "add", "--detach", str(path), candidate], cwd=repo)
-    return path
-
-
-def _remove_worktree(repo: Path, path: Path) -> None:
-    subprocess.run(
-        ["git", "worktree", "remove", "--force", str(path)],
-        cwd=repo,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        check=False,
+def _resolve_candidate_image(candidate: str) -> tuple[str, str]:
+    tag = os.getenv(
+        "JASON_AUTONOMOUS_REPAIR_CANDIDATE_IMAGE",
+        f"jason-runtime:repair-{candidate[:12]}",
+    ).strip()
+    if not tag:
+        raise RepairRunnerError(
+            "CANDIDATE_IMAGE_MISSING",
+            "prebuilt repair candidate image tag is empty",
+        )
+    image_id = _run(
+        ["docker", "image", "inspect", tag, "--format", "{{.Id}}"],
+        capture=True,
     )
-
-
-def _build_candidate(worktree: Path, candidate: str) -> str:
-    tag = f"jason-runtime:repair-{candidate[:12]}"
-    _run(
+    source_revision = _run(
         [
             "docker",
-            "build",
-            "--label",
-            f"org.opencontainers.image.revision={candidate}",
-            "--label",
-            f"com.teamaot.jason.source_revision={candidate}",
-            "-t",
+            "image",
+            "inspect",
             tag,
-            "-f",
-            str(worktree / "infrastructure" / "jason-runtime" / "Dockerfile"),
-            str(worktree),
-        ]
-    )
-    return tag
+            "--format",
+            '{{index .Config.Labels "com.teamaot.jason.source_revision"}}',
+        ],
+        capture=True,
+    ).casefold()
+    if source_revision != candidate:
+        raise RepairRunnerError(
+            "CANDIDATE_IMAGE_REVISION_MISMATCH",
+            "prebuilt repair image source revision does not match candidate SHA",
+        )
+    if not image_id.startswith("sha256:") or len(image_id) != 71:
+        raise RepairRunnerError(
+            "CANDIDATE_IMAGE_ID_INVALID",
+            "prebuilt repair image does not have an immutable sha256 image ID",
+        )
+    return tag, image_id
 
 
-def _deploy(worktree: Path, image: str, candidate: str) -> None:
+def _deploy(repo: Path, image: str, candidate: str) -> None:
     env = os.environ.copy()
     env["JASON_RUNTIME_PRODUCTION_IMAGE"] = image
     env["JASON_SOURCE_REVISION_OVERRIDE"] = candidate
+    env["JASON_PRODUCTION_PROMOTION_OPERATION"] = "deploy"
     _run(
-        [str(worktree / "infrastructure" / "jason-runtime" / "production-deploy.sh")],
-        cwd=worktree,
+        [str(repo / "infrastructure" / "jason-runtime" / "production-deploy.sh")],
+        cwd=repo,
         env=env,
     )
 
 
-def _rollback(worktree: Path, rollback_sha: str) -> None:
+def _rollback(repo: Path, rollback_sha: str) -> None:
     env = os.environ.copy()
+    rollback_permit = env.get("JASON_PRODUCTION_ROLLBACK_PERMIT", "").strip()
+    if not rollback_permit:
+        raise RepairRunnerError(
+            "ROLLBACK_PERMIT_MISSING",
+            "governed rollback requires a separately signed rollback permit",
+        )
+    env["JASON_PRODUCTION_PROMOTION_PERMIT"] = rollback_permit
+    env["JASON_PRODUCTION_PROMOTION_OPERATION"] = "rollback"
     env["JASON_RUNTIME_PRODUCTION_IMAGE"] = "jason-runtime:rollback-current"
     env["JASON_SOURCE_REVISION_OVERRIDE"] = rollback_sha
     _run(
-        [str(worktree / "infrastructure" / "jason-runtime" / "production-deploy.sh")],
-        cwd=worktree,
+        [str(repo / "infrastructure" / "jason-runtime" / "production-deploy.sh")],
+        cwd=repo,
         env=env,
     )
 
@@ -415,11 +421,14 @@ def _process(
         request=request,
         live_revision=live_before,
     )
+    image, image_id = _resolve_candidate_image(candidate)
     if preflight_only:
         return {
             "state": "preflight_passed",
             "request_id": request_id,
             "candidate_sha": candidate,
+            "candidate_image": image,
+            "candidate_image_id": image_id,
             "rollback_sha": rollback_sha,
             "support_item": request["support_item"],
             "live_revision": live_before,
@@ -429,17 +438,17 @@ def _process(
             "completed_at": _now(),
         }
 
-    worktree = _worktree(repo, candidate)
     deployed = False
     try:
-        image = _build_candidate(worktree, candidate)
-        _deploy(worktree, image, candidate)
+        _deploy(repo, image, candidate)
         deployed = True
         observed, health = _wait_live_revision_health(candidate)
         return {
             "state": "succeeded",
             "request_id": request_id,
             "candidate_sha": candidate,
+            "candidate_image": image,
+            "candidate_image_id": image_id,
             "rollback_sha": rollback_sha,
             "support_item": request["support_item"],
             "pr_number": request["pr_number"],
@@ -453,7 +462,7 @@ def _process(
     except Exception:
         if deployed:
             try:
-                _rollback(worktree, rollback_sha)
+                _rollback(repo, rollback_sha)
                 rollback_revision, rollback_health = _wait_live_revision_health(
                     rollback_sha
                 )
@@ -469,8 +478,6 @@ def _process(
                     "repair deployment failed and rollback could not be verified",
                 )
         raise
-    finally:
-        _remove_worktree(repo, worktree)
 
 
 def process_one(

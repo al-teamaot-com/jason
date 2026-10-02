@@ -88,7 +88,7 @@ def _apply_capability(now: datetime) -> CapabilityDefinition:
         input_schema_reference="schema://jason/deployment-repair-apply/1.0",
         output_schema_reference="schema://jason/deployment-repair-queued/1.0",
         invoking_roles=frozenset({"orchestrator"}),
-        approval=CapabilityApproval(required=False),
+        approval=CapabilityApproval(required=True, approver_classes=("owner",)),
         evidence=CapabilityEvidence(
             required=True,
             requirements=(
@@ -151,9 +151,10 @@ def _apply_capability(now: datetime) -> CapabilityDefinition:
             ),
             "mcp_action_enabled": "false",
             "autonomous_repair_only": "true",
-            "standing_authority_source": "J-CHANGE-002",
+            "standing_authority_source": "none",
+            "production_authority": "j-change-003-owner-exact-plan",
             "host_privilege_exposed_to_runtime": "false",
-            "activation_state": "source_only_not_activated",
+            "activation_state": "blocked_pending_governed_production_promotion",
         },
     )
 
@@ -279,12 +280,14 @@ def register_autonomous_repair_deployment_foundation(
             "unsupported autonomous repair deployment profile"
         )
 
-    for capability_name in (DEPLOYMENT_REPAIR_APPLY, DEPLOYMENT_REPAIR_STATUS):
-        capabilities.set_lifecycle(
-            capability_name=capability_name,
-            version="1.0",
-            lifecycle_status=CapabilityLifecycle.ACTIVE,
-        )
+    # J-CHANGE-003 removes standing Production authority from the legacy repair
+    # apply lane. Keep status observable, but leave apply in BUILDING until it is
+    # routed through the exact-plan Owner-approved jason.deployment.apply path.
+    capabilities.set_lifecycle(
+        capability_name=DEPLOYMENT_REPAIR_STATUS,
+        version="1.0",
+        lifecycle_status=CapabilityLifecycle.ACTIVE,
+    )
     providers.set_approval(
         provider_id=AUTONOMOUS_REPAIR_DEPLOYMENT_PROVIDER,
         approval_status=ProviderApproval.APPROVED,
@@ -301,7 +304,7 @@ def register_autonomous_repair_deployment_foundation(
         profile,
         True,
         (AUTONOMOUS_REPAIR_DEPLOYMENT_PROVIDER,),
-        (DEPLOYMENT_REPAIR_APPLY, DEPLOYMENT_REPAIR_STATUS),
+        (DEPLOYMENT_REPAIR_STATUS,),
     )
 
 
@@ -542,12 +545,11 @@ class AutonomousRepairDeploymentInvoker:
         )
 
 
-AUTONOMOUS_REPAIR_EXECUTE_GRANT_ID = "grant-jason-autonomy-worker-deployment-repair-apply-v1"
 AUTONOMOUS_REPAIR_STATUS_GRANT_ID = "grant-jason-autonomy-worker-deployment-repair-status-v1"
 
 
 def ensure_autonomous_repair_authority(identity_authority) -> tuple[str, ...]:
-    """Persist only the exact J-CHANGE-002 workload grants when profile is active."""
+    """Persist read-only repair-status authority; Production apply has no standing grant."""
 
     if not autonomous_repair_deployment_enabled():
         return ()
@@ -567,16 +569,6 @@ def ensure_autonomous_repair_authority(identity_authority) -> tuple[str, ...]:
         )
 
     expected = (
-        AuthorityGrant(
-            grant_id=AUTONOMOUS_REPAIR_EXECUTE_GRANT_ID,
-            subject_id="jason-autonomy-worker",
-            capability=DEPLOYMENT_REPAIR_APPLY,
-            organization_id="aot",
-            client_id=None,
-            permission=PermissionMode.EXECUTE,
-            approval_required=False,
-            status="active",
-        ),
         AuthorityGrant(
             grant_id=AUTONOMOUS_REPAIR_STATUS_GRANT_ID,
             subject_id="jason-autonomy-worker",

@@ -5,7 +5,7 @@
 **Authority:** `docs/engineering/Jason-Change-Integration-and-Release-Standard.md`  
 **Scope:** Derived development/release visibility and advisory next-work recommendations  
 **Canonical source:** Yes — operational procedure and behavior  
-**Last reviewed:** 2026-09-28
+**Last reviewed:** 2026-10-02
 
 ## Purpose
 
@@ -73,7 +73,7 @@ The native implementation boundary is split deliberately:
 
 - the Jason runtime performs bounded structured repair reasoning and has no shell, GitHub credential, or deployment authority;
 - the rootless host support-repair worker owns isolated worktree/GitHub mechanics but has no model credential and may apply only exact-text edits that pass deterministic J-CHANGE-002 path, size, regression-test, and merge checks;
-- the existing `deployment.repair.apply` capability and autonomous-repair host runner remain the only autonomous production deployment lane;
+- `deployment.repair.apply` may prepare/status a repair candidate but has no standing Production execution authority; final promotion must use the J-CHANGE-003 `jason.deployment.apply` lane;
 - support closure requires the item's explicit production acceptance criteria. CI success, merge, deployment, or generic health alone do not prove resolution.
 
 A support item stops automatically only for a genuine governance/capability blocker: constitutional change, broader authority/permission, secret exposure, provider bypass, client-scope expansion, unapproved disruptive behavior, ambiguous evidence, denied repair path, bounded retry exhaustion, or missing acceptance evidence. A blocked item does not consume an active implementation slot; Jason continues other independent support items within the configured active-work limit.
@@ -88,7 +88,7 @@ The coordinator does not deploy.
 
 Production promotion remains serialized and requires an exact merged main SHA.
 
-Normal releases remain human-approved. J-CHANGE-002 defines a narrow Autonomous Repair Release class where a new human production approval is not required when the change only restores previously approved behavior and passes every deterministic eligibility gate. Autonomous repair execution remains blocked until Jason's named governed deployment capability is enabled for that release class; classification alone is not deployment authority.
+J-CHANGE-002 may autonomously classify, validate, package, and prepare an eligible repair through READY FOR PRODUCTION. It does not waive Production approval.\n\nJ-CHANGE-003 is the controlling Production authority: every material Production promotion requires explicit Owner approval bound to the exact promotion plan, followed by a signed single-use host permit and the named `jason.deployment.apply` lane. Classification, CI success, merge, or prior approval of the repaired behavior is not Production deployment authority.
 
 ## Automation
 

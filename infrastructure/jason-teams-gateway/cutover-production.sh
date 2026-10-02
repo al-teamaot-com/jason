@@ -6,13 +6,25 @@ RUNTIME_CONTAINER="${RUNTIME_CONTAINER:-jason-runtime}"
 OPENCLAW_COMPOSE_FILE="${OPENCLAW_COMPOSE_FILE:-/opt/jason/services/openclaw/docker-compose.yml}"
 GATEWAY_CONTAINER="${GATEWAY_CONTAINER:-jason-teams-gateway}"
 PILOT_CONTAINER="${PILOT_CONTAINER:-jason-teams-gateway-pilot}"
-IMAGE="${IMAGE:-jason-teams-gateway:production}"
+IMAGE="${JASON_TEAMS_PRODUCTION_IMAGE:-jason-teams-gateway:production}"
+PROMOTION_PERMIT="${JASON_PRODUCTION_PROMOTION_PERMIT:-}"
+PROMOTION_PLAN_SHA256="${JASON_PRODUCTION_PLAN_SHA256:-}"
 SERVICE_DIR="${JASON_TEAMS_SERVICE_DIR:-/opt/jason/services/jason-teams-gateway}"
 HOST_PORT="${JASON_TEAMS_HOST_PORT:-3978}"
 CONTAINER_PORT="${JASON_TEAMS_CONTAINER_PORT:-3979}"
 RUN_UID="$(id -u)"
 RUN_GID="$(id -g)"
 STATE_FILE="$SERVICE_DIR/cutover-state.env"
+PREFLIGHT_ONLY=false
+if [ "${1:-}" = "--preflight" ]; then
+  PREFLIGHT_ONLY=true
+  shift
+fi
+if [ "$#" -ne 0 ]; then
+  echo "CUTOVER_STATUS=FAIL"
+  echo "ERROR: unsupported arguments"
+  exit 2
+fi
 
 fail() {
   echo "CUTOVER_STATUS=FAIL"
@@ -55,6 +67,23 @@ fi
 if [ "$(docker inspect "$PILOT_CONTAINER" --format '{{.State.Status}}')" != "running" ]; then
   fail "pilot container is not running"
 fi
+
+if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
+  fail "immutable candidate image is not present: $IMAGE"
+fi
+IMAGE_ID="$(docker image inspect "$IMAGE" --format '{{.Id}}')"
+IMAGE_SOURCE_SHA="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
+if [ -z "$IMAGE_SOURCE_SHA" ]; then
+  IMAGE_SOURCE_SHA="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' 2>/dev/null || true)"
+fi
+case "$IMAGE_ID" in
+  sha256:????????????????????????????????????????????????????????????????) ;;
+  *) fail "candidate image ID is not an immutable sha256 digest" ;;
+esac
+case "$IMAGE_SOURCE_SHA" in
+  ????????????????????????????????????????) ;;
+  *) fail "candidate image source revision is not an exact git SHA" ;;
+esac
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -252,29 +281,49 @@ echo "RUNTIME_NETWORK=$NETWORK"
 echo "CURRENT_OPENCLAW_3978=$(docker port "$OPENCLAW_CONTAINER" 3978/tcp 2>/dev/null | tr '\n' ' ' || true)"
 
 echo
-echo "========== BUILD PRODUCTION GATEWAY =========="
-docker build \
-  -f infrastructure/jason-teams-gateway/Dockerfile \
-  -t "$IMAGE" \
-  . >/dev/null
-
-echo "PASS: production gateway image built"
+echo "========== IMMUTABLE CANDIDATE =========="
+echo "CANDIDATE_IMAGE=$IMAGE"
+echo "CANDIDATE_IMAGE_ID=$IMAGE_ID"
+echo "CANDIDATE_SOURCE_SHA=$IMAGE_SOURCE_SHA"
+echo "PASS: immutable candidate image is present"
 
 echo
 echo "========== PREPARE OPENCLAW PORT RELEASE =========="
 rewrite_ports_from_runtime
-sudo install -m 0644 "$LOCAL_NEXT_COMPOSE" "$NEXT_COMPOSE"
 
-if ! (
-  cd "$OPENCLAW_WORKDIR"
-  docker compose -p "$OPENCLAW_PROJECT" -f "$NEXT_COMPOSE" config >/dev/null
-); then
-  sudo rm -f "$NEXT_COMPOSE" >/dev/null 2>&1 || true
+if ! docker compose \
+  --project-directory "$OPENCLAW_WORKDIR" \
+  -p "$OPENCLAW_PROJECT" \
+  -f "$LOCAL_NEXT_COMPOSE" \
+  config >/dev/null
+then
   fail "modified OpenClaw compose did not validate"
 fi
 echo "PASS: modified compose validates"
 
+if [ "$PREFLIGHT_ONLY" = "true" ]; then
+  echo "PRODUCTION_PROMOTION_PREFLIGHT=PASS"
+  echo "CUTOVER_STATUS=PREFLIGHT_ONLY"
+  exit 0
+fi
+
+[ -n "$PROMOTION_PERMIT" ] || fail "Production cutover requires JASON_PRODUCTION_PROMOTION_PERMIT"
+[ -n "$PROMOTION_PLAN_SHA256" ] || fail "Production cutover requires JASON_PRODUCTION_PLAN_SHA256"
+
+python3 tools/claim_production_promotion_permit.py \
+  --permit "$PROMOTION_PERMIT" \
+  --component jason-teams-gateway \
+  --operation deploy \
+  --source-sha "$IMAGE_SOURCE_SHA" \
+  --artifact-digest "$IMAGE_ID" \
+  --plan-sha256 "$PROMOTION_PLAN_SHA256" \
+  || fail "Production promotion permit verification/claim failed"
+
+echo "PRODUCTION_PROMOTION_GATE=PASS"
+
+sudo install -m 0644 "$LOCAL_NEXT_COMPOSE" "$NEXT_COMPOSE"
 sudo cp "$OPENCLAW_COMPOSE_FILE" "$BACKUP_FILE"
+BACKUP_SHA256="$(sha256sum "$BACKUP_FILE" | awk '{print $1}')"
 sudo cp "$NEXT_COMPOSE" "$OPENCLAW_COMPOSE_FILE"
 sudo rm -f "$NEXT_COMPOSE"
 echo "BACKUP_FILE=$BACKUP_FILE"
@@ -349,6 +398,9 @@ sudo mkdir -p "$SERVICE_DIR"
   printf 'OPENCLAW_SERVICE=%q\n' "$OPENCLAW_SERVICE"
   printf 'OPENCLAW_WORKDIR=%q\n' "$OPENCLAW_WORKDIR"
   printf 'GATEWAY_CONTAINER=%q\n' "$GATEWAY_CONTAINER"
+  printf 'GATEWAY_SOURCE_SHA=%q\n' "$IMAGE_SOURCE_SHA"
+  printf 'BACKUP_SHA256=%q\n' "$BACKUP_SHA256"
+  printf 'PROMOTION_PLAN_SHA256=%q\n' "$PROMOTION_PLAN_SHA256"
   printf 'CUTOVER_TIMESTAMP=%q\n' "$TIMESTAMP"
 } > "$TMP_DIR/cutover-state.env"
 sudo install -m 0640 -o "$RUN_UID" -g "$RUN_GID" "$TMP_DIR/cutover-state.env" "$STATE_FILE"

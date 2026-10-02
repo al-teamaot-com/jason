@@ -1,0 +1,155 @@
+{
+  "schema_version": "1.0",
+  "production_promotion_capability": "jason.deployment.apply",
+  "principles": {
+    "release_or_configuration_replacement_requires_exact_plan_owner_approval": true,
+    "operational_recovery_is_not_release_authority": true,
+    "legacy_pending_entrypoints_are_not_supported_direct_production_lanes": true
+  },
+  "entrypoints": [
+    {
+      "path": "infrastructure/boot-recovery/jason-boot-recovery.service",
+      "classification": "operational_recovery_definition",
+      "scope": "boot recovery service definition; no release selection authority",
+      "production_release_authority": false
+    },
+    {
+      "path": "infrastructure/jason-mcp/production-deploy.sh",
+      "classification": "gated_component_runner",
+      "scope": "jason-mcp promotion/rollback",
+      "production_release_authority": true
+    },
+    {
+      "path": "infrastructure/jason-runtime/jason-baseline-refresh.sh",
+      "classification": "gated_promotion_wrapper",
+      "scope": "prebuilt jason-runtime candidate promotion",
+      "production_release_authority": true
+    },
+    {
+      "path": "infrastructure/jason-runtime/jason-ops.sh",
+      "classification": "gated_operator_wrapper",
+      "scope": "status/capture plus routing deploy to gated promotion wrapper",
+      "production_release_authority": true
+    },
+    {
+      "path": "infrastructure/jason-runtime/production-deploy.sh",
+      "classification": "gated_component_runner",
+      "scope": "jason-runtime promotion/rollback",
+      "production_release_authority": true
+    },
+    {
+      "path": "infrastructure/jason-teams-gateway/bootstrap-azure-credential.sh",
+      "classification": "bootstrap_non_release",
+      "scope": "credential onboarding",
+      "production_release_authority": false
+    },
+    {
+      "path": "infrastructure/jason-teams-gateway/cutover-production.sh",
+      "classification": "gated_component_runner",
+      "scope": "prebuilt Teams gateway cutover",
+      "production_release_authority": true
+    },
+    {
+      "path": "infrastructure/jason-teams-gateway/deploy-pilot.sh",
+      "classification": "non_production_candidate",
+      "scope": "Teams pilot only",
+      "production_release_authority": false
+    },
+    {
+      "path": "infrastructure/jason-teams-gateway/discover-cutover.sh",
+      "classification": "discovery_read_only",
+      "scope": "cutover discovery",
+      "production_release_authority": false
+    },
+    {
+      "path": "infrastructure/jason-teams-gateway/discover-teams-managed.sh",
+      "classification": "discovery_read_only",
+      "scope": "Teams discovery",
+      "production_release_authority": false
+    },
+    {
+      "path": "infrastructure/jason-teams-gateway/rollback-production.sh",
+      "classification": "gated_component_runner",
+      "scope": "Teams gateway standalone rollback",
+      "production_release_authority": true
+    },
+    {
+      "path": "infrastructure/kfs-collector/run_kfs_collector_container.sh",
+      "classification": "operational_workload",
+      "scope": "KFS collector execution using the already-selected runtime image; does not select or install a Production release",
+      "production_release_authority": false
+    },
+    {
+      "path": "infrastructure/showcase/deploy_autonomy_flight_recorder.sh",
+      "classification": "blocked_legacy_production_mutator",
+      "scope": "autonomy observability deployment; direct execution blocked pending migration to governed promotion",
+      "production_release_authority": false
+    },
+    {
+      "path": "infrastructure/showcase/deploy_production_health_dashboard.sh",
+      "classification": "blocked_legacy_production_mutator",
+      "scope": "production health observability/systemd deployment; direct execution blocked pending migration to governed promotion",
+      "production_release_authority": false
+    },
+    {
+      "path": "infrastructure/showcase/deploy_usage_dashboard.sh",
+      "classification": "blocked_legacy_production_mutator",
+      "scope": "usage observability/systemd deployment; direct execution blocked pending migration to governed promotion",
+      "production_release_authority": false
+    },
+    {
+      "path": "infrastructure/showcase/install_showcase.sh",
+      "classification": "blocked_legacy_production_mutator",
+      "scope": "showcase/observability service installation; direct execution blocked pending migration to governed promotion",
+      "production_release_authority": false
+    },
+    {
+      "path": "tools/autonomous_repair_host_runner.py",
+      "classification": "blocked_legacy_promotion_requester",
+      "scope": "repair candidate inspection and gated handoff only",
+      "production_release_authority": false
+    },
+    {
+      "path": "tools/deploy_live_container.py",
+      "classification": "gated_internal_helper",
+      "scope": "container replacement",
+      "production_release_authority": true
+    },
+    {
+      "path": "tools/install_ccc_scheduler.sh",
+      "classification": "blocked_legacy_production_mutator",
+      "scope": "CCC release pointer/config/systemd installation; direct execution blocked pending migration to governed promotion",
+      "production_release_authority": false
+    },
+    {
+      "path": "tools/install_observability_assurance.sh",
+      "classification": "blocked_legacy_production_mutator",
+      "scope": "observability release pointer and systemd installation; direct execution blocked pending migration to governed promotion",
+      "production_release_authority": false
+    },
+    {
+      "path": "tools/install_openclaw_authority_operations.sh",
+      "classification": "blocked_legacy_production_mutator",
+      "scope": "authority maintenance systemd installation; direct execution blocked pending migration to governed promotion",
+      "production_release_authority": false
+    },
+    {
+      "path": "tools/jason_self_heal_watchdog.py",
+      "classification": "operational_recovery",
+      "scope": "bounded recovery of existing declared runtime state; no new artifact/config promotion",
+      "production_release_authority": false
+    },
+    {
+      "path": "tools/openbao_deployment_verification.py",
+      "classification": "discovery_read_only",
+      "scope": "bounded non-secret OpenBao deployment evidence collection",
+      "production_release_authority": false
+    },
+    {
+      "path": "tools/reconcile_production_host_services.sh",
+      "classification": "blocked_legacy_production_mutator",
+      "scope": "release pointer and systemd reconciliation; direct execution blocked pending migration to governed promotion",
+      "production_release_authority": false
+    }
+  ]
+}

@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 set -uo pipefail
+# J-CHANGE-003 / #764: this legacy Production mutator is intentionally disabled
+# until it is migrated behind the exact-plan Owner-approved promotion gate.
+# Do not replace this with an environment-variable approval bypass.
+echo "PRODUCTION_PROMOTION_GATE=BLOCKED legacy mutator is not an approved Production lane" >&2
+echo "REASON=use the governed jason.deployment.apply promotion path after this component is migrated" >&2
+exit 42
 
 # Minimal, rollback-protected deployment for Jason usage telemetry dashboards.
 # This intentionally does NOT restart Jason runtime, Jason MCP, Ollama, node-exporter,
