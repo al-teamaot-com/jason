@@ -2408,6 +2408,11 @@ class OperationalAutonomyMaintenance:
             "low disk space" in title
             or "critical low disk space" in title
             or "hard disk full" in title
+            or (
+                "drive has" in title
+                and "used out of" in title
+                and "% used" in title
+            )
         )
 
     @staticmethod
