@@ -47,6 +47,13 @@ class ReleaseManagerGateTests(unittest.TestCase):
         self.assertFalse(plan["todo_start_allowed"])
         self.assertEqual(plan["support_to_start"], ["SUPPORT-OPS-002"])
 
+    def test_release_blocker_can_start_while_support_work_remains(self):
+        result = self.evaluate(
+            {"state": "requested", "change_class": "release_blocker"},
+            "development",
+        )
+        self.assertTrue(result["allowed"])
+
     def test_state_skipping_fails_closed(self):
         result = self.evaluate(
             {"state": "development", "change_class": "support"},
