@@ -57,6 +57,28 @@ def test_reasoning_maintenance_processes_bounded_search_request(tmp_path: Path):
     assert len(client.calls) == 1
 
 
+def test_reasoning_accepts_owner_approved_development_work_item(tmp_path: Path):
+    client = Client()
+    request_dir = tmp_path / 'reasoning' / 'requests'
+    request_dir.mkdir(parents=True)
+    payload = {
+        'kind': 'search_plan',
+        'support_item': 'DEV-676',
+        'title': 'Owner-only staff activity audit',
+        'evidence': 'Owner-approved issue scope',
+        'acceptance': 'Regression passes',
+        'context': {'work_class': 'owner_approved_development'},
+    }
+    payload['request_id'] = _request_id(payload)
+    (request_dir / f"{payload['request_id']}.json").write_text(json.dumps(payload), encoding='utf-8')
+    maintenance = SupportRepairReasoningMaintenance(structured_client=client, spool=tmp_path, interval_seconds=1)
+    assert maintenance.tick() is True
+    response = json.loads((tmp_path / 'reasoning' / 'responses' / f"{payload['request_id']}.json").read_text())
+    assert response['status'] == 'succeeded'
+    assert len(client.calls) == 1
+    assert 'owner-approved development diagnostician' in client.calls[0]['system']
+
+
 def test_reasoning_maintenance_rejects_tampered_request(tmp_path: Path):
     request_dir = tmp_path / 'reasoning' / 'requests'
     request_dir.mkdir(parents=True)
