@@ -149,6 +149,23 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         self.assertIn('f"jason-runtime:{container_path}/."', source)
         self.assertNotIn('run(["cp", "-a", source', source)
 
+    def test_postcutover_verifier_waits_for_healthy_runtime(self):
+        with patch.object(
+            runner,
+            "output",
+            side_effect=[
+                '[{"State":{"Health":{"Status":"starting"}}}]',
+                '[{"State":{"Health":{"Status":"healthy"}},"Config":{"Labels":{"com.teamaot.jason.source_revision":"'
+                + SHA_A
+                + '"}},"Image":"sha256:test"}]',
+                '[{"State":{"Health":{"Status":"healthy"}},"Config":{"Labels":{"com.teamaot.jason.source_revision":"'
+                + SHA_A
+                + '"}},"Image":"sha256:test"}]',
+            ],
+        ), patch.object(runner.time, "sleep"):
+            result = runner.wait_live_runtime(attempts=2, interval_seconds=0)
+        self.assertEqual(result["revision"], SHA_A)
+
     def test_exact_sha_rejects_symbolic_ref(self):
         with self.assertRaises(runner.ReleaseManagerError):
             runner.exact_sha("main", "candidate_sha")
