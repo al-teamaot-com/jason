@@ -1307,6 +1307,7 @@ def post_candidate(title="Power-On-Self-Test (POST) errors occurred during the l
             "title": title,
             "companyID": 311,
             "configurationItemID": 1583,
+            "_jason_source_status_label": "New",
         },
     )
 
