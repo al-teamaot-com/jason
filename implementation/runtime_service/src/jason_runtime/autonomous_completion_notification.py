@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
-from urllib.request import Request, urlopen
 
 from kernel.capabilities import (
     CapabilityApproval,
@@ -18,7 +17,6 @@ from kernel.capabilities import (
     CapabilityStewardship,
     IdempotencyBehavior,
 )
-from kernel.execution_deadline import bounded_execution_timeout
 from kernel.execution_providers import (
     ExecutionProvider,
     ExecutionProviderRegistryService,
@@ -39,6 +37,8 @@ from orchestrator.service import InvocationResult
 from autonomous_remediation.autonomous_principal import AutonomousPrincipal, AutonomousRequestFactory
 from autonomous_remediation.playbook_autonomy_approval import SQLitePlaybookAutonomyApprovalStore
 from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
+
+from .teams_gateway_transport import TeamsGatewayPreparedRequest, TeamsGatewayTransport
 
 
 CAPABILITY = "communication.teams.autonomy.completion.send"
@@ -65,9 +65,7 @@ class AutonomousCompletionNotificationActivationError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class _PreparedNotification:
-    gateway_url: str
-    token: str
-    payload: dict[str, Any]
+    request: TeamsGatewayPreparedRequest
 
 
 def enabled() -> bool:
@@ -359,10 +357,6 @@ class AutonomousCompletionTeamsInvoker:
         aad = str(binding.microsoft_object_id).strip()
         if not tenant or not aad:
             raise PermissionError("person-al Teams binding is incomplete")
-        token = self.token_file.read_text(encoding="utf-8").strip()
-        if not token:
-            raise PermissionError("Teams proactive token unavailable")
-
         payload = {
             "aadObjectId": aad,
             "tenantId": tenant,
@@ -386,9 +380,10 @@ class AutonomousCompletionTeamsInvoker:
         return PreparedExecutionPlan(
             plan=plan,
             opaque=_PreparedNotification(
-                gateway_url=self.gateway_url.rstrip("/"),
-                token=token,
-                payload=payload,
+                request=TeamsGatewayTransport(
+                    gateway_url=self.gateway_url,
+                    token_file=self.token_file,
+                ).prepare(payload),
             ),
         )
 
@@ -402,18 +397,10 @@ class AutonomousCompletionTeamsInvoker:
         opaque = prepared.opaque
         if not isinstance(opaque, _PreparedNotification):
             raise PermissionError("invalid autonomous completion prepared state")
-        body = json.dumps(opaque.payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        http_request = Request(
-            opaque.gateway_url + "/internal/proactive/send",
-            data=body,
-            method="POST",
-            headers={
-                "Authorization": "Bearer " + opaque.token,
-                "Content-Type": "application/json",
-            },
-        )
-        with urlopen(http_request, timeout=bounded_execution_timeout(20)) as response:
-            result = json.loads(response.read().decode("utf-8"))
+        result = TeamsGatewayTransport(
+            gateway_url=self.gateway_url,
+            token_file=self.token_file,
+        ).send(opaque.request)
         if result.get("status") != "succeeded" or not result.get("message_id"):
             raise RuntimeError("autonomous completion Teams send failed")
         return InvocationResult(

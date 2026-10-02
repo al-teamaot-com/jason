@@ -14,7 +14,6 @@ from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 from typing import Mapping, Protocol
-from urllib.request import Request, urlopen
 
 from autonomous_remediation.playbook_autonomy_approval import (
     SQLitePlaybookAutonomyApprovalStore,
@@ -27,8 +26,7 @@ from autonomous_remediation.playbook_autonomy_scope import (
     PlaybookAutonomyScopeError,
     registered_autonomy_scope,
 )
-from connectors.microsoft_graph.teams_approval_channel import render_approval_card
-from connectors.src.jason_connectors.approval_requests import (
+from orchestrator.approval_requests import (
     ApprovalDecision,
     ApprovalRequest,
     ApprovalRequestService,
@@ -65,112 +63,8 @@ class OwnerOnlyPlaybookAutonomyAuthority:
         )
 
 
-class TeamsGatewayPlaybookApprovalSender:
-    def __init__(
-        self,
-        *,
-        gateway_url: str,
-        token_file: str | Path,
-        bindings: ActiveMicrosoftIdentityBindingReader,
-        owner_identity_ids,
-    ) -> None:
-        self.gateway_url = str(gateway_url).rstrip("/")
-        self.token_file = Path(token_file)
-        self.bindings = bindings
-        self.owner_identity_ids = tuple(sorted(str(x).strip() for x in owner_identity_ids if str(x).strip()))
-
-    def send(self, request: ApprovalRequest) -> tuple[str, ...]:
-        card = render_approval_card(request)
-        adaptive = self._adaptive_card(card)
-        token = self.token_file.read_text(encoding="utf-8").strip()
-        if not token:
-            raise PermissionError("Teams proactive token unavailable")
-        message_ids: list[str] = []
-        for owner_id in self.owner_identity_ids:
-            binding = self.bindings.find_active_by_jason_identity(jason_identity_id=owner_id)
-            if binding is None or getattr(binding, "status", None) != "active":
-                raise PermissionError(f"owner Microsoft identity binding unavailable: {owner_id}")
-            payload = {
-                "aadObjectId": binding.microsoft_object_id,
-                "tenantId": binding.microsoft_tenant_id,
-                "text": card.summary,
-                "card": adaptive,
-            }
-            body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            http_request = Request(
-                self.gateway_url + "/internal/proactive/send",
-                data=body,
-                method="POST",
-                headers={
-                    "Authorization": "Bearer " + token,
-                    "Content-Type": "application/json",
-                },
-            )
-            with urlopen(http_request, timeout=20) as response:
-                result = json.loads(response.read().decode("utf-8"))
-            if result.get("status") != "succeeded" or not result.get("message_id"):
-                raise RuntimeError("Teams playbook approval delivery failed")
-            message_ids.append(str(result["message_id"]).strip())
-        return tuple(message_ids)
-
-    @staticmethod
-    def _adaptive_card(card) -> dict:
-        facts = [
-            {"title": "Capability", "value": card.capability},
-            {"title": "Mode", "value": card.requested_mode},
-            {"title": "Expires", "value": card.expires_at},
-            {"title": "Approval ID", "value": card.approval_id},
-        ]
-        facts.extend({"title": str(k), "value": str(v)} for k, v in card.facts)
-        body = [
-            {"type": "TextBlock", "text": card.title, "weight": "Bolder", "wrap": True},
-            {"type": "TextBlock", "text": card.summary, "wrap": True},
-            {"type": "FactSet", "facts": facts},
-        ]
-        if card.evidence_artifact_ids:
-            body.append(
-                {
-                    "type": "TextBlock",
-                    "text": "Evidence references: " + ", ".join(card.evidence_artifact_ids),
-                    "isSubtle": True,
-                    "wrap": True,
-                }
-            )
-        return {
-            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-            "type": "AdaptiveCard",
-            "version": "1.4",
-            "body": body,
-            "actions": [
-                {
-                    "type": "Action.Submit",
-                    "title": "Approve",
-                    "data": {
-                        "approval_id": card.approval_id,
-                        "organization_id": card.organization_id,
-                        "decision": "approve",
-                    },
-                },
-                {
-                    "type": "Action.Submit",
-                    "title": "Deny",
-                    "data": {
-                        "approval_id": card.approval_id,
-                        "organization_id": card.organization_id,
-                        "decision": "deny",
-                    },
-                },
-                {
-                    "type": "Action.Submit",
-                    "title": "Request Changes",
-                    "data": {
-                        "approval_id": card.approval_id,
-                        "organization_id": card.organization_id,
-                        "decision": "request_changes",
-                    },
-                },
-            ],
-        }
+class ApprovalRequestSender(Protocol):
+    def send(self, request: ApprovalRequest) -> tuple[str, ...]: ...
 
 
 class PlaybookAutonomyReviewMaintenance:
@@ -184,7 +78,7 @@ class PlaybookAutonomyReviewMaintenance:
         request_repository: SQLiteApprovalRequestRepository,
         approval_service: ApprovalRequestService,
         review_service: PlaybookAutonomyReviewService,
-        sender: TeamsGatewayPlaybookApprovalSender,
+        sender: ApprovalRequestSender,
         promotion_store: SQLitePlaybookAutonomyApprovalStore,
         interval_seconds: int = 300,
         now=None,

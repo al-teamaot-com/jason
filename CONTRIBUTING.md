@@ -41,6 +41,7 @@ All material concurrent work is governed by [J-CHANGE-001](docs/engineering/Jaso
 - Preserve evidence provenance and historical records.
 - Fail closed on missing authority, client ambiguity, invalid contracts, and cross-client scope.
 - Prefer reusable capabilities/resources over workflow-specific scripts.
+- Before adding provider-facing behavior, reuse an existing Kernel canonical capability when its contract covers the operation; workflow/process callers must not add duplicate connector, authentication, transport, or provider-specific execution plumbing. See `docs/engineering/Jason-Canonical-Capability-Reuse-Standard.md`.
 - Add/update deterministic tests for material behavior.
 - Update governed documentation in the same change when durable truth changes.
 - Update reusable construction guidance when a future instance would otherwise require rediscovery.

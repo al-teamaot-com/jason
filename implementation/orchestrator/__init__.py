@@ -1,3 +1,17 @@
+from .approval_requests import (
+    AcceptedApproval,
+    ApprovalAuthorityChecker,
+    ApprovalDecision,
+    ApprovalEvidenceReference,
+    ApprovalPresentation,
+    ApprovalRequest,
+    ApprovalRequestRepository,
+    ApprovalRequestService,
+    ApprovalRequestStatus,
+    ApprovalResponse,
+    InMemoryApprovalRequestRepository,
+    SQLiteApprovalRequestRepository,
+)
 from .assessment import (
     ExecutionAssessment,
     ExecutionAssessmentReason,
@@ -45,6 +59,18 @@ from .service import (
 )
 
 __all__ = [
+    "AcceptedApproval",
+    "ApprovalAuthorityChecker",
+    "ApprovalDecision",
+    "ApprovalEvidenceReference",
+    "ApprovalPresentation",
+    "ApprovalRequest",
+    "ApprovalRequestRepository",
+    "ApprovalRequestService",
+    "ApprovalRequestStatus",
+    "ApprovalResponse",
+    "InMemoryApprovalRequestRepository",
+    "SQLiteApprovalRequestRepository",
     "ArtifactReference",
     "CapabilityInvoker",
     "CapabilityInvokerAlreadyRegisteredError",

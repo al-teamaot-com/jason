@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.0",
+  "status": "active_nonproduction_migration",
+  "rule": "Legacy caller/provider coupling is migrated incrementally; no authority boundary may be weakened merely to achieve code reuse.",
+  "items": [
+    {
+      "id": "CC-MIG-001",
+      "status": "resolved_in_pr_805",
+      "path": "implementation/runtime_service/src/jason_runtime/playbook_autonomy_review.py",
+      "problem": "Playbook autonomy review owned Teams card rendering and raw Teams gateway HTTP transport.",
+      "target": "Provider-neutral approval workflow plus shared Teams approval-delivery adapter.",
+      "evidence": "playbook_autonomy_review now depends only on ApprovalRequestSender; Teams transport moved to teams_approval_delivery.py"
+    },
+    {
+      "id": "CC-MIG-002",
+      "status": "provider_transport_converged_authority_policy_pending",
+      "path": "implementation/runtime_service/src/jason_runtime/procurement_billing_audit_maintenance.py",
+      "problem": "Billing-audit workflow is provider-neutral, but notification delivery is not yet routed through a canonical communication capability.",
+      "target": "Reuse canonical Teams message delivery with an exact workload/recipient policy or another shared communication capability contract.",
+      "blocker": "communication.teams.message.send currently has owner-approval semantics that do not match scheduled billing notifications; do not weaken that authority merely to migrate.",
+      "evidence": "Teams binding and gateway transport moved behind teams_billing_delivery.py; shared gateway mechanics live in teams_gateway_transport.py."
+    },
+    {
+      "id": "CC-MIG-003",
+      "status": "provider_transport_converged_semantic_capability_pending",
+      "path": "implementation/runtime_service/src/jason_runtime/autonomous_completion_notification.py",
+      "problem": "Autonomous completion retains a specialized semantic Teams capability, but no longer owns duplicate raw gateway HTTP mechanics.",
+      "target": "One shared Teams message implementation with caller-specific exact authority/grant policy and fixed-recipient constraints where required.",
+      "blocker": "Must preserve autonomous fixed-recipient and event-type constraints while removing duplicate transport.",
+      "evidence": "Autonomous completion invoker now reuses teams_gateway_transport.py while preserving fixed-recipient and event constraints."
+    },
+    {
+      "id": "CC-MIG-004",
+      "status": "resolved_in_pr_805",
+      "path": "implementation/runtime_service/src/jason_runtime/autonomous_repair_maintenance.py",
+      "problem": "Autonomous repair maintenance previously read GitHub pull requests and commits through raw HTTP.",
+      "target": "Canonical source.repository.pullrequest.search and source.repository.commit.read capabilities.",
+      "evidence": "autonomous_repair_maintenance now uses GovernedSourceRepositoryReader/build_observe; GitHub transport is isolated in source_repository_read.py with configured-repository enforcement."
+    },
+    {
+      "id": "CC-MIG-005",
+      "status": "resolved_in_pr_805",
+      "path": "implementation/runtime_service/src/jason_runtime/procurement_teams_flow.py",
+      "problem": "Workflow imported provider-neutral approval contracts from the connector package.",
+      "target": "Orchestrator-owned provider-neutral approval contracts.",
+      "evidence": "workflow now imports orchestrator.approval_requests; connector path is compatibility-only"
+    }
+  ],
+  "next_migration_rule": "Prefer the highest-impact item whose canonical target can be implemented without broadening authority, client scope, provider permission, or disruption."
+}

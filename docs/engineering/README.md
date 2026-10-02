@@ -55,3 +55,7 @@ Engineering documentation for governed resolution implementation.
 New platform-level architecture belongs in `docs/architecture/` or `docs/decisions/` as appropriate. New detailed implementation engineering architecture may live here when it is intentionally subordinate to those canonical platform records.
 
 Do not introduce a second project-level architecture authority under this directory.
+
+## Canonical capability reuse
+
+`Jason-Canonical-Capability-Reuse-Standard.md` governs the caller/provider boundary. Processes and playbooks own decision logic but must reuse Kernel canonical capabilities for shared operations. Provider-specific transport belongs behind governed capability implementations. The changed-files ratchet gate prevents new workflow/process code from introducing duplicate provider plumbing while legacy paths are migrated incrementally.

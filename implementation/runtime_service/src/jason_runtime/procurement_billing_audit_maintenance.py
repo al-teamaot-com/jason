@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from hashlib import sha256
 from pathlib import Path
-from typing import Any, Mapping
-from urllib.request import Request, urlopen
+from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
 from kernel.capabilities import CapabilityRegistryService
@@ -29,6 +28,7 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_TICKET_READ,
 )
 
+from .procurement_billing_contracts import AUDIT_WORKER_ID
 from .procurement_inventory_billing import (
     BillingAuditState,
     BillingExpectation,
@@ -39,9 +39,7 @@ from .procurement_inventory_billing import (
 )
 
 
-AUDIT_WORKER_ID = "jason-procurement-billing-audit"
 AUDIT_READ_POLICY_ID = "aot-procurement-billing-audit-read-v1"
-LORI_EMAIL = "lori@teamaot.com"
 AUDIT_READ_CAPABILITIES = (
     SERVICE_TICKET_READ,
     SERVICE_RESOURCE_READ,
@@ -161,52 +159,19 @@ class GovernedBillingAuditReadPort:
         return dict(result.output or {})
 
 
-@dataclass
-class TeamsGatewayBillingAuditSender:
-    gateway_url: str
-    token_file: Path
-    bindings: Any
-    lori_email: str = LORI_EMAIL
+class BillingAuditNotificationPort(Protocol):
+    def identity_for_email(self, *, email_address: str) -> str | None: ...
 
-    def _send(self, *, binding: Any, text: str, card: Mapping[str, Any] | None = None) -> str:
-        token = self.token_file.read_text(encoding="utf-8").strip()
-        if not token:
-            raise PermissionError("Teams proactive token unavailable")
-        payload: dict[str, Any] = {
-            "aadObjectId": str(binding.microsoft_object_id),
-            "tenantId": str(binding.microsoft_tenant_id),
-            "text": str(text),
-        }
-        if card is not None:
-            payload["card"] = dict(card)
-        request = Request(
-            self.gateway_url.rstrip("/") + "/internal/proactive/send",
-            data=json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(),
-            method="POST",
-            headers={
-                "Authorization": "Bearer " + token,
-                "Content-Type": "application/json",
-            },
-        )
-        with urlopen(request, timeout=20) as response:
-            result = json.loads(response.read().decode("utf-8"))
-        if result.get("status") != "succeeded" or not result.get("message_id"):
-            raise RuntimeError("Teams hardware billing notification delivery failed")
-        return str(result["message_id"])
+    def technician(
+        self,
+        *,
+        jason_identity_id: str,
+        text: str,
+        card: Mapping[str, Any],
+        evidence_key: str,
+    ) -> str: ...
 
-    def technician(self, *, jason_identity_id: str, text: str, card: Mapping[str, Any]) -> str:
-        binding = self.bindings.find_active_by_jason_identity(
-            jason_identity_id=jason_identity_id
-        )
-        if binding is None:
-            raise LookupError("technician Teams binding unavailable")
-        return self._send(binding=binding, text=text, card=card)
-
-    def lori(self, *, text: str) -> str:
-        binding = self.bindings.find_active_by_email(email_address=self.lori_email)
-        if binding is None:
-            raise LookupError("Lori Teams binding unavailable")
-        return self._send(binding=binding, text=text)
+    def lori(self, *, text: str, evidence_key: str) -> str: ...
 
 
 def _data(output: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -243,7 +208,7 @@ class HardwareBillingAuditMaintenance:
         submissions: Any,
         cases: SQLiteBillingLeakageStore,
         reads: GovernedBillingAuditReadPort,
-        notifications: TeamsGatewayBillingAuditSender,
+        notifications: BillingAuditNotificationPort,
         actions: Any | None = None,
         interval: timedelta = timedelta(minutes=5),
         now=lambda: datetime.now(timezone.utc),
@@ -445,6 +410,7 @@ class HardwareBillingAuditMaintenance:
                             f"{customer_quantity} customer item(s) need disposition."
                         ),
                         card=technician_disposition_card(case),
+                        evidence_key=case_key,
                     )
                     self.cases.mark_notified(case_key, notified_at=current)
                     summary["technician_notified"] += 1
@@ -455,7 +421,16 @@ class HardwareBillingAuditMaintenance:
 
         due = self.cases.due_for_lori_escalation(today=current.date())
         if due:
-            self.notifications.lori(text=lori_escalation_text(due))
+            due_material = ",".join(
+                sorted(str(case["case_key"]) for case in due)
+            )
+            due_digest = sha256(due_material.encode("utf-8")).hexdigest()[:20]
+            self.notifications.lori(
+                text=lori_escalation_text(due),
+                evidence_key=(
+                    f"lori-escalation:{current.date().isoformat()}:{due_digest}"
+                ),
+            )
             for case in due:
                 self.cases.mark_escalated(str(case["case_key"]), at=current)
                 summary["lori_escalated"] += 1
@@ -490,10 +465,7 @@ class HardwareBillingAuditMaintenance:
         email = str(resource.get("email") or resource.get("emailAddress") or "").strip()
         if not email:
             return None
-        binding = self.notifications.bindings.find_active_by_email(
-            email_address=email
-        )
-        return None if binding is None else str(binding.jason_identity_id)
+        return self.notifications.identity_for_email(email_address=email)
 
     def _create_missing_charge(
         self, *, submission: Mapping[str, Any], current: datetime

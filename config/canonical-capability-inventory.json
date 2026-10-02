@@ -1,0 +1,125 @@
+{
+  "schema_version": "1.0",
+  "status": "initial_machine_readable_inventory",
+  "authority": "Kernel Capability Registry plus source-controlled capability catalogs",
+  "rule": "Processes choose when/why. Canonical capabilities define the operation. Governance decides whether it is allowed. Provider adapters decide how it is performed.",
+  "families": [
+    {
+      "family": "service_ticket",
+      "canonical_capabilities": [
+        "service.ticket.search",
+        "service.ticket.count",
+        "service.ticket.read",
+        "service.ticket.notes.search",
+        "service.ticket.create",
+        "service.ticket.update",
+        "service.ticket.note.create",
+        "service.ticket.note.update",
+        "service.ticket.client.notification.create",
+        "service.ticket.attachment.search",
+        "service.ticket.attachment.read",
+        "service.ticket.attachment.content.read",
+        "service.ticket.attachment.create",
+        "service.ticket.charge.search",
+        "service.ticket.charge.read",
+        "service.ticket.charge.create",
+        "service.ticket.charge.update"
+      ],
+      "caller_rule": "All ticket workflows request these names; no workflow-specific Autotask transport."
+    },
+    {
+      "family": "service_procurement",
+      "canonical_capabilities": [
+        "service.vendor.create",
+        "service.product.search",
+        "service.product.read",
+        "service.product.create",
+        "service.product.update",
+        "service.product.vendor.search",
+        "service.product.vendor.create",
+        "service.product.vendor.update",
+        "service.purchase.order.search",
+        "service.purchase.order.read",
+        "service.purchase.order.item.search",
+        "service.purchase.order.create",
+        "service.purchase.order.update",
+        "service.purchase.order.item.create",
+        "service.purchase.order.item.update",
+        "service.purchase.order.receive",
+        "service.quote.search",
+        "service.quote.read",
+        "service.quote.create",
+        "service.quote.item.create",
+        "service.opportunity.search",
+        "service.opportunity.read",
+        "service.opportunity.create"
+      ],
+      "caller_rule": "Procurement decision logic remains process-specific; service-management operations remain canonical."
+    },
+    {
+      "family": "documentation",
+      "canonical_capabilities": [
+        "documentation.organization.search",
+        "documentation.organization.read",
+        "documentation.contact.search",
+        "documentation.contact.read",
+        "documentation.location.search",
+        "documentation.location.read",
+        "documentation.configuration.search",
+        "documentation.configuration.read",
+        "documentation.document.search",
+        "documentation.document.read",
+        "documentation.attachment.search",
+        "documentation.attachment.read",
+        "documentation.attachment.content.read",
+        "documentation.flexible.asset.search",
+        "documentation.flexible.asset.read"
+      ],
+      "caller_rule": "Playbooks consume documentation facts through canonical reads; IT Glue stays an adapter concern."
+    },
+    {
+      "family": "identity_and_mail",
+      "canonical_capabilities": [
+        "identity.user.search",
+        "identity.user.read",
+        "identity.authentication.methods.read",
+        "identity.conditional.access.search",
+        "identity.directory.role.search",
+        "identity.directory.role.members.search",
+        "communication.mail.message.search",
+        "communication.mail.message.read",
+        "communication.mail.attachment.search",
+        "communication.teams.message.send"
+      ],
+      "caller_rule": "Microsoft-specific transport and Graph/Teams details remain behind governed capability implementations."
+    },
+    {
+      "family": "endpoint_automation",
+      "canonical_capabilities": [
+        "automation.component.execute",
+        "automation.job.read"
+      ],
+      "caller_rule": "Playbooks select an approved action and target; Datto job submission/polling belongs behind the governed capability boundary."
+    },
+    {
+      "family": "deployment",
+      "canonical_capabilities": [
+        "deployment.release.validate",
+        "deployment.release.deploy",
+        "deployment.release.verify",
+        "deployment.release.rollback",
+        "deployment.repair.apply",
+        "deployment.repair.status"
+      ],
+      "caller_rule": "Release Manager, support repair, engineering window, and technician requests share one deployment contract."
+    },
+    {
+      "family": "source_repository",
+      "canonical_capabilities": [
+        "source.repository.pullrequest.search",
+        "source.repository.commit.read"
+      ],
+      "caller_rule": "Release, repair, and engineering processes consume source-control evidence through canonical reads; GitHub transport and repository authorization remain behind the provider boundary."
+    }
+  ]
+}

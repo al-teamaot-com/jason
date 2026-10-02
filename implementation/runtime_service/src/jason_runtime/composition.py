@@ -225,6 +225,12 @@ from .autonomous_repair_deployment import (
 from .autonomous_repair_maintenance import (
     build_autonomous_repair_deployment_maintenance,
 )
+from .source_repository_read import (
+    build_source_repository_read_invoker,
+    ensure_source_repository_read_authority,
+    register_source_repository_read_foundation,
+    register_source_repository_read_invokers,
+)
 from .support_repair_reasoning import build_support_repair_reasoning_maintenance
 from .autotask_ticket_create import (
     build_autotask_ticket_create_invoker,
@@ -314,8 +320,14 @@ from .kfs_meter_history import (
 from .procurement_billing_audit_maintenance import (
     GovernedBillingAuditReadPort,
     HardwareBillingAuditMaintenance,
-    TeamsGatewayBillingAuditSender,
     ensure_billing_audit_read_authority,
+)
+from .teams_billing_delivery import (
+    GovernedBillingAuditNotificationPort,
+    build_invoker as build_billing_notification_invoker,
+    ensure_authority as ensure_billing_notification_authority,
+    register_foundation as register_billing_notification_foundation,
+    register_invoker as register_billing_notification_invoker,
 )
 from .procurement_inventory_billing import (
     HardwareBillingDispositionFlow,
@@ -341,8 +353,8 @@ from .playbook_autonomy_review import (
     OwnerOnlyPlaybookAutonomyAuthority,
     PlaybookAutonomyApprovalInteractionFlow,
     PlaybookAutonomyReviewMaintenance,
-    TeamsGatewayPlaybookApprovalSender,
 )
+from .teams_approval_delivery import TeamsGatewayApprovalSender
 from autonomous_remediation.playbook_autonomy_approval import SQLitePlaybookAutonomyApprovalStore
 from autonomous_remediation.playbook_autonomy_review import PlaybookAutonomyReviewService
 from .microsoft_directory import build_microsoft_directory_runtime
@@ -1338,12 +1350,22 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         providers=providers,
         now=now,
     )
+    billing_notifications_enabled = register_billing_notification_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
     autonomous_repair_deployment_activation = (
         register_autonomous_repair_deployment_foundation(
             capabilities=capabilities,
             providers=providers,
             now=now,
         )
+    )
+    source_repository_reads_enabled = register_source_repository_read_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
     )
     register_autotask_ticket_create_runtime_foundation(
         capabilities=capabilities,
@@ -1432,8 +1454,14 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     if autonomous_repair_deployment_activation.enabled:
         ensure_autonomous_repair_authority(identity_authority)
 
+    if source_repository_reads_enabled:
+        ensure_source_repository_read_authority(identity_authority)
+
     if autonomous_completion_notifications_enabled:
         ensure_autonomous_completion_authority(identity_authority)
+
+    if billing_notifications_enabled:
+        ensure_billing_notification_authority(identity_authority)
 
 
     ollama_client = OllamaStructuredJsonClient(
@@ -1866,9 +1894,20 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         if autonomous_repair_deployment_activation.enabled
         else None
     )
+    source_repository_read_invoker = (
+        build_source_repository_read_invoker()
+        if source_repository_reads_enabled
+        else None
+    )
     autonomous_completion_invoker = (
         build_autonomous_completion_invoker(bindings=bindings)
         if autonomous_completion_notifications_enabled
+        else None
+    )
+
+    billing_notification_invoker = (
+        build_billing_notification_invoker(bindings=bindings)
+        if billing_notifications_enabled
         else None
     )
 
@@ -1992,10 +2031,20 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             invokers=invokers,
             invoker=autonomous_repair_deployment_invoker,
         )
+    if source_repository_read_invoker is not None:
+        register_source_repository_read_invokers(
+            invokers=invokers,
+            invoker=source_repository_read_invoker,
+        )
     if autonomous_completion_invoker is not None:
         register_autonomous_completion_invoker(
             invokers=invokers,
             invoker=autonomous_completion_invoker,
+        )
+    if billing_notification_invoker is not None:
+        register_billing_notification_invoker(
+            invokers=invokers,
+            invoker=billing_notification_invoker,
         )
     invokers.register(EMAIL_CAPABILITY_NAME, email_invoker)
 
@@ -2160,11 +2209,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             approval_service=playbook_approval_service,
             review_service=playbook_review_service,
         )
-        playbook_approval_sender = TeamsGatewayPlaybookApprovalSender(
+        playbook_approval_sender = TeamsGatewayApprovalSender(
             gateway_url=settings.teams_gateway_internal_url,
             token_file=settings.teams_proactive_token_file,
             bindings=bindings,
-            owner_identity_ids=owner_ids,
+            recipient_identity_ids=owner_ids,
         )
         playbook_review_maintenance = PlaybookAutonomyReviewMaintenance(
             enabled=True,
@@ -2202,11 +2251,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
                 frozenset(procurement_owner_ids)
             ),
         )
-        procurement_approval_sender = TeamsGatewayPlaybookApprovalSender(
+        procurement_approval_sender = TeamsGatewayApprovalSender(
             gateway_url=settings.teams_gateway_internal_url,
             token_file=settings.teams_proactive_token_file,
             bindings=bindings,
-            owner_identity_ids=procurement_owner_ids,
+            recipient_identity_ids=procurement_owner_ids,
         )
         procurement_worker = ProcurementWorkerExecutor(
             authority=identity_authority,
@@ -2249,9 +2298,10 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
                 capabilities=capabilities,
                 orchestrator=orchestrator,
             ),
-            notifications=TeamsGatewayBillingAuditSender(
-                gateway_url=settings.teams_gateway_internal_url,
-                token_file=settings.teams_proactive_token_file,
+            notifications=GovernedBillingAuditNotificationPort(
+                authority=identity_authority,
+                capabilities=capabilities,
+                orchestrator=orchestrator,
                 bindings=bindings,
             ),
             actions=procurement_worker,

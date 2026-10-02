@@ -1,14 +1,13 @@
 from __future__ import annotations
-import json, os
+import os
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
-from urllib.request import Request, urlopen
 from kernel.capabilities import CapabilityApproval, CapabilityDefinition, CapabilityEvidence, CapabilityLifecycle, CapabilityRisk, CapabilityStewardship, IdempotencyBehavior
-from kernel.execution_deadline import bounded_execution_timeout
 from kernel.execution_providers import ExecutionProvider, ProviderApproval, ProviderFeatures, ProviderHealth, ProviderLifecycle, ProviderLimits, ProviderStewardship, ProviderType
 from orchestrator.execution_plan import ExecutionPlan, PreparedExecutionPlan, normalize_provider_relative_path
 from orchestrator.service import InvocationResult
+
+from .teams_gateway_transport import TeamsGatewayPreparedRequest, TeamsGatewayTransport
 
 CAPABILITY="communication.teams.message.send"
 PROVIDER="microsoft_teams_gateway"
@@ -16,9 +15,7 @@ PROFILE="owner-proactive-v1"
 
 @dataclass(frozen=True, slots=True)
 class _PreparedTeamsMessageSend:
-    gateway_url: str
-    token: str
-    payload: dict
+    request: TeamsGatewayPreparedRequest
 
 
 @dataclass
@@ -47,9 +44,6 @@ class TeamsMessageSendInvoker:
 
     def prepare_execution_plan(self, *, request, resolution):
         aad, tenant, payload = self._validated_payload(request=request, resolution=resolution)
-        token = Path(self.token_file).read_text().strip()
-        if not token:
-            raise PermissionError("Teams proactive token unavailable")
         path = "/internal/proactive/send"
         plan = ExecutionPlan(
             principal_id=request.principal_id,
@@ -69,9 +63,10 @@ class TeamsMessageSendInvoker:
         return PreparedExecutionPlan(
             plan=plan,
             opaque=_PreparedTeamsMessageSend(
-                gateway_url=self.gateway_url.rstrip("/"),
-                token=token,
-                payload=payload,
+                request=TeamsGatewayTransport(
+                    gateway_url=self.gateway_url,
+                    token_file=self.token_file,
+                ).prepare(payload),
             ),
         )
 
@@ -89,20 +84,12 @@ class TeamsMessageSendInvoker:
             raise PermissionError("prepared Teams path changed")
         if plan.resource_identifier != f"{tenant}:{aad}":
             raise PermissionError("prepared Teams target changed")
-        if dict(plan.normalized_payload) != payload or opaque.payload != payload:
+        if dict(plan.normalized_payload) != payload or opaque.request.payload != payload:
             raise PermissionError("prepared Teams payload changed")
-        body = json.dumps(payload).encode()
-        req = Request(
-            opaque.gateway_url + plan.normalized_path,
-            data=body,
-            method="POST",
-            headers={
-                "Authorization": "Bearer " + opaque.token,
-                "Content-Type": "application/json",
-            },
-        )
-        with urlopen(req, timeout=bounded_execution_timeout(20)) as response:
-            result = json.loads(response.read().decode())
+        result = TeamsGatewayTransport(
+            gateway_url=self.gateway_url,
+            token_file=self.token_file,
+        ).send(opaque.request, path=plan.normalized_path)
         if result.get("status") != "succeeded" or not result.get("message_id"):
             raise RuntimeError("Teams proactive send failed")
         return InvocationResult(

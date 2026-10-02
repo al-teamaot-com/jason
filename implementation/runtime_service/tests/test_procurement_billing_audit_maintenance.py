@@ -44,12 +44,16 @@ class Notifications:
         self.tech = []
         self.lori_messages = []
 
+    def identity_for_email(self, *, email_address):
+        binding = self.bindings.find_active_by_email(email_address=email_address)
+        return None if binding is None else binding.jason_identity_id
+
     def technician(self, **kwargs):
         self.tech.append(kwargs)
         return "msg-tech"
 
-    def lori(self, *, text):
-        self.lori_messages.append(text)
+    def lori(self, *, text, evidence_key):
+        self.lori_messages.append({"text": text, "evidence_key": evidence_key})
         return "msg-lori"
 
 
@@ -131,6 +135,9 @@ def test_missing_charge_notifies_assigned_technician_once_and_escalates_once(tmp
     assert first["technician_pending"] == 1
     assert first["technician_notified"] == 1
     assert len(notifications.tech) == 1
+    assert notifications.tech[0]["evidence_key"] == (
+        "submission:proc-1:ticket:123:product:456"
+    )
     case = cases.get("submission:proc-1:ticket:123:product:456")
     assert case["technician_identity_id"] == "person-tech"
     assert case["disposition_due_date"] == "2026-10-06"
@@ -143,6 +150,9 @@ def test_missing_charge_notifies_assigned_technician_once_and_escalates_once(tmp
     escalated = maintenance.run_once(now=tuesday)
     assert escalated["lori_escalated"] == 1
     assert len(notifications.lori_messages) == 1
+    assert notifications.lori_messages[0]["evidence_key"].startswith(
+        "lori-escalation:2026-10-06:"
+    )
 
     maintenance.run_once(now=tuesday)
     assert len(notifications.lori_messages) == 1

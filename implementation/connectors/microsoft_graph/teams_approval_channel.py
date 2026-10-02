@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Mapping
 
-from implementation.connectors.src.jason_connectors.approval_requests import (
+from orchestrator.approval_requests import (
     ApprovalDecision,
     ApprovalRequest,
     ApprovalResponse,
