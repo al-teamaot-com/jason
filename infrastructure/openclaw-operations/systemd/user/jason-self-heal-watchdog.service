@@ -5,12 +5,14 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/al/projects/jason
-Environment=HOME=/home/al
+WorkingDirectory=/opt/jason/current
+EnvironmentFile=-/etc/jason/engineering.env
+Environment=HOME=/var/lib/jason/service-home
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/jason_self_heal_watchdog.py --root /var/lib/jason/openclaw/self-heal --max-attempts 2
+ExecStart=/usr/bin/python3 /opt/jason/current/tools/jason_self_heal_watchdog.py --root /var/lib/jason/openclaw/self-heal --max-attempts 2
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/var/lib/jason/openclaw/self-heal
+ProtectHome=true
+ReadOnlyPaths=/opt/jason/current
+ReadWritePaths=/var/lib/jason/openclaw/self-heal /var/lib/jason/service-home

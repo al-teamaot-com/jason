@@ -5,19 +5,21 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/al/jason-worktrees/pr-integration-main
-Environment=HOME=/home/al
+WorkingDirectory=/var/lib/jason/worktrees/pr-integration-main
+EnvironmentFile=-/etc/jason/engineering.env
+Environment=HOME=/var/lib/jason/service-home
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-Environment=JASON_REPOSITORY=al-teamaot-com/jason
-Environment=JASON_DEVELOPMENT_RELEASE_CONFIG=/home/al/jason-worktrees/pr-integration-main/config/development-release-coordinator.json
-ExecStartPre=/usr/bin/git -C /home/al/jason-worktrees/pr-integration-main fetch origin main
-ExecStartPre=/usr/bin/git -C /home/al/jason-worktrees/pr-integration-main reset --hard origin/main
-ExecStart=/usr/bin/python3 /home/al/jason-worktrees/pr-integration-main/tools/pr_integration_source_reconciler.py
+Environment=GH_CONFIG_DIR=/var/lib/jason/runtime-secrets/github/gh
+Environment=JASON_DEVELOPMENT_RELEASE_CONFIG=/opt/jason/current/config/development-release-coordinator.json
+ExecStartPre=/usr/bin/git -C /var/lib/jason/worktrees/pr-integration-main fetch origin main
+ExecStartPre=/usr/bin/git -C /var/lib/jason/worktrees/pr-integration-main reset --hard origin/main
+ExecStart=/usr/bin/python3 /opt/jason/current/tools/pr_integration_source_reconciler.py
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/home/al/jason-worktrees/pr-integration-main /home/al/.config/gh
+ProtectHome=true
+ReadOnlyPaths=/opt/jason/current
+ReadWritePaths=/var/lib/jason/worktrees/pr-integration-main /var/lib/jason/runtime-secrets/github /var/lib/jason/service-home
 
 [Install]
 WantedBy=default.target

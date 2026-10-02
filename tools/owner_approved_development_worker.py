@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import tempfile
 from datetime import datetime, timezone
@@ -11,9 +12,9 @@ from typing import Any, Mapping
 
 import support_repair_host_worker as support
 
-DEFAULT_REPO = Path('/home/al/projects/jason')
+DEFAULT_REPO = Path(os.environ.get('JASON_SOURCE_ROOT', '/var/lib/jason/source'))
 DEFAULT_SPOOL = Path('/var/lib/jason/openclaw/support-repair')
-WORKTREE_ROOT = Path('/home/al/jason-worktrees/owner-approved-development')
+WORKTREE_ROOT = Path(os.environ.get('JASON_WORKTREE_ROOT', '/var/lib/jason/worktrees')) / 'owner-approved-development'
 APPROVAL = re.compile(
     r'(?im)^\s*-\s*\*\*Autonomous development:\*\*\s*owner-approved\s*$'
 )

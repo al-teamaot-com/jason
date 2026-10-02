@@ -20,22 +20,16 @@ def rules():
     )
 
 
-def test_current_runtime_has_known_portability_blockers():
+def test_declared_runtime_assets_are_portable():
     findings = audit_runtime_portability(
         repository_root=ROOT,
         rules=rules(),
     )
     summary = summarize_findings(findings)
-    assert summary["status"] == "blocked"
-
-    ids = {item.rule_id for item in findings}
-    assert "operator-home-path" in ids
-    assert "aot-email-domain" in ids
-    assert "aot-component-label" in ids
-    assert "aot-profile-name" in ids
-
-    paths = {item.path for item in findings}
-    assert "infrastructure/jason-runtime/compose.yaml" in paths
+    assert summary["status"] == "portable"
+    assert summary["blocker_count"] == 0
+    assert summary["warning_count"] == 0
+    assert findings == ()
 
 
 def test_findings_do_not_echo_full_runtime_lines():
