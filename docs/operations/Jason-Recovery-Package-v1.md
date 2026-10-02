@@ -39,3 +39,34 @@ The non-production foundation now includes:
 Inspection exposes only package metadata. Signature validation does not require the recovery private key. Optional decryptability validation decrypts in memory to prove key/package compatibility but does not print recovered member contents.
 
 Export-from-live-state and restore remain intentionally unavailable.
+
+## Restore planning
+
+The recovery foundation now has a plan-first restore boundary.
+
+The encrypted payload carries an internal recovery-state manifest that binds:
+- source deployment identity;
+- logical recovery state class;
+- encrypted payload member name;
+- target relative path;
+- payload SHA-256;
+- payload size;
+- non-secret source metadata.
+
+Before any write, the restore planner cross-checks that manifest against the versioned recovery-state taxonomy.
+
+It fails closed on:
+- source deployment identity mismatch;
+- unknown state classes;
+- payload digest or size mismatch;
+- missing payloads;
+- unmanifested payloads;
+- state classes not allowed in a Full Recovery Export;
+- reconstructable/discardable state incorrectly carried as restore payload;
+- machine-bound identity payloads;
+- required re-enrollment;
+- unsafe restore paths.
+
+A non-production apply helper can restore a plan only when the plan is ready_for_restore. It writes each payload atomically with private file permissions, refuses existing targets, does not run migrations, does not start services, and does not perform provider re-enrollment.
+
+The live filesystem root remains unsupported by this implementation.
