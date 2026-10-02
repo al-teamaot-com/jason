@@ -226,16 +226,22 @@ def build_candidate(repo: Path, state_root: Path, candidate_sha: str) -> tuple[s
         remove_worktree(repo, path)
 
 
-def copy_state(source: str, destination: Path) -> None:
+def copy_state_from_live_container(
+    container_path: str,
+    destination: Path,
+) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     if destination.exists():
         shutil.rmtree(destination)
-    run(["cp", "-a", source, str(destination)])
-    for root, dirs, files in os.walk(destination):
-        try:
-            os.chmod(root, 0o700)
-        except PermissionError:
-            pass
+    destination.mkdir(parents=True, exist_ok=True, mode=0o700)
+    run(
+        [
+            "docker",
+            "cp",
+            f"jason-runtime:{container_path}/.",
+            str(destination),
+        ]
+    )
 
 
 def create_preprod_container(
@@ -261,7 +267,7 @@ def create_preprod_container(
         source = str(mount.get("Source") or "")
         if destination in {"/var/lib/jason/authority", "/var/lib/jason/openclaw"}:
             clone = scratch / destination.rsplit("/", 1)[-1]
-            copy_state(source, clone)
+            copy_state_from_live_container(destination, clone)
             mount_sources[destination] = str(clone)
 
     config = src["Config"]
