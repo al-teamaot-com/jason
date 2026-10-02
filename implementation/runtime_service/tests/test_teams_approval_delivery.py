@@ -7,7 +7,7 @@ import pytest
 
 from orchestrator.approval_requests import ApprovalPresentation, ApprovalRequest
 from jason_runtime.teams_approval_delivery import TeamsGatewayApprovalSender
-import jason_runtime.teams_approval_delivery as delivery
+import jason_runtime.teams_gateway_transport as transport
 
 
 NOW = datetime(2026, 10, 2, 18, 0, tzinfo=timezone.utc)
@@ -75,7 +75,7 @@ def test_shared_teams_approval_sender_delivers_exact_bound_recipient(tmp_path, m
         captured["payload"] = json.loads(http_request.data.decode("utf-8"))
         return Response({"status": "succeeded", "message_id": "teams-1"})
 
-    monkeypatch.setattr(delivery, "urlopen", fake_urlopen)
+    monkeypatch.setattr(transport, "urlopen", fake_urlopen)
     sender = TeamsGatewayApprovalSender(
         gateway_url="http://teams-gateway:3979",
         token_file=token,
