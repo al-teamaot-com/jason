@@ -9,6 +9,8 @@ from jason_runtime.autotask_procurement import (
     AUTOTASK_PROCUREMENT_PROFILE_ENV,
     AUTOTASK_PROCUREMENT_PROVIDER,
     PROCUREMENT_CAPABILITIES,
+    PROVIDER_MAP,
+    PROVIDER_ENTITY,
     AutotaskProductionProcurementConnector,
     register_autotask_procurement_runtime_foundation,
 )
@@ -156,3 +158,37 @@ def test_procurement_worker_rejects_submitter_object_id_mismatch():
 
     assert email is None
     assert resolver.calls == ["person-al"]
+
+
+def test_procurement_runtime_registers_every_flow_mutation() -> None:
+    from orchestrator.provider_mutation_capability_catalog import (
+        SERVICE_VENDOR_CREATE,
+        SERVICE_PRODUCT_CREATE,
+        SERVICE_PRODUCT_VENDOR_CREATE,
+        SERVICE_OPPORTUNITY_CREATE,
+        SERVICE_QUOTE_LOCATION_CREATE,
+        SERVICE_QUOTE_CREATE,
+        SERVICE_QUOTE_ITEM_CREATE,
+        SERVICE_PURCHASE_ORDER_CREATE,
+        SERVICE_PURCHASE_ORDER_ITEM_CREATE,
+        SERVICE_PURCHASE_ORDER_UPDATE,
+        SERVICE_TICKET_CHARGE_CREATE,
+    )
+
+    required = {
+        SERVICE_VENDOR_CREATE: ("autotask.vendor.create", "Companies"),
+        SERVICE_PRODUCT_CREATE: ("autotask.product.create", "Products"),
+        SERVICE_PRODUCT_VENDOR_CREATE: ("autotask.product.vendor.create", "ProductVendors"),
+        SERVICE_OPPORTUNITY_CREATE: ("autotask.opportunity.create", "Opportunities"),
+        SERVICE_QUOTE_LOCATION_CREATE: ("autotask.quote.location.create", "QuoteLocations"),
+        SERVICE_QUOTE_CREATE: ("autotask.quote.create", "Quotes"),
+        SERVICE_QUOTE_ITEM_CREATE: ("autotask.quote.item.create", "QuoteItems"),
+        SERVICE_PURCHASE_ORDER_CREATE: ("autotask.purchase.order.create", "PurchaseOrders"),
+        SERVICE_PURCHASE_ORDER_ITEM_CREATE: ("autotask.purchase.order.item.create", "PurchaseOrderItems"),
+        SERVICE_PURCHASE_ORDER_UPDATE: ("autotask.purchase.order.update", "PurchaseOrders"),
+        SERVICE_TICKET_CHARGE_CREATE: ("autotask.ticket.charge.create", "TicketCharges"),
+    }
+    for capability, (provider_capability, entity) in required.items():
+        assert capability in PROCUREMENT_CAPABILITIES
+        assert PROVIDER_MAP[(AUTOTASK_PROCUREMENT_PROVIDER, capability)] == provider_capability
+        assert PROVIDER_ENTITY[provider_capability] == entity
