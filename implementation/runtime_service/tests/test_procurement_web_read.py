@@ -91,6 +91,33 @@ def test_extract_product_and_vendor_jsonld() -> None:
     assert "Business laptop" in result["visible_text_excerpt"]
 
 
+def test_extract_numeric_jsonld_price_without_confusing_regular_price() -> None:
+    html = """
+    <html><head>
+      <script type="application/ld+json">
+      {
+        "@type": "Product",
+        "name": "Lenovo ThinkPad L16 G2",
+        "sku": "24667541",
+        "mpn": "21SBS2CB00-W11P",
+        "offers": {
+          "@type": "Offer",
+          "price": 879.99,
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/LimitedAvailability",
+          "seller": {"@type":"Organization","name":"Staples"}
+        }
+      }
+      </script>
+    </head><body>Final price is $879.99. Original price is $1,299.99.</body></html>
+    """
+    result = subject.extract_product_page(html)
+    product = result["products"][0]
+    assert product["price"] == "879.99"
+    assert product["currency"] == "USD"
+    assert product["sku"] == "24667541"
+
+
 def test_invoker_returns_bounded_evidence(monkeypatch) -> None:
     monkeypatch.setattr(
         subject,
