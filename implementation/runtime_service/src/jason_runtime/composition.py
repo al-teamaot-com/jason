@@ -322,7 +322,13 @@ from .procurement_billing_audit_maintenance import (
     HardwareBillingAuditMaintenance,
     ensure_billing_audit_read_authority,
 )
-from .teams_billing_delivery import TeamsGatewayBillingAuditSender
+from .teams_billing_delivery import (
+    GovernedBillingAuditNotificationPort,
+    build_invoker as build_billing_notification_invoker,
+    ensure_authority as ensure_billing_notification_authority,
+    register_foundation as register_billing_notification_foundation,
+    register_invoker as register_billing_notification_invoker,
+)
 from .procurement_inventory_billing import (
     HardwareBillingDispositionFlow,
     SQLiteBillingLeakageStore,
@@ -1344,6 +1350,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         providers=providers,
         now=now,
     )
+    billing_notifications_enabled = register_billing_notification_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
     autonomous_repair_deployment_activation = (
         register_autonomous_repair_deployment_foundation(
             capabilities=capabilities,
@@ -1448,6 +1459,9 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
 
     if autonomous_completion_notifications_enabled:
         ensure_autonomous_completion_authority(identity_authority)
+
+    if billing_notifications_enabled:
+        ensure_billing_notification_authority(identity_authority)
 
 
     ollama_client = OllamaStructuredJsonClient(
@@ -1891,6 +1905,12 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         else None
     )
 
+    billing_notification_invoker = (
+        build_billing_notification_invoker(bindings=bindings)
+        if billing_notifications_enabled
+        else None
+    )
+
     invokers = CapabilityInvokerRegistry()
     invokers.register(ENDPOINT_DEVICE_SEARCH, datto_invoker)
     invokers.register(ENDPOINT_DEVICE_READ, datto_invoker)
@@ -2020,6 +2040,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         register_autonomous_completion_invoker(
             invokers=invokers,
             invoker=autonomous_completion_invoker,
+        )
+    if billing_notification_invoker is not None:
+        register_billing_notification_invoker(
+            invokers=invokers,
+            invoker=billing_notification_invoker,
         )
     invokers.register(EMAIL_CAPABILITY_NAME, email_invoker)
 
@@ -2273,9 +2298,10 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
                 capabilities=capabilities,
                 orchestrator=orchestrator,
             ),
-            notifications=TeamsGatewayBillingAuditSender(
-                gateway_url=settings.teams_gateway_internal_url,
-                token_file=settings.teams_proactive_token_file,
+            notifications=GovernedBillingAuditNotificationPort(
+                authority=identity_authority,
+                capabilities=capabilities,
+                orchestrator=orchestrator,
                 bindings=bindings,
             ),
             actions=procurement_worker,
