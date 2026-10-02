@@ -16,4 +16,4 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/al/jason-worktrees/support-repair /home/al/jason-worktrees/owner-approved-development /home/al/projects/jason /var/lib/jason/openclaw/support-repair
+ReadWritePaths=/home/al/jason-worktrees/support-repair /home/al/jason-worktrees/owner-approved-development /home/al/jason-worktrees/todo-closure /home/al/projects/jason /var/lib/jason/openclaw/support-repair /var/lib/jason/openclaw/release-manager
