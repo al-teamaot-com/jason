@@ -9,6 +9,11 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
 from jason_runtime.composition import RuntimeSettings, build_runtime_application
+from jason_runtime.procurement_web_read import (
+    CAPABILITY as PROCUREMENT_WEB_PRODUCT_READ,
+    PROFILE as PROCUREMENT_WEB_READ_PROFILE,
+    PROFILE_ENV as PROCUREMENT_WEB_READ_PROFILE_ENV,
+)
 from jason_runtime.dnsfilter_mcp_mutation import (
     DNSFILTER_MCP_MUTATION_ENABLED_ENV,
     DNSFILTER_MCP_MUTATION_POLICY_CREATE_ACCEPTANCE_CAPABILITY,
@@ -123,6 +128,21 @@ def test_production_composition_builds_and_serves_internal_health(tmp_path):
     assert (tmp_path / "replay.sqlite3").stat().st_mode & 0o777 == 0o600
     assert (tmp_path / "security.sqlite3").stat().st_mode & 0o777 == 0o600
     assert (tmp_path / "events.sqlite3").stat().st_mode & 0o777 == 0o600
+
+
+def test_procurement_web_profile_seeds_exact_aot_observe_authority(tmp_path, monkeypatch):
+    monkeypatch.setenv(PROCUREMENT_WEB_READ_PROFILE_ENV, PROCUREMENT_WEB_READ_PROFILE)
+    application = build_runtime_application(_settings(tmp_path))
+
+    grants = application.identity_authority.grants.list_for_subject("organization:aot")
+    matching = [grant for grant in grants if grant.capability == PROCUREMENT_WEB_PRODUCT_READ]
+
+    assert len(matching) == 1
+    assert matching[0].organization_id == "aot"
+    assert matching[0].client_id is None
+    assert matching[0].permission.value == "observe"
+    assert matching[0].approval_required is False
+    assert matching[0].status == "active"
 
 
 def test_backup_capabilities_are_composed_but_provider_stays_gated_by_default(tmp_path):
