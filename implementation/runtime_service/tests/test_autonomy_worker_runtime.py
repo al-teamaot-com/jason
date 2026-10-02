@@ -59,7 +59,15 @@ class QueueSource:
         self.candidate = candidate
 
     def reconcile_candidates(self):
-        return (self.candidate,)
+        context = dict(self.candidate.context)
+        if (
+            str(self.candidate.source_queue).strip().casefold() != "jason"
+            and "_jason_source_status_label" not in context
+        ):
+            # Production Autotask discovery always supplies the source-status
+            # marker. Keep generic worker fixtures shaped like live candidates.
+            context["_jason_source_status_label"] = "New"
+        return (replace(self.candidate, context=context),)
 
 
 class Reads:
