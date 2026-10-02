@@ -117,6 +117,22 @@ def live_runtime() -> dict[str, Any]:
     }
 
 
+def wait_live_runtime(attempts: int = 30, interval_seconds: int = 2) -> dict[str, Any]:
+    last_health = "unknown"
+    for _ in range(attempts):
+        raw = json.loads(output(["docker", "inspect", "jason-runtime"]))[0]
+        health = str((raw.get("State", {}).get("Health") or {}).get("Status") or "")
+        last_health = health or "unknown"
+        if health == "healthy":
+            return live_runtime()
+        if health == "unhealthy":
+            break
+        time.sleep(interval_seconds)
+    raise ReleaseManagerError(
+        f"live jason-runtime did not become healthy: {last_health}"
+    )
+
+
 def verify_candidate_on_main(repo: Path, candidate_sha: str) -> None:
     run(["git", "fetch", "--no-tags", "origin", "main"], cwd=repo)
     run(["git", "cat-file", "-e", f"{candidate_sha}^{{commit}}"], cwd=repo)
@@ -580,7 +596,7 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
             cwd=deploy_worktree,
             env=env,
         )
-        live = live_runtime()
+        live = wait_live_runtime()
         live_digest = image_id("jason-runtime:production")
         record["production"] = {
             "live_sha": live["revision"],
@@ -601,7 +617,7 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
         rollback_ok = False
         try:
             run([str(deploy_script)], cwd=deploy_worktree, env=rollback_env)
-            rollback_live = live_runtime()
+            rollback_live = wait_live_runtime()
             rollback_ok = rollback_live["revision"] == rollback_sha
         except Exception:
             rollback_ok = False
