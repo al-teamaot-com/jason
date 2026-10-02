@@ -257,7 +257,7 @@ These changes do not expand authority. Exact company/CI/DRMM identity, durable p
 
 ## 2026-09-27 complete-scope discovery and triage hardening
 
-The production worker now discovers the full unresolved population in the approved queue set by using the provider-side semantic `open` status selector and cursor pagination until exhaustion. The worker no longer limits outside-Jason discovery to only New and Emergency statuses.
+The production worker now discovers the full unresolved population in the approved queue set by using the provider-side semantic `open` status selector and cursor pagination until exhaustion. The worker no longer limits outside-Jason discovery to only New and Emergency statuses. That broader population is available for assessment and bounded augmentation, but **autonomous remediation admission outside the Jason queue is limited to tickets whose current PSA status is New or Emergency**. An In Progress or otherwise non-intake Help Desk ticket may be observed for assessment, but it cannot be claimed merely because it matches a promoted remediation playbook. The worker repeats this admission scan on its configured cadence (60 seconds in the production configuration) whenever runtime maintenance is enabled.
 
 Each scan persists bounded aggregate evidence: pages traversed, raw provider items, duplicate items, unique tickets evaluated, eligible tickets, unsupported-capability tickets, governance-blocked tickets, tickets already assigned to another technician, active slots, selections, Waiting Device Access tickets, and human-review handoffs. Current ticket classifications are persisted separately with one of these bounded states:
 
