@@ -54,6 +54,16 @@ class CanonicalCapabilityBoundaryGateTests(unittest.TestCase):
         )
         self.assertEqual(violations, [])
 
+
+    def test_workflow_caller_local_provider_import_fails(self):
+        source = "from .autotask_ticket_update import build_invoker\n"
+        violations = gate.inspect_python(
+            "implementation/runtime_service/src/jason_runtime/example_workflow.py",
+            source,
+            self.policy,
+        )
+        self.assertTrue(any(v.rule == "direct_provider_import" for v in violations))
+
     def test_provider_boundary_may_import_connector(self):
         source = "from connectors.autotask.connector import AutotaskConnector\n"
         violations = gate.inspect_python(
