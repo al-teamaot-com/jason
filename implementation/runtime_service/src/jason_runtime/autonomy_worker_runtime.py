@@ -850,6 +850,67 @@ class OperationalAutonomyMaintenance:
         self.completion_notifier = completion_notifier
         self._next_due = 0.0
         self._resource_automation_cache: dict[int, bool] = {}
+        self._ticket_status_cache: dict[int, str] = {}
+
+    @staticmethod
+    def _status_for_phase(phase: str) -> str | None:
+        value = str(phase or "")
+        if value == "waiting_patch_approval":
+            return "Waiting Patch Approval"
+        if value == "waiting_patch_window":
+            return "On Hold"
+        if value.startswith("waiting_device_access:"):
+            return "Waiting Device Access"
+        if value.startswith("waiting_recheck:"):
+            return "On Hold"
+        if value == "waiting_client_notification_authority":
+            return "On Hold"
+        if value == "approval_pending":
+            return "Human Review"
+        if value == "escalated":
+            return "Human Review"
+        if value == "complete":
+            return "Complete"
+        if value == "blocked":
+            return "On Hold"
+        return None
+
+    def _update_ticket_status_verified(self, work: OperationalWork, status: str) -> None:
+        normalized = str(status).strip()
+        if self._ticket_status_cache.get(work.ticket_id, "").casefold() == normalized.casefold():
+            return
+        output = self.actions.execute(
+            self._scope_for_work(work),
+            "service.ticket.update",
+            {"payload": {"id": work.ticket_id, "status": normalized}},
+        )
+        verification = self._action_data(output).get("jasonVerification")
+        fields = verification.get("verifiedFields") if isinstance(verification, Mapping) else None
+        if not (
+            isinstance(verification, Mapping)
+            and verification.get("readbackVerified") is True
+            and isinstance(fields, Sequence)
+            and not isinstance(fields, (str, bytes))
+            and "status" in {str(value) for value in fields}
+        ):
+            raise OperationalAutonomyError(
+                f"ticket status transition to {normalized!r} was not verified by provider readback"
+            )
+        self._ticket_status_cache[work.ticket_id] = normalized
+
+    def _reconcile_ticket_status_for_phase(
+        self,
+        work: OperationalWork,
+        observed_status: str | None = None,
+    ) -> None:
+        desired = self._status_for_phase(work.phase)
+        if not desired:
+            return
+        observed = str(observed_status or "").strip()
+        if observed.casefold() == desired.casefold():
+            self._ticket_status_cache[work.ticket_id] = desired
+            return
+        self._update_ticket_status_verified(work, desired)
 
     def request_reconcile(self, reason: str) -> None:
         """Request a full queue reconciliation on the next maintenance tick."""
@@ -1650,6 +1711,10 @@ class OperationalAutonomyMaintenance:
                         )
                     continue
                 if existing.phase in {"waiting_patch_approval", "waiting_patch_window"}:
+                    self._reconcile_ticket_status_for_phase(
+                        existing,
+                        item.context.get("_jason_source_status_label"),
+                    )
                     interval = (
                         VULSCAN_APPROVAL_RECHECK_SECONDS
                         if existing.phase == "waiting_patch_approval"
@@ -1661,6 +1726,7 @@ class OperationalAutonomyMaintenance:
                         or (datetime.now(timezone.utc) - updated).total_seconds() >= interval
                     )
                     if due:
+                        self._update_ticket_status_verified(existing, "In Progress")
                         existing = self._replace(
                             existing,
                             phase="vulscan_investigate",
@@ -1684,6 +1750,10 @@ class OperationalAutonomyMaintenance:
                     )
                     continue
                 if existing.phase.startswith("waiting_device_access:"):
+                    self._reconcile_ticket_status_for_phase(
+                        existing,
+                        item.context.get("_jason_source_status_label"),
+                    )
                     waiting_phase = existing.phase
                     try:
                         access_state, deb = self._device_access_state(existing)
@@ -1800,7 +1870,12 @@ class OperationalAutonomyMaintenance:
                         )
                     continue
                 if existing.phase.startswith("waiting_recheck:"):
+                    self._reconcile_ticket_status_for_phase(
+                        existing,
+                        item.context.get("_jason_source_status_label"),
+                    )
                     if len(self.store.list_open()) < self.max_active_work_items:
+                        self._update_ticket_status_verified(existing, "In Progress")
                         waiting_phase = existing.phase
                         resume_phase = waiting_phase.split(":", 1)[1]
                         waiting_since = existing.updated_at
@@ -2201,17 +2276,8 @@ class OperationalAutonomyMaintenance:
             candidate.context.get("_jason_source_status_label") or ""
         ).strip()
         if self._block_is_retryable(work):
-            if status_label.casefold() == "new":
-                self.actions.execute(
-                    self._scope_for_work(work),
-                    "service.ticket.update",
-                    {
-                        "payload": {
-                            "id": work.ticket_id,
-                            "status": "In Progress",
-                        }
-                    },
-                )
+            if status_label.casefold() != "on hold":
+                self._update_ticket_status_verified(work, "On Hold")
             return
 
         self._write_note(
@@ -4235,6 +4301,7 @@ class OperationalAutonomyMaintenance:
                 note,
                 "Jason - VulScan - Waiting Patch Approval",
             )
+            self._update_ticket_status_verified(work, "Waiting Patch Approval")
             self.store.put(
                 self._replace(
                     work,
@@ -4249,6 +4316,7 @@ class OperationalAutonomyMaintenance:
                 note,
                 "Jason - VulScan - Waiting Patch Window",
             )
+            self._update_ticket_status_verified(work, "On Hold")
             self.store.put(
                 self._replace(
                     work,
