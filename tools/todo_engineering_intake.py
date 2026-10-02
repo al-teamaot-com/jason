@@ -158,6 +158,32 @@ def active_support_ids(state: Mapping[str, Any]) -> list[str]:
     )
 
 
+def active_development_count(spool: Path) -> int:
+    path = spool / "development-state.json"
+    if not path.exists():
+        return 0
+    value = json.loads(path.read_text(encoding="utf-8"))
+    items = value.get("items") if isinstance(value, Mapping) else {}
+    items = items if isinstance(items, Mapping) else {}
+    active = {
+        "identified",
+        "diagnosing",
+        "implementing",
+        "ci_repair_needed",
+        "ci_repairing",
+        "pr_validating",
+        "merged_waiting_release",
+        "release_preparing",
+        "release_waiting",
+    }
+    return sum(
+        1
+        for record in items.values()
+        if isinstance(record, Mapping)
+        and str(record.get("phase") or "") in active
+    )
+
+
 def select_candidate(
     *,
     todos: list[TodoItem],
@@ -318,21 +344,37 @@ def main() -> int:
 
     todos = parse_todo_sections(todo_text)
     issues = open_todo_issue_map(repo)
-    candidate, reason = select_candidate(
-        todos=todos,
-        support_text=support_text,
-        support_state=load_support_state(spool),
-        max_support_repairs=int(
-            config.get("support_autonomy", {}).get("max_active_items", args.max_support_repairs)
-        ),
-        existing_issues=issues,
+    support_state = load_support_state(spool)
+    support_limit = int(
+        config.get("support_autonomy", {}).get("max_active_items", args.max_support_repairs)
     )
+    active_support = len(active_support_ids(support_state))
+    active_development = active_development_count(spool)
+    engineering_limit = max(
+        1,
+        int(policy.get("max_active_items", 1)) + support_limit,
+    )
+    if active_support + active_development >= engineering_limit:
+        candidate, reason = None, "Engineering capacity is already fully occupied"
+    elif len(issues) >= int(policy.get("max_open_todo_issues", 1)):
+        candidate, reason = None, "Maximum open TODO engineering issues already reached"
+    else:
+        candidate, reason = select_candidate(
+            todos=todos,
+            support_text=support_text,
+            support_state=support_state,
+            max_support_repairs=support_limit,
+            existing_issues=issues,
+        )
 
     state: dict[str, Any] = {
         "schema_version": "1.0",
         "observed_at": now(),
         "status": "idle" if candidate is None else "candidate_selected",
         "reason": reason,
+        "active_support_repairs": active_support,
+        "active_development_items": active_development,
+        "engineering_capacity": engineering_limit,
         "existing_todo_issues": {
             item_id: int(issue["number"]) for item_id, issue in sorted(issues.items())
         },
