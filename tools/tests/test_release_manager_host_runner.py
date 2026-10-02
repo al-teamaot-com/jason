@@ -126,6 +126,21 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         self.assertIn("DBUS_SESSION_BUS_ADDRESS", installer)
         self.assertIn("unix:path=/run/user/{uid}/bus", installer)
 
+    def test_service_uses_immutable_installed_source_link(self):
+        service = (
+            ROOT
+            / "infrastructure"
+            / "openclaw-operations"
+            / "systemd"
+            / "user"
+            / "jason-release-manager.service"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "/home/al/.local/lib/jason/release-manager-source",
+            service,
+        )
+        self.assertNotIn("/home/al/projects/jason", service)
+
     def test_exact_sha_rejects_symbolic_ref(self):
         with self.assertRaises(runner.ReleaseManagerError):
             runner.exact_sha("main", "candidate_sha")
