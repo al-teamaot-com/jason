@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from connectors.core.connector_base import PreparedRequest
+from connectors.core.contracts import ConnectorContext, ConnectorRequest
 from kernel.capabilities import CapabilityLifecycle, CapabilityRegistryService, InMemoryCapabilityRegistry
 from kernel.execution_providers import ExecutionProviderRegistryService, InMemoryExecutionProviderRegistry
 from jason_runtime.autotask_procurement import (
@@ -81,3 +83,76 @@ def test_procurement_readback_reuses_authorized_write_headers() -> None:
     assert call["headers"] is prepared.headers
     assert call["params"] is None
     assert call["json"] is None
+
+
+
+class BindingResolver:
+    def __init__(self, binding):
+        self.binding = binding
+        self.calls = []
+
+    def find_active_by_jason_identity(self, *, jason_identity_id):
+        self.calls.append(jason_identity_id)
+        return self.binding
+
+
+def procurement_connector_request(*, microsoft_object_id):
+    return ConnectorRequest(
+        context=ConnectorContext(
+            correlation_id="corr-procurement",
+            principal_id="jason-procurement-worker",
+            organization_id="aot",
+            client_id=None,
+            capability="autotask.vendor.create",
+            mode="execute",
+            policy_ids=("aot-procurement-delegated-spend-v1",),
+            principal_attributes={
+                "workload": "jason-procurement-worker",
+                "procurement_submission_id": "procsub-1",
+                "procurement_digest": "digest-1",
+                "submitted_by": "person-al",
+                "submitted_email": "al@teamaot.com",
+                "submitted_microsoft_object_id": microsoft_object_id,
+            },
+        ),
+        arguments={"payload": {"companyName": "Synthetic Vendor"}},
+    )
+
+
+
+def test_procurement_worker_uses_bound_submitter_for_autotask_impersonation():
+    binding = SimpleNamespace(
+        microsoft_object_id="bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
+        email_address=None,
+    )
+    resolver = BindingResolver(binding)
+    connector = object.__new__(AutotaskProductionProcurementConnector)
+    connector._bindings = resolver
+
+    email = connector._trusted_email(
+        procurement_connector_request(
+            microsoft_object_id="bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
+        )
+    )
+
+    assert email == "al@teamaot.com"
+    assert resolver.calls == ["person-al"]
+
+
+def test_procurement_worker_rejects_submitter_object_id_mismatch():
+    binding = SimpleNamespace(
+        microsoft_object_id="bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
+        email_address=None,
+    )
+    resolver = BindingResolver(binding)
+    connector = object.__new__(AutotaskProductionProcurementConnector)
+    connector._bindings = resolver
+
+    email = connector._trusted_email(
+        procurement_connector_request(
+            microsoft_object_id="00000000-0000-4000-8000-000000000001"
+        )
+    )
+
+    assert email is None
+    assert resolver.calls == ["person-al"]

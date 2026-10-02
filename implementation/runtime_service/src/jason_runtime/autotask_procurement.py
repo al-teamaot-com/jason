@@ -50,6 +50,8 @@ from orchestrator.service import CapabilityInvoker
 AUTOTASK_PROCUREMENT_PROVIDER = "autotask_procurement"
 AUTOTASK_PROCUREMENT_PROFILE_ENV = "JASON_AUTOTASK_PROCUREMENT_MCP_PROFILE"
 AUTOTASK_PROCUREMENT_PROFILE = "owner-procurement-v1"
+PROCUREMENT_WORKER_ID = "jason-procurement-worker"
+PROCUREMENT_POLICY_ID = "aot-procurement-delegated-spend-v1"
 
 PROCUREMENT_CAPABILITIES = frozenset({
     SERVICE_VENDOR_CREATE, SERVICE_PRODUCT_CREATE, SERVICE_PRODUCT_UPDATE,
@@ -196,6 +198,34 @@ class _PreparedAutotaskProcurement:
 
 class AutotaskProductionProcurementConnector(AutotaskProcurementMutationConnector):
     logical_secret = "autotask.write"
+
+    def _trusted_email(self, request: ConnectorRequest) -> str | None:
+        if request.context.principal_id != PROCUREMENT_WORKER_ID:
+            return super()._trusted_email(request)
+        attributes = dict(request.context.principal_attributes)
+        if attributes.get("workload") != PROCUREMENT_WORKER_ID:
+            return None
+        if PROCUREMENT_POLICY_ID not in request.context.policy_ids:
+            return None
+        if not attributes.get("procurement_submission_id") or not attributes.get("procurement_digest"):
+            return None
+        submitted_by = str(attributes.get("submitted_by") or "").strip()
+        submitted_email = str(attributes.get("submitted_email") or "").strip().casefold()
+        submitted_object_id = str(attributes.get("submitted_microsoft_object_id") or "").strip().casefold()
+        if not submitted_by or submitted_by == PROCUREMENT_WORKER_ID:
+            return None
+        if not submitted_email or not submitted_object_id or self._bindings is None:
+            return None
+        binding = self._bindings.find_active_by_jason_identity(jason_identity_id=submitted_by)
+        if binding is None:
+            return None
+        bound_object_id = str(getattr(binding, "microsoft_object_id", "") or "").strip().casefold()
+        if not bound_object_id or bound_object_id != submitted_object_id:
+            return None
+        bound_email = str(getattr(binding, "email_address", "") or "").strip().casefold()
+        if bound_email and bound_email != submitted_email:
+            return None
+        return submitted_email
 
     @staticmethod
     def _id(data: Mapping[str, Any]) -> int:
