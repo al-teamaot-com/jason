@@ -172,6 +172,8 @@ jobs:
         run: python3 -B -m unittest tools.tests.test_change_integration_gate
       - name: Test development release coordinator
         run: python3 -B -m unittest tools.tests.test_development_release_coordinator
+      - name: Test non-production release manager gate
+        run: python3 -B -m unittest tools.tests.test_release_manager_gate
       - name: Test host PR integration reconciler
         run: python3 -B -m unittest tools.tests.test_pr_integration_source_reconciler
       - name: Test autonomous repair release classifier
