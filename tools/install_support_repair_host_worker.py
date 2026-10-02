@@ -29,6 +29,7 @@ def main() -> int:
     runner = repo / 'tools' / 'support_repair_host_worker.py'
     development_runner = repo / 'tools' / 'owner_approved_development_worker.py'
     todo_intake_runner = repo / 'tools' / 'todo_engineering_intake.py'
+    todo_release_bridge = repo / 'tools' / 'todo_release_bridge.py'
     unit_root = repo / 'infrastructure' / 'openclaw-operations' / 'systemd' / 'user'
     units = ('jason-support-repair-worker.service', 'jason-support-repair-worker.timer')
     if not runner.is_file():
@@ -37,6 +38,8 @@ def main() -> int:
         raise SystemExit('owner-approved development worker source is missing')
     if not todo_intake_runner.is_file():
         raise SystemExit('TODO engineering intake worker source is missing')
+    if not todo_release_bridge.is_file():
+        raise SystemExit('TODO release bridge source is missing')
     for unit in units:
         if not (unit_root / unit).is_file():
             raise SystemExit(f'systemd source unit is missing: {unit}')
@@ -46,6 +49,7 @@ def main() -> int:
     _copy(runner, install_root / 'support_repair_host_worker.py', 0o700)
     _copy(development_runner, install_root / 'owner_approved_development_worker.py', 0o700)
     _copy(todo_intake_runner, install_root / 'todo_engineering_intake.py', 0o700)
+    _copy(todo_release_bridge, install_root / 'todo_release_bridge.py', 0o700)
     for unit in units:
         _copy(unit_root / unit, user_units / unit, 0o600)
 
