@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import os
+import re
 import sqlite3
 from pathlib import Path
 from typing import Protocol
@@ -36,6 +37,84 @@ class ActiveJasonIdentityBindingReader(Protocol):
         *,
         jason_identity_id: str,
     ) -> MicrosoftIdentityBinding | None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class AutoEnrollingMicrosoftIdentityBindingStore:
+    bindings: "SQLiteMicrosoftIdentityBindingStore"
+    directory: object
+    authority_store: object
+    allowed_domains: frozenset[str]
+
+    def find(
+        self,
+        *,
+        microsoft_tenant_id: str,
+        microsoft_object_id: str,
+    ) -> MicrosoftIdentityBinding | None:
+        binding = self.bindings.find(
+            microsoft_tenant_id=microsoft_tenant_id,
+            microsoft_object_id=microsoft_object_id,
+        )
+        if binding is not None:
+            return binding
+
+        try:
+            user = self.directory.read_user(
+                microsoft_tenant_id=microsoft_tenant_id,
+                microsoft_object_id=microsoft_object_id,
+            )
+        except Exception:
+            return None
+        if user.get("accountEnabled") is False:
+            return None
+
+        upn = str(user.get("userPrincipalName") or "").strip().casefold()
+        if "@" not in upn or upn.rsplit("@", 1)[1] not in self.allowed_domains:
+            return None
+        mail = str(user.get("mail") or "").strip().casefold()
+        email = upn
+        if "@" in mail and mail.rsplit("@", 1)[1] in self.allowed_domains:
+            email = mail
+
+        compact = re.sub(r"[^a-f0-9]", "", microsoft_object_id.casefold())
+        if len(compact) < 12:
+            return None
+        principal_id = f"person-entra-{compact}"
+        expected = IdentityRecord(
+            identity_id=principal_id,
+            identity_type="human",
+            organization_id="aot",
+            status="active",
+        )
+        existing = self.authority_store.get_identity(principal_id)
+        if existing is None:
+            self.authority_store.put_identity(expected)
+        elif existing != expected:
+            return None
+
+        binding = MicrosoftIdentityBinding(
+            microsoft_tenant_id=microsoft_tenant_id.strip(),
+            microsoft_object_id=microsoft_object_id.strip(),
+            jason_identity_id=principal_id,
+            client_id=None,
+            email_address=email,
+            status="active",
+        )
+        self.bindings.put(binding)
+        return binding
+
+    def find_active_by_jason_identity(
+        self,
+        *,
+        jason_identity_id: str,
+    ) -> MicrosoftIdentityBinding | None:
+        return self.bindings.find_active_by_jason_identity(
+            jason_identity_id=jason_identity_id,
+        )
+
+    def put(self, binding: MicrosoftIdentityBinding) -> None:
+        self.bindings.put(binding)
 
 
 class SQLiteMicrosoftIdentityBindingStore:

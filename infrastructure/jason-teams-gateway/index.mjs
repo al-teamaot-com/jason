@@ -107,7 +107,49 @@ function parseApprovalSubmit(value) {
   if (!approvalId || approvalId.length > 256 || !["approve", "deny", "request_changes"].includes(decision)) {
     return null;
   }
-  return { approvalId, decision };
+
+  const forbidden = new Set([
+    "principal_id", "organization_id", "client_id", "capability",
+    "capability_name", "provider", "provider_id", "connector",
+    "connector_id", "authority_context_id", "requested_by",
+  ]);
+  const selections = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (key === "approval_id" || key === "decision") continue;
+    if (forbidden.has(key)) return null;
+    if (!/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(key)) return null;
+    if (Object.keys(selections).length >= 32) return null;
+    if (!["string", "number", "boolean"].includes(typeof raw)) return null;
+    const normalized = String(raw).trim();
+    if (normalized.length > 512) return null;
+    selections[key] = normalized;
+  }
+  return { approvalId, decision, selections };
+}
+
+function parseProcurementSubmit(value) {
+  if (!value || typeof value !== "object") return null;
+  if (nonBlank(value.kind) !== "procurement.submit") return null;
+  const submissionId = nonBlank(value.submission_id);
+  if (!submissionId || submissionId.length > 256) return null;
+
+  const forbidden = new Set([
+    "principal_id", "organization_id", "client_id", "capability",
+    "capability_name", "provider", "provider_id", "connector",
+    "connector_id", "authority_context_id", "requested_by",
+  ]);
+  const selections = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (key === "kind" || key === "submission_id") continue;
+    if (forbidden.has(key)) return null;
+    if (!/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(key)) return null;
+    if (Object.keys(selections).length >= 32) return null;
+    if (!["string", "number", "boolean"].includes(typeof raw)) return null;
+    const normalized = String(raw).trim();
+    if (normalized.length > 512) return null;
+    selections[key] = normalized;
+  }
+  return { submissionId, selections };
 }
 
 function terminalApprovalText(record) {
@@ -313,8 +355,9 @@ agent.onActivity("message", async (context) => {
   try {
     storeConversationReference(context, aadObjectId, tenantId);
     const approvalSubmit = parseApprovalSubmit(submitValue);
-    if (submitValue && !approvalSubmit) {
-      await context.sendActivity("Jason rejected this approval response because its approval ID or decision was invalid.");
+    const procurementSubmit = approvalSubmit ? null : parseProcurementSubmit(submitValue);
+    if (submitValue && !approvalSubmit && !procurementSubmit) {
+      await context.sendActivity("Jason rejected this card response because its governed interaction data was invalid.");
       return;
     }
     if (approvalSubmit) {
@@ -340,7 +383,9 @@ agent.onActivity("message", async (context) => {
     }
     const governedText = approvalSubmit
       ? `Jason approval response: ${approvalSubmit.decision} approval ${approvalSubmit.approvalId}`
-      : text;
+      : procurementSubmit
+        ? `Jason procurement submission ${procurementSubmit.submissionId}`
+        : text;
     const envelope = buildConversationEnvelope({
       text: governedText,
       microsoftTenantId: auth.tenantId,
@@ -353,9 +398,17 @@ agent.onActivity("message", async (context) => {
             kind: "approval.submit",
             approval_id: approvalSubmit.approvalId,
             decision: approvalSubmit.decision,
+            selections: approvalSubmit.selections,
             channel_response_id: messageId,
           }
-        : undefined,
+        : procurementSubmit
+          ? {
+              kind: "procurement.submit",
+              submission_id: procurementSubmit.submissionId,
+              selections: procurementSubmit.selections,
+              channel_response_id: messageId,
+            }
+          : undefined,
     });
     const signed = loadAndSignConversationEnvelope(
       envelope,
@@ -385,7 +438,21 @@ agent.onActivity("message", async (context) => {
         decision: approvalSubmit.decision,
       });
     }
-    await context.sendActivity(replyForRuntimeResult(result));
+    const adaptiveReply = result?.payload?.reply?.card;
+    if (adaptiveReply && adaptiveReply.type === "AdaptiveCard") {
+      await context.sendActivity({
+        type: "message",
+        text: String(result?.payload?.reply?.text ?? "Jason procurement"),
+        attachments: [
+          {
+            contentType: "application/vnd.microsoft.card.adaptive",
+            content: adaptiveReply,
+          },
+        ],
+      });
+    } else {
+      await context.sendActivity(replyForRuntimeResult(result));
+    }
 
     console.log(
       JSON.stringify({
