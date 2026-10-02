@@ -1,0 +1,10 @@
+[Unit]
+Description=Jason Release Manager production promotion
+After=docker.service
+ConditionPathExists=/home/al/.local/lib/jason/release_manager_host_runner.py
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/release_manager_host_runner.py --repo /home/al/projects/jason --state-root /var/lib/jason/openclaw/release-manager promote-eligible
+WorkingDirectory=/home/al/projects/jason
+Environment=PYTHONUNBUFFERED=1
