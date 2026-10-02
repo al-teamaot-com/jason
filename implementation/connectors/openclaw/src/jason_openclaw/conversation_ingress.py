@@ -60,6 +60,20 @@ class GovernedProcurementInteractionFlow(Protocol):
     ) -> Mapping[str, Any]: ...
 
 
+class GovernedBillingDispositionInteractionFlow(Protocol):
+    def handle(
+        self,
+        *,
+        case_key: str,
+        disposition: str,
+        microsoft_tenant_id: str,
+        microsoft_object_id: str,
+        conversation_id: str,
+        channel_response_id: str,
+        decided_at: datetime,
+    ) -> Mapping[str, Any]: ...
+
+
 class GovernedApprovalInteractionFlow(Protocol):
     def handle(
         self,
@@ -87,6 +101,13 @@ class ApprovalSubmitEvidence:
 class ProcurementSubmitEvidence:
     submission_id: str
     selections: Mapping[str, str]
+    channel_response_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class HardwareBillingDispositionEvidence:
+    case_key: str
+    disposition: str
     channel_response_id: str
 
 
@@ -162,6 +183,7 @@ class OpenClawTeamsConversationEnvelope:
     message_id: str
     approval_submit: ApprovalSubmitEvidence | None = None
     procurement_submit: ProcurementSubmitEvidence | None = None
+    billing_disposition: HardwareBillingDispositionEvidence | None = None
 
     @classmethod
     def from_mapping(cls, envelope: Mapping[str, Any]) -> "OpenClawTeamsConversationEnvelope":
@@ -243,6 +265,7 @@ class OpenClawTeamsConversationEnvelope:
 
         approval_submit = None
         procurement_submit = None
+        billing_disposition = None
         interaction = envelope.get("interaction")
         if interaction is not None:
             if not isinstance(interaction, Mapping):
@@ -250,7 +273,7 @@ class OpenClawTeamsConversationEnvelope:
             kind = str(interaction.get("kind") or "").strip()
             allowed_interaction_keys = {
                 "kind", "approval_id", "decision", "submission_id",
-                "selections", "channel_response_id",
+                "case_key", "disposition", "selections", "channel_response_id",
             }
             if set(interaction) - allowed_interaction_keys:
                 raise PermissionError(
@@ -293,6 +316,34 @@ class OpenClawTeamsConversationEnvelope:
                     selections=selections,
                     channel_response_id=channel_response_id,
                 )
+            elif kind == "hardware.billing.disposition":
+                case_key = str(interaction.get("case_key") or "").strip()
+                disposition = str(
+                    interaction.get("disposition") or ""
+                ).strip().casefold()
+                if not case_key or len(case_key) > 256:
+                    raise ValueError("hardware billing case key is invalid")
+                if disposition not in {
+                    "charge_needed", "not_billable", "already_handled"
+                }:
+                    raise ValueError("hardware billing disposition is invalid")
+                if selections:
+                    raise PermissionError(
+                        "hardware billing disposition does not accept mutable selections"
+                    )
+                if (
+                    interaction.get("approval_id")
+                    or interaction.get("decision")
+                    or interaction.get("submission_id")
+                ):
+                    raise PermissionError(
+                        "hardware billing disposition cannot assert other workflow authority"
+                    )
+                billing_disposition = HardwareBillingDispositionEvidence(
+                    case_key=case_key,
+                    disposition=disposition,
+                    channel_response_id=channel_response_id,
+                )
             else:
                 raise ValueError("conversation interaction kind is invalid")
 
@@ -312,6 +363,7 @@ class OpenClawTeamsConversationEnvelope:
             message_id=values["message_id"],
             approval_submit=approval_submit,
             procurement_submit=procurement_submit,
+            billing_disposition=billing_disposition,
         )
 
 
@@ -332,6 +384,7 @@ class GovernedOpenClawTeamsConversationIngress:
     allowed_machine_identities: frozenset[str]
     approval_flow: GovernedApprovalInteractionFlow | None = None
     procurement_flow: GovernedProcurementInteractionFlow | None = None
+    billing_disposition_flow: GovernedBillingDispositionInteractionFlow | None = None
     max_clock_skew_seconds: int = 60
 
     def handle(self, envelope: Mapping[str, Any]) -> dict[str, Any]:
@@ -484,6 +537,68 @@ class GovernedOpenClawTeamsConversationIngress:
             approval_result.setdefault("request_id", parsed.request_id)
             approval_result.setdefault("correlation_id", parsed.correlation_id)
             return approval_result
+
+        if parsed.billing_disposition is not None:
+            if self.billing_disposition_flow is None:
+                return self._reject(
+                    request_id=parsed.request_id,
+                    correlation_id=parsed.correlation_id,
+                    reason="billing_disposition_interaction_not_configured",
+                    machine_identity=machine_identity,
+                )
+            try:
+                billing_result = dict(
+                    self.billing_disposition_flow.handle(
+                        case_key=parsed.billing_disposition.case_key,
+                        disposition=parsed.billing_disposition.disposition,
+                        microsoft_tenant_id=parsed.microsoft_tenant_id,
+                        microsoft_object_id=parsed.microsoft_object_id,
+                        conversation_id=parsed.conversation_id,
+                        channel_response_id=parsed.billing_disposition.channel_response_id,
+                        decided_at=parsed.issued_at,
+                    )
+                )
+            except PermissionError as error:
+                return self._deny(
+                    parsed=parsed,
+                    machine_identity=machine_identity,
+                    reason="billing_disposition_interaction_denied",
+                    diagnostic={
+                        "error_type": type(error).__name__,
+                        "error_message": str(error)[:500],
+                    },
+                )
+            except Exception as error:
+                self.audit.append(
+                    "openclaw.teams_billing_disposition_interaction_failed",
+                    {
+                        "request_id": parsed.request_id,
+                        "correlation_id": parsed.correlation_id,
+                        "machine_identity": machine_identity,
+                        "case_key": parsed.billing_disposition.case_key,
+                        "error_type": type(error).__name__,
+                        "error_message": str(error)[:500],
+                    },
+                )
+                return {
+                    "request_id": parsed.request_id,
+                    "correlation_id": parsed.correlation_id,
+                    "status": "failed",
+                    "error_code": "billing_disposition_interaction_failed",
+                }
+            self.audit.append(
+                "openclaw.teams_billing_disposition_interaction_completed",
+                {
+                    "request_id": parsed.request_id,
+                    "correlation_id": parsed.correlation_id,
+                    "machine_identity": machine_identity,
+                    "case_key": parsed.billing_disposition.case_key,
+                    "disposition": parsed.billing_disposition.disposition,
+                },
+            )
+            billing_result.setdefault("request_id", parsed.request_id)
+            billing_result.setdefault("correlation_id", parsed.correlation_id)
+            return billing_result
 
         procurement_url = _standalone_https_url(parsed.text)
         if parsed.procurement_submit is not None or (

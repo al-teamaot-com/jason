@@ -72,3 +72,13 @@ test("proactive preflight diagnostics expose bounded reason codes without secret
     .join("\n");
   assert.doesNotMatch(diagnosticLines, /PROACTIVE_TOKEN|authorization|clientSecret|message|card|text/);
 });
+
+
+test("hardware billing disposition card is constrained and signed as a governed interaction", () => {
+  assert.match(source, /function parseBillingDispositionSubmit/);
+  assert.match(source, /"charge_needed", "not_billable", "already_handled"/);
+  assert.match(source, /kind: "hardware\.billing\.disposition"/);
+  assert.match(source, /case_key: billingDispositionSubmit\.caseKey/);
+  assert.match(source, /disposition: billingDispositionSubmit\.disposition/);
+  assert.match(source, /channel_response_id: messageId/);
+});

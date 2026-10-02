@@ -100,3 +100,67 @@ def test_ticket_charge_create_requires_catalog_reference_and_bounded_fields() ->
             "autotask.ticket.charge.update",
             {"id": 456, "ticketID": 999, "unitQuantity": 1},
         )
+
+
+def test_client_quote_create_payloads_require_native_autotask_fields() -> None:
+    opportunity = AutotaskProcurementMutationConnector._validated_payload(
+        "autotask.opportunity.create",
+        {
+            "amount": 1199,
+            "cost": 900,
+            "companyID": 123,
+            "ownerResourceID": 456,
+            "probability": 50,
+            "projectedCloseDate": "2026-11-01T12:00:00Z",
+            "stage": 29682772,
+            "startDate": "2026-10-02T12:00:00Z",
+            "status": 1,
+            "title": "Ticket quote",
+            "useQuoteTotals": True,
+        },
+    )
+    assert opportunity["stage"] == 29682772
+
+    quote = AutotaskProcurementMutationConnector._validated_payload(
+        "autotask.quote.create",
+        {
+            "billToLocationID": 1,
+            "effectiveDate": "2026-10-02T12:00:00Z",
+            "expirationDate": "2026-11-01T12:00:00Z",
+            "name": "Ticket quote",
+            "opportunityID": 2,
+            "shipToLocationID": 1,
+            "soldToLocationID": 1,
+        },
+    )
+    assert quote["opportunityID"] == 2
+
+    quote_item = AutotaskProcurementMutationConnector._validated_payload(
+        "autotask.quote.item.create",
+        {
+            "productID": 77,
+            "name": "Dock",
+            "isOptional": False,
+            "lineDiscount": 0,
+            "percentageDiscount": 0,
+            "periodType": 5,
+            "quantity": 1,
+            "quoteItemType": 1,
+            "unitDiscount": 0,
+            "unitPrice": 199,
+        },
+    )
+    assert quote_item["productID"] == 77
+
+
+def test_quote_item_create_fails_closed_without_discount_and_type_controls() -> None:
+    with pytest.raises(ValueError, match="missing required fields"):
+        AutotaskProcurementMutationConnector._validated_payload(
+            "autotask.quote.item.create",
+            {
+                "productID": 77,
+                "name": "Dock",
+                "quantity": 1,
+                "quoteItemType": 1,
+            },
+        )

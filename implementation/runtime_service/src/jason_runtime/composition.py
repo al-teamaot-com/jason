@@ -248,6 +248,8 @@ from .autotask_ticket_update import (
     register_autotask_ticket_update_runtime_foundation,
 )
 from .autotask_procurement import (
+    AUTOTASK_PROCUREMENT_PROFILE,
+    AUTOTASK_PROCUREMENT_PROFILE_ENV,
     build_autotask_procurement_invoker,
     register_autotask_procurement_invoker,
     register_autotask_procurement_runtime_foundation,
@@ -309,7 +311,26 @@ from .kfs_meter_history import (
     KfsMeterHistoryStore,
     ensure_meter_history_read_authority,
 )
-from .procurement_teams_flow import ensure_procurement_read_authority
+from .procurement_billing_audit_maintenance import (
+    GovernedBillingAuditReadPort,
+    HardwareBillingAuditMaintenance,
+    TeamsGatewayBillingAuditSender,
+    ensure_billing_audit_read_authority,
+)
+from .procurement_inventory_billing import (
+    HardwareBillingDispositionFlow,
+    SQLiteBillingLeakageStore,
+)
+from .procurement_teams_flow import (
+    ApprovalInteractionDispatcher,
+    OwnerOnlyProcurementAuthority,
+    ProcurementApprovalInteractionFlow,
+    ProcurementTeamsFlow,
+    ProcurementWorkerExecutor,
+    SQLiteProcurementSubmissionStore,
+    ensure_procurement_read_authority,
+    ensure_procurement_worker_authority,
+)
 from .autonomy_shadow_composition import build_autonomy_shadow_maintenance
 from .autonomy_worker_composition import build_autonomy_worker_maintenance
 from .daily_drmm_alert_reconciliation_composition import build_daily_drmm_alert_reconciliation_maintenance
@@ -516,6 +537,16 @@ class RuntimeSettings:
     teams_proactive_token_file: Path = Path(
         "/run/jason-secrets/teams-proactive/token"
     )
+    procurement_submissions_db: Path = Path(
+        "/var/lib/jason/openclaw/procurement/submissions.sqlite3"
+    )
+    procurement_approvals_db: Path = Path(
+        "/var/lib/jason/openclaw/procurement/approvals.sqlite3"
+    )
+    procurement_billing_audit_db: Path = Path(
+        "/var/lib/jason/openclaw/procurement/billing-audit.sqlite3"
+    )
+    procurement_inventory_location_id: int = 1
     host: str = "0.0.0.0"
     port: int = 8080
 
@@ -928,6 +959,27 @@ class RuntimeSettings:
                     "/run/jason-secrets/teams-proactive/token",
                 )
             ),
+            procurement_submissions_db=Path(
+                os.getenv(
+                    "JASON_PROCUREMENT_SUBMISSIONS_DB",
+                    "/var/lib/jason/openclaw/procurement/submissions.sqlite3",
+                )
+            ),
+            procurement_approvals_db=Path(
+                os.getenv(
+                    "JASON_PROCUREMENT_APPROVALS_DB",
+                    "/var/lib/jason/openclaw/procurement/approvals.sqlite3",
+                )
+            ),
+            procurement_billing_audit_db=Path(
+                os.getenv(
+                    "JASON_PROCUREMENT_BILLING_AUDIT_DB",
+                    "/var/lib/jason/openclaw/procurement/billing-audit.sqlite3",
+                )
+            ),
+            procurement_inventory_location_id=int(
+                os.getenv("JASON_PROCUREMENT_INVENTORY_LOCATION_ID", "1")
+            ),
             host=os.getenv("JASON_RUNTIME_HOST", "0.0.0.0").strip(),
             port=int(os.getenv("JASON_RUNTIME_PORT", "8080")),
         )
@@ -937,6 +989,8 @@ class RuntimeSettings:
     def validate(self) -> None:
         if not self.ollama_model:
             raise ValueError("JASON_OLLAMA_MODEL is required")
+        if self.procurement_inventory_location_id < 1:
+            raise ValueError("JASON_PROCUREMENT_INVENTORY_LOCATION_ID must be positive")
         if not 1 <= self.autonomy_max_active_work_items <= 100:
             raise ValueError(
                 "JASON_AUTONOMY_MAX_ACTIVE_WORK_ITEMS must be between 1 and 100"
@@ -2123,6 +2177,91 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             interval_seconds=settings.autonomy_review_interval_seconds,
         )
 
+    procurement_teams_flow = None
+    procurement_approval_flow = None
+    billing_disposition_flow = None
+    procurement_billing_audit_maintenance = None
+    procurement_enabled = (
+        os.getenv(AUTOTASK_PROCUREMENT_PROFILE_ENV, "").strip().casefold()
+        == AUTOTASK_PROCUREMENT_PROFILE
+        and os.getenv(PROCUREMENT_WEB_READ_PROFILE_ENV, "").strip().casefold()
+        == PROCUREMENT_WEB_READ_PROFILE
+    )
+    if procurement_enabled:
+        ensure_procurement_worker_authority(identity_authority, enabled=True)
+        procurement_owner_ids = approval_owner_identities()
+        procurement_submission_store = SQLiteProcurementSubmissionStore(
+            settings.procurement_submissions_db
+        )
+        procurement_approval_repository = SQLiteApprovalRequestRepository(
+            settings.procurement_approvals_db
+        )
+        procurement_approval_service = ApprovalRequestService(
+            repository=procurement_approval_repository,
+            authority=OwnerOnlyProcurementAuthority(
+                frozenset(procurement_owner_ids)
+            ),
+        )
+        procurement_approval_sender = TeamsGatewayPlaybookApprovalSender(
+            gateway_url=settings.teams_gateway_internal_url,
+            token_file=settings.teams_proactive_token_file,
+            bindings=bindings,
+            owner_identity_ids=procurement_owner_ids,
+        )
+        procurement_worker = ProcurementWorkerExecutor(
+            authority=identity_authority,
+            capabilities=capabilities,
+            approvals=approval_repository,
+            execution_ledger=governed_execution_ledger,
+            orchestrator=orchestrator,
+        )
+        procurement_teams_flow = ProcurementTeamsFlow(
+            identity_binder=identity_binder,
+            request_factory=request_factory,
+            orchestrator=orchestrator,
+            store=procurement_submission_store,
+            worker=procurement_worker,
+            approval_service=procurement_approval_service,
+            approval_sender=procurement_approval_sender,
+            owner_ids=tuple(procurement_owner_ids),
+            inventory_location_id=settings.procurement_inventory_location_id,
+        )
+        procurement_approval_flow = ProcurementApprovalInteractionFlow(
+            bindings=bindings,
+            approval_service=procurement_approval_service,
+            submissions=procurement_submission_store,
+            processor=procurement_teams_flow,
+        )
+        billing_audit_store = SQLiteBillingLeakageStore(
+            settings.procurement_billing_audit_db
+        )
+        billing_disposition_flow = HardwareBillingDispositionFlow(
+            bindings=bindings,
+            store=billing_audit_store,
+            procurement_submissions=procurement_submission_store,
+        )
+        ensure_billing_audit_read_authority(identity_authority, enabled=True)
+        procurement_billing_audit_maintenance = HardwareBillingAuditMaintenance(
+            submissions=procurement_submission_store,
+            cases=billing_audit_store,
+            reads=GovernedBillingAuditReadPort(
+                authority=identity_authority,
+                capabilities=capabilities,
+                orchestrator=orchestrator,
+            ),
+            notifications=TeamsGatewayBillingAuditSender(
+                gateway_url=settings.teams_gateway_internal_url,
+                token_file=settings.teams_proactive_token_file,
+                bindings=bindings,
+            ),
+            actions=procurement_worker,
+        )
+
+    approval_interaction_flow = ApprovalInteractionDispatcher(
+        procurement=procurement_approval_flow,
+        fallback=playbook_approval_flow,
+    )
+
     trusted_keys = FileBackedTrustedKeyRegistry(settings.trusted_keys_registry)
     governed_ingress = GovernedOpenClawTeamsConversationIngress(
         authenticator=trusted_keys.build_authenticator(),
@@ -2130,7 +2269,9 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         audit=SQLiteIngressSecurityAudit(settings.security_audit_db),
         flow=flow,
         allowed_machine_identities=settings.allowed_machine_identities,
-        approval_flow=playbook_approval_flow,
+        approval_flow=approval_interaction_flow,
+        procurement_flow=procurement_teams_flow,
+        billing_disposition_flow=billing_disposition_flow,
     )
     shadow_autonomy_maintenance = build_autonomy_shadow_maintenance(
         enabled=settings.autonomy_shadow_enabled,
@@ -2241,6 +2382,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         autonomous_repair_deployment_maintenance,
         operational_autonomy_maintenance,
         drmm_recent_alert_reconciliation_maintenance,
+        procurement_billing_audit_maintenance,
         windows_time_source_shadow_maintenance,
         shadow_autonomy_maintenance,
     )
