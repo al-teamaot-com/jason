@@ -2934,6 +2934,14 @@ def test_backupiq_second_reinstall_is_blocked_before_component_dispatch(tmp_path
     store.close()
 
 
+def test_low_disk_matcher_recognizes_aem_drive_usage_title():
+    title = (
+        "E: Drive has 2,456.4 GB used out of 2,682.6 GB (92% Used) "
+        "(has passed 90.0 % Used for 5 mins) for VMHOST"
+    )
+    assert OperationalAutonomyMaintenance._is_low_disk_ticket({"title": title}) is True
+
+
 def low_disk_candidate():
     return QueueCandidate(
         resource_id="141101",
