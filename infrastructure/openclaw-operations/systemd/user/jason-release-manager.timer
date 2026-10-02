@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Jason Release Manager at the controlled 02:30 engineering window
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 America/New_York
+Persistent=true
+RandomizedDelaySec=0
+Unit=jason-release-manager.service
+
+[Install]
+WantedBy=timers.target
