@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Callable, Protocol
 from uuid import uuid4
 
-from connectors.src.jason_connectors.approval_requests import ApprovalRequest, ApprovalRequestService
+from orchestrator.approval_requests import ApprovalRequest, ApprovalRequestService
 
 from .approval_audit import ApprovalAuditEvent, ApprovalAuditEventType, ApprovalAuditRecorder
 
