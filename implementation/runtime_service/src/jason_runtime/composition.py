@@ -225,6 +225,12 @@ from .autonomous_repair_deployment import (
 from .autonomous_repair_maintenance import (
     build_autonomous_repair_deployment_maintenance,
 )
+from .source_repository_read import (
+    build_source_repository_read_invoker,
+    ensure_source_repository_read_authority,
+    register_source_repository_read_foundation,
+    register_source_repository_read_invokers,
+)
 from .support_repair_reasoning import build_support_repair_reasoning_maintenance
 from .autotask_ticket_create import (
     build_autotask_ticket_create_invoker,
@@ -1345,6 +1351,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             now=now,
         )
     )
+    source_repository_reads_enabled = register_source_repository_read_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
     register_autotask_ticket_create_runtime_foundation(
         capabilities=capabilities,
         providers=providers,
@@ -1431,6 +1442,9 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
 
     if autonomous_repair_deployment_activation.enabled:
         ensure_autonomous_repair_authority(identity_authority)
+
+    if source_repository_reads_enabled:
+        ensure_source_repository_read_authority(identity_authority)
 
     if autonomous_completion_notifications_enabled:
         ensure_autonomous_completion_authority(identity_authority)
@@ -1866,6 +1880,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         if autonomous_repair_deployment_activation.enabled
         else None
     )
+    source_repository_read_invoker = (
+        build_source_repository_read_invoker()
+        if source_repository_reads_enabled
+        else None
+    )
     autonomous_completion_invoker = (
         build_autonomous_completion_invoker(bindings=bindings)
         if autonomous_completion_notifications_enabled
@@ -1991,6 +2010,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         register_autonomous_repair_deployment_invokers(
             invokers=invokers,
             invoker=autonomous_repair_deployment_invoker,
+        )
+    if source_repository_read_invoker is not None:
+        register_source_repository_read_invokers(
+            invokers=invokers,
+            invoker=source_repository_read_invoker,
         )
     if autonomous_completion_invoker is not None:
         register_autonomous_completion_invoker(
