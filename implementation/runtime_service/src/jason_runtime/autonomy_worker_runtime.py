@@ -904,7 +904,7 @@ class OperationalAutonomyMaintenance:
                 )
             except Exception as exc:
                 if self.audit is not None:
-                    self.audit.record(
+                    self.audit.append(
                         "autonomy.waiting_device_reverse_reconcile.failed",
                         {
                             "ticket_id": work.ticket_id,
@@ -1405,7 +1405,7 @@ class OperationalAutonomyMaintenance:
                     self._augment_offline_ticket_context(item)
                 except Exception as exc:
                     if self.audit is not None:
-                        self.audit.record(
+                        self.audit.append(
                             "autonomy.offline_ticket_augmentation.failed",
                             {
                                 "ticket_id": int(item.resource_id),
@@ -1556,7 +1556,7 @@ class OperationalAutonomyMaintenance:
                         self._synchronize_blocked_ticket_lifecycle(existing, item)
                     except Exception as exc:
                         if self.audit is not None:
-                            self.audit.record(
+                            self.audit.append(
                                 "autonomy.blocked_ticket_lifecycle_sync.failed",
                                 {
                                     "ticket_id": ticket_id,
@@ -6612,7 +6612,7 @@ class OperationalAutonomyMaintenance:
             self._synchronize_blocked_ticket_lifecycle(work, candidate)
         except Exception as exc:
             if self.audit is not None:
-                self.audit.record(
+                self.audit.append(
                     "autonomy.blocked_ticket_lifecycle_sync.failed",
                     {
                         "ticket_id": ticket_id,
