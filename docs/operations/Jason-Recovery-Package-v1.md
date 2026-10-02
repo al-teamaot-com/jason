@@ -70,3 +70,18 @@ It fails closed on:
 A non-production apply helper can restore a plan only when the plan is ready_for_restore. It writes each payload atomically with private file permissions, refuses existing targets, does not run migrations, does not start services, and does not perform provider re-enrollment.
 
 The live filesystem root remains unsupported by this implementation.
+
+## Restore CLI
+
+The recovery CLI now exposes the non-production restore sequence:
+
+- inspect
+- validate
+- plan-restore
+- restore-to-root
+
+plan-restore decrypts the package in memory, validates the internal recovery-state manifest against the versioned state taxonomy, and emits only the restore plan. It performs no writes.
+
+restore-to-root repeats the same validation and applies only a ready_for_restore plan to a non-live target root. It refuses blocked and re-enrollment-required plans before creating restored state.
+
+Restore output reports state classes, target paths, hashes, and status but never prints recovered secret contents.
