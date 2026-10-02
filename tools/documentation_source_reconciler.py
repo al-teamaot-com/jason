@@ -281,9 +281,44 @@ def merge_ready_automation_prs() -> str:
         if not required_checks_green(number):
             print(f"DOCUMENTATION_PR_WAITING={number}")
             return "waiting"
-        run("gh", "pr", "merge", number, "--repo", REPO, "--merge")
-        print(f"DOCUMENTATION_PR_MERGED={number}")
-        return "merged"
+
+        merge_result = subprocess.run(
+            ["gh", "pr", "merge", number, "--repo", REPO, "--merge"],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if merge_result.returncode == 0:
+            print(f"DOCUMENTATION_PR_MERGED={number}")
+            return "merged"
+
+        # Main can advance after the initial PR status read but before the merge.
+        # Re-read GitHub state and treat expected merge-policy races as waiting,
+        # while preserving hard failure for authentication/provider errors.
+        fresh = gh_json(
+            "pr", "view", number,
+            "--repo", REPO,
+            "--json", "mergeable,mergeStateStatus",
+        ) or {}
+        fresh_mergeable = str(fresh.get("mergeable") or "")
+        fresh_state = str(fresh.get("mergeStateStatus") or "")
+        if fresh_mergeable == "CONFLICTING" or fresh_state == "DIRTY":
+            print(f"DOCUMENTATION_PR_REFRESH_REQUIRED={number}")
+            return "refresh"
+        if fresh_state == "BEHIND" or "not up to date" in (merge_result.stderr or "").casefold():
+            run("gh", "pr", "update-branch", number, "--repo", REPO)
+            print(f"DOCUMENTATION_PR_UPDATED_TO_MAIN={number}")
+            return "waiting"
+        if fresh_state in {"BLOCKED", "UNSTABLE", "HAS_HOOKS", "UNKNOWN"}:
+            print(f"DOCUMENTATION_PR_WAITING={number} state={fresh_state}")
+            return "waiting"
+
+        raise subprocess.CalledProcessError(
+            merge_result.returncode,
+            merge_result.args,
+            output=merge_result.stdout,
+            stderr=merge_result.stderr,
+        )
     return "none"
 
 
