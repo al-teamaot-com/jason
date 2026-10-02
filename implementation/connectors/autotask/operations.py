@@ -149,6 +149,11 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
         json_argument="payload",
         require_positive_body_id=True,
     ),
+    "autotask.vendor.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/Companies",
+        json_argument="payload",
+    ),
     "autotask.product.create": OperationDefinition(
         method="POST",
         path_template="/V1.0/Products",

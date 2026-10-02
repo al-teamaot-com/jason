@@ -33,6 +33,7 @@ from kernel.identity_authority import (
 from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
 from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
 from orchestrator.provider_mutation_capability_catalog import (
+    SERVICE_VENDOR_CREATE,
     SERVICE_PRODUCT_CREATE,
     SERVICE_PRODUCT_VENDOR_CREATE,
     SERVICE_OPPORTUNITY_CREATE,
@@ -841,17 +842,20 @@ class ProcurementTeamsFlow:
             for item in _items(vendor_search)
             if _norm(item.get("companyName")) == _norm(vendor_name)
         ]
-        if len(vendors) != 1:
+        if len(vendors) > 1:
             raise ProcurementFlowError(
                 "Vendor could not be resolved to exactly one Autotask company."
             )
-        vendor = vendors[0]
-        checks, mismatches = _vendor_checks(source_org, vendor)
-        if mismatches:
-            raise ProcurementFlowError(
-                "Vendor Review required before procurement: "
-                + ", ".join(sorted(mismatches))
-            )
+        vendor = vendors[0] if vendors else None
+        checks: list[dict[str, str]] = []
+        mismatches: list[str] = []
+        if vendor is not None:
+            checks, mismatches = _vendor_checks(source_org, vendor)
+            if mismatches:
+                raise ProcurementFlowError(
+                    "Vendor Review required before procurement: "
+                    + ", ".join(sorted(mismatches))
+                )
 
         product_match: dict[str, Any] | None = None
         selectors: list[tuple[str, str]] = []
@@ -900,10 +904,18 @@ class ProcurementTeamsFlow:
             "source_capture_sha256": str(source_capture_sha256 or ""),
             "source_captured_at": str(source_captured_at or ""),
             "vendor": {
-                "id": int(vendor["id"]),
-                "name": str(vendor.get("companyName") or vendor_name),
+                "id": int(vendor["id"]) if vendor is not None else None,
+                "name": str(
+                    vendor.get("companyName") if vendor is not None else vendor_name
+                ),
+                "needs_create": vendor is None,
+                "source": dict(source_org),
                 "field_checks": checks,
-                "verification_summary": "; ".join(verification),
+                "verification_summary": (
+                    "; ".join(verification)
+                    if vendor is not None
+                    else "Vendor not present in Autotask; creation proposed on submit."
+                ),
             },
             "product": {
                 "name": str(product.get("name") or "").strip(),
@@ -929,9 +941,14 @@ class ProcurementTeamsFlow:
             "submission_id": submission_id,
             "reply": {
                 "text": (
-                    "I normalized the source and matched the vendor in Autotask. "
-                    "Review the selections below and submit when ready."
-                ),
+                    (
+                        "I normalized the source. The vendor is not in Autotask, so "
+                        "submission will create the Vendor record first. "
+                    )
+                    if payload["vendor"].get("needs_create")
+                    else "I normalized the source and matched the vendor in Autotask. "
+                )
+                + "Review the selections below and submit when ready.",
                 "card": _card(payload),
             },
         }
@@ -1431,6 +1448,43 @@ class ProcurementTeamsFlow:
                 {**latest, "status": "executing", "result": dict(result)},
             )
 
+        vendor_id = result.get("vendor_id") or submission["vendor"].get("id")
+        if vendor_id is None:
+            source_vendor = dict(submission["vendor"].get("source") or {})
+            source_address = dict(source_vendor.get("address") or {})
+            vendor_payload: dict[str, Any] = {
+                "companyName": str(submission["vendor"]["name"]),
+            }
+            field_map = {
+                "url": "webAddress",
+                "phone": "phone",
+            }
+            for source_field, target_field in field_map.items():
+                value = str(source_vendor.get(source_field) or "").strip()
+                if value:
+                    vendor_payload[target_field] = value
+            address_map = {
+                "street": "address1",
+                "city": "city",
+                "state": "state",
+                "postal_code": "postalCode",
+            }
+            for source_field, target_field in address_map.items():
+                value = str(source_address.get(source_field) or "").strip()
+                if value:
+                    vendor_payload[target_field] = value
+            vendor_output = self.worker.execute(
+                capability_name=SERVICE_VENDOR_CREATE,
+                payload=vendor_payload,
+                submission=submission,
+                correlation_id=correlation,
+            )
+            vendor_id = _resource_id(vendor_output)
+            checkpoint(vendor_id=int(vendor_id), created_vendor=True)
+        else:
+            result.setdefault("vendor_id", int(vendor_id))
+            result.setdefault("created_vendor", False)
+
         product_id = (
             result.get("product_id")
             or submission["product"].get("existing_product_id")
@@ -1452,7 +1506,7 @@ class ProcurementTeamsFlow:
                         or submission["product"].get("sku")
                         or ""
                     ),
-                    "defaultVendorID": int(submission["vendor"]["id"]),
+                    "defaultVendorID": int(vendor_id),
                     "unitCost": float(Decimal(str(submission["product"]["cost"]))),
                     "unitPrice": float(Decimal(str(submission["retail_price"]))),
                 },
@@ -1468,7 +1522,7 @@ class ProcurementTeamsFlow:
                 capability_name=SERVICE_PRODUCT_VENDOR_CREATE,
                 payload={
                     "productID": int(product_id),
-                    "vendorID": int(submission["vendor"]["id"]),
+                    "vendorID": int(vendor_id),
                     "isActive": True,
                     "isDefault": True,
                     "vendorCost": float(
@@ -1651,7 +1705,7 @@ class ProcurementTeamsFlow:
 
         if submission.get("create_po"):
             po_payload: dict[str, Any] = {
-                "vendorID": int(submission["vendor"]["id"]),
+                "vendorID": int(vendor_id),
                 "freight": float(Decimal(str(submission["freight"]))),
                 "generalMemo": (
                     "Jason procurement "

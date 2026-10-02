@@ -21,6 +21,7 @@ SERVICE_TICKET_NOTE_UPDATE = "service.ticket.note.update"
 SERVICE_TICKET_ATTACHMENT_CREATE = "service.ticket.attachment.create"
 SERVICE_TICKET_CHARGE_CREATE = "service.ticket.charge.create"
 SERVICE_TICKET_CHARGE_UPDATE = "service.ticket.charge.update"
+SERVICE_VENDOR_CREATE = "service.vendor.create"
 SERVICE_PRODUCT_CREATE = "service.product.create"
 SERVICE_PRODUCT_UPDATE = "service.product.update"
 SERVICE_PRODUCT_VENDOR_CREATE = "service.product.vendor.create"
@@ -49,6 +50,7 @@ AUTOTASK_MUTATION_CAPABILITIES = frozenset(
         SERVICE_TICKET_ATTACHMENT_CREATE,
         SERVICE_TICKET_CHARGE_CREATE,
         SERVICE_TICKET_CHARGE_UPDATE,
+        SERVICE_VENDOR_CREATE,
         SERVICE_PRODUCT_CREATE,
         SERVICE_PRODUCT_UPDATE,
         SERVICE_PRODUCT_VENDOR_CREATE,
@@ -257,6 +259,15 @@ def autotask_mutation_capability_definitions(
             resource_types="service_ticket_charge,ticket_charge,billing_item",
             operation="update",
             idempotency_behavior=IdempotencyBehavior.CONDITIONALLY_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_VENDOR_CREATE,
+            display_name="Create Procurement Vendor",
+            business_purpose="Create one approved Autotask Vendor company required by a verified procurement source.",
+            resource_types="service_vendor,vendor,procurement",
+            operation="create",
+            idempotency_behavior=IdempotencyBehavior.NON_IDEMPOTENT,
         ),
         _mutation_capability(
             now=now,

@@ -118,3 +118,48 @@ def test_card_source_is_not_a_second_procurement_execution_path(tmp_path):
     assert payload["status"] == "draft"
     assert "create_po" not in payload
     assert "create_client_quote" not in payload
+
+
+class MissingVendorFlow(ProcurementTeamsFlow):
+    def _read(self, *, capability, arguments, **kwargs):
+        if capability == "service.company.search":
+            return {"data": {"items": []}}
+        if capability == "service.product.search":
+            return {"data": {"items": []}}
+        raise AssertionError(capability)
+
+
+def test_missing_vendor_becomes_explicit_creation_proposal(tmp_path):
+    flow = MissingVendorFlow(
+        identity_binder=Binder(),
+        request_factory=Factory(),
+        orchestrator=None,
+        store=SQLiteProcurementSubmissionStore(tmp_path / "missing-vendor.sqlite3"),
+        worker=None,
+        approval_service=None,
+        approval_sender=None,
+        owner_ids=(),
+    )
+    normalized = {
+        "source_kind": "vendor_quote",
+        "source_reference": "quote:NEW-VENDOR",
+        "vendor": {"name": "Plugable Technologies"},
+        "product": {
+            "name": "USB-C to VGA Adapter",
+            "mpn": "USBC-TVGA",
+            "unit_cost": "19.95",
+        },
+    }
+    result = flow.handle_vendor_document(
+        normalized=normalized,
+        microsoft_tenant_id="tenant",
+        microsoft_object_id="object",
+        conversation_id="conv",
+        message_id="msg",
+        occurred_at=NOW,
+    )
+    payload = flow.store.get(result["submission_id"])
+    assert payload["vendor"]["id"] is None
+    assert payload["vendor"]["needs_create"] is True
+    assert "creation proposed" in payload["vendor"]["verification_summary"]
+    assert "create the Vendor record first" in result["reply"]["text"]

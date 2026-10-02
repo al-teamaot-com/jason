@@ -19,6 +19,34 @@ def test_procurement_connector_uses_separate_secret_and_exact_capability_set() -
     )
 
 
+
+
+def test_vendor_create_is_bounded_to_vendor_company_and_aot_defaults() -> None:
+    payload = AutotaskProcurementMutationConnector._validated_payload(
+        "autotask.vendor.create",
+        {
+            "companyName": "Synthetic Vendor",
+            "webAddress": "https://vendor.example",
+        },
+    )
+    assert payload["companyType"] == 7
+    assert payload["ownerResourceID"] == 29682892
+    assert payload["territoryID"] == 29682778
+    assert payload["companyCategoryID"] == 1
+    assert payload["currencyID"] == 1
+    assert payload["purchaseOrderTemplateID"] == 102
+    assert payload["isActive"] is True
+    assert payload["phone"] == "0"
+
+    with pytest.raises(PermissionError, match="AUTOTASK_PROCUREMENT_FIELD_NOT_ALLOWED"):
+        AutotaskProcurementMutationConnector._validated_payload(
+            "autotask.vendor.create",
+            {
+                "companyName": "Synthetic Vendor",
+                "companyType": 1,
+            },
+        )
+
 def test_product_create_payload_is_bounded_to_approved_fields() -> None:
     payload = AutotaskProcurementMutationConnector._validated_payload(
         "autotask.product.create",
