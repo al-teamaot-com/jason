@@ -257,3 +257,86 @@ def test_required_checks_green_fails_on_pending(monkeypatch):
     monkeypatch.setattr("tools.documentation_source_reconciler.subprocess.run", lambda *a, **k: Result())
     from tools.documentation_source_reconciler import required_checks_green
     assert required_checks_green("123") is False
+
+
+def test_merge_race_becoming_behind_refreshes_instead_of_failing(monkeypatch, capsys):
+    calls = []
+
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.automation_prs",
+        lambda: [{
+            "number": 668,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+        }],
+    )
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.required_checks_green",
+        lambda number: True,
+    )
+
+    class MergeResult:
+        returncode = 1
+        stdout = ""
+        stderr = "head branch is not up to date with the base branch"
+        args = ("gh", "pr", "merge", "668")
+
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.subprocess.run",
+        lambda *args, **kwargs: MergeResult(),
+    )
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.gh_json",
+        lambda *args: {"mergeable": "MERGEABLE", "mergeStateStatus": "BEHIND"},
+    )
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.run",
+        lambda *args, **kwargs: calls.append(args) or "",
+    )
+
+    from tools.documentation_source_reconciler import merge_ready_automation_prs
+
+    assert merge_ready_automation_prs() == "waiting"
+    assert ("gh", "pr", "update-branch", "668", "--repo", "al-teamaot-com/jason") in calls
+    assert "DOCUMENTATION_PR_UPDATED_TO_MAIN=668" in capsys.readouterr().out
+
+
+def test_merge_provider_error_still_fails_closed(monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.automation_prs",
+        lambda: [{
+            "number": 700,
+            "mergeable": "MERGEABLE",
+            "mergeStateStatus": "CLEAN",
+        }],
+    )
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.required_checks_green",
+        lambda number: True,
+    )
+
+    class MergeResult:
+        returncode = 1
+        stdout = ""
+        stderr = "authentication failed"
+        args = ("gh", "pr", "merge", "700")
+
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.subprocess.run",
+        lambda *args, **kwargs: MergeResult(),
+    )
+    monkeypatch.setattr(
+        "tools.documentation_source_reconciler.gh_json",
+        lambda *args: {"mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN"},
+    )
+
+    from tools.documentation_source_reconciler import merge_ready_automation_prs
+
+    try:
+        merge_ready_automation_prs()
+    except subprocess.CalledProcessError:
+        pass
+    else:
+        raise AssertionError("provider/authentication merge failures must remain fatal")
