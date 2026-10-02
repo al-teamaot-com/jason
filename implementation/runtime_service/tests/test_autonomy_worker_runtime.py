@@ -1065,6 +1065,110 @@ def test_worker_accepts_provider_native_datto_device_identity(tmp_path: Path):
     store.close()
 
 
+def test_worker_uses_rmm_audit_hostname_when_reference_title_is_generic(tmp_path: Path):
+    class GenericTitleReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "item": {
+                                "id": 1583,
+                                "companyID": 507,
+                                "isActive": True,
+                                "referenceNumber": "device-uid-1",
+                                "referenceTitle": "Mac",
+                                "rmmDeviceAuditHostname": "PC-1",
+                            }
+                        }
+                    },
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()),
+        reads=GenericTitleReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    work = store.get(140933)
+    assert work is not None
+    assert work.device_uid == "device-uid-1"
+    assert work.hostname == "PC-1"
+    assert work.phase == "health_wait"
+    store.close()
+
+
+def test_exact_resource_id_can_bind_when_ci_display_title_is_not_hostname(tmp_path: Path):
+    class GenericTitleNoAuditHostnameReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "item": {
+                                "id": 1583,
+                                "companyID": 507,
+                                "isActive": True,
+                                "referenceNumber": "device-uid-1",
+                                "referenceTitle": "Mac",
+                            }
+                        }
+                    },
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()),
+        reads=GenericTitleNoAuditHostnameReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    work = store.get(140933)
+    assert work is not None
+    assert work.device_uid == "device-uid-1"
+    assert work.hostname == "PC-1"
+    assert work.phase == "health_wait"
+    store.close()
+
+
+def test_legacy_hostname_mismatch_block_is_retryable():
+    work = OperationalWork(
+        ticket_id=140933,
+        ticket_number="T20260925.9999",
+        title="Antivirus status is Not running for PC-1",
+        playbook_id="datto_edr_av",
+        source_queue="Monitoring Alert",
+        company_id=507,
+        configuration_item_id=1583,
+        device_uid="device-uid-1",
+        hostname="PC-1",
+        phase="blocked",
+        last_reason="Autotask CI and DRMM hostname do not match",
+    )
+    assert OperationalAutonomyMaintenance._block_is_retryable(work) is True
+
+
 def dns_candidate(title="DNS Agent service isStopped for PC-1"):
     return QueueCandidate(
         resource_id="140944",

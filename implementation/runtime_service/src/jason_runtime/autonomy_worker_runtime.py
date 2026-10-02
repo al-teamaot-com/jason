@@ -2257,6 +2257,9 @@ class OperationalAutonomyMaintenance:
                 "provider_http_status_502",
                 "provider_http_status_503",
                 "provider_http_status_504",
+                "autotask ci and drmm hostname do not match",
+                "autotask ci rmm hostname and drmm hostname do not match",
+                "same-company configuration and datto hostname do not match",
             )
         )
 
@@ -2721,7 +2724,11 @@ class OperationalAutonomyMaintenance:
             if isinstance(item, Mapping)
             and item.get("isActive") is True
             and str(item.get("referenceNumber") or "").strip() == endpoint_uid
-            and str(item.get("referenceTitle") or "").strip().casefold() == hostname.casefold()
+            and str(
+                item.get("rmmDeviceAuditHostname")
+                or item.get("referenceTitle")
+                or ""
+            ).strip().casefold() == hostname.casefold()
         ]
         if len(matches) != 1:
             return None
@@ -2760,8 +2767,11 @@ class OperationalAutonomyMaintenance:
                 if isinstance(item, Mapping)
                 and item.get("isActive") is True
                 and self._company_id(item.get("companyID")) == company_id
-                and str(item.get("referenceTitle") or "").strip().casefold()
-                == structured_hostname.casefold()
+                and str(
+                    item.get("rmmDeviceAuditHostname")
+                    or item.get("referenceTitle")
+                    or ""
+                ).strip().casefold() == structured_hostname.casefold()
                 and str(item.get("referenceNumber") or "").strip()
             ]
             if len(matches) == 1:
@@ -2880,7 +2890,11 @@ class OperationalAutonomyMaintenance:
             and item.get("isActive") is True
             and self._company_id(item.get("companyID")) == company_id
             and str(item.get("referenceNumber") or "").strip() == endpoint_uid
-            and str(item.get("referenceTitle") or "").strip().casefold() == hostname.casefold()
+            and str(
+                item.get("rmmDeviceAuditHostname")
+                or item.get("referenceTitle")
+                or ""
+            ).strip().casefold() == hostname.casefold()
         ]
         if len(matches) != 1:
             raise OperationalAutonomyError(
@@ -2944,8 +2958,12 @@ class OperationalAutonomyMaintenance:
             raise OperationalAutonomyError("configuration is inactive")
 
         device_uid = str(ci.get("referenceNumber") or "").strip()
-        hostname = str(ci.get("referenceTitle") or "").strip()
-        if not device_uid or not hostname:
+        ci_hostname = str(
+            ci.get("rmmDeviceAuditHostname")
+            or ci.get("dattoHostname")
+            or ""
+        ).strip()
+        if not device_uid:
             raise OperationalAutonomyError("configuration lacks exact DRMM identity")
 
         endpoint = self._read_record(
@@ -2965,10 +2983,21 @@ class OperationalAutonomyMaintenance:
         ).strip()
         if endpoint_uid != device_uid:
             raise OperationalAutonomyError("DRMM device identity mismatch")
-        if endpoint_hostname.casefold() != hostname.casefold():
+        if (
+            ci_hostname
+            and endpoint_hostname
+            and endpoint_hostname.casefold() != ci_hostname.casefold()
+        ):
             raise OperationalAutonomyError(
-                "Autotask CI and DRMM hostname do not match"
+                "Autotask CI RMM hostname and DRMM hostname do not match"
             )
+        hostname = (
+            endpoint_hostname
+            or ci_hostname
+            or str(ci.get("referenceTitle") or "").strip()
+        )
+        if not hostname:
+            raise OperationalAutonomyError("configuration lacks DRMM hostname evidence")
 
         work = OperationalWork(
             ticket_id=ticket_id,
