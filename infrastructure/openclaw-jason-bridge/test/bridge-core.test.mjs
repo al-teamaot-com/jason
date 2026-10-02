@@ -252,3 +252,102 @@ test("rejects invalid approval interaction decisions before signing", () => {
     },
   }), /decision is invalid/);
 });
+
+
+test("binds procurement card submission into the signed envelope", () => {
+  const value = buildConversationEnvelope({
+    text: "Jason procurement submission",
+    microsoftTenantId: tenantId,
+    microsoftObjectId: objectId,
+    conversationId: "conversation-procurement",
+    messageId: "message-procurement",
+    keyId: "openclaw-gateway-2",
+    interaction: {
+      kind: "procurement.submit",
+      submission_id: "procsub-123",
+      selections: {
+        create_po: true,
+        create_client_quote: true,
+        quantity: 2,
+        customer_quantity: 1,
+        aot_stock_quantity: 1,
+        at_part_number: "USBC-TVGA",
+      },
+      channel_response_id: "message-procurement",
+    },
+  });
+  assert.deepEqual(value.interaction, {
+    kind: "procurement.submit",
+    submission_id: "procsub-123",
+    selections: {
+      create_po: "true",
+      create_client_quote: "true",
+      quantity: "2",
+      customer_quantity: "1",
+      aot_stock_quantity: "1",
+      at_part_number: "USBC-TVGA",
+    },
+    channel_response_id: "message-procurement",
+  });
+});
+
+test("procurement interaction rejects authority-bearing selections", () => {
+  assert.throws(() => buildConversationEnvelope({
+    text: "Jason procurement submission",
+    microsoftTenantId: tenantId,
+    microsoftObjectId: objectId,
+    conversationId: "conversation-procurement",
+    messageId: "message-procurement",
+    keyId: "openclaw-gateway-2",
+    interaction: {
+      kind: "procurement.submit",
+      submission_id: "procsub-123",
+      selections: { provider: "autotask" },
+      channel_response_id: "message-procurement",
+    },
+  }), /authority field/);
+});
+
+test("binds hardware billing disposition into the signed envelope", () => {
+  const value = buildConversationEnvelope({
+    text: "Jason hardware billing disposition",
+    microsoftTenantId: tenantId,
+    microsoftObjectId: objectId,
+    conversationId: "conversation-billing",
+    messageId: "message-billing",
+    keyId: "openclaw-gateway-2",
+    interaction: {
+      kind: "hardware.billing.disposition",
+      case_key: "case-123",
+      disposition: "charge_needed",
+      channel_response_id: "message-billing",
+    },
+  });
+  assert.deepEqual(value.interaction, {
+    kind: "hardware.billing.disposition",
+    case_key: "case-123",
+    disposition: "charge_needed",
+    channel_response_id: "message-billing",
+  });
+});
+
+test("approval interactions preserve bounded card selections", () => {
+  const value = buildConversationEnvelope({
+    text: "Jason approval response",
+    microsoftTenantId: tenantId,
+    microsoftObjectId: objectId,
+    conversationId: "conversation-approval-selections",
+    messageId: "message-approval-selections",
+    keyId: "openclaw-gateway-2",
+    interaction: {
+      kind: "approval.submit",
+      approval_id: "pbautreq-2",
+      decision: "approve",
+      selections: { requested_window: "02:30" },
+      channel_response_id: "message-approval-selections",
+    },
+  });
+  assert.deepEqual(value.interaction.selections, {
+    requested_window: "02:30",
+  });
+});
