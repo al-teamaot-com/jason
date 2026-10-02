@@ -637,6 +637,48 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
         remove_worktree(repo, deploy_worktree)
 
 
+
+def prepare_release(
+    repo: Path,
+    state_root: Path,
+    candidate_sha: str,
+    change_class: str,
+    *,
+    owner_approved: bool = False,
+) -> dict[str, Any]:
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    release_id = record_id(candidate_sha)
+    path = record_path(state_root, release_id)
+
+    if path.exists():
+        record = load_record(state_root, release_id)
+        state = str(record.get("state") or "")
+        if state in {
+            "production_eligible",
+            "production",
+            "production_verified",
+            "closed",
+        }:
+            return record
+        if state == "release_candidate":
+            return run_preproduction(repo, state_root, record)
+        raise ReleaseManagerError(
+            f"existing release {release_id} is not safely resumable from state {state}"
+        )
+
+    live = live_runtime()
+    rollback_sha = exact_sha(str(live["revision"]), "rollback_sha")
+    record = create_record(
+        repo=repo,
+        state_root=state_root,
+        candidate_sha=candidate_sha,
+        rollback_sha=rollback_sha,
+        change_class=change_class,
+        owner_approved=owner_approved,
+    )
+    return run_preproduction(repo, state_root, record)
+
+
 def promote_eligible(repo: Path, state_root: Path) -> bool:
     records = state_root / "records"
     if not records.exists():
@@ -661,6 +703,11 @@ def main() -> int:
     create.add_argument("--change-class", default="feature")
     create.add_argument("--owner-approved", action="store_true")
 
+    prepare = sub.add_parser("prepare")
+    prepare.add_argument("--candidate-sha", required=True)
+    prepare.add_argument("--change-class", default="feature")
+    prepare.add_argument("--owner-approved", action="store_true")
+
     preprod = sub.add_parser("preprod")
     preprod.add_argument("--release-id", required=True)
 
@@ -682,6 +729,16 @@ def main() -> int:
             state_root=state_root,
             candidate_sha=args.candidate_sha,
             rollback_sha=args.rollback_sha,
+            change_class=args.change_class,
+            owner_approved=args.owner_approved,
+        )
+        print(json.dumps(record, indent=2))
+        return 0
+    if args.command == "prepare":
+        record = prepare_release(
+            repo=repo,
+            state_root=state_root,
+            candidate_sha=args.candidate_sha,
             change_class=args.change_class,
             owner_approved=args.owner_approved,
         )
