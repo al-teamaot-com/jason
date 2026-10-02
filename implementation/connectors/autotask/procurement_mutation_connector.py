@@ -21,6 +21,10 @@ AUTOTASK_PROCUREMENT_MUTATION_OPERATIONS = frozenset(
         "autotask.service.update",
         "autotask.service.bundle.create",
         "autotask.service.bundle.update",
+        "autotask.opportunity.create",
+        "autotask.quote.location.create",
+        "autotask.quote.create",
+        "autotask.quote.item.create",
         "autotask.purchase.order.create",
         "autotask.purchase.order.update",
         "autotask.purchase.order.item.create",
@@ -39,6 +43,10 @@ PROCUREMENT_OPERATION_PREFLIGHT = {
     "autotask.service.update": ("Services", "userAccessForUpdate"),
     "autotask.service.bundle.create": ("ServiceBundles", "userAccessForCreate"),
     "autotask.service.bundle.update": ("ServiceBundles", "userAccessForUpdate"),
+    "autotask.opportunity.create": ("Opportunities", "userAccessForCreate"),
+    "autotask.quote.location.create": ("QuoteLocations", "userAccessForCreate"),
+    "autotask.quote.create": ("Quotes", "userAccessForCreate"),
+    "autotask.quote.item.create": ("QuoteItems", "userAccessForCreate"),
     "autotask.purchase.order.create": ("PurchaseOrders", "userAccessForCreate"),
     "autotask.purchase.order.update": ("PurchaseOrders", "userAccessForUpdate"),
     "autotask.purchase.order.item.create": (
@@ -97,6 +105,25 @@ SAFE_FIELDS = {
         "id", "billingCodeID", "name", "unitPrice", "description",
         "invoiceDescription", "isActive", "sku", "catalogNumberPartNumber",
     }),
+    "autotask.opportunity.create": frozenset({
+        "amount", "companyID", "contactID", "cost", "description", "ownerResourceID",
+        "probability", "projectedCloseDate", "stage", "startDate", "status", "title",
+        "useQuoteTotals", "onetimeRevenue", "onetimeCost", "productID",
+    }),
+    "autotask.quote.location.create": frozenset({
+        "address1", "address2", "city", "postalCode", "state",
+    }),
+    "autotask.quote.create": frozenset({
+        "billToLocationID", "companyID", "contactID", "comment", "description",
+        "effectiveDate", "expirationDate", "externalQuoteNumber", "isActive",
+        "name", "opportunityID", "primaryQuote", "quoteTemplateID",
+        "shipToLocationID", "soldToLocationID", "taxRegionID",
+    }),
+    "autotask.quote.item.create": frozenset({
+        "productID", "description", "isOptional", "lineDiscount", "name",
+        "percentageDiscount", "periodType", "quantity", "quoteItemType",
+        "taxCategoryID", "unitCost", "unitDiscount", "unitPrice",
+    }),
     "autotask.purchase.order.create": frozenset({
         "vendorID", "purchaseForCompanyID", "externalPONumber",
         "vendorInvoiceNumber", "freight", "generalMemo", "paymentTerm",
@@ -146,6 +173,19 @@ REQUIRED_CREATE_FIELDS = {
         {"billingCodeID", "name", "periodType", "unitPrice"}
     ),
     "autotask.service.bundle.create": frozenset({"billingCodeID", "name"}),
+    "autotask.opportunity.create": frozenset({
+        "amount", "companyID", "cost", "ownerResourceID", "probability",
+        "projectedCloseDate", "stage", "startDate", "status", "title", "useQuoteTotals",
+    }),
+    "autotask.quote.location.create": frozenset(),
+    "autotask.quote.create": frozenset({
+        "billToLocationID", "effectiveDate", "expirationDate", "name",
+        "opportunityID", "shipToLocationID", "soldToLocationID",
+    }),
+    "autotask.quote.item.create": frozenset({
+        "productID", "isOptional", "lineDiscount", "name", "percentageDiscount",
+        "periodType", "quantity", "quoteItemType", "unitDiscount",
+    }),
     "autotask.purchase.order.create": frozenset({"vendorID"}),
     "autotask.purchase.order.item.create": frozenset(
         {"orderID", "inventoryLocationID", "quantity", "unitCost"}
@@ -216,6 +256,11 @@ class AutotaskProcurementMutationConnector(AutotaskMutationConnector):
         arguments = {**dict(request.arguments), "payload": payload}
         if request.context.capability == "autotask.product.vendor.create":
             arguments["productID"] = int(payload["productID"])
+        if request.context.capability == "autotask.quote.item.create":
+            raw_quote_id = request.arguments.get("quoteID") or request.arguments.get("quote_id")
+            if isinstance(raw_quote_id, bool) or not str(raw_quote_id or "").isdigit() or int(raw_quote_id) < 1:
+                raise ValueError("quote item create requires positive quoteID route selector")
+            arguments["quoteID"] = int(raw_quote_id)
         if request.context.capability == "autotask.ticket.charge.update":
             raw_ticket_id = request.arguments.get("ticketID") or request.arguments.get("ticket_id")
             if isinstance(raw_ticket_id, bool) or not str(raw_ticket_id or "").isdigit() or int(raw_ticket_id) < 1:

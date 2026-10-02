@@ -45,7 +45,7 @@ EXPECTED_SOURCE_REVISION = os.environ.get(
 ).strip()
 EXPECTED_PROVIDER_PROFILE = os.environ.get(
     "JASON_EXPECTED_PROVIDER_PROFILE",
-    "itglue-autotask-entra-procurement-mail-contract-attachment-resource-catalog-v9",
+    "itglue-autotask-entra-procurement-billing-reconciliation-catalog-v10",
 )
 EXPECTED_AUTOTASK_MODE = os.environ.get(
     "JASON_EXPECTED_AUTOTASK_REQUESTER_MODE",

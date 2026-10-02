@@ -185,6 +185,29 @@ class SQLiteMicrosoftIdentityBindingStore:
             return None
         return self._from_row(row)
 
+    def find_active_by_email(
+        self,
+        *,
+        email_address: str,
+    ) -> MicrosoftIdentityBinding | None:
+        normalized = str(email_address or "").strip().casefold()
+        if not normalized or "@" not in normalized:
+            return None
+        rows = self._connection.execute(
+            """
+            SELECT microsoft_tenant_id, microsoft_object_id, jason_identity_id,
+                   client_id, email_address, status
+            FROM microsoft_identity_bindings
+            WHERE lower(email_address) = ? AND status = 'active'
+            ORDER BY microsoft_tenant_id, microsoft_object_id
+            LIMIT 2
+            """,
+            (normalized,),
+        ).fetchall()
+        if len(rows) != 1:
+            return None
+        return self._from_row(rows[0])
+
     def find_active_by_jason_identity(
         self,
         *,

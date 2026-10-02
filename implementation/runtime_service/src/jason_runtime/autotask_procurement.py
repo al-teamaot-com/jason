@@ -37,6 +37,8 @@ from orchestrator.provider_mutation_capability_catalog import (
     SERVICE_PRODUCT_VENDOR_CREATE, SERVICE_PRODUCT_VENDOR_UPDATE,
     SERVICE_SERVICE_CREATE, SERVICE_SERVICE_UPDATE,
     SERVICE_SERVICE_BUNDLE_CREATE, SERVICE_SERVICE_BUNDLE_UPDATE,
+    SERVICE_OPPORTUNITY_CREATE, SERVICE_QUOTE_LOCATION_CREATE,
+    SERVICE_QUOTE_CREATE, SERVICE_QUOTE_ITEM_CREATE,
     SERVICE_PURCHASE_ORDER_CREATE, SERVICE_PURCHASE_ORDER_UPDATE,
     SERVICE_PURCHASE_ORDER_ITEM_CREATE, SERVICE_PURCHASE_ORDER_ITEM_UPDATE,
     SERVICE_PURCHASE_ORDER_RECEIVE,
@@ -54,6 +56,8 @@ PROCUREMENT_CAPABILITIES = frozenset({
     SERVICE_PRODUCT_VENDOR_CREATE, SERVICE_PRODUCT_VENDOR_UPDATE,
     SERVICE_SERVICE_CREATE, SERVICE_SERVICE_UPDATE,
     SERVICE_SERVICE_BUNDLE_CREATE, SERVICE_SERVICE_BUNDLE_UPDATE,
+    SERVICE_OPPORTUNITY_CREATE, SERVICE_QUOTE_LOCATION_CREATE,
+    SERVICE_QUOTE_CREATE, SERVICE_QUOTE_ITEM_CREATE,
     SERVICE_PURCHASE_ORDER_CREATE, SERVICE_PURCHASE_ORDER_UPDATE,
     SERVICE_PURCHASE_ORDER_ITEM_CREATE, SERVICE_PURCHASE_ORDER_ITEM_UPDATE,
     SERVICE_PURCHASE_ORDER_RECEIVE,
@@ -69,6 +73,10 @@ PROVIDER_MAP = {
     (AUTOTASK_PROCUREMENT_PROVIDER, SERVICE_SERVICE_UPDATE): "autotask.service.update",
     (AUTOTASK_PROCUREMENT_PROVIDER, SERVICE_SERVICE_BUNDLE_CREATE): "autotask.service.bundle.create",
     (AUTOTASK_PROCUREMENT_PROVIDER, SERVICE_SERVICE_BUNDLE_UPDATE): "autotask.service.bundle.update",
+    (AUTOTASK_PROCUREMENT_PROVIDER, SERVICE_OPPORTUNITY_CREATE): "autotask.opportunity.create",
+    (AUTOTASK_PROCUREMENT_PROVIDER, SERVICE_QUOTE_LOCATION_CREATE): "autotask.quote.location.create",
+    (AUTOTASK_PROCUREMENT_PROVIDER, SERVICE_QUOTE_CREATE): "autotask.quote.create",
+    (AUTOTASK_PROCUREMENT_PROVIDER, SERVICE_QUOTE_ITEM_CREATE): "autotask.quote.item.create",
     (AUTOTASK_PROCUREMENT_PROVIDER, SERVICE_PURCHASE_ORDER_CREATE): "autotask.purchase.order.create",
     (AUTOTASK_PROCUREMENT_PROVIDER, SERVICE_PURCHASE_ORDER_UPDATE): "autotask.purchase.order.update",
     (AUTOTASK_PROCUREMENT_PROVIDER, SERVICE_PURCHASE_ORDER_ITEM_CREATE): "autotask.purchase.order.item.create",
@@ -86,6 +94,10 @@ PROVIDER_ENTITY = {
     "autotask.service.update": "Services",
     "autotask.service.bundle.create": "ServiceBundles",
     "autotask.service.bundle.update": "ServiceBundles",
+    "autotask.opportunity.create": "Opportunities",
+    "autotask.quote.location.create": "QuoteLocations",
+    "autotask.quote.create": "Quotes",
+    "autotask.quote.item.create": "QuoteItems",
     "autotask.purchase.order.create": "PurchaseOrders",
     "autotask.purchase.order.update": "PurchaseOrders",
     "autotask.purchase.order.item.create": "PurchaseOrderItems",
@@ -232,6 +244,11 @@ class AutotaskProductionProcurementConnector(AutotaskProcurementMutationConnecto
             request.arguments.get("payload"),
         )
         arguments = {**dict(request.arguments), "payload": payload}
+        if request.context.capability == "autotask.quote.item.create":
+            raw_quote_id = request.arguments.get("quoteID") or request.arguments.get("quote_id")
+            if isinstance(raw_quote_id, bool) or not str(raw_quote_id or "").isdigit() or int(raw_quote_id) < 1:
+                raise ValueError("quote item create requires positive quoteID route selector")
+            arguments["quoteID"] = int(raw_quote_id)
         if request.context.capability == "autotask.ticket.charge.update":
             raw_ticket_id = request.arguments.get("ticketID") or request.arguments.get("ticket_id")
             if (
@@ -266,6 +283,8 @@ class AutotaskProductionProcurementConnector(AutotaskProcurementMutationConnecto
             raw_ticket = normalized.arguments.get("ticketID") or payload.get("ticketID")
             if raw_ticket is not None:
                 route_parameters["ticketID"] = int(raw_ticket)
+        if operation == "autotask.quote.item.create":
+            route_parameters["quoteID"] = int(normalized.arguments["quoteID"])
         return ProviderPreparedExecution(
             provider_capability=operation,
             action_method=prepared.method,
@@ -320,6 +339,8 @@ class AutotaskProductionProcurementConnector(AutotaskProcurementMutationConnecto
             raw_ticket = request.arguments.get("ticketID") or payload.get("ticketID")
             if raw_ticket is not None:
                 expected_parameters["ticketID"] = int(raw_ticket)
+        if operation == "autotask.quote.item.create":
+            expected_parameters["quoteID"] = int(request.arguments["quoteID"])
         expected_parameters.update(dict(prepared.params or {}))
         if expected_parameters != dict(prepared_execution.parameters):
             raise PermissionError("prepared Autotask procurement parameters changed")

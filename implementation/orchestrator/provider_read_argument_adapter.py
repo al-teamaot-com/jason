@@ -64,6 +64,14 @@ from .provider_read_capability_catalog import (
     SERVICE_PURCHASE_ORDER_ITEM_SEARCH,
     SERVICE_TICKET_CHARGE_SEARCH,
     SERVICE_TICKET_CHARGE_READ,
+    SERVICE_INVOICE_SEARCH,
+    SERVICE_INVOICE_READ,
+    SERVICE_BILLING_ITEM_SEARCH,
+    SERVICE_BILLING_ITEM_READ,
+    SERVICE_QUOTE_SEARCH,
+    SERVICE_QUOTE_READ,
+    SERVICE_OPPORTUNITY_SEARCH,
+    SERVICE_OPPORTUNITY_READ,
     SERVICE_TICKET_COUNT,
     SERVICE_TICKET_NOTES_SEARCH,
     SERVICE_TICKET_ATTACHMENT_SEARCH,
@@ -214,6 +222,28 @@ _AUTOTASK_SEARCH_FIELDS: Mapping[str, Mapping[str, str]] = {
         "ticket_id": "ticketID",
         "product_id": "productID",
         "is_billed": "isBilled",
+    },
+    SERVICE_INVOICE_SEARCH: {
+        "resource_id": "id",
+        "company_id": "companyID",
+        "invoice_number": "invoiceNumber",
+    },
+    SERVICE_BILLING_ITEM_SEARCH: {
+        "resource_id": "id",
+        "invoice_id": "invoiceID",
+        "ticket_id": "ticketID",
+        "ticket_charge_id": "ticketChargeID",
+    },
+    SERVICE_QUOTE_SEARCH: {
+        "resource_id": "id",
+        "company_id": "companyID",
+        "opportunity_id": "opportunityID",
+        "external_quote_number": "externalQuoteNumber",
+    },
+    SERVICE_OPPORTUNITY_SEARCH: {
+        "resource_id": "id",
+        "company_id": "companyID",
+        "title": "title",
     },
 }
 
@@ -669,6 +699,14 @@ def adapt_autotask_arguments(
         return {"entity": "PurchaseOrders", "entity_id": _resource_id(arguments)}
     if capability_name == SERVICE_TICKET_CHARGE_READ:
         return {"entity": "TicketCharges", "entity_id": _resource_id(arguments)}
+    if capability_name == SERVICE_INVOICE_READ:
+        return {"entity": "Invoices", "entity_id": _resource_id(arguments)}
+    if capability_name == SERVICE_BILLING_ITEM_READ:
+        return {"entity": "BillingItems", "entity_id": _resource_id(arguments)}
+    if capability_name == SERVICE_QUOTE_READ:
+        return {"entity": "Quotes", "entity_id": _resource_id(arguments)}
+    if capability_name == SERVICE_OPPORTUNITY_READ:
+        return {"entity": "Opportunities", "entity_id": _resource_id(arguments)}
     entity_searches = {
         SERVICE_RESOURCE_SEARCH: "Resources",
         SERVICE_PRODUCT_SEARCH: "Products",
@@ -678,6 +716,10 @@ def adapt_autotask_arguments(
         SERVICE_PURCHASE_ORDER_SEARCH: "PurchaseOrders",
         SERVICE_PURCHASE_ORDER_ITEM_SEARCH: "PurchaseOrderItems",
         SERVICE_TICKET_CHARGE_SEARCH: "TicketCharges",
+        SERVICE_INVOICE_SEARCH: "Invoices",
+        SERVICE_BILLING_ITEM_SEARCH: "BillingItems",
+        SERVICE_QUOTE_SEARCH: "Quotes",
+        SERVICE_OPPORTUNITY_SEARCH: "Opportunities",
     }
     if capability_name in entity_searches:
         return {"entity": entity_searches[capability_name], "search": _autotask_search(capability_name, arguments)}

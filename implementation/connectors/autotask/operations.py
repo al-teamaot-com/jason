@@ -21,6 +21,10 @@ APPROVED_AUTOTASK_ENTITIES = frozenset(
         "Contacts",
         "ConfigurationItems",
         "Invoices",
+        "BillingItems",
+        "Quotes",
+        "QuoteItems",
+        "QuoteLocations",
         "PurchaseOrders",
         "PurchaseOrderItems",
         "PurchaseOrderItemReceiving",
@@ -189,6 +193,27 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
         path_template="/V1.0/ServiceBundles",
         json_argument="payload",
         require_positive_body_id=True,
+    ),
+    "autotask.opportunity.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/Opportunities",
+        json_argument="payload",
+    ),
+    "autotask.quote.location.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/QuoteLocations",
+        json_argument="payload",
+    ),
+    "autotask.quote.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/Quotes",
+        json_argument="payload",
+    ),
+    "autotask.quote.item.create": OperationDefinition(
+        method="POST",
+        path_template="/V1.0/Quotes/{quoteID}/Items",
+        path_arguments=("quoteID",),
+        json_argument="payload",
     ),
     "autotask.purchase.order.create": OperationDefinition(
         method="POST",

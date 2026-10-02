@@ -103,6 +103,10 @@ A healthy procurement case has:
 - delivery state supported by current evidence;
 - receiving based on actual receiving evidence;
 - customer billing quantity equal only to the explicitly approved customer allocation;
+- receiving is recorded before release and never implies release;
+- customer stock is not released until one exact ticket and one explicit billing disposition are persisted;
+- client quote creation is an optional branch, independent of purchase-order creation, and is bound to one exact ticket;
+- hardware billing is reconciled through TicketCharge -> BillingItem -> Invoice evidence with persisted exception states;
 - complete audit linkage from request/invoice/email -> approval -> Autotask mutation -> readback.
 
 ---
@@ -138,7 +142,14 @@ Persist:
 - tracking references
 - email evidence identifiers/digests
 - approval IDs and decisions
+- create-PO selection and create-client-quote selection
+- client quote ID and opportunity ID when created
 - receiving quantities
+- release state and release quantity
+- billing disposition
+- ticket charge ID
+- billing item ID and invoice ID when posted/billed
+- billing-audit evidence digest and last notification digest/state
 - invoice/PO variance
 - outstanding exceptions
 
@@ -527,6 +538,94 @@ Do not broaden capabilities solely for convenience.
 
 ---
 
+## 20A. Unified Procurement / Inventory / Billing Controls (2026-10-02)
+
+This section reconciles GitHub issues `#727`, `#728`, and `#731` into this single lifecycle. No separate procurement, quote, inventory-release, or billing-audit workflow may bypass this state model.
+
+### Vendor quote / invoice / URL branch
+
+The normalized source record may originate from a vendor quote, vendor invoice, or pasted product URL. All sources converge on the same product/vendor normalization, duplicate prevention, ticket resolution, allocation, approval, and audit path.
+
+The Teams card exposes independent controls:
+
+- **Create purchase order** — financial commitment branch.
+- **Create client quote** — customer-facing Autotask quote branch.
+- neither selected — catalog/part normalization only.
+
+The controls are independent. Creating a client quote does not create a PO. Creating a PO does not create a client quote unless explicitly selected.
+
+### Explicit ticket rule for client quotes
+
+A client quote may be created only when one exact Autotask ticket has been resolved and persisted. The quote audit record must retain ticket ID/number/title/company, created Opportunity ID, created Quote ID, created QuoteItem IDs, and source/procurement submission ID.
+
+API-created Autotask Quotes must be associated with an active Opportunity. Jason therefore creates the governed Opportunity first, then the Quote, then its QuoteItems, with post-write readback at every step.
+
+### Mixed allocation rule
+
+Each line persists ordered quantity, customer quantity, AOT stock quantity, and the exact customer ticket where customer quantity > 0.
+
+Hard invariant:
+
+`ordered_quantity = customer_quantity + aot_stock_quantity`
+
+Negative quantities, over-allocation, under-allocation, or customer allocation without an exact ticket fail closed.
+
+### Receiving is not release
+
+Receiving and stock release are different lifecycle transitions:
+
+`ordered -> received_pending_disposition -> ready_for_release -> released`
+
+Receiving proves physical receipt only. It does not authorize handing customer-designated stock to a technician/client.
+
+Customer stock may transition to `ready_for_release` only when all are true:
+1. required units are physically received;
+2. one exact ticket is persisted;
+3. billing disposition is `charge_created`, `existing_unbilled_charge`, `no_charge_contract`, `no_charge_warranty`, or `no_charge_internal`;
+4. allocation math still reconciles;
+5. no unresolved billing exception exists.
+
+AOT-stock-only quantity may be received into inventory without a customer ticket or customer billing disposition.
+
+### Hardware billing leakage audit
+
+For customer-designated hardware, persist one case key per expected ticket/product allocation with state, exact ticket, product, expected quantity/price, ticket charge ID, BillingItem ID, Invoice ID, evidence digest, first-detected time, technician disposition, due date, last-notified state/digest/time, and escalation time.
+
+State transitions:
+1. no matching ticket charge -> `technician_disposition_pending`;
+2. matching charge exists with `isBilled = false` -> `existing_unbilled_charge`;
+3. charge exists but quantity/price is wrong or ambiguous -> `billing_exception`;
+4. `isBilled = true` but no exact BillingItem references the ticket charge -> `invoice_reconciliation_exception`;
+5. BillingItem exists but invoice/quantity/rate does not match -> `invoice_reconciliation_exception`;
+6. exact TicketCharge -> BillingItem -> Invoice evidence matches -> `reconciled`.
+
+`existing_unbilled_charge` is not treated as a missing-charge case and must not create a duplicate charge.
+
+### Technician Teams disposition
+
+Only missing-charge cases require the concise technician card. Permitted dispositions are **Charge needed**, **Not billable**, and **Already handled**. The card must not repeat when the persisted state and evidence digest are unchanged.
+
+### Two-business-day Lori escalation
+
+When a missing-charge / technician-disposition case remains unanswered for two business days, escalate once to Lori. Persist the escalation timestamp so unchanged evidence does not generate duplicate escalation noise. The counter excludes Saturday and Sunday; holiday-calendar integration can be added without changing the persisted due-date contract.
+
+### Invoice line verification
+
+Customer invoice reconciliation uses Autotask `BillingItems`. The exact relationship is `BillingItem.ticketChargeID -> TicketCharge.id`, with `BillingItem.invoiceID` identifying the customer invoice.
+
+Verification requires the exact ticket charge, exact BillingItem, expected quantity, expected sell price/rate, non-null invoice ID, and customer invoice readback/status/date when available. A TicketCharge reporting billed status without the exact posted BillingItem is an exception, not successful reconciliation.
+
+### Retry / duplicate rules
+
+- Persist state before notifying.
+- Suppress Teams notification when both state and evidence digest are unchanged.
+- Never create a second ticket charge merely because the existing charge is unbilled.
+- Never create a second client quote on retry after successful quote readback.
+- Never repeat a write without first proving whether the first provider call was accepted.
+- Changed quantity, price, ticket, invoice linkage, or provider state produces a new evidence digest and may generate a new notification.
+
+---
+
 ## 21. Acceptance Test
 
 Use a controlled AOT test purchase with two identical items:
@@ -549,6 +648,15 @@ Prove:
 12. A deliberate ambiguous-ticket case presents candidates rather than guessing.
 13. State survives a new conversation/recheck.
 14. Final notes reconcile PO, inventory, ticket billing, and receiving.
+15. With Create PO unchecked, Jason normalizes the part and does not create a PO.
+16. With Create Client Quote checked, Jason requires one exact ticket and creates Opportunity -> Quote -> QuoteItem without creating a PO unless Create PO is also checked.
+17. A mixed allocation `2 = 1 customer + 1 AOT stock` remains persisted through PO creation.
+18. Physical receiving alone leaves customer stock in `received_pending_disposition`; release is denied until the ticket and billing disposition are present.
+19. An existing matching `isBilled=false` ticket charge becomes `existing_unbilled_charge` and no duplicate charge is created.
+20. A billed charge without a matching BillingItem becomes `invoice_reconciliation_exception`.
+21. Exact TicketCharge -> BillingItem -> Invoice quantity/rate verification becomes `reconciled`.
+22. An unchanged technician billing exception does not generate a duplicate Teams card.
+23. An unanswered missing-charge case becomes eligible for one Lori escalation exactly two business days after first detection.
 
 Do not use a real client charge for the first acceptance test unless specifically approved.
 

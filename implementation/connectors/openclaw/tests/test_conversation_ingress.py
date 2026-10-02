@@ -703,3 +703,101 @@ def test_approval_interaction_response_id_must_match_authenticated_teams_message
     assert result["status"] == "rejected"
     assert result["error_code"] == "invalid_conversation_contract"
     assert approval.calls == []
+
+
+class BillingDispositionFlow:
+    def __init__(self, *, error=None):
+        self.calls = []
+        self.error = error
+
+    def handle(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        return {
+            "status": "completed",
+            "case_key": kwargs["case_key"],
+            "reply": {"text": "Billing disposition recorded."},
+        }
+
+
+def test_signed_hardware_billing_disposition_routes_to_dedicated_flow():
+    normal = Flow()
+    billing = BillingDispositionFlow()
+    handler = GovernedOpenClawTeamsConversationIngress(
+        authenticator=Authenticator(),
+        replay=Replay(),
+        audit=Audit(),
+        flow=normal,
+        allowed_machine_identities=frozenset({"machine:openclaw-jason"}),
+        billing_disposition_flow=billing,
+    )
+    result = handler.handle(
+        envelope(
+            request_id="req-billing-1",
+            interaction={
+                "kind": "hardware.billing.disposition",
+                "case_key": "ticket:123:product:456",
+                "disposition": "charge_needed",
+                "channel_response_id": "teams-message-1",
+            },
+        )
+    )
+    assert result["status"] == "completed"
+    assert result["case_key"] == "ticket:123:product:456"
+    assert normal.requests == []
+    assert len(billing.calls) == 1
+    assert billing.calls[0]["microsoft_object_id"] == "object-al"
+    assert billing.calls[0]["disposition"] == "charge_needed"
+
+
+def test_hardware_billing_disposition_rejects_unsupported_disposition():
+    billing = BillingDispositionFlow()
+    handler = GovernedOpenClawTeamsConversationIngress(
+        authenticator=Authenticator(),
+        replay=Replay(),
+        audit=Audit(),
+        flow=Flow(),
+        allowed_machine_identities=frozenset({"machine:openclaw-jason"}),
+        billing_disposition_flow=billing,
+    )
+    result = handler.handle(
+        envelope(
+            request_id="req-billing-invalid",
+            interaction={
+                "kind": "hardware.billing.disposition",
+                "case_key": "case-1",
+                "disposition": "just_bill_it",
+                "channel_response_id": "teams-message-1",
+            },
+        )
+    )
+    assert result["status"] == "rejected"
+    assert result["error_code"] == "invalid_conversation_contract"
+    assert billing.calls == []
+
+
+def test_hardware_billing_disposition_response_id_must_match_authenticated_message():
+    billing = BillingDispositionFlow()
+    handler = GovernedOpenClawTeamsConversationIngress(
+        authenticator=Authenticator(),
+        replay=Replay(),
+        audit=Audit(),
+        flow=Flow(),
+        allowed_machine_identities=frozenset({"machine:openclaw-jason"}),
+        billing_disposition_flow=billing,
+    )
+    result = handler.handle(
+        envelope(
+            request_id="req-billing-mismatch",
+            interaction={
+                "kind": "hardware.billing.disposition",
+                "case_key": "case-1",
+                "disposition": "not_billable",
+                "channel_response_id": "different-message",
+            },
+        )
+    )
+    assert result["status"] == "rejected"
+    assert result["error_code"] == "invalid_conversation_contract"
+    assert billing.calls == []

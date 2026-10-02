@@ -35,6 +35,10 @@ from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
 from orchestrator.provider_mutation_capability_catalog import (
     SERVICE_PRODUCT_CREATE,
     SERVICE_PRODUCT_VENDOR_CREATE,
+    SERVICE_OPPORTUNITY_CREATE,
+    SERVICE_QUOTE_LOCATION_CREATE,
+    SERVICE_QUOTE_CREATE,
+    SERVICE_QUOTE_ITEM_CREATE,
     SERVICE_PURCHASE_ORDER_CREATE,
     SERVICE_PURCHASE_ORDER_ITEM_CREATE,
     SERVICE_PURCHASE_ORDER_UPDATE,
@@ -42,8 +46,10 @@ from orchestrator.provider_mutation_capability_catalog import (
 )
 from orchestrator.provider_read_capability_catalog import (
     SERVICE_COMPANY_SEARCH,
+    SERVICE_COMPANY_READ,
     SERVICE_CONTACT_SEARCH,
     SERVICE_PRODUCT_SEARCH,
+    SERVICE_RESOURCE_SEARCH,
     SERVICE_TICKET_SEARCH,
 )
 from orchestrator.teams_conversation_flow import (
@@ -53,6 +59,7 @@ from orchestrator.teams_conversation_flow import (
 )
 from orchestrator.teams_request_factory import GovernedTeamsOrchestrationRequestFactory
 from .procurement_web_read import CAPABILITY as PROCUREMENT_WEB_PRODUCT_READ
+from .procurement_inventory_billing import AllocationPlan
 
 PROCUREMENT_APPROVAL_CAPABILITY = "procurement.submission.execute"
 PROCUREMENT_WORKER_ID = "jason-procurement-worker"
@@ -124,6 +131,113 @@ class SQLiteProcurementSubmissionStore:
             )
             if cursor.rowcount != 1:
                 raise ProcurementFlowError("procurement submission no longer exists")
+
+    def list_all(self) -> tuple[dict[str, Any], ...]:
+        with sqlite3.connect(str(self.path)) as connection:
+            rows = connection.execute(
+                "SELECT payload FROM procurement_submissions ORDER BY updated_at, submission_id"
+            ).fetchall()
+        return tuple(dict(json.loads(str(row[0]))) for row in rows)
+
+    def record_receipt(self, submission_id: str, *, received_quantity: int) -> dict[str, Any]:
+        payload = self.get(submission_id)
+        if payload is None:
+            raise ProcurementFlowError("procurement submission no longer exists")
+        if received_quantity < 1:
+            raise ProcurementFlowError("received quantity must be positive")
+        ordered = int(payload.get("quantity") or 0)
+        already = int(payload.get("received_quantity") or 0)
+        if already + received_quantity > ordered:
+            raise ProcurementFlowError("received quantity exceeds outstanding quantity")
+        updated_received = already + received_quantity
+        customer = int(payload.get("customer_quantity") or 0)
+        release_state = (
+            "received_pending_disposition"
+            if customer > 0
+            else "ready_for_release"
+        )
+        updated = {
+            **payload,
+            "received_quantity": updated_received,
+            "release_state": release_state,
+            "status": (
+                "received_pending_disposition"
+                if customer > 0
+                else "received"
+            ),
+        }
+        self.update(submission_id, updated)
+        return updated
+
+    def record_billing_disposition(
+        self, submission_id: str, *, disposition: str
+    ) -> dict[str, Any]:
+        payload = self.get(submission_id)
+        if payload is None:
+            raise ProcurementFlowError("procurement submission no longer exists")
+        customer = int(payload.get("customer_quantity") or 0)
+        if customer < 1:
+            raise ProcurementFlowError("billing disposition is not applicable to AOT-stock-only allocation")
+        if not payload.get("ticket_id") or not payload.get("ticket_number"):
+            raise ProcurementFlowError("customer billing disposition requires exact ticket")
+        allowed = {
+            "charge_created",
+            "existing_unbilled_charge",
+            "no_charge_contract",
+            "no_charge_warranty",
+            "no_charge_internal",
+        }
+        if disposition not in allowed:
+            raise ProcurementFlowError("billing disposition is not release-authorizing")
+        received = int(payload.get("received_quantity") or 0)
+        release_state = (
+            "ready_for_release"
+            if received >= customer
+            else str(payload.get("release_state") or "ordered")
+        )
+        updated = {
+            **payload,
+            "billing_disposition": disposition,
+            "billing_state": disposition,
+            "release_state": release_state,
+            "status": (
+                "ready_for_release"
+                if release_state == "ready_for_release"
+                else str(payload.get("status") or "ordered")
+            ),
+        }
+        self.update(submission_id, updated)
+        return updated
+
+    def release_stock(self, submission_id: str, *, release_quantity: int) -> dict[str, Any]:
+        from .procurement_inventory_billing import ReleaseGate
+
+        payload = self.get(submission_id)
+        if payload is None:
+            raise ProcurementFlowError("procurement submission no longer exists")
+        customer = int(payload.get("customer_quantity") or 0)
+        already_released = int(payload.get("released_quantity") or 0)
+        if release_quantity < 1 or already_released + release_quantity > customer:
+            raise ProcurementFlowError("release quantity exceeds customer allocation")
+        try:
+            ReleaseGate(
+                received_quantity=int(payload.get("received_quantity") or 0),
+                release_quantity=already_released + release_quantity,
+                customer_quantity=customer,
+                ticket_id=int(payload["ticket_id"]) if payload.get("ticket_id") else None,
+                billing_disposition=payload.get("billing_disposition"),
+            ).validate()
+        except ValueError as exc:
+            raise ProcurementFlowError(str(exc)) from exc
+        released = already_released + release_quantity
+        updated = {
+            **payload,
+            "released_quantity": released,
+            "release_state": "released" if released == customer else "ready_for_release",
+            "status": "released" if released == customer else "ready_for_release",
+        }
+        self.update(submission_id, updated)
+        return updated
 
 
 def _decimal(value: Any, *, field: str, allow_zero: bool = True) -> Decimal:
@@ -275,86 +389,139 @@ def _card(payload: Mapping[str, Any]) -> dict[str, Any]:
         "type": "AdaptiveCard",
         "version": "1.4",
         "body": [
-            {"type": "TextBlock", "text": "Procurement / Quote Intake", "weight": "Bolder", "size": "Medium", "wrap": True},
+            {
+                "type": "TextBlock",
+                "text": "Procurement",
+                "weight": "Bolder",
+                "size": "Medium",
+            },
             {
                 "type": "FactSet",
                 "facts": [
                     {"title": "Vendor", "value": vendor["name"]},
-                    {"title": "AT Vendor ID", "value": str(vendor["id"])},
-                    {"title": "Product", "value": product["name"]},
+                    {"title": "Item", "value": product["name"]},
                     {"title": "Cost", "value": "$" + f"{cost:.2f}"},
-                    {"title": "Source", "value": str(payload["source_url"])},
                 ],
             },
-            {"type": "TextBlock", "text": str(vendor.get("verification_summary") or ""), "wrap": True, "isSubtle": True},
             {
-                "type": "Input.ChoiceSet",
-                "id": "workflow_action",
-                "label": "What are we doing?",
-                "style": "compact",
-                "value": "quote_catalog",
-                "choices": [
-                    {"title": "Quote / Catalog", "value": "quote_catalog"},
-                    {"title": "Purchase / AOT PO", "value": "purchase_order"},
-                ],
+                "type": "Input.Toggle",
+                "id": "create_po",
+                "title": "Create purchase order",
+                "value": "false",
+                "valueOn": "true",
+                "valueOff": "false",
             },
-            {"type": "Input.Text", "id": "at_part_number", "label": "AT Part #", "value": part_default, "isRequired": True},
+            {
+                "type": "Input.Toggle",
+                "id": "create_client_quote",
+                "title": "Create client quote",
+                "value": "false",
+                "valueOn": "true",
+                "valueOff": "false",
+            },
+            {
+                "type": "Input.Text",
+                "id": "at_part_number",
+                "label": "AT Part #",
+                "value": part_default,
+                "isRequired": True,
+            },
             {
                 "type": "Input.ChoiceSet",
                 "id": "item_class",
-                "label": "Item Classification",
+                "label": "Class",
                 "style": "compact",
                 "value": "it",
                 "choices": [
                     {"title": "IT", "value": "it"},
                     {"title": "Copy / Print", "value": "copy_print"},
-                    {"title": "Other / Needs Review", "value": "other"},
+                    {"title": "Other", "value": "other"},
                 ],
             },
             {
                 "type": "Input.ChoiceSet",
                 "id": "retail_price",
-                "label": "Retail Price",
+                "label": "Retail",
                 "style": "compact",
                 "value": prices[1]["value"],
-                "choices": [{"title": item["title"], "value": item["value"]} for item in prices],
-            },
-            {"type": "Input.Number", "id": "quantity", "label": "Quantity", "value": 1, "min": 1, "max": 1000},
-            {
-                "type": "Input.ChoiceSet",
-                "id": "destination",
-                "label": "Ticket / Destination",
-                "style": "compact",
-                "value": "aot_inventory",
                 "choices": [
-                    {"title": "No Ticket — AOT Inventory", "value": "aot_inventory"},
-                    {"title": "Customer Ticket — enter below", "value": "customer_ticket"},
+                    {"title": item["title"], "value": item["value"]}
+                    for item in prices
                 ],
             },
-            {"type": "Input.Text", "id": "ticket_number", "label": "Customer Ticket # (when applicable)", "placeholder": "T20261001.0001"},
+            {
+                "type": "Input.Number",
+                "id": "quantity",
+                "label": "Ordered Qty",
+                "value": 1,
+                "min": 1,
+                "max": 1000,
+            },
+            {
+                "type": "Input.Number",
+                "id": "customer_quantity",
+                "label": "Customer Qty",
+                "value": 0,
+                "min": 0,
+                "max": 1000,
+            },
+            {
+                "type": "Input.Number",
+                "id": "aot_stock_quantity",
+                "label": "AOT Stock Qty",
+                "value": 1,
+                "min": 0,
+                "max": 1000,
+            },
+            {
+                "type": "Input.Text",
+                "id": "ticket_number",
+                "label": "Ticket # (required for customer qty or client quote)",
+                "placeholder": "T20261001.0001",
+            },
             {
                 "type": "Input.ChoiceSet",
                 "id": "billing_treatment",
-                "label": "Billing Treatment",
+                "label": "Customer billing",
                 "style": "compact",
                 "value": "charge_ticket",
                 "choices": [
                     {"title": "Charge Ticket", "value": "charge_ticket"},
-                    {"title": "No Charge — Contract / Included", "value": "no_charge_contract"},
+                    {"title": "No Charge — Contract", "value": "no_charge_contract"},
                     {"title": "No Charge — Warranty", "value": "no_charge_warranty"},
-                    {"title": "No Charge — Internal / AOT", "value": "no_charge_internal"},
-                    {"title": "Needs Review", "value": "needs_review"},
+                    {"title": "No Charge — Internal", "value": "no_charge_internal"},
                 ],
             },
-            {"type": "Input.Number", "id": "freight", "label": "Freight / Shipping", "value": 0, "min": 0},
-            {"type": "Input.Number", "id": "tax", "label": "Tax", "value": 0, "min": 0},
-            {"type": "Input.Number", "id": "fees", "label": "Other Fees", "value": 0, "min": 0},
+            {
+                "type": "Input.Number",
+                "id": "freight",
+                "label": "Freight",
+                "value": 0,
+                "min": 0,
+            },
+            {
+                "type": "Input.Number",
+                "id": "tax",
+                "label": "Tax",
+                "value": 0,
+                "min": 0,
+            },
+            {
+                "type": "Input.Number",
+                "id": "fees",
+                "label": "Other Fees",
+                "value": 0,
+                "min": 0,
+            },
         ],
         "actions": [
             {
                 "type": "Action.Submit",
                 "title": "Submit",
-                "data": {"kind": "procurement.submit", "submission_id": str(payload["submission_id"])},
+                "data": {
+                    "kind": "procurement.submit",
+                    "submission_id": str(payload["submission_id"]),
+                },
             }
         ],
     }
@@ -376,6 +543,10 @@ def _exact_udf(contact: Mapping[str, Any], name: str) -> str | None:
 PROCUREMENT_WRITE_CAPABILITIES = (
     SERVICE_PRODUCT_CREATE,
     SERVICE_PRODUCT_VENDOR_CREATE,
+    SERVICE_OPPORTUNITY_CREATE,
+    SERVICE_QUOTE_LOCATION_CREATE,
+    SERVICE_QUOTE_CREATE,
+    SERVICE_QUOTE_ITEM_CREATE,
     SERVICE_PURCHASE_ORDER_CREATE,
     SERVICE_PURCHASE_ORDER_ITEM_CREATE,
     SERVICE_PURCHASE_ORDER_UPDATE,
@@ -459,10 +630,11 @@ class ProcurementWorkerExecutor:
         payload: Mapping[str, Any],
         submission: Mapping[str, Any],
         correlation_id: str,
+        route_arguments: Mapping[str, Any] | None = None,
     ) -> Mapping[str, Any]:
         capability = self.capabilities.get_current(capability_name=capability_name, allow_pilot=False)
         execution_id = f"exec_proc_{uuid4().hex}"
-        arguments = {"payload": dict(payload)}
+        arguments = {"payload": dict(payload), **dict(route_arguments or {})}
         reservation = self.execution_ledger.reserve_approval(
             principal_id=PROCUREMENT_WORKER_ID,
             organization_id="aot",
@@ -622,6 +794,148 @@ class ProcurementTeamsFlow:
             raise ProcurementFlowError(f"read failed: {capability}")
         return dict(result.output or {})
 
+    def _draft_from_normalized_source(
+        self,
+        *,
+        principal: BoundConversationPrincipal,
+        evidence: TeamsConversationPrincipalEvidence,
+        microsoft_object_id: str,
+        occurred_at: datetime,
+        source_kind: str,
+        source_reference: str,
+        source_capture_sha256: str,
+        source_captured_at: str,
+        source_org: Mapping[str, Any],
+        product: Mapping[str, Any],
+        correlation_id: str,
+    ) -> Mapping[str, Any]:
+        normalized_kind = str(source_kind or "").strip().casefold()
+        if normalized_kind not in {"website_url", "vendor_quote", "vendor_invoice"}:
+            raise ProcurementFlowError("Unsupported procurement source kind.")
+        source_reference = str(source_reference or "").strip()
+        if not source_reference:
+            raise ProcurementFlowError("Procurement source reference is required.")
+        product = dict(product)
+        raw_cost = product.get("unit_cost")
+        if raw_cost is None:
+            raw_cost = product.get("price")
+        if raw_cost is None:
+            raise ProcurementFlowError("The source did not expose a verified unit cost.")
+        cost = _decimal(raw_cost, field="source unit cost", allow_zero=False)
+        source_org = dict(source_org or {})
+        vendor_name = str(
+            source_org.get("name") or product.get("seller") or product.get("vendor") or ""
+        ).strip()
+        if not vendor_name:
+            raise ProcurementFlowError("The source did not identify a vendor.")
+
+        vendor_search = self._read(
+            principal=principal,
+            evidence=evidence,
+            capability=SERVICE_COMPANY_SEARCH,
+            arguments={"name": vendor_name, "page_size": 20},
+            correlation_id=correlation_id,
+        )
+        vendors = [
+            item
+            for item in _items(vendor_search)
+            if _norm(item.get("companyName")) == _norm(vendor_name)
+        ]
+        if len(vendors) != 1:
+            raise ProcurementFlowError(
+                "Vendor could not be resolved to exactly one Autotask company."
+            )
+        vendor = vendors[0]
+        checks, mismatches = _vendor_checks(source_org, vendor)
+        if mismatches:
+            raise ProcurementFlowError(
+                "Vendor Review required before procurement: "
+                + ", ".join(sorted(mismatches))
+            )
+
+        product_match: dict[str, Any] | None = None
+        selectors: list[tuple[str, str]] = []
+        if product.get("sku"):
+            selectors.append(("sku", str(product["sku"])))
+        if product.get("mpn") and product.get("mpn") != product.get("sku"):
+            selectors.append(("sku", str(product["mpn"])))
+        selectors.append(("name", str(product.get("name") or "").strip()))
+        for selector, value in selectors:
+            if not value:
+                continue
+            observed = self._read(
+                principal=principal,
+                evidence=evidence,
+                capability=SERVICE_PRODUCT_SEARCH,
+                arguments={selector: value, "page_size": 20},
+                correlation_id=correlation_id,
+            )
+            matches = _items(observed)
+            if len(matches) == 1:
+                product_match = matches[0]
+                break
+            if len(matches) > 1:
+                raise ProcurementFlowError(
+                    "Multiple Autotask products match this source item; review is required."
+                )
+
+        verification: list[str] = []
+        for check in checks:
+            if check["status"] == "match":
+                verification.append(check["field"] + " verified")
+            elif check["status"] == "autotask_missing":
+                verification.append(check["field"] + " missing in Autotask")
+
+        submission_id = f"procsub-{uuid4().hex}"
+        payload: dict[str, Any] = {
+            "submission_id": submission_id,
+            "status": "draft",
+            "created_at": occurred_at.astimezone(timezone.utc).isoformat(),
+            "requester_principal_id": principal.principal_id,
+            "requester_email": principal.email_address,
+            "requester_microsoft_object_id": microsoft_object_id,
+            "source_kind": normalized_kind,
+            "source_reference": source_reference,
+            "source_url": source_reference,
+            "source_capture_sha256": str(source_capture_sha256 or ""),
+            "source_captured_at": str(source_captured_at or ""),
+            "vendor": {
+                "id": int(vendor["id"]),
+                "name": str(vendor.get("companyName") or vendor_name),
+                "field_checks": checks,
+                "verification_summary": "; ".join(verification),
+            },
+            "product": {
+                "name": str(product.get("name") or "").strip(),
+                "description": str(product.get("description") or "").strip(),
+                "sku": str(product.get("sku") or "").strip(),
+                "mpn": str(product.get("mpn") or "").strip(),
+                "brand": str(product.get("brand") or "").strip(),
+                "cost": f"{cost:.2f}",
+                "existing_product_id": (
+                    int(product_match["id"]) if product_match else None
+                ),
+                "existing_sku": (
+                    str(product_match.get("sku") or "") if product_match else ""
+                ),
+            },
+        }
+        if not payload["product"]["name"]:
+            raise ProcurementFlowError("The source did not identify a product/service line.")
+        payload["digest"] = _submission_digest(payload)
+        self.store.put_new(submission_id, payload)
+        return {
+            "status": "completed",
+            "submission_id": submission_id,
+            "reply": {
+                "text": (
+                    "I normalized the source and matched the vendor in Autotask. "
+                    "Review the selections below and submit when ready."
+                ),
+                "card": _card(payload),
+            },
+        }
+
     def handle_url(
         self,
         *,
@@ -648,11 +962,10 @@ class ProcurementTeamsFlow:
         )
         products = web.get("products")
         if not isinstance(products, list) or not products:
-            raise ProcurementFlowError("The page did not expose enough structured product data to build a safe quote.")
+            raise ProcurementFlowError(
+                "The page did not expose enough structured product data to build a safe quote."
+            )
         product = dict(products[0])
-        if product.get("price") is None:
-            raise ProcurementFlowError("The product page did not expose a current price.")
-        cost = _decimal(product["price"], field="source price", allow_zero=False)
         organizations = web.get("organizations")
         source_org = (
             dict(organizations[0])
@@ -661,95 +974,73 @@ class ProcurementTeamsFlow:
             and isinstance(organizations[0], Mapping)
             else {}
         )
-        vendor_name = str(source_org.get("name") or product.get("seller") or "").strip()
-        if not vendor_name:
+        if not source_org.get("name") and not product.get("seller"):
             host = str(web.get("source_host") or "").strip().casefold()
-            vendor_name = host.split(".")[-2].title() if "." in host else host.title()
-        vendor_search = self._read(
+            fallback = host.split(".")[-2].title() if "." in host else host.title()
+            source_org["name"] = fallback
+        if not product.get("name"):
+            product["name"] = str(web.get("page_title") or "").strip()
+        return self._draft_from_normalized_source(
             principal=principal,
             evidence=evidence,
-            capability=SERVICE_COMPANY_SEARCH,
-            arguments={"name": vendor_name, "page_size": 20},
+            microsoft_object_id=microsoft_object_id,
+            occurred_at=occurred_at,
+            source_kind="website_url",
+            source_reference=str(web.get("final_url") or url),
+            source_capture_sha256=str(web.get("content_sha256") or ""),
+            source_captured_at=str(web.get("captured_at") or ""),
+            source_org=source_org,
+            product=product,
             correlation_id=correlation,
         )
-        vendors = [
-            item
-            for item in _items(vendor_search)
-            if _norm(item.get("companyName")) == _norm(vendor_name)
-        ]
-        if len(vendors) != 1:
-            raise ProcurementFlowError("Vendor could not be resolved to exactly one Autotask company.")
-        vendor = vendors[0]
-        checks, mismatches = _vendor_checks(source_org, vendor)
-        if mismatches:
-            raise ProcurementFlowError("Vendor Review required before procurement: " + ", ".join(sorted(mismatches)))
-        product_match: dict[str, Any] | None = None
-        selectors: list[tuple[str, str]] = []
-        if product.get("sku"):
-            selectors.append(("sku", str(product["sku"])))
-        if product.get("mpn") and product.get("mpn") != product.get("sku"):
-            selectors.append(("sku", str(product["mpn"])))
-        selectors.append(("name", str(product.get("name") or "").strip()))
-        for selector, value in selectors:
-            if not value:
-                continue
-            observed = self._read(
-                principal=principal,
-                evidence=evidence,
-                capability=SERVICE_PRODUCT_SEARCH,
-                arguments={selector: value, "page_size": 20},
-                correlation_id=correlation,
+
+    def handle_vendor_document(
+        self,
+        *,
+        normalized: Mapping[str, Any],
+        microsoft_tenant_id: str,
+        microsoft_object_id: str,
+        conversation_id: str,
+        message_id: str,
+        occurred_at: datetime,
+    ) -> Mapping[str, Any]:
+        """Accept bounded, already-extracted vendor quote/invoice evidence.
+
+        Extraction is intentionally separate from procurement authority. This method
+        converges the document branch into the same vendor/product/draft/card path
+        used by URL intake; document content cannot expand runtime authority.
+        """
+        source_kind = str(normalized.get("source_kind") or "").strip().casefold()
+        if source_kind not in {"vendor_quote", "vendor_invoice"}:
+            raise ProcurementFlowError(
+                "Vendor document must be classified as vendor_quote or vendor_invoice."
             )
-            matches = _items(observed)
-            if len(matches) == 1:
-                product_match = matches[0]
-                break
-            if len(matches) > 1:
-                raise ProcurementFlowError("Multiple Autotask products match this web item; review is required.")
-        verification = []
-        for check in checks:
-            if check["status"] == "match":
-                verification.append(check["field"] + " verified")
-            elif check["status"] == "autotask_missing":
-                verification.append(check["field"] + " missing in Autotask")
-        submission_id = f"procsub-{uuid4().hex}"
-        payload: dict[str, Any] = {
-            "submission_id": submission_id,
-            "status": "draft",
-            "created_at": occurred_at.astimezone(timezone.utc).isoformat(),
-            "requester_principal_id": principal.principal_id,
-            "requester_email": principal.email_address,
-            "requester_microsoft_object_id": microsoft_object_id,
-            "source_url": str(web.get("final_url") or url),
-            "source_capture_sha256": str(web.get("content_sha256") or ""),
-            "source_captured_at": str(web.get("captured_at") or ""),
-            "vendor": {
-                "id": int(vendor["id"]),
-                "name": str(vendor.get("companyName") or vendor_name),
-                "field_checks": checks,
-                "verification_summary": "; ".join(verification),
-            },
-            "product": {
-                "name": str(product.get("name") or web.get("page_title") or "").strip(),
-                "description": str(product.get("description") or "").strip(),
-                "sku": str(product.get("sku") or "").strip(),
-                "mpn": str(product.get("mpn") or "").strip(),
-                "brand": str(product.get("brand") or "").strip(),
-                "cost": f"{cost:.2f}",
-                "existing_product_id": int(product_match["id"]) if product_match else None,
-                "existing_sku": str(product_match.get("sku") or "") if product_match else "",
-            },
-        }
-        payload["digest"] = _submission_digest(payload)
-        self.store.put_new(submission_id, payload)
-        return {
-            "status": "completed",
-            "submission_id": submission_id,
-            "reply": {
-                "text": "I found the product and matched the vendor in Autotask. Review the selections below and submit when ready.",
-                "card": _card(payload),
-            },
-        }
+        vendor = normalized.get("vendor")
+        product = normalized.get("product")
+        if not isinstance(vendor, Mapping) or not isinstance(product, Mapping):
+            raise ProcurementFlowError(
+                "Vendor document requires one normalized vendor and one product line."
+            )
+        principal, evidence = self._principal(
+            tenant=microsoft_tenant_id,
+            object_id=microsoft_object_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+        )
+        correlation = self.request_factory.new_correlation_id()
+        return self._draft_from_normalized_source(
+            principal=principal,
+            evidence=evidence,
+            microsoft_object_id=microsoft_object_id,
+            occurred_at=occurred_at,
+            source_kind=source_kind,
+            source_reference=str(normalized.get("source_reference") or ""),
+            source_capture_sha256=str(normalized.get("source_capture_sha256") or ""),
+            source_captured_at=str(normalized.get("source_captured_at") or ""),
+            source_org=vendor,
+            product=product,
+            correlation_id=correlation,
+        )
 
     def _requester_limit(
         self,
@@ -805,6 +1096,50 @@ class ProcurementTeamsFlow:
             raise ProcurementFlowError("Customer ticket must resolve to exactly one Autotask ticket.")
         return tickets[0]
 
+    def _company(
+        self,
+        *,
+        company_id: int,
+        principal: BoundConversationPrincipal,
+        evidence: TeamsConversationPrincipalEvidence,
+        correlation_id: str,
+    ) -> dict[str, Any]:
+        result = self._read(
+            principal=principal,
+            evidence=evidence,
+            capability=SERVICE_COMPANY_READ,
+            arguments={"resource_id": company_id},
+            correlation_id=correlation_id,
+        )
+        data = result.get("data")
+        item = data.get("item") if isinstance(data, Mapping) else None
+        source = item if isinstance(item, Mapping) else data
+        if not isinstance(source, Mapping):
+            raise ProcurementFlowError("Customer company could not be read for client quote.")
+        return dict(source)
+
+    def _requester_resource(
+        self,
+        *,
+        email: str,
+        principal: BoundConversationPrincipal,
+        evidence: TeamsConversationPrincipalEvidence,
+        correlation_id: str,
+    ) -> dict[str, Any]:
+        result = self._read(
+            principal=principal,
+            evidence=evidence,
+            capability=SERVICE_RESOURCE_SEARCH,
+            arguments={"email": email, "page_size": 20},
+            correlation_id=correlation_id,
+        )
+        matches = _items(result)
+        if len(matches) != 1:
+            raise ProcurementFlowError(
+                "Client quote requester must resolve to exactly one active Autotask resource."
+            )
+        return matches[0]
+
     def handle_submit(
         self,
         *,
@@ -823,6 +1158,7 @@ class ProcurementTeamsFlow:
             raise PermissionError("procurement submission is no longer pending")
         if str(payload.get("requester_microsoft_object_id")) != microsoft_object_id:
             raise PermissionError("procurement submission belongs to another requester")
+
         principal, evidence = self._principal(
             tenant=microsoft_tenant_id,
             object_id=microsoft_object_id,
@@ -831,64 +1167,127 @@ class ProcurementTeamsFlow:
         )
         if principal.principal_id != payload.get("requester_principal_id"):
             raise PermissionError("procurement requester identity changed")
+
         allowed = {
-            "workflow_action", "at_part_number", "item_class", "retail_price",
-            "quantity", "destination", "ticket_number", "billing_treatment",
-            "freight", "tax", "fees",
+            "create_po", "create_client_quote", "at_part_number", "item_class",
+            "retail_price", "quantity", "customer_quantity", "aot_stock_quantity",
+            "ticket_number", "billing_treatment", "freight", "tax", "fees",
         }
         if set(selections) - allowed:
             raise PermissionError("procurement card contained unsupported selections")
-        action = str(selections.get("workflow_action") or "").strip()
-        if action not in {"quote_catalog", "purchase_order"}:
-            raise ProcurementFlowError("Select Quote / Catalog or Purchase / AOT PO.")
+
+        create_po = str(selections.get("create_po") or "false").casefold() == "true"
+        create_client_quote = (
+            str(selections.get("create_client_quote") or "false").casefold() == "true"
+        )
         item_class = str(selections.get("item_class") or "").strip()
         if item_class not in {"it", "copy_print", "other"}:
             raise ProcurementFlowError("Item classification is invalid.")
+
         billing = str(selections.get("billing_treatment") or "").strip()
         if billing not in {
             "charge_ticket", "no_charge_contract", "no_charge_warranty",
-            "no_charge_internal", "needs_review",
+            "no_charge_internal",
         }:
             raise ProcurementFlowError("Billing treatment is invalid.")
+
         quantity = _bounded_int(selections.get("quantity") or "1", field="quantity")
-        retail = _decimal(selections.get("retail_price") or "", field="retail price", allow_zero=False)
-        part_number = str(selections.get("at_part_number") or "").strip()
-        if not part_number or len(part_number) > 100:
-            raise ProcurementFlowError("AT Part # is required and must be <= 100 characters.")
-        destination = str(selections.get("destination") or "").strip()
-        if destination not in {"aot_inventory", "customer_ticket"}:
-            raise ProcurementFlowError("Ticket / destination selection is invalid.")
-        ticket = None
+        customer_quantity = int(str(selections.get("customer_quantity") or "0").strip())
+        aot_stock_quantity = int(str(selections.get("aot_stock_quantity") or "0").strip())
+        if customer_quantity < 0 or aot_stock_quantity < 0:
+            raise ProcurementFlowError("Allocation quantities cannot be negative.")
+
         ticket_number = str(selections.get("ticket_number") or "").strip()
         correlation = self.request_factory.new_correlation_id()
-        if destination == "customer_ticket":
+        ticket = None
+        if customer_quantity or create_client_quote:
             if not ticket_number:
-                raise ProcurementFlowError("Customer-bound items require a ticket number.")
+                raise ProcurementFlowError(
+                    "Customer allocation and client quote creation require an explicit ticket."
+                )
             ticket = self._ticket(
                 number=ticket_number,
                 principal=principal,
                 evidence=evidence,
                 correlation_id=correlation,
             )
-            if item_class == "it" and billing != "charge_ticket":
-                raise ProcurementFlowError("Customer-bound IT items must be charged to the selected ticket.")
-        elif billing == "charge_ticket":
-            raise ProcurementFlowError("Charge Ticket requires a customer ticket destination.")
-        if item_class != "copy_print" and billing in {"no_charge_contract", "no_charge_warranty"}:
-            raise ProcurementFlowError("Contract/Warranty no-charge reasons are Copy / Print only.")
-        if billing == "needs_review":
-            raise ProcurementFlowError("Needs Review cannot be executed automatically.")
+
+        if create_client_quote and customer_quantity < 1:
+            raise ProcurementFlowError(
+                "Client quote creation requires at least one customer-allocated item."
+            )
+
+        plan = AllocationPlan(
+            ordered_quantity=quantity,
+            customer_quantity=customer_quantity,
+            aot_stock_quantity=aot_stock_quantity,
+            ticket_id=int(ticket["id"]) if ticket else None,
+            ticket_number=ticket_number or None,
+        )
+        try:
+            plan.validate()
+        except ValueError as exc:
+            raise ProcurementFlowError(str(exc)) from exc
+
+        if customer_quantity and item_class == "it" and billing != "charge_ticket":
+            raise ProcurementFlowError(
+                "Customer-bound IT items must use Charge Ticket billing."
+            )
+        if not customer_quantity and billing == "charge_ticket":
+            billing = "no_charge_internal"
+        if item_class != "copy_print" and billing in {
+            "no_charge_contract", "no_charge_warranty"
+        }:
+            raise ProcurementFlowError(
+                "Contract/Warranty no-charge reasons are Copy / Print only."
+            )
+
+        retail = _decimal(
+            selections.get("retail_price") or "",
+            field="retail price",
+            allow_zero=False,
+        )
+        part_number = str(selections.get("at_part_number") or "").strip()
+        if not part_number or len(part_number) > 100:
+            raise ProcurementFlowError(
+                "AT Part # is required and must be <= 100 characters."
+            )
+
         freight = _decimal(selections.get("freight") or "0", field="freight")
         tax = _decimal(selections.get("tax") or "0", field="tax")
         fees = _decimal(selections.get("fees") or "0", field="fees")
         unit_cost = Decimal(str(payload["product"]["cost"]))
         commitment = unit_cost * quantity + freight + tax + fees
+
         contact_id, requester_name, spending_limit = self._requester_limit(
             payload=payload,
             principal=principal,
             evidence=evidence,
             correlation_id=correlation,
         )
+
+        quote_context = None
+        if create_client_quote:
+            company = self._company(
+                company_id=int(ticket["companyID"]),
+                principal=principal,
+                evidence=evidence,
+                correlation_id=correlation,
+            )
+            requester_email = str(
+                principal.email_address or payload.get("requester_email") or ""
+            ).strip()
+            resource = self._requester_resource(
+                email=requester_email,
+                principal=principal,
+                evidence=evidence,
+                correlation_id=correlation,
+            )
+            quote_context = {
+                "company": company,
+                "owner_resource_id": int(resource["id"]),
+            }
+
         submitted = {
             **payload,
             "status": "submitted",
@@ -896,29 +1295,46 @@ class ProcurementTeamsFlow:
             "requester_contact_id": contact_id,
             "requester_name": requester_name,
             "spending_limit": f"{spending_limit:.2f}",
-            "workflow_action": action,
+            "create_po": create_po,
+            "create_client_quote": create_client_quote,
             "at_part_number": part_number,
             "item_class": item_class,
             "retail_price": f"{retail:.2f}",
             "quantity": quantity,
-            "destination": destination,
+            "customer_quantity": customer_quantity,
+            "aot_stock_quantity": aot_stock_quantity,
             "ticket_number": ticket_number or None,
             "ticket_id": int(ticket["id"]) if ticket else None,
             "ticket_title": str(ticket.get("title") or "") if ticket else None,
-            "ticket_company_id": int(ticket["companyID"]) if ticket and ticket.get("companyID") is not None else None,
+            "ticket_company_id": (
+                int(ticket["companyID"])
+                if ticket and ticket.get("companyID") is not None
+                else None
+            ),
             "billing_treatment": billing,
+            "billing_disposition": (
+                "pending_receipt" if customer_quantity else "no_customer_allocation"
+            ),
             "freight": f"{freight:.2f}",
             "tax": f"{tax:.2f}",
             "fees": f"{fees:.2f}",
             "total_commitment": f"{commitment:.2f}",
+            "quote_context": quote_context,
         }
         submitted["digest"] = _submission_digest(submitted)
         self.store.update(submission_id, submitted)
-        if action == "purchase_order" and commitment > spending_limit:
+
+        # Spend authority governs the purchase branch only. Catalog/client quote
+        # creation does not itself commit AOT funds.
+        if create_po and commitment > spending_limit:
             approval = self._create_owner_approval(submitted)
             self.store.update(
                 submission_id,
-                {**submitted, "status": "approval_required", "approval_id": approval.approval_id},
+                {
+                    **submitted,
+                    "status": "approval_required",
+                    "approval_id": approval.approval_id,
+                },
             )
             self.approval_sender.send(approval)
             return {
@@ -926,12 +1342,17 @@ class ProcurementTeamsFlow:
                 "submission_id": submission_id,
                 "reply": {
                     "text": (
-                        "Submitted. This $" + f"{commitment:.2f}" + " purchase exceeds "
-                        + requester_name + "'s current Autotask Spending limit of $"
-                        + f"{spending_limit:.2f}" + "; the owner approval was sent."
+                        "Submitted. Purchase total $"
+                        + f"{commitment:.2f}"
+                        + " exceeds "
+                        + requester_name
+                        + "'s Autotask Spending limit of $"
+                        + f"{spending_limit:.2f}"
+                        + "; owner approval was sent."
                     )
                 },
             }
+
         result = self.execute_submission(submitted, owner_approval_id=None)
         return {
             "status": "completed",
@@ -965,7 +1386,11 @@ class ProcurementTeamsFlow:
                     ("AOT Cost", "$" + str(submission["product"]["cost"]) + " each"),
                     ("Total Commitment", "$" + str(submission["total_commitment"])),
                     ("Spending Limit", "$" + str(submission["spending_limit"])),
-                    ("Destination", str(submission.get("ticket_number") or "No Ticket — AOT Inventory")),
+                    ("Allocation", (
+                        str(submission.get("customer_quantity", 0)) + " customer / "
+                        + str(submission.get("aot_stock_quantity", 0)) + " AOT stock"
+                    )),
+                    ("Ticket", str(submission.get("ticket_number") or "None")),
                     ("Retail", "$" + str(submission["retail_price"]) + " each"),
                     ("Billing", str(submission["billing_treatment"])),
                     ("Source", str(submission["source_url"])),
@@ -989,19 +1414,44 @@ class ProcurementTeamsFlow:
             raise ProcurementFlowError("procurement submission disappeared")
         if str(current.get("digest")) != str(submission.get("digest")):
             raise PermissionError("procurement submission changed after authorization")
+
         correlation = f"corr_proc_exec_{uuid4().hex}"
-        product_id = submission["product"].get("existing_product_id")
-        created_product = False
+        existing_result = current.get("result")
+        result: dict[str, Any] = (
+            dict(existing_result) if isinstance(existing_result, Mapping) else {}
+        )
+
+        def checkpoint(**values: Any) -> None:
+            result.update(values)
+            latest = self.store.get(str(submission["submission_id"]))
+            if latest is None:
+                raise ProcurementFlowError("procurement submission disappeared")
+            self.store.update(
+                str(submission["submission_id"]),
+                {**latest, "status": "executing", "result": dict(result)},
+            )
+
+        product_id = (
+            result.get("product_id")
+            or submission["product"].get("existing_product_id")
+        )
+        created_product = bool(result.get("created_product", False))
         if product_id is None:
             product_output = self.worker.execute(
                 capability_name=SERVICE_PRODUCT_CREATE,
                 payload={
                     "name": str(submission["product"]["name"]),
-                    "description": str(submission["product"].get("description") or ""),
+                    "description": str(
+                        submission["product"].get("description") or ""
+                    ),
                     "isActive": True,
                     "isSerialized": False,
                     "sku": str(submission["at_part_number"]),
-                    "vendorProductNumber": str(submission["product"].get("mpn") or submission["product"].get("sku") or ""),
+                    "vendorProductNumber": str(
+                        submission["product"].get("mpn")
+                        or submission["product"].get("sku")
+                        or ""
+                    ),
                     "defaultVendorID": int(submission["vendor"]["id"]),
                     "unitCost": float(Decimal(str(submission["product"]["cost"]))),
                     "unitPrice": float(Decimal(str(submission["retail_price"]))),
@@ -1011,124 +1461,308 @@ class ProcurementTeamsFlow:
             )
             product_id = _resource_id(product_output)
             created_product = True
+            checkpoint(product_id=int(product_id), created_product=True)
+
+        if created_product and not result.get("product_vendor_created"):
             self.worker.execute(
                 capability_name=SERVICE_PRODUCT_VENDOR_CREATE,
                 payload={
-                    "productID": product_id,
+                    "productID": int(product_id),
                     "vendorID": int(submission["vendor"]["id"]),
                     "isActive": True,
                     "isDefault": True,
-                    "vendorCost": float(Decimal(str(submission["product"]["cost"]))),
-                    "vendorPartNumber": str(submission["product"].get("mpn") or submission["product"].get("sku") or ""),
+                    "vendorCost": float(
+                        Decimal(str(submission["product"]["cost"]))
+                    ),
+                    "vendorPartNumber": str(
+                        submission["product"].get("mpn")
+                        or submission["product"].get("sku")
+                        or ""
+                    ),
                 },
                 submission=submission,
                 correlation_id=correlation,
             )
-        if submission["workflow_action"] == "quote_catalog":
-            final = {
-                **current,
-                "status": "catalog_ready",
-                "result": {"product_id": int(product_id), "created_product": created_product},
-            }
-            self.store.update(str(submission["submission_id"]), final)
-            return {
-                "summary": (
-                    "Catalog ready. AT Part # " + str(submission["at_part_number"])
-                    + " is linked to Autotask product " + str(product_id)
-                    + ". No purchase approval or PO was created."
+            checkpoint(
+                product_id=int(product_id),
+                created_product=created_product,
+                product_vendor_created=True,
+            )
+
+        result.setdefault("product_id", int(product_id))
+        result.setdefault("created_product", created_product)
+        result.setdefault("purchase_order_id", None)
+        result.setdefault("purchase_order_item_id", None)
+        result.setdefault("purchase_order_submitted", False)
+        result.setdefault("client_quote_id", None)
+        result.setdefault("quote_location_id", None)
+        result.setdefault("quote_item_id", None)
+        result.setdefault("opportunity_id", None)
+        result.setdefault("ticket_charge_id", None)
+        result["owner_approval_id"] = owner_approval_id
+        checkpoint(**result)
+
+        if submission.get("create_client_quote"):
+            if not submission.get("ticket_id"):
+                raise ProcurementFlowError(
+                    "client quote creation requires an exact ticket"
                 )
-            }
-        po_payload: dict[str, Any] = {
-            "vendorID": int(submission["vendor"]["id"]),
-            "freight": float(Decimal(str(submission["freight"]))),
-            "generalMemo": (
-                "Jason procurement " + str(submission["submission_id"])
-                + " | source " + str(submission["source_url"])
-                + " | submitted by " + str(submission["requester_name"])
-            )[:4000],
-            "purchaseOrderTemplateID": 102,
-            "shipToName": self.ship_to_name,
-            "shipToAddress1": self.ship_to_address1,
-            "shipToCity": self.ship_to_city,
-            "shipToState": self.ship_to_state,
-            "shipToPostalCode": self.ship_to_postal_code,
-            "taxRegionID": 1,
-            "useItemDescriptionsFrom": 1,
-        }
-        if submission.get("ticket_company_id"):
-            po_payload["purchaseForCompanyID"] = int(submission["ticket_company_id"])
-        po_output = self.worker.execute(
-            capability_name=SERVICE_PURCHASE_ORDER_CREATE,
-            payload=po_payload,
-            submission=submission,
-            correlation_id=correlation,
-        )
-        po_id = _resource_id(po_output)
-        self.worker.execute(
-            capability_name=SERVICE_PURCHASE_ORDER_ITEM_CREATE,
-            payload={
-                "orderID": po_id,
-                "productID": int(product_id),
-                "inventoryLocationID": int(self.inventory_location_id),
-                "quantity": int(submission["quantity"]),
-                "unitCost": float(Decimal(str(submission["product"]["cost"]))),
-                "memo": str(submission["source_url"])[:4000],
-            },
-            submission=submission,
-            correlation_id=correlation,
-        )
-        self.worker.execute(
-            capability_name=SERVICE_PURCHASE_ORDER_UPDATE,
-            payload={"id": po_id, "status": 2},
-            submission=submission,
-            correlation_id=correlation,
-        )
-        charge_id = None
-        if submission.get("destination") == "customer_ticket" and submission.get("billing_treatment") == "charge_ticket":
-            charge_output = self.worker.execute(
-                capability_name=SERVICE_TICKET_CHARGE_CREATE,
-                payload={
-                    "ticketID": int(submission["ticket_id"]),
-                    "productID": int(product_id),
-                    "costType": 1,
-                    "chargeType": 1,
-                    "datePurchased": datetime.now(timezone.utc).isoformat(),
-                    "name": str(submission["product"]["name"])[:100],
-                    "unitQuantity": int(submission["quantity"]),
-                    "unitCost": float(Decimal(str(submission["product"]["cost"]))),
-                    "unitPrice": float(Decimal(str(submission["retail_price"]))),
-                    "isBillableToCompany": True,
-                    "description": str(submission["at_part_number"])[:1000],
-                    "notes": (
-                        "Jason procurement " + str(submission["submission_id"])
-                        + " | PO resource " + str(po_id)
-                    )[:1000],
-                },
-                submission=submission,
-                correlation_id=correlation,
+            context = dict(submission.get("quote_context") or {})
+            company = dict(context.get("company") or {})
+            owner_resource_id = context.get("owner_resource_id")
+            if not company or not owner_resource_id:
+                raise ProcurementFlowError(
+                    "client quote creation is missing verified company/resource context"
+                )
+
+            now = datetime.now(timezone.utc)
+            sell_total = (
+                Decimal(str(submission["retail_price"]))
+                * int(submission["customer_quantity"])
             )
-            charge_id = _resource_id(charge_output)
+            cost_total = (
+                Decimal(str(submission["product"]["cost"]))
+                * int(submission["customer_quantity"])
+            )
+            opportunity_id = result.get("opportunity_id")
+            if not opportunity_id:
+                opportunity_output = self.worker.execute(
+                    capability_name=SERVICE_OPPORTUNITY_CREATE,
+                    payload={
+                        "amount": float(sell_total),
+                        "cost": float(cost_total),
+                        "companyID": int(submission["ticket_company_id"]),
+                        "ownerResourceID": int(owner_resource_id),
+                        "probability": 50,
+                        "projectedCloseDate": (now + timedelta(days=30)).isoformat(),
+                        "stage": 29682772,
+                        "startDate": now.isoformat(),
+                        "status": 1,
+                        "title": (
+                            "Jason quote "
+                            + str(submission["ticket_number"])
+                            + " - "
+                            + str(submission["product"]["name"])
+                        )[:128],
+                        "useQuoteTotals": True,
+                        "description": (
+                            "Created from exact ticket "
+                            + str(submission["ticket_number"])
+                            + " by Jason procurement "
+                            + str(submission["submission_id"])
+                        )[:8000],
+                    },
+                    submission=submission,
+                    correlation_id=correlation,
+                )
+                opportunity_id = _resource_id(opportunity_output)
+                checkpoint(opportunity_id=opportunity_id)
+            else:
+                opportunity_id = int(opportunity_id)
+
+            address = {
+                "address1": str(company.get("address1") or "")[:50],
+                "address2": str(company.get("address2") or "")[:50],
+                "city": str(company.get("city") or "")[:50],
+                "state": str(company.get("state") or "")[:50],
+                "postalCode": str(company.get("postalCode") or "")[:20],
+            }
+            quote_location_id = result.get("quote_location_id")
+            if not quote_location_id:
+                location_output = self.worker.execute(
+                    capability_name=SERVICE_QUOTE_LOCATION_CREATE,
+                    payload={key: value for key, value in address.items() if value},
+                    submission=submission,
+                    correlation_id=correlation,
+                )
+                quote_location_id = _resource_id(location_output)
+                checkpoint(quote_location_id=quote_location_id)
+            else:
+                quote_location_id = int(quote_location_id)
+
+            quote_id = result.get("client_quote_id")
+            if not quote_id:
+                quote_output = self.worker.execute(
+                    capability_name=SERVICE_QUOTE_CREATE,
+                    payload={
+                        "billToLocationID": quote_location_id,
+                        "companyID": int(submission["ticket_company_id"]),
+                        "effectiveDate": now.isoformat(),
+                        "expirationDate": (now + timedelta(days=30)).isoformat(),
+                        "externalQuoteNumber": str(submission["submission_id"])[:50],
+                        "isActive": True,
+                        "name": (
+                            str(submission["ticket_number"])
+                            + " - "
+                            + str(submission["product"]["name"])
+                        )[:100],
+                        "opportunityID": opportunity_id,
+                        "primaryQuote": True,
+                        "shipToLocationID": quote_location_id,
+                        "soldToLocationID": quote_location_id,
+                        "description": (
+                            "Ticket "
+                            + str(submission["ticket_number"])
+                            + " | "
+                            + str(submission["source_url"])
+                        )[:2000],
+                    },
+                    submission=submission,
+                    correlation_id=correlation,
+                )
+                quote_id = _resource_id(quote_output)
+                checkpoint(client_quote_id=quote_id)
+            else:
+                quote_id = int(quote_id)
+
+            quote_item_id = result.get("quote_item_id")
+            if not quote_item_id:
+                quote_item_output = self.worker.execute(
+                    capability_name=SERVICE_QUOTE_ITEM_CREATE,
+                    payload={
+                        "productID": int(product_id),
+                        "name": str(submission["product"]["name"])[:1000],
+                        "description": str(submission["at_part_number"])[:2000],
+                        "isOptional": False,
+                        "lineDiscount": 0,
+                        "percentageDiscount": 0,
+                        "periodType": 5,
+                        "quantity": int(submission["customer_quantity"]),
+                        "quoteItemType": 1,
+                        "unitCost": float(
+                            Decimal(str(submission["product"]["cost"]))
+                        ),
+                        "unitDiscount": 0,
+                        "unitPrice": float(
+                            Decimal(str(submission["retail_price"]))
+                        ),
+                    },
+                    submission=submission,
+                    correlation_id=correlation,
+                    route_arguments={"quoteID": quote_id},
+                )
+                quote_item_id = _resource_id(quote_item_output)
+                checkpoint(
+                    quote_item_id=quote_item_id,
+                    client_quote_id=quote_id,
+                    opportunity_id=opportunity_id,
+                )
+
+
+        if submission.get("create_po"):
+            po_payload: dict[str, Any] = {
+                "vendorID": int(submission["vendor"]["id"]),
+                "freight": float(Decimal(str(submission["freight"]))),
+                "generalMemo": (
+                    "Jason procurement "
+                    + str(submission["submission_id"])
+                    + " | source "
+                    + str(submission["source_url"])
+                    + " | submitted by "
+                    + str(submission["requester_name"])
+                )[:4000],
+                "purchaseOrderTemplateID": 102,
+                "shipToName": self.ship_to_name,
+                "shipToAddress1": self.ship_to_address1,
+                "shipToCity": self.ship_to_city,
+                "shipToState": self.ship_to_state,
+                "shipToPostalCode": self.ship_to_postal_code,
+                "taxRegionID": 1,
+                "useItemDescriptionsFrom": 1,
+            }
+            if submission.get("ticket_company_id"):
+                po_payload["purchaseForCompanyID"] = int(
+                    submission["ticket_company_id"]
+                )
+            po_id = result.get("purchase_order_id")
+            if not po_id:
+                po_output = self.worker.execute(
+                    capability_name=SERVICE_PURCHASE_ORDER_CREATE,
+                    payload=po_payload,
+                    submission=submission,
+                    correlation_id=correlation,
+                )
+                po_id = _resource_id(po_output)
+                checkpoint(purchase_order_id=po_id)
+            else:
+                po_id = int(po_id)
+
+            po_item_id = result.get("purchase_order_item_id")
+            if not po_item_id:
+                po_item_output = self.worker.execute(
+                    capability_name=SERVICE_PURCHASE_ORDER_ITEM_CREATE,
+                    payload={
+                        "orderID": po_id,
+                        "productID": int(product_id),
+                        "inventoryLocationID": int(self.inventory_location_id),
+                        "quantity": int(submission["quantity"]),
+                        "unitCost": float(
+                            Decimal(str(submission["product"]["cost"]))
+                        ),
+                        "memo": (
+                            str(submission["source_url"])
+                            + " | customer="
+                            + str(submission["customer_quantity"])
+                            + " | AOT stock="
+                            + str(submission["aot_stock_quantity"])
+                        )[:4000],
+                    },
+                    submission=submission,
+                    correlation_id=correlation,
+                )
+                po_item_id = _resource_id(po_item_output)
+                checkpoint(purchase_order_item_id=po_item_id)
+            else:
+                po_item_id = int(po_item_id)
+
+            if not result.get("purchase_order_submitted"):
+                self.worker.execute(
+                    capability_name=SERVICE_PURCHASE_ORDER_UPDATE,
+                    payload={"id": po_id, "status": 2},
+                    submission=submission,
+                    correlation_id=correlation,
+                )
+                checkpoint(
+                    purchase_order_id=po_id,
+                    purchase_order_item_id=po_item_id,
+                    purchase_order_submitted=True,
+                )
+
+        # Receiving, billing disposition, stock release, and invoice verification
+        # are intentionally subsequent lifecycle gates. No ticket charge is created here.
+        if submission.get("create_po"):
+            state = "ordered"
+        elif submission.get("create_client_quote"):
+            state = "client_quote_created"
+        else:
+            state = "catalog_ready"
+
         final = {
             **current,
-            "status": "ordered",
-            "result": {
-                "product_id": int(product_id),
-                "created_product": created_product,
-                "purchase_order_id": po_id,
-                "ticket_charge_id": charge_id,
-                "owner_approval_id": owner_approval_id,
-            },
+            "status": state,
+            "result": result,
+            "release_state": (
+                "ordered" if submission.get("create_po") else "not_applicable"
+            ),
+            "billing_state": (
+                "pending_receipt"
+                if int(submission.get("customer_quantity") or 0) > 0
+                else "not_applicable"
+            ),
         }
         self.store.update(str(submission["submission_id"]), final)
-        summary = (
-            "Processed " + str(submission["requester_name"])
-            + "'s procurement submission. Autotask product "
-            + str(product_id) + "; PO " + str(po_id)
-        )
-        if charge_id:
-            summary += "; ticket charge " + str(charge_id)
-        summary += ". Readback verification passed for each write."
-        return {"summary": summary}
+
+        parts = ["Catalog product " + str(product_id)]
+        if result.get("client_quote_id"):
+            parts.append("client quote " + str(result["client_quote_id"]))
+        if result.get("purchase_order_id"):
+            parts.append("PO " + str(result["purchase_order_id"]))
+        if result.get("purchase_order_id") and int(
+            submission.get("customer_quantity") or 0
+        ):
+            parts.append("customer stock held pending receipt + billing disposition")
+        parts.append("readback verified")
+        return {"summary": "; ".join(parts) + "."}
 
 
 @dataclass

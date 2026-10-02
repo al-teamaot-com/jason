@@ -152,6 +152,20 @@ function parseProcurementSubmit(value) {
   return { submissionId, selections };
 }
 
+function parseBillingDispositionSubmit(value) {
+  if (!value || typeof value !== "object") return null;
+  if (nonBlank(value.kind) !== "hardware.billing.disposition") return null;
+  const caseKey = nonBlank(value.case_key);
+  const disposition = nonBlank(value.disposition)?.toLowerCase();
+  if (!caseKey || caseKey.length > 256 || !["charge_needed", "not_billable", "already_handled"].includes(disposition)) return null;
+  const allowed = new Set(["kind", "case_key", "disposition"]);
+  const forbidden = new Set(["principal_id", "organization_id", "client_id", "capability", "capability_name", "provider", "provider_id", "connector", "connector_id", "authority_context_id", "requested_by"]);
+  for (const key of Object.keys(value)) {
+    if (forbidden.has(key) || !allowed.has(key)) return null;
+  }
+  return { caseKey, disposition };
+}
+
 function terminalApprovalText(record) {
   if (record.state === "decided") {
     const label = record.decision === "approve" ? "Approved" : record.decision === "request_changes" ? "Changes requested" : "Denied";
@@ -356,7 +370,11 @@ agent.onActivity("message", async (context) => {
     storeConversationReference(context, aadObjectId, tenantId);
     const approvalSubmit = parseApprovalSubmit(submitValue);
     const procurementSubmit = approvalSubmit ? null : parseProcurementSubmit(submitValue);
-    if (submitValue && !approvalSubmit && !procurementSubmit) {
+    const billingDispositionSubmit =
+      approvalSubmit || procurementSubmit
+        ? null
+        : parseBillingDispositionSubmit(submitValue);
+    if (submitValue && !approvalSubmit && !procurementSubmit && !billingDispositionSubmit) {
       await context.sendActivity("Jason rejected this card response because its governed interaction data was invalid.");
       return;
     }
@@ -385,7 +403,9 @@ agent.onActivity("message", async (context) => {
       ? `Jason approval response: ${approvalSubmit.decision} approval ${approvalSubmit.approvalId}`
       : procurementSubmit
         ? `Jason procurement submission ${procurementSubmit.submissionId}`
-        : text;
+        : billingDispositionSubmit
+          ? `Jason hardware billing disposition ${billingDispositionSubmit.caseKey}`
+          : text;
     const envelope = buildConversationEnvelope({
       text: governedText,
       microsoftTenantId: auth.tenantId,
@@ -408,7 +428,14 @@ agent.onActivity("message", async (context) => {
               selections: procurementSubmit.selections,
               channel_response_id: messageId,
             }
-          : undefined,
+          : billingDispositionSubmit
+            ? {
+                kind: "hardware.billing.disposition",
+                case_key: billingDispositionSubmit.caseKey,
+                disposition: billingDispositionSubmit.disposition,
+                channel_response_id: messageId,
+              }
+            : undefined,
     });
     const signed = loadAndSignConversationEnvelope(
       envelope,

@@ -79,6 +79,14 @@ SERVICE_PURCHASE_ORDER_READ = "service.purchase.order.read"
 SERVICE_PURCHASE_ORDER_ITEM_SEARCH = "service.purchase.order.item.search"
 SERVICE_TICKET_CHARGE_SEARCH = "service.ticket.charge.search"
 SERVICE_TICKET_CHARGE_READ = "service.ticket.charge.read"
+SERVICE_INVOICE_SEARCH = "service.invoice.search"
+SERVICE_INVOICE_READ = "service.invoice.read"
+SERVICE_BILLING_ITEM_SEARCH = "service.billing.item.search"
+SERVICE_BILLING_ITEM_READ = "service.billing.item.read"
+SERVICE_QUOTE_SEARCH = "service.quote.search"
+SERVICE_QUOTE_READ = "service.quote.read"
+SERVICE_OPPORTUNITY_SEARCH = "service.opportunity.search"
+SERVICE_OPPORTUNITY_READ = "service.opportunity.read"
 
 IDENTITY_USER_SEARCH = "identity.user.search"
 IDENTITY_USER_READ = "identity.user.read"
@@ -147,7 +155,15 @@ AUTOTASK_CAPABILITIES = frozenset(
         SERVICE_PURCHASE_ORDER_ITEM_SEARCH,
         SERVICE_TICKET_CHARGE_SEARCH,
         SERVICE_TICKET_CHARGE_READ,
-    }
+        SERVICE_INVOICE_SEARCH,
+        SERVICE_INVOICE_READ,
+        SERVICE_BILLING_ITEM_SEARCH,
+        SERVICE_BILLING_ITEM_READ,
+        SERVICE_QUOTE_SEARCH,
+        SERVICE_QUOTE_READ,
+        SERVICE_OPPORTUNITY_SEARCH,
+        SERVICE_OPPORTUNITY_READ,
+        }
 )
 
 MICROSOFT_GRAPH_DIRECTORY_CAPABILITIES = frozenset(
@@ -888,6 +904,98 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             operation="read",
             selector_keys="resource_id",
             fact_hints="ticket charge,billable product,material cost,ticket billing,product charge,quantity,unit price",
+            authoritative_change_sources=at,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_INVOICE_SEARCH,
+            display_name="Search Customer Invoices",
+            business_purpose="Search authorized Autotask customer invoices for billing reconciliation.",
+            resource_types="service_invoice,invoice,billing",
+            operation="search",
+            selector_keys="company_id,invoice_number,resource_id,filters,page_size,after_resource_id",
+            fact_hints="customer invoice,invoice number,billing date,invoice status,total",
+            authoritative_change_sources=at,
+            collection_fact="customer invoices",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_INVOICE_READ,
+            display_name="Read Customer Invoice",
+            business_purpose="Read one authorized Autotask customer invoice for billing reconciliation.",
+            resource_types="service_invoice,invoice,billing",
+            operation="read",
+            selector_keys="resource_id",
+            fact_hints="customer invoice,invoice number,billing date,invoice status,total",
+            authoritative_change_sources=at,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_BILLING_ITEM_SEARCH,
+            display_name="Search Invoice Billing Items",
+            business_purpose="Search exact Autotask invoice billing lines for charge-to-invoice reconciliation.",
+            resource_types="service_billing_item,billing_item,invoice_line",
+            operation="search",
+            selector_keys="invoice_id,ticket_id,ticket_charge_id,resource_id,filters,page_size,after_resource_id",
+            fact_hints="invoice line,billing item,ticket charge,quantity,unit price,invoice",
+            authoritative_change_sources=at,
+            collection_fact="invoice billing items",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_BILLING_ITEM_READ,
+            display_name="Read Invoice Billing Item",
+            business_purpose="Read one exact Autotask billing item from a customer invoice.",
+            resource_types="service_billing_item,billing_item,invoice_line",
+            operation="read",
+            selector_keys="resource_id",
+            fact_hints="invoice line,billing item,ticket charge,quantity,unit price,invoice",
+            authoritative_change_sources=at,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_QUOTE_SEARCH,
+            display_name="Search Client Quotes",
+            business_purpose="Search authorized Autotask client quotes for procurement idempotency and readback.",
+            resource_types="service_quote,quote,sales",
+            operation="search",
+            selector_keys="company_id,opportunity_id,external_quote_number,resource_id,filters,page_size,after_resource_id",
+            fact_hints="quote,client quote,opportunity,external quote number",
+            authoritative_change_sources=at,
+            collection_fact="client quotes",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_QUOTE_READ,
+            display_name="Read Client Quote",
+            business_purpose="Read one authorized Autotask client quote.",
+            resource_types="service_quote,quote,sales",
+            operation="read",
+            selector_keys="resource_id",
+            fact_hints="quote,client quote,opportunity",
+            authoritative_change_sources=at,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_OPPORTUNITY_SEARCH,
+            display_name="Search Opportunities",
+            business_purpose="Search authorized Autotask opportunities used by client quotes.",
+            resource_types="service_opportunity,opportunity,sales",
+            operation="search",
+            selector_keys="company_id,title,resource_id,filters,page_size,after_resource_id",
+            fact_hints="opportunity,sales opportunity,client quote",
+            authoritative_change_sources=at,
+            collection_fact="opportunities",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_OPPORTUNITY_READ,
+            display_name="Read Opportunity",
+            business_purpose="Read one authorized Autotask opportunity used by a client quote.",
+            resource_types="service_opportunity,opportunity,sales",
+            operation="read",
+            selector_keys="resource_id",
+            fact_hints="opportunity,sales opportunity,client quote",
             authoritative_change_sources=at,
         ),
         _read_capability(

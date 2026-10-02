@@ -29,6 +29,10 @@ SERVICE_SERVICE_CREATE = "service.service.create"
 SERVICE_SERVICE_UPDATE = "service.service.update"
 SERVICE_SERVICE_BUNDLE_CREATE = "service.service.bundle.create"
 SERVICE_SERVICE_BUNDLE_UPDATE = "service.service.bundle.update"
+SERVICE_OPPORTUNITY_CREATE = "service.opportunity.create"
+SERVICE_QUOTE_LOCATION_CREATE = "service.quote.location.create"
+SERVICE_QUOTE_CREATE = "service.quote.create"
+SERVICE_QUOTE_ITEM_CREATE = "service.quote.item.create"
 SERVICE_PURCHASE_ORDER_CREATE = "service.purchase.order.create"
 SERVICE_PURCHASE_ORDER_UPDATE = "service.purchase.order.update"
 SERVICE_PURCHASE_ORDER_ITEM_CREATE = "service.purchase.order.item.create"
@@ -53,6 +57,10 @@ AUTOTASK_MUTATION_CAPABILITIES = frozenset(
         SERVICE_SERVICE_UPDATE,
         SERVICE_SERVICE_BUNDLE_CREATE,
         SERVICE_SERVICE_BUNDLE_UPDATE,
+        SERVICE_OPPORTUNITY_CREATE,
+        SERVICE_QUOTE_LOCATION_CREATE,
+        SERVICE_QUOTE_CREATE,
+        SERVICE_QUOTE_ITEM_CREATE,
         SERVICE_PURCHASE_ORDER_CREATE,
         SERVICE_PURCHASE_ORDER_UPDATE,
         SERVICE_PURCHASE_ORDER_ITEM_CREATE,
@@ -321,6 +329,42 @@ def autotask_mutation_capability_definitions(
             resource_types="service_bundle,catalog_item",
             operation="update",
             idempotency_behavior=IdempotencyBehavior.CONDITIONALLY_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_OPPORTUNITY_CREATE,
+            display_name="Create Client Quote Opportunity",
+            business_purpose="Create one governed Autotask opportunity required for one exact ticket-bound client quote.",
+            resource_types="service_opportunity,opportunity,sales",
+            operation="create",
+            idempotency_behavior=IdempotencyBehavior.NON_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_QUOTE_LOCATION_CREATE,
+            display_name="Create Quote Location",
+            business_purpose="Create one governed Autotask quote address record for one exact ticket-bound client quote.",
+            resource_types="service_quote_location,quote_location,sales",
+            operation="create",
+            idempotency_behavior=IdempotencyBehavior.NON_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_QUOTE_CREATE,
+            display_name="Create Client Quote",
+            business_purpose="Create one governed client-facing Autotask quote linked to one exact ticket and opportunity.",
+            resource_types="service_quote,quote,sales",
+            operation="create",
+            idempotency_behavior=IdempotencyBehavior.NON_IDEMPOTENT,
+        ),
+        _mutation_capability(
+            now=now,
+            capability_name=SERVICE_QUOTE_ITEM_CREATE,
+            display_name="Create Client Quote Item",
+            business_purpose="Create one governed product line on one verified Autotask client quote.",
+            resource_types="service_quote_item,quote_item,sales",
+            operation="create",
+            idempotency_behavior=IdempotencyBehavior.NON_IDEMPOTENT,
         ),
         _mutation_capability(
             now=now,
