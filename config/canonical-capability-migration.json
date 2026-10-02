@@ -31,11 +31,11 @@
     },
     {
       "id": "CC-MIG-004",
-      "status": "open",
+      "status": "resolved_in_pr_805",
       "path": "implementation/runtime_service/src/jason_runtime/autonomous_repair_maintenance.py",
-      "problem": "Autonomous repair maintenance reads GitHub pull requests and commits through raw GitHub HTTP.",
-      "target": "Canonical source/repository pull-request and commit read capabilities.",
-      "blocker": "No active canonical repository-source read capability is currently available for this maintenance path."
+      "problem": "Autonomous repair maintenance previously read GitHub pull requests and commits through raw HTTP.",
+      "target": "Canonical source.repository.pull_request.search and source.repository.commit.read capabilities.",
+      "evidence": "autonomous_repair_maintenance now uses GovernedSourceRepositoryReader/build_observe; GitHub transport is isolated in source_repository_read.py with configured-repository enforcement."
     },
     {
       "id": "CC-MIG-005",
