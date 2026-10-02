@@ -166,6 +166,57 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             result = runner.wait_live_runtime(attempts=2, interval_seconds=0)
         self.assertEqual(result["revision"], SHA_A)
 
+    def test_prepare_release_discovers_live_rollback_and_runs_preprod(self):
+        with tempfile.TemporaryDirectory() as td:
+            state_root = Path(td)
+            created = {
+                "release_id": runner.record_id(SHA_A),
+                "state": "release_candidate",
+                "release_candidate": {
+                    "candidate_sha": SHA_A,
+                    "artifact_digest": "sha256:test",
+                    "image": "jason-runtime:test",
+                    "immutable": True,
+                },
+            }
+            with (
+                patch.object(runner, "live_runtime", return_value={"revision": SHA_B}),
+                patch.object(runner, "create_record", return_value=created) as create_record,
+                patch.object(runner, "run_preproduction", return_value={**created, "state": "production_eligible"}) as preprod,
+            ):
+                result = runner.prepare_release(
+                    ROOT,
+                    state_root,
+                    SHA_A,
+                    "todo",
+                )
+            self.assertEqual(result["state"], "production_eligible")
+            self.assertEqual(create_record.call_args.kwargs["rollback_sha"], SHA_B)
+            self.assertFalse(create_record.call_args.kwargs["owner_approved"])
+            preprod.assert_called_once()
+
+    def test_prepare_release_is_idempotent_after_production_eligible(self):
+        with tempfile.TemporaryDirectory() as td:
+            state_root = Path(td)
+            release_id = runner.record_id(SHA_A)
+            runner.atomic_json(
+                state_root / "records" / f"{release_id}.json",
+                {
+                    "release_id": release_id,
+                    "state": "production_eligible",
+                    "release_candidate": {"candidate_sha": SHA_A},
+                },
+            )
+            with patch.object(runner, "live_runtime") as live:
+                result = runner.prepare_release(
+                    ROOT,
+                    state_root,
+                    SHA_A,
+                    "todo",
+                )
+            self.assertEqual(result["state"], "production_eligible")
+            live.assert_not_called()
+
     def test_exact_sha_rejects_symbolic_ref(self):
         with self.assertRaises(runner.ReleaseManagerError):
             runner.exact_sha("main", "candidate_sha")
