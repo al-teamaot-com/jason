@@ -100,3 +100,24 @@ A separate secret-presence attestation may list which logical references are ava
 
 Provider startup remains blocked from being treated as fully ready until every required logical reference is attested available.
 
+
+## Candidate READY contract
+
+A staged candidate is not Jason READY.
+
+The candidate READY controller requires a single evidence set to prove all of the following:
+
+- the candidate bootstrap reached ready_for_runtime_activation;
+- the runtime Deployment Manifest identity matches the staged manifest;
+- every required logical secret reference is attested present without exposing values;
+- every required Docker network exists;
+- every required portable systemd unit is enabled;
+- runtime health is healthy and reports the same Deployment Manifest identity;
+- OpenClaw/JKD-001 operational-health evidence is healthy and fresh;
+- governed provider-health canaries are healthy and fresh for every enabled provider.
+
+Any missing, stale, degraded, unavailable, or identity-mismatched check yields BLOCKED.
+
+The candidate-status command collects these secret-safe signals and evaluates them together. When the command is run against the actual host root, an explicit authorized candidate-host identity is required. A Production identity cannot unlock candidate READY evaluation.
+
+This controller is read-only except for the optional candidate-ready result file. It does not enroll secrets, start services, contact providers directly, or grant operational authority.
