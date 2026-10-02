@@ -29,6 +29,12 @@ def main() -> int:
     LIB.mkdir(parents=True, exist_ok=True)
     UNIT_DIR.mkdir(parents=True, exist_ok=True)
     STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
+    source_link = LIB / "release-manager-source"
+    if source_link.is_symlink() or source_link.exists():
+        if source_link.is_dir() and not source_link.is_symlink():
+            raise RuntimeError("release-manager-source exists and is not a symlink")
+        source_link.unlink()
+    source_link.symlink_to(ROOT, target_is_directory=True)
 
     copy_mode(ROOT / "tools" / "release_manager_host_runner.py", LIB / "release_manager_host_runner.py", 0o755)
     copy_mode(ROOT / "tools" / "release_manager_gate.py", LIB / "release_manager_gate.py", 0o644)
