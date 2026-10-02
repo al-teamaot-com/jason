@@ -55,3 +55,15 @@ This synthetic mode intentionally sets deployability_proven=false.
 Only a complete mode=host run on a genuinely blank supported Ubuntu host may set deployability_proven=true.
 
 Even a successful host-mode receipt must always keep production_authorized=false. Production promotion remains separately governed by the Production Promotion Authorization Standard.
+
+## Host-mode bootstrap authorization
+
+The bootstrap path can target the actual filesystem root only when an explicit Candidate Host Identity is supplied.
+
+Candidate Host Identity requires schema version 1.0, environment=candidate, a non-empty instance ID, and bootstrap_authorized=true. A production identity cannot authorize candidate bootstrap.
+
+Before a blank-host install, the read-only candidate host preflight requires an authorized Candidate Host Identity with safe permissions, root privileges, supported Ubuntu 24.04 x86-64, Python 3.12 or newer, Docker and Docker Compose, and no prior Jason deployment markers or installed Jason units.
+
+The same authorization object is threaded through canonical layout creation, immutable release staging, durable state initialization, portable systemd staging, secret-requirement staging, and Deployment Manifest generation.
+
+Without that identity, all existing live-root guards remain fail-closed.

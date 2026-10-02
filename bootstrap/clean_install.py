@@ -12,6 +12,11 @@ import sys
 from typing import Any, Callable, Mapping
 
 from jsonschema import Draft202012Validator
+from bootstrap.candidate_host import (
+    CandidateHostIdentity,
+    authorize_mutation_target,
+    load_candidate_host_identity,
+)
 
 
 SUPPORTED_ENVIRONMENTS = {"development", "candidate"}
@@ -195,6 +200,7 @@ def build_plan(
     msp_policy_path: str | Path,
     schema_root: str | Path,
     host: HostObservation,
+    candidate_identity: CandidateHostIdentity | None = None,
 ) -> CleanInstallPlan:
     normalized_environment = environment.strip().lower()
     if normalized_environment not in SUPPORTED_ENVIRONMENTS:
@@ -203,11 +209,11 @@ def build_plan(
             "supported environments are development and candidate"
         )
 
-    root = Path(target_root)
-    if root == Path("/"):
-        raise PermissionError("clean-install may not target the live filesystem root")
-    if not root.is_absolute():
-        raise ValueError("target_root must be an absolute path")
+    root = authorize_mutation_target(
+        target_root=target_root,
+        candidate_identity=candidate_identity,
+        operation="clean-install",
+    )
 
     config = read_json(msp_configuration_path)
     policy = read_json(msp_policy_path)
@@ -240,12 +246,18 @@ def build_plan(
     )
 
 
-def apply_layout(plan: CleanInstallPlan) -> Path:
+def apply_layout(
+    plan: CleanInstallPlan,
+    *,
+    candidate_identity: CandidateHostIdentity | None = None,
+) -> Path:
     if plan.environment not in SUPPORTED_ENVIRONMENTS:
         raise PermissionError("bootstrap apply is non-production only")
-    target_root = Path(plan.target_root)
-    if target_root == Path("/"):
-        raise PermissionError("bootstrap apply may not target /")
+    target_root = authorize_mutation_target(
+        target_root=plan.target_root,
+        candidate_identity=candidate_identity,
+        operation="bootstrap apply",
+    )
 
     for action in plan.actions:
         if action.action == "create_directory":
@@ -284,9 +296,15 @@ def main() -> int:
     parser.add_argument("--msp-policy", required=True)
     parser.add_argument("--schema-root", default=str(_default_schema_root()))
     parser.add_argument("--apply-layout", action="store_true")
+    parser.add_argument("--candidate-host-identity")
     args = parser.parse_args()
 
     host = observe_host()
+    candidate_identity = (
+        load_candidate_host_identity(args.candidate_host_identity)
+        if args.candidate_host_identity
+        else None
+    )
     plan = build_plan(
         environment=args.environment,
         target_root=args.target_root,
@@ -294,10 +312,14 @@ def main() -> int:
         msp_policy_path=args.msp_policy,
         schema_root=args.schema_root,
         host=host,
+        candidate_identity=candidate_identity,
     )
     print(json.dumps(asdict(plan), indent=2, sort_keys=True))
     if args.apply_layout:
-        identity = apply_layout(plan)
+        identity = apply_layout(
+            plan,
+            candidate_identity=candidate_identity,
+        )
         print(f"BOOTSTRAP_LAYOUT=PASS identity={identity}")
     else:
         print("BOOTSTRAP_PLAN=PASS")

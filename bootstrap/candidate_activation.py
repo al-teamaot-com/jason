@@ -7,18 +7,15 @@ import subprocess
 from typing import Any, Callable, Mapping, Sequence
 
 from bootstrap.install_runtime import evaluate_candidate_readiness
+from bootstrap.candidate_host import (
+    CandidateHostIdentity,
+    load_candidate_host_identity as _load_candidate_host_identity,
+    validate_candidate_host_identity,
+)
 
 
 class CandidateActivationError(PermissionError):
     pass
-
-
-@dataclass(frozen=True, slots=True)
-class CandidateHostIdentity:
-    schema_version: str
-    environment: str
-    instance_id: str
-    bootstrap_authorized: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,22 +34,10 @@ class CandidateActivationPlan:
 
 
 def load_candidate_host_identity(path: str | Path) -> CandidateHostIdentity:
-    payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    identity = CandidateHostIdentity(
-        schema_version=str(payload.get("schema_version") or ""),
-        environment=str(payload.get("environment") or ""),
-        instance_id=str(payload.get("instance_id") or ""),
-        bootstrap_authorized=bool(payload.get("bootstrap_authorized")),
-    )
-    if identity.schema_version != "1.0":
-        raise CandidateActivationError("unsupported candidate-host identity schema")
-    if identity.environment != "candidate":
-        raise CandidateActivationError("host identity is not candidate")
-    if not identity.instance_id.strip():
-        raise CandidateActivationError("candidate instance_id is missing")
-    if not identity.bootstrap_authorized:
-        raise CandidateActivationError("candidate bootstrap is not authorized")
-    return identity
+    try:
+        return _load_candidate_host_identity(path)
+    except PermissionError as exc:
+        raise CandidateActivationError(str(exc)) from exc
 
 
 def _portable_unit_names(resources: Mapping[str, Any]) -> tuple[str, ...]:
@@ -69,10 +54,10 @@ def build_candidate_activation_plan(
     resources: Mapping[str, Any],
     candidate_identity: CandidateHostIdentity,
 ) -> CandidateActivationPlan:
-    if candidate_identity.environment != "candidate":
-        raise CandidateActivationError("Production activation is not supported here")
-    if not candidate_identity.bootstrap_authorized:
-        raise CandidateActivationError("candidate bootstrap is not authorized")
+    try:
+        validate_candidate_host_identity(candidate_identity)
+    except PermissionError as exc:
+        raise CandidateActivationError(str(exc)) from exc
 
     root = Path(target_root)
     readiness = evaluate_candidate_readiness(

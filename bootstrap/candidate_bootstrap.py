@@ -25,6 +25,11 @@ from bootstrap.install_runtime import (
     write_bootstrap_runtime_manifest,
 )
 from bootstrap.candidate_manifest import generate_candidate_deployment_manifest
+from bootstrap.candidate_host import (
+    CandidateHostIdentity,
+    authorize_mutation_target,
+    load_candidate_host_identity,
+)
 
 
 def _write_configuration(
@@ -69,10 +74,13 @@ def bootstrap_candidate(
     repository_root: str | Path,
     instance_id: str,
     host=None,
+    candidate_identity: CandidateHostIdentity | None = None,
 ) -> dict:
-    root = Path(target_root)
-    if root == Path("/"):
-        raise PermissionError("candidate bootstrap may not target the live filesystem root")
+    root = authorize_mutation_target(
+        target_root=target_root,
+        candidate_identity=candidate_identity,
+        operation="candidate bootstrap",
+    )
 
     observation = host or observe_host()
     plan = build_plan(
@@ -82,8 +90,12 @@ def bootstrap_candidate(
         msp_policy_path=msp_policy_path,
         schema_root=schema_root,
         host=observation,
+        candidate_identity=candidate_identity,
     )
-    bootstrap_identity = apply_layout(plan)
+    bootstrap_identity = apply_layout(
+        plan,
+        candidate_identity=candidate_identity,
+    )
     config_paths = _write_configuration(
         target_root=root,
         msp_configuration_path=Path(msp_configuration_path),
@@ -95,6 +107,7 @@ def bootstrap_candidate(
     secret_requirements_path = write_secret_requirements(
         target_root=root,
         requirements=secret_requirements,
+        candidate_identity=candidate_identity,
     )
 
     resources = load_resources(resources_path, resources_schema_path)
@@ -103,15 +116,18 @@ def bootstrap_candidate(
         expected_artifact_sha256=release_artifact_sha256,
         source_sha=source_sha,
         target_root=root,
+        candidate_identity=candidate_identity,
     )
     state = initialize_state_stores(
         target_root=root,
         resources=resources,
+        candidate_identity=candidate_identity,
     )
     services = stage_portable_systemd_units(
         repository_root=repository_root,
         target_root=root,
         resources=resources,
+        candidate_identity=candidate_identity,
     )
     runtime_manifest = write_bootstrap_runtime_manifest(
         target_root=root,
@@ -136,6 +152,7 @@ def bootstrap_candidate(
             msp_configuration_revision=plan.msp_configuration_revision,
             msp_policy_revision=plan.msp_policy_revision,
             host=observation,
+            candidate_identity=candidate_identity,
         )
     )
 
@@ -186,6 +203,7 @@ def main() -> int:
     parser.add_argument("--msp-config", required=True)
     parser.add_argument("--msp-policy", required=True)
     parser.add_argument("--instance-id", required=True)
+    parser.add_argument("--candidate-host-identity")
     parser.add_argument(
         "--schema-root",
         default=str(repo / "config/schemas"),
@@ -200,6 +218,11 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    candidate_identity = (
+        load_candidate_host_identity(args.candidate_host_identity)
+        if args.candidate_host_identity
+        else None
+    )
     result = bootstrap_candidate(
         target_root=args.target_root,
         release_archive=args.release_archive,
@@ -212,6 +235,7 @@ def main() -> int:
         resources_schema_path=args.resources_schema,
         repository_root=repo,
         instance_id=args.instance_id,
+        candidate_identity=candidate_identity,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result["readiness"]["status"] == "ready_for_runtime_activation" else 3

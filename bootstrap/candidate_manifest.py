@@ -10,6 +10,10 @@ import tomllib
 from typing import Any, Mapping
 
 from bootstrap.clean_install import HostObservation
+from bootstrap.candidate_host import (
+    CandidateHostIdentity,
+    authorize_mutation_target,
+)
 from bootstrap.install_runtime import ReleaseStageResult, StateStoreResult
 from tools.deployment_manifest import (
     ComponentIdentity,
@@ -127,10 +131,13 @@ def write_candidate_deployment_descriptor(
     *,
     target_root: str | Path,
     descriptor: Mapping[str, Any],
+    candidate_identity: CandidateHostIdentity | None = None,
 ) -> tuple[Path, str]:
-    root = Path(target_root)
-    if root == Path("/"):
-        raise PermissionError("candidate deployment descriptor may not target /")
+    root = authorize_mutation_target(
+        target_root=target_root,
+        candidate_identity=candidate_identity,
+        operation="candidate deployment descriptor",
+    )
     path = root / "etc/jason/deployment.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -191,10 +198,13 @@ def generate_candidate_deployment_manifest(
     msp_policy_revision: str,
     host: HostObservation,
     generated_at: datetime | None = None,
+    candidate_identity: CandidateHostIdentity | None = None,
 ) -> tuple[dict[str, Any], Path]:
-    root = Path(target_root)
-    if root == Path("/"):
-        raise PermissionError("candidate deployment manifest may not target /")
+    root = authorize_mutation_target(
+        target_root=target_root,
+        candidate_identity=candidate_identity,
+        operation="candidate deployment manifest",
+    )
     release_path = Path(release.release_path)
     version = released_platform_version(release_path)
     playbook_revision = released_playbook_revision(release_path)
@@ -209,6 +219,7 @@ def generate_candidate_deployment_manifest(
     _, deployment_revision = write_candidate_deployment_descriptor(
         target_root=root,
         descriptor=descriptor,
+        candidate_identity=candidate_identity,
     )
 
     artifact_digest = "sha256:" + release.artifact_sha256

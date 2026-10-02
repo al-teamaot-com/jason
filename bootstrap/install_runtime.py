@@ -12,6 +12,10 @@ import tempfile
 from typing import Any, Mapping
 
 from jsonschema import Draft202012Validator
+from bootstrap.candidate_host import (
+    CandidateHostIdentity,
+    authorize_mutation_target,
+)
 
 from kernel.identity_authority.durable import SQLiteIdentityAuthorityStore
 from kernel.client_boundaries.sqlite import SQLiteClientBoundaryStore
@@ -94,12 +98,13 @@ def stage_release_archive(
     expected_artifact_sha256: str,
     source_sha: str,
     target_root: str | Path,
+    candidate_identity: CandidateHostIdentity | None = None,
 ) -> ReleaseStageResult:
-    root = Path(target_root)
-    if root == Path("/"):
-        raise PermissionError("release staging may not target the live filesystem root")
-    if not root.is_absolute():
-        raise BootstrapRuntimeError("target_root must be absolute")
+    root = authorize_mutation_target(
+        target_root=target_root,
+        candidate_identity=candidate_identity,
+        operation="release staging",
+    )
 
     expected = expected_artifact_sha256.strip().lower()
     observed = file_sha256(archive_path)
@@ -151,10 +156,13 @@ def initialize_state_stores(
     *,
     target_root: str | Path,
     resources: Mapping[str, Any],
+    candidate_identity: CandidateHostIdentity | None = None,
 ) -> tuple[StateStoreResult, ...]:
-    root = Path(target_root)
-    if root == Path("/"):
-        raise PermissionError("state initialization may not target the live filesystem root")
+    root = authorize_mutation_target(
+        target_root=target_root,
+        candidate_identity=candidate_identity,
+        operation="state initialization",
+    )
 
     results: list[StateStoreResult] = []
     for store in resources["state_stores"]:
@@ -216,11 +224,14 @@ def stage_portable_systemd_units(
     repository_root: str | Path,
     target_root: str | Path,
     resources: Mapping[str, Any],
+    candidate_identity: CandidateHostIdentity | None = None,
 ) -> tuple[ServiceStageResult, ...]:
     repo = Path(repository_root)
-    root = Path(target_root)
-    if root == Path("/"):
-        raise PermissionError("systemd staging may not target the live filesystem root")
+    root = authorize_mutation_target(
+        target_root=target_root,
+        candidate_identity=candidate_identity,
+        operation="systemd staging",
+    )
     target_dir = root / "etc/systemd/system"
     target_dir.mkdir(parents=True, exist_ok=True)
 

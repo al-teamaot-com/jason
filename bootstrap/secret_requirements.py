@@ -6,6 +6,11 @@ from pathlib import Path
 import re
 from typing import Any, Mapping, Sequence
 
+from bootstrap.candidate_host import (
+    CandidateHostIdentity,
+    authorize_mutation_target,
+)
+
 
 _REFERENCE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
@@ -58,10 +63,13 @@ def write_secret_requirements(
     *,
     target_root: str | Path,
     requirements: Sequence[SecretRequirement],
+    candidate_identity: CandidateHostIdentity | None = None,
 ) -> Path:
-    root = Path(target_root)
-    if root == Path("/"):
-        raise PermissionError("secret requirement staging may not target /")
+    root = authorize_mutation_target(
+        target_root=target_root,
+        candidate_identity=candidate_identity,
+        operation="secret requirement staging",
+    )
     output = root / "var/lib/jason/secret-requirements.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     payload = {

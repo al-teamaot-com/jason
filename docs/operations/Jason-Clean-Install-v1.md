@@ -121,3 +121,15 @@ Any missing, stale, degraded, unavailable, or identity-mismatched check yields B
 The candidate-status command collects these secret-safe signals and evaluates them together. When the command is run against the actual host root, an explicit authorized candidate-host identity is required. A Production identity cannot unlock candidate READY evaluation.
 
 This controller is read-only except for the optional candidate-ready result file. It does not enroll secrets, start services, contact providers directly, or grant operational authority.
+
+## Blank-host candidate installation
+
+The clean-install implementation now distinguishes an ordinary live filesystem root from an explicitly authorized candidate host.
+
+Temporary/non-live target roots continue to require no special host identity.
+
+Target root / is accepted only when every mutating bootstrap layer receives the same validated Candidate Host Identity. The candidate identity cannot represent Production and must explicitly authorize bootstrap.
+
+The read-only candidate_host_preflight command should run before the first host-mode install. A blank host is blocked when prior Jason deployment markers or installed Jason units are detected.
+
+This enables the same deterministic bootstrap code used in non-production filesystem tests to become the installer for the eventual dedicated Jason-B Ubuntu host without adding a generic bypass flag.

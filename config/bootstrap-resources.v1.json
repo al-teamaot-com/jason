@@ -1,9 +1,18 @@
 {
   "schema_version": "1.0",
   "networks": [
-    {"name": "jason-core", "required": true},
-    {"name": "jason-observability", "required": true},
-    {"name": "openclaw_default", "required": false}
+    {
+      "name": "jason-core",
+      "required": true
+    },
+    {
+      "name": "jason-observability",
+      "required": true
+    },
+    {
+      "name": "openclaw_default",
+      "required": false
+    }
   ],
   "state_stores": [
     {
@@ -91,17 +100,17 @@
     {
       "source": "infrastructure/kfs-collector/systemd/jason-kfs-collector.service",
       "portable": false,
-      "reason": "hard-coded /home/al operator path"
+      "reason": "path-portable, but KFS component artifact/database staging is not yet part of base bootstrap"
     },
     {
       "source": "infrastructure/openclaw-operations/systemd/jason-documentation-reconciliation.service",
       "portable": false,
-      "reason": "hard-coded /home/al repository/worktree paths"
+      "reason": "path-portable, but engineering source/worktree initialization is not yet part of base bootstrap"
     },
     {
       "source": "infrastructure/ccc/systemd/jason-ccc.service",
       "portable": false,
-      "reason": "contains AOT/operator-home evidence and git paths"
+      "reason": "path-portable, but CCC component artifact/config staging is not yet part of base bootstrap"
     }
   ]
 }
