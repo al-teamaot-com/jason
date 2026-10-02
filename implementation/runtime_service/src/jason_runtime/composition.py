@@ -283,6 +283,8 @@ from .teams_message_send import (
 )
 from .procurement_web_read import (
     CAPABILITY as PROCUREMENT_WEB_PRODUCT_READ,
+    PROFILE as PROCUREMENT_WEB_READ_PROFILE,
+    PROFILE_ENV as PROCUREMENT_WEB_READ_PROFILE_ENV,
     build_invoker as build_procurement_web_read_invoker,
     register_foundation as register_procurement_web_read_foundation,
 )
@@ -307,6 +309,7 @@ from .kfs_meter_history import (
     KfsMeterHistoryStore,
     ensure_meter_history_read_authority,
 )
+from .procurement_teams_flow import ensure_procurement_read_authority
 from .autonomy_shadow_composition import build_autonomy_shadow_maintenance
 from .autonomy_worker_composition import build_autonomy_worker_maintenance
 from .daily_drmm_alert_reconciliation_composition import build_daily_drmm_alert_reconciliation_maintenance
@@ -1363,6 +1366,13 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     ensure_meter_history_read_authority(
         identity_authority,
         enabled=settings.kfs_enabled,
+    )
+    ensure_procurement_read_authority(
+        identity_authority,
+        enabled=(
+            os.getenv(PROCUREMENT_WEB_READ_PROFILE_ENV, "").strip().casefold()
+            == PROCUREMENT_WEB_READ_PROFILE
+        ),
     )
 
     if autonomous_repair_deployment_activation.enabled:
