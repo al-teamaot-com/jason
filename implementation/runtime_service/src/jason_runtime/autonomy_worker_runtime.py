@@ -1625,7 +1625,17 @@ class OperationalAutonomyMaintenance:
                 )
                 self.store.put(existing)
             if existing is not None and existing.phase in TERMINAL_PHASES:
+                observed_version = str(item.source_version or "").strip() or None
                 if (
+                    existing.phase == "blocked"
+                    and observed_version
+                    and observed_version != existing.source_version
+                ):
+                    # New PSA/provider evidence gets a fresh admission decision
+                    # before any automatic Human Review disposition.
+                    self.store.delete(ticket_id)
+                    existing = None
+                elif (
                     existing.phase == "blocked"
                     and self._recoverable_block_retry_due(existing)
                 ):
@@ -2273,7 +2283,12 @@ class OperationalAutonomyMaintenance:
         return age >= RECOVERABLE_BLOCK_RETRY_SECONDS
 
     def _synchronize_blocked_ticket_lifecycle(self, work: OperationalWork, candidate) -> None:
-        if str(candidate.source_queue).strip().casefold() != "jason":
+        current_queue = str(candidate.source_queue or "").strip().casefold()
+        origin_queue = str(work.source_queue or "").strip().casefold()
+        # Do not override a human/workflow move made after Jason persisted the
+        # block. Automatic disposition is limited to the original intake queue
+        # or Jason's own claimed-work queue.
+        if current_queue not in {origin_queue, "jason"}:
             return
         status_label = str(
             candidate.context.get("_jason_source_status_label") or ""
@@ -2288,8 +2303,8 @@ class OperationalAutonomyMaintenance:
             (
                 "Jason cannot safely continue this ticket automatically. "
                 f"Blocker: {work.last_reason}. "
-                "The ticket is being returned to Help Desk I for technician review "
-                "instead of remaining untriaged in the Jason queue."
+                "The ticket is being routed to Help Desk I for technician review "
+                "instead of remaining in an intake queue with a misleading active/new state."
             ),
             "Jason - Human Review Required",
         )
