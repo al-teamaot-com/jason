@@ -7,9 +7,9 @@ from pathlib import Path
 import subprocess
 from typing import Any
 
-REPO = "al-teamaot-com/jason"
+REPO = os.environ.get("JASON_REPOSITORY", "").strip()
 STATE_PATH = "docs/control/AUTOMATED-CHANGE-STATE.json"
-REPO_ROOT = Path(os.environ.get("JASON_DOCUMENTATION_REPO_ROOT", "/home/al/projects/jason"))
+REPO_ROOT = Path(os.environ.get("JASON_DOCUMENTATION_REPO_ROOT", "/var/lib/jason/source"))
 
 
 def run(*args: str, check: bool = True) -> str:
@@ -323,6 +323,10 @@ def merge_ready_automation_prs() -> str:
 
 
 def main() -> int:
+    if "/" not in REPO:
+        raise RuntimeError(
+            "JASON_REPOSITORY must identify the configured Jason source repository"
+        )
     pr_state = merge_ready_automation_prs()
     if pr_state == "refresh":
         publish_source_if_needed()

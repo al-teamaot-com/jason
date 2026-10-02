@@ -1,11 +1,14 @@
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+
+os.environ["GITHUB_REPOSITORY"] = "example/jason"
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "autonomous_repair_host_runner.py"
 SPEC = importlib.util.spec_from_file_location("autonomous_repair_host_runner", MODULE_PATH)

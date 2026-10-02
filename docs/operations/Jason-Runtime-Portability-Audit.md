@@ -29,3 +29,20 @@ The portability migration:
 After this extraction, infrastructure/jason-runtime/compose.yaml has zero portability-audit blockers.
 
 The remaining portability findings are operator-home dependencies in legacy/service assets and are handled separately.
+
+## Zero-blocker service/path milestone
+
+The declared deployable runtime and service assets now pass the portability audit with zero blockers and zero warnings.
+
+The service-path migration removes the original operator account and workstation-home assumptions from the audited deployment surface:
+
+- engineering source checkout defaults to /var/lib/jason/source;
+- engineering worktrees default to /var/lib/jason/worktrees;
+- service-home state defaults to /var/lib/jason/service-home;
+- GitHub CLI/runtime credential state lives under /var/lib/jason/runtime-secrets;
+- KFS service/runtime/evidence/secrets use /opt/jason and /var/lib/jason paths;
+- CCC uses the jason service account and canonical evidence/recovery paths;
+- documentation and repair workers use configured repository identity rather than assuming the AOT GitHub repository;
+- production-host reconciliation uses the configured Jason service account rather than user al.
+
+This is a source/candidate portability result. It does not change any currently installed Production unit or running process.

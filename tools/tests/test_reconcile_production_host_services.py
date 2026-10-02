@@ -69,8 +69,9 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'live MCP revision does not match requested host release' in text
     assert 'ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"' in text
     assert 'systemctl disable --now "$unit"' in text
-    assert 'pgrep -u al -f "$script_name"' in text
+    assert 'pgrep -u "$SERVICE_USER" -f "$script_name"' in text
     assert 'developer checkout dependency remains in $unit' in text
+    assert '/home/al/' not in text
     assert 'JASON_HOST_SERVICE_RECONCILIATION=PASS' in text
     assert 'publish_documentation_reconciliation.sh' in text
     assert 'POST_SUCCESS_DOCUMENTATION_RECONCILIATION=PASS' in text
