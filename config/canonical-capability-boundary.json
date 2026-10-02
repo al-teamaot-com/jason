@@ -23,7 +23,8 @@
     "implementation/runtime_service/src/jason_runtime/provider_read_*.py",
     "implementation/orchestrator/*capability_catalog.py",
     "implementation/orchestrator/connector_invoker.py",
-    "implementation/runtime_service/src/jason_runtime/teams_*delivery.py"
+    "implementation/runtime_service/src/jason_runtime/teams_*delivery.py",
+    "implementation/runtime_service/src/jason_runtime/teams_gateway_transport.py"
   ],
   "forbidden_import_prefixes_for_callers": [
     "connectors.",
