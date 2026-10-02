@@ -23,7 +23,7 @@ class Reads:
 
     def execute(self, capability, arguments):
         self.calls.append((capability, dict(arguments)))
-        if capability == "source.repository.pull_request.search":
+        if capability == "source.repository.pullrequest.search":
             return {
                 "data": {
                     "items": [
@@ -105,7 +105,7 @@ class AutonomousRepairMaintenanceTests(unittest.TestCase):
         self.assertEqual(
             [call[0] for call in reads.calls],
             [
-                "source.repository.pull_request.search",
+                "source.repository.pullrequest.search",
                 "source.repository.commit.read",
             ],
         )
@@ -119,7 +119,7 @@ class AutonomousRepairMaintenanceTests(unittest.TestCase):
             orchestrator=orchestrator,
         )
         output = reader.execute(
-            "source.repository.pull_request.search",
+            "source.repository.pullrequest.search",
             {"repository": REPO, "state": "closed", "base": "main", "limit": 30},
         )
         self.assertEqual(output["data"]["items"], [])
