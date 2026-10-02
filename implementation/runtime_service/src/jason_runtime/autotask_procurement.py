@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -227,6 +228,56 @@ class AutotaskProductionProcurementConnector(AutotaskProcurementMutationConnecto
             return None
         return submitted_email
 
+    def _resolve_active_submitter_resource_id(
+        self,
+        *,
+        prepared: PreparedRequest,
+        email: str,
+    ) -> int:
+        parts = urlsplit(prepared.url)
+        if not parts.scheme or not parts.netloc:
+            raise ValueError("AUTOTASK_PROCUREMENT_RESOURCE_LOOKUP_URL_INVALID")
+        api_prefix = parts.path.split("/V1.0/", 1)[0].rstrip("/")
+        search = json.dumps(
+            {
+                "MaxRecords": 2,
+                "filter": [
+                    {"op": "eq", "field": "email", "value": email},
+                ],
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        payload = self._transport.request(
+            method="GET",
+            url=f"{parts.scheme}://{parts.netloc}{api_prefix}/V1.0/Resources/query",
+            headers=prepared.headers,
+            params={"search": search},
+            json=None,
+            timeout_seconds=prepared.timeout_seconds,
+        )
+        raw_items = payload.get("items") if isinstance(payload, Mapping) else None
+        if not isinstance(raw_items, list):
+            raise PermissionError("AUTOTASK_PROCUREMENT_OWNER_LOOKUP_INVALID")
+        matches = []
+        for item in raw_items:
+            if not isinstance(item, Mapping):
+                continue
+            if str(item.get("email") or "").strip().casefold() != email:
+                continue
+            if item.get("isActive") is False or item.get("isActive") == 0:
+                continue
+            try:
+                resource_id = int(item.get("id"))
+            except (TypeError, ValueError):
+                continue
+            if resource_id > 0:
+                matches.append(resource_id)
+        unique = sorted(set(matches))
+        if len(unique) != 1:
+            raise PermissionError("AUTOTASK_PROCUREMENT_OWNER_RESOURCE_NOT_UNIQUE")
+        return unique[0]
+
     @staticmethod
     def _id(data: Mapping[str, Any]) -> int:
         for key in ("itemId", "itemID", "id"):
@@ -306,6 +357,25 @@ class AutotaskProductionProcurementConnector(AutotaskProcurementMutationConnecto
         credentials = self._secrets.resolve(self.logical_secret, normalized.context)
         prepared = AutotaskMutationConnector.prepare_request(self, normalized, credentials)
         operation = normalized.context.capability
+        if operation == "autotask.vendor.create":
+            trusted_email = self._trusted_email(normalized)
+            if trusted_email is None:
+                raise PermissionError("AUTOTASK_PROCUREMENT_TRUSTED_SUBMITTER_REQUIRED")
+            owner_resource_id = self._resolve_active_submitter_resource_id(
+                prepared=prepared,
+                email=trusted_email,
+            )
+            owner_payload = dict(normalized.arguments.get("payload") or {})
+            owner_payload["ownerResourceID"] = owner_resource_id
+            normalized = ConnectorRequest(
+                context=normalized.context,
+                arguments={**dict(normalized.arguments), "payload": owner_payload},
+            )
+            prepared = AutotaskMutationConnector.prepare_request(
+                self,
+                normalized,
+                credentials,
+            )
         entity = PROVIDER_ENTITY[operation]
         payload = dict(normalized.arguments.get("payload") or {})
         resource_id = int(payload["id"]) if operation.endswith(".update") else None
