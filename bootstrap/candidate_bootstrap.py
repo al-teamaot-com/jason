@@ -20,6 +20,7 @@ from bootstrap.install_runtime import (
     stage_release_archive,
     write_bootstrap_runtime_manifest,
 )
+from bootstrap.candidate_manifest import generate_candidate_deployment_manifest
 
 
 def _write_configuration(
@@ -62,6 +63,7 @@ def bootstrap_candidate(
     resources_path: str | Path,
     resources_schema_path: str | Path,
     repository_root: str | Path,
+    instance_id: str,
     host=None,
 ) -> dict:
     root = Path(target_root)
@@ -112,6 +114,20 @@ def bootstrap_candidate(
         resources=resources,
     )
 
+    deployment_manifest, deployment_manifest_path = (
+        generate_candidate_deployment_manifest(
+            target_root=root,
+            instance_id=instance_id,
+            release=release,
+            state_stores=state,
+            resources=resources,
+            msp_configuration=read_json(msp_configuration_path),
+            msp_configuration_revision=plan.msp_configuration_revision,
+            msp_policy_revision=plan.msp_policy_revision,
+            host=observation,
+        )
+    )
+
     result = {
         "schema_version": "1.0",
         "environment": "candidate",
@@ -122,6 +138,10 @@ def bootstrap_candidate(
         "state_stores": [asdict(item) for item in state],
         "systemd_units": [asdict(item) for item in services],
         "runtime_manifest": str(runtime_manifest),
+        "deployment_manifest": {
+            "path": str(deployment_manifest_path),
+            "identity_sha256": deployment_manifest["identity_sha256"],
+        },
         "readiness": readiness,
     }
     output = root / "var/lib/jason/candidate-bootstrap-result.json"
@@ -148,6 +168,7 @@ def main() -> int:
     parser.add_argument("--source-sha", required=True)
     parser.add_argument("--msp-config", required=True)
     parser.add_argument("--msp-policy", required=True)
+    parser.add_argument("--instance-id", required=True)
     parser.add_argument(
         "--schema-root",
         default=str(repo / "config/schemas"),
@@ -173,6 +194,7 @@ def main() -> int:
         resources_path=args.resources,
         resources_schema_path=args.resources_schema,
         repository_root=repo,
+        instance_id=args.instance_id,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result["readiness"]["status"] == "ready_for_runtime_activation" else 3

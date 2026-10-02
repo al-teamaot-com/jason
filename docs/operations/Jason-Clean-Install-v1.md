@@ -63,3 +63,23 @@ The activation plan contains only:
 The executor is allowed to run only when the target is the candidate host root. It does not start services and does not enroll provider secrets. Production identity is rejected.
 
 This keeps the current development host from being used as an accidental activation target while allowing the same released tooling to operate on a future dedicated Jason-B candidate host.
+
+## Deployment Manifest integration
+
+The candidate bootstrap now produces the authoritative Deployment Manifest as part of the same deterministic build.
+
+The manifest derives identity from what was actually staged and initialized:
+
+- platform version from the staged release implementation/pyproject.toml;
+- source SHA and release artifact SHA-256 from the verified immutable release;
+- deployment revision from canonical deployment content, not the temporary target-root path;
+- MSP configuration and MSP policy revisions from canonical validated JSON;
+- playbook revision from the canonical released playbook registry;
+- SQLite schema identities from hashes of the actual initialized sqlite_master schema definitions;
+- provider enablement from MSP configuration;
+- capability-bundle revision from canonical configured bundle selection;
+- runtime identity from the observed supported host.
+
+The resulting manifest is written to var/lib/jason/deployment-manifest.json inside the candidate root and can be read by the #750 runtime Deployment Manifest provider.
+
+Changing only the temporary filesystem location does not change the logical deployment identity.

@@ -30,6 +30,8 @@ def make_release(tmp_path: Path):
     with tarfile.open(archive, "w:gz") as handle:
         files = {
             "release.txt": b"synthetic released Jason",
+            "implementation/pyproject.toml": b'[project]\nname = "jason-platform"\nversion = "0.1.0"\n',
+            "implementation/autonomous_remediation/playbook_registry.json": b'{"schema_version":"1.0","playbooks":[]}\n',
             "tools/delegation_maintenance.py": b"print('synthetic')\n",
             "tools/openclaw_authority_health_snapshot.py": b"print('synthetic')\n",
         }
@@ -55,6 +57,7 @@ def test_end_to_end_candidate_bootstrap_reaches_activation_boundary(tmp_path):
         resources_path=ROOT / "config/bootstrap-resources.v1.json",
         resources_schema_path=ROOT / "config/schemas/bootstrap-resources.schema.json",
         repository_root=ROOT,
+        instance_id="jason-b",
         host=host(),
     )
 
@@ -67,6 +70,11 @@ def test_end_to_end_candidate_bootstrap_reaches_activation_boundary(tmp_path):
     assert (target / "etc/jason/msp-policy.json").is_file()
     assert (target / "var/lib/jason/bootstrap-runtime.json").is_file()
     assert (target / "var/lib/jason/candidate-bootstrap-result.json").is_file()
+    manifest_path = target / "var/lib/jason/deployment-manifest.json"
+    assert manifest_path.is_file()
+    manifest = json.loads(manifest_path.read_text())
+    assert result["deployment_manifest"]["identity_sha256"] == manifest["identity_sha256"]
+    assert manifest["instance_id"] == "jason-b"
 
     with sqlite3.connect(target / "var/lib/jason/authority/authority.sqlite3") as db:
         assert db.execute(
