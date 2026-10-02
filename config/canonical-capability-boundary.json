@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0",
+  "purpose": "Prevent workflow/process callers from reimplementing provider plumbing when a canonical Jason capability exists.",
+  "enforcement_mode": "changed_files_ratchet",
+  "caller_path_globs": [
+    "implementation/runtime_service/src/jason_runtime/*workflow*.py",
+    "implementation/runtime_service/src/jason_runtime/*flow*.py",
+    "implementation/runtime_service/src/jason_runtime/*analysis*.py",
+    "implementation/runtime_service/src/jason_runtime/*worker*.py",
+    "implementation/runtime_service/src/jason_runtime/*maintenance*.py",
+    "implementation/runtime_service/src/jason_runtime/playbook_*.py"
+  ],
+  "provider_boundary_path_globs": [
+    "implementation/connectors/**/*.py",
+    "implementation/runtime_service/src/jason_runtime/autotask_*.py",
+    "implementation/runtime_service/src/jason_runtime/datto_*.py",
+    "implementation/runtime_service/src/jason_runtime/microsoft_*.py",
+    "implementation/runtime_service/src/jason_runtime/dnsfilter_*.py",
+    "implementation/runtime_service/src/jason_runtime/kfs_*.py",
+    "implementation/runtime_service/src/jason_runtime/teams_message_send.py",
+    "implementation/runtime_service/src/jason_runtime/provider_read_*.py",
+    "implementation/orchestrator/*capability_catalog.py",
+    "implementation/orchestrator/connector_invoker.py"
+  ],
+  "forbidden_import_prefixes_for_callers": [
+    "connectors.",
+    "requests",
+    "httpx",
+    "urllib.request",
+    "socket"
+  ],
+  "forbidden_call_names_for_callers": [
+    "urlopen",
+    "requests.get",
+    "requests.post",
+    "requests.put",
+    "requests.patch",
+    "requests.delete",
+    "httpx.get",
+    "httpx.post",
+    "httpx.put",
+    "httpx.patch",
+    "httpx.delete"
+  ],
+  "canonical_capability_sources": [
+    "implementation/orchestrator/provider_read_capability_catalog.py",
+    "implementation/orchestrator/provider_mutation_capability_catalog.py"
+  ],
+  "rules": {
+    "provider_specific_implementation_only_behind_capability_boundary": true,
+    "workflow_callers_must_request_canonical_capabilities": true,
+    "new_duplicate_provider_plumbing_fails_ci": true,
+    "existing_legacy_paths_are_migrated_incrementally": true,
+    "provider_specific_business_decisions_in_callers_are_forbidden": true
+  }
+}
