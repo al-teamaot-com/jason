@@ -19,6 +19,19 @@ Each item should include:
 
 Items in this document are not approved capabilities and must not be enabled merely because they appear here.
 
+### Governed engineering intake
+
+Jason may use this backlog as an engineering intake source under the governed TODO Engineering Intake playbook.
+
+- Only items whose Status begins with Planned or In progress are eligible for autonomous engineering intake.
+- Proposed, Researching, Blocked, Rejected, Implemented, and Retired items are not automatic implementation authority.
+- Support List defects remain higher priority than normal TODO work.
+- An eligible TODO may create one bounded owner-approved development issue and reuse the existing development worker.
+- Merge is not completion. The exact merged SHA must pass Jason Release Manager, isolated pre-production, production verification, and Release Manager closure.
+- Protected-core production changes still require exact owner approval at the Release Manager gate.
+- The TODO is changed to Implemented only after authoritative production verification and a documentation closure PR.
+
+
 ---
 
 ## Priority legend
