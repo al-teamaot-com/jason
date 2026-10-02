@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jason.local/schemas/upgrade-checkpoint-receipt.schema.json",
+  "title": "Jason Upgrade Checkpoint Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_deployment_identity_sha256",
+    "recovery_package_sha256",
+    "verified",
+    "restorable"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "source_deployment_identity_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "recovery_package_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "verified": { "const": true },
+    "restorable": { "const": true }
+  }
+}
