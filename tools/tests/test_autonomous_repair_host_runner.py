@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -268,6 +269,56 @@ class HostRepairRunnerTests(unittest.TestCase):
             )
             self.assertEqual(result["state"], "rejected")
             self.assertEqual(result["error_code"], "TEST_REJECT")
+
+
+class ProductionPromotionGateRegressionTests(unittest.TestCase):
+    def test_candidate_image_is_inspected_not_built(self):
+        image_id = "sha256:" + "1" * 64
+        with patch.object(
+            runner,
+            "_run",
+            side_effect=[image_id, CANDIDATE],
+        ) as invoke:
+            tag, observed_id = runner._resolve_candidate_image(CANDIDATE)
+        self.assertEqual(tag, f"jason-runtime:repair-{CANDIDATE[:12]}")
+        self.assertEqual(observed_id, image_id)
+        self.assertEqual(invoke.call_count, 2)
+        for call in invoke.call_args_list:
+            self.assertEqual(call.args[0][:3], ["docker", "image", "inspect"])
+
+    def test_rollback_requires_separate_signed_permit_before_command(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(runner, "_run") as invoke:
+            with self.assertRaises(runner.RepairRunnerError) as caught:
+                runner._rollback(Path("/trusted-runner"), ROLLBACK)
+        self.assertEqual(caught.exception.code, "ROLLBACK_PERMIT_MISSING")
+        invoke.assert_not_called()
+
+    def test_deploy_marks_operation_and_uses_trusted_runner_path(self):
+        env = {
+            "JASON_PRODUCTION_PROMOTION_PERMIT": "/signed/permit.json",
+            "JASON_PRODUCTION_PLAN_SHA256": "c" * 64,
+        }
+        with patch.dict(os.environ, env, clear=True), patch.object(runner, "_run") as invoke:
+            runner._deploy(Path("/trusted-runner"), "jason-runtime:candidate", CANDIDATE)
+        call = invoke.call_args
+        self.assertEqual(
+            call.args[0][0],
+            "/trusted-runner/infrastructure/jason-runtime/production-deploy.sh",
+        )
+        self.assertEqual(call.kwargs["cwd"], Path("/trusted-runner"))
+        self.assertEqual(call.kwargs["env"]["JASON_PRODUCTION_PROMOTION_OPERATION"], "deploy")
+
+    def test_rollback_uses_distinct_rollback_permit(self):
+        env = {
+            "JASON_PRODUCTION_PROMOTION_PERMIT": "/signed/deploy.json",
+            "JASON_PRODUCTION_ROLLBACK_PERMIT": "/signed/rollback.json",
+            "JASON_PRODUCTION_PLAN_SHA256": "c" * 64,
+        }
+        with patch.dict(os.environ, env, clear=True), patch.object(runner, "_run") as invoke:
+            runner._rollback(Path("/trusted-runner"), ROLLBACK)
+        child_env = invoke.call_args.kwargs["env"]
+        self.assertEqual(child_env["JASON_PRODUCTION_PROMOTION_PERMIT"], "/signed/rollback.json")
+        self.assertEqual(child_env["JASON_PRODUCTION_PROMOTION_OPERATION"], "rollback")
 
 
 if __name__ == "__main__":

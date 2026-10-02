@@ -9,7 +9,18 @@ import re
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import Any
+
+
+_ROOT = Path(__file__).resolve().parents[1]
+_IMPLEMENTATION = _ROOT / "implementation"
+if str(_IMPLEMENTATION) not in sys.path:
+    sys.path.insert(0, str(_IMPLEMENTATION))
+
+from orchestrator.production_promotion_permit import (  # noqa: E402
+    verify_and_claim_production_permit,
+)
 
 
 def _run(args: list[str], *, env: dict[str, str] | None = None, quiet: bool = False) -> None:
@@ -339,6 +350,24 @@ def main() -> int:
     parser.add_argument("--health-attempts", type=int, default=30)
     parser.add_argument("--health-interval", type=float, default=2.0)
     parser.add_argument("--preflight", action="store_true")
+    parser.add_argument(
+        "--production-permit",
+        help="Signed single-use Production promotion permit. Required for mutation.",
+    )
+    parser.add_argument(
+        "--promotion-plan-sha256",
+        help="Exact approved Production promotion-plan SHA-256. Required for mutation.",
+    )
+    parser.add_argument(
+        "--promotion-component",
+        help="Exact component identity bound by the Production permit. Required for mutation.",
+    )
+    parser.add_argument(
+        "--promotion-operation",
+        default="deploy",
+        choices=("deploy", "rollback"),
+        help="Exact bounded operation authorized by the Production permit.",
+    )
     parser.add_argument("--harden", action="store_true")
     parser.add_argument(
         "--set-env",
@@ -406,6 +435,27 @@ def main() -> int:
     print(f"ROLLBACK_IMAGE_TAG={rollback_image_tag or ''}")
     if args.preflight:
         return 0
+
+    if not args.production_permit:
+        raise SystemExit("Production mutation requires --production-permit")
+    if not args.promotion_plan_sha256:
+        raise SystemExit("Production mutation requires --promotion-plan-sha256")
+    if not args.promotion_component:
+        raise SystemExit("Production mutation requires --promotion-component")
+
+    permit = verify_and_claim_production_permit(
+        permit_path=args.production_permit,
+        component=args.promotion_component,
+        operation=args.promotion_operation,
+        source_sha=args.source_revision,
+        artifact_digest=candidate_id,
+        plan_sha256=args.promotion_plan_sha256,
+        claim=True,
+    )
+    print("PRODUCTION_PROMOTION_AUTHORITY=PASS")
+    print(f"PRODUCTION_PROMOTION_PERMIT_ID={permit.permit_id}")
+    print(f"PRODUCTION_PROMOTION_APPROVAL_ID={permit.approval_id}")
+    print(f"PRODUCTION_PROMOTION_ID={permit.promotion_id}")
 
     old_renamed = False
     aliases_mutated = False

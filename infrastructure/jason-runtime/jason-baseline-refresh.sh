@@ -2,63 +2,75 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DOCKERFILE="$REPO_ROOT/infrastructure/jason-runtime/Dockerfile"
 RUNTIME_CONTAINER="jason-runtime"
-PRODUCTION_IMAGE="jason-runtime:production"
-COMPAT_IMAGE="jason-runtime:local"
-REVISION_LABEL="org.opencontainers.image.revision"
+CANDIDATE_IMAGE="${JASON_RUNTIME_CANDIDATE_IMAGE:-}"
+PROMOTION_PERMIT="${JASON_PRODUCTION_PROMOTION_PERMIT:-}"
+PROMOTION_PLAN_SHA256="${JASON_PRODUCTION_PLAN_SHA256:-}"
 
-cd "$REPO_ROOT"
+PREFLIGHT_ONLY=false
+if [ "${1:-}" = "--preflight" ]; then
+  PREFLIGHT_ONLY=true
+  shift
+fi
+if [ "$#" -ne 0 ]; then
+  echo "BASELINE_REFRESH=FAIL"
+  echo "REASON=unsupported arguments"
+  exit 2
+fi
 
-revision="$(git rev-parse HEAD)"
-short_revision="$(git rev-parse --short=12 HEAD)"
-candidate_image="jason-runtime:candidate-$short_revision"
-rollback_alias="jason-runtime:rollback-refresh-$(date -u +%Y%m%dT%H%M%SZ)"
+if [ -z "$CANDIDATE_IMAGE" ]; then
+  echo "BASELINE_REFRESH=FAIL"
+  echo "REASON=JASON_RUNTIME_CANDIDATE_IMAGE is required; Production may not build from a checkout"
+  exit 42
+fi
+if ! docker image inspect "$CANDIDATE_IMAGE" >/dev/null 2>&1; then
+  echo "BASELINE_REFRESH=FAIL"
+  echo "REASON=immutable candidate image is not present: $CANDIDATE_IMAGE"
+  exit 42
+fi
 
-echo "========== JASON PRODUCTION RUNTIME REFRESH =========="
+candidate_id="$(docker image inspect "$CANDIDATE_IMAGE" --format '{{.Id}}')"
+revision="$(docker image inspect "$CANDIDATE_IMAGE" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
+if [ -z "$revision" ]; then
+  revision="$(docker image inspect "$CANDIDATE_IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' 2>/dev/null || true)"
+fi
+case "$candidate_id" in
+  sha256:????????????????????????????????????????????????????????????????) ;;
+  *) echo "BASELINE_REFRESH=FAIL"; echo "REASON=candidate image ID is not sha256"; exit 42 ;;
+esac
+case "$revision" in
+  ????????????????????????????????????????) ;;
+  *) echo "BASELINE_REFRESH=FAIL"; echo "REASON=candidate source revision is not an exact git SHA"; exit 42 ;;
+esac
+
+echo "========== JASON PRODUCTION RUNTIME CANDIDATE =========="
 echo "SOURCE_REVISION=$revision"
-echo "CANDIDATE_IMAGE=$candidate_image"
-
-old_production_id="$(docker image inspect "$PRODUCTION_IMAGE" --format '{{.Id}}')"
-docker tag "$old_production_id" "$rollback_alias"
-echo "ROLLBACK_IMAGE=$rollback_alias"
-
-echo "BUILD_BUILDER=default"
-docker buildx build   --builder default   --load   --no-cache   --label "$REVISION_LABEL=$revision"   --label "com.teamaot.jason.source_revision=$revision"   --label "com.teamaot.jason.deployment-purpose=production-candidate"   --tag "$candidate_image"   --file "$DOCKERFILE"   "$REPO_ROOT"
-
-candidate_id="$(docker image inspect "$candidate_image" --format '{{.Id}}')"
-built_revision="$(docker image inspect "$candidate_image" --format "{{index .Config.Labels \"$REVISION_LABEL\"}}")"
-source_revision="$(docker image inspect "$candidate_image" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}')"
-test "$built_revision" = "$revision"
-test "$source_revision" = "$revision"
+echo "CANDIDATE_IMAGE=$CANDIDATE_IMAGE"
+echo "CANDIDATE_IMAGE_ID=$candidate_id"
 echo "IMAGE_PROVENANCE=PASS"
 
-docker run --rm --network none --entrypoint python "$candidate_image" -c   'from orchestrator.service import CentralOrchestrator; from orchestrator.approval_recovery_retry import GovernedApprovalRecoveryRetryExecutor; from jason_runtime.teams_message_send import TeamsMessageSendInvoker; assert hasattr(TeamsMessageSendInvoker,"prepare_execution_plan"); print("ISOLATED_SECURITY_SMOKE=PASS")'
-
-docker tag "$candidate_id" "$PRODUCTION_IMAGE"
-docker tag "$candidate_id" "$COMPAT_IMAGE"
-
-restore_aliases() {
-  docker tag "$old_production_id" "$PRODUCTION_IMAGE"
-  docker tag "$old_production_id" "$COMPAT_IMAGE"
-}
-
-if ! JASON_RUNTIME_PRODUCTION_IMAGE="$PRODUCTION_IMAGE"      JASON_SOURCE_REVISION_OVERRIDE="$revision"      bash "$REPO_ROOT/infrastructure/jason-runtime/production-deploy.sh"; then
-  restore_aliases
-  echo "BASELINE_REFRESH=FAIL"
-  echo "REASON=production cutover failed; production aliases restored"
-  exit 1
+if [ "$PREFLIGHT_ONLY" = "true" ]; then
+  echo "BASELINE_REFRESH=PREFLIGHT_ONLY"
+  exit 0
 fi
 
-if ! python3 "$REPO_ROOT/tools/runtime_cutover_verify.py" \
+if [ -z "$PROMOTION_PERMIT" ] || [ -z "$PROMOTION_PLAN_SHA256" ]; then
+  echo "BASELINE_REFRESH=FAIL"
+  echo "REASON=exact-plan Production permit and plan digest are required"
+  exit 42
+fi
+
+JASON_RUNTIME_PRODUCTION_IMAGE="$CANDIDATE_IMAGE" \
+JASON_SOURCE_REVISION_OVERRIDE="$revision" \
+JASON_PRODUCTION_PROMOTION_PERMIT="$PROMOTION_PERMIT" \
+JASON_PRODUCTION_PLAN_SHA256="$PROMOTION_PLAN_SHA256" \
+JASON_PRODUCTION_PROMOTION_OPERATION=deploy \
+  bash "$REPO_ROOT/infrastructure/jason-runtime/production-deploy.sh"
+
+python3 "$REPO_ROOT/tools/runtime_cutover_verify.py" \
   --container "$RUNTIME_CONTAINER" \
   --expected-image-id "$candidate_id" \
-  --expected-revision "$revision"; then
-  restore_aliases
-  echo "BASELINE_REFRESH=FAIL"
-  echo "REASON=post-cutover live verification failed"
-  exit 1
-fi
+  --expected-revision "$revision"
 
 running_revision="$(docker inspect "$RUNTIME_CONTAINER" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}')"
 running_health="$(docker inspect "$RUNTIME_CONTAINER" --format '{{.State.Health.Status}}')"
