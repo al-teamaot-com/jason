@@ -61,13 +61,15 @@ from .autotask_procurement import (
 )
 from .procurement_web_read import PROFILE as PROCUREMENT_WEB_READ_PROFILE
 from .procurement_web_read import PROFILE_ENV as PROCUREMENT_WEB_READ_PROFILE_ENV
+from .procurement_billing_contracts import (
+    AUDIT_WORKER_ID,
+    BILLING_NOTIFICATION_CAPABILITY as CAPABILITY,
+    BILLING_NOTIFICATION_POLICY_ID as POLICY_ID,
+)
 from .teams_gateway_transport import TeamsGatewayPreparedRequest, TeamsGatewayTransport
 
 
-CAPABILITY = "communication.teams.billing.notification.send"
 PROVIDER = "microsoft_teams_gateway_billing_notification"
-AUDIT_WORKER_ID = "jason-procurement-billing-audit"
-POLICY_ID = "aot-procurement-billing-notification-v1"
 EXECUTE_GRANT_ID = "grant-procurement-billing-audit-teams-notification-v1"
 LORI_EMAIL = "lori@teamaot.com"
 
