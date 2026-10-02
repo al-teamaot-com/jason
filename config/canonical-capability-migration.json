@@ -13,19 +13,21 @@
     },
     {
       "id": "CC-MIG-002",
-      "status": "open",
+      "status": "provider_transport_converged_authority_policy_pending",
       "path": "implementation/runtime_service/src/jason_runtime/procurement_billing_audit_maintenance.py",
-      "problem": "Billing-audit maintenance owns raw Teams gateway HTTP notification transport.",
+      "problem": "Billing-audit workflow is provider-neutral, but notification delivery is not yet routed through a canonical communication capability.",
       "target": "Reuse canonical Teams message delivery with an exact workload/recipient policy or another shared communication capability contract.",
-      "blocker": "communication.teams.message.send currently has owner-approval semantics that do not match scheduled billing notifications; do not weaken that authority merely to migrate."
+      "blocker": "communication.teams.message.send currently has owner-approval semantics that do not match scheduled billing notifications; do not weaken that authority merely to migrate.",
+      "evidence": "Teams binding and gateway transport moved behind teams_billing_delivery.py; shared gateway mechanics live in teams_gateway_transport.py."
     },
     {
       "id": "CC-MIG-003",
-      "status": "open",
+      "status": "provider_transport_converged_semantic_capability_pending",
       "path": "implementation/runtime_service/src/jason_runtime/autonomous_completion_notification.py",
-      "problem": "Autonomous completion notifications define a second Teams send capability/provider and own raw Teams gateway transport.",
+      "problem": "Autonomous completion retains a specialized semantic Teams capability, but no longer owns duplicate raw gateway HTTP mechanics.",
       "target": "One shared Teams message implementation with caller-specific exact authority/grant policy and fixed-recipient constraints where required.",
-      "blocker": "Must preserve autonomous fixed-recipient and event-type constraints while removing duplicate transport."
+      "blocker": "Must preserve autonomous fixed-recipient and event-type constraints while removing duplicate transport.",
+      "evidence": "Autonomous completion invoker now reuses teams_gateway_transport.py while preserving fixed-recipient and event constraints."
     },
     {
       "id": "CC-MIG-004",
