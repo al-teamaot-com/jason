@@ -1,0 +1,109 @@
+import importlib.util
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[2]
+GATE_PATH = ROOT / "tools" / "release_manager_gate.py"
+RUNNER_PATH = ROOT / "tools" / "release_manager_host_runner.py"
+
+gate_spec = importlib.util.spec_from_file_location("release_manager_gate", GATE_PATH)
+gate_module = importlib.util.module_from_spec(gate_spec)
+assert gate_spec.loader is not None
+sys.modules["release_manager_gate"] = gate_module
+gate_spec.loader.exec_module(gate_module)
+
+runner_spec = importlib.util.spec_from_file_location("release_manager_host_runner", RUNNER_PATH)
+runner = importlib.util.module_from_spec(runner_spec)
+assert runner_spec.loader is not None
+sys.modules["release_manager_host_runner"] = runner
+runner_spec.loader.exec_module(runner)
+
+SHA_A = "a" * 40
+SHA_B = "b" * 40
+
+
+class ReleaseManagerHostRunnerTests(unittest.TestCase):
+    def test_release_id_is_deterministic(self):
+        self.assertEqual(runner.record_id(SHA_A), "release-" + "a" * 16)
+
+    def test_preprod_mutation_guards_disable_known_write_paths(self):
+        self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_AUTOTASK_MUTATION_ENABLED"], "false")
+        self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_AUTONOMY_WORKER_ENABLED"], "false")
+        self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED"], "false")
+        self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_AUTOTASK_PROCUREMENT_MCP_PROFILE"], "")
+
+    def test_create_record_builds_once_after_protected_checks(self):
+        with tempfile.TemporaryDirectory() as td:
+            state_root = Path(td)
+            with (
+                patch.object(runner, "live_runtime", return_value={"revision": SHA_B, "image_id": "sha256:old"}),
+                patch.object(runner, "verify_candidate_on_main"),
+                patch.object(runner, "changed_files", return_value=["docs/operations/example.md"]),
+                patch.object(runner, "required_checks", return_value=["runtime-service"]),
+                patch.object(runner, "github_checks", return_value={"passed": True, "required": ["runtime-service"], "failures": []}),
+                patch.object(runner, "build_candidate", return_value=("jason-runtime:release-test", "sha256:new")),
+            ):
+                record = runner.create_record(
+                    repo=ROOT,
+                    state_root=state_root,
+                    candidate_sha=SHA_A,
+                    rollback_sha=SHA_B,
+                    change_class="release_blocker",
+                    owner_approved=False,
+                )
+            self.assertEqual(record["state"], "release_candidate")
+            self.assertEqual(record["release_candidate"]["candidate_sha"], SHA_A)
+            self.assertEqual(record["release_candidate"]["artifact_digest"], "sha256:new")
+            self.assertTrue((state_root / "records" / f"{record['release_id']}.json").exists())
+
+    def test_create_record_rejects_required_check_failure(self):
+        with tempfile.TemporaryDirectory() as td:
+            with (
+                patch.object(runner, "live_runtime", return_value={"revision": SHA_B, "image_id": "sha256:old"}),
+                patch.object(runner, "verify_candidate_on_main"),
+                patch.object(runner, "changed_files", return_value=[]),
+                patch.object(runner, "required_checks", return_value=["runtime-service"]),
+                patch.object(runner, "github_checks", return_value={"passed": False, "required": ["runtime-service"], "failures": ["runtime-service:failure"]}),
+            ):
+                with self.assertRaisesRegex(runner.ReleaseManagerError, "required protected checks"):
+                    runner.create_record(
+                        repo=ROOT,
+                        state_root=Path(td),
+                        candidate_sha=SHA_A,
+                        rollback_sha=SHA_B,
+                        change_class="release_blocker",
+                        owner_approved=False,
+                    )
+
+    def test_promote_eligible_serializes_to_one_release(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            records = root / "records"
+            records.mkdir()
+            for index, sha in enumerate((SHA_A, "c" * 40), start=1):
+                payload = {
+                    "release_id": runner.record_id(sha),
+                    "state": "production_eligible",
+                    "created_at": f"2026-10-02T0{index}:00:00+00:00",
+                }
+                runner.atomic_json(records / f"{payload['release_id']}.json", payload)
+
+            promoted = []
+            def fake_deploy(repo, state_root, record):
+                promoted.append(record["release_id"])
+                return record
+
+            with patch.object(runner, "deploy_production", side_effect=fake_deploy):
+                self.assertTrue(runner.promote_eligible(ROOT, root))
+            self.assertEqual(len(promoted), 1)
+
+    def test_exact_sha_rejects_symbolic_ref(self):
+        with self.assertRaises(runner.ReleaseManagerError):
+            runner.exact_sha("main", "candidate_sha")
+
+
+if __name__ == "__main__":
+    unittest.main()

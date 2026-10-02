@@ -17,19 +17,29 @@
   "parallel_development_allowed": true,
   "recommendation_mode": "advisory_only",
   "preproduction": {
-    "configured": false,
+    "configured": true,
     "environment_name": "jason-preprod",
-    "automatic_deploy": false
+    "automatic_deploy": true,
+    "kind": "isolated_candidate_container",
+    "release_manager": "enabled"
   },
   "production": {
     "serialized_promotion": true,
-    "human_approval_required": true,
+    "human_approval_required": false,
     "autonomous_repair": {
       "classification_enabled": true,
       "human_approval_required_when_eligible": false,
       "automatic_execution_enabled": true,
       "policy_path": "config/autonomous-repair-release-policy.json",
       "execution_blocker": "none"
+    },
+    "protected_core_human_approval_required": true,
+    "automatic_window": {
+      "enabled": true,
+      "local_time": "02:30",
+      "timezone": "America/New_York",
+      "only_production_eligible": true,
+      "max_releases_per_window": 1
     }
   },
   "active_display_days": 3,

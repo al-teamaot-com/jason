@@ -1,0 +1,115 @@
+{
+  "schema_version": "2.0",
+  "enabled": true,
+  "mode": "production",
+  "production_transition_enabled": true,
+  "schedule": {
+    "automatic_promotion_enabled": true,
+    "daily_window_local": "02:30",
+    "timezone": "America/New_York",
+    "serialized_promotion": true,
+    "max_releases_per_window": 1
+  },
+  "preproduction": {
+    "configured": true,
+    "environment_name": "jason-preprod",
+    "kind": "isolated_candidate_container",
+    "automatic_deploy": true,
+    "require_exact_candidate_sha": true,
+    "require_identical_artifact_digest": true,
+    "share_production_writable_state": false,
+    "provider_mutations_enabled": false
+  },
+  "production": {
+    "normal_release_auto_promote_when_eligible": true,
+    "protected_core_requires_owner_approval": true,
+    "post_deploy_verification_required": true,
+    "rollback_on_verification_failure": true,
+    "deployment_script": "infrastructure/jason-runtime/production-deploy.sh"
+  },
+  "protected_core_globs": [
+    ".github/workflows/*",
+    "config/release-manager-policy.json",
+    "tools/release_manager*.py",
+    "tools/install_release_manager*.py",
+    "infrastructure/openclaw-operations/systemd/user/jason-release-manager.*",
+    "infrastructure/jason-runtime/production-deploy.sh",
+    "tools/deploy_live_container.py",
+    "implementation/orchestrator/*",
+    "implementation/kernel/*"
+  ],
+  "priority": {
+    "order": [
+      "production_incident",
+      "support",
+      "release_blocker",
+      "production_eligible",
+      "todo",
+      "cleanup"
+    ],
+    "support_first": true,
+    "max_active_support_repairs": 2,
+    "todo_may_start_when_support_capacity_available": false,
+    "todo_may_continue_when_support_capacity_full": true
+  },
+  "states": [
+    "requested",
+    "development",
+    "dev_verified",
+    "release_candidate",
+    "preproduction",
+    "preprod_verified",
+    "production_eligible",
+    "production",
+    "production_verified",
+    "closed",
+    "blocked",
+    "failed",
+    "rolled_back"
+  ],
+  "transitions": {
+    "requested": ["development", "blocked"],
+    "development": ["dev_verified", "blocked", "failed"],
+    "dev_verified": ["release_candidate", "development", "blocked"],
+    "release_candidate": ["preproduction", "development", "blocked"],
+    "preproduction": ["preprod_verified", "development", "blocked", "failed"],
+    "preprod_verified": ["production_eligible", "development", "blocked"],
+    "production_eligible": ["production", "development", "blocked"],
+    "production": ["production_verified", "rolled_back", "failed"],
+    "production_verified": ["closed", "rolled_back"],
+    "blocked": ["development", "requested"],
+    "failed": ["development", "rolled_back"],
+    "rolled_back": ["development", "closed"],
+    "closed": []
+  },
+  "required_development_evidence": [
+    "source_sha",
+    "tests_passed",
+    "required_checks_passed"
+  ],
+  "required_release_candidate_evidence": [
+    "candidate_sha",
+    "artifact_digest",
+    "immutable"
+  ],
+  "required_preproduction_evidence": [
+    "deployed_sha",
+    "artifact_digest",
+    "acceptance_passed",
+    "failure_path_tests_passed",
+    "rollback_readiness_passed",
+    "writable_state_isolated",
+    "provider_mutations_disabled"
+  ],
+  "required_production_verification_evidence": [
+    "live_sha",
+    "artifact_digest",
+    "health_passed",
+    "deployment_script_passed"
+  ],
+  "support_impact": {
+    "required_before_production_eligible": true,
+    "blocking_items_must_be_empty": true,
+    "self_support_item_may_remain_open_until_production_verification": true
+  }
+}
