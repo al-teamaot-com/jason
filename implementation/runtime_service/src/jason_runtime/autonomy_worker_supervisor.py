@@ -118,15 +118,11 @@ class TicketWorkerSupervisor:
         if heartbeat is None:
             return self._restart("heartbeat_missing")
 
-        timestamps = [
-            _parse_timestamp(heartbeat.get("last_started_at")),
-            _parse_timestamp(heartbeat.get("last_completed_at")),
-        ]
-        latest = max((item for item in timestamps if item is not None), default=None)
-        if latest is None:
-            return self._restart("heartbeat_empty")
+        completed = _parse_timestamp(heartbeat.get("last_completed_at"))
+        if completed is None:
+            return self._restart("successful_heartbeat_missing")
 
-        age = (self.now().astimezone(timezone.utc) - latest).total_seconds()
+        age = (self.now().astimezone(timezone.utc) - completed).total_seconds()
         if age > self.stale_after_seconds:
             return self._restart("heartbeat_stale")
         return True
@@ -163,26 +159,25 @@ class TicketWorkerSupervisor:
                 "ticket_worker": "heartbeat_missing",
                 "last_restart_reason": self.last_restart_reason,
             }
-        timestamps = [
-            _parse_timestamp(heartbeat.get("last_started_at")),
-            _parse_timestamp(heartbeat.get("last_completed_at")),
-        ]
-        latest = max((item for item in timestamps if item is not None), default=None)
-        if latest is None:
+        completed = _parse_timestamp(heartbeat.get("last_completed_at"))
+        if completed is None:
             return {
                 "status": "degraded",
-                "ticket_worker": "heartbeat_empty",
+                "ticket_worker": "successful_heartbeat_missing",
                 "last_restart_reason": self.last_restart_reason,
             }
         age = max(
             0.0,
-            (self.now().astimezone(timezone.utc) - latest).total_seconds(),
+            (self.now().astimezone(timezone.utc) - completed).total_seconds(),
         )
         if age > self.stale_after_seconds:
             return {
                 "status": "degraded",
                 "ticket_worker": "heartbeat_stale",
                 "heartbeat_age_seconds": int(age),
+                "last_completed_at": heartbeat.get("last_completed_at"),
+                "last_failed_at": heartbeat.get("last_failed_at"),
+                "consecutive_failures": heartbeat.get("consecutive_failures", 0),
                 "last_restart_reason": self.last_restart_reason,
             }
         return {
@@ -190,6 +185,7 @@ class TicketWorkerSupervisor:
             "ticket_worker": "healthy",
             "heartbeat_age_seconds": int(age),
             "last_completed_at": heartbeat.get("last_completed_at"),
+            "last_failed_at": heartbeat.get("last_failed_at"),
             "consecutive_failures": heartbeat.get("consecutive_failures", 0),
             "last_restart_reason": self.last_restart_reason,
         }
