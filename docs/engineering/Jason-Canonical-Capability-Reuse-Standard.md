@@ -170,7 +170,7 @@ The initial enforcement suite proves:
 Two different operational families now demonstrate the intended pattern:
 
 - approval/procurement workflows depend on provider-neutral approval contracts and shared Teams delivery/transport boundaries rather than owning Teams HTTP;
-- autonomous repair candidate discovery requests `source.repository.pull_request.search` and `source.repository.commit.read` through the governed observe path rather than owning GitHub HTTP/token handling.
+- autonomous repair candidate discovery requests `source.repository.pullrequest.search` and `source.repository.commit.read` through the governed observe path rather than owning GitHub HTTP/token handling.
 
 This is intentional evidence that canonical capability reuse is not limited to one provider or one workflow family.
 
