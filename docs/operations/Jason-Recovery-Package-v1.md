@@ -116,3 +116,25 @@ source Jason root
 → restore to clean root
 
 The encrypted package file is written with mode 0600 and contains no plaintext secret or signing-key content.
+
+## Built-in OpenBao recovery adapters
+
+The Full Recovery Export now consumes Jason's existing governed OpenBao recovery model rather than enumerating provider secret values.
+
+The governed secret adapter:
+
+- selects the newest declared OpenBao Raft snapshot;
+- requires the snapshot and checksum sidecar to be private regular files;
+- verifies the snapshot SHA-256 before inclusion;
+- places the snapshot and checksum only inside the encrypted recovery package.
+
+The governed key adapter:
+
+- requires the protected OpenBao initialization artifact to have private permissions;
+- validates the recorded Shamir recovery structure without printing any share or token;
+- packages the protected initialization artifact only inside the encrypted recovery package;
+- includes trusted-key registry/material from the canonical Jason trusted-key directory when present.
+
+The recovery CLI now exposes export-from-root for non-live roots. The command requires an X25519 recovery-recipient public key and Ed25519 signer private key, writes the resulting package atomically with mode 0600, and emits only non-secret summary metadata.
+
+The implementation still refuses export-from-root when target-root is the live filesystem root. Production export activation remains a separate exact-plan Owner-approved operation.
