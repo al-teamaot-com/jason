@@ -192,3 +192,67 @@ def test_procurement_runtime_registers_every_flow_mutation() -> None:
         assert capability in PROCUREMENT_CAPABILITIES
         assert PROVIDER_MAP[(AUTOTASK_PROCUREMENT_PROVIDER, capability)] == provider_capability
         assert PROVIDER_ENTITY[provider_capability] == entity
+
+
+def test_vendor_owner_lookup_uses_one_active_submitter_resource() -> None:
+    class Transport:
+        def __init__(self):
+            self.calls = []
+
+        def request(self, **kwargs):
+            self.calls.append(kwargs)
+            return {
+                "items": [
+                    {"id": 9001, "email": "submitter@example.invalid", "isActive": False},
+                    {"id": 9002, "email": "submitter@example.invalid", "isActive": True},
+                ]
+            }
+
+    connector = object.__new__(AutotaskProductionProcurementConnector)
+    connector._transport = Transport()
+    prepared = PreparedRequest(
+        method="POST",
+        url="https://webservices.example/ATServicesRest/V1.0/Companies",
+        headers={"ApiIntegrationCode": "redacted", "UserName": "redacted"},
+        json={"companyName": "Synthetic Vendor"},
+        timeout_seconds=30.0,
+    )
+
+    owner = connector._resolve_active_submitter_resource_id(
+        prepared=prepared,
+        email="submitter@example.invalid",
+    )
+    assert owner == 9002
+    assert len(connector._transport.calls) == 1
+    call = connector._transport.calls[0]
+    assert call["method"] == "GET"
+    assert call["url"] == "https://webservices.example/ATServicesRest/V1.0/Resources/query"
+    assert call["headers"] is prepared.headers
+    assert "submitter@example.invalid" in call["params"]["search"]
+
+
+def test_vendor_owner_lookup_rejects_ambiguous_active_submitter() -> None:
+    class Transport:
+        def request(self, **kwargs):
+            return {
+                "items": [
+                    {"id": 9001, "email": "submitter@example.invalid", "isActive": True},
+                    {"id": 9002, "email": "submitter@example.invalid", "isActive": True},
+                ]
+            }
+
+    connector = object.__new__(AutotaskProductionProcurementConnector)
+    connector._transport = Transport()
+    prepared = PreparedRequest(
+        method="POST",
+        url="https://webservices.example/ATServicesRest/V1.0/Companies",
+        headers={"ApiIntegrationCode": "redacted", "UserName": "redacted"},
+        json={"companyName": "Synthetic Vendor"},
+        timeout_seconds=30.0,
+    )
+    import pytest
+    with pytest.raises(PermissionError, match="OWNER_RESOURCE_NOT_UNIQUE"):
+        connector._resolve_active_submitter_resource_id(
+            prepared=prepared,
+            email="submitter@example.invalid",
+        )
