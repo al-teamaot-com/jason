@@ -118,6 +118,14 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             self.assertEqual(run_command.call_args.kwargs["cwd"], candidate_tree)
             remove_tree.assert_called_once_with(ROOT, candidate_tree)
 
+    def test_installer_source_contains_non_login_user_bus_binding(self):
+        installer = (ROOT / "tools" / "install_release_manager.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("XDG_RUNTIME_DIR", installer)
+        self.assertIn("DBUS_SESSION_BUS_ADDRESS", installer)
+        self.assertIn("unix:path=/run/user/{uid}/bus", installer)
+
     def test_exact_sha_rejects_symbolic_ref(self):
         with self.assertRaises(runner.ReleaseManagerError):
             runner.exact_sha("main", "candidate_sha")
