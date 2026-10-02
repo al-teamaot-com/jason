@@ -155,6 +155,14 @@ def _name(value: Any) -> str | None:
     return None
 
 
+def _scalar_text(value: Any) -> str | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (str, int, float)):
+        return str(value).strip() or None
+    return None
+
+
 def _address(value: Any) -> dict[str, str]:
     if not isinstance(value, Mapping):
         return {}
@@ -204,7 +212,11 @@ def extract_product_page(html: str) -> dict[str, Any]:
                 "sku": _name(obj.get("sku")),
                 "mpn": _name(obj.get("mpn")),
                 "brand": _name(obj.get("brand")),
-                "price": _name(offer.get("price") or offer.get("lowPrice")),
+                "price": _scalar_text(
+                    offer.get("price")
+                    if offer.get("price") is not None
+                    else offer.get("lowPrice")
+                ),
                 "currency": _name(offer.get("priceCurrency")),
                 "availability": _name(offer.get("availability")),
                 "seller": _name(offer.get("seller")),
