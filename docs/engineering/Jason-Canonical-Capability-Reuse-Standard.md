@@ -98,6 +98,18 @@ Provider-specific modules may contain:
 
 These modules remain subordinate to Central Orchestrator and do not grant authority.
 
+## 8A. Authority Is Not An Implementation Detail
+
+Canonical reuse must never be achieved by weakening approval or authority.
+
+If two callers need the same underlying operation but have different authority conditions:
+- keep one reusable operation/implementation where possible;
+- bind each caller to its exact identity, grant, target, arguments, policy, and approval requirements;
+- use caller-specific policy only for the authority distinction, not a duplicate provider transport;
+- if the current capability contract cannot represent both safely, leave the legacy caller isolated and record migration debt until the authority model is extended safely.
+
+A scheduled process needing a Teams message, for example, is not permission to remove owner approval from an interactive Teams-send capability.
+
 ## 9. Shared Runtime Rule
 
 Common workflow mechanics belong in the shared runtime:
@@ -178,4 +190,4 @@ The non-production foundation is complete when:
 - at least one real caller family is confirmed to follow the canonical pattern;
 - remaining legacy paths can be enumerated and migrated incrementally.
 
-Future work should add a generated registry view so capability inventory is derived automatically from the Kernel catalog instead of manually maintained.
+Remaining caller/provider coupling is tracked in `config/canonical-capability-migration.json`. Future work should add a generated registry view so capability inventory is derived automatically from the Kernel catalog instead of manually maintained.
