@@ -158,7 +158,8 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
     ),
     "autotask.product.vendor.create": OperationDefinition(
         method="POST",
-        path_template="/V1.0/ProductVendors",
+        path_template="/V1.0/Products/{productID}/Vendors",
+        path_arguments=("productID",),
         json_argument="payload",
     ),
     "autotask.product.vendor.update": OperationDefinition(
