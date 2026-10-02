@@ -537,10 +537,21 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
     env = os.environ.copy()
     env["JASON_RUNTIME_PRODUCTION_IMAGE"] = image
     env["JASON_SOURCE_REVISION_OVERRIDE"] = str(candidate["candidate_sha"])
-    deploy_script = repo / "infrastructure" / "jason-runtime" / "production-deploy.sh"
+    deploy_worktree = worktree(
+        repo,
+        state_root,
+        str(candidate["candidate_sha"]),
+    )
+    deploy_script = (
+        deploy_worktree / "infrastructure" / "jason-runtime" / "production-deploy.sh"
+    )
 
     try:
-        deploy_output = run([str(deploy_script)], cwd=repo, env=env)
+        deploy_output = run(
+            [str(deploy_script)],
+            cwd=deploy_worktree,
+            env=env,
+        )
         live = live_runtime()
         live_digest = image_id("jason-runtime:production")
         record["production"] = {
@@ -561,7 +572,7 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
         rollback_env["JASON_SOURCE_REVISION_OVERRIDE"] = rollback_sha
         rollback_ok = False
         try:
-            run([str(deploy_script)], cwd=repo, env=rollback_env)
+            run([str(deploy_script)], cwd=deploy_worktree, env=rollback_env)
             rollback_live = live_runtime()
             rollback_ok = rollback_live["revision"] == rollback_sha
         except Exception:
@@ -578,6 +589,8 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
         )
         save_record(state_root, record)
         raise
+    finally:
+        remove_worktree(repo, deploy_worktree)
 
 
 def promote_eligible(repo: Path, state_root: Path) -> bool:
