@@ -341,8 +341,8 @@ from .playbook_autonomy_review import (
     OwnerOnlyPlaybookAutonomyAuthority,
     PlaybookAutonomyApprovalInteractionFlow,
     PlaybookAutonomyReviewMaintenance,
-    TeamsGatewayPlaybookApprovalSender,
 )
+from .teams_approval_delivery import TeamsGatewayApprovalSender
 from autonomous_remediation.playbook_autonomy_approval import SQLitePlaybookAutonomyApprovalStore
 from autonomous_remediation.playbook_autonomy_review import PlaybookAutonomyReviewService
 from .microsoft_directory import build_microsoft_directory_runtime
@@ -2148,7 +2148,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         playbook_review_service = PlaybookAutonomyReviewService(
             registry_path=settings.autonomy_playbook_registry,
             promotion_store=playbook_promotion_store,
-            owner_identity_ids=owner_ids,
+            recipient_identity_ids=owner_ids,
             audit_path=settings.autonomy_review_audit_path,
         )
         playbook_approval_service = ApprovalRequestService(
@@ -2160,11 +2160,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             approval_service=playbook_approval_service,
             review_service=playbook_review_service,
         )
-        playbook_approval_sender = TeamsGatewayPlaybookApprovalSender(
+        playbook_approval_sender = TeamsGatewayApprovalSender(
             gateway_url=settings.teams_gateway_internal_url,
             token_file=settings.teams_proactive_token_file,
             bindings=bindings,
-            owner_identity_ids=owner_ids,
+            recipient_identity_ids=owner_ids,
         )
         playbook_review_maintenance = PlaybookAutonomyReviewMaintenance(
             enabled=True,
@@ -2202,11 +2202,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
                 frozenset(procurement_owner_ids)
             ),
         )
-        procurement_approval_sender = TeamsGatewayPlaybookApprovalSender(
+        procurement_approval_sender = TeamsGatewayApprovalSender(
             gateway_url=settings.teams_gateway_internal_url,
             token_file=settings.teams_proactive_token_file,
             bindings=bindings,
-            owner_identity_ids=procurement_owner_ids,
+            recipient_identity_ids=procurement_owner_ids,
         )
         procurement_worker = ProcurementWorkerExecutor(
             authority=identity_authority,
