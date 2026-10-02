@@ -17,6 +17,12 @@ from kernel.client_boundaries import (
 GRAPH_DEFAULT_SCOPE = (
     "https://graph.microsoft.com/.default"
 )
+EXCHANGE_DEFAULT_SCOPE = (
+    "https://outlook.office365.com/.default"
+)
+_APPROVED_APPLICATION_SCOPES = frozenset(
+    {GRAPH_DEFAULT_SCOPE, EXCHANGE_DEFAULT_SCOPE}
+)
 MICROSOFT_AUTHORITY_HOST = (
     "https://login.microsoftonline.com"
 )
@@ -211,10 +217,9 @@ class MsalCertificateTokenProvider:
                 "profile_name must be non-empty."
             )
 
-        if scope != GRAPH_DEFAULT_SCOPE:
+        if scope not in _APPROVED_APPLICATION_SCOPES:
             raise ValueError(
-                "Only Microsoft Graph .default scope "
-                "is approved."
+                "Microsoft application scope is not approved."
             )
 
         if authority_host != MICROSOFT_AUTHORITY_HOST:

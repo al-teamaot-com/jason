@@ -7,6 +7,7 @@ import pytest
 
 from connectors.microsoft_graph import (
     GRAPH_DEFAULT_SCOPE,
+    EXCHANGE_DEFAULT_SCOPE,
     MICROSOFT_AUTHORITY_HOST,
     MicrosoftBoundaryError,
     MicrosoftCertificateCredential,
@@ -665,12 +666,33 @@ def test_normalizes_formatted_thumbprint() -> None:
     assert result.certificate_thumbprint == THUMBPRINT
 
 
-def test_rejects_non_default_scope() -> None:
+def test_allows_exchange_online_default_scope() -> None:
+    record = boundary()
+    boundaries = InMemoryClientBoundaryRepository()
+    boundaries.add(record)
+    factory = FakeMsalFactory(
+        [{"access_token": "EXO-TOKEN", "token_type": "Bearer", "expires_in": 3600}]
+    )
+    provider = MsalCertificateTokenProvider(
+        boundaries=boundaries,
+        credentials=FakeCredentialSource(credential()),
+        application_factory=factory,
+        scope=EXCHANGE_DEFAULT_SCOPE,
+    )
+    result = provider.acquire_for_client(
+        client_id="client_faith",
+        correlation_id="corr_exchange",
+    )
+    assert result.scope == EXCHANGE_DEFAULT_SCOPE
+    assert factory.applications[0].scopes == [[EXCHANGE_DEFAULT_SCOPE]]
+
+
+def test_rejects_unapproved_application_scope() -> None:
     boundaries = InMemoryClientBoundaryRepository()
 
     with pytest.raises(
         ValueError,
-        match=r"Graph \.default scope",
+        match="scope is not approved",
     ):
         MsalCertificateTokenProvider(
             boundaries=boundaries,

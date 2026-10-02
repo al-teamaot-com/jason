@@ -22,7 +22,12 @@ from orchestrator.provider_read_capability_catalog import (
     MICROSOFT_GRAPH_CAPABILITIES,
     MICROSOFT_GRAPH_DIRECTORY_CAPABILITIES,
     MICROSOFT_GRAPH_MAIL_CAPABILITIES,
+    MICROSOFT_GRAPH_MAIL_INVESTIGATION_CAPABILITIES,
     MICROSOFT_GRAPH_PROVIDER,
+    MICROSOFT_EXCHANGE_CAPABILITIES,
+    MICROSOFT_EXCHANGE_PROVIDER,
+    MICROSOFT_PURVIEW_CAPABILITIES,
+    MICROSOFT_PURVIEW_PROVIDER,
     SERVICE_COMPANY_READ,
     SERVICE_CONTRACT_READ,
     SERVICE_CONTRACT_SEARCH,
@@ -74,6 +79,9 @@ PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_ATTACHMENT_CATALOG_PROFILE = (
 )
 PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_ATTACHMENT_RESOURCE_CATALOG_PROFILE = (
     "itglue-autotask-entra-procurement-mail-contract-attachment-resource-catalog-v9"
+)
+PROVIDER_READ_M365_MAIL_INVESTIGATION_CATALOG_PROFILE = (
+    "itglue-autotask-entra-procurement-mail-contract-attachment-resource-exchange-investigation-v10"
 )
 
 PROVIDER_READ_PRODUCTION_CAPABILITIES = frozenset(
@@ -158,6 +166,15 @@ _V9_EXPECTED_PROVIDER_CATALOGS = {
     AUTOTASK_PROVIDER: AUTOTASK_CAPABILITIES,
     MICROSOFT_GRAPH_PROVIDER: MICROSOFT_GRAPH_CAPABILITIES,
 }
+_V10_EXPECTED_PROVIDER_CATALOGS = {
+    **_V9_EXPECTED_PROVIDER_CATALOGS,
+    MICROSOFT_GRAPH_PROVIDER: (
+        MICROSOFT_GRAPH_CAPABILITIES
+        | MICROSOFT_GRAPH_MAIL_INVESTIGATION_CAPABILITIES
+    ),
+    MICROSOFT_EXCHANGE_PROVIDER: MICROSOFT_EXCHANGE_CAPABILITIES,
+    MICROSOFT_PURVIEW_PROVIDER: MICROSOFT_PURVIEW_CAPABILITIES,
+}
 
 # Kept for compatibility with existing tests/importers that inspect the current v3
 # governed catalog directly.
@@ -206,6 +223,12 @@ PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_ATTACHMENT_RESOURCE_CATALOG_CAPABI
     *(
         _V9_EXPECTED_PROVIDER_CATALOGS[provider_id]
         for provider_id in sorted(_V9_EXPECTED_PROVIDER_CATALOGS)
+    )
+)
+PROVIDER_READ_M365_MAIL_INVESTIGATION_CATALOG_CAPABILITIES = frozenset().union(
+    *(
+        _V10_EXPECTED_PROVIDER_CATALOGS[provider_id]
+        for provider_id in sorted(_V10_EXPECTED_PROVIDER_CATALOGS)
     )
 )
 
@@ -421,6 +444,11 @@ def apply_provider_read_activation_profile(
         )
     elif normalized == PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CONTRACT_ATTACHMENT_RESOURCE_CATALOG_PROFILE:
         expected_catalogs = _V9_EXPECTED_PROVIDER_CATALOGS
+        approved_capabilities, provider_capabilities = _governed_catalog_contract(
+            expected_catalogs
+        )
+    elif normalized == PROVIDER_READ_M365_MAIL_INVESTIGATION_CATALOG_PROFILE:
+        expected_catalogs = _V10_EXPECTED_PROVIDER_CATALOGS
         approved_capabilities, provider_capabilities = _governed_catalog_contract(
             expected_catalogs
         )

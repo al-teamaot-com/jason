@@ -1,5 +1,6 @@
 from connectors.microsoft_graph.token import (
     GRAPH_DEFAULT_SCOPE,
+    EXCHANGE_DEFAULT_SCOPE,
     MICROSOFT_AUTHORITY_HOST,
     MicrosoftApplicationToken,
     MicrosoftApplicationTokenProvider,
@@ -52,6 +53,7 @@ from connectors.microsoft_graph.platform import (
 
 __all__ = [
     "GRAPH_DEFAULT_SCOPE",
+    "EXCHANGE_DEFAULT_SCOPE",
     "MICROSOFT_AUTHORITY_HOST",
     "MicrosoftApplicationToken",
     "MicrosoftApplicationTokenProvider",

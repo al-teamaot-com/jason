@@ -13,11 +13,19 @@ from connectors.datto_rmm.connector import DattoRmmConnector
 from connectors.it_glue.capability_manifest import build_it_glue_manifest
 from connectors.it_glue.connector import ItGlueConnector
 from connectors.microsoft_graph.capability_manifest import build_microsoft_graph_manifest
+from connectors.microsoft_exchange.capability_manifest import build_microsoft_exchange_manifest
+from connectors.microsoft_exchange.connector import MicrosoftExchangeReadConnector
+from connectors.microsoft_exchange.worker_client import ExchangeReadWorkerClient, read_worker_token
 from connectors.microsoft_graph.directory_connector import MicrosoftGraphDirectoryConnector
 from connectors.microsoft_graph.mailbox_connector import MicrosoftGraphMailboxConnector
+from connectors.microsoft_graph.mail_investigation_connector import MicrosoftGraphMailInvestigationConnector
 from connectors.microsoft_graph.security_posture import MicrosoftGraphSecurityPostureReader
 from connectors.microsoft_graph.security_posture_connector import MicrosoftGraphSecurityPostureConnector
+from connectors.microsoft_purview.capability_manifest import build_microsoft_purview_manifest
+from connectors.microsoft_purview.connector import MicrosoftPurviewMailInvestigationConnector
+from connectors.microsoft_purview.exchange_audit_reader import MicrosoftPurviewExchangeAuditReader
 from kernel.capabilities import CapabilityRegistryService
+from kernel.client_boundaries import SQLiteClientBoundaryRepository, SQLiteClientBoundaryStore
 from kernel.execution_providers import ExecutionProviderRegistryService
 from orchestrator.autotask_information_authorizer import (
     AutotaskImpersonationInformationAuthorizer,
@@ -28,6 +36,9 @@ from orchestrator.integration_broker import IntegrationBroker
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.microsoft_graph_information_authorizer import (
     MicrosoftGraphInformationAuthorizer,
+)
+from orchestrator.microsoft_mail_investigation_information_authorizer import (
+    MicrosoftMailInvestigationInformationAuthorizer,
 )
 from orchestrator.provider_read_argument_adapter import GovernedProviderReadConnectorInvoker
 from orchestrator.provider_read_information_authorizer import (
@@ -63,10 +74,30 @@ from orchestrator.provider_read_capability_catalog import (
     COMMUNICATION_MAIL_MESSAGE_SEARCH,
     COMMUNICATION_MAIL_MESSAGE_READ,
     COMMUNICATION_MAIL_ATTACHMENT_SEARCH,
+    COMMUNICATION_MAIL_INVESTIGATION_MESSAGE_SEARCH,
+    COMMUNICATION_MAIL_INVESTIGATION_MESSAGE_READ,
+    COMMUNICATION_MAIL_INVESTIGATION_FOLDER_SEARCH,
+    COMMUNICATION_MAIL_INVESTIGATION_FOLDER_READ,
     IT_GLUE_CAPABILITIES,
     IT_GLUE_PROVIDER,
     MICROSOFT_GRAPH_CAPABILITIES,
+    MICROSOFT_GRAPH_MAIL_INVESTIGATION_CAPABILITIES,
     MICROSOFT_GRAPH_PROVIDER,
+    MICROSOFT_EXCHANGE_CAPABILITIES,
+    MICROSOFT_EXCHANGE_PROVIDER,
+    COMMUNICATION_MAIL_TRACE_SEARCH,
+    COMMUNICATION_MAIL_TRACE_DETAIL,
+    COMMUNICATION_MAILBOX_FORWARDING_READ,
+    COMMUNICATION_MAILBOX_INBOX_RULES_READ,
+    COMMUNICATION_MAILBOX_FULL_ACCESS_READ,
+    COMMUNICATION_MAILBOX_SEND_AS_READ,
+    COMMUNICATION_MAILBOX_SEND_ON_BEHALF_READ,
+    COMMUNICATION_MAILBOX_TRANSPORT_RULES_READ,
+    COMMUNICATION_MAILBOX_MOBILE_DEVICES_READ,
+    COMMUNICATION_MAILBOX_RETENTION_AUDIT_READ,
+    COMMUNICATION_MAILBOX_AUDIT_SEARCH,
+    MICROSOFT_PURVIEW_CAPABILITIES,
+    MICROSOFT_PURVIEW_PROVIDER,
     SERVICE_COMPANY_READ,
     SERVICE_COMPANY_SEARCH,
     SERVICE_CONFIGURATION_READ,
@@ -172,10 +203,25 @@ _PROVIDER_CAPABILITY_MAP = {
     (MICROSOFT_GRAPH_PROVIDER, COMMUNICATION_MAIL_MESSAGE_SEARCH): "microsoft_graph.mail.message.search",
     (MICROSOFT_GRAPH_PROVIDER, COMMUNICATION_MAIL_MESSAGE_READ): "microsoft_graph.mail.message.read",
     (MICROSOFT_GRAPH_PROVIDER, COMMUNICATION_MAIL_ATTACHMENT_SEARCH): "microsoft_graph.mail.attachment.search",
+    (MICROSOFT_GRAPH_PROVIDER, COMMUNICATION_MAIL_INVESTIGATION_MESSAGE_SEARCH): "microsoft_graph.mail_investigation.message.search",
+    (MICROSOFT_GRAPH_PROVIDER, COMMUNICATION_MAIL_INVESTIGATION_MESSAGE_READ): "microsoft_graph.mail_investigation.message.read",
+    (MICROSOFT_GRAPH_PROVIDER, COMMUNICATION_MAIL_INVESTIGATION_FOLDER_SEARCH): "microsoft_graph.mail_investigation.folder.search",
+    (MICROSOFT_GRAPH_PROVIDER, COMMUNICATION_MAIL_INVESTIGATION_FOLDER_READ): "microsoft_graph.mail_investigation.folder.read",
     (MICROSOFT_GRAPH_PROVIDER, IDENTITY_AUTHENTICATION_METHODS_READ): "microsoft_graph.authentication_methods.list",
     (MICROSOFT_GRAPH_PROVIDER, IDENTITY_CONDITIONAL_ACCESS_SEARCH): "microsoft_graph.conditional_access.list",
     (MICROSOFT_GRAPH_PROVIDER, IDENTITY_DIRECTORY_ROLE_SEARCH): "microsoft_graph.directory_roles.list",
     (MICROSOFT_GRAPH_PROVIDER, IDENTITY_DIRECTORY_ROLE_MEMBERS_SEARCH): "microsoft_graph.directory_role_members.list",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAIL_TRACE_SEARCH): "microsoft_exchange.message_trace.search",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAIL_TRACE_DETAIL): "microsoft_exchange.message_trace.detail",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAILBOX_FORWARDING_READ): "microsoft_exchange.mailbox.forwarding.read",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAILBOX_INBOX_RULES_READ): "microsoft_exchange.mailbox.inbox_rules.read_hidden",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAILBOX_FULL_ACCESS_READ): "microsoft_exchange.mailbox.full_access.read",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAILBOX_SEND_AS_READ): "microsoft_exchange.mailbox.send_as.read",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAILBOX_SEND_ON_BEHALF_READ): "microsoft_exchange.mailbox.send_on_behalf.read",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAILBOX_TRANSPORT_RULES_READ): "microsoft_exchange.mailbox.transport_rules.read",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAILBOX_MOBILE_DEVICES_READ): "microsoft_exchange.mailbox.mobile_devices.read",
+    (MICROSOFT_EXCHANGE_PROVIDER, COMMUNICATION_MAILBOX_RETENTION_AUDIT_READ): "microsoft_exchange.mailbox.retention_audit_config.read",
+    (MICROSOFT_PURVIEW_PROVIDER, COMMUNICATION_MAILBOX_AUDIT_SEARCH): "microsoft_purview.mailbox.audit.search",
 }
 
 _DATTO_AUTOMATION_CAPABILITIES = frozenset(
@@ -209,6 +255,11 @@ _RUNTIME_MICROSOFT_SECRET_ENV = "JASON_MICROSOFT_OPENBAO_SECRET_ID_PATH"
 _RUNTIME_MICROSOFT_MAIL_ROLE_ENV = "JASON_MICROSOFT_MAIL_OPENBAO_ROLE_ID_PATH"
 _RUNTIME_MICROSOFT_MAIL_SECRET_ENV = "JASON_MICROSOFT_MAIL_OPENBAO_SECRET_ID_PATH"
 _RUNTIME_MICROSOFT_MAILBOXES_ENV = "JASON_MICROSOFT_MAIL_APPROVED_MAILBOXES"
+_RUNTIME_MICROSOFT_MAIL_INVESTIGATION_ENABLED_ENV = "JASON_MICROSOFT_MAIL_INVESTIGATION_ENABLED"
+_RUNTIME_MICROSOFT_MAIL_INVESTIGATION_ROLE_ENV = "JASON_MICROSOFT_MAIL_INVESTIGATION_OPENBAO_ROLE_ID_PATH"
+_RUNTIME_MICROSOFT_MAIL_INVESTIGATION_SECRET_ENV = "JASON_MICROSOFT_MAIL_INVESTIGATION_OPENBAO_SECRET_ID_PATH"
+_RUNTIME_MICROSOFT_EXCHANGE_WORKER_ENABLED_ENV = "JASON_MICROSOFT_EXCHANGE_READ_ENABLED"
+_RUNTIME_MICROSOFT_EXCHANGE_WORKER_TOKEN_FILE_ENV = "JASON_MICROSOFT_EXCHANGE_WORKER_TOKEN_FILE"
 
 
 def register_provider_read_runtime_foundation(
@@ -228,6 +279,8 @@ def register_provider_read_runtime_foundation(
     integration_broker.register(build_it_glue_manifest())
     integration_broker.register(build_autotask_manifest())
     integration_broker.register(build_microsoft_graph_manifest())
+    integration_broker.register(build_microsoft_exchange_manifest())
+    integration_broker.register(build_microsoft_purview_manifest())
     apply_provider_read_activation_from_env(
         capabilities=capabilities,
         providers=providers,
@@ -343,6 +396,75 @@ def runtime_microsoft_mail_from_env(*, transport: HttpTransport):
     )
 
 
+def runtime_microsoft_mail_investigation_from_env(*, transport: HttpTransport):
+    enabled = os.getenv(
+        _RUNTIME_MICROSOFT_MAIL_INVESTIGATION_ENABLED_ENV, ""
+    ).strip().casefold() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return None
+
+    from .microsoft_mail_investigation import (
+        build_microsoft_mail_investigation_runtime,
+    )
+
+    boundary_db = Path(
+        os.getenv(
+            _RUNTIME_MICROSOFT_BOUNDARY_ENV,
+            "/var/lib/jason/authority/client-boundaries.sqlite3",
+        )
+    )
+    openbao_url = os.getenv("JASON_OPENBAO_URL", "http://openbao:8200").strip()
+    role_id_path = Path(
+        os.getenv(
+            _RUNTIME_MICROSOFT_MAIL_INVESTIGATION_ROLE_ENV,
+            "/run/jason-secrets/openbao/microsoft-mail/role_id",
+        )
+    )
+    secret_id_path = Path(
+        os.getenv(
+            _RUNTIME_MICROSOFT_MAIL_INVESTIGATION_SECRET_ENV,
+            "/run/jason-secrets/openbao/microsoft-mail/secret_id",
+        )
+    )
+    return build_microsoft_mail_investigation_runtime(
+        boundary_db=boundary_db,
+        openbao_url=openbao_url,
+        role_id_path=role_id_path,
+        secret_id_path=secret_id_path,
+        transport=transport,
+    )
+
+
+def runtime_microsoft_exchange_from_env(
+    *,
+    transport: HttpTransport,
+    audit: AuditSink,
+    mail_investigation_runtime,
+):
+    enabled = os.getenv(
+        _RUNTIME_MICROSOFT_EXCHANGE_WORKER_ENABLED_ENV, ""
+    ).strip().casefold() in {"1", "true", "yes", "on"}
+    if not enabled or mail_investigation_runtime is None:
+        return None
+
+    token_path = Path(
+        os.getenv(
+            _RUNTIME_MICROSOFT_EXCHANGE_WORKER_TOKEN_FILE_ENV,
+            "/run/jason-secrets/microsoft-exchange/worker-token",
+        )
+    )
+    worker = ExchangeReadWorkerClient(
+        transport=transport,
+        worker_token=read_worker_token(token_path),
+    )
+    return MicrosoftExchangeReadConnector(
+        worker=worker,
+        exchange_tokens=mail_investigation_runtime.exchange_tokens,
+        boundaries=mail_investigation_runtime.boundaries,
+        audit=audit,
+    )
+
+
 def runtime_approved_mailboxes_from_env() -> frozenset[str]:
     raw = os.getenv(_RUNTIME_MICROSOFT_MAILBOXES_ENV, "")
     return frozenset(
@@ -412,6 +534,9 @@ def build_provider_read_invoker(
         )
 
     raw_microsoft_bindings = runtime_principal_bindings_from_env()
+    mail_investigation_runtime = runtime_microsoft_mail_investigation_from_env(
+        transport=transport
+    )
     effective_bindings = (
         bindings
         if bindings is not None
@@ -447,20 +572,64 @@ def build_provider_read_invoker(
             approved_mailboxes=runtime_approved_mailboxes_from_env(),
             audit=audit,
         )
+        mail_investigation_connector = (
+            MicrosoftGraphMailInvestigationConnector(
+                reader=mail_investigation_runtime.reader,
+                boundaries=mail_investigation_runtime.boundaries,
+                audit=audit,
+            )
+            if mail_investigation_runtime is not None
+            else None
+        )
         class _MicrosoftCompositeConnector:
             provider_name = MICROSOFT_GRAPH_PROVIDER
             capabilities = (
                 directory_connector.capabilities
                 | posture_connector.capabilities
                 | mailbox_connector.capabilities
+                | (
+                    mail_investigation_connector.capabilities
+                    if mail_investigation_connector is not None
+                    else frozenset()
+                )
             )
             def execute(self, request):
+                if (
+                    mail_investigation_connector is not None
+                    and request.context.capability
+                    in mail_investigation_connector.capabilities
+                ):
+                    return mail_investigation_connector.execute(request)
                 if request.context.capability in mailbox_connector.capabilities:
                     return mailbox_connector.execute(request)
                 if request.context.capability in posture_connector.capabilities:
                     return posture_connector.execute(request)
                 return directory_connector.execute(request)
         connectors[MICROSOFT_GRAPH_PROVIDER] = _MicrosoftCompositeConnector()
+
+    microsoft_exchange = runtime_microsoft_exchange_from_env(
+        transport=transport,
+        audit=audit,
+        mail_investigation_runtime=mail_investigation_runtime,
+    )
+    if microsoft_exchange is not None:
+        connectors[MICROSOFT_EXCHANGE_PROVIDER] = microsoft_exchange
+
+    microsoft_purview = None
+    if (
+        raw_microsoft_bindings is not None
+        and "mail_investigation_runtime" in locals()
+        and mail_investigation_runtime is not None
+    ):
+        microsoft_purview = MicrosoftPurviewMailInvestigationConnector(
+            reader=MicrosoftPurviewExchangeAuditReader(
+                tokens=mail_investigation_runtime.tokens,
+                transport=transport,
+            ),
+            boundaries=mail_investigation_runtime.boundaries,
+            audit=audit,
+        )
+        connectors[MICROSOFT_PURVIEW_PROVIDER] = microsoft_purview
 
     delegate = GovernedConnectorCapabilityInvoker(
         connectors=connectors,
@@ -475,8 +644,12 @@ def build_provider_read_invoker(
         delegate=source_authorized,
         bindings=effective_bindings,
     )
-    governed_provider_reads: CapabilityInvoker = MicrosoftGraphInformationAuthorizer(
+    graph_authorized: CapabilityInvoker = MicrosoftGraphInformationAuthorizer(
         delegate=autotask_authorized,
+        bindings=effective_bindings,
+    )
+    governed_provider_reads: CapabilityInvoker = MicrosoftMailInvestigationInformationAuthorizer(
+        delegate=graph_authorized,
         bindings=effective_bindings,
     )
 
@@ -485,6 +658,18 @@ def build_provider_read_invoker(
         | AUTOTASK_CAPABILITIES
         | MICROSOFT_GRAPH_CAPABILITIES
     )
+    if (
+        raw_microsoft_bindings is not None
+        and "mail_investigation_connector" in locals()
+        and mail_investigation_connector is not None
+    ):
+        standard_capabilities = (
+            standard_capabilities | MICROSOFT_GRAPH_MAIL_INVESTIGATION_CAPABILITIES
+        )
+    if microsoft_exchange is not None:
+        standard_capabilities = standard_capabilities | MICROSOFT_EXCHANGE_CAPABILITIES
+    if microsoft_purview is not None:
+        standard_capabilities = standard_capabilities | MICROSOFT_PURVIEW_CAPABILITIES
     routes: dict[str, CapabilityInvoker] = {
         capability: governed_provider_reads
         for capability in standard_capabilities
@@ -526,6 +711,9 @@ def register_provider_read_invokers(
         IT_GLUE_CAPABILITIES
         | AUTOTASK_CAPABILITIES
         | MICROSOFT_GRAPH_CAPABILITIES
+        | MICROSOFT_GRAPH_MAIL_INVESTIGATION_CAPABILITIES
+        | MICROSOFT_EXCHANGE_CAPABILITIES
+        | MICROSOFT_PURVIEW_CAPABILITIES
     )
 
     if isinstance(invoker, CanonicalCapabilityRoutingInvoker):

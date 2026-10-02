@@ -69,7 +69,8 @@ class MicrosoftGraphMailboxReader:
             "$top": maximum,
             "$select": (
                 "id,subject,from,toRecipients,receivedDateTime,sentDateTime,"
-                "hasAttachments,internetMessageId,conversationId"
+                "hasAttachments,internetMessageId,conversationId,parentFolderId,"
+                "isRead,importance,categories"
             ),
             "$orderby": "receivedDateTime desc",
         }
@@ -102,6 +103,118 @@ class MicrosoftGraphMailboxReader:
             "mailbox": mailbox_address.casefold(),
             "items": items,
             "count": len(items),
+        }
+
+    def search_folder_messages(
+        self,
+        *,
+        microsoft_tenant_id: str,
+        mailbox: str,
+        folder: str,
+        maximum_records: int = 50,
+        sender: str | None = None,
+        received_after: str | None = None,
+        received_before: str | None = None,
+    ) -> Mapping[str, Any]:
+        tenant = microsoft_tenant_id.strip()
+        mailbox_address = mailbox.strip()
+        folder_name = folder.strip().casefold()
+        allowed_folders = frozenset(
+            {"inbox", "deleteditems", "junkemail", "archive", "sentitems", "drafts"}
+        )
+        if not tenant or not mailbox_address or "@" not in mailbox_address:
+            raise ValueError("tenant and exact mailbox address are required")
+        if folder_name not in allowed_folders:
+            raise ValueError("mail folder is not allowlisted")
+        maximum = int(maximum_records)
+        if not 1 <= maximum <= 50:
+            raise ValueError("page_size must be between 1 and 50")
+
+        filters: list[str] = []
+        if sender:
+            sender_value = sender.strip()
+            if not sender_value or "@" not in sender_value:
+                raise ValueError("sender must be a valid exact email address")
+            filters.append(
+                "from/emailAddress/address eq " + _odata_string(sender_value)
+            )
+        if received_after:
+            filters.append(f"receivedDateTime ge {received_after.strip()}")
+        if received_before:
+            filters.append(f"receivedDateTime le {received_before.strip()}")
+
+        params: dict[str, Any] = {
+            "$top": maximum,
+            "$select": (
+                "id,subject,from,toRecipients,receivedDateTime,sentDateTime,"
+                "hasAttachments,internetMessageId,conversationId,parentFolderId,"
+                "isRead,importance,categories"
+            ),
+            "$orderby": "receivedDateTime desc",
+        }
+        if filters:
+            params["$filter"] = " and ".join(filters)
+
+        response = self._get(
+            tenant_id=tenant,
+            path=(
+                f"/users/{quote(mailbox_address, safe='')}/mailFolders/"
+                f"{quote(folder_name, safe='')}/messages"
+            ),
+            params=params,
+        )
+        values = response.get("value")
+        if not isinstance(values, list):
+            raise ConnectorTransportError(
+                "Microsoft folder message search returned an unexpected shape"
+            )
+        items = [
+            self._project_message(item, include_body=False)
+            for item in values[:maximum]
+            if isinstance(item, Mapping)
+        ]
+        if len(items) != min(len(values), maximum):
+            raise ConnectorTransportError(
+                "Microsoft folder message search returned an invalid record"
+            )
+        return {
+            "mailbox": mailbox_address.casefold(),
+            "folder": folder_name,
+            "items": items,
+            "count": len(items),
+        }
+
+    def read_folder(
+        self,
+        *,
+        microsoft_tenant_id: str,
+        mailbox: str,
+        folder_id: str,
+    ) -> Mapping[str, Any]:
+        tenant = microsoft_tenant_id.strip()
+        mailbox_address = mailbox.strip()
+        durable_folder_id = folder_id.strip()
+        if not tenant or not mailbox_address or "@" not in mailbox_address:
+            raise ValueError("tenant and exact mailbox address are required")
+        if not durable_folder_id:
+            raise ValueError("folder_id is required")
+        response = self._get(
+            tenant_id=tenant,
+            path=(
+                f"/users/{quote(mailbox_address, safe='')}/mailFolders/"
+                f"{quote(durable_folder_id, safe='')}"
+            ),
+            params={"$select": "id,displayName,parentFolderId,totalItemCount,unreadItemCount"},
+        )
+        return {
+            "mailbox": mailbox_address.casefold(),
+            "folder": {
+                "id": response.get("id"),
+                "display_name": response.get("displayName"),
+                "parent_folder_id": response.get("parentFolderId"),
+                "total_item_count": response.get("totalItemCount"),
+                "unread_item_count": response.get("unreadItemCount"),
+            },
         }
 
     def read_message(
@@ -252,6 +365,10 @@ class MicrosoftGraphMailboxReader:
             "has_attachments": bool(item.get("hasAttachments")),
             "internet_message_id": item.get("internetMessageId"),
             "conversation_id": item.get("conversationId"),
+            "parent_folder_id": item.get("parentFolderId"),
+            "is_read": item.get("isRead"),
+            "importance": item.get("importance"),
+            "categories": list(item.get("categories") or []),
         }
         if include_body:
             body = item.get("body")
