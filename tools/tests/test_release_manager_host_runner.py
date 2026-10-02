@@ -100,6 +100,32 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 self.assertTrue(runner.promote_eligible(ROOT, root))
             self.assertEqual(len(promoted), 1)
 
+    def test_production_preflight_uses_exact_candidate_worktree(self):
+        with tempfile.TemporaryDirectory() as td:
+            state_root = Path(td)
+            candidate_tree = state_root / "candidate-tree"
+            script = candidate_tree / "infrastructure" / "jason-runtime" / "production-deploy.sh"
+            script.parent.mkdir(parents=True)
+            script.write_text("#!/bin/sh\n", encoding="utf-8")
+            with (
+                patch.object(runner, "worktree", return_value=candidate_tree) as make_tree,
+                patch.object(runner, "remove_worktree") as remove_tree,
+                patch.object(runner, "run", return_value="PREFLIGHT=PASS") as run_command,
+            ):
+                runner.production_preflight(ROOT, state_root, "image:test", SHA_A)
+            make_tree.assert_called_once_with(ROOT, state_root, SHA_A)
+            self.assertEqual(run_command.call_args.args[0][0], str(script))
+            self.assertEqual(run_command.call_args.kwargs["cwd"], candidate_tree)
+            remove_tree.assert_called_once_with(ROOT, candidate_tree)
+
+    def test_installer_source_contains_non_login_user_bus_binding(self):
+        installer = (ROOT / "tools" / "install_release_manager.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("XDG_RUNTIME_DIR", installer)
+        self.assertIn("DBUS_SESSION_BUS_ADDRESS", installer)
+        self.assertIn("unix:path=/run/user/{uid}/bus", installer)
+
     def test_exact_sha_rejects_symbolic_ref(self):
         with self.assertRaises(runner.ReleaseManagerError):
             runner.exact_sha("main", "candidate_sha")

@@ -373,15 +373,32 @@ def verify_preprod_env(name: str, candidate_sha: str) -> None:
             raise ReleaseManagerError(f"pre-production mutation guard mismatch: {key}")
 
 
-def production_preflight(repo: Path, image: str, candidate_sha: str) -> None:
-    env = os.environ.copy()
-    env["JASON_RUNTIME_PRODUCTION_IMAGE"] = image
-    env["JASON_SOURCE_REVISION_OVERRIDE"] = candidate_sha
-    run(
-        [str(repo / "infrastructure" / "jason-runtime" / "production-deploy.sh"), "--preflight"],
-        cwd=repo,
-        env=env,
-    )
+def production_preflight(
+    repo: Path,
+    state_root: Path,
+    image: str,
+    candidate_sha: str,
+) -> None:
+    candidate_tree = worktree(repo, state_root, candidate_sha)
+    try:
+        env = os.environ.copy()
+        env["JASON_RUNTIME_PRODUCTION_IMAGE"] = image
+        env["JASON_SOURCE_REVISION_OVERRIDE"] = candidate_sha
+        run(
+            [
+                str(
+                    candidate_tree
+                    / "infrastructure"
+                    / "jason-runtime"
+                    / "production-deploy.sh"
+                ),
+                "--preflight",
+            ],
+            cwd=candidate_tree,
+            env=env,
+        )
+    finally:
+        remove_worktree(repo, candidate_tree)
 
 
 def gate_transition(repo: Path, record: dict[str, Any], target: str) -> None:
@@ -498,7 +515,12 @@ def run_preproduction(repo: Path, state_root: Path, record: dict[str, Any]) -> d
         run(["docker", "start", name])
         wait_health(name)
         verify_preprod_env(name, str(candidate["candidate_sha"]))
-        production_preflight(repo, image, str(candidate["candidate_sha"]))
+        production_preflight(
+            repo,
+            state_root,
+            image,
+            str(candidate["candidate_sha"]),
+        )
         rollback_image = image_id("jason-runtime:rollback-current")
         if not rollback_image:
             raise ReleaseManagerError("rollback-current image alias is unavailable")
@@ -537,10 +559,21 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
     env = os.environ.copy()
     env["JASON_RUNTIME_PRODUCTION_IMAGE"] = image
     env["JASON_SOURCE_REVISION_OVERRIDE"] = str(candidate["candidate_sha"])
-    deploy_script = repo / "infrastructure" / "jason-runtime" / "production-deploy.sh"
+    deploy_worktree = worktree(
+        repo,
+        state_root,
+        str(candidate["candidate_sha"]),
+    )
+    deploy_script = (
+        deploy_worktree / "infrastructure" / "jason-runtime" / "production-deploy.sh"
+    )
 
     try:
-        deploy_output = run([str(deploy_script)], cwd=repo, env=env)
+        deploy_output = run(
+            [str(deploy_script)],
+            cwd=deploy_worktree,
+            env=env,
+        )
         live = live_runtime()
         live_digest = image_id("jason-runtime:production")
         record["production"] = {
@@ -561,7 +594,7 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
         rollback_env["JASON_SOURCE_REVISION_OVERRIDE"] = rollback_sha
         rollback_ok = False
         try:
-            run([str(deploy_script)], cwd=repo, env=rollback_env)
+            run([str(deploy_script)], cwd=deploy_worktree, env=rollback_env)
             rollback_live = live_runtime()
             rollback_ok = rollback_live["revision"] == rollback_sha
         except Exception:
@@ -578,6 +611,8 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
         )
         save_record(state_root, record)
         raise
+    finally:
+        remove_worktree(repo, deploy_worktree)
 
 
 def promote_eligible(repo: Path, state_root: Path) -> bool:
