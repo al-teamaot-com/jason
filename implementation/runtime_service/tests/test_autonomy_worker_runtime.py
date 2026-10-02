@@ -595,8 +595,8 @@ def test_orphaned_waiting_device_completed_ticket_retires_local_wait(tmp_path: P
     store.close()
 
 
-def test_orphaned_waiting_device_read_failure_does_not_abort_scan_with_append_only_audit(tmp_path: Path):
-    # Regression for production issue #787: append-only audit sinks must preserve scan continuity.
+def test_orphaned_waiting_device_read_failure_does_not_abort_scan_with_canonical_audit(tmp_path: Path):
+    # Regression for production issues #787/#790: audit diagnostics must use the canonical envelope.
     class EmptyQueueSource:
         def reconcile_candidates(self):
             return ()
@@ -607,14 +607,23 @@ def test_orphaned_waiting_device_read_failure_does_not_abort_scan_with_append_on
                 raise PermissionError("INFORMATION_RELEASE_DENIED")
             return super().execute(capability, arguments)
 
-    class AppendOnlyAudit:
+    class CanonicalAudit:
         def __init__(self):
             self.events = []
 
         def append(self, event_type, payload):
+            for key in (
+                "execution_id",
+                "correlation_id",
+                "organization_id",
+                "principal_id",
+                "capability_name",
+                "stage",
+            ):
+                assert payload[key]
             self.events.append((event_type, dict(payload)))
 
-    audit = AppendOnlyAudit()
+    audit = CanonicalAudit()
     store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
     store.put(OperationalWork(
         ticket_id=140933,

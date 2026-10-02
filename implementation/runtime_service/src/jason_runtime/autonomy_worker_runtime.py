@@ -856,6 +856,25 @@ class OperationalAutonomyMaintenance:
         del reason
         self._next_due = 0.0
 
+
+    def _audit_diagnostic(self, event_type: str, payload: Mapping[str, Any]) -> None:
+        """Emit one canonical worker diagnostic event without affecting ticket flow."""
+        if self.audit is None:
+            return
+        event_id = f"autonomy-worker-{uuid4().hex}"
+        self.audit.append(
+            event_type,
+            {
+                "execution_id": event_id,
+                "correlation_id": event_id,
+                "organization_id": "aot",
+                "principal_id": "jason-autonomy-worker",
+                "capability_name": "autonomy.ticket.worker.scan",
+                "stage": "completed",
+                **dict(payload),
+            },
+        )
+
     def _reconcile_orphaned_waiting_device_rows(
         self,
         candidates_by_id: Mapping[int, Any],
@@ -904,7 +923,7 @@ class OperationalAutonomyMaintenance:
                 )
             except Exception as exc:
                 if self.audit is not None:
-                    self.audit.append(
+                    self._audit_diagnostic(
                         "autonomy.waiting_device_reverse_reconcile.failed",
                         {
                             "ticket_id": work.ticket_id,
@@ -1405,7 +1424,7 @@ class OperationalAutonomyMaintenance:
                     self._augment_offline_ticket_context(item)
                 except Exception as exc:
                     if self.audit is not None:
-                        self.audit.append(
+                        self._audit_diagnostic(
                             "autonomy.offline_ticket_augmentation.failed",
                             {
                                 "ticket_id": int(item.resource_id),
@@ -1556,7 +1575,7 @@ class OperationalAutonomyMaintenance:
                         self._synchronize_blocked_ticket_lifecycle(existing, item)
                     except Exception as exc:
                         if self.audit is not None:
-                            self.audit.append(
+                            self._audit_diagnostic(
                                 "autonomy.blocked_ticket_lifecycle_sync.failed",
                                 {
                                     "ticket_id": ticket_id,
@@ -6612,7 +6631,7 @@ class OperationalAutonomyMaintenance:
             self._synchronize_blocked_ticket_lifecycle(work, candidate)
         except Exception as exc:
             if self.audit is not None:
-                self.audit.append(
+                self._audit_diagnostic(
                     "autonomy.blocked_ticket_lifecycle_sync.failed",
                     {
                         "ticket_id": ticket_id,
