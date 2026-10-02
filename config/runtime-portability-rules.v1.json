@@ -13,7 +13,8 @@
     "tools/pr_integration_source_reconciler.py",
     "tools/autonomous_repair_host_runner.py",
     "tools/documentation_source_reconciler.py",
-    "tools/reconcile_production_host_services.sh"
+    "tools/reconcile_production_host_services.sh",
+    "implementation/mcp_service/src/jason_mcp/server.py"
   ],
   "rules": [
     {
@@ -51,6 +52,24 @@
       "severity": "blocker",
       "pattern": "al-teamaot-com/jason",
       "description": "Deployable engineering asset assumes the AOT GitHub repository."
+    },
+    {
+      "id": "aot-domain-literal",
+      "severity": "blocker",
+      "pattern": "(?:teamaot|teamaom)\\\\.com",
+      "description": "Generic deployable source embeds an AOT domain literal."
+    },
+    {
+      "id": "aot-entra-tenant-id",
+      "severity": "blocker",
+      "pattern": "f7054323-d52b-4863-8c2f-1898f0b6077c",
+      "description": "Generic deployable source embeds the AOT Entra tenant ID."
+    },
+    {
+      "id": "aot-entra-client-id",
+      "severity": "blocker",
+      "pattern": "9b9996e9-5c34-48b7-948c-f44f89352f89",
+      "description": "Generic deployable source embeds the AOT MCP Entra client ID."
     }
   ]
 }

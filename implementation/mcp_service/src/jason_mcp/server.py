@@ -129,6 +129,10 @@ from jason_mcp.json_playbook_admin import (
     validate_payload as validate_json_playbook_payload,
 )
 from autonomous_remediation.playbook_document import PlaybookValidationError
+from jason_mcp.deployment_config import (
+    load_mcp_deployment_configuration,
+    validate_mcp_deployment_configuration as _validate_mcp_deployment_configuration,
+)
 from jason_runtime.datto_component_approval_registry import (
     approval_owner_identities,
     approve_component as persist_component_approval,
@@ -138,30 +142,13 @@ from jason_runtime.datto_component_approval_registry import (
 )
 
 
-JASON_ENTRA_TENANT_ID = os.environ.get(
-    "JASON_MCP_ENTRA_TENANT_ID",
-    "f7054323-d52b-4863-8c2f-1898f0b6077c",
-).strip()
+_MCP_DEPLOYMENT_CONFIG = load_mcp_deployment_configuration()
 
-JASON_ENTRA_CLIENT_ID = os.environ.get(
-    "JASON_MCP_ENTRA_CLIENT_ID",
-    "9b9996e9-5c34-48b7-948c-f44f89352f89",
-).strip()
-
-JASON_REQUIRED_SCOPE = os.environ.get(
-    "JASON_MCP_REQUIRED_SCOPE",
-    "Jason.Read",
-).strip()
-
-JASON_RESOURCE_URL = os.environ.get(
-    "JASON_MCP_RESOURCE_URL",
-    "http://127.0.0.1:8000/mcp",
-).strip()
-
-JASON_OAUTH_REQUEST_SCOPE = os.environ.get(
-    "JASON_MCP_OAUTH_REQUEST_SCOPE",
-    JASON_RESOURCE_URL.rstrip("/") + "/" + JASON_REQUIRED_SCOPE,
-).strip()
+JASON_ENTRA_TENANT_ID = _MCP_DEPLOYMENT_CONFIG.tenant_id
+JASON_ENTRA_CLIENT_ID = _MCP_DEPLOYMENT_CONFIG.client_id
+JASON_REQUIRED_SCOPE = _MCP_DEPLOYMENT_CONFIG.required_scope
+JASON_RESOURCE_URL = _MCP_DEPLOYMENT_CONFIG.resource_url
+JASON_OAUTH_REQUEST_SCOPE = _MCP_DEPLOYMENT_CONFIG.oauth_request_scope
 
 JASON_DNSFILTER_MCP_OAUTH_DB = Path(
     os.environ.get(
@@ -170,21 +157,8 @@ JASON_DNSFILTER_MCP_OAUTH_DB = Path(
     )
 )
 
-JASON_AUTOENROLL_DOMAINS = frozenset(
-    item.strip().casefold()
-    for item in os.environ.get(
-        "JASON_MCP_AUTOENROLL_DOMAINS",
-        "teamaot.com,teamaom.com",
-    ).split(",")
-    if item.strip()
-)
-
-# OAuth discovery facade used by MCP clients.  The actual authorization
-# and token endpoints remain Microsoft Entra.
-JASON_OAUTH_ISSUER_URL = os.environ.get(
-    "JASON_MCP_OAUTH_ISSUER_URL",
-    "https://mcp-jason.teamaot.com/",
-).strip()
+JASON_AUTOENROLL_DOMAINS = _MCP_DEPLOYMENT_CONFIG.autoenroll_domains
+JASON_OAUTH_ISSUER_URL = _MCP_DEPLOYMENT_CONFIG.oauth_issuer_url
 
 JASON_ENTRA_OIDC_CONFIGURATION_URL = (
     "https://login.microsoftonline.com/"
@@ -7029,16 +7003,8 @@ async def entra_oidc_configuration(_request):
 
 transport_security = TransportSecuritySettings(
     enable_dns_rebinding_protection=True,
-    allowed_hosts=[
-        "mcp-jason.teamaot.com",
-        "mcp-jason.teamaot.com:*",
-    ],
-    allowed_origins=[
-        "https://chatgpt.com",
-        "https://chatgpt.com:*",
-        "https://mcp-jason.teamaot.com",
-        "https://mcp-jason.teamaot.com:*",
-    ],
+    allowed_hosts=list(_MCP_DEPLOYMENT_CONFIG.allowed_hosts),
+    allowed_origins=list(_MCP_DEPLOYMENT_CONFIG.allowed_origins),
 )
 
 
@@ -7197,8 +7163,14 @@ app.add_middleware(
 )
 
 
+def validate_mcp_deployment_configuration() -> None:
+    _validate_mcp_deployment_configuration(_MCP_DEPLOYMENT_CONFIG)
+
+
 def main() -> None:
     import uvicorn
+
+    validate_mcp_deployment_configuration()
 
     uvicorn.run(
         app,
