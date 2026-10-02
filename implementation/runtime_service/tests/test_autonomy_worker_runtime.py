@@ -455,6 +455,105 @@ def test_waiting_device_access_offline_is_idempotent(tmp_path: Path):
     store.close()
 
 
+def test_orphaned_waiting_device_completed_ticket_retires_local_wait(tmp_path: Path):
+    class EmptyQueueSource:
+        def reconcile_candidates(self):
+            return ()
+
+    class TicketReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.ticket.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "items": [
+                                {
+                                    "id": 140933,
+                                    "completedDate": "2026-09-30T11:32:22.750Z",
+                                }
+                            ]
+                        }
+                    },
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    store.put(OperationalWork(
+        ticket_id=140933,
+        ticket_number="T20260925.9999",
+        title="[Monitor] Antivirus status issue",
+        playbook_id="datto_edr_av",
+        source_queue="Jason",
+        company_id=507,
+        configuration_item_id=1583,
+        device_uid="device-uid-1",
+        hostname="PC-1",
+        phase="waiting_device_access:health_wait",
+        last_reason="endpoint offline",
+    ))
+    worker = OperationalAutonomyMaintenance(
+        queue_source=EmptyQueueSource(), reads=TicketReads(), actions=actions,
+        store=store, promotion_store=PromotionStore(), max_active_work_items=2,
+        interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    current = store.get(140933)
+    assert current is not None
+    assert current.phase == "complete"
+    assert "stale Waiting Device Access" in current.last_reason
+    assert actions.calls == []
+    store.close()
+
+
+def test_orphaned_waiting_device_open_ticket_stops_without_psa_override(tmp_path: Path):
+    class EmptyQueueSource:
+        def reconcile_candidates(self):
+            return ()
+
+    class TicketReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.ticket.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"items": [{"id": 140933, "completedDate": None}]}},
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    store.put(OperationalWork(
+        ticket_id=140933,
+        ticket_number="T20260925.9999",
+        title="[Monitor] Antivirus status issue",
+        playbook_id="datto_edr_av",
+        source_queue="Jason",
+        company_id=507,
+        configuration_item_id=1583,
+        device_uid="device-uid-1",
+        hostname="PC-1",
+        phase="waiting_device_access:health_wait",
+        last_reason="endpoint offline",
+    ))
+    worker = OperationalAutonomyMaintenance(
+        queue_source=EmptyQueueSource(), reads=TicketReads(), actions=actions,
+        store=store, promotion_store=PromotionStore(), max_active_work_items=2,
+        interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    current = store.get(140933)
+    assert current is not None
+    assert current.phase == "escalated"
+    assert "preserve authoritative PSA/human state" in current.last_reason
+    assert actions.calls == []
+    store.close()
+
+
 def test_waiting_device_access_online_returns_to_in_progress_and_resumes(tmp_path: Path):
     actions = Actions()
     store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")

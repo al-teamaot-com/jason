@@ -481,6 +481,14 @@ class SQLiteOperationalWorkStore:
         ).fetchall()
         return tuple(self._row(row) for row in rows)
 
+    def list_waiting_device_access(self) -> tuple[OperationalWork, ...]:
+        rows = self._connection.execute(
+            "SELECT * FROM autonomy_operational_work "
+            "WHERE phase LIKE 'waiting_device_access:%' "
+            "ORDER BY updated_at,ticket_id"
+        ).fetchall()
+        return tuple(self._row(row) for row in rows)
+
     def put(self, work: OperationalWork) -> None:
         value = work.updated_at or datetime.now(timezone.utc).isoformat()
         with self._connection:
@@ -847,6 +855,62 @@ class OperationalAutonomyMaintenance:
         """Request a full queue reconciliation on the next maintenance tick."""
         del reason
         self._next_due = 0.0
+
+    def _reconcile_orphaned_waiting_device_rows(
+        self,
+        candidates_by_id: Mapping[int, Any],
+    ) -> None:
+        """Stop stale waiting rows without overriding authoritative PSA changes."""
+        for work in self.store.list_waiting_device_access():
+            if work.ticket_id in candidates_by_id:
+                continue
+            try:
+                data = self._read_data(
+                    "service.ticket.read",
+                    {"resource_id": work.ticket_id},
+                )
+                items = data.get("items")
+                if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], Mapping):
+                    raise OperationalAutonomyError(
+                        "waiting-device reconciliation requires exactly one ticket readback"
+                    )
+                ticket = dict(items[0])
+                if int(ticket.get("id") or 0) != work.ticket_id:
+                    raise OperationalAutonomyError(
+                        "waiting-device reconciliation ticket identity mismatch"
+                    )
+                if ticket.get("completedDate"):
+                    self.store.put(
+                        self._replace(
+                            work,
+                            phase="complete",
+                            last_reason=(
+                                "Autotask ticket is complete; stale Waiting Device Access "
+                                "worker state was retired without a PSA mutation."
+                            ),
+                        )
+                    )
+                    continue
+                self.store.put(
+                    self._replace(
+                        work,
+                        phase="escalated",
+                        last_reason=(
+                            "Autotask no longer presents this ticket in Jason's governed "
+                            "Waiting Device Access candidate set. Autonomous waiting/resume "
+                            "was stopped to preserve authoritative PSA/human state."
+                        ),
+                    )
+                )
+            except Exception as exc:
+                if self.audit is not None:
+                    self.audit.record(
+                        "autonomy.waiting_device_reverse_reconcile.failed",
+                        {
+                            "ticket_id": work.ticket_id,
+                            "error_type": type(exc).__name__,
+                        },
+                    )
 
     @staticmethod
     def _offline_augmentation_role(
@@ -1330,6 +1394,7 @@ class OperationalAutonomyMaintenance:
             # A later cadence retry will reconcile again.
             return
         by_id = {int(item.resource_id): item for item in candidates}
+        self._reconcile_orphaned_waiting_device_rows(by_id)
 
         # Ticket augmentation is deliberately independent of queue ownership and
         # active-work capacity. It may add read-only context to a technician-owned
