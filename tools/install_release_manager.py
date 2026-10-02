@@ -43,11 +43,23 @@ def main() -> int:
         0o644,
     )
 
-    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+    uid = os.getuid()
+    systemd_env = os.environ.copy()
+    systemd_env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+    systemd_env.setdefault(
+        "DBUS_SESSION_BUS_ADDRESS",
+        f"unix:path=/run/user/{uid}/bus",
+    )
+    subprocess.run(
+        ["systemctl", "--user", "daemon-reload"],
+        check=True,
+        env=systemd_env,
+    )
     if args.activate:
         subprocess.run(
             ["systemctl", "--user", "enable", "--now", "jason-release-manager.timer"],
             check=True,
+            env=systemd_env,
         )
     print("JASON_RELEASE_MANAGER_INSTALL=PASS")
     print("STATE_ROOT=" + str(STATE))
