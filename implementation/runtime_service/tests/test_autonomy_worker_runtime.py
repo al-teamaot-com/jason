@@ -59,7 +59,15 @@ class QueueSource:
         self.candidate = candidate
 
     def reconcile_candidates(self):
-        return (self.candidate,)
+        context = dict(self.candidate.context)
+        if (
+            str(self.candidate.source_queue).strip().casefold() != "jason"
+            and "_jason_source_status_label" not in context
+        ):
+            # Production Autotask discovery always supplies the source-status
+            # marker. Keep generic worker fixtures shaped like live candidates.
+            context["_jason_source_status_label"] = "New"
+        return (replace(self.candidate, context=context),)
 
 
 class Reads:
@@ -203,8 +211,86 @@ def candidate(title="[Monitor] Antivirus status issue"):
             "title": title,
             "companyID": 507,
             "configurationItemID": 1583,
+            "_jason_source_status_label": "New",
         },
     )
+
+
+@pytest.mark.parametrize(
+    ("queue_name", "status_label"),
+    (
+        ("Help Desk I", "New"),
+        ("Help Desk II", "New"),
+        ("Help Desk I", "Emergency"),
+    ),
+)
+def test_help_desk_intake_status_is_continuously_admission_eligible(
+    tmp_path: Path,
+    queue_name: str,
+    status_label: str,
+):
+    base = candidate()
+    item = replace(
+        base,
+        source_queue=queue_name,
+        context={
+            **base.context,
+            "_jason_source_status_label": status_label,
+        },
+    )
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert store.get(140933) is not None
+    assert any(
+        capability == "service.ticket.update"
+        and arguments["payload"].get("queueID") == "Jason"
+        for _, capability, arguments in actions.calls
+    )
+    store.close()
+
+
+def test_help_desk_in_progress_is_assessed_but_not_admitted(tmp_path: Path):
+    base = candidate()
+    item = replace(
+        base,
+        source_queue="Help Desk I",
+        context={
+            **base.context,
+            "_jason_source_status_label": "In Progress",
+        },
+    )
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    assert store.get(140933) is None
+    assert store.classification_state(140933) == "not_actionable"
+    assert actions.calls == []
+    store.close()
 
 
 
@@ -1221,6 +1307,7 @@ def post_candidate(title="Power-On-Self-Test (POST) errors occurred during the l
             "title": title,
             "companyID": 311,
             "configurationItemID": 1583,
+            "_jason_source_status_label": "New",
         },
     )
 
