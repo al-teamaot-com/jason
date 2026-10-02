@@ -46,3 +46,21 @@ The service-path migration removes the original operator account and workstation
 - production-host reconciliation uses the configured Jason service account rather than user al.
 
 This is a source/candidate portability result. It does not change any currently installed Production unit or running process.
+
+## MCP deployment identity portability
+
+The generic MCP server no longer embeds AOT-specific Entra or host defaults.
+
+MCP deployment identity is now loaded through a dependency-free configuration contract:
+
+- Entra tenant ID is explicit;
+- Entra client ID is explicit;
+- auto-enroll domains default to empty;
+- resource URL defaults only to loopback;
+- OAuth issuer defaults from the configured resource URL;
+- allowed Host values derive from the configured resource URL unless explicitly supplied;
+- allowed Origin values remain explicit/generic and may be overridden by deployment configuration.
+
+The MCP server entrypoint fails closed when required tenant/client deployment identity is missing.
+
+The portability audit now scans the generic MCP server for AOT domain, tenant-ID, and client-ID literals so these assumptions cannot silently return.
