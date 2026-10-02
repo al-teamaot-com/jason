@@ -96,9 +96,58 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 promoted.append(record["release_id"])
                 return record
 
-            with patch.object(runner, "deploy_production", side_effect=fake_deploy):
+            with (
+                patch.object(
+                    runner,
+                    "production_gate_result",
+                    return_value={"allowed": True, "protected_core": False, "reasons": []},
+                ),
+                patch.object(runner, "deploy_production", side_effect=fake_deploy),
+            ):
                 self.assertTrue(runner.promote_eligible(ROOT, root))
             self.assertEqual(len(promoted), 1)
+
+    def test_promote_eligible_skips_unapproved_protected_core_and_continues(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            records = root / "records"
+            records.mkdir()
+            first_sha = SHA_A
+            second_sha = "c" * 40
+            for index, sha in enumerate((first_sha, second_sha), start=1):
+                payload = {
+                    "release_id": runner.record_id(sha),
+                    "state": "production_eligible",
+                    "created_at": f"2026-10-02T0{index}:00:00+00:00",
+                }
+                runner.atomic_json(records / f"{payload['release_id']}.json", payload)
+
+            def gate_result(repo, record):
+                if record["release_id"] == runner.record_id(first_sha):
+                    return {
+                        "allowed": False,
+                        "protected_core": True,
+                        "reasons": [
+                            "protected-core release requires explicit owner approval",
+                            "owner approval is not bound to the exact candidate SHA",
+                        ],
+                    }
+                return {"allowed": True, "protected_core": False, "reasons": []}
+
+            promoted = []
+            with (
+                patch.object(runner, "production_gate_result", side_effect=gate_result),
+                patch.object(
+                    runner,
+                    "deploy_production",
+                    side_effect=lambda repo, state_root, record: promoted.append(
+                        record["release_id"]
+                    ),
+                ),
+            ):
+                self.assertTrue(runner.promote_eligible(ROOT, root))
+
+            self.assertEqual(promoted, [runner.record_id(second_sha)])
 
     def test_production_preflight_uses_exact_candidate_worktree(self):
         with tempfile.TemporaryDirectory() as td:
