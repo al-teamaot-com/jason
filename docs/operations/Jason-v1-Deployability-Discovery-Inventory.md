@@ -319,10 +319,81 @@ No change was made.
 8. The bootstrap script is tracked without executable permission despite documentation using direct execution syntax.
 9. External Docker networks are assumed rather than created/validated by the bootstrap.
 10. The role of `jason-core.service` is not yet established for reproducible deployment.
+11. Installed production systemd state is not fully source-identical: two OpenBao backup units and `jason-core.service` are host-only, and the production-health exporter has an installed configuration drift from the repository copy.
+12. Live container Compose metadata is insufficient to reconstruct deployment origin/configuration for all core components.
+13. The runtime exposes a large environment-driven configuration surface that is not yet governed by one explicit v1.0 configuration schema.
+
+## Systemd reconciliation pass
+
+The installed systemd units were compared by filename and SHA-256 against repository-controlled definitions.
+
+### Exact repository matches
+
+The majority of installed Jason units match repository-controlled files exactly, including boot recovery, CCC, delegation maintenance, documentation reconciliation, Grafana assurance, OpenClaw authority health, and the principal observability/exporter units.
+
+This is positive evidence that much of the host service layer is already reproducible.
+
+### Host-only units
+
+The following installed units had no same-named unit definition under the repository infrastructure/deploy trees:
+
+- `jason-core.service`
+- `jason-openbao-backup.service`
+- `jason-openbao-backup.timer`
+
+The OpenBao deployment record documents the backup unit/timer as installed production state, but the actual unit definitions are not presently stored as same-named repository artifacts. Repository search found documentation and verification code referencing them, not a source unit definition.
+
+A reproducible installer must either generate these units from version-controlled templates or carry the exact unit files as versioned artifacts.
+
+### Installed-vs-repository drift
+
+`jason-production-health-exporter.service` differs from the repository copy.
+
+The observed difference is an expected-provider-profile value:
+
+- repository: `itglue-autotask-entra-procurement-mail-contract-attachment-resource-catalog-v9`
+- installed host: `itglue-autotask-entra-procurement-billing-reconciliation-catalog-v10`
+
+This may represent a legitimate operational update, but the current deployment model does not make the source of that override self-evident. Environment-specific operational values should be supplied through explicit configuration or deterministic generation instead of an edited installed unit.
+
+Destination: #748 and #749.
+
+## Container lineage / configuration discovery pass
+
+Current container metadata is not sufficient by itself to reconstruct all deployment inputs.
+
+Observed:
+
+- `jason-runtime` reports Compose project/service labels but no Compose working-directory/config-file labels;
+- `jason-mcp-pilot` reports the same Compose project/service identity as `jason-runtime` despite being a separate live container/image;
+- `jason-teams-gateway` does not expose equivalent Compose-origin labels.
+
+The current runtime runbook instructs operators to derive Compose working directory/config from live labels. That strategy is not reliable for every currently running component.
+
+The v1.0 deployment manifest and installer must carry authoritative deployment-source/configuration identity directly rather than depending on incidental Docker Compose labels.
+
+Destination: #750.
+
+## Runtime environment-name discovery
+
+Only environment variable **names** were inspected; no values were read.
+
+The core runtime/MCP surfaces expose a large environment-driven configuration contract covering authority/state paths, provider activation, Autotask/Datto/DNSFilter/KFS/Backup.NET profiles, autonomy, model settings, Teams integration, and other provider-specific controls.
+
+The Teams gateway environment also includes credential-shaped names such as `MSTEAMS_APP_PASSWORD`. This discovery does not establish how the value is sourced, only that the running process receives such a variable.
+
+For v1.0, configuration schema validation must explicitly distinguish:
+
+- non-secret MSP configuration;
+- governed policy;
+- secret references/files;
+- prohibited raw secret-in-environment patterns.
+
+Destination: #748 and #749.
 
 ## Next discovery steps
 
-- reconcile every installed Jason systemd unit against a repository-controlled source;
+- reconcile every installed Jason systemd unit against a repository-controlled source — **initial pass complete; host-only/drift items identified above**;
 - reconcile every runtime bind mount against a declared platform/configuration/secret/state class;
 - identify every host-local file used by a running service/container that is not part of a versioned release;
 - enumerate required database schemas/migrations and initialization commands;
