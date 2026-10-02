@@ -201,3 +201,110 @@ def test_rendered_text_fallback_requires_stable_identifier() -> None:
     """
     result = subject.extract_product_page(html)
     assert result["products"] == []
+
+
+
+def test_itemprop_text_and_common_b2b_labels_are_vendor_agnostic() -> None:
+    html = """
+    <html><head><title>USB-C VGA Adapter</title></head><body>
+      <h1>USB-C VGA Adapter</h1>
+      <span>Mfg # <span itemprop="mpn">USBC-VGA-CABLE</span></span>
+      <span>CDW # 7392921</span>
+      <div data-price="16.95"></div>
+    </body></html>
+    """
+    result = subject.extract_product_page(html)
+    assert result["normalization_status"] == "ready"
+    product = result["products"][0]
+    assert product["mpn"] == "USBC-VGA-CABLE"
+    assert product["price"] == "16.95"
+
+
+def test_common_model_item_price_labels_normalize_without_vendor_branch() -> None:
+    html = """
+    <html><head><title>Generic Adapter</title></head><body>
+      <h1>Generic Adapter</h1>
+      <div>Item #: IM17ZA109 | Model #: USBC-TVGA</div>
+      <div>Price is $15.99</div>
+    </body></html>
+    """
+    result = subject.extract_product_page(html)
+    product = result["products"][0]
+    assert product["mpn"] == "USBC-TVGA"
+    assert product["sku"] == "IM17ZA109"
+    assert product["price"] == "15.99"
+
+
+def test_upc_is_secondary_identifier_not_primary_mpn() -> None:
+    html = """
+    <html><head><title>Generic Adapter</title></head><body>
+      <h1>Generic Adapter</h1>
+      <div>Product # 34187</div>
+      <div>UPC # 889028093702</div>
+      <div>$8.99</div>
+    </body></html>
+    """
+    result = subject.extract_product_page(html)
+    product = result["products"][0]
+    assert product["sku"] == "34187"
+    assert product["upc"] == "889028093702"
+    assert "mpn" not in product
+
+
+def test_insufficient_page_marks_richer_acquisition_requirement() -> None:
+    html = """
+    <html><head><title>Dynamic Product Page</title></head>
+    <body><h1>Dynamic Product Page</h1><p>Sign in to see details</p></body></html>
+    """
+    result = subject.extract_product_page(html)
+    assert result["products"] == []
+    assert result["normalization_status"] == "needs_richer_acquisition"
+    assert result["evidence_mode"] == "none"
+
+
+
+def test_duplicate_upc_in_mpn_does_not_override_distinct_sku() -> None:
+    html = """
+    <html><head><script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Product",
+      "name": "USB-C VGA Adapter",
+      "sku": "USBC-TVGA",
+      "mpn": "819927012221",
+      "gtin12": "819927012221",
+      "offers": {"@type": "Offer", "price": "14.95", "priceCurrency": "USD"}
+    }
+    </script></head><body></body></html>
+    """
+    result = subject.extract_product_page(html)
+    product = result["products"][0]
+    assert product["sku"] == "USBC-TVGA"
+    assert product["upc"] == "819927012221"
+    assert "mpn" not in product
+    assert product["identifier_note"] == "source_mpn_duplicated_upc"
+
+
+def test_invoker_returns_needs_browser_for_simple_http_block(monkeypatch) -> None:
+    def blocked(url, max_bytes):
+        raise subject.ProcurementWebReadError(
+            "product URL returned HTTP 403",
+            acquisition_hint="browser_or_api",
+            http_status=403,
+        )
+
+    monkeypatch.setattr(subject, "_fetch_html", blocked)
+    request = SimpleNamespace(
+        capability_name=subject.CAPABILITY,
+        arguments={"url": "https://vendor.example/item"},
+    )
+    resolution = SimpleNamespace(selected_provider_id=subject.PROVIDER)
+
+    result = subject.ProcurementWebReadInvoker().invoke(
+        request=request,
+        resolution=resolution,
+    )
+    assert result.output["normalization_status"] == "needs_browser_or_api"
+    assert result.output["evidence_mode"] == "simple_http_blocked"
+    assert result.output["fetch_http_status"] == 403
+    assert result.output["products"] == []

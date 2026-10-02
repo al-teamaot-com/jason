@@ -979,8 +979,15 @@ class ProcurementTeamsFlow:
         )
         products = web.get("products")
         if not isinstance(products, list) or not products:
+            status = str(web.get("normalization_status") or "").strip()
             raise ProcurementFlowError(
-                "The page did not expose enough structured product data to build a safe quote."
+                "The public page did not expose enough verifiable product evidence to "
+                "build a safe quote."
+                + (
+                    " A richer browser/API/document source is required."
+                    if status in {"needs_richer_acquisition", "needs_browser_or_api"}
+                    else ""
+                )
             )
         product = dict(products[0])
         organizations = web.get("organizations")
