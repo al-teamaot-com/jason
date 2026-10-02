@@ -1,5 +1,6 @@
 import importlib.util
 import sys
+import unittest
 from pathlib import Path
 
 TOOLS = Path(__file__).resolve().parents[1]
@@ -37,80 +38,75 @@ TODO_TEXT = """# Backlog
 """
 
 
-def test_parse_todo_sections_preserves_exact_section():
-    items = module.parse_todo_sections(TODO_TEXT)
-    assert [item.item_id for item in items] == [
-        "TODO-OPS-010",
-        "TODO-OPS-011",
-        "TODO-OPS-012",
-    ]
-    assert items[0].priority == "P1"
-    assert items[0].status == "Planned"
-    assert "Build the thing." in items[0].section
+class TodoEngineeringIntakeTests(unittest.TestCase):
+    def test_parse_todo_sections_preserves_exact_section(self):
+        items = module.parse_todo_sections(TODO_TEXT)
+        self.assertEqual(
+            [item.item_id for item in items],
+            ["TODO-OPS-010", "TODO-OPS-011", "TODO-OPS-012"],
+        )
+        self.assertEqual(items[0].priority, "P1")
+        self.assertEqual(items[0].status, "Planned")
+        self.assertIn("Build the thing.", items[0].section)
+
+    def test_only_planned_and_in_progress_are_executable(self):
+        items = module.parse_todo_sections(TODO_TEXT)
+        status = {item.item_id: item.executable for item in items}
+        self.assertTrue(status["TODO-OPS-010"])
+        self.assertTrue(status["TODO-OPS-012"])
+        self.assertFalse(status["TODO-OPS-011"])
+
+    def test_support_first_blocks_todo_when_repair_capacity_exists(self):
+        todos = module.parse_todo_sections(TODO_TEXT)
+        support = (
+            "| ID | Priority | Status | Title | Evidence | Acceptance |\n"
+            "| --- | --- | --- | --- | --- | --- |\n"
+            "| SUPPORT-OPS-099 | P1 | Open | Broken thing | evidence | fix |\n"
+        )
+        candidate, reason = module.select_candidate(
+            todos=todos,
+            support_text=support,
+            support_state={"items": {}},
+            max_support_repairs=2,
+            existing_issues={},
+        )
+        self.assertIsNone(candidate)
+        self.assertIn("Support-first", reason)
+
+    def test_todo_selected_by_priority_after_support_is_satisfied(self):
+        todos = module.parse_todo_sections(TODO_TEXT)
+        candidate, reason = module.select_candidate(
+            todos=todos,
+            support_text="",
+            support_state={"items": {}},
+            max_support_repairs=2,
+            existing_issues={},
+        )
+        self.assertEqual(reason, "eligible")
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate.item_id, "TODO-OPS-010")
+
+    def test_existing_todo_issue_is_not_duplicated(self):
+        todos = module.parse_todo_sections(TODO_TEXT)
+        candidate, _ = module.select_candidate(
+            todos=todos,
+            support_text="",
+            support_state={"items": {}},
+            max_support_repairs=2,
+            existing_issues={"TODO-OPS-010": {"number": 5}},
+        )
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate.item_id, "TODO-OPS-012")
+
+    def test_issue_body_binds_development_to_release_manager_completion(self):
+        item = module.parse_todo_sections(TODO_TEXT)[0]
+        body = module.issue_body(item)
+        self.assertIn("- TODO item: TODO-OPS-010", body)
+        self.assertIn("- **Autonomous development:** owner-approved", body)
+        self.assertIn("Release path: Jason Release Manager required", body)
+        self.assertIn("production_verified", body)
+        self.assertIn("Protected-core production approval: not granted by this intake", body)
 
 
-def test_only_planned_and_in_progress_are_executable():
-    items = module.parse_todo_sections(TODO_TEXT)
-    status = {item.item_id: item.executable for item in items}
-    assert status["TODO-OPS-010"] is True
-    assert status["TODO-OPS-012"] is True
-    assert status["TODO-OPS-011"] is False
-
-
-def test_support_first_blocks_todo_when_repair_capacity_exists():
-    todos = module.parse_todo_sections(TODO_TEXT)
-    support = (
-        "| ID | Priority | Status | Title | Evidence | Acceptance |\n"
-        "| --- | --- | --- | --- | --- | --- |\n"
-        "| SUPPORT-OPS-099 | P1 | Open | Broken thing | evidence | fix |\n"
-    )
-    candidate, reason = module.select_candidate(
-        todos=todos,
-        support_text=support,
-        support_state={"items": {}},
-        max_support_repairs=2,
-        existing_issues={},
-    )
-    assert candidate is None
-    assert "Support-first" in reason
-
-
-def test_todo_selected_by_priority_after_support_is_satisfied():
-    todos = module.parse_todo_sections(TODO_TEXT)
-    support = (
-        "| ID | Priority | Status | Title | Evidence | Acceptance |\n"
-        "| --- | --- | --- | --- | --- | --- |\n"
-    )
-    candidate, reason = module.select_candidate(
-        todos=todos,
-        support_text=support,
-        support_state={"items": {}},
-        max_support_repairs=2,
-        existing_issues={},
-    )
-    assert reason == "eligible"
-    assert candidate is not None
-    assert candidate.item_id == "TODO-OPS-010"
-
-
-def test_existing_todo_issue_is_not_duplicated():
-    todos = module.parse_todo_sections(TODO_TEXT)
-    candidate, _ = module.select_candidate(
-        todos=todos,
-        support_text="",
-        support_state={"items": {}},
-        max_support_repairs=2,
-        existing_issues={"TODO-OPS-010": {"number": 5}},
-    )
-    assert candidate is not None
-    assert candidate.item_id == "TODO-OPS-012"
-
-
-def test_issue_body_binds_development_to_release_manager_completion():
-    item = module.parse_todo_sections(TODO_TEXT)[0]
-    body = module.issue_body(item)
-    assert "- TODO item: TODO-OPS-010" in body
-    assert "- **Autonomous development:** owner-approved" in body
-    assert "Release path: Jason Release Manager required" in body
-    assert "production_verified" in body
-    assert "Protected-core production approval: not granted by this intake" in body
+if __name__ == "__main__":
+    unittest.main()
