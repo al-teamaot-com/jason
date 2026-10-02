@@ -12,7 +12,7 @@ from typing import Any, Mapping
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from connectors.src.jason_connectors.approval_requests import (
+from orchestrator.approval_requests import (
     ApprovalDecision,
     ApprovalPresentation,
     ApprovalRequest,
