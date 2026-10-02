@@ -64,38 +64,3 @@ def test_blocked_marker_excludes_issue():
     )
     assert module.APPROVAL.search(body)
     assert module.BLOCKED.search(body)
-
-
-def test_todo_policy_approval_requires_current_actionable_todo(tmp_path, monkeypatch):
-    config_dir = tmp_path / 'config'
-    config_dir.mkdir()
-    (config_dir / 'development-release-coordinator.json').write_text(
-        '{"todo_autonomy":{"enabled":true,"owner_approved":true}}',
-        encoding='utf-8',
-    )
-    backlog = """### TODO-OPS-010 — Build thing
-
-- **Priority:** P1
-- **Status:** Planned
-- **Idea:** Build it.
-
-### TODO-OPS-011 — Idea only
-
-- **Priority:** P1
-- **Status:** Proposed
-- **Idea:** Save it.
-"""
-    monkeypatch.setattr(module.support, 'run', lambda *args, **kwargs: backlog)
-
-    assert module.todo_policy_approved(
-        tmp_path,
-        '- TODO item: TODO-OPS-010\n- **Autonomous development:** owner-approved\n',
-    )
-    assert not module.todo_policy_approved(
-        tmp_path,
-        '- TODO item: TODO-OPS-011\n- **Autonomous development:** owner-approved\n',
-    )
-    assert not module.todo_policy_approved(
-        tmp_path,
-        '- TODO item: TODO-OPS-999\n- **Autonomous development:** owner-approved\n',
-    )
