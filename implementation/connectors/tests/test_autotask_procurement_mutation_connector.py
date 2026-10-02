@@ -30,7 +30,7 @@ def test_vendor_create_is_bounded_to_vendor_company_and_aot_defaults() -> None:
         },
     )
     assert payload["companyType"] == 7
-    assert payload["ownerResourceID"] == 29682892
+    assert "ownerResourceID" not in payload
     assert payload["territoryID"] == 29682778
     assert payload["companyCategoryID"] == 1
     assert payload["currencyID"] == 1

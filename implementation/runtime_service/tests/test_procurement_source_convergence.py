@@ -314,3 +314,73 @@ def test_document_defaults_preserve_existing_quote_invoice_behavior(tmp_path):
     assert payload["source_confidence"] == "document_verified"
     assert payload["source_confidence_score"] == 85
     assert payload["source_evidence_mode"] == "document_normalized"
+
+
+class TicketUrlFlow(ProcurementTeamsFlow):
+    def _read(self, *, capability, arguments, **kwargs):
+        if capability == "service.ticket.search":
+            assert arguments["ticket_number"] == "T20191013.0001"
+            return {
+                "data": {
+                    "items": [
+                        {
+                            "id": 8870,
+                            "ticketNumber": "T20191013.0001",
+                            "companyID": 1158,
+                            "title": "test ticket",
+                        }
+                    ]
+                }
+            }
+        if capability == "procurement.web.product.read":
+            return {
+                "products": [
+                    {
+                        "name": "Plugable USB C to VGA Adapter",
+                        "mpn": "USBC-TVGA",
+                        "sku": "9SIA2XBBKZ0313",
+                        "price": "19.95",
+                        "seller": "Plugable Technologies",
+                    }
+                ],
+                "organizations": [{"name": "Plugable Technologies"}],
+                "final_url": "https://www.newegg.com/p/2VF-0046-00012",
+                "content_sha256": "d" * 64,
+                "captured_at": NOW.isoformat(),
+                "evidence_mode": "rendered_commerce_fallback",
+                "source_host": "www.newegg.com",
+            }
+        if capability == "service.company.search":
+            return {"data": {"items": []}}
+        if capability == "service.product.search":
+            return {"data": {"items": []}}
+        raise AssertionError(capability)
+
+
+def test_url_ticket_hint_is_verified_and_prefilled_in_card(tmp_path):
+    flow = TicketUrlFlow(
+        identity_binder=Binder(),
+        request_factory=Factory(),
+        orchestrator=None,
+        store=SQLiteProcurementSubmissionStore(tmp_path / "ticket-url.sqlite3"),
+        worker=None,
+        approval_service=None,
+        approval_sender=None,
+        owner_ids=(),
+    )
+    result = flow.handle_url(
+        url="https://www.newegg.com/p/2VF-0046-00012",
+        microsoft_tenant_id="tenant",
+        microsoft_object_id="object",
+        conversation_id="conv",
+        message_id="msg",
+        occurred_at=NOW,
+        ticket_number_hint="T20191013.0001",
+    )
+    payload = flow.store.get(result["submission_id"])
+    assert payload["ticket_number_hint"] == "T20191013.0001"
+    ticket_input = next(
+        item for item in result["reply"]["card"]["body"]
+        if item.get("id") == "ticket_number"
+    )
+    assert ticket_input["value"] == "T20191013.0001"

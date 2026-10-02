@@ -596,6 +596,77 @@ def test_orphaned_waiting_device_completed_ticket_retires_local_wait(tmp_path: P
     store.close()
 
 
+def test_orphaned_waiting_device_read_failure_does_not_abort_scan_with_canonical_audit(tmp_path: Path):
+    # Regression for production issues #787/#790: audit diagnostics must use the canonical envelope.
+    class EmptyQueueSource:
+        def reconcile_candidates(self):
+            return ()
+
+    class DeniedTicketReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.ticket.read":
+                raise PermissionError("INFORMATION_RELEASE_DENIED")
+            return super().execute(capability, arguments)
+
+    class CanonicalAudit:
+        def __init__(self):
+            self.events = []
+
+        def append(self, event_type, payload):
+            for key in (
+                "execution_id",
+                "correlation_id",
+                "organization_id",
+                "principal_id",
+                "capability_name",
+                "stage",
+            ):
+                assert payload[key]
+            self.events.append((event_type, dict(payload)))
+
+    audit = CanonicalAudit()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    store.put(OperationalWork(
+        ticket_id=140933,
+        ticket_number="T20260925.9999",
+        title="[Monitor] Antivirus status issue",
+        playbook_id="datto_edr_av",
+        source_queue="Jason",
+        company_id=507,
+        configuration_item_id=1583,
+        device_uid="device-uid-1",
+        hostname="PC-1",
+        phase="waiting_device_access:health_wait",
+        last_reason="endpoint offline",
+    ))
+    worker = OperationalAutonomyMaintenance(
+        queue_source=EmptyQueueSource(),
+        reads=DeniedTicketReads(),
+        actions=Actions(),
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+        audit=audit,
+    )
+
+    worker.tick()
+
+    latest = store.latest_scan()
+    assert latest is not None
+    assert latest.evaluated == 0
+    assert any(
+        event_type == "autonomy.waiting_device_reverse_reconcile.failed"
+        for event_type, _ in audit.events
+    )
+    assert any(
+        event_type == "orchestration.capability.completed"
+        for event_type, _ in audit.events
+    )
+    store.close()
+
+
 def test_orphaned_waiting_device_open_ticket_stops_without_psa_override(tmp_path: Path):
     class EmptyQueueSource:
         def reconcile_candidates(self):
