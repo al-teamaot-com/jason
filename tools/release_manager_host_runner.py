@@ -679,15 +679,45 @@ def prepare_release(
     return run_preproduction(repo, state_root, record)
 
 
+def production_gate_result(repo: Path, record: dict[str, Any]) -> dict[str, Any]:
+    policy = gate.load_json(repo / "config" / "release-manager-policy.json")
+    support = gate.parse_support((repo / "SUPPORT.md").read_text(encoding="utf-8"))
+    todos = gate.parse_todos(
+        (repo / "docs" / "roadmaps" / "Project-Jason-TODO-and-Future-Ideas.md").read_text(
+            encoding="utf-8"
+        )
+    )
+    return gate.evaluate_transition(
+        record,
+        "production",
+        policy,
+        support_items=support,
+        todos=todos,
+    )
+
+
 def promote_eligible(repo: Path, state_root: Path) -> bool:
     records = state_root / "records"
     if not records.exists():
         return False
     for path in sorted(records.glob("*.json"), key=lambda item: item.stat().st_mtime):
         record = json.loads(path.read_text(encoding="utf-8"))
-        if record.get("state") == "production_eligible":
+        if record.get("state") != "production_eligible":
+            continue
+        result = production_gate_result(repo, record)
+        if result.get("allowed") is True:
             deploy_production(repo, state_root, record)
             return True
+        reasons = [str(value) for value in result.get("reasons") or []]
+        owner_only = bool(result.get("protected_core")) and reasons and all(
+            "owner approval" in reason.casefold() for reason in reasons
+        )
+        if owner_only:
+            continue
+        raise ReleaseManagerError(
+            "Production Eligible release failed production gate: "
+            + "; ".join(reasons)
+        )
     return False
 
 
