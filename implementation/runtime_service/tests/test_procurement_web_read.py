@@ -159,3 +159,45 @@ def test_invoker_rejects_unknown_arguments() -> None:
             request=request,
             resolution=resolution,
         )
+
+
+
+def test_rendered_text_fallback_ignores_scripts_and_prefers_mpn() -> None:
+    html = """
+    <html><head>
+      <title>Plugable USB C to VGA Adapter - Newegg.com</title>
+      <meta property="og:title" content="Plugable USB C to VGA Adapter">
+      <style>.fake:after { content: '$999.99'; }</style>
+      <script>window.fakePrice = '$888.88';</script>
+    </head><body>
+      <div>Item#: <em>9SIA2XBBKZ0313</em></div>
+      <div data-pp-amount="19.95"></div>
+      <script src="https://example.invalid/widget.js"
+        spex-mfg-name="Plugable Technologies"
+        spex-mfg-part-number="USBC-TVGA"></script>
+      <h1>Plugable USB C to VGA Adapter</h1>
+      <div>Sold by <a>Plugable Technologies</a> Top Rated</div>
+      <div>Add to cart</div>
+    </body></html>
+    """
+    result = subject.extract_product_page(html)
+    assert len(result["products"]) == 1
+    product = result["products"][0]
+    assert product["name"] == "Plugable USB C to VGA Adapter"
+    assert product["mpn"] == "USBC-TVGA"
+    assert product["sku"] == "9SIA2XBBKZ0313"
+    assert product["price"] == "19.95"
+    assert product["brand"] == "Plugable Technologies"
+    assert product["seller"] == "Plugable Technologies"
+    assert result["organizations"][0]["name"] == "Plugable Technologies"
+    assert "$999.99" not in result["visible_text_excerpt"]
+    assert "$888.88" not in result["visible_text_excerpt"]
+
+
+def test_rendered_text_fallback_requires_stable_identifier() -> None:
+    html = """
+    <html><head><title>Generic Widget</title></head>
+    <body><h1>Generic Widget</h1><div>$19.95</div><div>Sold by Vendor Add to cart</div></body></html>
+    """
+    result = subject.extract_product_page(html)
+    assert result["products"] == []

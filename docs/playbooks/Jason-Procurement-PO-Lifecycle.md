@@ -176,7 +176,7 @@ Compare available source fields to Autotask, including:
 - vendor/account number;
 - other stable procurement identifiers present in the source.
 
-If no exact vendor exists -> propose vendor creation under governed approval before product or PO creation.
+If no exact vendor exists -> retain the submission as a vendor-creation proposal. On explicit submission, use only the vendor-specific governed capability to create an Autotask company with `companyType = Vendor`; do not expose generic company creation. Persist the returned vendor ID before any product, quote, or PO mutation so retries cannot duplicate the vendor.
 If Autotask is missing a value that is present in authoritative current source evidence -> propose a vendor-master update.
 If both source and Autotask contain conflicting values -> `state = vendor_review`; do not silently update or continue financial commitment.
 If the source does not expose a field -> retain the Autotask value and record that the source could not verify it.

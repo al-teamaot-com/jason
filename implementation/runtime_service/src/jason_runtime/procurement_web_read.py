@@ -8,6 +8,7 @@ import http.client
 import ipaddress
 import json
 import os
+import re
 import socket
 import ssl
 from typing import Any, Mapping
@@ -89,8 +90,12 @@ class _ProductPageParser(HTMLParser):
         self.meta: dict[str, str] = {}
         self.jsonld: list[str] = []
         self.text_parts: list[str] = []
+        self.h1_parts: list[str] = []
+        self.attribute_hints: dict[str, str] = {}
         self._in_title = False
+        self._in_h1 = False
         self._in_jsonld = False
+        self._ignored_text_depth = 0
         self._jsonld_parts: list[str] = []
 
     def handle_starttag(self, tag: str, attrs) -> None:
@@ -98,6 +103,8 @@ class _ProductPageParser(HTMLParser):
         lowered = tag.casefold()
         if lowered == "title":
             self._in_title = True
+        elif lowered == "h1":
+            self._in_h1 = True
         elif lowered == "meta":
             key = (
                 values.get("property")
@@ -113,17 +120,56 @@ class _ProductPageParser(HTMLParser):
             if script_type == "application/ld+json":
                 self._in_jsonld = True
                 self._jsonld_parts = []
+            else:
+                self._ignored_text_depth += 1
+        elif lowered in {"style", "noscript"}:
+            self._ignored_text_depth += 1
+
+        itemprop = values.get("itemprop", "").strip().casefold()
+        content = values.get("content", "").strip()
+        if itemprop and content:
+            generic_itemprops = {
+                "price": "price",
+                "sku": "sku",
+                "mpn": "mpn",
+                "model": "mpn",
+                "brand": "brand",
+            }
+            canonical = generic_itemprops.get(itemprop)
+            if canonical:
+                self.attribute_hints.setdefault(canonical, content)
+
+        attribute_sources = {
+            "price": ("data-price", "data-product-price", "data-pp-amount"),
+            "sku": ("data-sku", "data-item-number", "data-product-sku"),
+            "mpn": ("data-mpn", "data-model", "spex-mfg-part-number"),
+            "brand": ("data-brand", "data-manufacturer", "spex-mfg-name"),
+            "seller": ("data-seller", "data-seller-name"),
+        }
+        for canonical, source_keys in attribute_sources.items():
+            for source_key in source_keys:
+                hint = values.get(source_key, "").strip()
+                if hint:
+                    self.attribute_hints.setdefault(canonical, hint)
+                    break
 
     def handle_endtag(self, tag: str) -> None:
         lowered = tag.casefold()
         if lowered == "title":
             self._in_title = False
-        elif lowered == "script" and self._in_jsonld:
-            value = "".join(self._jsonld_parts).strip()
-            if value and sum(len(item) for item in self.jsonld) < 300_000:
-                self.jsonld.append(value[:150_000])
-            self._jsonld_parts = []
-            self._in_jsonld = False
+        elif lowered == "h1":
+            self._in_h1 = False
+        elif lowered == "script":
+            if self._in_jsonld:
+                value = "".join(self._jsonld_parts).strip()
+                if value and sum(len(item) for item in self.jsonld) < 300_000:
+                    self.jsonld.append(value[:150_000])
+                self._jsonld_parts = []
+                self._in_jsonld = False
+            elif self._ignored_text_depth:
+                self._ignored_text_depth -= 1
+        elif lowered in {"style", "noscript"} and self._ignored_text_depth:
+            self._ignored_text_depth -= 1
 
     def handle_data(self, data: str) -> None:
         value = " ".join(str(data).split())
@@ -133,6 +179,12 @@ class _ProductPageParser(HTMLParser):
             self.title_parts.append(value)
         elif self._in_jsonld:
             self._jsonld_parts.append(data)
+        elif self._ignored_text_depth:
+            return
+        elif self._in_h1:
+            self.h1_parts.append(value)
+            if len(" ".join(self.text_parts)) < 40_000:
+                self.text_parts.append(value)
         elif len(" ".join(self.text_parts)) < 40_000:
             self.text_parts.append(value)
 
@@ -179,6 +231,65 @@ def _address(value: Any) -> dict[str, str]:
         if raw:
             result[target] = raw
     return result
+
+
+def _first_price(text: str) -> str | None:
+    match = re.search(r"(?<![A-Za-z0-9])\$\s*([0-9][0-9,]*(?:\.[0-9]{2})?)", text)
+    if not match:
+        return None
+    return match.group(1).replace(",", "")
+
+
+def _rendered_text_product_fallback(
+    parser: _ProductPageParser,
+    *,
+    title: str,
+    excerpt: str,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Derive a bounded product from explicit rendered-page evidence.
+
+    This is intentionally conservative. It is only used when JSON-LD did not
+    provide a Product and requires a name, a verified page price, and at least
+    one stable product identifier (MPN/model or vendor SKU).
+    """
+
+    heading = " ".join(parser.h1_parts).strip()
+    name = heading or parser.meta.get("og:title") or title
+    price = parser.attribute_hints.get("price") or _first_price(excerpt)
+    mpn = parser.attribute_hints.get("mpn")
+    sku = parser.attribute_hints.get("sku")
+
+    if not sku:
+        item_match = re.search(r"\bItem\s*#\s*:?\s*([A-Za-z0-9][A-Za-z0-9._-]{2,63})\b", excerpt, re.I)
+        if item_match:
+            sku = item_match.group(1)
+
+    seller = parser.attribute_hints.get("seller")
+    if not seller:
+        seller_match = re.search(
+            r"\bSold\s+by\s+(.{2,100}?)(?=\s+(?:Top\s+Rated|Shipped\s+by|Contact\s+Seller|Price\s+alert|Add\s+to\s+cart)\b)",
+            excerpt,
+            re.I,
+        )
+        if seller_match:
+            seller = " ".join(seller_match.group(1).split()).strip(" -|")
+
+    if not (name and price and (mpn or sku)):
+        return None, None
+
+    product = {
+        "name": name,
+        "sku": sku,
+        "mpn": mpn,
+        "brand": parser.attribute_hints.get("brand"),
+        "price": price,
+        "currency": "USD" if "$" in excerpt or parser.attribute_hints.get("price") else None,
+        "seller": seller,
+    }
+    product = {key: value for key, value in product.items() if value}
+
+    organization = {"name": seller} if seller else None
+    return product, organization
 
 
 def extract_product_page(html: str) -> dict[str, Any]:
@@ -244,6 +355,17 @@ def extract_product_page(html: str) -> dict[str, Any]:
     excerpt = " ".join(parser.text_parts)
     if len(excerpt) > 40_000:
         excerpt = excerpt[:40_000]
+
+    if not products:
+        fallback_product, fallback_org = _rendered_text_product_fallback(
+            parser,
+            title=title,
+            excerpt=excerpt,
+        )
+        if fallback_product:
+            products.append(fallback_product)
+        if fallback_org:
+            organizations.append(fallback_org)
 
     products.sort(key=lambda item: len(item), reverse=True)
     organizations.sort(

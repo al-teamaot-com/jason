@@ -13,6 +13,7 @@ from .mutation_connector import AutotaskMutationConnector
 
 AUTOTASK_PROCUREMENT_MUTATION_OPERATIONS = frozenset(
     {
+        "autotask.vendor.create",
         "autotask.product.create",
         "autotask.product.update",
         "autotask.product.vendor.create",
@@ -35,6 +36,7 @@ AUTOTASK_PROCUREMENT_MUTATION_OPERATIONS = frozenset(
     }
 )
 PROCUREMENT_OPERATION_PREFLIGHT = {
+    "autotask.vendor.create": ("Companies", "userAccessForCreate"),
     "autotask.product.create": ("Products", "userAccessForCreate"),
     "autotask.product.update": ("Products", "userAccessForUpdate"),
     "autotask.product.vendor.create": ("ProductVendors", "userAccessForCreate"),
@@ -67,6 +69,10 @@ PROCUREMENT_OPERATION_PREFLIGHT = {
 
 
 SAFE_FIELDS = {
+    "autotask.vendor.create": frozenset({
+        "companyName", "address1", "address2", "city", "state", "postalCode",
+        "countryID", "phone", "webAddress",
+    }),
     "autotask.product.create": frozenset({
         "name", "description", "isActive", "isSerialized", "sku",
         "vendorProductNumber", "defaultVendorID", "unitCost", "unitPrice",
@@ -165,6 +171,7 @@ SAFE_FIELDS = {
 
 
 REQUIRED_CREATE_FIELDS = {
+    "autotask.vendor.create": frozenset({"companyName"}),
     "autotask.product.create": frozenset({"name", "isActive", "isSerialized"}),
     "autotask.product.vendor.create": frozenset(
         {"productID", "vendorID", "isActive", "isDefault"}
@@ -228,6 +235,20 @@ class AutotaskProcurementMutationConnector(AutotaskMutationConnector):
             if int(raw_id) < 1:
                 raise ValueError("procurement update requires a positive durable id")
             normalized["id"] = int(raw_id)
+        if operation == "autotask.vendor.create":
+            # Procurement authority may create only Autotask Vendor companies.
+            # AOT defaults are server-controlled and cannot be supplied or changed
+            # by the conversational payload.
+            normalized.update({
+                "companyType": 7,
+                "ownerResourceID": 29682892,
+                "territoryID": 29682778,
+                "companyCategoryID": 1,
+                "currencyID": 1,
+                "purchaseOrderTemplateID": 102,
+                "isActive": True,
+            })
+            normalized["phone"] = str(normalized.get("phone") or "0").strip() or "0"
         if operation == "autotask.ticket.charge.create":
             if not normalized.get("productID") and not normalized.get("billingCodeID"):
                 raise ValueError("ticket charge requires productID or billingCodeID")
