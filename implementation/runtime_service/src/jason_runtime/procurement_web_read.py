@@ -46,7 +46,16 @@ MAX_REDIRECTS = 3
 
 
 class ProcurementWebReadError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        acquisition_hint: str | None = None,
+        http_status: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.acquisition_hint = acquisition_hint
+        self.http_status = http_status
 
 
 def _resolve_public_host(host: str) -> None:
@@ -96,6 +105,7 @@ class _ProductPageParser(HTMLParser):
         self._in_h1 = False
         self._in_jsonld = False
         self._ignored_text_depth = 0
+        self._text_itemprop_stack: list[tuple[str, str]] = []
         self._jsonld_parts: list[str] = []
 
     def handle_starttag(self, tag: str, attrs) -> None:
@@ -134,10 +144,28 @@ class _ProductPageParser(HTMLParser):
                 "mpn": "mpn",
                 "model": "mpn",
                 "brand": "brand",
+                "gtin": "upc",
+                "gtin12": "upc",
+                "gtin13": "upc",
+                "upc": "upc",
             }
             canonical = generic_itemprops.get(itemprop)
             if canonical:
                 self.attribute_hints.setdefault(canonical, content)
+        elif itemprop:
+            generic_text_itemprops = {
+                "sku": "sku",
+                "mpn": "mpn",
+                "model": "mpn",
+                "brand": "brand",
+                "gtin": "upc",
+                "gtin12": "upc",
+                "gtin13": "upc",
+                "upc": "upc",
+            }
+            canonical = generic_text_itemprops.get(itemprop)
+            if canonical:
+                self._text_itemprop_stack.append((lowered, canonical))
 
         attribute_sources = {
             "price": ("data-price", "data-product-price", "data-pp-amount"),
@@ -145,6 +173,7 @@ class _ProductPageParser(HTMLParser):
             "mpn": ("data-mpn", "data-model", "spex-mfg-part-number"),
             "brand": ("data-brand", "data-manufacturer", "spex-mfg-name"),
             "seller": ("data-seller", "data-seller-name"),
+            "upc": ("data-upc", "data-gtin", "data-gtin12", "data-gtin13"),
         }
         for canonical, source_keys in attribute_sources.items():
             for source_key in source_keys:
@@ -171,6 +200,9 @@ class _ProductPageParser(HTMLParser):
         elif lowered in {"style", "noscript"} and self._ignored_text_depth:
             self._ignored_text_depth -= 1
 
+        if self._text_itemprop_stack and self._text_itemprop_stack[-1][0] == lowered:
+            self._text_itemprop_stack.pop()
+
     def handle_data(self, data: str) -> None:
         value = " ".join(str(data).split())
         if not value:
@@ -181,6 +213,12 @@ class _ProductPageParser(HTMLParser):
             self._jsonld_parts.append(data)
         elif self._ignored_text_depth:
             return
+        elif self._text_itemprop_stack:
+            _, canonical = self._text_itemprop_stack[-1]
+            if len(value) <= 256:
+                self.attribute_hints.setdefault(canonical, value)
+            if len(" ".join(self.text_parts)) < 40_000:
+                self.text_parts.append(value)
         elif self._in_h1:
             self.h1_parts.append(value)
             if len(" ".join(self.text_parts)) < 40_000:
@@ -240,6 +278,51 @@ def _first_price(text: str) -> str | None:
     return match.group(1).replace(",", "")
 
 
+def _generic_label_value(text: str, pattern: str) -> str | None:
+    match = re.search(pattern, text, re.I)
+    if not match:
+        return None
+    value = str(match.group(1) or "").strip().strip(" |,;")
+    return value or None
+
+
+def _commerce_identifiers(text: str) -> dict[str, str]:
+    """Extract common commerce identifiers without vendor-specific branching."""
+    mpn = _generic_label_value(
+        text,
+        r"\b(?:Mfg|Mfr|Manufacturer)\s*(?:Part(?:\s*(?:Number|No\.?|#))?|#)\s*:?[\s|]*"
+        r"([A-Za-z0-9][A-Za-z0-9._/+\-]{1,99})\b",
+    )
+    if not mpn:
+        mpn = _generic_label_value(
+            text,
+            r"\bModel\s*(?:Number|No\.?|#)?\s*:?[\s|]*"
+            r"([A-Za-z0-9][A-Za-z0-9._/+\-]{1,99})\b",
+        )
+    sku = _generic_label_value(
+        text,
+        r"\b(?:Item|SKU|Product)\s*(?:Number|No\.?|#)\s*:?[\s|]*"
+        r"([A-Za-z0-9][A-Za-z0-9._/+\-]{1,99})\b",
+    )
+    if not sku:
+        sku = _generic_label_value(
+            text,
+            r"\bASIN\s*:?[\s|]*([A-Z0-9]{8,20})\b",
+        )
+    upc = _generic_label_value(
+        text,
+        r"\bUPC\s*(?:Number|No\.?|#)?\s*:?[\s|]*([0-9]{8,14})\b",
+    )
+    result: dict[str, str] = {}
+    if mpn:
+        result["mpn"] = mpn
+    if sku:
+        result["sku"] = sku
+    if upc:
+        result["upc"] = upc
+    return result
+
+
 def _rendered_text_product_fallback(
     parser: _ProductPageParser,
     *,
@@ -256,13 +339,10 @@ def _rendered_text_product_fallback(
     heading = " ".join(parser.h1_parts).strip()
     name = heading or parser.meta.get("og:title") or title
     price = parser.attribute_hints.get("price") or _first_price(excerpt)
-    mpn = parser.attribute_hints.get("mpn")
-    sku = parser.attribute_hints.get("sku")
-
-    if not sku:
-        item_match = re.search(r"\bItem\s*#\s*:?\s*([A-Za-z0-9][A-Za-z0-9._-]{2,63})\b", excerpt, re.I)
-        if item_match:
-            sku = item_match.group(1)
+    labels = _commerce_identifiers(excerpt)
+    mpn = parser.attribute_hints.get("mpn") or labels.get("mpn")
+    sku = parser.attribute_hints.get("sku") or labels.get("sku")
+    upc = parser.attribute_hints.get("upc") or labels.get("upc")
 
     seller = parser.attribute_hints.get("seller")
     if not seller:
@@ -282,6 +362,7 @@ def _rendered_text_product_fallback(
         "sku": sku,
         "mpn": mpn,
         "brand": parser.attribute_hints.get("brand"),
+        "upc": upc,
         "price": price,
         "currency": "USD" if "$" in excerpt or parser.attribute_hints.get("price") else None,
         "seller": seller,
@@ -290,6 +371,18 @@ def _rendered_text_product_fallback(
 
     organization = {"name": seller} if seller else None
     return product, organization
+
+
+def _normalize_product_identifiers(product: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = dict(product)
+    mpn = str(normalized.get("mpn") or "").strip()
+    upc = str(normalized.get("upc") or "").strip()
+    if mpn and upc and mpn == upc and mpn.isdigit() and 8 <= len(mpn) <= 14:
+        # Some commerce feeds duplicate the GTIN/UPC into the MPN field. Preserve
+        # the barcode as a secondary identifier and let a distinct SKU/model win.
+        normalized.pop("mpn", None)
+        normalized["identifier_note"] = "source_mpn_duplicated_upc"
+    return normalized
 
 
 def extract_product_page(html: str) -> dict[str, Any]:
@@ -323,6 +416,12 @@ def extract_product_page(html: str) -> dict[str, Any]:
                 "sku": _name(obj.get("sku")),
                 "mpn": _name(obj.get("mpn")),
                 "brand": _name(obj.get("brand")),
+                "upc": (
+                    _scalar_text(obj.get("gtin12"))
+                    or _scalar_text(obj.get("gtin13"))
+                    or _scalar_text(obj.get("gtin"))
+                    or _scalar_text(obj.get("upc"))
+                ),
                 "price": _scalar_text(
                     offer.get("price")
                     if offer.get("price") is not None
@@ -367,6 +466,14 @@ def extract_product_page(html: str) -> dict[str, Any]:
         if fallback_org:
             organizations.append(fallback_org)
 
+    products = [_normalize_product_identifiers(item) for item in products]
+    normalization_status = "ready" if products else "needs_richer_acquisition"
+    evidence_mode = (
+        "structured_or_semantic_product"
+        if parser.jsonld and products
+        else ("rendered_product" if products else "none")
+    )
+
     products.sort(key=lambda item: len(item), reverse=True)
     organizations.sort(
         key=lambda item: (bool(item.get("address")), len(item)),
@@ -377,6 +484,8 @@ def extract_product_page(html: str) -> dict[str, Any]:
         "meta": dict(sorted(parser.meta.items())),
         "products": products[:10],
         "organizations": organizations[:10],
+        "normalization_status": normalization_status,
+        "evidence_mode": evidence_mode,
         "visible_text_excerpt": excerpt,
     }
 
@@ -418,6 +527,12 @@ def _fetch_html(url: str, *, max_bytes: int) -> tuple[str, str, bool]:
                 current = validate_public_https_url(urljoin(current, location))
                 continue
             if status != 200:
+                if status in {401, 403, 429}:
+                    raise ProcurementWebReadError(
+                        f"product URL returned HTTP {status}",
+                        acquisition_hint="browser_or_api",
+                        http_status=status,
+                    )
                 raise ProcurementWebReadError(
                     f"product URL returned HTTP {status}"
                 )
@@ -463,9 +578,35 @@ class ProcurementWebReadInvoker:
             raise ValueError("max_bytes is outside the bounded range")
 
         source_url = validate_public_https_url(str(args.get("url") or ""))
-        final_url, html, truncated = _fetch_html(source_url, max_bytes=max_bytes)
-        facts = extract_product_page(html)
         captured_at = datetime.now(timezone.utc).isoformat()
+        try:
+            final_url, html, truncated = _fetch_html(source_url, max_bytes=max_bytes)
+        except ProcurementWebReadError as exc:
+            if exc.acquisition_hint != "browser_or_api":
+                raise
+            return InvocationResult(
+                output={
+                    "provider": PROVIDER,
+                    "source_url": source_url,
+                    "final_url": source_url,
+                    "source_host": urlsplit(source_url).hostname,
+                    "captured_at": captured_at,
+                    "content_sha256": None,
+                    "truncated": False,
+                    "page_title": None,
+                    "meta": {},
+                    "products": [],
+                    "organizations": [],
+                    "normalization_status": "needs_browser_or_api",
+                    "evidence_mode": "simple_http_blocked",
+                    "fetch_http_status": exc.http_status,
+                    "acquisition_hint": exc.acquisition_hint,
+                    "visible_text_excerpt": "",
+                },
+                attempts=1,
+            )
+
+        facts = extract_product_page(html)
         digest = sha256(html.encode("utf-8", errors="replace")).hexdigest()
         return InvocationResult(
             output={

@@ -157,6 +157,38 @@ Do not repeat already completed steps after a restart, recheck, or handoff.
 
 ---
 
+## 6A. Procurement Source Hierarchy
+
+Jason MUST normalize every procurement source into the same canonical procurement
+evidence model before any Autotask mutation. Source type changes evidence quality,
+not business workflow or authority.
+
+Preferred source order:
+
+1. authenticated vendor/distributor API;
+2. structured vendor data such as CSV/Excel/export feeds;
+3. vendor quote, invoice, order confirmation, or packing-slip document;
+4. public product URL using bounded structured/rendered-page extraction;
+5. browser-backed public-page acquisition when simple HTTP is blocked or incomplete;
+6. manual entry as a last resort, subject to the same validation and reconciliation.
+
+Higher-confidence authoritative evidence should outrank weaker inferred evidence.
+Conflicting material values MUST enter review rather than being silently reconciled.
+
+For URL intake, use provider-neutral extraction rules such as JSON-LD, semantic
+item properties, common commerce labels (MPN, Mfg/Mfr Part Number, Model, Item/SKU/
+Product number, UPC), price semantics, and rendered text. Do not introduce a
+vendor-specific parser merely to support a new retailer.
+
+UPC and retailer SKU are secondary matching identifiers. Manufacturer part number
+remains the preferred product code when available.
+
+If the simple public-page reader is blocked or does not expose enough verifiable
+facts, return a richer-acquisition requirement rather than guessing values.
+Browser/API/document acquisition must still converge into this same lifecycle.
+
+---
+
 ## 7. Diagnostic Workflow
 
 ### Step 0: Resolve and verify vendor
