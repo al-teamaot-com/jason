@@ -7,7 +7,7 @@ import pytest
 
 from autonomous_remediation.playbook_autonomy_approval import SQLitePlaybookAutonomyApprovalStore
 from autonomous_remediation.playbook_autonomy_review import PlaybookAutonomyReviewService
-from connectors.src.jason_connectors.approval_requests import (
+from orchestrator.approval_requests import (
     ApprovalRequestService,
     SQLiteApprovalRequestRepository,
 )
