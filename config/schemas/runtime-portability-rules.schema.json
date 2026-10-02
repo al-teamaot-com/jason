@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jason.local/schemas/runtime-portability-rules.schema.json",
+  "title": "Jason Runtime Portability Rules",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "scan_globs", "rules"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "scan_globs": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "rules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "severity", "pattern", "description"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "severity": { "enum": ["blocker", "warning"] },
+          "pattern": { "type": "string", "minLength": 1 },
+          "description": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}
