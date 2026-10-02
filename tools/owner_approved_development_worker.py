@@ -40,13 +40,30 @@ def todo_policy_approved(repo: Path, body: str) -> bool:
     match = TODO_META.search(body)
     if not match:
         return False
-    config = json.loads((repo / 'config' / 'development-release-coordinator.json').read_text(encoding='utf-8'))
-    policy = config.get('todo_autonomy') if isinstance(config.get('todo_autonomy'), Mapping) else {}
-    if not policy or policy.get('enabled') is not True or policy.get('owner_approved') is not True:
+    config = json.loads(
+        (repo / 'config' / 'development-release-coordinator.json').read_text(
+            encoding='utf-8'
+        )
+    )
+    policy = (
+        config.get('todo_autonomy')
+        if isinstance(config.get('todo_autonomy'), Mapping)
+        else {}
+    )
+    if (
+        not policy
+        or policy.get('enabled') is not True
+        or policy.get('owner_approved') is not True
+    ):
         return False
+
     todo_id = match.group(1).upper()
     text = support.run(
-        ['git', 'show', 'origin/main:docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md'],
+        [
+            'git',
+            'show',
+            'origin/main:docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md',
+        ],
         cwd=repo,
     )
     heading = re.search(
@@ -622,7 +639,6 @@ if __name__ == '__main__':
     )
     if not heading:
         return False
-    start = heading.start()
     remainder = text[heading.end():]
     next_heading = re.search(
         r'(?im)^###\s+TODO-[A-Z]+-[0-9]+\s+—\s+.+    value = support.gh_json(['repo', 'view', '--json', 'nameWithOwner'], cwd=repo) or {}
@@ -1181,8 +1197,9 @@ if __name__ == '__main__':
         remainder,
     )
     end = heading.end() + next_heading.start() if next_heading else len(text)
-    section = text[start:end]
-    status = re.search(r'(?im)^- \*\*Status:\*\*\s*(.+?)\s*    value = support.gh_json(['repo', 'view', '--json', 'nameWithOwner'], cwd=repo) or {}
+    section = text[heading.start():end]
+    status = re.search(
+        r'(?im)^- \*\*Status:\*\*\s*(.+?)\s*    value = support.gh_json(['repo', 'view', '--json', 'nameWithOwner'], cwd=repo) or {}
     name = str(value.get('nameWithOwner') or '').strip()
     if '/' not in name:
         raise support.WorkerError('could not determine GitHub repository identity')
@@ -1734,7 +1751,9 @@ def main() -> int:
 
 if __name__ == '__main__':
     raise SystemExit(main())
-, section)
+,
+        section,
+    )
     if not status:
         return False
     value = status.group(1).strip().casefold()
