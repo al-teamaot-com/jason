@@ -2148,7 +2148,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         playbook_review_service = PlaybookAutonomyReviewService(
             registry_path=settings.autonomy_playbook_registry,
             promotion_store=playbook_promotion_store,
-            recipient_identity_ids=owner_ids,
+            owner_identity_ids=owner_ids,
             audit_path=settings.autonomy_review_audit_path,
         )
         playbook_approval_service = ApprovalRequestService(
