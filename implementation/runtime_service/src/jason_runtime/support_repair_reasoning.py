@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -132,9 +133,11 @@ class SupportRepairReasoningMaintenance:
         kind = str(raw.get('kind') or '').strip()
         support_item = str(raw.get('support_item') or '').strip().upper()
         if kind not in _ALLOWED_KINDS:
-            raise ValueError('unsupported support repair reasoning kind')
-        if not support_item.startswith('SUPPORT-') or len(support_item) > 80:
-            raise ValueError('invalid support item')
+            raise ValueError('unsupported support/development reasoning kind')
+        is_support = support_item.startswith('SUPPORT-')
+        is_development = bool(re.fullmatch(r'DEV-[1-9][0-9]*', support_item))
+        if (not is_support and not is_development) or len(support_item) > 80:
+            raise ValueError('invalid governed work item')
         payload = {
             'kind': kind,
             'support_item': support_item,
@@ -151,26 +154,47 @@ class SupportRepairReasoningMaintenance:
     def _complete(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
         kind = str(request['kind'])
         context = request.get('context') or {}
+        is_development = str(request['support_item']).startswith('DEV-')
         if kind == 'search_plan':
-            system = (
-                'You are the bounded Project Jason support-repair diagnostician. '
-                'Return search terms that help a deterministic host worker locate the smallest source area for this defect. '
-                'Do not propose shell commands, credentials, authority changes, security bypasses, or deployment actions. '
-                'If the defect inherently requires new authority, constitutional change, secret access, or disruptive behavior, set blocked_reason.'
-            )
+            if is_development:
+                system = (
+                    'You are the bounded Project Jason owner-approved development diagnostician. '
+                    'The supplied issue text is the maximum approved implementation scope. '
+                    'Return search terms that help a deterministic host worker locate the smallest source area needed to implement that scope. '
+                    'A new capability or workflow may be proposed only when the approved issue explicitly asks for it. '
+                    'Do not propose credentials, secret access, authority beyond the issue, governance bypasses, disruptive provider actions, or production deployment. '
+                    'If the issue is ambiguous or requires authority not explicitly approved, set blocked_reason.'
+                )
+            else:
+                system = (
+                    'You are the bounded Project Jason support-repair diagnostician. '
+                    'Return search terms that help a deterministic host worker locate the smallest source area for this defect. '
+                    'Do not propose shell commands, credentials, authority changes, security bypasses, or deployment actions. '
+                    'If the defect inherently requires new authority, constitutional change, secret access, or disruptive behavior, set blocked_reason.'
+                )
             schema = _search_schema()
         elif kind == 'edit_plan':
-            system = (
-                'You are the bounded Project Jason repair patch proposer. '
-                'Use only the supplied repository excerpts and failure evidence. '
-                'Return exact-text replacements; do not invent unseen surrounding code. '
-                'Prefer the smallest repair plus regression test. Do not modify governance, authority, security, credentials, dependencies, workflows, deployment, or infrastructure. '
-                'If a safe exact replacement cannot be formed from supplied excerpts, set blocked_reason and return no edits.'
-            )
+            if is_development:
+                system = (
+                    'You are the bounded Project Jason owner-approved development patch proposer. '
+                    'Use only the supplied repository excerpts and approved issue scope. '
+                    'Return exact-text replacements; do not invent unseen surrounding code. '
+                    'Implement the smallest complete change plus regression tests. '
+                    'Do not add credentials, broaden authority beyond the issue, weaken security/governance, bypass existing controls, or perform deployment. '
+                    'If a safe exact replacement cannot be formed from supplied excerpts, set blocked_reason and return no edits.'
+                )
+            else:
+                system = (
+                    'You are the bounded Project Jason repair patch proposer. '
+                    'Use only the supplied repository excerpts and failure evidence. '
+                    'Return exact-text replacements; do not invent unseen surrounding code. '
+                    'Prefer the smallest repair plus regression test. Do not modify governance, authority, security, credentials, dependencies, workflows, deployment, or infrastructure. '
+                    'If a safe exact replacement cannot be formed from supplied excerpts, set blocked_reason and return no edits.'
+                )
             schema = _edit_schema()
         else:
             system = (
-                'You are the Project Jason support production-acceptance reviewer. '
+                'You are the Project Jason governed production-acceptance reviewer. '
                 'Decide only whether the explicit acceptance criteria are directly proven by the supplied production evidence. '
                 'CI success, merge, deployment, or generic health are not proof of provider-specific behavior unless the acceptance criteria require only those facts. '
                 'Never infer missing live evidence. If any criterion lacks direct evidence, verified must be false and missing_evidence must state exactly what remains.'

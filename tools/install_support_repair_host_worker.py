@@ -27,10 +27,13 @@ def main() -> int:
     spool = args.spool.expanduser().resolve()
     home = Path.home()
     runner = repo / 'tools' / 'support_repair_host_worker.py'
+    development_runner = repo / 'tools' / 'owner_approved_development_worker.py'
     unit_root = repo / 'infrastructure' / 'openclaw-operations' / 'systemd' / 'user'
     units = ('jason-support-repair-worker.service', 'jason-support-repair-worker.timer')
     if not runner.is_file():
         raise SystemExit('support repair host worker source is missing')
+    if not development_runner.is_file():
+        raise SystemExit('owner-approved development worker source is missing')
     for unit in units:
         if not (unit_root / unit).is_file():
             raise SystemExit(f'systemd source unit is missing: {unit}')
@@ -38,6 +41,7 @@ def main() -> int:
     install_root = home / '.local' / 'lib' / 'jason'
     user_units = home / '.config' / 'systemd' / 'user'
     _copy(runner, install_root / 'support_repair_host_worker.py', 0o700)
+    _copy(development_runner, install_root / 'owner_approved_development_worker.py', 0o700)
     for unit in units:
         _copy(unit_root / unit, user_units / unit, 0o600)
 
