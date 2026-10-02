@@ -196,21 +196,27 @@ class AutotaskProductionProcurementConnector(AutotaskProcurementMutationConnecto
                 return int(raw)
         raise ValueError("AUTOTASK_PROCUREMENT_DURABLE_ID_MISSING")
 
-    def _readback(self, request: ConnectorRequest, entity: str, resource_id: int) -> Mapping[str, Any]:
-        reader = AutotaskConnector(
-            secrets=self._secrets,
-            transport=self._transport,
-            audit=self._audit,
+    def _readback(
+        self,
+        prepared: PreparedRequest,
+        entity: str,
+        resource_id: int,
+    ) -> Mapping[str, Any]:
+        parts = urlsplit(prepared.url)
+        if not parts.scheme or not parts.netloc:
+            raise ValueError("AUTOTASK_PROCUREMENT_READBACK_URL_INVALID")
+        api_prefix = parts.path.split("/V1.0/", 1)[0].rstrip("/")
+        readback_url = (
+            f"{parts.scheme}://{parts.netloc}{api_prefix}/V1.0/{entity}/{resource_id}"
         )
-        read_request = ConnectorRequest(
-            context=replace(
-                request.context,
-                capability="autotask.entity.get",
-                mode="observe",
-            ),
-            arguments={"entity": entity, "entity_id": resource_id},
+        observed = self._transport.request(
+            method="GET",
+            url=readback_url,
+            headers=prepared.headers,
+            params=None,
+            json=None,
+            timeout_seconds=prepared.timeout_seconds,
         )
-        observed = reader.execute(read_request).data
         if not isinstance(observed, Mapping):
             raise ValueError("AUTOTASK_PROCUREMENT_READBACK_INVALID")
         item = observed.get("item")
@@ -347,7 +353,7 @@ class AutotaskProductionProcurementConnector(AutotaskProcurementMutationConnecto
             if operation.endswith(".create")
             else int(payload["id"])
         )
-        observed = self._readback(request, opaque.entity, resource_id)
+        observed = self._readback(prepared, opaque.entity, resource_id)
         if int(observed.get("id", 0)) != resource_id:
             raise ValueError("AUTOTASK_PROCUREMENT_READBACK_ID_MISMATCH")
         data = dict(result.data)
