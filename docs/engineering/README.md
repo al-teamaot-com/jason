@@ -55,3 +55,7 @@ Engineering documentation for governed resolution implementation.
 New platform-level architecture belongs in `docs/architecture/` or `docs/decisions/` as appropriate. New detailed implementation engineering architecture may live here when it is intentionally subordinate to those canonical platform records.
 
 Do not introduce a second project-level architecture authority under this directory.
+
+## Release management
+
+`Jason-Release-Manager.md` defines the evidence-gated development, immutable candidate, isolated pre-production, Production Eligible, serialized promotion, verification, and rollback lifecycle. The daily 02:30 engineering window may promote only an already-eligible release and never creates eligibility by itself.
