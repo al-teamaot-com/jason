@@ -13,3 +13,19 @@ It currently blocks on:
 The audit reports only the matched fragment, rule, file, and line number. It does not echo complete runtime configuration lines.
 
 A candidate release is not considered clean-deployable while blocker findings remain. The correct remediation is to move the value into validated MSP/deployment configuration or remove the host-specific dependency, not to add an allow-bypass environment flag.
+
+## Runtime Compose extraction progress
+
+The generic runtime Compose no longer embeds AOT-specific deployment defaults.
+
+The portability migration:
+- removes the default AOT Datto component list and scalar component identity;
+- preserves fail-closed Datto behavior by defaulting server-configured component scope to empty while allowing separately governed durable approvals;
+- renames the procurement web-read profile to the provider-neutral procurement-web-v1 identifier;
+- requires the SES default sender to be supplied explicitly by deployment/MSP configuration;
+- removes the AOT sender default from runtime composition;
+- moves the KFS history password host mount default to the canonical Jason runtime-secrets tree.
+
+After this extraction, infrastructure/jason-runtime/compose.yaml has zero portability-audit blockers.
+
+The remaining portability findings are operator-home dependencies in legacy/service assets and are handled separately.

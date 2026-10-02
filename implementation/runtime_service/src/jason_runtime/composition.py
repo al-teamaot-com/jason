@@ -821,7 +821,7 @@ class RuntimeSettings:
             ),
             ses_region=os.getenv("JASON_SES_REGION", "us-east-1").strip(),
             ses_default_sender=os.getenv(
-                "JASON_SES_DEFAULT_SENDER", "jason@teamaot.com"
+                "JASON_SES_DEFAULT_SENDER", ""
             ).strip(),
             dynamic_conversation_enabled=os.getenv(
                 "JASON_DYNAMIC_CONVERSATION_ENABLED", "false"
