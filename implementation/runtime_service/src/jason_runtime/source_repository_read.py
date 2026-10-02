@@ -43,7 +43,7 @@ from .autonomous_repair_deployment import (
 )
 
 
-SOURCE_REPOSITORY_PULL_REQUEST_SEARCH = "source.repository.pull_request.search"
+SOURCE_REPOSITORY_PULL_REQUEST_SEARCH = "source.repository.pullrequest.search"
 SOURCE_REPOSITORY_COMMIT_READ = "source.repository.commit.read"
 PROVIDER = "github_source_repository"
 DEFAULT_REPOSITORY = "al-teamaot-com/jason"
