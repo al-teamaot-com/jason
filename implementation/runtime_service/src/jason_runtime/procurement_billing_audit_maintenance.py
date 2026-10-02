@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol
 from uuid import uuid4
 
 from kernel.capabilities import CapabilityRegistryService
@@ -27,7 +27,6 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_TICKET_READ,
 )
 
-from .teams_gateway_transport import TeamsGatewayTransport
 from .procurement_inventory_billing import (
     BillingAuditState,
     BillingExpectation,
@@ -40,7 +39,6 @@ from .procurement_inventory_billing import (
 
 AUDIT_WORKER_ID = "jason-procurement-billing-audit"
 AUDIT_READ_POLICY_ID = "aot-procurement-billing-audit-read-v1"
-LORI_EMAIL = "lori@teamaot.com"
 AUDIT_READ_CAPABILITIES = (
     SERVICE_TICKET_READ,
     SERVICE_RESOURCE_READ,
@@ -160,43 +158,18 @@ class GovernedBillingAuditReadPort:
         return dict(result.output or {})
 
 
-@dataclass
-class TeamsGatewayBillingAuditSender:
-    gateway_url: str
-    token_file: Path
-    bindings: Any
-    lori_email: str = LORI_EMAIL
+class BillingAuditNotificationPort(Protocol):
+    def identity_for_email(self, *, email_address: str) -> str | None: ...
 
-    def _send(self, *, binding: Any, text: str, card: Mapping[str, Any] | None = None) -> str:
-        payload: dict[str, Any] = {
-            "aadObjectId": str(binding.microsoft_object_id),
-            "tenantId": str(binding.microsoft_tenant_id),
-            "text": str(text),
-        }
-        if card is not None:
-            payload["card"] = dict(card)
-        transport = TeamsGatewayTransport(
-            gateway_url=self.gateway_url,
-            token_file=self.token_file,
-        )
-        result = transport.send(transport.prepare(payload))
-        if result.get("status") != "succeeded" or not result.get("message_id"):
-            raise RuntimeError("Teams hardware billing notification delivery failed")
-        return str(result["message_id"])
+    def technician(
+        self,
+        *,
+        jason_identity_id: str,
+        text: str,
+        card: Mapping[str, Any],
+    ) -> str: ...
 
-    def technician(self, *, jason_identity_id: str, text: str, card: Mapping[str, Any]) -> str:
-        binding = self.bindings.find_active_by_jason_identity(
-            jason_identity_id=jason_identity_id
-        )
-        if binding is None:
-            raise LookupError("technician Teams binding unavailable")
-        return self._send(binding=binding, text=text, card=card)
-
-    def lori(self, *, text: str) -> str:
-        binding = self.bindings.find_active_by_email(email_address=self.lori_email)
-        if binding is None:
-            raise LookupError("Lori Teams binding unavailable")
-        return self._send(binding=binding, text=text)
+    def lori(self, *, text: str) -> str: ...
 
 
 def _data(output: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -233,7 +206,7 @@ class HardwareBillingAuditMaintenance:
         submissions: Any,
         cases: SQLiteBillingLeakageStore,
         reads: GovernedBillingAuditReadPort,
-        notifications: TeamsGatewayBillingAuditSender,
+        notifications: BillingAuditNotificationPort,
         actions: Any | None = None,
         interval: timedelta = timedelta(minutes=5),
         now=lambda: datetime.now(timezone.utc),
@@ -480,10 +453,7 @@ class HardwareBillingAuditMaintenance:
         email = str(resource.get("email") or resource.get("emailAddress") or "").strip()
         if not email:
             return None
-        binding = self.notifications.bindings.find_active_by_email(
-            email_address=email
-        )
-        return None if binding is None else str(binding.jason_identity_id)
+        return self.notifications.identity_for_email(email_address=email)
 
     def _create_missing_charge(
         self, *, submission: Mapping[str, Any], current: datetime
