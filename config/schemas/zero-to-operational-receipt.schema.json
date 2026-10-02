@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jason.local/schemas/zero-to-operational-receipt.schema.json",
+  "title": "Jason Zero-to-Operational Acceptance Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "scenario_id",
+    "mode",
+    "status",
+    "deployability_proven",
+    "production_authorized",
+    "phases",
+    "receipt_sha256"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "scenario_id": { "type": "string", "minLength": 1 },
+    "mode": { "enum": ["synthetic", "host"] },
+    "status": { "enum": ["PASS", "FAIL"] },
+    "deployability_proven": { "type": "boolean" },
+    "production_authorized": { "const": false },
+    "phases": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sequence",
+          "phase",
+          "status",
+          "evidence_sha256",
+          "summary"
+        ],
+        "properties": {
+          "sequence": { "type": "integer", "minimum": 1 },
+          "phase": { "type": "string", "minLength": 1 },
+          "status": { "enum": ["PASS", "FAIL", "SKIPPED"] },
+          "evidence_sha256": {
+            "type": ["string", "null"],
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "summary": { "type": "string" }
+        }
+      }
+    },
+    "receipt_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}
