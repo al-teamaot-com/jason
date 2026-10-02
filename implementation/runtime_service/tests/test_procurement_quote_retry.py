@@ -99,3 +99,83 @@ def test_client_quote_retry_resumes_from_persisted_readback_checkpoints(tmp_path
     persisted = store.get(submission["submission_id"])["result"]
     assert persisted["client_quote_id"] == 1003
     assert persisted["quote_item_id"] == 1004
+
+
+class VendorWorker:
+    def __init__(self, *, fail_on=None):
+        self.fail_on = fail_on
+        self.calls = []
+        self.ids = {
+            "service.vendor.create": 700,
+            "service.product.create": 701,
+            "service.product.vendor.create": 702,
+        }
+
+    def execute(self, *, capability_name, payload, submission, correlation_id, route_arguments=None):
+        self.calls.append((capability_name, dict(payload), dict(route_arguments or {})))
+        if capability_name == self.fail_on:
+            raise RuntimeError("simulated provider interruption")
+        return {"data": {"jasonVerification": {"resourceId": self.ids[capability_name]}}}
+
+
+def _missing_vendor_submission():
+    return {
+        "submission_id": "proc-vendor-retry",
+        "status": "submitted",
+        "digest": "digest-vendor-retry",
+        "requester_principal_id": "person-requester",
+        "requester_name": "Requester",
+        "source_url": "https://www.newegg.com/p/example",
+        "create_po": False,
+        "create_client_quote": False,
+        "customer_quantity": 0,
+        "aot_stock_quantity": 1,
+        "quantity": 1,
+        "ticket_id": None,
+        "ticket_number": None,
+        "ticket_company_id": None,
+        "retail_price": "29.95",
+        "at_part_number": "USBC-TVGA",
+        "freight": "0.00",
+        "product": {
+            "name": "Plugable USB C to VGA Adapter",
+            "cost": "19.95",
+            "mpn": "USBC-TVGA",
+            "existing_product_id": None,
+        },
+        "vendor": {
+            "id": None,
+            "name": "Plugable Technologies",
+            "needs_create": True,
+            "source": {"name": "Plugable Technologies"},
+        },
+        "quote_context": {},
+    }
+
+
+def test_missing_vendor_retry_reuses_persisted_vendor_before_product(tmp_path):
+    store = SQLiteProcurementSubmissionStore(tmp_path / "vendor-retry.sqlite3")
+    submission = _missing_vendor_submission()
+    store.put_new(submission["submission_id"], submission)
+
+    first = VendorWorker(fail_on="service.product.create")
+    with pytest.raises(RuntimeError, match="simulated provider interruption"):
+        _flow(store, first).execute_submission(submission, owner_approval_id=None)
+
+    assert [call[0] for call in first.calls] == [
+        "service.vendor.create",
+        "service.product.create",
+    ]
+    checkpoint = store.get(submission["submission_id"])["result"]
+    assert checkpoint["vendor_id"] == 700
+    assert checkpoint["created_vendor"] is True
+
+    second = VendorWorker()
+    result = _flow(store, second).execute_submission(submission, owner_approval_id=None)
+    assert [call[0] for call in second.calls] == [
+        "service.product.create",
+        "service.product.vendor.create",
+    ]
+    assert second.calls[0][1]["defaultVendorID"] == 700
+    assert second.calls[1][1]["vendorID"] == 700
+    assert "Catalog product 701" in result["summary"]

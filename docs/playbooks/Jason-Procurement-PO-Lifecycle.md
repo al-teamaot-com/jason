@@ -157,6 +157,38 @@ Do not repeat already completed steps after a restart, recheck, or handoff.
 
 ---
 
+## 6A. Procurement Source Hierarchy
+
+Jason MUST normalize every procurement source into the same canonical procurement
+evidence model before any Autotask mutation. Source type changes evidence quality,
+not business workflow or authority.
+
+Preferred source order:
+
+1. authenticated vendor/distributor API;
+2. structured vendor data such as CSV/Excel/export feeds;
+3. vendor quote, invoice, order confirmation, or packing-slip document;
+4. public product URL using bounded structured/rendered-page extraction;
+5. browser-backed public-page acquisition when simple HTTP is blocked or incomplete;
+6. manual entry as a last resort, subject to the same validation and reconciliation.
+
+Higher-confidence authoritative evidence should outrank weaker inferred evidence.
+Conflicting material values MUST enter review rather than being silently reconciled.
+
+For URL intake, use provider-neutral extraction rules such as JSON-LD, semantic
+item properties, common commerce labels (MPN, Mfg/Mfr Part Number, Model, Item/SKU/
+Product number, UPC), price semantics, and rendered text. Do not introduce a
+vendor-specific parser merely to support a new retailer.
+
+UPC and retailer SKU are secondary matching identifiers. Manufacturer part number
+remains the preferred product code when available.
+
+If the simple public-page reader is blocked or does not expose enough verifiable
+facts, return a richer-acquisition requirement rather than guessing values.
+Browser/API/document acquisition must still converge into this same lifecycle.
+
+---
+
 ## 7. Diagnostic Workflow
 
 ### Step 0: Resolve and verify vendor
@@ -176,7 +208,7 @@ Compare available source fields to Autotask, including:
 - vendor/account number;
 - other stable procurement identifiers present in the source.
 
-If no exact vendor exists -> propose vendor creation under governed approval before product or PO creation.
+If no exact vendor exists -> retain the submission as a vendor-creation proposal. On explicit submission, use only the vendor-specific governed capability to create an Autotask company with `companyType = Vendor`; do not expose generic company creation. Persist the returned vendor ID before any product, quote, or PO mutation so retries cannot duplicate the vendor.
 If Autotask is missing a value that is present in authoritative current source evidence -> propose a vendor-master update.
 If both source and Autotask contain conflicting values -> `state = vendor_review`; do not silently update or continue financial commitment.
 If the source does not expose a field -> retain the Autotask value and record that the source could not verify it.
@@ -542,9 +574,37 @@ Do not broaden capabilities solely for convenience.
 
 This section reconciles GitHub issues `#727`, `#728`, and `#731` into this single lifecycle. No separate procurement, quote, inventory-release, or billing-audit workflow may bypass this state model.
 
+### Procurement source hierarchy and convergence
+
+All procurement inputs are first-class evidence sources, but they do not create separate purchasing workflows. Every source must normalize into the same vendor/product record before duplicate prevention, ticket resolution, allocation, approval, quote/PO creation, receiving, billing reconciliation, or release.
+
+Preferred acquisition order:
+
+1. **Authenticated vendor API** — preferred when available for account-specific SKU/MPN, price, availability, order status, tracking, invoice, and related supplier facts.
+2. **Structured vendor files** — CSV/Excel or equivalent feeds/exports.
+3. **Vendor documents** — PDF/document quotes, invoices, order confirmations, and packing slips after bounded extraction.
+4. **Product URLs with structured/simple HTTP evidence** — schema/metadata first, then generic rendered commerce labels.
+5. **Browser-acquired public product pages** — used when simple HTTP is blocked or a page is client-rendered.
+6. **Manual normalized entry** — last resort and lowest-confidence source.
+
+The normalized source record must persist:
+- source kind and immutable source reference;
+- acquisition method;
+- evidence/confidence tier;
+- source capture timestamp and digest when available;
+- evidence mode;
+- vendor identity evidence;
+- product name, manufacturer part number, vendor SKU, UPC when available, and price/cost evidence.
+
+Manufacturer part number remains the preferred primary product code when available. UPC and vendor SKU are secondary correlation identifiers; they must not silently replace a valid MPN.
+
+Confidence controls evidence preference, not authority. A higher-confidence source may be preferred when sources agree or duplicate data exists, but conflicting vendor/product/price evidence must be surfaced for review rather than silently overwritten.
+
+Vendor-specific parsers are not the default design. Common commerce labels such as MPN/Mfg #/Mfr Part Number/Model, Item/SKU/Product #, UPC, seller/manufacturer, and price should be normalized generically. Sites that reject simple HTTP or withhold usable product evidence must return a richer-acquisition state such as browser/API/document required rather than guessed product data.
+
 ### Vendor quote / invoice / URL branch
 
-The normalized source record may originate from a vendor quote, vendor invoice, or pasted product URL. All sources converge on the same product/vendor normalization, duplicate prevention, ticket resolution, allocation, approval, and audit path.
+Vendor quote, vendor invoice, vendor API, structured-file, and URL-derived records all converge on the same product/vendor normalization, duplicate prevention, ticket resolution, allocation, approval, and audit path.
 
 The Teams card exposes independent controls:
 

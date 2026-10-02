@@ -33,6 +33,7 @@ from kernel.identity_authority import (
 from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
 from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
 from orchestrator.provider_mutation_capability_catalog import (
+    SERVICE_VENDOR_CREATE,
     SERVICE_PRODUCT_CREATE,
     SERVICE_PRODUCT_VENDOR_CREATE,
     SERVICE_OPPORTUNITY_CREATE,
@@ -64,6 +65,35 @@ from .procurement_inventory_billing import AllocationPlan
 PROCUREMENT_APPROVAL_CAPABILITY = "procurement.submission.execute"
 PROCUREMENT_WORKER_ID = "jason-procurement-worker"
 PROCUREMENT_POLICY_ID = "aot-procurement-delegated-spend-v1"
+
+PROCUREMENT_SOURCE_KINDS = frozenset({
+    "website_url",
+    "browser_url",
+    "vendor_api",
+    "vendor_csv",
+    "vendor_xlsx",
+    "vendor_quote",
+    "vendor_invoice",
+})
+PROCUREMENT_SOURCE_ACQUISITIONS = frozenset({
+    "vendor_api",
+    "structured_file",
+    "document_extraction",
+    "simple_http_structured",
+    "simple_http_rendered",
+    "browser_rendered",
+    "manual",
+})
+PROCUREMENT_SOURCE_CONFIDENCE = {
+    "vendor_api": 100,
+    "structured_file": 90,
+    "document_verified": 85,
+    "web_structured": 80,
+    "browser_rendered": 70,
+    "web_rendered": 65,
+    "manual": 40,
+}
+
 DEFAULT_DB = Path("/var/lib/jason/procurement/submissions.sqlite3")
 
 
@@ -541,6 +571,7 @@ def _exact_udf(contact: Mapping[str, Any], name: str) -> str | None:
 
 
 PROCUREMENT_WRITE_CAPABILITIES = (
+    SERVICE_VENDOR_CREATE,
     SERVICE_PRODUCT_CREATE,
     SERVICE_PRODUCT_VENDOR_CREATE,
     SERVICE_OPPORTUNITY_CREATE,
@@ -805,13 +836,22 @@ class ProcurementTeamsFlow:
         source_reference: str,
         source_capture_sha256: str,
         source_captured_at: str,
+        source_acquisition: str,
+        source_confidence: str,
+        source_evidence_mode: str,
         source_org: Mapping[str, Any],
         product: Mapping[str, Any],
         correlation_id: str,
     ) -> Mapping[str, Any]:
         normalized_kind = str(source_kind or "").strip().casefold()
-        if normalized_kind not in {"website_url", "vendor_quote", "vendor_invoice"}:
+        if normalized_kind not in PROCUREMENT_SOURCE_KINDS:
             raise ProcurementFlowError("Unsupported procurement source kind.")
+        normalized_acquisition = str(source_acquisition or "").strip().casefold()
+        if normalized_acquisition not in PROCUREMENT_SOURCE_ACQUISITIONS:
+            raise ProcurementFlowError("Unsupported procurement acquisition method.")
+        normalized_confidence = str(source_confidence or "").strip().casefold()
+        if normalized_confidence not in PROCUREMENT_SOURCE_CONFIDENCE:
+            raise ProcurementFlowError("Unsupported procurement source confidence.")
         source_reference = str(source_reference or "").strip()
         if not source_reference:
             raise ProcurementFlowError("Procurement source reference is required.")
@@ -841,17 +881,20 @@ class ProcurementTeamsFlow:
             for item in _items(vendor_search)
             if _norm(item.get("companyName")) == _norm(vendor_name)
         ]
-        if len(vendors) != 1:
+        if len(vendors) > 1:
             raise ProcurementFlowError(
                 "Vendor could not be resolved to exactly one Autotask company."
             )
-        vendor = vendors[0]
-        checks, mismatches = _vendor_checks(source_org, vendor)
-        if mismatches:
-            raise ProcurementFlowError(
-                "Vendor Review required before procurement: "
-                + ", ".join(sorted(mismatches))
-            )
+        vendor = vendors[0] if vendors else None
+        checks: list[dict[str, str]] = []
+        mismatches: list[str] = []
+        if vendor is not None:
+            checks, mismatches = _vendor_checks(source_org, vendor)
+            if mismatches:
+                raise ProcurementFlowError(
+                    "Vendor Review required before procurement: "
+                    + ", ".join(sorted(mismatches))
+                )
 
         product_match: dict[str, Any] | None = None
         selectors: list[tuple[str, str]] = []
@@ -899,17 +942,30 @@ class ProcurementTeamsFlow:
             "source_url": source_reference,
             "source_capture_sha256": str(source_capture_sha256 or ""),
             "source_captured_at": str(source_captured_at or ""),
+            "source_acquisition": normalized_acquisition,
+            "source_confidence": normalized_confidence,
+            "source_confidence_score": PROCUREMENT_SOURCE_CONFIDENCE[normalized_confidence],
+            "source_evidence_mode": str(source_evidence_mode or "").strip(),
             "vendor": {
-                "id": int(vendor["id"]),
-                "name": str(vendor.get("companyName") or vendor_name),
+                "id": int(vendor["id"]) if vendor is not None else None,
+                "name": str(
+                    vendor.get("companyName") if vendor is not None else vendor_name
+                ),
+                "needs_create": vendor is None,
+                "source": dict(source_org),
                 "field_checks": checks,
-                "verification_summary": "; ".join(verification),
+                "verification_summary": (
+                    "; ".join(verification)
+                    if vendor is not None
+                    else "Vendor not present in Autotask; creation proposed on submit."
+                ),
             },
             "product": {
                 "name": str(product.get("name") or "").strip(),
                 "description": str(product.get("description") or "").strip(),
                 "sku": str(product.get("sku") or "").strip(),
                 "mpn": str(product.get("mpn") or "").strip(),
+                "upc": str(product.get("upc") or "").strip(),
                 "brand": str(product.get("brand") or "").strip(),
                 "cost": f"{cost:.2f}",
                 "existing_product_id": (
@@ -929,9 +985,14 @@ class ProcurementTeamsFlow:
             "submission_id": submission_id,
             "reply": {
                 "text": (
-                    "I normalized the source and matched the vendor in Autotask. "
-                    "Review the selections below and submit when ready."
-                ),
+                    (
+                        "I normalized the source. The vendor is not in Autotask, so "
+                        "submission will create the Vendor record first. "
+                    )
+                    if payload["vendor"].get("needs_create")
+                    else "I normalized the source and matched the vendor in Autotask. "
+                )
+                + "Review the selections below and submit when ready.",
                 "card": _card(payload),
             },
         }
@@ -962,8 +1023,15 @@ class ProcurementTeamsFlow:
         )
         products = web.get("products")
         if not isinstance(products, list) or not products:
+            status = str(web.get("normalization_status") or "").strip()
             raise ProcurementFlowError(
-                "The page did not expose enough structured product data to build a safe quote."
+                "The public page did not expose enough verifiable product evidence to "
+                "build a safe quote."
+                + (
+                    " A richer browser/API/document source is required."
+                    if status in {"needs_richer_acquisition", "needs_browser_or_api"}
+                    else ""
+                )
             )
         product = dict(products[0])
         organizations = web.get("organizations")
@@ -989,12 +1057,23 @@ class ProcurementTeamsFlow:
             source_reference=str(web.get("final_url") or url),
             source_capture_sha256=str(web.get("content_sha256") or ""),
             source_captured_at=str(web.get("captured_at") or ""),
+            source_acquisition=(
+                "simple_http_structured"
+                if str(web.get("evidence_mode") or "") == "structured_or_semantic_product"
+                else "simple_http_rendered"
+            ),
+            source_confidence=(
+                "web_structured"
+                if str(web.get("evidence_mode") or "") == "structured_or_semantic_product"
+                else "web_rendered"
+            ),
+            source_evidence_mode=str(web.get("evidence_mode") or ""),
             source_org=source_org,
             product=product,
             correlation_id=correlation,
         )
 
-    def handle_vendor_document(
+    def handle_normalized_source(
         self,
         *,
         normalized: Mapping[str, Any],
@@ -1004,22 +1083,20 @@ class ProcurementTeamsFlow:
         message_id: str,
         occurred_at: datetime,
     ) -> Mapping[str, Any]:
-        """Accept bounded, already-extracted vendor quote/invoice evidence.
+        """Converge any trusted normalized procurement source into one workflow.
 
-        Extraction is intentionally separate from procurement authority. This method
-        converges the document branch into the same vendor/product/draft/card path
-        used by URL intake; document content cannot expand runtime authority.
+        Source adapters (future vendor APIs, CSV/XLSX imports, browser acquisition,
+        and document extraction) may differ in acquisition mechanics, but none may
+        bypass the common vendor/product reconciliation and procurement state model.
         """
         source_kind = str(normalized.get("source_kind") or "").strip().casefold()
-        if source_kind not in {"vendor_quote", "vendor_invoice"}:
-            raise ProcurementFlowError(
-                "Vendor document must be classified as vendor_quote or vendor_invoice."
-            )
+        if source_kind not in PROCUREMENT_SOURCE_KINDS:
+            raise ProcurementFlowError("Unsupported normalized procurement source kind.")
         vendor = normalized.get("vendor")
         product = normalized.get("product")
         if not isinstance(vendor, Mapping) or not isinstance(product, Mapping):
             raise ProcurementFlowError(
-                "Vendor document requires one normalized vendor and one product line."
+                "Normalized procurement source requires one vendor and one product line."
             )
         principal, evidence = self._principal(
             tenant=microsoft_tenant_id,
@@ -1037,9 +1114,55 @@ class ProcurementTeamsFlow:
             source_reference=str(normalized.get("source_reference") or ""),
             source_capture_sha256=str(normalized.get("source_capture_sha256") or ""),
             source_captured_at=str(normalized.get("source_captured_at") or ""),
+            source_acquisition=str(
+                normalized.get("source_acquisition") or "manual"
+            ),
+            source_confidence=str(
+                normalized.get("source_confidence") or "manual"
+            ),
+            source_evidence_mode=str(
+                normalized.get("source_evidence_mode") or "normalized_source"
+            ),
             source_org=vendor,
             product=product,
             correlation_id=correlation,
+        )
+
+    def handle_vendor_document(
+        self,
+        *,
+        normalized: Mapping[str, Any],
+        microsoft_tenant_id: str,
+        microsoft_object_id: str,
+        conversation_id: str,
+        message_id: str,
+        occurred_at: datetime,
+    ) -> Mapping[str, Any]:
+        """Accept bounded, already-extracted vendor quote/invoice evidence."""
+        source_kind = str(normalized.get("source_kind") or "").strip().casefold()
+        if source_kind not in {"vendor_quote", "vendor_invoice"}:
+            raise ProcurementFlowError(
+                "Vendor document must be classified as vendor_quote or vendor_invoice."
+            )
+        enriched = {
+            **dict(normalized),
+            "source_acquisition": str(
+                normalized.get("source_acquisition") or "document_extraction"
+            ),
+            "source_confidence": str(
+                normalized.get("source_confidence") or "document_verified"
+            ),
+            "source_evidence_mode": str(
+                normalized.get("source_evidence_mode") or "document_normalized"
+            ),
+        }
+        return self.handle_normalized_source(
+            normalized=enriched,
+            microsoft_tenant_id=microsoft_tenant_id,
+            microsoft_object_id=microsoft_object_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            occurred_at=occurred_at,
         )
 
     def _requester_limit(
@@ -1133,7 +1256,11 @@ class ProcurementTeamsFlow:
             arguments={"email": email, "page_size": 20},
             correlation_id=correlation_id,
         )
-        matches = _items(result)
+        matches = [
+            item
+            for item in _items(result)
+            if item.get("isActive") is not False
+        ]
         if len(matches) != 1:
             raise ProcurementFlowError(
                 "Client quote requester must resolve to exactly one active Autotask resource."
@@ -1431,6 +1558,43 @@ class ProcurementTeamsFlow:
                 {**latest, "status": "executing", "result": dict(result)},
             )
 
+        vendor_id = result.get("vendor_id") or submission["vendor"].get("id")
+        if vendor_id is None:
+            source_vendor = dict(submission["vendor"].get("source") or {})
+            source_address = dict(source_vendor.get("address") or {})
+            vendor_payload: dict[str, Any] = {
+                "companyName": str(submission["vendor"]["name"]),
+            }
+            field_map = {
+                "url": "webAddress",
+                "phone": "phone",
+            }
+            for source_field, target_field in field_map.items():
+                value = str(source_vendor.get(source_field) or "").strip()
+                if value:
+                    vendor_payload[target_field] = value
+            address_map = {
+                "street": "address1",
+                "city": "city",
+                "state": "state",
+                "postal_code": "postalCode",
+            }
+            for source_field, target_field in address_map.items():
+                value = str(source_address.get(source_field) or "").strip()
+                if value:
+                    vendor_payload[target_field] = value
+            vendor_output = self.worker.execute(
+                capability_name=SERVICE_VENDOR_CREATE,
+                payload=vendor_payload,
+                submission=submission,
+                correlation_id=correlation,
+            )
+            vendor_id = _resource_id(vendor_output)
+            checkpoint(vendor_id=int(vendor_id), created_vendor=True)
+        else:
+            result.setdefault("vendor_id", int(vendor_id))
+            result.setdefault("created_vendor", False)
+
         product_id = (
             result.get("product_id")
             or submission["product"].get("existing_product_id")
@@ -1452,7 +1616,7 @@ class ProcurementTeamsFlow:
                         or submission["product"].get("sku")
                         or ""
                     ),
-                    "defaultVendorID": int(submission["vendor"]["id"]),
+                    "defaultVendorID": int(vendor_id),
                     "unitCost": float(Decimal(str(submission["product"]["cost"]))),
                     "unitPrice": float(Decimal(str(submission["retail_price"]))),
                 },
@@ -1468,7 +1632,7 @@ class ProcurementTeamsFlow:
                 capability_name=SERVICE_PRODUCT_VENDOR_CREATE,
                 payload={
                     "productID": int(product_id),
-                    "vendorID": int(submission["vendor"]["id"]),
+                    "vendorID": int(vendor_id),
                     "isActive": True,
                     "isDefault": True,
                     "vendorCost": float(
@@ -1651,7 +1815,7 @@ class ProcurementTeamsFlow:
 
         if submission.get("create_po"):
             po_payload: dict[str, Any] = {
-                "vendorID": int(submission["vendor"]["id"]),
+                "vendorID": int(vendor_id),
                 "freight": float(Decimal(str(submission["freight"]))),
                 "generalMemo": (
                     "Jason procurement "
