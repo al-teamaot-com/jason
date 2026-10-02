@@ -29,7 +29,7 @@ import re
 import sqlite3
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 from uuid import uuid4
@@ -44,6 +44,11 @@ from autonomous_remediation.autotask_queue_source import (
 )
 from autonomous_remediation.playbook_autonomy_approval import (
     SQLitePlaybookAutonomyApprovalStore,
+)
+from autonomous_remediation.targeted_recheck import (
+    SQLiteTargetedWakeStore,
+    TargetedWake,
+    WakeKind,
 )
 from autonomous_remediation.datto_edr_av_playbook import PLAYBOOK_VERSION as EDR_PLAYBOOK_VERSION
 from autonomous_remediation.datto_edr_av_runtime_contract import VERIFIED_COMPONENTS
@@ -355,6 +360,17 @@ class SQLiteOperationalWorkStore:
         human_review INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS autonomy_worker_heartbeat (
+        singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+        last_started_at TEXT,
+        last_completed_at TEXT,
+        last_failed_at TEXT,
+        last_error TEXT,
+        last_duration_ms INTEGER,
+        consecutive_failures INTEGER NOT NULL DEFAULT 0,
+        last_cycle_id TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS autonomy_ticket_classification (
         ticket_id INTEGER PRIMARY KEY,
         state TEXT NOT NULL,
@@ -598,6 +614,72 @@ class SQLiteOperationalWorkStore:
         ).fetchone()
         return None if row is None else TicketScanSnapshot(**dict(row))
 
+    def record_worker_cycle_started(self, started_at: str) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO autonomy_worker_heartbeat(
+                    singleton_id,last_started_at,consecutive_failures
+                ) VALUES (1,?,0)
+                ON CONFLICT(singleton_id) DO UPDATE SET
+                    last_started_at=excluded.last_started_at
+                """,
+                (str(started_at),),
+            )
+
+    def record_worker_cycle_completed(
+        self,
+        *,
+        completed_at: str,
+        duration_ms: int,
+        cycle_id: str,
+    ) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO autonomy_worker_heartbeat(
+                    singleton_id,last_completed_at,last_duration_ms,
+                    consecutive_failures,last_cycle_id,last_error
+                ) VALUES (1,?,?,0,?,NULL)
+                ON CONFLICT(singleton_id) DO UPDATE SET
+                    last_completed_at=excluded.last_completed_at,
+                    last_duration_ms=excluded.last_duration_ms,
+                    consecutive_failures=0,
+                    last_cycle_id=excluded.last_cycle_id,
+                    last_error=NULL
+                """,
+                (str(completed_at), int(duration_ms), str(cycle_id)),
+            )
+
+    def record_worker_cycle_failed(
+        self,
+        *,
+        failed_at: str,
+        duration_ms: int,
+        error: str,
+    ) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO autonomy_worker_heartbeat(
+                    singleton_id,last_failed_at,last_error,last_duration_ms,
+                    consecutive_failures
+                ) VALUES (1,?,?,?,1)
+                ON CONFLICT(singleton_id) DO UPDATE SET
+                    last_failed_at=excluded.last_failed_at,
+                    last_error=excluded.last_error,
+                    last_duration_ms=excluded.last_duration_ms,
+                    consecutive_failures=autonomy_worker_heartbeat.consecutive_failures + 1
+                """,
+                (str(failed_at), str(error)[:1000], int(duration_ms)),
+            )
+
+    def worker_heartbeat(self) -> Mapping[str, Any] | None:
+        row = self._connection.execute(
+            "SELECT * FROM autonomy_worker_heartbeat WHERE singleton_id=1"
+        ).fetchone()
+        return None if row is None else dict(row)
+
     def record_classifications(
         self,
         rows: Sequence[tuple[int, str, str, str | None, bool]],
@@ -820,6 +902,7 @@ class OperationalAutonomyMaintenance:
         actions: GovernedAutonomyActionPort,
         store: SQLiteOperationalWorkStore,
         promotion_store: SQLitePlaybookAutonomyApprovalStore,
+        targeted_wake_store: SQLiteTargetedWakeStore | None = None,
         max_active_work_items: int = 2,
         max_admission_attempts_per_scan: int = 4,
         max_candidate_evaluations_per_scan: int = 40,
@@ -841,6 +924,7 @@ class OperationalAutonomyMaintenance:
         self.actions = actions
         self.store = store
         self.promotion_store = promotion_store
+        self.targeted_wake_store = targeted_wake_store
         self.max_active_work_items = int(max_active_work_items)
         self.max_admission_attempts_per_scan = int(max_admission_attempts_per_scan)
         self.max_candidate_evaluations_per_scan = int(max_candidate_evaluations_per_scan)
@@ -850,6 +934,55 @@ class OperationalAutonomyMaintenance:
         self.completion_notifier = completion_notifier
         self._next_due = 0.0
         self._resource_automation_cache: dict[int, bool] = {}
+        self._ticket_status_cache: dict[int, str] = {}
+
+    def _schedule_device_access_wake(self, work: OperationalWork) -> None:
+        if self.targeted_wake_store is None or not work.device_uid:
+            return
+        now = datetime.now(timezone.utc)
+        cadence = max(30, self.interval_seconds)
+        next_bucket = int(now.timestamp() // cadence) + 1
+        due_at = datetime.fromtimestamp(next_bucket * cadence, tz=timezone.utc)
+        wake = TargetedWake(
+            wake_id=f"worker-device-{work.ticket_id}-{next_bucket}",
+            resource_id=str(work.ticket_id),
+            reason=f"recheck exact endpoint access for {work.ticket_number}",
+            kind=WakeKind.TARGETED_READ,
+            due_at=due_at,
+            capability_name="endpoint.device.read",
+            arguments={"resource_id": work.device_uid},
+            queue_reconciliation_required=True,
+            max_attempts=3,
+        )
+        self.targeted_wake_store.schedule(wake)
+
+    def _schedule_waiting_reconcile_wake(
+        self,
+        work: OperationalWork,
+        *,
+        delay_seconds: int,
+        reason: str,
+    ) -> None:
+        if self.targeted_wake_store is None:
+            return
+        base = self._parse_iso_timestamp(work.updated_at) or datetime.now(timezone.utc)
+        due_at = base + timedelta(seconds=max(30, int(delay_seconds)))
+        fingerprint = hashlib.sha256(
+            (
+                f"{work.ticket_id}|{work.phase}|{work.updated_at}|"
+                f"{int(delay_seconds)}|{reason}"
+            ).encode("utf-8")
+        ).hexdigest()[:16]
+        self.targeted_wake_store.schedule(
+            TargetedWake(
+                wake_id=f"worker-wait-{work.ticket_id}-{fingerprint}",
+                resource_id=str(work.ticket_id),
+                reason=reason,
+                kind=WakeKind.QUEUE_RECONCILE,
+                due_at=due_at,
+                max_attempts=3,
+            )
+        )
 
     def request_reconcile(self, reason: str) -> None:
         """Request a full queue reconciliation on the next maintenance tick."""
@@ -1387,12 +1520,32 @@ class OperationalAutonomyMaintenance:
             return
         self._next_due = now + self.interval_seconds
 
+        started_at = datetime.now(timezone.utc)
+        started_clock = time.monotonic()
+        self.store.record_worker_cycle_started(started_at.isoformat())
+        try:
+            snapshot = self._run_cycle()
+        except Exception as exc:
+            self.store.record_worker_cycle_failed(
+                failed_at=datetime.now(timezone.utc).isoformat(),
+                duration_ms=max(0, int((time.monotonic() - started_clock) * 1000)),
+                error=f"{type(exc).__name__}: {str(exc)[:900]}",
+            )
+            raise
+        self.store.record_worker_cycle_completed(
+            completed_at=datetime.now(timezone.utc).isoformat(),
+            duration_ms=max(0, int((time.monotonic() - started_clock) * 1000)),
+            cycle_id=snapshot.cycle_id,
+        )
+
+    def _run_cycle(self) -> TicketScanSnapshot:
         try:
             candidates = tuple(self.queue_source.reconcile_candidates())
         except Exception:
             # Provider/read failures are never authority to mutate or redispatch.
-            # A later cadence retry will reconcile again.
-            return
+            # Surface the failed cycle to the durable heartbeat; the outer
+            # maintenance loop remains fail-closed and retries on the next cadence.
+            raise
         by_id = {int(item.resource_id): item for item in candidates}
         self._reconcile_orphaned_waiting_device_rows(by_id)
 
@@ -1468,6 +1621,14 @@ class OperationalAutonomyMaintenance:
                 )
                 continue
             try:
+                status_label = str(
+                    candidate.context.get("_jason_source_status_label") or ""
+                ).strip()
+                if (
+                    str(candidate.source_queue).strip().casefold() == "jason"
+                    and status_label.casefold() != "in progress"
+                ):
+                    self._update_ticket_status_verified(work, "In Progress")
                 if self._pause_active_work_if_endpoint_offline(work, candidate):
                     state, reason_code = self._classify_persisted_work(work.ticket_id)
                     classifications[work.ticket_id] = (
@@ -1518,16 +1679,7 @@ class OperationalAutonomyMaintenance:
                     item.context.get("_jason_source_status_label") or ""
                 ).strip()
                 if status_label.casefold() != desired_status.casefold():
-                    self.actions.execute(
-                        self._scope_for_work(existing),
-                        "service.ticket.update",
-                        {
-                            "payload": {
-                                "id": existing.ticket_id,
-                                "status": desired_status,
-                            }
-                        },
-                    )
+                    self._update_ticket_status_verified(existing, desired_status)
                 existing = self._replace(
                     existing,
                     phase=(
@@ -1631,6 +1783,11 @@ class OperationalAutonomyMaintenance:
                         )
                     continue
                 if existing.phase in {"waiting_patch_approval", "waiting_patch_window"}:
+                    status_label = str(
+                        item.context.get("_jason_source_status_label") or ""
+                    ).strip()
+                    if status_label.casefold() != "waiting":
+                        self._update_ticket_status_verified(existing, "Waiting")
                     interval = (
                         VULSCAN_APPROVAL_RECHECK_SECONDS
                         if existing.phase == "waiting_patch_approval"
@@ -1642,6 +1799,7 @@ class OperationalAutonomyMaintenance:
                         or (datetime.now(timezone.utc) - updated).total_seconds() >= interval
                     )
                     if due:
+                        self._update_ticket_status_verified(existing, "In Progress")
                         existing = self._replace(
                             existing,
                             phase="vulscan_investigate",
@@ -1665,6 +1823,14 @@ class OperationalAutonomyMaintenance:
                     )
                     continue
                 if existing.phase.startswith("waiting_device_access:"):
+                    status_label = str(
+                        item.context.get("_jason_source_status_label") or ""
+                    ).strip()
+                    if status_label.casefold() != "waiting device access":
+                        self._update_ticket_status_verified(
+                            existing,
+                            "Waiting Device Access",
+                        )
                     waiting_phase = existing.phase
                     try:
                         access_state, deb = self._device_access_state(existing)
@@ -1694,16 +1860,9 @@ class OperationalAutonomyMaintenance:
 
                     if may_resume:
                         if len(self.store.list_open()) < self.max_active_work_items:
-                            scope = self._scope_for_work(existing)
-                            self.actions.execute(
-                                scope,
-                                "service.ticket.update",
-                                {
-                                    "payload": {
-                                        "id": existing.ticket_id,
-                                        "status": "In Progress",
-                                    }
-                                },
+                            self._update_ticket_status_verified(
+                                existing,
+                                "In Progress",
                             )
                             resume_reason = (
                                 existing.last_reason
@@ -1779,6 +1938,7 @@ class OperationalAutonomyMaintenance:
                             item.source_version,
                             False,
                         )
+                        self._schedule_device_access_wake(existing)
                     continue
                 if existing.phase.startswith("waiting_recheck:"):
                     if len(self.store.list_open()) < self.max_active_work_items:
@@ -1922,7 +2082,14 @@ class OperationalAutonomyMaintenance:
         }
         eligible.sort(
             key=lambda pair: (
-                int(prior_states.get(int(pair[0].resource_id)) == "waiting_device_access"),
+                (
+                    2
+                    if prior_states.get(int(pair[0].resource_id))
+                    in {"waiting_device_access", "governance_blocked"}
+                    else 1
+                    if prior_states.get(int(pair[0].resource_id)) == "admission_deferred"
+                    else 0
+                ),
                 -int(pair[0].urgent),
                 -pair[0].priority,
                 -int(pair[0].owned_by_jason),
@@ -1940,9 +2107,21 @@ class OperationalAutonomyMaintenance:
             if len(self.store.list_open()) >= self.max_active_work_items:
                 break
             if admission_attempts >= self.max_admission_attempts_per_scan:
-                break
+                classifications[int(candidate.resource_id)] = (
+                    "admission_deferred",
+                    "admission_attempt_budget_exhausted",
+                    candidate.source_version,
+                    False,
+                )
+                continue
             if candidate_evaluations >= self.max_candidate_evaluations_per_scan:
-                break
+                classifications[int(candidate.resource_id)] = (
+                    "admission_deferred",
+                    "candidate_evaluation_budget_exhausted",
+                    candidate.source_version,
+                    False,
+                )
+                continue
             candidate_evaluations += 1
             try:
                 work = self._admit(candidate, scope)
@@ -2055,6 +2234,22 @@ class OperationalAutonomyMaintenance:
         self.store.record_scan(snapshot)
         self._emit_scan_reflection(snapshot)
 
+        unselected_eligible = sorted(
+            ticket_id
+            for ticket_id, (state, _, _, selected) in classifications.items()
+            if state == "eligible_now" and not selected
+        )
+        if (
+            snapshot.active_slots < self.max_active_work_items
+            and unselected_eligible
+        ):
+            raise OperationalAutonomyError(
+                "admission invariant violated: free capacity remained while "
+                "eligible tickets were unselected; ticket_ids="
+                + ",".join(str(ticket_id) for ticket_id in unselected_eligible[:20])
+            )
+        return snapshot
+
     def _emit_scan_reflection(self, snapshot: TicketScanSnapshot) -> None:
         if self.audit is None:
             return
@@ -2125,28 +2320,18 @@ class OperationalAutonomyMaintenance:
             self._document_deb_drmm_conflict(work, deb)
             return False
 
-        scope = self._scope_for_work(work)
         status_label = str(
             candidate.context.get("_jason_source_status_label") or ""
         ).strip()
         if status_label.casefold() != "waiting device access":
-            self.actions.execute(
-                scope,
-                "service.ticket.update",
-                {
-                    "payload": {
-                        "id": work.ticket_id,
-                        "status": "Waiting Device Access",
-                    }
-                },
-            )
-        self.store.put(
-            self._replace(
-                work,
-                phase=f"waiting_device_access:{work.phase}",
-                last_reason=self._device_wait_reason(access_state, deb),
-            )
+            self._update_ticket_status_verified(work, "Waiting Device Access")
+        waiting_work = self._replace(
+            work,
+            phase=f"waiting_device_access:{work.phase}",
+            last_reason=self._device_wait_reason(access_state, deb),
         )
+        self.store.put(waiting_work)
+        self._schedule_device_access_wake(waiting_work)
         return True
 
     @staticmethod
@@ -2961,6 +3146,7 @@ class OperationalAutonomyMaintenance:
                 raise OperationalAutonomyError(
                     "Jason queue claim readback did not verify queueID and status"
                 )
+            self._ticket_status_cache[work.ticket_id] = "In Progress"
             if work.playbook_id == EDR_SCOPE.playbook_id:
                 next_phase = "health_dispatch"
             elif work.playbook_id == DNS_SCOPE.playbook_id:
@@ -3278,16 +3464,7 @@ class OperationalAutonomyMaintenance:
 
         if endpoint.get("online") is False:
             access_state, deb = self._device_access_state(work, endpoint=endpoint)
-            self.actions.execute(
-                self._scope_for_work(work),
-                "service.ticket.update",
-                {
-                    "payload": {
-                        "id": work.ticket_id,
-                        "status": "Waiting Device Access",
-                    }
-                },
-            )
+            self._update_ticket_status_verified(work, "Waiting Device Access")
             if access_state == "deb_online_drmm_offline":
                 self._document_deb_drmm_conflict(work, deb)
                 status_text = (
@@ -3325,13 +3502,13 @@ class OperationalAutonomyMaintenance:
                 note,
                 "Jason - Idle Log Off - Waiting Device Access",
             )
-            self.store.put(
-                self._replace(
-                    work,
-                    phase="waiting_device_access:idle_log_off_investigate",
-                    last_reason=self._device_wait_reason(access_state, deb),
-                )
+            waiting_work = self._replace(
+                work,
+                phase="waiting_device_access:idle_log_off_investigate",
+                last_reason=self._device_wait_reason(access_state, deb),
             )
+            self.store.put(waiting_work)
+            self._schedule_device_access_wake(waiting_work)
             return
 
         current_data = self._read_data(
@@ -4216,12 +4393,17 @@ class OperationalAutonomyMaintenance:
                 note,
                 "Jason - VulScan - Waiting Patch Approval",
             )
-            self.store.put(
-                self._replace(
-                    work,
-                    phase="waiting_patch_approval",
-                    last_reason=reason,
-                )
+            self._update_ticket_status_verified(work, "Waiting")
+            waiting_work = self._replace(
+                work,
+                phase="waiting_patch_approval",
+                last_reason=reason,
+            )
+            self.store.put(waiting_work)
+            self._schedule_waiting_reconcile_wake(
+                waiting_work,
+                delay_seconds=VULSCAN_APPROVAL_RECHECK_SECONDS,
+                reason="VulScan patch approval recheck due",
             )
             return
         if classification == "approved_pending":
@@ -4230,12 +4412,17 @@ class OperationalAutonomyMaintenance:
                 note,
                 "Jason - VulScan - Waiting Patch Window",
             )
-            self.store.put(
-                self._replace(
-                    work,
-                    phase="waiting_patch_window",
-                    last_reason=reason,
-                )
+            self._update_ticket_status_verified(work, "Waiting")
+            waiting_work = self._replace(
+                work,
+                phase="waiting_patch_window",
+                last_reason=reason,
+            )
+            self.store.put(waiting_work)
+            self._schedule_waiting_reconcile_wake(
+                waiting_work,
+                delay_seconds=VULSCAN_PATCH_WINDOW_RECHECK_SECONDS,
+                reason="VulScan patch processing window recheck due",
             )
             return
 
@@ -4437,20 +4624,16 @@ class OperationalAutonomyMaintenance:
             return
         if endpoint.get("online") is not True:
             access_state, deb = self._device_access_state(work, endpoint=endpoint)
-            self.actions.execute(
-                self._scope_for_work(work),
-                "service.ticket.update",
-                {"payload": {"id": work.ticket_id, "status": "Waiting Device Access"}},
-            )
+            self._update_ticket_status_verified(work, "Waiting Device Access")
             if access_state == "deb_online_drmm_offline":
                 self._document_deb_drmm_conflict(work, deb)
-            self.store.put(
-                self._replace(
-                    work,
-                    phase="waiting_device_access:low_disk_investigate",
-                    last_reason=self._device_wait_reason(access_state, deb),
-                )
+            waiting_work = self._replace(
+                work,
+                phase="waiting_device_access:low_disk_investigate",
+                last_reason=self._device_wait_reason(access_state, deb),
             )
+            self.store.put(waiting_work)
+            self._schedule_device_access_wake(waiting_work)
             return
 
         _disk, size, free, free_pct, drive = self._low_disk_volume_baseline(work)
@@ -4499,16 +4682,20 @@ class OperationalAutonomyMaintenance:
             grace_started = datetime.now(timezone.utc)
         grace_age = (datetime.now(timezone.utc) - grace_started).total_seconds()
         if grace_age < LOW_DISK_GRACE_SECONDS:
-            self.store.put(
-                self._replace(
-                    work,
-                    phase="waiting_recheck:low_disk_investigate",
-                    last_reason=(
-                        f"low_disk_grace_started_at={grace_started.isoformat()}; "
-                        "Waiting for the existing Autotask-triggered Disk Cleanup and "
-                        "normal monitor propagation before deeper diagnostics."
-                    ),
-                )
+            waiting_work = self._replace(
+                work,
+                phase="waiting_recheck:low_disk_investigate",
+                last_reason=(
+                    f"low_disk_grace_started_at={grace_started.isoformat()}; "
+                    "Waiting for the existing Autotask-triggered Disk Cleanup and "
+                    "normal monitor propagation before deeper diagnostics."
+                ),
+            )
+            self.store.put(waiting_work)
+            self._schedule_waiting_reconcile_wake(
+                waiting_work,
+                delay_seconds=max(30, int(LOW_DISK_GRACE_SECONDS - grace_age)),
+                reason="Low disk grace-period recheck due",
             )
             return
 
@@ -5053,26 +5240,17 @@ class OperationalAutonomyMaintenance:
                 "when the exact endpoint is available again."
             )
             self._write_note(work, note, "Jason - BackupIQ - Diagnostic")
-            self.actions.execute(
-                self._scope_for_work(work),
-                "service.ticket.update",
-                {
-                    "payload": {
-                        "id": work.ticket_id,
-                        "status": "Waiting Device Access",
-                    }
-                },
+            self._update_ticket_status_verified(work, "Waiting Device Access")
+            waiting_work = self._replace(
+                work,
+                phase="waiting_device_access:backupiq_investigate",
+                last_reason=(
+                    "BackupIQ true-offline state verified by both DRMM and Backup.net; "
+                    "waiting for exact endpoint access."
+                ),
             )
-            self.store.put(
-                self._replace(
-                    work,
-                    phase="waiting_device_access:backupiq_investigate",
-                    last_reason=(
-                        "BackupIQ true-offline state verified by both DRMM and Backup.net; "
-                        "waiting for exact endpoint access."
-                    ),
-                )
-            )
+            self.store.put(waiting_work)
+            self._schedule_device_access_wake(waiting_work)
             return
 
         if classification == "drmm_only_offline_conflict":
@@ -5329,23 +5507,14 @@ class OperationalAutonomyMaintenance:
             return
 
         if not endpoint_online and not provider_online:
-            self.actions.execute(
-                self._scope_for_work(work),
-                "service.ticket.update",
-                {
-                    "payload": {
-                        "id": work.ticket_id,
-                        "status": "Waiting Device Access",
-                    }
-                },
+            self._update_ticket_status_verified(work, "Waiting Device Access")
+            waiting_work = self._replace(
+                work,
+                phase="waiting_device_access:backupiq_verify_reinstall",
+                last_reason=work.last_reason,
             )
-            self.store.put(
-                self._replace(
-                    work,
-                    phase="waiting_device_access:backupiq_verify_reinstall",
-                    last_reason=work.last_reason,
-                )
-            )
+            self.store.put(waiting_work)
+            self._schedule_device_access_wake(waiting_work)
             return
 
         if not endpoint_online and provider_online:
@@ -5539,20 +5708,16 @@ class OperationalAutonomyMaintenance:
             return
         if endpoint.get("online") is not True:
             access_state, deb = self._device_access_state(work, endpoint=endpoint)
-            self.actions.execute(
-                self._scope_for_work(work),
-                "service.ticket.update",
-                {"payload": {"id": work.ticket_id, "status": "Waiting Device Access"}},
-            )
+            self._update_ticket_status_verified(work, "Waiting Device Access")
             if access_state == "deb_online_drmm_offline":
                 self._document_deb_drmm_conflict(work, deb)
-            self.store.put(
-                self._replace(
-                    work,
-                    phase="waiting_device_access:shutdown_investigate",
-                    last_reason=self._device_wait_reason(access_state, deb),
-                )
+            waiting_work = self._replace(
+                work,
+                phase="waiting_device_access:shutdown_investigate",
+                last_reason=self._device_wait_reason(access_state, deb),
             )
+            self.store.put(waiting_work)
+            self._schedule_device_access_wake(waiting_work)
             return
 
         history = self._read_data(
@@ -6115,6 +6280,38 @@ class OperationalAutonomyMaintenance:
             "EDR/AV remains non-Healthy after the single standing-safe repair attempt.",
         )
 
+    def _update_ticket_status_verified(
+        self,
+        work: OperationalWork,
+        status: str,
+    ) -> None:
+        normalized = str(status).strip()
+        if self._ticket_status_cache.get(work.ticket_id, "").casefold() == normalized.casefold():
+            return
+        scope = self._scope_for_work(work)
+        output = self.actions.execute(
+            scope,
+            "service.ticket.update",
+            {"payload": {"id": work.ticket_id, "status": status}},
+        )
+        verification = self._action_data(output).get("jasonVerification")
+        fields = (
+            verification.get("verifiedFields")
+            if isinstance(verification, Mapping)
+            else None
+        )
+        if not (
+            isinstance(verification, Mapping)
+            and verification.get("readbackVerified") is True
+            and isinstance(fields, Sequence)
+            and not isinstance(fields, (str, bytes))
+            and "status" in {str(value) for value in fields}
+        ):
+            raise OperationalAutonomyError(
+                f"ticket status transition to {status!r} was not verified by provider readback"
+            )
+        self._ticket_status_cache[work.ticket_id] = normalized
+
     def _complete_verified_ticket(self, work: OperationalWork, *, reason: str) -> None:
         scope = self._scope_for_work(work)
         update_output = self.actions.execute(
@@ -6548,7 +6745,24 @@ class OperationalAutonomyMaintenance:
             status_label = str(
                 candidate.context.get("_jason_source_status_label") or ""
             ).strip()
-            if (
+            if isinstance(error, DeviceAccessDeferred):
+                waiting_work = self._replace(
+                    error.work,
+                    phase="waiting_device_access:claim",
+                    last_reason=str(error)[:500],
+                )
+                if (
+                    str(candidate.source_queue).strip().casefold() == "jason"
+                    and candidate.owned_by_jason
+                    and status_label.casefold() != "waiting device access"
+                ):
+                    self._update_ticket_status_verified(
+                        waiting_work,
+                        "Waiting Device Access",
+                    )
+                self.store.put(waiting_work)
+                self._schedule_device_access_wake(waiting_work)
+            elif (
                 str(candidate.source_queue).strip().casefold() == "jason"
                 and candidate.owned_by_jason
                 and status_label.casefold() != "waiting device access"
@@ -6563,13 +6777,6 @@ class OperationalAutonomyMaintenance:
                         }
                     },
                 )
-            if isinstance(error, DeviceAccessDeferred):
-                waiting_work = self._replace(
-                    error.work,
-                    phase="waiting_device_access:claim",
-                    last_reason=str(error)[:500],
-                )
-                self.store.put(waiting_work)
             return
         # Missing/invalid ticket identity prerequisites outside Jason are not a
         # durable failure. They can be corrected by normal PSA triage; keeping a

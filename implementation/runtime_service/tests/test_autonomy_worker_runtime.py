@@ -10,6 +10,7 @@ import pytest
 from types import SimpleNamespace
 
 from autonomous_remediation.autonomous_queue_worker import QueueCandidate
+from autonomous_remediation.targeted_recheck import SQLiteTargetedWakeStore, WakeKind, WakeState
 from jason_runtime.autonomy_worker_runtime import (
     BACKUPIQ_SCOPE,
     OperationalAutonomyError,
@@ -3527,6 +3528,7 @@ def test_vulscan_not_approved_kbs_wait_in_jason_without_helpdesk_handoff(tmp_pat
             "status": "In Progress",
             "billingCodeID": "Remote Support",
         },
+        {"id": 141183, "status": "Waiting"},
     ]
 
     # A normal worker tick before the daily recheck is due must not emit
@@ -3627,6 +3629,9 @@ def test_vulscan_approval_change_resumes_without_helpdesk_handoff(tmp_path: Path
     ]
     assert {"id": 141183, "queueID": "Help Desk I", "status": "New"} not in updates
     assert {"id": 141183, "queueID": "Help Desk I", "status": "Human Review"} not in updates
+    assert {"id": 141183, "status": "Waiting"} in updates
+    assert {"id": 141183, "status": "In Progress"} in updates
+    assert updates[-1] == {"id": 141183, "status": "Waiting"}
     store.close()
 
 
@@ -5428,3 +5433,155 @@ def test_owned_retryable_provider_block_leaves_new_status_and_retries_under_jaso
     updates = [call[2]["payload"] for call in actions.calls if call[1] == "service.ticket.update"]
     assert {"id": 149001, "status": "In Progress"} in updates
     assert not any(payload.get("queueID") == "Help Desk I" for payload in updates)
+
+
+def test_worker_heartbeat_records_successful_scan(tmp_path: Path):
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()),
+        reads=Reads(),
+        actions=Actions(),
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    heartbeat = store.worker_heartbeat()
+    assert heartbeat is not None
+    assert heartbeat["last_started_at"]
+    assert heartbeat["last_completed_at"]
+    assert heartbeat["last_failed_at"] is None
+    assert heartbeat["last_error"] is None
+    assert heartbeat["consecutive_failures"] == 0
+    assert heartbeat["last_cycle_id"] == store.latest_scan().cycle_id
+    assert heartbeat["last_duration_ms"] >= 0
+    store.close()
+
+
+def test_worker_heartbeat_records_failed_scan(tmp_path: Path):
+    class BrokenQueue:
+        def reconcile_candidates(self):
+            raise RuntimeError("synthetic queue read failure")
+
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=BrokenQueue(),
+        reads=Reads(),
+        actions=Actions(),
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    with pytest.raises(RuntimeError, match="synthetic queue read failure"):
+        worker.tick()
+
+    heartbeat = store.worker_heartbeat()
+    assert heartbeat is not None
+    assert heartbeat["last_started_at"]
+    assert heartbeat["last_completed_at"] is None
+    assert heartbeat["last_failed_at"]
+    assert "synthetic queue read failure" in heartbeat["last_error"]
+    assert heartbeat["consecutive_failures"] == 1
+    store.close()
+
+
+def test_vulscan_wait_schedules_durable_reconcile_wake(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    wake_store = SQLiteTargetedWakeStore(tmp_path / "wakes.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()),
+        reads=VulscanBranchReads("NOT_APPROVED"),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("vulscan_missing_patch",)),
+        targeted_wake_store=wake_store,
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    rows = wake_store._connection.execute(
+        "SELECT kind,state,resource_id,payload FROM autonomy_targeted_wakes "
+        "WHERE resource_id=?",
+        ("141183",),
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["kind"] == WakeKind.QUEUE_RECONCILE.value
+    assert rows[0]["state"] == WakeState.PENDING.value
+    assert rows[0]["resource_id"] == "141183"
+    assert "VulScan patch approval recheck due" in rows[0]["payload"]
+    wake_store.close()
+    store.close()
+
+
+def test_waiting_device_access_schedules_exact_endpoint_wake(tmp_path: Path):
+    base = candidate()
+    owned = replace(
+        base,
+        source_queue="Jason",
+        owned_by_jason=True,
+        context={
+            **base.context,
+            "_jason_source_status_label": "New",
+        },
+    )
+
+    class OfflineReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "endpoint.device.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"record": {
+                        "resource_id": "device-uid-1",
+                        "hostname": "PC-1",
+                        "online": False,
+                    }},
+                }
+            if capability == "backup.endpoint.asset.search":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"items": []}},
+                }
+            return super().execute(capability, arguments)
+
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    wake_store = SQLiteTargetedWakeStore(tmp_path / "wakes.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(owned),
+        reads=OfflineReads(),
+        actions=Actions(),
+        store=store,
+        promotion_store=PromotionStore(),
+        targeted_wake_store=wake_store,
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    waiting = store.get(140933)
+    assert waiting is not None
+    assert waiting.phase == "waiting_device_access:claim"
+    rows = wake_store._connection.execute(
+        "SELECT kind,state,resource_id,payload FROM autonomy_targeted_wakes "
+        "WHERE resource_id=?",
+        ("140933",),
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["kind"] == WakeKind.TARGETED_READ.value
+    assert rows[0]["state"] == WakeState.PENDING.value
+    assert '"capability_name":"endpoint.device.read"' in rows[0]["payload"]
+    assert '"resource_id":"device-uid-1"' in rows[0]["payload"]
+    wake_store.close()
+    store.close()

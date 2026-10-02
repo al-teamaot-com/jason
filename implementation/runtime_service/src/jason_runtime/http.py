@@ -47,6 +47,9 @@ class RuntimeHttpApplication:
     # Same-thread bounded maintenance hook. The HTTP layer never invokes it from
     # request dispatch; JasonRuntimeHttpServer.service_actions() owns maintenance.
     maintenance: Any | None = None
+    # Optional local-only health evidence. It may report control-loop degradation
+    # but grants no authority and performs no provider action.
+    health_probe: Any | None = None
 
     max_body_bytes: int = 64 * 1024
     conversation_path: str = "/v1/openclaw/teams/conversation"
@@ -63,14 +66,23 @@ class RuntimeHttpApplication:
         request_path = path.split("?", 1)[0]
 
         if verb == "GET" and request_path == "/healthz":
-            return HttpResponse(
-                200,
-                {
-                    "status": "ok",
-                    "component": "jason-runtime",
-                    "authority": "central-orchestrator",
-                },
-            )
+            health = {
+                "status": "ok",
+                "component": "jason-runtime",
+                "authority": "central-orchestrator",
+            }
+            if self.health_probe is not None:
+                try:
+                    probe = dict(self.health_probe())
+                except Exception as exc:
+                    probe = {
+                        "status": "degraded",
+                        "ticket_worker": "health_probe_failed",
+                        "error_type": type(exc).__name__,
+                    }
+                health.update(probe)
+            status_code = 200 if health.get("status") == "ok" else 503
+            return HttpResponse(status_code, health)
 
         if request_path != self.conversation_path:
             return HttpResponse(404, {"status": "rejected", "error_code": "not_found"})

@@ -100,12 +100,14 @@ def build_autonomy_worker_maintenance(
         orchestrator=orchestrator,
         promotion_store=promotion_store,
     )
+    targeted_wake_store = SQLiteTargetedWakeStore(targeted_wake_db)
     worker = OperationalAutonomyMaintenance(
         queue_source=queue_source,
         reads=reads,
         actions=actions,
         store=SQLiteOperationalWorkStore(work_db),
         promotion_store=promotion_store,
+        targeted_wake_store=targeted_wake_store,
         max_active_work_items=max_active_work_items,
         interval_seconds=interval_seconds,
         audit=audit,
@@ -117,7 +119,7 @@ def build_autonomy_worker_maintenance(
         policy_id="autonomous-targeted-read-v1",
     )
     targeted = TargetedWakeMaintenance(
-        store=SQLiteTargetedWakeStore(targeted_wake_db),
+        store=targeted_wake_store,
         reads=targeted_reads,
         queue_attention=worker,
         retry_seconds=targeted_wake_retry_seconds,

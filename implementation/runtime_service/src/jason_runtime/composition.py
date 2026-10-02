@@ -1220,8 +1220,15 @@ def _deterministic_resource_contracts(
     return tuple(contracts)
 
 
-def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplication:
+def build_runtime_application(
+    settings: RuntimeSettings,
+    *,
+    maintenance_profile: str = "all",
+    health_probe=None,
+) -> RuntimeHttpApplication:
     settings.validate()
+    if maintenance_profile not in {"all", "ticket_worker", "auxiliary"}:
+        raise ValueError(f"unsupported maintenance profile: {maintenance_profile}")
 
     authority_store = SQLiteIdentityAuthorityStore(settings.authority_db)
     approval_repository = SQLiteApprovalRepository(authority_store)
@@ -2374,18 +2381,35 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         cadence_minutes=settings.windows_time_source_shadow_cadence_minutes,
         audit=reflection_audit,
     )
-    autonomy_maintenance = CompositeAutonomyMaintenance(
-        playbook_review_maintenance,
-        autonomous_deployment_completion_notification_maintenance,
-        self_heal_escalation_notification_maintenance,
-        support_repair_reasoning_maintenance,
-        autonomous_repair_deployment_maintenance,
-        operational_autonomy_maintenance,
-        drmm_recent_alert_reconciliation_maintenance,
-        procurement_billing_audit_maintenance,
-        windows_time_source_shadow_maintenance,
-        shadow_autonomy_maintenance,
-    )
+    if maintenance_profile == "ticket_worker":
+        autonomy_maintenance = CompositeAutonomyMaintenance(
+            operational_autonomy_maintenance,
+        )
+    elif maintenance_profile == "auxiliary":
+        autonomy_maintenance = CompositeAutonomyMaintenance(
+            playbook_review_maintenance,
+            autonomous_deployment_completion_notification_maintenance,
+            self_heal_escalation_notification_maintenance,
+            support_repair_reasoning_maintenance,
+            autonomous_repair_deployment_maintenance,
+            drmm_recent_alert_reconciliation_maintenance,
+            procurement_billing_audit_maintenance,
+            windows_time_source_shadow_maintenance,
+            shadow_autonomy_maintenance,
+        )
+    else:
+        autonomy_maintenance = CompositeAutonomyMaintenance(
+            playbook_review_maintenance,
+            autonomous_deployment_completion_notification_maintenance,
+            self_heal_escalation_notification_maintenance,
+            support_repair_reasoning_maintenance,
+            autonomous_repair_deployment_maintenance,
+            operational_autonomy_maintenance,
+            drmm_recent_alert_reconciliation_maintenance,
+            procurement_billing_audit_maintenance,
+            windows_time_source_shadow_maintenance,
+            shadow_autonomy_maintenance,
+        )
 
     return RuntimeHttpApplication(
         ingress=OpenClawReturnPathConversationIngress(
@@ -2399,4 +2423,5 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         microsoft_identity_bindings=bindings,
         microsoft_user_directory=microsoft_directory.directory,
         maintenance=autonomy_maintenance,
+        health_probe=health_probe,
     )
