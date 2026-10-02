@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from jsonschema import Draft202012Validator
+from bootstrap.candidate_host import (
+    CandidateHostIdentity,
+    authorize_mutation_target,
+)
 
 from jason_runtime.deployment_identity import validate_deployment_manifest
 
@@ -373,12 +377,13 @@ def execute_candidate_upgrade(
     verify_target,
     checkpoint_restore=None,
     authorize_checkpoint_restore: bool = False,
+    candidate_identity: CandidateHostIdentity | None = None,
 ) -> dict[str, Any]:
-    root = Path(target_root)
-    if root == Path("/"):
-        raise PermissionError(
-            "candidate upgrade executor may not target the live filesystem root"
-        )
+    root = authorize_mutation_target(
+        target_root=target_root,
+        candidate_identity=candidate_identity,
+        operation="candidate upgrade execution",
+    )
     if plan.status != "ready_for_upgrade":
         raise UpgradePlanError(
             "candidate upgrade plan is not ready: " + ",".join(plan.blockers)

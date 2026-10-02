@@ -97,7 +97,11 @@ def main() -> int:
         candidate_identity=identity,
     )
     if args.write_result:
-        write_ready_result(target_root=root, result=result)
+        write_ready_result(
+            target_root=root,
+            result=result,
+            candidate_identity=identity,
+        )
     print(json.dumps(
         {
             "result": {

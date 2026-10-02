@@ -12,6 +12,11 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
+from bootstrap.candidate_host import (
+    CandidateHostIdentity,
+    load_candidate_host_identity,
+)
+
 from tools.full_recovery_package import (
     RecoveryPackageError,
     decrypt_recovery_package,
@@ -19,6 +24,7 @@ from tools.full_recovery_package import (
     verify_recovery_package_signature,
 )
 from tools.full_recovery_restore import (
+    acknowledge_reenrollment,
     apply_recovery_restore_plan,
     plan_recovery_restore,
 )
@@ -65,6 +71,13 @@ def _load_signer_private(path: str | Path) -> Ed25519PrivateKey:
     if not isinstance(key, Ed25519PrivateKey):
         raise RecoveryPackageError("recovery signer private key is not Ed25519")
     return key
+
+
+
+
+def _candidate_identity(args: argparse.Namespace) -> CandidateHostIdentity | None:
+    path = getattr(args, "candidate_host_identity", None)
+    return load_candidate_host_identity(path) if path else None
 
 
 def command_inspect(args: argparse.Namespace) -> int:
@@ -126,6 +139,7 @@ def command_plan_export(args: argparse.Namespace) -> int:
         collection_spec=collection,
         state_inventory=inventory,
         available_adapter_names=tuple(args.available_adapter or ()),
+        candidate_identity=_candidate_identity(args),
     )
     print(json.dumps(asdict(plan), indent=2, sort_keys=True))
     return 0 if plan.status == "ready_for_export" else 3
@@ -148,6 +162,7 @@ def command_export_from_root(args: argparse.Namespace) -> int:
         recipient_key_id=args.recipient_key_id,
         signer_private_key=_load_signer_private(args.signer_private_key),
         signer_key_id=args.signer_key_id,
+        candidate_identity=_candidate_identity(args),
     )
     output = write_recovery_package_atomic(
         package,
@@ -189,7 +204,14 @@ def _restore_inputs(args: argparse.Namespace):
         payload_manifest_schema=payload_schema,
         target_root=args.target_root,
         expected_source_deployment_identity_sha256=args.expected_source_deployment_id,
+        candidate_identity=_candidate_identity(args),
     )
+    completed = tuple(getattr(args, "acknowledge_reenrollment", ()) or ())
+    if completed:
+        plan = acknowledge_reenrollment(
+            plan=plan,
+            completed_state_classes=completed,
+        )
     return members, plan
 
 
@@ -207,6 +229,7 @@ def command_restore_to_root(args: argparse.Namespace) -> int:
     result = apply_recovery_restore_plan(
         plan=plan,
         decrypted_members=members,
+        candidate_identity=_candidate_identity(args),
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
@@ -233,6 +256,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="plan a non-production Full Recovery Export without reading secret values",
     )
     export_parser.add_argument("--target-root", required=True)
+    export_parser.add_argument("--candidate-host-identity")
     export_parser.add_argument(
         "--collection-spec",
         default=str(repo / "config/full-recovery-collection.v1.json"),
@@ -254,9 +278,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     export_run = sub.add_parser(
         "export-from-root",
-        help="create an encrypted Full Recovery Export from a non-live Jason root",
+        help="create an encrypted Full Recovery Export from a Jason candidate root",
     )
     export_run.add_argument("--target-root", required=True)
+    export_run.add_argument("--candidate-host-identity")
     export_run.add_argument(
         "--collection-spec",
         default=str(repo / "config/full-recovery-collection.v1.json"),
@@ -285,6 +310,13 @@ def build_parser() -> argparse.ArgumentParser:
         restore_parser.add_argument("--signer-public-key", required=True)
         restore_parser.add_argument("--recovery-private-key", required=True)
         restore_parser.add_argument("--target-root", required=True)
+        restore_parser.add_argument("--candidate-host-identity")
+        restore_parser.add_argument(
+            "--acknowledge-reenrollment",
+            action="append",
+            default=[],
+            help="state class whose required machine re-enrollment has been completed",
+        )
         restore_parser.add_argument(
             "--expected-source-deployment-id",
             required=True,

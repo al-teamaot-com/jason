@@ -165,3 +165,13 @@ The matching restore helper:
 - refuses the live filesystem root.
 
 If no KFS backup artifact exists, the v1 collection records KFS as optional-missing rather than copying PostgreSQL volume files.
+
+## Candidate-host lifecycle authorization
+
+Full Recovery Export planning/export and recovery plan/apply can now target the actual filesystem root only when supplied the same validated Candidate Host Identity used by clean bootstrap.
+
+The recovery CLI accepts a candidate-host identity for these live-root candidate operations.
+
+Machine-bound re-enrollment remains explicit. After the required host identity or hardware-bound credential has actually been re-enrolled, the recovery CLI may acknowledge the named recovery state class. The acknowledgement removes only the matching re-enrollment blocker; it does not bypass unrelated restore blockers.
+
+A Production identity cannot authorize these candidate lifecycle operations.

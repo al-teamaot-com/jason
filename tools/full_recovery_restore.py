@@ -9,6 +9,10 @@ import tempfile
 from typing import Any, Mapping, Sequence
 
 from jsonschema import Draft202012Validator
+from bootstrap.candidate_host import (
+    CandidateHostIdentity,
+    authorize_mutation_target,
+)
 
 
 INTERNAL_MANIFEST_MEMBER = "manifest/recovery-state.json"
@@ -234,14 +238,13 @@ def plan_recovery_restore(
     payload_manifest_schema: Mapping[str, Any],
     target_root: str | Path,
     expected_source_deployment_identity_sha256: str,
+    candidate_identity: CandidateHostIdentity | None = None,
 ) -> RecoveryRestorePlan:
-    root = Path(target_root)
-    if root == Path("/"):
-        raise PermissionError(
-            "recovery planning for the live filesystem root is not supported here"
-        )
-    if not root.is_absolute():
-        raise RecoveryRestoreError("target_root must be absolute")
+    root = authorize_mutation_target(
+        target_root=target_root,
+        candidate_identity=candidate_identity,
+        operation="recovery restore planning",
+    )
 
     raw_manifest = decrypted_members.get(INTERNAL_MANIFEST_MEMBER)
     if raw_manifest is None:
@@ -398,14 +401,17 @@ def apply_recovery_restore_plan(
     *,
     plan: RecoveryRestorePlan,
     decrypted_members: Mapping[str, bytes],
+    candidate_identity: CandidateHostIdentity | None = None,
 ) -> dict[str, Any]:
     if plan.status != "ready_for_restore":
         raise PermissionError(
             "recovery restore plan is not ready: " + ",".join(plan.blockers)
         )
-    root = Path(plan.target_root)
-    if root == Path("/"):
-        raise PermissionError("restore apply may not target the live filesystem root")
+    root = authorize_mutation_target(
+        target_root=plan.target_root,
+        candidate_identity=candidate_identity,
+        operation="recovery restore apply",
+    )
 
     restored: list[dict[str, Any]] = []
     for action in plan.actions:

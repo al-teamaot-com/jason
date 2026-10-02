@@ -11,7 +11,10 @@ from bootstrap.secret_requirements import (
     build_secret_requirements,
     evaluate_secret_readiness,
 )
-from bootstrap.candidate_activation import CandidateHostIdentity
+from bootstrap.candidate_host import (
+    CandidateHostIdentity,
+    authorize_mutation_target,
+)
 from jason_runtime.deployment_identity import FileDeploymentManifestProvider
 
 
@@ -217,10 +220,13 @@ def write_ready_result(
     *,
     target_root: str | Path,
     result: CandidateReadyResult,
+    candidate_identity: CandidateHostIdentity | None = None,
 ) -> Path:
-    root = Path(target_root)
-    if root == Path("/"):
-        raise PermissionError("candidate READY result may not target /")
+    root = authorize_mutation_target(
+        target_root=target_root,
+        candidate_identity=candidate_identity,
+        operation="candidate READY result",
+    )
     output = root / "var/lib/jason/candidate-ready.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(

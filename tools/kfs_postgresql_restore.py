@@ -7,6 +7,11 @@ from pathlib import Path
 import subprocess
 from typing import Callable, Mapping, Sequence
 
+from bootstrap.candidate_host import (
+    CandidateHostIdentity,
+    authorize_mutation_target,
+)
+
 
 class KfsPostgresqlRestoreError(ValueError):
     pass
@@ -62,14 +67,13 @@ def restore_kfs_postgresql_backup(
     authorize_database_restore: bool,
     runner: Runner = _default_runner,
     base_environment: Mapping[str, str] | None = None,
+    candidate_identity: CandidateHostIdentity | None = None,
 ) -> dict:
-    root = Path(target_root)
-    if root == Path("/"):
-        raise PermissionError(
-            "KFS PostgreSQL restore from the live filesystem root is not supported here"
-        )
-    if not root.is_absolute():
-        raise KfsPostgresqlRestoreError("target_root must be absolute")
+    root = authorize_mutation_target(
+        target_root=target_root,
+        candidate_identity=candidate_identity,
+        operation="KFS PostgreSQL restore",
+    )
     if not candidate_instance_id.strip():
         raise KfsPostgresqlRestoreError(
             "candidate_instance_id must be explicitly supplied"

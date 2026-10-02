@@ -10,6 +10,10 @@ import tempfile
 from typing import Any, Callable, Mapping, Sequence
 
 from jsonschema import Draft202012Validator
+from bootstrap.candidate_host import (
+    CandidateHostIdentity,
+    authorize_mutation_target,
+)
 
 from jason_runtime.deployment_identity import FileDeploymentManifestProvider
 from tools.full_recovery_restore import assemble_recovery_members
@@ -170,14 +174,13 @@ def collect_full_recovery_state(
     collection_spec: Mapping[str, Any],
     state_inventory: Mapping[str, Any],
     external_adapters: Mapping[str, ExternalAdapter] | None = None,
+    candidate_identity: CandidateHostIdentity | None = None,
 ) -> CollectionResult:
-    root = Path(target_root)
-    if root == Path("/"):
-        raise PermissionError(
-            "non-production full recovery exporter may not target the live filesystem root"
-        )
-    if not root.is_absolute():
-        raise FullRecoveryExportError("target_root must be absolute")
+    root = authorize_mutation_target(
+        target_root=target_root,
+        candidate_identity=candidate_identity,
+        operation="full recovery export",
+    )
 
     manifest = FileDeploymentManifestProvider(
         root / "var/lib/jason/deployment-manifest.json"
@@ -357,12 +360,13 @@ def plan_full_recovery_export(
     collection_spec: Mapping[str, Any],
     state_inventory: Mapping[str, Any],
     available_adapter_names: Sequence[str] = (),
+    candidate_identity: CandidateHostIdentity | None = None,
 ) -> FullRecoveryExportPlan:
-    root = Path(target_root)
-    if root == Path("/"):
-        raise PermissionError(
-            "non-production full recovery export planning may not target the live filesystem root"
-        )
+    root = authorize_mutation_target(
+        target_root=target_root,
+        candidate_identity=candidate_identity,
+        operation="full recovery export planning",
+    )
     manifest = FileDeploymentManifestProvider(
         root / "var/lib/jason/deployment-manifest.json"
     ).read()

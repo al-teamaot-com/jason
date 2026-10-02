@@ -138,3 +138,16 @@ def test_reenrollment_blocks_restore_to_root_before_writes(tmp_path, capsys):
     output = json.loads(capsys.readouterr().out)
     assert output["status"] == "blocked_for_reenrollment"
     assert not target.exists()
+
+
+def test_restore_cli_can_acknowledge_required_machine_reenrollment(tmp_path, capsys):
+    args, target = parse_args(
+        tmp_path,
+        "restore-to-root",
+        reenrollment=True,
+    )
+    args.acknowledge_reenrollment = ["host-bound-identity"]
+    assert jason_recovery.command_restore_to_root(args) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "restore_payload_applied"
+    assert target.exists()

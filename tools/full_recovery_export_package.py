@@ -9,6 +9,8 @@ from typing import Any, Mapping
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
 
+from bootstrap.candidate_host import CandidateHostIdentity
+
 from tools.full_recovery_export import (
     CollectionResult,
     ExternalAdapter,
@@ -29,12 +31,14 @@ def create_encrypted_full_recovery_export(
     signer_private_key: Ed25519PrivateKey,
     signer_key_id: str,
     created_at=None,
+    candidate_identity: CandidateHostIdentity | None = None,
 ) -> tuple[dict[str, Any], CollectionResult]:
     collection = collect_full_recovery_state(
         target_root=target_root,
         collection_spec=collection_spec,
         state_inventory=state_inventory,
         external_adapters=external_adapters,
+        candidate_identity=candidate_identity,
     )
     members = collection_result_to_members(collection)
     package = create_recovery_package(

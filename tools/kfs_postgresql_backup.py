@@ -9,6 +9,11 @@ import subprocess
 import tempfile
 from typing import Callable, Mapping, Sequence
 
+from bootstrap.candidate_host import (
+    CandidateHostIdentity,
+    authorize_mutation_target,
+)
+
 
 class KfsPostgresqlBackupError(ValueError):
     pass
@@ -83,14 +88,13 @@ def create_kfs_postgresql_backup(
     output_relative_path: str = "var/lib/jason/recovery/kfs/kfs-postgresql.dump",
     runner: Runner = _default_runner,
     base_environment: Mapping[str, str] | None = None,
+    candidate_identity: CandidateHostIdentity | None = None,
 ) -> KfsPostgresqlBackupResult:
-    root = Path(target_root)
-    if root == Path("/"):
-        raise PermissionError(
-            "KFS PostgreSQL backup from the live filesystem root is not supported here"
-        )
-    if not root.is_absolute():
-        raise KfsPostgresqlBackupError("target_root must be absolute")
+    root = authorize_mutation_target(
+        target_root=target_root,
+        candidate_identity=candidate_identity,
+        operation="KFS PostgreSQL backup",
+    )
 
     relative = Path(output_relative_path)
     if relative.is_absolute() or ".." in relative.parts:
