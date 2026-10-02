@@ -45,3 +45,21 @@ The candidate bootstrap now supports a second deterministic phase:
 This phase still does not create Docker networks, enable/start systemd units, enroll provider secrets, or start containers on the current host.
 
 A candidate that passes this phase is reported as ready_for_runtime_activation, not Jason READY.
+
+## Candidate activation boundary
+
+Runtime activation is a separate phase from filesystem bootstrap.
+
+The candidate activation contract requires a validated candidate-host identity with:
+- schema version 1.0;
+- environment = candidate;
+- a non-empty instance ID;
+- explicit bootstrap authorization.
+
+The activation plan contains only:
+- creation of required Docker networks when absent;
+- enablement of systemd units previously classified and staged as portable.
+
+The executor is allowed to run only when the target is the candidate host root. It does not start services and does not enroll provider secrets. Production identity is rejected.
+
+This keeps the current development host from being used as an accidental activation target while allowing the same released tooling to operate on a future dedicated Jason-B candidate host.
