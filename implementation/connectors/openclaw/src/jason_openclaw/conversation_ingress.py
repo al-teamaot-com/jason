@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
+import re
 from typing import Any, Mapping, Protocol
 from urllib.parse import urlsplit
 
@@ -45,6 +46,7 @@ class GovernedProcurementInteractionFlow(Protocol):
         conversation_id: str,
         message_id: str,
         occurred_at: datetime,
+        ticket_number_hint: str | None = None,
     ) -> Mapping[str, Any]: ...
 
     def handle_submit(
@@ -111,14 +113,36 @@ class HardwareBillingDispositionEvidence:
     channel_response_id: str
 
 
-def _standalone_https_url(text: str) -> str | None:
+_TICKET_NUMBER_RE = re.compile(r"\bT\d{8}\.\d{4}\b", re.IGNORECASE)
+_HTTPS_URL_RE = re.compile(r"https://[^\s<>]+", re.IGNORECASE)
+_PROCUREMENT_CONTEXT_TERMS = frozenset({
+    "procurement", "quote", "invoice", "purchase", "order", "product", "part",
+})
+
+
+def _procurement_url_context(text: str) -> tuple[str | None, str | None]:
     value = str(text or "").strip()
-    if not value or any(char.isspace() for char in value):
-        return None
-    parsed = urlsplit(value)
+    if not value:
+        return None, None
+    urls = [match.rstrip(".,;:!?)]}") for match in _HTTPS_URL_RE.findall(value)]
+    if len(urls) != 1:
+        return None, None
+    url = urls[0]
+    parsed = urlsplit(url)
     if parsed.scheme.casefold() != "https" or not parsed.hostname:
-        return None
-    return value
+        return None, None
+
+    tickets = [match.upper() for match in _TICKET_NUMBER_RE.findall(value)]
+    if len(set(tickets)) > 1:
+        return None, None
+    ticket = tickets[0] if tickets else None
+
+    if value == url:
+        return url, None
+    lowered = value.casefold()
+    if ticket or any(term in lowered for term in _PROCUREMENT_CONTEXT_TERMS):
+        return url, ticket
+    return None, None
 
 
 def _validated_card_selections(value: Any) -> dict[str, str]:
@@ -600,7 +624,7 @@ class GovernedOpenClawTeamsConversationIngress:
             billing_result.setdefault("correlation_id", parsed.correlation_id)
             return billing_result
 
-        procurement_url = _standalone_https_url(parsed.text)
+        procurement_url, procurement_ticket = _procurement_url_context(parsed.text)
         if parsed.procurement_submit is not None or (
             procurement_url is not None and self.procurement_flow is not None
         ):
@@ -633,6 +657,7 @@ class GovernedOpenClawTeamsConversationIngress:
                             conversation_id=parsed.conversation_id,
                             message_id=parsed.message_id,
                             occurred_at=parsed.issued_at,
+                            ticket_number_hint=procurement_ticket,
                         )
                     )
             except PermissionError as error:
