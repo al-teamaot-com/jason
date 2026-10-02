@@ -86,6 +86,7 @@ from .unexpected_shutdown_analysis import (
     storage_health_risk as shutdown_storage_health_risk,
 )
 from .approved_client_messages import resolve_approved_client_message
+from .technical_notes import TechnicalNote, canonical_title, legacy_technical_note, render_technical_note
 from autonomous_remediation.offline_ticket_augmentation import (
     SiteContextEvidence,
     SiteWitness,
@@ -252,7 +253,6 @@ VULSCAN_APPROVAL_RECHECK_SECONDS = 24 * 60 * 60
 VULSCAN_APPROVAL_ESCALATION_SECONDS = 10 * 24 * 60 * 60
 VULSCAN_PATCH_WINDOW_RECHECK_SECONDS = 6 * 60 * 60
 OFFLINE_AUGMENTATION_RECHECK_SECONDS = 10 * 60
-OFFLINE_AUGMENTATION_NOTE_TITLE = "Jason - Offline Ticket Context"
 OFFLINE_AUGMENTATION_WITNESS_COMMAND = "Get-NetIPConfiguration"
 
 
@@ -1237,19 +1237,48 @@ class OperationalAutonomyMaintenance:
                 witnesses=tuple(witnesses),
             )
             assessment = classify_site_context(evidence)
-            body = render_site_context_note(
+            legacy_body = render_site_context_note(
                 assessment,
                 target_drmm_online=target_drmm_online,
                 target_deb_online=target_deb_online,
                 site_name=site,
             )
-            evidence_fingerprint = assessment.fingerprint()
             classification = assessment.state.value
+            note_title = canonical_title("technical_review")
+            body = render_technical_note(
+                TechnicalNote(
+                    kind="technical_review",
+                    status="Offline Context Assessed",
+                    issue=str(candidate.context.get("title") or "Offline endpoint availability"),
+                    scope=[
+                        f"Ticket={candidate.context.get('ticketNumber') or ticket_id}",
+                        f"CompanyID={candidate.context.get('companyID') or 0}",
+                        f"Device={hostname or 'not resolved'}",
+                        f"Site={site or 'not resolved'}",
+                    ],
+                    findings=[legacy_body],
+                    evidence=[
+                        f"Classification={classification}",
+                        f"DRMMOnline={target_drmm_online}",
+                        f"DEBOnline={target_deb_online}",
+                        f"SiteWitnessCount={len(witnesses)}",
+                    ],
+                    actions_taken=["No endpoint remediation performed; this note records read-only availability correlation."],
+                    verification=["Provider availability evidence was classified and fingerprinted."],
+                    next_action="Continue according to the ticket playbook; this augmentation does not broaden execution authority.",
+                    jason_state=[
+                        f"Playbook={OFFLINE_AUGMENTATION_SCOPE.playbook_id}",
+                        "Phase=offline_context_augmentation",
+                        f"Classification={classification}",
+                    ],
+                )
+            )
+            evidence_fingerprint = assessment.fingerprint()
 
             prior = self.store.last_note_fingerprint(
                 ticket_id,
                 OFFLINE_AUGMENTATION_SCOPE.playbook_id,
-                OFFLINE_AUGMENTATION_NOTE_TITLE,
+                note_title,
             )
             if prior != evidence_fingerprint:
                 self.actions.execute(
@@ -1258,7 +1287,7 @@ class OperationalAutonomyMaintenance:
                     {
                         "payload": {
                             "ticketID": ticket_id,
-                            "title": OFFLINE_AUGMENTATION_NOTE_TITLE,
+                            "title": note_title,
                             "description": body,
                             "noteType": 3,
                             "publish": 1,
@@ -1268,7 +1297,7 @@ class OperationalAutonomyMaintenance:
                 self.store.remember_note_fingerprint(
                     ticket_id,
                     OFFLINE_AUGMENTATION_SCOPE.playbook_id,
-                    OFFLINE_AUGMENTATION_NOTE_TITLE,
+                    note_title,
                     evidence_fingerprint,
                 )
         finally:
@@ -6498,6 +6527,35 @@ class OperationalAutonomyMaintenance:
                 )
 
     def _write_note(self, work: OperationalWork, body: str, title: str) -> bool:
+        legacy_normalized_title = " ".join(str(title).split())
+        legacy_normalized_body = " ".join(str(body).split())
+        legacy_encoded = json.dumps(
+            {
+                "title": legacy_normalized_title,
+                "body": legacy_normalized_body,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        legacy_fingerprint = hashlib.sha256(legacy_encoded).hexdigest()
+
+        structured = legacy_technical_note(
+            title=title,
+            body=body,
+            issue=work.title,
+            scope=[
+                f"Ticket={work.ticket_number}",
+                f"CompanyID={work.company_id}",
+                f"Device={work.hostname or 'not resolved'}",
+                f"ConfigurationItemID={work.configuration_item_id or 'not associated'}",
+                f"EndpointUID={work.device_uid or 'not resolved'}",
+            ],
+            playbook=work.playbook_id,
+            phase=work.phase,
+            reason=work.last_reason,
+        )
+        title = canonical_title(structured.kind)
+        body = render_technical_note(structured)
         normalized_title = " ".join(str(title).split())
         normalized_body = " ".join(str(body).split())
         encoded = json.dumps(
@@ -6510,6 +6568,20 @@ class OperationalAutonomyMaintenance:
             work.ticket_id, work.playbook_id, normalized_title
         )
         if prior == fingerprint:
+            return False
+
+        legacy_prior = self.store.last_note_fingerprint(
+            work.ticket_id,
+            work.playbook_id,
+            legacy_normalized_title,
+        )
+        if legacy_prior == legacy_fingerprint:
+            self.store.remember_note_fingerprint(
+                work.ticket_id,
+                work.playbook_id,
+                normalized_title,
+                fingerprint,
+            )
             return False
 
         self.actions.execute(

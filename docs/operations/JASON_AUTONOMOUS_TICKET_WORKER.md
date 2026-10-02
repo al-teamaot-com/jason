@@ -19,6 +19,10 @@ Current discovery queues are:
 
 The default active-work limit is two. Tickets that are waiting, blocked, approval-pending, complete, or escalated do not consume an active slot.
 
+## Technician-facing note standard
+
+All autonomous technician-facing Autotask notes follow `docs/operations/JASON_TECHNICAL_NOTE_STANDARD.md`. The runtime uses one canonical section order: STATUS, ISSUE, DEVICE / SCOPE, FINDINGS, EVIDENCE, ACTIONS TAKEN, VERIFICATION, NEXT ACTION, and JASON STATE. NEXT ACTION is mandatory, note titles come from the bounded six-title taxonomy, and unchanged duplicate notes remain suppressed by the existing fingerprint store. Existing playbook narrative is preserved during the v1 migration while new and materially revised playbooks should populate the structured sections directly.
+
 ## Current production autonomous scope
 
 As of 2026-09-26, all ten production playbooks in the current registry have a separately promoted autonomous safe branch. This does **not** mean every remediation branch is autonomous. Each resolver is limited to the exact source-controlled capability set and its documented stop conditions.

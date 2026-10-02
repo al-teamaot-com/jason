@@ -486,6 +486,58 @@
           }
         ]
       }
+    },
+    {
+      "id": "windows_time_source",
+      "name": "Jason - Windows Time Source Self-Heal",
+      "version": "0.1.0",
+      "lifecycle": "pilot",
+      "enabled": true,
+      "source": "docs/playbooks/Jason-Windows-Time-Source-Self-Heal.md",
+      "trigger": {
+        "provider": "datto_rmm",
+        "alert_diagnostics_contains": [
+          "Time source mismatch.",
+          "not in approved list:"
+        ]
+      },
+      "review_status": "owner_design_approved_shadow_acceptance_and_component_review_required",
+      "autonomy": {
+        "activation": "shadow",
+        "required_gates": [
+          "trigger",
+          "identity",
+          "endpoint_online",
+          "time_source_evidence",
+          "machine_role",
+          "recurrence_check",
+          "evidence_fresh",
+          "governance_precheck",
+          "autonomy_approved"
+        ],
+        "allowed_capabilities": [],
+        "policy_id": "playbook-autonomy:windows_time_source",
+        "allowed_branches": [
+          "detect",
+          "identify",
+          "classify",
+          "recurrence_detection",
+          "read_only_diagnostics",
+          "recovered_verification"
+        ],
+        "approval_bound_branches": [
+          "rediscover_resync",
+          "restore_domain_hierarchy",
+          "restart_w32time",
+          "exact_alert_resolution"
+        ],
+        "disruptive_branches": [
+          "reboot",
+          "domain_rejoin",
+          "secure_channel_reset",
+          "domain_controller_time_configuration"
+        ]
+      }
     }
   ]
 }

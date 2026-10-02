@@ -50,24 +50,20 @@ if ! JASON_RUNTIME_PRODUCTION_IMAGE="$PRODUCTION_IMAGE"      JASON_SOURCE_REVISI
   exit 1
 fi
 
-running_image_id="$(docker inspect "$RUNTIME_CONTAINER" --format '{{.Image}}')"
+if ! python3 "$REPO_ROOT/tools/runtime_cutover_verify.py" \
+  --container "$RUNTIME_CONTAINER" \
+  --expected-image-id "$candidate_id" \
+  --expected-revision "$revision"; then
+  restore_aliases
+  echo "BASELINE_REFRESH=FAIL"
+  echo "REASON=post-cutover live verification failed"
+  exit 1
+fi
+
 running_revision="$(docker inspect "$RUNTIME_CONTAINER" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}')"
 running_health="$(docker inspect "$RUNTIME_CONTAINER" --format '{{.State.Health.Status}}')"
 
-if [ "$running_image_id" != "$candidate_id" ]; then
-  restore_aliases
-  echo "BASELINE_REFRESH=FAIL"
-  echo "REASON=running image does not match candidate"
-  exit 1
-fi
-if [ "$running_revision" != "$revision" ] || [ "$running_health" != "healthy" ]; then
-  restore_aliases
-  echo "BASELINE_REFRESH=FAIL"
-  echo "REASON=running revision or health verification failed"
-  exit 1
-fi
-
 echo "RUNNING_IMAGE_MATCH=PASS"
 echo "RUNNING_REVISION=$running_revision"
-echo "RUNTIME_HEALTH=healthy"
+echo "RUNTIME_HEALTH=$running_health"
 echo "BASELINE_REFRESH=PASS"

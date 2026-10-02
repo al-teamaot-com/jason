@@ -171,6 +171,8 @@ from orchestrator.print_capability_catalog import (
     PRINT_DEVICE_READ,
     PRINT_DEVICE_SEARCH,
     PRINT_METER_READ,
+    PRINT_METER_HISTORY_SEARCH,
+    PRINT_METER_USAGE_READ,
     PRINT_SUPPLIES_READ,
     register_print_resource_foundation,
 )
@@ -294,9 +296,15 @@ from .datto_site_variable_management import (
     register_site_variable_runtime_foundation,
 )
 from .http import RuntimeHttpApplication
+from .kfs_meter_history import (
+    GovernedKfsMeterHistoryInvoker,
+    KfsMeterHistoryStore,
+    ensure_meter_history_read_authority,
+)
 from .autonomy_shadow_composition import build_autonomy_shadow_maintenance
 from .autonomy_worker_composition import build_autonomy_worker_maintenance
 from .daily_drmm_alert_reconciliation_composition import build_daily_drmm_alert_reconciliation_maintenance
+from .windows_time_source_shadow_composition import build_windows_time_source_shadow_maintenance
 from .autonomy_targeted_wake_runtime import CompositeAutonomyMaintenance
 from .datto_component_approval_registry import approval_owner_identities
 from .playbook_autonomy_review import (
@@ -388,6 +396,13 @@ class RuntimeSettings:
     kfs_openbao_secret_id_path: Path = Path(
         "/run/jason-secrets/openbao/kyocera-kfs/secret_id"
     )
+    kfs_history_host: str = "jason-kfs-postgres"
+    kfs_history_port: int = 5432
+    kfs_history_database: str = "kfs_collector"
+    kfs_history_user: str = "kfs_reader"
+    kfs_history_password_file: Path = Path(
+        "/run/jason-secrets/kfs-history/password"
+    )
     backup_net_enabled: bool = False
     backup_net_access_profile: str = "read_only"
     backup_net_openbao_role_id_path: Path = Path(
@@ -471,6 +486,11 @@ class RuntimeSettings:
     )
     drmm_recent_alert_reconciliation_lookback_hours: int = 24
     drmm_recent_alert_reconciliation_cadence_hours: int = 24
+    windows_time_source_shadow_enabled: bool = False
+    windows_time_source_shadow_db: Path = Path(
+        "/var/lib/jason/openclaw/windows-time-source-shadow.sqlite3"
+    )
+    windows_time_source_shadow_cadence_minutes: int = 15
     autonomy_review_enabled: bool = False
     autonomy_review_db: Path = Path(
         "/var/lib/jason/openclaw/playbook-autonomy-review.sqlite3"
@@ -636,6 +656,22 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_KFS_OPENBAO_SECRET_ID_PATH",
                     "/run/jason-secrets/openbao/kyocera-kfs/secret_id",
+                )
+            ),
+            kfs_history_host=os.getenv(
+                "JASON_KFS_HISTORY_HOST", "jason-kfs-postgres"
+            ).strip(),
+            kfs_history_port=int(os.getenv("JASON_KFS_HISTORY_PORT", "5432")),
+            kfs_history_database=os.getenv(
+                "JASON_KFS_HISTORY_DATABASE", "kfs_collector"
+            ).strip(),
+            kfs_history_user=os.getenv(
+                "JASON_KFS_HISTORY_USER", "kfs_reader"
+            ).strip(),
+            kfs_history_password_file=Path(
+                os.getenv(
+                    "JASON_KFS_HISTORY_PASSWORD_FILE",
+                    "/run/jason-secrets/kfs-history/password",
                 )
             ),
             backup_net_enabled=os.getenv(
@@ -835,6 +871,18 @@ class RuntimeSettings:
             drmm_recent_alert_reconciliation_cadence_hours=int(
                 os.getenv("JASON_DRMM_RECENT_ALERT_RECONCILIATION_CADENCE_HOURS", "24")
             ),
+            windows_time_source_shadow_enabled=os.getenv(
+                "JASON_WINDOWS_TIME_SOURCE_SHADOW_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            windows_time_source_shadow_db=Path(
+                os.getenv(
+                    "JASON_WINDOWS_TIME_SOURCE_SHADOW_DB",
+                    "/var/lib/jason/openclaw/windows-time-source-shadow.sqlite3",
+                )
+            ),
+            windows_time_source_shadow_cadence_minutes=int(
+                os.getenv("JASON_WINDOWS_TIME_SOURCE_SHADOW_CADENCE_MINUTES", "15")
+            ),
             autonomy_review_enabled=os.getenv(
                 "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED", "false"
             ).strip().casefold() in {"1", "true", "yes", "on"},
@@ -909,6 +957,8 @@ class RuntimeSettings:
             raise ValueError("JASON_DRMM_RECENT_ALERT_RECONCILIATION_LOOKBACK_HOURS must be 1..168")
         if self.drmm_recent_alert_reconciliation_cadence_hours < 1:
             raise ValueError("JASON_DRMM_RECENT_ALERT_RECONCILIATION_CADENCE_HOURS must be at least 1")
+        if self.windows_time_source_shadow_cadence_minutes < 1:
+            raise ValueError("JASON_WINDOWS_TIME_SOURCE_SHADOW_CADENCE_MINUTES must be at least 1")
         if self.autonomy_review_interval_seconds < 60:
             raise ValueError(
                 "JASON_PLAYBOOK_AUTONOMY_REVIEW_INTERVAL_SECONDS must be at least 60"
@@ -1288,6 +1338,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             capabilities=capabilities, providers=providers
         ),
     )
+    ensure_meter_history_read_authority(
+        identity_authority,
+        enabled=settings.kfs_enabled,
+    )
+
     if autonomous_repair_deployment_activation.enabled:
         ensure_autonomous_repair_authority(identity_authority)
 
@@ -1575,6 +1630,15 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         transport=http_transport,
         audit=ConnectorEventAudit(orchestration_events),
     )
+    kfs_history_invoker = GovernedKfsMeterHistoryInvoker(
+        store=KfsMeterHistoryStore(
+            host=settings.kfs_history_host,
+            port=settings.kfs_history_port,
+            database=settings.kfs_history_database,
+            user=settings.kfs_history_user,
+            password_file=settings.kfs_history_password_file,
+        )
+    )
     kfs_invoker = GovernedConnectorCapabilityInvoker(
         connectors={KYOCERA_KFS_PROVIDER: kfs},
         provider_capability_map={
@@ -1801,6 +1865,8 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     invokers.register(PRINT_DEVICE_SEARCH, kfs_invoker)
     invokers.register(PRINT_DEVICE_READ, kfs_invoker)
     invokers.register(PRINT_METER_READ, kfs_invoker)
+    invokers.register(PRINT_METER_HISTORY_SEARCH, kfs_history_invoker)
+    invokers.register(PRINT_METER_USAGE_READ, kfs_history_invoker)
     invokers.register(PRINT_SUPPLIES_READ, kfs_invoker)
     invokers.register(PRINT_ALERT_SEARCH, kfs_invoker)
     invokers.register(BACKUP_ENDPOINT_ASSET_SEARCH, backup_net_invoker)
@@ -2070,6 +2136,9 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     support_repair_reasoning_maintenance = build_support_repair_reasoning_maintenance(
         enabled=settings.support_repair_autonomy_enabled,
         structured_client=hosted_conversation_client or ollama_client,
+        fallback_structured_client=(
+            ollama_client if hosted_conversation_client is not None else None
+        ),
         spool=settings.support_repair_spool,
     )
     autonomous_repair_deployment_maintenance = (
@@ -2116,6 +2185,18 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         cadence_hours=settings.drmm_recent_alert_reconciliation_cadence_hours,
         audit=reflection_audit,
     )
+    windows_time_source_shadow_maintenance = build_windows_time_source_shadow_maintenance(
+        enabled=settings.windows_time_source_shadow_enabled,
+        identity_authority=identity_authority,
+        capabilities=capabilities,
+        approvals=approval_repository,
+        execution_ledger=governed_execution_ledger,
+        orchestrator=orchestrator,
+        state_db=settings.windows_time_source_shadow_db,
+        promotion_db=settings.autonomy_promotion_db,
+        cadence_minutes=settings.windows_time_source_shadow_cadence_minutes,
+        audit=reflection_audit,
+    )
     autonomy_maintenance = CompositeAutonomyMaintenance(
         playbook_review_maintenance,
         autonomous_deployment_completion_notification_maintenance,
@@ -2124,6 +2205,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         autonomous_repair_deployment_maintenance,
         operational_autonomy_maintenance,
         drmm_recent_alert_reconciliation_maintenance,
+        windows_time_source_shadow_maintenance,
         shadow_autonomy_maintenance,
     )
 

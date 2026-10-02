@@ -470,6 +470,18 @@ def _autotask_after_resource_id(arguments: Mapping[str, Any]) -> int | None:
     return resource_id
 
 
+def _autotask_created_range_value(
+    arguments: Mapping[str, Any],
+    selector: str,
+) -> str | None:
+    value = arguments.get(selector)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{selector} must be a non-empty ISO-8601 datetime string")
+    return value.strip()
+
+
 def _autotask_search(
     capability_name: str,
     arguments: Mapping[str, Any],
@@ -501,6 +513,18 @@ def _autotask_search(
             raise ValueError("Autotask filter field names must be non-empty")
         field_name = ticket_filter_aliases.get(field_name, field_name)
         clauses.append({"op": "eq", "field": field_name, "value": value})
+
+    if capability_name in {SERVICE_TICKET_SEARCH, SERVICE_TICKET_COUNT}:
+        created_after = _autotask_created_range_value(arguments, "created_after")
+        created_before = _autotask_created_range_value(arguments, "created_before")
+        if created_after is not None:
+            clauses.append(
+                {"op": "gte", "field": "createDate", "value": created_after}
+            )
+        if created_before is not None:
+            clauses.append(
+                {"op": "lte", "field": "createDate", "value": created_before}
+            )
 
     after_resource_id = _autotask_after_resource_id(arguments)
     if after_resource_id is not None:
