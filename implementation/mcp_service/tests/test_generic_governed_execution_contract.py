@@ -1083,6 +1083,71 @@ def test_generic_internal_note_canonicalizes_technician_friendly_arguments():
     }
 
 
+def test_product_vendor_create_canonicalizes_exact_procurement_payload():
+    result = server._canonicalize_governed_action_arguments(
+        "service.product.vendor.create",
+        {
+            "payload": {
+                "productID": "29686513",
+                "vendorID": 528,
+                "isActive": True,
+                "isDefault": True,
+                "vendorCost": "879.99",
+                "vendorPartNumber": " 21SBS2CB00-W11P ",
+            }
+        },
+    )
+
+    assert result == {
+        "payload": {
+            "productID": 29686513,
+            "vendorID": 528,
+            "isActive": True,
+            "isDefault": True,
+            "vendorCost": 879.99,
+            "vendorPartNumber": "21SBS2CB00-W11P",
+        }
+    }
+
+
+def test_product_vendor_create_rejects_missing_or_invalid_identity():
+    for payload in (
+        {"vendorID": 528},
+        {"productID": 29686513},
+        {"productID": 0, "vendorID": 528},
+        {"productID": 29686513, "vendorID": False},
+    ):
+        try:
+            server._canonicalize_governed_action_arguments(
+                "service.product.vendor.create",
+                {"payload": payload},
+            )
+        except ValueError as exc:
+            assert "AUTOTASK_PRODUCT_VENDOR_CREATE_" in str(exc)
+        else:
+            raise AssertionError("invalid product/vendor identity must fail closed")
+
+
+def test_product_vendor_create_rejects_unknown_fields():
+    try:
+        server._canonicalize_governed_action_arguments(
+            "service.product.vendor.create",
+            {
+                "payload": {
+                    "productID": 29686513,
+                    "vendorID": 528,
+                    "unexpected": "no",
+                }
+            },
+        )
+    except ValueError as exc:
+        assert str(exc).startswith(
+            "AUTOTASK_PRODUCT_VENDOR_CREATE_UNSUPPORTED_ARGUMENTS:"
+        )
+    else:
+        raise AssertionError("unknown procurement fields must fail closed")
+
+
 def test_ticket_activity_report_aggregates_durable_activity(monkeypatch, tmp_path):
     import sqlite3
 
