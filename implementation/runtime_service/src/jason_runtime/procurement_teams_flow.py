@@ -1300,7 +1300,10 @@ class ProcurementTeamsFlow:
         payload = self.store.get(submission_id)
         if payload is None:
             raise PermissionError("procurement submission was not found")
-        if payload.get("status") != "draft":
+        submission_status = str(payload.get("status") or "")
+        if submission_status not in {"draft", "failed_retryable"}:
+            if submission_status == "executing":
+                raise ProcurementFlowError("procurement submission is already executing")
             raise PermissionError("procurement submission is no longer pending")
         if str(payload.get("requester_microsoft_object_id")) != microsoft_object_id:
             raise PermissionError("procurement submission belongs to another requester")
@@ -1313,6 +1316,21 @@ class ProcurementTeamsFlow:
         )
         if principal.principal_id != payload.get("requester_principal_id"):
             raise PermissionError("procurement requester identity changed")
+
+        if submission_status == "failed_retryable":
+            result = self.execute_submission_with_retry_state(
+                payload,
+                owner_approval_id=(
+                    str(payload.get("owner_approval_id"))
+                    if payload.get("owner_approval_id")
+                    else None
+                ),
+            )
+            return {
+                "status": "completed",
+                "submission_id": submission_id,
+                "reply": {"text": result["summary"]},
+            }
 
         allowed = {
             "create_po", "create_client_quote", "at_part_number", "item_class",
@@ -1468,7 +1486,6 @@ class ProcurementTeamsFlow:
             "quote_context": quote_context,
         }
         submitted["digest"] = _submission_digest(submitted)
-        self.store.update(submission_id, submitted)
 
         # Spend authority governs the purchase branch only. Catalog/client quote
         # creation does not itself commit AOT funds.
@@ -1499,7 +1516,10 @@ class ProcurementTeamsFlow:
                 },
             }
 
-        result = self.execute_submission(submitted, owner_approval_id=None)
+        result = self.execute_submission_with_retry_state(
+            submitted,
+            owner_approval_id=None,
+        )
         return {
             "status": "completed",
             "submission_id": submission_id,
@@ -1548,6 +1568,47 @@ class ProcurementTeamsFlow:
             },
         )
         return self.approval_service.create(approval, now=now)
+
+    def execute_submission_with_retry_state(
+        self,
+        submission: Mapping[str, Any],
+        *,
+        owner_approval_id: str | None,
+    ) -> dict[str, Any]:
+        submission_id = str(submission["submission_id"])
+        current = self.store.get(submission_id)
+        if current is None:
+            raise ProcurementFlowError("procurement submission disappeared")
+        attempts = int(current.get("execution_attempts") or 0) + 1
+        executing = {
+            **current,
+            **dict(submission),
+            "status": "executing",
+            "execution_attempts": attempts,
+            "execution_started_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if owner_approval_id:
+            executing["owner_approval_id"] = owner_approval_id
+        self.store.update(submission_id, executing)
+        try:
+            return self.execute_submission(
+                executing,
+                owner_approval_id=owner_approval_id,
+            )
+        except Exception as error:
+            latest = self.store.get(submission_id)
+            if latest is not None:
+                self.store.update(
+                    submission_id,
+                    {
+                        **latest,
+                        "status": "failed_retryable",
+                        "execution_failed_at": datetime.now(timezone.utc).isoformat(),
+                        "execution_error_type": type(error).__name__,
+                        "execution_error_message": str(error)[:500],
+                    },
+                )
+            raise
 
     def execute_submission(
         self,
@@ -2008,7 +2069,14 @@ class ProcurementApprovalInteractionFlow:
                 "approval_id": approval_id,
                 "reply": {"text": label + ". No procurement write was performed."},
             }
-        result = self.processor.execute_submission(submission, owner_approval_id=approval_id)
+        approved_submission = {
+            **submission,
+            "owner_approval_id": approval_id,
+        }
+        result = self.processor.execute_submission_with_retry_state(
+            approved_submission,
+            owner_approval_id=approval_id,
+        )
         return {
             "status": "completed",
             "approval_id": approval_id,
