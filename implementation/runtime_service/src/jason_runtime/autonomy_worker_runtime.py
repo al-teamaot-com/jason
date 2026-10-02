@@ -260,6 +260,12 @@ class OperationalAutonomyError(RuntimeError):
     pass
 
 
+class DeviceAccessDeferred(OperationalAutonomyError):
+    def __init__(self, *, work: "OperationalWork", reason: str) -> None:
+        self.work = work
+        super().__init__(reason)
+
+
 class BackupIQManagedEndpointMissing(OperationalAutonomyError):
     def __init__(self, *, company_id: int, ci_id: int, hostname: str, provider_status: str) -> None:
         self.company_id = int(company_id)
@@ -2795,31 +2801,8 @@ class OperationalAutonomyMaintenance:
             raise OperationalAutonomyError(
                 "Autotask CI and DRMM hostname do not match"
             )
-        offline_wait_scopes = {
-            BACKUPIQ_SCOPE.playbook_id,
-            IDLE_LOG_OFF_SCOPE.playbook_id,
-        }
-        if (
-            endpoint.get("online") is not True
-            and scope.playbook_id not in offline_wait_scopes
-        ):
-            deb = self._deb_asset_selection(
-                company_id=company_id,
-                hostname=hostname,
-            )
-            if deb.state is DebAvailabilityState.ONLINE:
-                raise OperationalAutonomyError(
-                    "DRMM access unavailable while DEB reports endpoint online"
-                )
-            if deb.state is DebAvailabilityState.OFFLINE:
-                raise OperationalAutonomyError(
-                    "endpoint is not currently online (DEB corroborated)"
-                )
-            raise OperationalAutonomyError(
-                "endpoint is not currently online (DEB unconfirmed)"
-            )
 
-        return OperationalWork(
+        work = OperationalWork(
             ticket_id=ticket_id,
             ticket_number=str(ticket.get("ticketNumber") or ticket.get("ticket_number") or ticket_id),
             title=str(ticket.get("title") or ""),
@@ -2833,6 +2816,27 @@ class OperationalAutonomyMaintenance:
             source_version=(str(candidate.source_version or "").strip() or None),
             updated_at=datetime.now(timezone.utc).isoformat(),
         )
+        offline_wait_scopes = {
+            BACKUPIQ_SCOPE.playbook_id,
+            IDLE_LOG_OFF_SCOPE.playbook_id,
+        }
+        if (
+            endpoint.get("online") is not True
+            and scope.playbook_id not in offline_wait_scopes
+        ):
+            deb = self._deb_asset_selection(
+                company_id=company_id,
+                hostname=hostname,
+            )
+            if deb.state is DebAvailabilityState.ONLINE:
+                reason = "DRMM access unavailable while DEB reports endpoint online"
+            elif deb.state is DebAvailabilityState.OFFLINE:
+                reason = "endpoint is not currently online (DEB corroborated)"
+            else:
+                reason = "endpoint is not currently online (DEB unconfirmed)"
+            raise DeviceAccessDeferred(work=work, reason=reason)
+
+        return work
 
     def _advance(self, work: OperationalWork, ticket: Mapping[str, Any]) -> None:
         scope = self._scope_for_work(work)
@@ -6476,6 +6480,13 @@ class OperationalAutonomyMaintenance:
                         }
                     },
                 )
+            if isinstance(error, DeviceAccessDeferred):
+                waiting_work = self._replace(
+                    error.work,
+                    phase="waiting_device_access:claim",
+                    last_reason=str(error)[:500],
+                )
+                self.store.put(waiting_work)
             return
         # Missing/invalid ticket identity prerequisites outside Jason are not a
         # durable failure. They can be corrected by normal PSA triage; keeping a

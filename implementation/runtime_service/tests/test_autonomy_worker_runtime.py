@@ -414,7 +414,13 @@ def test_owned_offline_ticket_moves_to_waiting_device_access_without_active_slot
 
     worker.tick()
 
-    assert store.get(140933) is None
+    work = store.get(140933)
+    assert work is not None
+    assert work.phase == "waiting_device_access:claim"
+    assert work.company_id == 507
+    assert work.configuration_item_id == 1583
+    assert work.device_uid == "device-uid-1"
+    assert work.hostname == "PC-1"
     updates = [
         args["payload"]
         for _, capability, args in actions.calls
@@ -440,7 +446,11 @@ def test_waiting_device_access_offline_is_idempotent(tmp_path: Path):
 
     worker.tick()
 
-    assert store.get(140933) is None
+    work = store.get(140933)
+    assert work is not None
+    assert work.phase == "waiting_device_access:claim"
+    assert work.device_uid == "device-uid-1"
+    assert work.hostname == "PC-1"
     assert actions.calls == []
     store.close()
 
@@ -1392,8 +1402,13 @@ def test_offline_high_priority_candidates_do_not_starve_online_post_ticket(tmp_p
 
     worker.tick()
 
-    assert store.get(140901) is None
-    assert store.get(140902) is None
+    offline_one_work = store.get(140901)
+    offline_two_work = store.get(140902)
+    assert offline_one_work is not None
+    assert offline_two_work is not None
+    assert offline_one_work.phase == "waiting_device_access:claim"
+    assert offline_two_work.phase == "waiting_device_access:claim"
+    assert store.list_open() == ()
     post = store.get(141004)
     assert post is not None
     assert post.phase == "escalated"
@@ -3693,7 +3708,11 @@ def test_vulscan_offline_endpoint_waits_for_device_access(tmp_path: Path):
 
     worker.tick()
 
-    assert store.get(141183) is None
+    work = store.get(141183)
+    assert work is not None
+    assert work.phase == "waiting_device_access:claim"
+    assert work.device_uid == "vul-device-1"
+    assert work.hostname == "GAI-DT2850"
     update_calls = [
         args["payload"]
         for _, capability, args in actions.calls
