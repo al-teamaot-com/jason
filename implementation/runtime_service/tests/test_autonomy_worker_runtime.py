@@ -2555,6 +2555,7 @@ def test_backupiq_backup_only_offline_runs_one_standing_safe_reinstall_and_verif
     worker.tick()
     assert store.get(141185).phase == "waiting_recheck:backupiq_verify_reinstall"
 
+    _expire_next_recheck(store, 141185)
     worker.tick()
     final = store.get(141185)
     assert final is not None
@@ -2993,6 +2994,24 @@ def _promoted_low_disk_worker(tmp_path: Path, reads, actions=None):
     return worker, store, actions
 
 
+def _expire_next_recheck(store, ticket_id: int):
+    current = store.get(ticket_id)
+    assert current is not None
+    reason = str(current.last_reason or "")
+    reason = __import__("re").sub(
+        r"(?:^|;\s*)next_recheck_at=[^;]+",
+        "",
+        reason,
+    ).strip(" ;")
+    expired = datetime.now(timezone.utc) - timedelta(seconds=1)
+    reason = (
+        f"{reason}; next_recheck_at={expired.isoformat()}"
+        if reason
+        else f"next_recheck_at={expired.isoformat()}"
+    )
+    store.put(replace(current, last_reason=reason, updated_at=current.updated_at))
+
+
 def _expire_low_disk_grace(store):
     current = store.get(141101)
     assert current is not None
@@ -3190,6 +3209,7 @@ def test_low_disk_runs_one_narrow_cleanup_then_verifies_monitor(tmp_path: Path):
     assert store.get(141101).phase == "waiting_recheck:low_disk_verify"
 
     reads.alert_open = False
+    _expire_next_recheck(store, 141101)
     worker.tick()
 
     final = store.get(141101)
@@ -4117,6 +4137,7 @@ def test_idle_logoff_true_noncompliance_runs_exact_setter_and_waits_for_monitor_
     worker.tick()
     assert store.get(141066).phase=="waiting_recheck:idle_log_off_verify_monitor"
     assert store.list_open()==()
+    _expire_next_recheck(store, 141066)
     worker.tick()
 
     final=store.get(141066)

@@ -1001,6 +1001,36 @@ class OperationalAutonomyMaintenance:
             )
         )
 
+    @staticmethod
+    def _next_recheck_at(work: OperationalWork) -> datetime | None:
+        match = re.search(
+            r"(?:^|;\s*)next_recheck_at=([^;]+)",
+            str(work.last_reason or ""),
+        )
+        if match is None:
+            return None
+        try:
+            parsed = datetime.fromisoformat(match.group(1).strip().replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def _waiting_recheck_due(self, work: OperationalWork) -> bool:
+        due_at = self._next_recheck_at(work)
+        return due_at is None or datetime.now(timezone.utc) >= due_at
+
+    @staticmethod
+    def _with_next_recheck(reason: str, due_at: datetime) -> str:
+        base = re.sub(
+            r"(?:^|;\s*)next_recheck_at=[^;]+;?\s*",
+            "",
+            str(reason or ""),
+        ).strip(" ;")
+        suffix = f"next_recheck_at={due_at.astimezone(timezone.utc).isoformat()}"
+        return f"{base}; {suffix}" if base else suffix
+
     def request_reconcile(self, reason: str) -> None:
         """Request a full queue reconciliation on the next maintenance tick."""
         del reason
@@ -1958,6 +1988,28 @@ class OperationalAutonomyMaintenance:
                         self._schedule_device_access_wake(existing)
                     continue
                 if existing.phase.startswith("waiting_recheck:"):
+                    due_at = self._next_recheck_at(existing)
+                    if not self._waiting_recheck_due(existing):
+                        remaining = max(
+                            30,
+                            int(
+                                (
+                                    due_at - datetime.now(timezone.utc)
+                                ).total_seconds()
+                            ),
+                        ) if due_at is not None else self.interval_seconds
+                        self._schedule_waiting_reconcile_wake(
+                            existing,
+                            delay_seconds=remaining,
+                            reason=f"{existing.playbook_id} scheduled recheck due",
+                        )
+                        classifications[ticket_id] = (
+                            "waiting_recheck",
+                            "scheduled_recheck_not_due",
+                            item.source_version,
+                            False,
+                        )
+                        continue
                     if len(self.store.list_open()) < self.max_active_work_items:
                         waiting_phase = existing.phase
                         resume_phase = waiting_phase.split(":", 1)[1]
@@ -3761,17 +3813,27 @@ class OperationalAutonomyMaintenance:
             ),
             "Jason - Idle Log Off - Remediation",
         )
-        self.store.put(
-            self._replace(
-                work,
-                phase="waiting_recheck:idle_log_off_verify_monitor",
-                job_uid=None,
-                component_uid=None,
-                last_reason=(
+        due_at = datetime.now(timezone.utc) + timedelta(
+            seconds=max(60, self.interval_seconds)
+        )
+        waiting_work = self._replace(
+            work,
+            phase="waiting_recheck:idle_log_off_verify_monitor",
+            job_uid=None,
+            component_uid=None,
+            last_reason=self._with_next_recheck(
+                (
                     "Idle Log Off setter completed; waiting for the authoritative "
                     "normal monitor cycle to clear the exact alert."
                 ),
-            )
+                due_at,
+            ),
+        )
+        self.store.put(waiting_work)
+        self._schedule_waiting_reconcile_wake(
+            waiting_work,
+            delay_seconds=max(60, self.interval_seconds),
+            reason="Idle Log Off monitor verification due",
         )
 
     def _verify_idle_log_off_monitor(self, work: OperationalWork) -> None:
@@ -3817,16 +3879,28 @@ class OperationalAutonomyMaintenance:
             else 0
         )
         if age_seconds < 900:
-            self.store.put(
-                self._replace(
-                    work,
-                    phase="waiting_recheck:idle_log_off_verify_monitor",
-                    last_reason=(
+            delay = max(
+                30,
+                min(max(60, self.interval_seconds), int(900 - age_seconds)),
+            )
+            due_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+            waiting_work = self._replace(
+                work,
+                phase="waiting_recheck:idle_log_off_verify_monitor",
+                last_reason=self._with_next_recheck(
+                    (
                         "Idle Log Off alert remains open inside the bounded monitor "
                         "propagation window; waiting without redispatch."
                     ),
-                    updated_at=work.updated_at,
-                )
+                    due_at,
+                ),
+                updated_at=work.updated_at,
+            )
+            self.store.put(waiting_work)
+            self._schedule_waiting_reconcile_wake(
+                waiting_work,
+                delay_seconds=delay,
+                reason="Idle Log Off monitor propagation recheck due",
             )
             return
 
@@ -4707,19 +4781,30 @@ class OperationalAutonomyMaintenance:
             grace_started = datetime.now(timezone.utc)
         grace_age = (datetime.now(timezone.utc) - grace_started).total_seconds()
         if grace_age < LOW_DISK_GRACE_SECONDS:
+            delay = max(
+                30,
+                min(
+                    max(60, self.interval_seconds),
+                    int(LOW_DISK_GRACE_SECONDS - grace_age),
+                ),
+            )
+            due_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
             waiting_work = self._replace(
                 work,
                 phase="waiting_recheck:low_disk_investigate",
-                last_reason=(
-                    f"low_disk_grace_started_at={grace_started.isoformat()}; "
-                    "Waiting for the existing Autotask-triggered Disk Cleanup and "
-                    "normal monitor propagation before deeper diagnostics."
+                last_reason=self._with_next_recheck(
+                    (
+                        f"low_disk_grace_started_at={grace_started.isoformat()}; "
+                        "Waiting for the existing Autotask-triggered Disk Cleanup and "
+                        "normal monitor propagation before deeper diagnostics."
+                    ),
+                    due_at,
                 ),
             )
             self.store.put(waiting_work)
             self._schedule_waiting_reconcile_wake(
                 waiting_work,
-                delay_seconds=max(30, int(LOW_DISK_GRACE_SECONDS - grace_age)),
+                delay_seconds=delay,
                 reason="Low disk grace-period recheck due",
             )
             return
@@ -4965,18 +5050,27 @@ class OperationalAutonomyMaintenance:
             ),
             "Jason - Low Disk - Remediation",
         )
-        self.store.put(
-            self._replace(
-                work,
-                phase="waiting_recheck:low_disk_verify",
-                job_uid=None,
-                component_uid=None,
-                last_reason=(
+        delay = max(60, self.interval_seconds)
+        due_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+        waiting_work = self._replace(
+            work,
+            phase="waiting_recheck:low_disk_verify",
+            job_uid=None,
+            component_uid=None,
+            last_reason=self._with_next_recheck(
+                (
                     f"low_disk_cleanup_completed_at={completed_at.isoformat()}; "
                     f"low_disk_cleanup_component={component_name}; "
                     "Waiting for free-space and monitor verification."
                 ),
-            )
+                due_at,
+            ),
+        )
+        self.store.put(waiting_work)
+        self._schedule_waiting_reconcile_wake(
+            waiting_work,
+            delay_seconds=delay,
+            reason="Low disk cleanup verification due",
         )
 
     def _verify_low_disk_cleanup(self, work: OperationalWork) -> None:
@@ -5031,13 +5125,25 @@ class OperationalAutonomyMaintenance:
 
         age = (datetime.now(timezone.utc) - completed_at).total_seconds()
         if age < LOW_DISK_GRACE_SECONDS:
-            self.store.put(
-                self._replace(
-                    work,
-                    phase="waiting_recheck:low_disk_verify",
-                    last_reason=work.last_reason,
-                    updated_at=work.updated_at,
-                )
+            delay = max(
+                30,
+                min(
+                    max(60, self.interval_seconds),
+                    int(LOW_DISK_GRACE_SECONDS - age),
+                ),
+            )
+            due_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+            waiting_work = self._replace(
+                work,
+                phase="waiting_recheck:low_disk_verify",
+                last_reason=self._with_next_recheck(work.last_reason, due_at),
+                updated_at=work.updated_at,
+            )
+            self.store.put(waiting_work)
+            self._schedule_waiting_reconcile_wake(
+                waiting_work,
+                delay_seconds=delay,
+                reason="Low disk monitor verification recheck due",
             )
             return
 
@@ -5455,19 +5561,28 @@ class OperationalAutonomyMaintenance:
 
         deadline = started_at.timestamp() + BACKUPIQ_REINSTALL_VERIFY_SECONDS
         deadline_at = datetime.fromtimestamp(deadline, tz=timezone.utc)
-        self.store.put(
-            self._replace(
-                work,
-                phase="waiting_recheck:backupiq_verify_reinstall",
-                job_uid=None,
-                component_uid=None,
-                last_reason=(
+        delay = min(300, max(60, self.interval_seconds))
+        due_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+        waiting_work = self._replace(
+            work,
+            phase="waiting_recheck:backupiq_verify_reinstall",
+            job_uid=None,
+            component_uid=None,
+            last_reason=self._with_next_recheck(
+                (
                     f"backupiq_reinstall_started_at={started_at.isoformat()}; "
                     f"backupiq_verify_deadline_at={deadline_at.isoformat()}; "
                     "Reinstall completed; waiting for provider recovery and a new "
                     "successful backup."
                 ),
-            )
+                due_at,
+            ),
+        )
+        self.store.put(waiting_work)
+        self._schedule_waiting_reconcile_wake(
+            waiting_work,
+            delay_seconds=delay,
+            reason="BackupIQ post-reinstall verification due",
         )
 
     def _verify_backupiq_reinstall(self, work: OperationalWork) -> None:
@@ -5608,12 +5723,22 @@ class OperationalAutonomyMaintenance:
             )
             return
 
-        self.store.put(
-            self._replace(
-                work,
-                phase="waiting_recheck:backupiq_verify_reinstall",
-                last_reason=work.last_reason,
-            )
+        remaining = max(
+            30,
+            int((deadline_at - datetime.now(timezone.utc)).total_seconds()),
+        )
+        delay = min(300, max(60, self.interval_seconds), remaining)
+        due_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+        waiting_work = self._replace(
+            work,
+            phase="waiting_recheck:backupiq_verify_reinstall",
+            last_reason=self._with_next_recheck(work.last_reason, due_at),
+        )
+        self.store.put(waiting_work)
+        self._schedule_waiting_reconcile_wake(
+            waiting_work,
+            delay_seconds=delay,
+            reason="BackupIQ provider recovery recheck due",
         )
 
     @staticmethod
