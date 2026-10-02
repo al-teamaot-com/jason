@@ -1,6 +1,8 @@
 import importlib.util
 import json
 import sys
+import tempfile
+import unittest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -30,18 +32,14 @@ def release_record(state="closed"):
     }
 
 
-def test_release_id_requires_exact_sha():
-    assert module.release_id(SHA) == "release-" + "a" * 16
-    try:
-        module.release_id("main")
-    except module.TodoReleaseBridgeError:
-        pass
-    else:
-        raise AssertionError("symbolic ref should be rejected")
+class TodoReleaseBridgeTests(unittest.TestCase):
+    def test_release_id_requires_exact_sha(self):
+        self.assertEqual(module.release_id(SHA), "release-" + "a" * 16)
+        with self.assertRaises(module.TodoReleaseBridgeError):
+            module.release_id("main")
 
-
-def test_update_todo_text_requires_closed_release():
-    source = """# Backlog
+    def test_update_todo_text_requires_closed_release(self):
+        source = """# Backlog
 
 ### TODO-OPS-010 — Build thing
 
@@ -54,67 +52,70 @@ def test_update_todo_text_requires_closed_release():
 - **Priority:** P2
 - **Status:** Planned
 """
-    updated = module.update_todo_text(
-        source,
-        todo_id="TODO-OPS-010",
-        release=release_record(),
-    )
-    assert "**Status:** Implemented" in updated
-    assert "release-" + "a" * 16 in updated
-    assert SHA in updated
-    assert "**Implementation evidence:**" in updated
-    other = updated.split("### TODO-OPS-011", 1)[1]
-    assert "**Status:** Planned" in other
-
-    try:
-        module.update_todo_text(
+        updated = module.update_todo_text(
             source,
             todo_id="TODO-OPS-010",
-            release=release_record("production_eligible"),
+            release=release_record(),
         )
-    except module.TodoReleaseBridgeError:
-        pass
-    else:
-        raise AssertionError("TODO must not close before Release Manager closed")
+        self.assertIn("**Status:** Implemented", updated)
+        self.assertIn("release-" + "a" * 16, updated)
+        self.assertIn(SHA, updated)
+        self.assertIn("**Implementation evidence:**", updated)
+        other = updated.split("### TODO-OPS-011", 1)[1]
+        self.assertIn("**Status:** Planned", other)
+
+        with self.assertRaises(module.TodoReleaseBridgeError):
+            module.update_todo_text(
+                source,
+                todo_id="TODO-OPS-010",
+                release=release_record("production_eligible"),
+            )
+
+    def test_release_record_reads_exact_merge_sha(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            path = root / "records" / f"{module.release_id(SHA)}.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps(release_record()), encoding="utf-8")
+            observed = module.release_record(root, SHA)
+            self.assertIsNotNone(observed)
+            self.assertEqual(observed["state"], "closed")
+
+    def test_prepare_release_delegates_to_release_manager(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            runner = root / "release_manager_host_runner.py"
+            runner.write_text("# runner", encoding="utf-8")
+            source = root / "source"
+            source.mkdir()
+            state = root / "state"
+            state.mkdir()
+
+            payload = {
+                **release_record("production_eligible"),
+                "release_id": module.release_id(SHA),
+            }
+            with patch.object(module, "run", return_value=json.dumps(payload)) as run_cmd:
+                result = module.prepare_release(
+                    repo=root,
+                    merge_sha=SHA,
+                    release_runner=runner,
+                    release_source=source,
+                    release_state=state,
+                )
+            self.assertEqual(result["state"], "production_eligible")
+            args = run_cmd.call_args.args[0]
+            self.assertIn("prepare", args)
+            self.assertIn("--candidate-sha", args)
+            self.assertIn(SHA, args)
+            self.assertIn("--change-class", args)
+            self.assertIn("todo", args)
+
+    def test_todo_and_development_metadata_patterns_are_exact(self):
+        self.assertTrue(module.TODO_META.search("- TODO item: TODO-OPS-010"))
+        self.assertFalse(module.TODO_META.search("- TODO: TODO-OPS-010"))
+        self.assertTrue(module.DEV_META.search("- Development issue: #123"))
 
 
-def test_release_record_reads_exact_merge_sha(tmp_path):
-    root = tmp_path
-    path = root / "records" / f"{module.release_id(SHA)}.json"
-    path.parent.mkdir(parents=True)
-    path.write_text(json.dumps(release_record()), encoding="utf-8")
-    observed = module.release_record(root, SHA)
-    assert observed is not None
-    assert observed["state"] == "closed"
-
-
-def test_prepare_release_delegates_to_release_manager(tmp_path):
-    runner = tmp_path / "release_manager_host_runner.py"
-    runner.write_text("# runner", encoding="utf-8")
-    source = tmp_path / "source"
-    source.mkdir()
-    state = tmp_path / "state"
-    state.mkdir()
-
-    payload = {**release_record("production_eligible"), "release_id": module.release_id(SHA)}
-    with patch.object(module, "run", return_value=json.dumps(payload)) as run_cmd:
-        result = module.prepare_release(
-            repo=tmp_path,
-            merge_sha=SHA,
-            release_runner=runner,
-            release_source=source,
-            release_state=state,
-        )
-    assert result["state"] == "production_eligible"
-    args = run_cmd.call_args.args[0]
-    assert "prepare" in args
-    assert "--candidate-sha" in args
-    assert SHA in args
-    assert "--change-class" in args
-    assert "todo" in args
-
-
-def test_todo_and_development_metadata_patterns_are_exact():
-    assert module.TODO_META.search("- TODO item: TODO-OPS-010")
-    assert not module.TODO_META.search("- TODO: TODO-OPS-010")
-    assert module.DEV_META.search("- Development issue: #123")
+if __name__ == "__main__":
+    unittest.main()
