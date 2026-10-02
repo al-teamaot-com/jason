@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Mapping
-from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from kernel.capabilities import CapabilityRegistryService
@@ -29,6 +27,7 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_TICKET_READ,
 )
 
+from .teams_gateway_transport import TeamsGatewayTransport
 from .procurement_inventory_billing import (
     BillingAuditState,
     BillingExpectation,
@@ -169,9 +168,6 @@ class TeamsGatewayBillingAuditSender:
     lori_email: str = LORI_EMAIL
 
     def _send(self, *, binding: Any, text: str, card: Mapping[str, Any] | None = None) -> str:
-        token = self.token_file.read_text(encoding="utf-8").strip()
-        if not token:
-            raise PermissionError("Teams proactive token unavailable")
         payload: dict[str, Any] = {
             "aadObjectId": str(binding.microsoft_object_id),
             "tenantId": str(binding.microsoft_tenant_id),
@@ -179,17 +175,11 @@ class TeamsGatewayBillingAuditSender:
         }
         if card is not None:
             payload["card"] = dict(card)
-        request = Request(
-            self.gateway_url.rstrip("/") + "/internal/proactive/send",
-            data=json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(),
-            method="POST",
-            headers={
-                "Authorization": "Bearer " + token,
-                "Content-Type": "application/json",
-            },
+        transport = TeamsGatewayTransport(
+            gateway_url=self.gateway_url,
+            token_file=self.token_file,
         )
-        with urlopen(request, timeout=20) as response:
-            result = json.loads(response.read().decode("utf-8"))
+        result = transport.send(transport.prepare(payload))
         if result.get("status") != "succeeded" or not result.get("message_id"):
             raise RuntimeError("Teams hardware billing notification delivery failed")
         return str(result["message_id"])
