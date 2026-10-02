@@ -68,6 +68,12 @@ def test_end_to_end_candidate_bootstrap_reaches_activation_boundary(tmp_path):
     assert (target / "opt/jason/current/release.txt").read_bytes() == b"synthetic released Jason"
     assert (target / "etc/jason/msp-configuration.json").is_file()
     assert (target / "etc/jason/msp-policy.json").is_file()
+    secret_requirements = target / "var/lib/jason/secret-requirements.json"
+    assert secret_requirements.is_file()
+    secret_payload = json.loads(secret_requirements.read_text())
+    assert secret_payload["contains_secret_values"] is False
+    assert result["secret_requirements"]["required_count"] == 2
+    assert result["secret_requirements"]["readiness"] == "pending_attestation"
     assert (target / "var/lib/jason/bootstrap-runtime.json").is_file()
     assert (target / "var/lib/jason/candidate-bootstrap-result.json").is_file()
     manifest_path = target / "var/lib/jason/deployment-manifest.json"
