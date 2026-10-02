@@ -6,13 +6,13 @@ authority, persistence, and lifecycle remain owned by the orchestrator.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Protocol
-from urllib.request import Request, urlopen
 
 from connectors.microsoft_graph.teams_approval_channel import render_approval_card
 from orchestrator.approval_requests import ApprovalRequest
+
+from .teams_gateway_transport import TeamsGatewayTransport
 
 
 class ActiveMicrosoftIdentityBindingReader(Protocol):
@@ -46,9 +46,10 @@ class TeamsGatewayApprovalSender:
     def send(self, request: ApprovalRequest) -> tuple[str, ...]:
         card = render_approval_card(request)
         adaptive = self._adaptive_card(card)
-        token = self.token_file.read_text(encoding="utf-8").strip()
-        if not token:
-            raise PermissionError("Teams proactive token unavailable")
+        transport = TeamsGatewayTransport(
+            gateway_url=self.gateway_url,
+            token_file=self.token_file,
+        )
 
         message_ids: list[str] = []
         for recipient_id in self.recipient_identity_ids:
@@ -65,22 +66,7 @@ class TeamsGatewayApprovalSender:
                 "text": card.summary,
                 "card": adaptive,
             }
-            body = json.dumps(
-                payload,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-            http_request = Request(
-                self.gateway_url + "/internal/proactive/send",
-                data=body,
-                method="POST",
-                headers={
-                    "Authorization": "Bearer " + token,
-                    "Content-Type": "application/json",
-                },
-            )
-            with urlopen(http_request, timeout=20) as response:
-                result = json.loads(response.read().decode("utf-8"))
+            result = transport.send(transport.prepare(payload))
             if result.get("status") != "succeeded" or not result.get("message_id"):
                 raise RuntimeError("Teams approval delivery failed")
             message_ids.append(str(result["message_id"]).strip())
