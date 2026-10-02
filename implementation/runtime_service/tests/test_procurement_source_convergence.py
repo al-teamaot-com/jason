@@ -163,3 +163,51 @@ def test_missing_vendor_becomes_explicit_creation_proposal(tmp_path):
     assert payload["vendor"]["needs_create"] is True
     assert "creation proposed" in payload["vendor"]["verification_summary"]
     assert "create the Vendor record first" in result["reply"]["text"]
+
+
+
+class RequesterResourceFlow(ProcurementTeamsFlow):
+    def _read(self, *, capability, arguments, **kwargs):
+        assert capability == "service.resource.search"
+        assert arguments["email"] == "al@teamaot.com"
+        return {
+            "data": {
+                "items": [
+                    {
+                        "id": 29682885,
+                        "email": "al@teamaot.com",
+                        "firstName": "Al",
+                        "lastName": "Davis",
+                        "isActive": True,
+                    },
+                    {
+                        "id": 29682902,
+                        "email": "al@teamaot.com",
+                        "firstName": "DarkWeb",
+                        "lastName": "API",
+                        "isActive": False,
+                    },
+                ]
+            }
+        }
+
+
+def test_requester_resource_ignores_inactive_email_duplicates(tmp_path):
+    flow = RequesterResourceFlow(
+        identity_binder=Binder(),
+        request_factory=Factory(),
+        orchestrator=None,
+        store=SQLiteProcurementSubmissionStore(tmp_path / "resource.sqlite3"),
+        worker=None,
+        approval_service=None,
+        approval_sender=None,
+        owner_ids=(),
+    )
+    resource = flow._requester_resource(
+        email="al@teamaot.com",
+        principal=SimpleNamespace(principal_id="person-requester"),
+        evidence=SimpleNamespace(),
+        correlation_id="corr-resource",
+    )
+    assert resource["id"] == 29682885
+    assert resource["isActive"] is True
