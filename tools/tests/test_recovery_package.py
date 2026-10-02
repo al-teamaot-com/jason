@@ -9,7 +9,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from jsonschema import Draft202012Validator
 
-from tools.recovery_package import (
+from tools.full_recovery_package import (
     RecoveryPackageError,
     create_recovery_package,
     decrypt_recovery_package,

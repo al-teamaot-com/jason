@@ -1,293 +1,352 @@
 from __future__ import annotations
 
-import base64
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import hashlib
-import io
+from hashlib import sha256
 import json
 import os
+from pathlib import Path
+import platform
+import shutil
+import subprocess
 import tarfile
-from typing import Any, Mapping
-
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric.ed25519 import (
-    Ed25519PrivateKey,
-    Ed25519PublicKey,
-)
-from cryptography.hazmat.primitives.asymmetric.x25519 import (
-    X25519PrivateKey,
-    X25519PublicKey,
-)
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+from typing import Callable, Sequence
 
 
-FORMAT = "jason-recovery-package"
-FORMAT_VERSION = "1.0"
+CommandRunner = Callable[
+    [Sequence[str], Path],
+    subprocess.CompletedProcess[str],
+]
 
 
-class RecoveryPackageError(ValueError):
+class RecoveryPackageError(RuntimeError):
     pass
 
 
-def canonical_json_bytes(value: Any) -> bytes:
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
-
-
-def _b64(value: bytes) -> str:
-    return base64.b64encode(value).decode("ascii")
-
-
-def _unb64(value: str) -> bytes:
-    try:
-        return base64.b64decode(value.encode("ascii"), validate=True)
-    except Exception as exc:
-        raise RecoveryPackageError("invalid base64 in recovery package") from exc
-
-
-def _derive_wrap_key(
-    *,
-    private_key: X25519PrivateKey,
-    public_key: X25519PublicKey,
-    context: bytes,
-) -> bytes:
-    shared = private_key.exchange(public_key)
-    return HKDF(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=None,
-        info=b"jason-recovery-key-wrap-v1|" + context,
-    ).derive(shared)
-
-
-def _build_payload(members: Mapping[str, bytes]) -> bytes:
-    buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
-        for name in sorted(members):
-            clean = name.strip().lstrip("/")
-            if not clean or ".." in clean.split("/"):
-                raise RecoveryPackageError(f"unsafe recovery member path: {name!r}")
-            data = bytes(members[name])
-            info = tarfile.TarInfo(name=clean)
-            info.size = len(data)
-            info.mode = 0o600
-            info.mtime = 0
-            archive.addfile(info, io.BytesIO(data))
-    return buffer.getvalue()
-
-
-def _extract_payload(payload: bytes) -> dict[str, bytes]:
-    result: dict[str, bytes] = {}
-    with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
-        for member in archive.getmembers():
-            if not member.isfile():
-                raise RecoveryPackageError("recovery package payload contains non-file member")
-            if member.name.startswith("/") or ".." in member.name.split("/"):
-                raise RecoveryPackageError("unsafe recovery member path")
-            extracted = archive.extractfile(member)
-            if extracted is None:
-                raise RecoveryPackageError("unable to read recovery member")
-            result[member.name] = extracted.read()
-    return result
-
-
-def _signature_material(package: Mapping[str, Any]) -> bytes:
-    unsigned = {
-        key: value
-        for key, value in package.items()
-        if key != "signature"
-    }
-    return canonical_json_bytes(unsigned)
+@dataclass(frozen=True, slots=True)
+class RecoveryArtifact:
+    name: str
+    path: Path
+    sha256: str
+    size_bytes: int
 
 
 @dataclass(frozen=True, slots=True)
-class RecoveryPackageSummary:
-    format: str
-    format_version: str
-    created_at: str
-    source_deployment_identity_sha256: str
-    recipient_key_id: str
-    signer_key_id: str
-    payload_ciphertext_sha256: str
+class RecoveryPackageResult:
+    version: str
+    commit: str
+    destination: Path
+    artifacts: tuple[RecoveryArtifact, ...]
 
 
-def create_recovery_package(
-    *,
-    members: Mapping[str, bytes],
-    source_deployment_identity_sha256: str,
-    recipient_public_key: X25519PublicKey,
-    recipient_key_id: str,
-    signer_private_key: Ed25519PrivateKey,
-    signer_key_id: str,
-    created_at: datetime | None = None,
-) -> dict[str, Any]:
-    source_id = source_deployment_identity_sha256.strip().lower()
-    if len(source_id) != 64 or any(c not in "0123456789abcdef" for c in source_id):
-        raise RecoveryPackageError("source deployment identity must be SHA-256 hex")
-    if not recipient_key_id.strip() or not signer_key_id.strip():
-        raise RecoveryPackageError("key identifiers must be non-empty")
-    if not members:
-        raise RecoveryPackageError("recovery package must contain at least one member")
-
-    timestamp = created_at or datetime.now(timezone.utc)
-    if timestamp.tzinfo is None:
-        raise RecoveryPackageError("created_at must be timezone-aware")
-    created = timestamp.astimezone(timezone.utc).isoformat()
-
-    payload_plaintext = _build_payload(members)
-    data_key = AESGCM.generate_key(bit_length=256)
-    payload_nonce = os.urandom(12)
-    payload_aad = canonical_json_bytes(
-        {
-            "format": FORMAT,
-            "format_version": FORMAT_VERSION,
-            "created_at": created,
-            "source_deployment_identity_sha256": source_id,
-            "recipient_key_id": recipient_key_id.strip(),
-            "signer_key_id": signer_key_id.strip(),
-        }
-    )
-    payload_ciphertext = AESGCM(data_key).encrypt(
-        payload_nonce,
-        payload_plaintext,
-        payload_aad,
+def default_runner(
+    command: Sequence[str],
+    working_directory: Path,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        cwd=working_directory,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
     )
 
-    ephemeral_private = X25519PrivateKey.generate()
-    ephemeral_public = ephemeral_private.public_key()
-    ephemeral_public_bytes = ephemeral_public.public_bytes(
-        Encoding.Raw,
-        PublicFormat.Raw,
-    )
-    wrap_context = source_id.encode("ascii")
-    wrap_key = _derive_wrap_key(
-        private_key=ephemeral_private,
-        public_key=recipient_public_key,
-        context=wrap_context,
-    )
-    wrapped_key_nonce = os.urandom(12)
-    wrapped_key = AESGCM(wrap_key).encrypt(
-        wrapped_key_nonce,
-        data_key,
-        payload_aad,
-    )
 
-    package: dict[str, Any] = {
-        "format": FORMAT,
-        "format_version": FORMAT_VERSION,
-        "created_at": created,
-        "source_deployment_identity_sha256": source_id,
-        "recipient_key_id": recipient_key_id.strip(),
-        "signer_key_id": signer_key_id.strip(),
-        "ephemeral_public_key": _b64(ephemeral_public_bytes),
-        "wrapped_key_nonce": _b64(wrapped_key_nonce),
-        "wrapped_key": _b64(wrapped_key),
-        "payload_nonce": _b64(payload_nonce),
-        "payload_ciphertext": _b64(payload_ciphertext),
-        "payload_ciphertext_sha256": hashlib.sha256(payload_ciphertext).hexdigest(),
+def normalize_version(version: str) -> str:
+    normalized = version.strip()
+    if not normalized:
+        raise ValueError("version must be non-empty")
+    if not normalized.startswith("v"):
+        normalized = f"v{normalized}"
+    if any(character in normalized for character in "/\\\0"):
+        raise ValueError("version contains an unsafe path character")
+    return normalized
+
+
+def file_sha256(path: Path) -> str:
+    digest = sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _exclude_from_source(relative_path: Path) -> bool:
+    excluded_names = {
+        ".git",
+        ".build",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        "site",
+        "__pycache__",
     }
-    package["signature"] = _b64(
-        signer_private_key.sign(_signature_material(package))
-    )
-    return package
+    if any(part in excluded_names for part in relative_path.parts):
+        return True
+    if any(part.startswith(".venv") for part in relative_path.parts):
+        return True
+    return relative_path.suffix in {".pyc", ".pyo"}
 
 
-def inspect_recovery_package(package: Mapping[str, Any]) -> RecoveryPackageSummary:
-    required = (
-        "format",
-        "format_version",
-        "created_at",
-        "source_deployment_identity_sha256",
-        "recipient_key_id",
-        "signer_key_id",
-        "payload_ciphertext_sha256",
-    )
-    for key in required:
-        if not str(package.get(key) or "").strip():
-            raise RecoveryPackageError(f"recovery package field is missing: {key}")
-    return RecoveryPackageSummary(
-        format=str(package["format"]),
-        format_version=str(package["format_version"]),
-        created_at=str(package["created_at"]),
-        source_deployment_identity_sha256=str(
-            package["source_deployment_identity_sha256"]
-        ),
-        recipient_key_id=str(package["recipient_key_id"]),
-        signer_key_id=str(package["signer_key_id"]),
-        payload_ciphertext_sha256=str(package["payload_ciphertext_sha256"]),
-    )
+class RecoveryPackageBuilder:
+    def __init__(
+        self,
+        repository_root: Path,
+        destination_root: Path,
+        *,
+        runner: CommandRunner = default_runner,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        self._repository_root = repository_root.resolve()
+        self._destination_root = destination_root.expanduser().resolve()
+        self._runner = runner
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
 
+    def build(
+        self,
+        version: str,
+        *,
+        release_name: str,
+        ref: str = "HEAD",
+    ) -> RecoveryPackageResult:
+        normalized_version = normalize_version(version)
+        if not release_name.strip():
+            raise ValueError("release_name must be non-empty")
 
-def verify_recovery_package_signature(
-    package: Mapping[str, Any],
-    *,
-    signer_public_key: Ed25519PublicKey,
-) -> None:
-    signature = _unb64(str(package.get("signature") or ""))
-    try:
-        signer_public_key.verify(signature, _signature_material(package))
-    except Exception as exc:
-        raise RecoveryPackageError("recovery package signature verification failed") from exc
+        final_destination = self._destination_root / normalized_version
+        staging_destination = self._destination_root / (
+            f".{normalized_version}.staging-{os.getpid()}"
+        )
 
-    ciphertext = _unb64(str(package.get("payload_ciphertext") or ""))
-    observed = hashlib.sha256(ciphertext).hexdigest()
-    if observed != str(package.get("payload_ciphertext_sha256") or ""):
-        raise RecoveryPackageError("recovery package ciphertext digest mismatch")
+        if final_destination.exists():
+            raise RecoveryPackageError(
+                f"Recovery package already exists: {final_destination}"
+            )
 
+        self._destination_root.mkdir(parents=True, exist_ok=True)
+        if staging_destination.exists():
+            shutil.rmtree(staging_destination)
+        staging_destination.mkdir(parents=False)
 
-def decrypt_recovery_package(
-    package: Mapping[str, Any],
-    *,
-    recipient_private_key: X25519PrivateKey,
-    signer_public_key: Ed25519PublicKey,
-) -> dict[str, bytes]:
-    verify_recovery_package_signature(
-        package,
-        signer_public_key=signer_public_key,
-    )
-    summary = inspect_recovery_package(package)
-    if summary.format != FORMAT or summary.format_version != FORMAT_VERSION:
-        raise RecoveryPackageError("unsupported recovery package format/version")
+        try:
+            commit = self._git_output(
+                ("git", "rev-parse", f"{ref}^{{commit}}")
+            ).strip()
+            self._assert_ref_is_reachable(ref)
 
-    ephemeral_public = X25519PublicKey.from_public_bytes(
-        _unb64(str(package["ephemeral_public_key"]))
-    )
-    payload_aad = canonical_json_bytes(
-        {
-            "format": summary.format,
-            "format_version": summary.format_version,
-            "created_at": summary.created_at,
-            "source_deployment_identity_sha256": summary.source_deployment_identity_sha256,
-            "recipient_key_id": summary.recipient_key_id,
-            "signer_key_id": summary.signer_key_id,
+            bundle_path = staging_destination / (
+                f"Jason-{normalized_version}.bundle"
+            )
+            source_path = staging_destination / (
+                f"Jason-{normalized_version}-source.tar.gz"
+            )
+            environment_path = staging_destination / (
+                f"environment-{normalized_version}.txt"
+            )
+            manifest_path = staging_destination / "release-manifest.json"
+            checksums_path = staging_destination / "SHA256SUMS.txt"
+
+            self._run_required(
+                (
+                    "git",
+                    "bundle",
+                    "create",
+                    str(bundle_path),
+                    "--all",
+                )
+            )
+            self._run_required(
+                (
+                    "git",
+                    "bundle",
+                    "verify",
+                    str(bundle_path),
+                )
+            )
+
+            self._create_source_archive(source_path)
+            self._write_environment(environment_path, commit)
+
+            initial_artifacts = (
+                self._artifact(bundle_path),
+                self._artifact(source_path),
+                self._artifact(environment_path),
+            )
+            self._write_manifest(
+                manifest_path,
+                version=normalized_version,
+                release_name=release_name.strip(),
+                commit=commit,
+                ref=ref,
+                artifacts=initial_artifacts,
+            )
+
+            checksum_artifacts = initial_artifacts + (
+                self._artifact(manifest_path),
+            )
+            self._write_checksums(checksums_path, checksum_artifacts)
+            self._verify_checksums(
+                staging_destination,
+                checksums_path,
+            )
+
+            artifacts = checksum_artifacts + (
+                self._artifact(checksums_path),
+            )
+            staging_destination.rename(final_destination)
+            return RecoveryPackageResult(
+                version=normalized_version,
+                commit=commit,
+                destination=final_destination,
+                artifacts=tuple(
+                    RecoveryArtifact(
+                        name=artifact.name,
+                        path=final_destination / artifact.name,
+                        sha256=artifact.sha256,
+                        size_bytes=artifact.size_bytes,
+                    )
+                    for artifact in artifacts
+                ),
+            )
+        except Exception:
+            shutil.rmtree(staging_destination, ignore_errors=True)
+            raise
+
+    def _assert_ref_is_reachable(self, ref: str) -> None:
+        self._run_required(
+            ("git", "merge-base", "--is-ancestor", ref, "HEAD")
+        )
+
+    def _git_output(self, command: Sequence[str]) -> str:
+        return self._run_required(command).stdout or ""
+
+    def _run_required(
+        self,
+        command: Sequence[str],
+    ) -> subprocess.CompletedProcess[str]:
+        completed = self._runner(command, self._repository_root)
+        if completed.returncode != 0:
+            raise RecoveryPackageError(
+                "Command failed: "
+                + " ".join(command)
+                + "\n"
+                + (completed.stdout or "")
+            )
+        return completed
+
+    def _create_source_archive(self, destination: Path) -> None:
+        repository_name = self._repository_root.name
+        with tarfile.open(destination, "w:gz") as archive:
+            for path in sorted(self._repository_root.rglob("*")):
+                relative_path = path.relative_to(self._repository_root)
+                if _exclude_from_source(relative_path):
+                    continue
+                archive.add(
+                    path,
+                    arcname=Path(repository_name) / relative_path,
+                    recursive=False,
+                )
+
+    def _write_environment(self, destination: Path, commit: str) -> None:
+        lines = [
+            "Jason Recovery Package",
+            f"Created: {self._clock().astimezone(timezone.utc).isoformat()}",
+            f"Commit: {commit}",
+            f"Platform: {platform.platform()}",
+            f"Python: {platform.python_version()}",
+            self._git_output(("git", "--version")).strip(),
+            "",
+            "Test environment:",
+            self._python_freeze(".venv-test"),
+            "",
+            "Documentation environment:",
+            self._python_freeze(".venv-docs"),
+        ]
+        destination.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def _python_freeze(self, environment_name: str) -> str:
+        python_path = (
+            self._repository_root / environment_name / "bin" / "python"
+        )
+        if not python_path.is_file():
+            return f"{environment_name}: not present"
+        if not os.access(python_path, os.X_OK):
+            return f"{environment_name}: python is not executable"
+        completed = self._runner(
+            (str(python_path), "-m", "pip", "freeze"),
+            self._repository_root,
+        )
+        if completed.returncode != 0:
+            raise RecoveryPackageError(
+                f"Unable to capture {environment_name} environment\n"
+                + (completed.stdout or "")
+            )
+        return completed.stdout or ""
+
+    def _write_manifest(
+        self,
+        destination: Path,
+        *,
+        version: str,
+        release_name: str,
+        commit: str,
+        ref: str,
+        artifacts: tuple[RecoveryArtifact, ...],
+    ) -> None:
+        manifest = {
+            "schema_version": "0.1",
+            "version": version,
+            "release_name": release_name,
+            "commit": commit,
+            "source_ref": ref,
+            "created_at": self._clock().astimezone(timezone.utc).isoformat(),
+            "status": "recovery_package_created",
+            "artifacts": [
+                {
+                    "name": artifact.name,
+                    "sha256": artifact.sha256,
+                    "size_bytes": artifact.size_bytes,
+                }
+                for artifact in artifacts
+            ],
         }
-    )
-    wrap_key = _derive_wrap_key(
-        private_key=recipient_private_key,
-        public_key=ephemeral_public,
-        context=summary.source_deployment_identity_sha256.encode("ascii"),
-    )
-    try:
-        data_key = AESGCM(wrap_key).decrypt(
-            _unb64(str(package["wrapped_key_nonce"])),
-            _unb64(str(package["wrapped_key"])),
-            payload_aad,
+        destination.write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
         )
-        plaintext = AESGCM(data_key).decrypt(
-            _unb64(str(package["payload_nonce"])),
-            _unb64(str(package["payload_ciphertext"])),
-            payload_aad,
+
+    @staticmethod
+    def _artifact(path: Path) -> RecoveryArtifact:
+        return RecoveryArtifact(
+            name=path.name,
+            path=path,
+            sha256=file_sha256(path),
+            size_bytes=path.stat().st_size,
         )
-    except Exception as exc:
-        raise RecoveryPackageError(
-            "recovery package decryption failed; wrong key or tampered package"
-        ) from exc
-    return _extract_payload(plaintext)
+
+    @staticmethod
+    def _write_checksums(
+        destination: Path,
+        artifacts: tuple[RecoveryArtifact, ...],
+    ) -> None:
+        destination.write_text(
+            "".join(
+                f"{artifact.sha256}  {artifact.name}\n"
+                for artifact in artifacts
+            ),
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _verify_checksums(
+        package_directory: Path,
+        checksums_path: Path,
+    ) -> None:
+        for line in checksums_path.read_text(encoding="utf-8").splitlines():
+            expected, name = line.split("  ", maxsplit=1)
+            actual = file_sha256(package_directory / name)
+            if actual != expected:
+                raise RecoveryPackageError(
+                    f"Checksum verification failed: {name}"
+                )
