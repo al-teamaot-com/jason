@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jason.local/schemas/bootstrap-resources.schema.json",
+  "title": "Jason Bootstrap Resources",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "networks", "state_stores", "systemd_units"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "networks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "required"],
+        "properties": {
+          "name": { "type": "string", "minLength": 1 },
+          "required": { "type": "boolean" }
+        }
+      }
+    },
+    "state_stores": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "relative_path", "owner", "initialization"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "relative_path": { "type": "string", "minLength": 1 },
+          "owner": { "type": "string", "minLength": 1 },
+          "initialization": {
+            "enum": ["bootstrap_explicit", "runtime_owned", "external_database"]
+          }
+        }
+      }
+    },
+    "systemd_units": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source", "portable", "reason"],
+        "properties": {
+          "source": { "type": "string", "minLength": 1 },
+          "portable": { "type": "boolean" },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}

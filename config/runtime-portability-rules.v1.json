@@ -1,0 +1,75 @@
+{
+  "schema_version": "1.0",
+  "scan_globs": [
+    "infrastructure/jason-runtime/compose.yaml",
+    "infrastructure/kfs-collector/compose.yaml",
+    "infrastructure/kfs-collector/systemd/*.service",
+    "infrastructure/ccc/systemd/*.service",
+    "infrastructure/openclaw-operations/systemd/*.service",
+    "infrastructure/openclaw-operations/systemd/user/*.service",
+    "infrastructure/kfs-collector/*.sh",
+    "tools/support_repair_host_worker.py",
+    "tools/owner_approved_development_worker.py",
+    "tools/pr_integration_source_reconciler.py",
+    "tools/autonomous_repair_host_runner.py",
+    "tools/documentation_source_reconciler.py",
+    "tools/reconcile_production_host_services.sh",
+    "implementation/mcp_service/src/jason_mcp/server.py"
+  ],
+  "rules": [
+    {
+      "id": "operator-home-path",
+      "severity": "blocker",
+      "pattern": "/home/[A-Za-z0-9._-]+/",
+      "description": "Runtime artifact depends on an operator home directory."
+    },
+    {
+      "id": "aot-email-domain",
+      "severity": "blocker",
+      "pattern": "@teamaot\\.com",
+      "description": "Runtime artifact contains an AOT-specific email domain."
+    },
+    {
+      "id": "aot-component-label",
+      "severity": "blocker",
+      "pattern": "AOT Ver [0-9]",
+      "description": "Runtime artifact contains an AOT-specific component label."
+    },
+    {
+      "id": "aot-profile-name",
+      "severity": "blocker",
+      "pattern": "\\baot-[A-Za-z0-9._-]+",
+      "description": "Runtime artifact contains an AOT-specific runtime/profile identifier."
+    },
+    {
+      "id": "operator-service-user",
+      "severity": "blocker",
+      "pattern": "(?:User|Group)=al\\\\b",
+      "description": "Service unit is bound to the original operator account."
+    },
+    {
+      "id": "aot-github-repository",
+      "severity": "blocker",
+      "pattern": "al-teamaot-com/jason",
+      "description": "Deployable engineering asset assumes the AOT GitHub repository."
+    },
+    {
+      "id": "aot-domain-literal",
+      "severity": "blocker",
+      "pattern": "(?:teamaot|teamaom)\\\\.com",
+      "description": "Generic deployable source embeds an AOT domain literal."
+    },
+    {
+      "id": "aot-entra-tenant-id",
+      "severity": "blocker",
+      "pattern": "f7054323-d52b-4863-8c2f-1898f0b6077c",
+      "description": "Generic deployable source embeds the AOT Entra tenant ID."
+    },
+    {
+      "id": "aot-entra-client-id",
+      "severity": "blocker",
+      "pattern": "9b9996e9-5c34-48b7-948c-f44f89352f89",
+      "description": "Generic deployable source embeds the AOT MCP Entra client ID."
+    }
+  ]
+}

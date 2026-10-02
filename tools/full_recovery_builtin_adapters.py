@@ -1,0 +1,376 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import stat
+from pathlib import Path
+from typing import Any, Mapping, Sequence
+
+from tools.full_recovery_export import (
+    CollectedMetadata,
+    CollectedPayload,
+    OptionalRecoverySourceUnavailable,
+)
+
+
+class BuiltinRecoveryAdapterError(ValueError):
+    pass
+
+
+def _private_regular_file(path: Path, *, label: str) -> bytes:
+    if path.is_symlink() or not path.is_file():
+        raise BuiltinRecoveryAdapterError(f"{label} is unavailable: {path}")
+    mode = stat.S_IMODE(path.stat().st_mode)
+    if mode & 0o077:
+        raise BuiltinRecoveryAdapterError(
+            f"{label} permissions are too broad: {oct(mode)}"
+        )
+    return path.read_bytes()
+
+
+
+
+def _protected_regular_file(path: Path, *, label: str) -> bytes:
+    if path.is_symlink() or not path.is_file():
+        raise BuiltinRecoveryAdapterError(f"{label} is unavailable: {path}")
+    mode = stat.S_IMODE(path.stat().st_mode)
+    # Group-read is acceptable for runtime service credentials; group write,
+    # group execute, and all world permissions are prohibited.
+    if mode & 0o037:
+        raise BuiltinRecoveryAdapterError(
+            f"{label} permissions are too broad: {oct(mode)}"
+        )
+    return path.read_bytes()
+
+
+def _openbao_bootstrap_payloads(root: Path) -> tuple[CollectedPayload, ...]:
+    base = root / "opt/jason/bootstrap/secrets/openbao"
+    if not base.exists():
+        return ()
+    if base.is_symlink() or not base.is_dir():
+        raise BuiltinRecoveryAdapterError(
+            "OpenBao bootstrap secret directory is unsafe"
+        )
+    payloads: list[CollectedPayload] = []
+    for child in sorted(base.rglob("*")):
+        if child.is_symlink():
+            raise BuiltinRecoveryAdapterError(
+                f"OpenBao bootstrap secret directory contains symlink: {child}"
+            )
+        if not child.is_file() or child == base / "init.json":
+            continue
+        relative = child.relative_to(base)
+        data = _protected_regular_file(
+            child,
+            label="OpenBao bootstrap credential",
+        )
+        payloads.append(
+            CollectedPayload(
+                state_class="provider-secrets",
+                member_name=(
+                    "secrets/openbao/bootstrap/" + relative.as_posix()
+                ),
+                restore_relative_path=(
+                    Path("opt/jason/bootstrap/secrets/openbao")
+                    / relative
+                ).as_posix(),
+                data=data,
+                metadata={
+                    "adapter": "governed_secret_export",
+                    "source": "openbao-bootstrap-credential",
+                    "protected_values_exposed": False,
+                },
+            )
+        )
+    return tuple(payloads)
+
+
+def _latest_openbao_snapshot(root: Path) -> tuple[Path, Path, str]:
+    backup_dir = root / "opt/jason/backups/openbao"
+    snapshots = sorted(
+        (
+            path
+            for path in backup_dir.glob("*.snap")
+            if path.is_file() and not path.is_symlink()
+        ),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    if not snapshots:
+        raise BuiltinRecoveryAdapterError(
+            "no governed OpenBao Raft snapshot is available"
+        )
+    snapshot = snapshots[0]
+    sidecar = Path(str(snapshot) + ".sha256")
+    if sidecar.is_symlink() or not sidecar.is_file():
+        raise BuiltinRecoveryAdapterError(
+            "OpenBao snapshot checksum sidecar is missing"
+        )
+    snapshot_bytes = _private_regular_file(
+        snapshot,
+        label="OpenBao Raft snapshot",
+    )
+    sidecar_bytes = _private_regular_file(
+        sidecar,
+        label="OpenBao snapshot checksum",
+    )
+    expected = sidecar_bytes.decode("ascii").split()[0].strip().lower()
+    observed = hashlib.sha256(snapshot_bytes).hexdigest()
+    if expected != observed:
+        raise BuiltinRecoveryAdapterError(
+            "OpenBao Raft snapshot checksum verification failed"
+        )
+    return snapshot, sidecar, observed
+
+
+def governed_secret_export_adapter(
+    source_id: str,
+    source: Mapping[str, Any],
+    root: Path,
+) -> tuple[Sequence[CollectedPayload], Sequence[CollectedMetadata]]:
+    snapshot, sidecar, digest = _latest_openbao_snapshot(root)
+    snapshot_bytes = snapshot.read_bytes()
+    sidecar_bytes = sidecar.read_bytes()
+    payloads = (
+        CollectedPayload(
+            state_class="provider-secrets",
+            member_name="secrets/openbao/raft/latest.snap",
+            restore_relative_path="var/lib/jason/recovery/openbao/latest.snap",
+            data=snapshot_bytes,
+            metadata={
+                "adapter": "governed_secret_export",
+                "source": "openbao-raft-snapshot",
+                "sha256": digest,
+                "size_bytes": len(snapshot_bytes),
+            },
+        ),
+        CollectedPayload(
+            state_class="provider-secrets",
+            member_name="secrets/openbao/raft/latest.snap.sha256",
+            restore_relative_path="var/lib/jason/recovery/openbao/latest.snap.sha256",
+            data=sidecar_bytes,
+            metadata={
+                "adapter": "governed_secret_export",
+                "source": "openbao-raft-checksum",
+            },
+        ),
+    ) + _openbao_bootstrap_payloads(root)
+    return payloads, ()
+
+
+def _validate_openbao_init(data: bytes) -> Mapping[str, Any]:
+    try:
+        payload = json.loads(data)
+    except json.JSONDecodeError as exc:
+        raise BuiltinRecoveryAdapterError(
+            "OpenBao initialization artifact is invalid JSON"
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise BuiltinRecoveryAdapterError(
+            "OpenBao initialization artifact must be an object"
+        )
+    shares = payload.get("unseal_keys_b64")
+    threshold = payload.get("unseal_threshold")
+    declared = payload.get("unseal_shares")
+    if (
+        not isinstance(shares, list)
+        or not shares
+        or not all(isinstance(item, str) and item for item in shares)
+        or not isinstance(threshold, int)
+        or threshold < 1
+        or declared != len(shares)
+        or threshold > len(shares)
+    ):
+        raise BuiltinRecoveryAdapterError(
+            "OpenBao initialization artifact has invalid recovery structure"
+        )
+    return payload
+
+
+def governed_key_export_adapter(
+    source_id: str,
+    source: Mapping[str, Any],
+    root: Path,
+) -> tuple[Sequence[CollectedPayload], Sequence[CollectedMetadata]]:
+    init_path = root / "opt/jason/bootstrap/secrets/openbao/init.json"
+    init_bytes = _private_regular_file(
+        init_path,
+        label="OpenBao initialization artifact",
+    )
+    init = _validate_openbao_init(init_bytes)
+
+    payloads: list[CollectedPayload] = [
+        CollectedPayload(
+            state_class="signing-and-recovery-keys",
+            member_name="secrets/openbao/init.json",
+            restore_relative_path="opt/jason/bootstrap/secrets/openbao/init.json",
+            data=init_bytes,
+            metadata={
+                "adapter": "governed_key_export",
+                "source": "openbao-init",
+                "share_count": int(init["unseal_shares"]),
+                "threshold": int(init["unseal_threshold"]),
+                "protected_values_exposed": False,
+            },
+        )
+    ]
+
+    trusted = root / "var/lib/jason/openclaw/trusted-keys"
+    if trusted.exists():
+        if trusted.is_symlink() or not trusted.is_dir():
+            raise BuiltinRecoveryAdapterError(
+                "trusted-key registry path is not a safe directory"
+            )
+        for child in sorted(trusted.rglob("*")):
+            if child.is_symlink():
+                raise BuiltinRecoveryAdapterError(
+                    f"trusted-key directory contains symlink: {child}"
+                )
+            if not child.is_file():
+                continue
+            relative = child.relative_to(trusted)
+            data = _private_regular_file(
+                child,
+                label="trusted-key material",
+            )
+            payloads.append(
+                CollectedPayload(
+                    state_class="signing-and-recovery-keys",
+                    member_name="secrets/trusted-keys/" + relative.as_posix(),
+                    restore_relative_path=(
+                        Path("var/lib/jason/openclaw/trusted-keys") / relative
+                    ).as_posix(),
+                    data=data,
+                    metadata={
+                        "adapter": "governed_key_export",
+                        "source": "trusted-key-material",
+                    },
+                )
+            )
+
+    return tuple(payloads), ()
+
+
+
+
+def kfs_postgresql_backup_adapter(
+    source_id: str,
+    source: Mapping[str, Any],
+    root: Path,
+) -> tuple[Sequence[CollectedPayload], Sequence[CollectedMetadata]]:
+    dump_path = root / "var/lib/jason/recovery/kfs/kfs-postgresql.dump"
+    receipt_path = dump_path.with_suffix(dump_path.suffix + ".receipt.json")
+    if not dump_path.exists() and not receipt_path.exists():
+        raise OptionalRecoverySourceUnavailable(
+            "KFS PostgreSQL backup artifact is not available"
+        )
+
+    dump_bytes = _private_regular_file(
+        dump_path,
+        label="KFS PostgreSQL backup artifact",
+    )
+    receipt_bytes = _private_regular_file(
+        receipt_path,
+        label="KFS PostgreSQL backup receipt",
+    )
+    try:
+        receipt = json.loads(receipt_bytes)
+    except json.JSONDecodeError as exc:
+        raise BuiltinRecoveryAdapterError(
+            "KFS PostgreSQL backup receipt is invalid JSON"
+        ) from exc
+
+    if receipt.get("schema_version") != "1.0":
+        raise BuiltinRecoveryAdapterError(
+            "KFS PostgreSQL backup receipt schema is unsupported"
+        )
+    if receipt.get("verified") is not True:
+        raise BuiltinRecoveryAdapterError(
+            "KFS PostgreSQL backup receipt is not verified"
+        )
+    if receipt.get("format") != "postgresql-custom":
+        raise BuiltinRecoveryAdapterError(
+            "KFS PostgreSQL backup receipt format is not postgresql-custom"
+        )
+    observed = hashlib.sha256(dump_bytes).hexdigest()
+    if receipt.get("sha256") != observed:
+        raise BuiltinRecoveryAdapterError(
+            "KFS PostgreSQL backup digest does not match its receipt"
+        )
+    if int(receipt.get("size_bytes") or -1) != len(dump_bytes):
+        raise BuiltinRecoveryAdapterError(
+            "KFS PostgreSQL backup size does not match its receipt"
+        )
+
+    return (
+        (
+            CollectedPayload(
+                state_class="business-operational-state",
+                member_name="state/kfs-postgresql/kfs-postgresql.dump",
+                restore_relative_path=(
+                    "var/lib/jason/recovery/kfs/kfs-postgresql.dump"
+                ),
+                data=dump_bytes,
+                metadata={
+                    "adapter": "kfs_postgresql_backup",
+                    "format": "postgresql-custom",
+                    "sha256": observed,
+                    "database": str(receipt.get("database") or ""),
+                    "host": str(receipt.get("host") or ""),
+                    "port": int(receipt.get("port") or 0),
+                    "user": str(receipt.get("user") or ""),
+                    "verified": True,
+                },
+            ),
+            CollectedPayload(
+                state_class="business-operational-state",
+                member_name="state/kfs-postgresql/kfs-postgresql.dump.receipt.json",
+                restore_relative_path=(
+                    "var/lib/jason/recovery/kfs/kfs-postgresql.dump.receipt.json"
+                ),
+                data=receipt_bytes,
+                metadata={
+                    "adapter": "kfs_postgresql_backup",
+                    "source": "backup-receipt",
+                },
+            ),
+        ),
+        (),
+    )
+
+
+BUILTIN_ADAPTERS = {
+    "governed_secret_export": governed_secret_export_adapter,
+    "governed_key_export": governed_key_export_adapter,
+    "kfs_postgresql_backup": kfs_postgresql_backup_adapter,
+}
+
+
+def discover_builtin_adapter_names(target_root: str | Path) -> tuple[str, ...]:
+    root = Path(target_root)
+    available: list[str] = []
+    try:
+        _latest_openbao_snapshot(root)
+    except Exception:
+        pass
+    else:
+        available.append("governed_secret_export")
+
+    try:
+        data = _private_regular_file(
+            root / "opt/jason/bootstrap/secrets/openbao/init.json",
+            label="OpenBao initialization artifact",
+        )
+        _validate_openbao_init(data)
+    except Exception:
+        pass
+    else:
+        available.append("governed_key_export")
+
+    try:
+        kfs_postgresql_backup_adapter("kfs-postgresql", {}, root)
+    except Exception:
+        pass
+    else:
+        available.append("kfs_postgresql_backup")
+    return tuple(sorted(available))

@@ -15,7 +15,8 @@ def test_engineering_service_runs_support_before_owner_approved_development():
     support_index = service.index('support_repair_host_worker.py')
     development_index = service.index('owner_approved_development_worker.py')
     assert support_index < development_index
-    assert '/home/al/jason-worktrees/owner-approved-development' in service
+    assert '/var/lib/jason/worktrees' in service
+    assert '/home/al/' not in service
 
 
 def test_support_repair_timer_runs_daily_at_0230_and_remains_persistent():

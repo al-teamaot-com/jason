@@ -5,13 +5,19 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/home/al/projects/jason
-Environment=HOME=/home/al
+WorkingDirectory=/var/lib/jason/source
+EnvironmentFile=-/etc/jason/engineering.env
+Environment=HOME=/var/lib/jason/service-home
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/support_repair_host_worker.py --repo /home/al/projects/jason --spool /var/lib/jason/openclaw/support-repair --max-active 2
-ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/owner_approved_development_worker.py --repo /home/al/projects/jason --spool /var/lib/jason/openclaw/support-repair --max-active 2
+Environment=GH_CONFIG_DIR=/var/lib/jason/runtime-secrets/github/gh
+Environment=JASON_SOURCE_ROOT=/var/lib/jason/source
+Environment=JASON_WORKTREE_ROOT=/var/lib/jason/worktrees
+Environment=JASON_ENGINEERING_PYTHON=/opt/jason/venv/bin/python
+ExecStart=/usr/bin/python3 /opt/jason/current/tools/support_repair_host_worker.py --repo /var/lib/jason/source --spool /var/lib/jason/openclaw/support-repair --max-active 2
+ExecStart=/usr/bin/python3 /opt/jason/current/tools/owner_approved_development_worker.py --repo /var/lib/jason/source --spool /var/lib/jason/openclaw/support-repair --max-active 2
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=/home/al/jason-worktrees/support-repair /home/al/jason-worktrees/owner-approved-development /home/al/projects/jason /var/lib/jason/openclaw/support-repair
+ProtectHome=true
+ReadOnlyPaths=/opt/jason/current
+ReadWritePaths=/var/lib/jason/source /var/lib/jason/worktrees /var/lib/jason/openclaw/support-repair /var/lib/jason/runtime-secrets/github /var/lib/jason/service-home

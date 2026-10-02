@@ -1,8 +1,11 @@
 import importlib.util
+import os
 import sys
 import unittest
 from pathlib import Path
 
+
+os.environ["JASON_REPOSITORY"] = "example/jason"
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "pr_integration_source_reconciler.py"
 SPEC = importlib.util.spec_from_file_location(
@@ -37,7 +40,7 @@ def pr_fixture(**overrides):
         "head": {
             "ref": "feature/example",
             "sha": "head-sha",
-            "repo": {"full_name": "al-teamaot-com/jason"},
+            "repo": {"full_name": "example/jason"},
         },
     }
     item.update(overrides)

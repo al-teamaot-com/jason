@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jason.local/schemas/jason-recovery-package.schema.json",
+  "title": "Jason Recovery Package",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "format_version",
+    "created_at",
+    "source_deployment_identity_sha256",
+    "recipient_key_id",
+    "signer_key_id",
+    "ephemeral_public_key",
+    "wrapped_key_nonce",
+    "wrapped_key",
+    "payload_nonce",
+    "payload_ciphertext",
+    "payload_ciphertext_sha256",
+    "signature"
+  ],
+  "properties": {
+    "format": { "const": "jason-recovery-package" },
+    "format_version": { "const": "1.0" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "source_deployment_identity_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "recipient_key_id": { "type": "string", "minLength": 1 },
+    "signer_key_id": { "type": "string", "minLength": 1 },
+    "ephemeral_public_key": { "type": "string", "minLength": 1 },
+    "wrapped_key_nonce": { "type": "string", "minLength": 1 },
+    "wrapped_key": { "type": "string", "minLength": 1 },
+    "payload_nonce": { "type": "string", "minLength": 1 },
+    "payload_ciphertext": { "type": "string", "minLength": 1 },
+    "payload_ciphertext_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "signature": { "type": "string", "minLength": 1 }
+  }
+}

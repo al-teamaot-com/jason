@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-REPO = os.environ.get("JASON_REPOSITORY", "al-teamaot-com/jason")
+REPO = os.environ.get("JASON_REPOSITORY", "").strip()
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG_PATH = Path(
     os.environ.get(
@@ -330,6 +330,10 @@ def reconcile(policy: IntegrationPolicy) -> dict[int, str]:
 
 
 def main() -> int:
+    if "/" not in REPO:
+        raise IntegrationHostError(
+            "JASON_REPOSITORY must identify the configured Jason source repository"
+        )
     policy = load_policy()
     outcomes = reconcile(policy)
     print(json.dumps({"outcomes": outcomes}, sort_keys=True))

@@ -5,8 +5,8 @@ ConditionPathExists=/var/lib/jason/authority/authority.sqlite3
 
 [Service]
 Type=oneshot
-User=al
-Group=al
+User=jason
+Group=jason
 WorkingDirectory=/opt/jason/current
 ExecStart=/usr/bin/python3 /opt/jason/current/tools/openclaw_authority_health_snapshot.py --output /var/lib/jason/openclaw/operational-health.json
 NoNewPrivileges=true

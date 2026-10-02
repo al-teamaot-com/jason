@@ -7,16 +7,16 @@ ConditionPathExists=/var/lib/jason/authority/authority.sqlite3
 
 [Service]
 Type=oneshot
-User=al
-Group=al
+User=jason
+Group=jason
 WorkingDirectory=/opt/jason/ccc-current
-Environment=DOCKER_CONFIG=/var/lib/jason/ccc/docker
+Environment=DOCKER_CONFIG=/var/lib/jason/runtime-secrets/docker
 ExecStart=/usr/bin/python3 /opt/jason/ccc-current/tools/run_ccc.py --config /var/lib/jason/ccc/ccc.json
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ProtectHome=read-only
-ReadOnlyPaths=/opt/jason/ccc-current /home/al/projects/jason /var/lib/jason/authority /var/lib/jason/openclaw
-ReadWritePaths=/home/al/projects/jason/.git /var/lib/jason/ccc /home/al/Jason-Evidence/CCC /home/al/Jason-Recovery/CCC
+ProtectHome=true
+ReadOnlyPaths=/opt/jason/ccc-current /var/lib/jason/source /var/lib/jason/authority /var/lib/jason/openclaw
+ReadWritePaths=/var/lib/jason/source/.git /var/lib/jason/ccc /var/lib/jason/evidence/ccc /var/lib/jason/recovery/ccc /var/lib/jason/runtime-secrets/docker
 UMask=0077
 TimeoutStartSec=45min

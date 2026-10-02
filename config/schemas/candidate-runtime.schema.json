@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jason.local/schemas/candidate-runtime.schema.json",
+  "title": "Jason Candidate Runtime",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "compose_relative_path",
+    "service",
+    "candidate_container_name",
+    "candidate_image_prefix",
+    "external_networks",
+    "host_health_port",
+    "runtime_health_url",
+    "state_mounts",
+    "secret_mounts"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "compose_relative_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "service": {
+      "type": "string",
+      "minLength": 1
+    },
+    "candidate_container_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "candidate_image_prefix": {
+      "type": "string",
+      "minLength": 1
+    },
+    "external_networks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "uniqueItems": true
+    },
+    "runtime_health_url": {
+      "type": "string",
+      "pattern": "^http://127\\.0\\.0\\.1:[0-9]+/healthz$"
+    },
+    "host_health_port": {
+      "type": "integer",
+      "minimum": 1024,
+      "maximum": 65535
+    },
+    "state_mounts": {
+      "type": "array",
+      "minItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source_relative_path",
+          "destination",
+          "mode"
+        ],
+        "properties": {
+          "source_relative_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "destination": {
+            "type": "string",
+            "pattern": "^/"
+          },
+          "mode": {
+            "enum": [
+              "ro",
+              "rw"
+            ]
+          }
+        }
+      }
+    },
+    "secret_mounts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "environment_variable",
+          "destination",
+          "mode"
+        ],
+        "properties": {
+          "environment_variable": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]+_HOST_PATH$"
+          },
+          "destination": {
+            "type": "string",
+            "pattern": "^/run/jason-secrets/"
+          },
+          "mode": {
+            "const": "ro"
+          }
+        }
+      }
+    }
+  }
+}

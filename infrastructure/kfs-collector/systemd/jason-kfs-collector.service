@@ -1,11 +1,18 @@
 [Unit]
 Description=Jason Kyocera KFS nightly read-only collector
-After=network-online.target
+After=network-online.target docker.service
+Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/home/al/jason-runtime-tools/kfs/run_kfs_collector_container.sh
-WorkingDirectory=/home/al/jason-runtime-tools/kfs
+User=jason
+Group=jason
+EnvironmentFile=-/etc/jason/kfs.env
+ExecStart=/opt/jason/services/kfs/run_kfs_collector_container.sh
+WorkingDirectory=/opt/jason/services/kfs
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
+ProtectHome=true
+ReadOnlyPaths=/opt/jason/services/kfs /opt/jason/bootstrap/secrets/openbao/kyocera-kfs-read-approle /var/lib/jason/runtime-secrets/kfs
+ReadWritePaths=/var/lib/jason/evidence/kfs-runs
