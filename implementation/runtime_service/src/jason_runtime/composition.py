@@ -314,9 +314,9 @@ from .kfs_meter_history import (
 from .procurement_billing_audit_maintenance import (
     GovernedBillingAuditReadPort,
     HardwareBillingAuditMaintenance,
-    TeamsGatewayBillingAuditSender,
     ensure_billing_audit_read_authority,
 )
+from .teams_billing_delivery import TeamsGatewayBillingAuditSender
 from .procurement_inventory_billing import (
     HardwareBillingDispositionFlow,
     SQLiteBillingLeakageStore,
