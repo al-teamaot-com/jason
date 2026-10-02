@@ -12,6 +12,10 @@ from bootstrap.clean_install import (
     observe_host,
     read_json,
 )
+from bootstrap.secret_requirements import (
+    build_secret_requirements,
+    write_secret_requirements,
+)
 from bootstrap.install_runtime import (
     evaluate_candidate_readiness,
     initialize_state_stores,
@@ -83,6 +87,13 @@ def bootstrap_candidate(
         msp_configuration_path=Path(msp_configuration_path),
         msp_policy_path=Path(msp_policy_path),
     )
+    secret_requirements = build_secret_requirements(
+        read_json(msp_configuration_path)
+    )
+    secret_requirements_path = write_secret_requirements(
+        target_root=root,
+        requirements=secret_requirements,
+    )
 
     resources = load_resources(resources_path, resources_schema_path)
     release = stage_release_archive(
@@ -118,6 +129,12 @@ def bootstrap_candidate(
         "target_root": str(root),
         "bootstrap_identity": str(bootstrap_identity),
         "configuration": config_paths,
+        "secret_requirements": {
+            "path": str(secret_requirements_path),
+            "required_count": len(secret_requirements),
+            "readiness": "pending_attestation" if secret_requirements else "ready",
+            "secret_values_observed": False,
+        },
         "release": asdict(release),
         "state_stores": [asdict(item) for item in state],
         "systemd_units": [asdict(item) for item in services],

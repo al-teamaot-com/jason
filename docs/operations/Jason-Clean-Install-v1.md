@@ -63,3 +63,19 @@ The activation plan contains only:
 The executor is allowed to run only when the target is the candidate host root. It does not start services and does not enroll provider secrets. Production identity is rejected.
 
 This keeps the current development host from being used as an accidental activation target while allowing the same released tooling to operate on a future dedicated Jason-B candidate host.
+
+## Governed secret readiness
+
+Candidate bootstrap now derives required logical secret references from enabled MSP providers.
+
+The bootstrap writes var/lib/jason/secret-requirements.json containing only:
+- provider IDs;
+- logical secret-reference identifiers;
+- requirement state;
+- an explicit assertion that no secret values are present.
+
+References that resemble filesystem paths or inline key/value secrets are rejected.
+
+A separate secret-presence attestation may list which logical references are available. The readiness check compares identifiers only; it never reads, returns, or logs the secret values themselves.
+
+Provider startup remains blocked from being treated as fully ready until every required logical reference is attested available.
