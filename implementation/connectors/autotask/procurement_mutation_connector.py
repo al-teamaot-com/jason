@@ -214,6 +214,8 @@ class AutotaskProcurementMutationConnector(AutotaskMutationConnector):
             request.arguments.get("payload"),
         )
         arguments = {**dict(request.arguments), "payload": payload}
+        if request.context.capability == "autotask.product.vendor.create":
+            arguments["productID"] = int(payload["productID"])
         if request.context.capability == "autotask.ticket.charge.update":
             raw_ticket_id = request.arguments.get("ticketID") or request.arguments.get("ticket_id")
             if isinstance(raw_ticket_id, bool) or not str(raw_ticket_id or "").isdigit() or int(raw_ticket_id) < 1:

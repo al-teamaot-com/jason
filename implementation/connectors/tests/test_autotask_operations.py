@@ -280,7 +280,7 @@ def test_generic_get_requires_numeric_entity_id() -> None:
         ),
         ("autotask.product.create", "POST", "/V1.0/Products"),
         ("autotask.product.update", "PATCH", "/V1.0/Products"),
-        ("autotask.product.vendor.create", "POST", "/V1.0/ProductVendors"),
+        ("autotask.product.vendor.create", "POST", "/V1.0/Products/29686513/Vendors"),
         ("autotask.product.vendor.update", "PATCH", "/V1.0/ProductVendors"),
         ("autotask.service.create", "POST", "/V1.0/Services"),
         ("autotask.service.update", "PATCH", "/V1.0/Services"),
@@ -306,10 +306,14 @@ def test_compiles_only_registered_mutation_routes(capability, method, path) -> N
         payload["ticketID"] = 12345
     if capability.endswith("update"):
         payload["id"] = 12345
+    arguments = {"payload": payload}
+    if capability == "autotask.product.vendor.create":
+        payload["productID"] = 29686513
+        arguments["productID"] = 29686513
 
     actual_method, actual_path, params, body = resolve_operation_request(
         capability,
-        {"payload": payload},
+        arguments,
     )
 
     assert actual_method == method
