@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# J-CHANGE-003 / #764: this legacy Production mutator is intentionally disabled
+# until it is migrated behind the exact-plan Owner-approved promotion gate.
+# Do not replace this with an environment-variable approval bypass.
+echo "PRODUCTION_PROMOTION_GATE=BLOCKED legacy mutator is not an approved Production lane" >&2
+echo "REASON=use the governed jason.deployment.apply promotion path after this component is migrated" >&2
+exit 42
 
 if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
   echo "usage: $0 <source-revision> [material-review-json]" >&2

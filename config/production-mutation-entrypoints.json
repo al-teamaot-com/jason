@@ -75,32 +75,32 @@
     },
     {
       "path": "infrastructure/kfs-collector/run_kfs_collector_container.sh",
-      "classification": "legacy_pending_promotion_gate",
-      "scope": "KFS collector container runtime installation/update",
+      "classification": "operational_workload",
+      "scope": "KFS collector execution using the already-selected runtime image; does not select or install a Production release",
       "production_release_authority": false
     },
     {
       "path": "infrastructure/showcase/deploy_autonomy_flight_recorder.sh",
-      "classification": "legacy_pending_promotion_gate",
-      "scope": "autonomy observability deployment",
+      "classification": "blocked_legacy_production_mutator",
+      "scope": "autonomy observability deployment; direct execution blocked pending migration to governed promotion",
       "production_release_authority": false
     },
     {
       "path": "infrastructure/showcase/deploy_production_health_dashboard.sh",
-      "classification": "legacy_pending_promotion_gate",
-      "scope": "production health observability/systemd deployment",
+      "classification": "blocked_legacy_production_mutator",
+      "scope": "production health observability/systemd deployment; direct execution blocked pending migration to governed promotion",
       "production_release_authority": false
     },
     {
       "path": "infrastructure/showcase/deploy_usage_dashboard.sh",
-      "classification": "legacy_pending_promotion_gate",
-      "scope": "usage observability/systemd deployment",
+      "classification": "blocked_legacy_production_mutator",
+      "scope": "usage observability/systemd deployment; direct execution blocked pending migration to governed promotion",
       "production_release_authority": false
     },
     {
       "path": "infrastructure/showcase/install_showcase.sh",
-      "classification": "legacy_pending_promotion_gate",
-      "scope": "showcase/observability service installation",
+      "classification": "blocked_legacy_production_mutator",
+      "scope": "showcase/observability service installation; direct execution blocked pending migration to governed promotion",
       "production_release_authority": false
     },
     {
@@ -117,20 +117,20 @@
     },
     {
       "path": "tools/install_ccc_scheduler.sh",
-      "classification": "legacy_pending_promotion_gate",
-      "scope": "CCC release pointer/config/systemd installation",
+      "classification": "blocked_legacy_production_mutator",
+      "scope": "CCC release pointer/config/systemd installation; direct execution blocked pending migration to governed promotion",
       "production_release_authority": false
     },
     {
       "path": "tools/install_observability_assurance.sh",
-      "classification": "legacy_pending_promotion_gate",
-      "scope": "observability release pointer and systemd installation",
+      "classification": "blocked_legacy_production_mutator",
+      "scope": "observability release pointer and systemd installation; direct execution blocked pending migration to governed promotion",
       "production_release_authority": false
     },
     {
       "path": "tools/install_openclaw_authority_operations.sh",
-      "classification": "legacy_pending_promotion_gate",
-      "scope": "authority maintenance systemd installation",
+      "classification": "blocked_legacy_production_mutator",
+      "scope": "authority maintenance systemd installation; direct execution blocked pending migration to governed promotion",
       "production_release_authority": false
     },
     {
@@ -147,8 +147,8 @@
     },
     {
       "path": "tools/reconcile_production_host_services.sh",
-      "classification": "legacy_pending_promotion_gate",
-      "scope": "release pointer and systemd reconciliation",
+      "classification": "blocked_legacy_production_mutator",
+      "scope": "release pointer and systemd reconciliation; direct execution blocked pending migration to governed promotion",
       "production_release_authority": false
     }
   ]

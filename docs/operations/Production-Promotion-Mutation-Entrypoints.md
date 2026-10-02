@@ -30,20 +30,22 @@ Those helpers may execute only after the exact-plan Owner approval has produced 
 
 Candidate/staging helpers and read-only discovery tools have no Production release authority.
 
-## Legacy direct installers pending migration
+## Legacy direct installers are fail-closed pending migration
 
-The registry currently marks the following classes as `legacy_pending_promotion_gate`:
+The following direct Production release/configuration mutators are now technically blocked before their first material mutation:
 
-- host-service/systemd reconciliation;
-- observability assurance and dashboard installers;
-- CCC scheduler installation;
-- OpenClaw authority-operations installation;
-- autonomy flight-recorder deployment;
-- KFS collector runtime installation/update.
+- autonomy flight-recorder observability deployment;
+- production-health observability/systemd deployment;
+- usage observability/systemd deployment;
+- showcase/observability service installation;
+- CCC scheduler release-pointer/config/systemd installation;
+- observability release-pointer/systemd installation;
+- OpenClaw authority-maintenance systemd installation;
+- production host-service/release-pointer reconciliation.
 
-These scripts are existing implementation utilities, not supported independent Production deployment lanes.
+They are classified as blocked_legacy_production_mutator and exit with code 42. They cannot be enabled with an approved=true-style flag or a permit environment variable. They remain unavailable as direct Production lanes until migrated behind the trusted J-CHANGE-003 host runner.
 
-Until they are migrated behind the common Production runner, their registry entries explicitly declare `production_release_authority=false`.
+The KFS collector runner is classified separately as operational_workload: it executes a collector using the already-selected runtime image but does not choose or install a Production release. Its operator-home paths remain a deployability concern tracked under the #747/#748/#749 work, not Production release authority.
 
 ## Autonomous repair
 
@@ -59,12 +61,12 @@ A newly added deploy/install/reconcile/cutover/rollback helper that contains Doc
 
 Only classifications representing the exact-plan gated lane may declare `production_release_authority=true`.
 
-Legacy pending, discovery, bootstrap, candidate, repair-preparation, and operational-recovery paths cannot claim Production release authority.
+Blocked legacy, operational-workload, discovery, bootstrap, candidate, repair-preparation, and operational-recovery paths cannot claim Production release authority.
 
 ## Production activation boundary
 
 This registry and the #764 code are non-production controls until separately approved.
 
-Production activation requires the remaining legacy installers to be migrated or technically denied direct Production release authority, the trusted permit key/claim-store boundary to be installed, and #765 acceptance to prove missing/tampered/replayed authority causes zero Production mutation.
+Production activation requires the trusted permit key/claim-store boundary to be installed, the blocked legacy installers to remain denied or be migrated behind the governed host runner, and #765 acceptance to prove missing/tampered/replayed authority causes zero Production mutation.
 
 Passing CI, merging these controls, or closing #764 does not itself authorize activation in Production.
