@@ -1863,6 +1863,21 @@ class OperationalAutonomyMaintenance:
                     state, reason_code, item.source_version, state == "eligible_now"
                 )
                 continue
+            scope = self._match_scope(item.context)
+            if scope is None:
+                unsupported += 1
+                classifications[ticket_id] = (
+                    "unsupported_capability", "no_applicable_promoted_playbook",
+                    item.source_version, False,
+                )
+                continue
+            if not self._scope_is_promoted(scope):
+                governance_blocked += 1
+                classifications[ticket_id] = (
+                    "governance_blocked", "playbook_not_promoted",
+                    item.source_version, False,
+                )
+                continue
             # Broad open-status discovery is useful for read-only assessment, but
             # autonomous admission outside Jason is limited to intake states.
             # This prevents a matching playbook from claiming work already being
@@ -1879,21 +1894,6 @@ class OperationalAutonomyMaintenance:
                     "discovery_status_not_admissible",
                     item.source_version,
                     False,
-                )
-                continue
-            scope = self._match_scope(item.context)
-            if scope is None:
-                unsupported += 1
-                classifications[ticket_id] = (
-                    "unsupported_capability", "no_applicable_promoted_playbook",
-                    item.source_version, False,
-                )
-                continue
-            if not self._scope_is_promoted(scope):
-                governance_blocked += 1
-                classifications[ticket_id] = (
-                    "governance_blocked", "playbook_not_promoted",
-                    item.source_version, False,
                 )
                 continue
             if item.context.get("_jason_assigned_elsewhere") is True:
