@@ -28,6 +28,63 @@ def _private_regular_file(path: Path, *, label: str) -> bytes:
     return path.read_bytes()
 
 
+
+
+def _protected_regular_file(path: Path, *, label: str) -> bytes:
+    if path.is_symlink() or not path.is_file():
+        raise BuiltinRecoveryAdapterError(f"{label} is unavailable: {path}")
+    mode = stat.S_IMODE(path.stat().st_mode)
+    # Group-read is acceptable for runtime service credentials; group write,
+    # group execute, and all world permissions are prohibited.
+    if mode & 0o037:
+        raise BuiltinRecoveryAdapterError(
+            f"{label} permissions are too broad: {oct(mode)}"
+        )
+    return path.read_bytes()
+
+
+def _openbao_bootstrap_payloads(root: Path) -> tuple[CollectedPayload, ...]:
+    base = root / "opt/jason/bootstrap/secrets/openbao"
+    if not base.exists():
+        return ()
+    if base.is_symlink() or not base.is_dir():
+        raise BuiltinRecoveryAdapterError(
+            "OpenBao bootstrap secret directory is unsafe"
+        )
+    payloads: list[CollectedPayload] = []
+    for child in sorted(base.rglob("*")):
+        if child.is_symlink():
+            raise BuiltinRecoveryAdapterError(
+                f"OpenBao bootstrap secret directory contains symlink: {child}"
+            )
+        if not child.is_file() or child == base / "init.json":
+            continue
+        relative = child.relative_to(base)
+        data = _protected_regular_file(
+            child,
+            label="OpenBao bootstrap credential",
+        )
+        payloads.append(
+            CollectedPayload(
+                state_class="provider-secrets",
+                member_name=(
+                    "secrets/openbao/bootstrap/" + relative.as_posix()
+                ),
+                restore_relative_path=(
+                    Path("opt/jason/bootstrap/secrets/openbao")
+                    / relative
+                ).as_posix(),
+                data=data,
+                metadata={
+                    "adapter": "governed_secret_export",
+                    "source": "openbao-bootstrap-credential",
+                    "protected_values_exposed": False,
+                },
+            )
+        )
+    return tuple(payloads)
+
+
 def _latest_openbao_snapshot(root: Path) -> tuple[Path, Path, str]:
     backup_dir = root / "opt/jason/backups/openbao"
     snapshots = sorted(
@@ -74,33 +131,31 @@ def governed_secret_export_adapter(
     snapshot, sidecar, digest = _latest_openbao_snapshot(root)
     snapshot_bytes = snapshot.read_bytes()
     sidecar_bytes = sidecar.read_bytes()
-    return (
-        (
-            CollectedPayload(
-                state_class="provider-secrets",
-                member_name="secrets/openbao/raft/latest.snap",
-                restore_relative_path="var/lib/jason/recovery/openbao/latest.snap",
-                data=snapshot_bytes,
-                metadata={
-                    "adapter": "governed_secret_export",
-                    "source": "openbao-raft-snapshot",
-                    "sha256": digest,
-                    "size_bytes": len(snapshot_bytes),
-                },
-            ),
-            CollectedPayload(
-                state_class="provider-secrets",
-                member_name="secrets/openbao/raft/latest.snap.sha256",
-                restore_relative_path="var/lib/jason/recovery/openbao/latest.snap.sha256",
-                data=sidecar_bytes,
-                metadata={
-                    "adapter": "governed_secret_export",
-                    "source": "openbao-raft-checksum",
-                },
-            ),
+    payloads = (
+        CollectedPayload(
+            state_class="provider-secrets",
+            member_name="secrets/openbao/raft/latest.snap",
+            restore_relative_path="var/lib/jason/recovery/openbao/latest.snap",
+            data=snapshot_bytes,
+            metadata={
+                "adapter": "governed_secret_export",
+                "source": "openbao-raft-snapshot",
+                "sha256": digest,
+                "size_bytes": len(snapshot_bytes),
+            },
         ),
-        (),
-    )
+        CollectedPayload(
+            state_class="provider-secrets",
+            member_name="secrets/openbao/raft/latest.snap.sha256",
+            restore_relative_path="var/lib/jason/recovery/openbao/latest.snap.sha256",
+            data=sidecar_bytes,
+            metadata={
+                "adapter": "governed_secret_export",
+                "source": "openbao-raft-checksum",
+            },
+        ),
+    ) + _openbao_bootstrap_payloads(root)
+    return payloads, ()
 
 
 def _validate_openbao_init(data: bytes) -> Mapping[str, Any]:

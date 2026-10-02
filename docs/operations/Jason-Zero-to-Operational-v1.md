@@ -204,3 +204,11 @@ The acceptance plan supplies:
 A candidate-only canary principal receives time-bounded OBSERVE grants only for the selected synthetic canary capabilities. The grants carry no client wildcard, require no mutation permission, and expire after the bounded acceptance window.
 
 The canary runner uses that explicit organization and provider set. Wrong organization, unsupported providers, conflicting identity, or excessive grant lifetime fail closed.
+
+## Encrypted candidate seed prerequisite
+
+Host-mode acceptance no longer accepts loose OpenBao snapshot, checksum, or initialization files.
+
+The host plan requires one signed/encrypted JRP seed plus the protected decryption key and signer public key. Preflight proves the seed belongs to the expected source deployment and that its internal recovery manifest covers every Candidate Runtime/MCP protected mount path.
+
+This makes the encrypted recovery artifact the recovery boundary for new hardware instead of relying on separately remembered AppRole bootstrap files.

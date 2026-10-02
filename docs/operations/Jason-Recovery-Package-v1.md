@@ -175,3 +175,13 @@ The recovery CLI accepts a candidate-host identity for these live-root candidate
 Machine-bound re-enrollment remains explicit. After the required host identity or hardware-bound credential has actually been re-enrolled, the recovery CLI may acknowledge the named recovery state class. The acknowledgement removes only the matching re-enrollment blocker; it does not bypass unrelated restore blockers.
 
 A Production identity cannot authorize these candidate lifecycle operations.
+
+## Encrypted new-hardware credential seed
+
+The Full Recovery Export now includes protected OpenBao AppRole bootstrap files in addition to the verified Raft snapshot, initialization/recovery material, and trusted keys.
+
+Host recovery consumes these items through the signed and encrypted JRP. The candidate seed inspector validates the package signature/decryption, exact source Deployment Manifest identity, internal recovery manifest, member digest/size, required OpenBao snapshot/init members, and declared restore paths before any write.
+
+Candidate seed staging restores only provider-secret and signing/recovery-key state from that package. Host preflight verifies that every protected credential path referenced by Candidate Runtime/MCP is covered by a restore path inside the encrypted seed package.
+
+OpenBao restore uses the HTTP Raft snapshot-force API so temporary initialization authority never appears in a process command. After restoring and unsealing with the packaged source recovery shares, Jason validates the packaged AppRole credentials directly. It does not issue replacement provider credentials as part of restore.

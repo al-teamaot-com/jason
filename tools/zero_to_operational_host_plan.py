@@ -16,7 +16,11 @@ from cryptography.hazmat.primitives.serialization import (
 )
 from jsonschema import Draft202012Validator
 
+from bootstrap.candidate_host import load_candidate_host_identity
 from bootstrap.candidate_host_preflight import preflight_candidate_host
+from bootstrap.candidate_openbao_restore import (
+    build_candidate_openbao_restore_plan,
+)
 from bootstrap.candidate_runtime import (
     load_candidate_runtime_config,
     validate_candidate_runtime_environment_file,
@@ -48,6 +52,7 @@ class HostAcceptancePlanResult:
     current_release_sha256: str | None
     next_release_sha256: str | None
     recovery_keys_valid: bool
+    openbao_recovery_valid: bool
     runtime_environment_valid: bool
     mcp_environment_valid: bool
     ollama_model: str | None
@@ -157,6 +162,27 @@ def _validate_recovery_keys(
         )
 
 
+def _expected_candidate_mount_sources(
+    target_root: str | Path,
+) -> dict[str, str]:
+    root = Path(target_root)
+    base = root / "opt/jason/bootstrap/secrets/openbao"
+    return {
+        "JASON_OPENBAO_ROLE_ID_HOST_PATH": str(
+            base / "datto-rmm-read-approle/role-id"
+        ),
+        "JASON_OPENBAO_SECRET_ID_HOST_PATH": str(
+            base / "datto-rmm-read-approle/secret-id"
+        ),
+        "JASON_AUTOTASK_OPENBAO_ROLE_ID_HOST_PATH": str(
+            base / "autotask-read-approle/role-id"
+        ),
+        "JASON_AUTOTASK_OPENBAO_SECRET_ID_HOST_PATH": str(
+            base / "autotask-read-approle/secret-id"
+        ),
+    }
+
+
 def preflight_host_acceptance_plan(
     *,
     plan_path: str | Path,
@@ -182,6 +208,13 @@ def preflight_host_acceptance_plan(
         effective_uid=effective_uid,
     )
     blockers.extend("host:" + item for item in host_preflight.blockers)
+    candidate_identity = None
+    try:
+        candidate_identity = load_candidate_host_identity(
+            str(plan["candidate_host_identity"])
+        )
+    except Exception as exc:
+        blockers.append("candidate_host_identity:" + str(exc))
 
     current_digest: str | None = None
     next_digest: str | None = None
@@ -243,6 +276,23 @@ def preflight_host_acceptance_plan(
             + ",".join(enabled_providers)
         )
 
+    openbao_recovery_valid = False
+    if candidate_identity is not None:
+        try:
+            recovery = dict(plan["openbao_recovery"])
+            build_candidate_openbao_restore_plan(
+                target_root=target_root,
+                candidate_identity=candidate_identity,
+                snapshot_path=recovery["snapshot"],
+                snapshot_checksum_path=recovery["checksum"],
+                init_path=recovery["init_file"],
+                approle_root=recovery["approle_root"],
+                provider_ids=enabled_providers,
+            )
+            openbao_recovery_valid = True
+        except Exception as exc:
+            blockers.append("openbao_recovery:" + str(exc))
+
     requirements = build_secret_requirements(msp_configuration)
     required_secret_references = tuple(
         sorted(item.secret_reference for item in requirements if item.required)
@@ -269,8 +319,15 @@ def preflight_host_acceptance_plan(
         runtime_summary = validate_candidate_runtime_environment_file(
             env_file=str(plan["candidate_runtime_env"]),
             runtime_config=runtime_config,
+            require_mount_sources=False,
         )
         ollama_model = str(runtime_summary["ollama_model"])
+        expected_mounts = _expected_candidate_mount_sources(target_root)
+        if runtime_summary["mount_sources"] != expected_mounts:
+            raise HostAcceptancePlanError(
+                "candidate runtime credential paths do not match "
+                "the canonical OpenBao restore outputs"
+            )
         runtime_environment_valid = True
     except Exception as exc:
         blockers.append("candidate_runtime_env:" + str(exc))
@@ -286,6 +343,7 @@ def preflight_host_acceptance_plan(
                 env_file=str(plan["candidate_runtime_env"]),
                 runtime_config=runtime_config,
                 mcp_config=mcp_config,
+                require_mount_sources=False,
             )
             mcp_environment_valid = True
         except Exception as exc:
@@ -327,6 +385,7 @@ def preflight_host_acceptance_plan(
         current_release_sha256=current_digest,
         next_release_sha256=next_digest,
         recovery_keys_valid=recovery_keys_valid,
+        openbao_recovery_valid=openbao_recovery_valid,
         runtime_environment_valid=runtime_environment_valid,
         mcp_environment_valid=mcp_environment_valid,
         ollama_model=ollama_model,

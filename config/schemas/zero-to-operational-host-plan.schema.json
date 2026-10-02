@@ -14,6 +14,7 @@
     "msp_policy",
     "secret_presence_attestation",
     "candidate_runtime_env",
+    "openbao_recovery",
     "recovery_recipient_public_key",
     "recovery_signer_private_key",
     "provider_canary",
@@ -50,6 +51,34 @@
     "secret_presence_attestation": {
       "type": "string",
       "minLength": 1
+    },
+    "openbao_recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "seed_package",
+        "recipient_private_key",
+        "signer_public_key",
+        "source_deployment_identity_sha256"
+      ],
+      "properties": {
+        "seed_package": {
+          "type": "string",
+          "minLength": 1
+        },
+        "recipient_private_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "signer_public_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_deployment_identity_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
     },
     "recovery_recipient_public_key": {
       "type": "string",

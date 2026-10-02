@@ -40,6 +40,15 @@ def prepare_openbao(root: Path):
     )
     init.chmod(0o600)
 
+    approle = init.parent / "autotask-read-approle"
+    approle.mkdir(parents=True)
+    role_id = approle / "role-id"
+    secret_id = approle / "secret-id"
+    role_id.write_text("synthetic-role-id\n")
+    secret_id.write_text("synthetic-secret-id\n")
+    role_id.chmod(0o640)
+    secret_id.chmod(0o640)
+
     trusted = root / "var/lib/jason/openclaw/trusted-keys"
     trusted.mkdir(parents=True)
     registry = trusted / "registry.json"
@@ -66,6 +75,18 @@ def test_builtin_openbao_adapters_package_snapshot_and_protected_recovery_materi
     assert secret_payloads[0].data == snapshot.read_bytes()
     assert secret_payloads[0].restore_relative_path.endswith(
         "recovery/openbao/latest.snap"
+    )
+    assert any(
+        item.member_name
+        == "secrets/openbao/bootstrap/autotask-read-approle/role-id"
+        and item.data == b"synthetic-role-id\n"
+        for item in secret_payloads
+    )
+    assert any(
+        item.member_name
+        == "secrets/openbao/bootstrap/autotask-read-approle/secret-id"
+        and item.data == b"synthetic-secret-id\n"
+        for item in secret_payloads
     )
     init_payload = next(
         item for item in key_payloads if item.member_name == "secrets/openbao/init.json"
@@ -184,3 +205,19 @@ def test_missing_kfs_backup_is_optional_source_unavailable(tmp_path):
             {},
             tmp_path / "candidate",
         )
+
+
+def test_bootstrap_credential_group_write_is_rejected(tmp_path):
+    root = tmp_path / "candidate"
+    prepare_openbao(root)
+    path = (
+        root
+        / "opt/jason/bootstrap/secrets/openbao"
+        / "autotask-read-approle/secret-id"
+    )
+    path.chmod(0o660)
+    with pytest.raises(
+        BuiltinRecoveryAdapterError,
+        match="permissions are too broad",
+    ):
+        governed_secret_export_adapter("provider-secrets", {}, root)
