@@ -463,3 +463,51 @@ def apply_recovery_restore_plan(
         "migrations_run": False,
         "provider_reenrollment_performed": False,
     }
+
+
+def acknowledge_reenrollment(
+    *,
+    plan: RecoveryRestorePlan,
+    completed_state_classes: Sequence[str],
+) -> RecoveryRestorePlan:
+    completed = {str(item).strip() for item in completed_state_classes if str(item).strip()}
+    if not completed:
+        raise RecoveryRestoreError("at least one completed re-enrollment state class is required")
+
+    expected = {
+        blocker.split(":", 1)[1]
+        for blocker in plan.blockers
+        if blocker.startswith("reenrollment_required:")
+    }
+    unknown = completed - expected
+    if unknown:
+        raise RecoveryRestoreError(
+            "re-enrollment completion references state classes not required by the plan: "
+            + ",".join(sorted(unknown))
+        )
+
+    remaining_blockers = tuple(
+        blocker
+        for blocker in plan.blockers
+        if not (
+            blocker.startswith("reenrollment_required:")
+            and blocker.split(":", 1)[1] in completed
+        )
+    )
+    remaining_actions = tuple(
+        action
+        for action in plan.actions
+        if not (
+            action.action == "reenroll"
+            and action.state_class in completed
+        )
+    )
+    return RecoveryRestorePlan(
+        schema_version=plan.schema_version,
+        source_deployment_identity_sha256=plan.source_deployment_identity_sha256,
+        target_root=plan.target_root,
+        status="ready_for_restore" if not remaining_blockers else "blocked",
+        actions=remaining_actions,
+        blockers=remaining_blockers,
+        destructive_restore_performed=plan.destructive_restore_performed,
+    )

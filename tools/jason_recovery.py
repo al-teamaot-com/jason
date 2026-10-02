@@ -20,6 +20,10 @@ from tools.full_recovery_restore import (
     apply_recovery_restore_plan,
     plan_recovery_restore,
 )
+from tools.full_recovery_export import (
+    load_collection_spec,
+    plan_full_recovery_export,
+)
 
 
 def _load_json(path: str | Path):
@@ -86,6 +90,24 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+
+
+def command_plan_export(args: argparse.Namespace) -> int:
+    collection = load_collection_spec(
+        args.collection_spec,
+        args.collection_schema,
+    )
+    inventory = _load_json(args.state_inventory)
+    plan = plan_full_recovery_export(
+        target_root=args.target_root,
+        collection_spec=collection,
+        state_inventory=inventory,
+        available_adapter_names=tuple(args.available_adapter or ()),
+    )
+    print(json.dumps(asdict(plan), indent=2, sort_keys=True))
+    return 0 if plan.status == "ready_for_export" else 3
+
+
 def _restore_inputs(args: argparse.Namespace):
     package = _load_json(args.package)
     signer_public = _load_signer_public(args.signer_public_key)
@@ -141,6 +163,30 @@ def build_parser() -> argparse.ArgumentParser:
     validate_parser.set_defaults(func=command_validate)
 
     repo = _repo_root()
+
+    export_parser = sub.add_parser(
+        "plan-export",
+        help="plan a non-production Full Recovery Export without reading secret values",
+    )
+    export_parser.add_argument("--target-root", required=True)
+    export_parser.add_argument(
+        "--collection-spec",
+        default=str(repo / "config/full-recovery-collection.v1.json"),
+    )
+    export_parser.add_argument(
+        "--collection-schema",
+        default=str(repo / "config/schemas/full-recovery-collection.schema.json"),
+    )
+    export_parser.add_argument(
+        "--state-inventory",
+        default=str(repo / "config/recovery-state-inventory.v1.json"),
+    )
+    export_parser.add_argument(
+        "--available-adapter",
+        action="append",
+        default=[],
+    )
+    export_parser.set_defaults(func=command_plan_export)
     for name, handler, help_text in (
         ("plan-restore", command_plan_restore, "validate and plan a non-production restore"),
         ("restore-to-root", command_restore_to_root, "apply a validated restore to a non-live target root"),
