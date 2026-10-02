@@ -65,6 +65,35 @@ from .procurement_inventory_billing import AllocationPlan
 PROCUREMENT_APPROVAL_CAPABILITY = "procurement.submission.execute"
 PROCUREMENT_WORKER_ID = "jason-procurement-worker"
 PROCUREMENT_POLICY_ID = "aot-procurement-delegated-spend-v1"
+
+PROCUREMENT_SOURCE_KINDS = frozenset({
+    "website_url",
+    "browser_url",
+    "vendor_api",
+    "vendor_csv",
+    "vendor_xlsx",
+    "vendor_quote",
+    "vendor_invoice",
+})
+PROCUREMENT_SOURCE_ACQUISITIONS = frozenset({
+    "vendor_api",
+    "structured_file",
+    "document_extraction",
+    "simple_http_structured",
+    "simple_http_rendered",
+    "browser_rendered",
+    "manual",
+})
+PROCUREMENT_SOURCE_CONFIDENCE = {
+    "vendor_api": 100,
+    "structured_file": 90,
+    "document_verified": 85,
+    "web_structured": 80,
+    "browser_rendered": 70,
+    "web_rendered": 65,
+    "manual": 40,
+}
+
 DEFAULT_DB = Path("/var/lib/jason/procurement/submissions.sqlite3")
 
 
@@ -807,13 +836,22 @@ class ProcurementTeamsFlow:
         source_reference: str,
         source_capture_sha256: str,
         source_captured_at: str,
+        source_acquisition: str,
+        source_confidence: str,
+        source_evidence_mode: str,
         source_org: Mapping[str, Any],
         product: Mapping[str, Any],
         correlation_id: str,
     ) -> Mapping[str, Any]:
         normalized_kind = str(source_kind or "").strip().casefold()
-        if normalized_kind not in {"website_url", "vendor_quote", "vendor_invoice"}:
+        if normalized_kind not in PROCUREMENT_SOURCE_KINDS:
             raise ProcurementFlowError("Unsupported procurement source kind.")
+        normalized_acquisition = str(source_acquisition or "").strip().casefold()
+        if normalized_acquisition not in PROCUREMENT_SOURCE_ACQUISITIONS:
+            raise ProcurementFlowError("Unsupported procurement acquisition method.")
+        normalized_confidence = str(source_confidence or "").strip().casefold()
+        if normalized_confidence not in PROCUREMENT_SOURCE_CONFIDENCE:
+            raise ProcurementFlowError("Unsupported procurement source confidence.")
         source_reference = str(source_reference or "").strip()
         if not source_reference:
             raise ProcurementFlowError("Procurement source reference is required.")
@@ -904,6 +942,10 @@ class ProcurementTeamsFlow:
             "source_url": source_reference,
             "source_capture_sha256": str(source_capture_sha256 or ""),
             "source_captured_at": str(source_captured_at or ""),
+            "source_acquisition": normalized_acquisition,
+            "source_confidence": normalized_confidence,
+            "source_confidence_score": PROCUREMENT_SOURCE_CONFIDENCE[normalized_confidence],
+            "source_evidence_mode": str(source_evidence_mode or "").strip(),
             "vendor": {
                 "id": int(vendor["id"]) if vendor is not None else None,
                 "name": str(
@@ -923,6 +965,7 @@ class ProcurementTeamsFlow:
                 "description": str(product.get("description") or "").strip(),
                 "sku": str(product.get("sku") or "").strip(),
                 "mpn": str(product.get("mpn") or "").strip(),
+                "upc": str(product.get("upc") or "").strip(),
                 "brand": str(product.get("brand") or "").strip(),
                 "cost": f"{cost:.2f}",
                 "existing_product_id": (
@@ -1014,12 +1057,23 @@ class ProcurementTeamsFlow:
             source_reference=str(web.get("final_url") or url),
             source_capture_sha256=str(web.get("content_sha256") or ""),
             source_captured_at=str(web.get("captured_at") or ""),
+            source_acquisition=(
+                "simple_http_structured"
+                if str(web.get("evidence_mode") or "") == "structured_or_semantic_product"
+                else "simple_http_rendered"
+            ),
+            source_confidence=(
+                "web_structured"
+                if str(web.get("evidence_mode") or "") == "structured_or_semantic_product"
+                else "web_rendered"
+            ),
+            source_evidence_mode=str(web.get("evidence_mode") or ""),
             source_org=source_org,
             product=product,
             correlation_id=correlation,
         )
 
-    def handle_vendor_document(
+    def handle_normalized_source(
         self,
         *,
         normalized: Mapping[str, Any],
@@ -1029,22 +1083,20 @@ class ProcurementTeamsFlow:
         message_id: str,
         occurred_at: datetime,
     ) -> Mapping[str, Any]:
-        """Accept bounded, already-extracted vendor quote/invoice evidence.
+        """Converge any trusted normalized procurement source into one workflow.
 
-        Extraction is intentionally separate from procurement authority. This method
-        converges the document branch into the same vendor/product/draft/card path
-        used by URL intake; document content cannot expand runtime authority.
+        Source adapters (future vendor APIs, CSV/XLSX imports, browser acquisition,
+        and document extraction) may differ in acquisition mechanics, but none may
+        bypass the common vendor/product reconciliation and procurement state model.
         """
         source_kind = str(normalized.get("source_kind") or "").strip().casefold()
-        if source_kind not in {"vendor_quote", "vendor_invoice"}:
-            raise ProcurementFlowError(
-                "Vendor document must be classified as vendor_quote or vendor_invoice."
-            )
+        if source_kind not in PROCUREMENT_SOURCE_KINDS:
+            raise ProcurementFlowError("Unsupported normalized procurement source kind.")
         vendor = normalized.get("vendor")
         product = normalized.get("product")
         if not isinstance(vendor, Mapping) or not isinstance(product, Mapping):
             raise ProcurementFlowError(
-                "Vendor document requires one normalized vendor and one product line."
+                "Normalized procurement source requires one vendor and one product line."
             )
         principal, evidence = self._principal(
             tenant=microsoft_tenant_id,
@@ -1062,9 +1114,55 @@ class ProcurementTeamsFlow:
             source_reference=str(normalized.get("source_reference") or ""),
             source_capture_sha256=str(normalized.get("source_capture_sha256") or ""),
             source_captured_at=str(normalized.get("source_captured_at") or ""),
+            source_acquisition=str(
+                normalized.get("source_acquisition") or "manual"
+            ),
+            source_confidence=str(
+                normalized.get("source_confidence") or "manual"
+            ),
+            source_evidence_mode=str(
+                normalized.get("source_evidence_mode") or "normalized_source"
+            ),
             source_org=vendor,
             product=product,
             correlation_id=correlation,
+        )
+
+    def handle_vendor_document(
+        self,
+        *,
+        normalized: Mapping[str, Any],
+        microsoft_tenant_id: str,
+        microsoft_object_id: str,
+        conversation_id: str,
+        message_id: str,
+        occurred_at: datetime,
+    ) -> Mapping[str, Any]:
+        """Accept bounded, already-extracted vendor quote/invoice evidence."""
+        source_kind = str(normalized.get("source_kind") or "").strip().casefold()
+        if source_kind not in {"vendor_quote", "vendor_invoice"}:
+            raise ProcurementFlowError(
+                "Vendor document must be classified as vendor_quote or vendor_invoice."
+            )
+        enriched = {
+            **dict(normalized),
+            "source_acquisition": str(
+                normalized.get("source_acquisition") or "document_extraction"
+            ),
+            "source_confidence": str(
+                normalized.get("source_confidence") or "document_verified"
+            ),
+            "source_evidence_mode": str(
+                normalized.get("source_evidence_mode") or "document_normalized"
+            ),
+        }
+        return self.handle_normalized_source(
+            normalized=enriched,
+            microsoft_tenant_id=microsoft_tenant_id,
+            microsoft_object_id=microsoft_object_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            occurred_at=occurred_at,
         )
 
     def _requester_limit(

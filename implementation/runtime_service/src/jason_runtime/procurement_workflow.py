@@ -146,11 +146,28 @@ class ProductSource:
     source_type: str
     source_reference: str
     captured_at: datetime
+    acquisition_method: str = "manual"
+    confidence: str = "manual"
+    capture_sha256: str | None = None
 
     def validate(self) -> None:
         source_type = self.source_type.strip().casefold()
-        if source_type not in {"vendor_document", "website_url", "autotask_catalog"}:
+        if source_type not in {
+            "vendor_document", "website_url", "browser_url", "vendor_api",
+            "vendor_csv", "vendor_xlsx", "autotask_catalog",
+        }:
             raise ProcurementWorkflowError("unsupported procurement source type")
+        if self.acquisition_method.strip().casefold() not in {
+            "vendor_api", "structured_file", "document_extraction",
+            "simple_http_structured", "simple_http_rendered",
+            "browser_rendered", "manual",
+        }:
+            raise ProcurementWorkflowError("unsupported procurement acquisition method")
+        if self.confidence.strip().casefold() not in {
+            "vendor_api", "structured_file", "document_verified",
+            "web_structured", "browser_rendered", "web_rendered", "manual",
+        }:
+            raise ProcurementWorkflowError("unsupported procurement source confidence")
         if not self.source_reference.strip():
             raise ProcurementWorkflowError("procurement source reference is required")
         if self.captured_at.tzinfo is None:
