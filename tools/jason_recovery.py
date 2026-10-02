@@ -7,6 +7,8 @@ from pathlib import Path
 import sys
 
 from cryptography.hazmat.primitives.serialization import load_pem_private_key, load_pem_public_key
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
@@ -20,6 +22,15 @@ from tools.full_recovery_restore import (
     apply_recovery_restore_plan,
     plan_recovery_restore,
 )
+from tools.full_recovery_export import (
+    load_collection_spec,
+    plan_full_recovery_export,
+)
+from tools.full_recovery_export_package import (
+    create_encrypted_full_recovery_export,
+    write_recovery_package_atomic,
+)
+from tools.full_recovery_builtin_adapters import BUILTIN_ADAPTERS
 
 
 def _load_json(path: str | Path):
@@ -37,6 +48,22 @@ def _load_recovery_private(path: str | Path) -> X25519PrivateKey:
     key = load_pem_private_key(Path(path).read_bytes(), password=None)
     if not isinstance(key, X25519PrivateKey):
         raise RecoveryPackageError("recovery private key is not X25519")
+    return key
+
+
+
+
+def _load_recovery_public(path: str | Path) -> X25519PublicKey:
+    key = load_pem_public_key(Path(path).read_bytes())
+    if not isinstance(key, X25519PublicKey):
+        raise RecoveryPackageError("recovery recipient public key is not X25519")
+    return key
+
+
+def _load_signer_private(path: str | Path) -> Ed25519PrivateKey:
+    key = load_pem_private_key(Path(path).read_bytes(), password=None)
+    if not isinstance(key, Ed25519PrivateKey):
+        raise RecoveryPackageError("recovery signer private key is not Ed25519")
     return key
 
 
@@ -84,6 +111,65 @@ def command_validate(args: argparse.Namespace) -> int:
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
+
+
+
+
+def command_plan_export(args: argparse.Namespace) -> int:
+    collection = load_collection_spec(
+        args.collection_spec,
+        args.collection_schema,
+    )
+    inventory = _load_json(args.state_inventory)
+    plan = plan_full_recovery_export(
+        target_root=args.target_root,
+        collection_spec=collection,
+        state_inventory=inventory,
+        available_adapter_names=tuple(args.available_adapter or ()),
+    )
+    print(json.dumps(asdict(plan), indent=2, sort_keys=True))
+    return 0 if plan.status == "ready_for_export" else 3
+
+
+
+
+def command_export_from_root(args: argparse.Namespace) -> int:
+    collection = load_collection_spec(
+        args.collection_spec,
+        args.collection_schema,
+    )
+    inventory = _load_json(args.state_inventory)
+    package, collected = create_encrypted_full_recovery_export(
+        target_root=args.target_root,
+        collection_spec=collection,
+        state_inventory=inventory,
+        external_adapters=BUILTIN_ADAPTERS,
+        recipient_public_key=_load_recovery_public(args.recovery_recipient_public_key),
+        recipient_key_id=args.recipient_key_id,
+        signer_private_key=_load_signer_private(args.signer_private_key),
+        signer_key_id=args.signer_key_id,
+    )
+    output = write_recovery_package_atomic(
+        package,
+        output=args.output,
+    )
+    print(json.dumps(
+        {
+            "status": "exported",
+            "output": str(output),
+            "source_deployment_identity_sha256": (
+                collected.source_deployment_identity_sha256
+            ),
+            "payload_count": len(collected.payloads),
+            "metadata_only_count": len(collected.metadata_only),
+            "optional_missing": list(collected.optional_missing),
+            "external_adapters_used": list(collected.external_adapters_used),
+            "plaintext_secret_values_emitted": False,
+        },
+        indent=2,
+        sort_keys=True,
+    ))
+    return 0
 
 
 def _restore_inputs(args: argparse.Namespace):
@@ -141,6 +227,55 @@ def build_parser() -> argparse.ArgumentParser:
     validate_parser.set_defaults(func=command_validate)
 
     repo = _repo_root()
+
+    export_parser = sub.add_parser(
+        "plan-export",
+        help="plan a non-production Full Recovery Export without reading secret values",
+    )
+    export_parser.add_argument("--target-root", required=True)
+    export_parser.add_argument(
+        "--collection-spec",
+        default=str(repo / "config/full-recovery-collection.v1.json"),
+    )
+    export_parser.add_argument(
+        "--collection-schema",
+        default=str(repo / "config/schemas/full-recovery-collection.schema.json"),
+    )
+    export_parser.add_argument(
+        "--state-inventory",
+        default=str(repo / "config/recovery-state-inventory.v1.json"),
+    )
+    export_parser.add_argument(
+        "--available-adapter",
+        action="append",
+        default=[],
+    )
+    export_parser.set_defaults(func=command_plan_export)
+
+    export_run = sub.add_parser(
+        "export-from-root",
+        help="create an encrypted Full Recovery Export from a non-live Jason root",
+    )
+    export_run.add_argument("--target-root", required=True)
+    export_run.add_argument(
+        "--collection-spec",
+        default=str(repo / "config/full-recovery-collection.v1.json"),
+    )
+    export_run.add_argument(
+        "--collection-schema",
+        default=str(repo / "config/schemas/full-recovery-collection.schema.json"),
+    )
+    export_run.add_argument(
+        "--state-inventory",
+        default=str(repo / "config/recovery-state-inventory.v1.json"),
+    )
+    export_run.add_argument("--recovery-recipient-public-key", required=True)
+    export_run.add_argument("--recipient-key-id", required=True)
+    export_run.add_argument("--signer-private-key", required=True)
+    export_run.add_argument("--signer-key-id", required=True)
+    export_run.add_argument("--output", required=True)
+    export_run.set_defaults(func=command_export_from_root)
+
     for name, handler, help_text in (
         ("plan-restore", command_plan_restore, "validate and plan a non-production restore"),
         ("restore-to-root", command_restore_to_root, "apply a validated restore to a non-live target root"),

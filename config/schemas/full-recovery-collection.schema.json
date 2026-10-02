@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jason.local/schemas/full-recovery-collection.schema.json",
+  "title": "Jason Full Recovery Collection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "sources"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "state_class",
+          "strategy",
+          "required"
+        ],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "state_class": { "type": "string", "minLength": 1 },
+          "strategy": {
+            "enum": [
+              "file",
+              "sqlite_backup",
+              "directory_files",
+              "metadata_only",
+              "external_adapter"
+            ]
+          },
+          "required": { "type": "boolean" },
+          "source_relative_path": { "type": "string" },
+          "restore_relative_path": { "type": "string" },
+          "adapter": { "type": "string" },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": ["string", "number", "boolean", "null"]
+            }
+          }
+        }
+      }
+    }
+  }
+}

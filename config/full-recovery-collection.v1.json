@@ -1,0 +1,123 @@
+{
+  "schema_version": "1.0",
+  "sources": [
+    {
+      "id": "deployment-descriptor",
+      "state_class": "deployment-configuration",
+      "strategy": "file",
+      "required": true,
+      "source_relative_path": "etc/jason/deployment.json",
+      "restore_relative_path": "etc/jason/deployment.json"
+    },
+    {
+      "id": "msp-configuration",
+      "state_class": "deployment-configuration",
+      "strategy": "file",
+      "required": true,
+      "source_relative_path": "etc/jason/msp-configuration.json",
+      "restore_relative_path": "etc/jason/msp-configuration.json"
+    },
+    {
+      "id": "msp-policy",
+      "state_class": "msp-policy",
+      "strategy": "file",
+      "required": true,
+      "source_relative_path": "etc/jason/msp-policy.json",
+      "restore_relative_path": "etc/jason/msp-policy.json"
+    },
+    {
+      "id": "deployment-manifest",
+      "state_class": "deployment-configuration",
+      "strategy": "file",
+      "required": true,
+      "source_relative_path": "var/lib/jason/deployment-manifest.json",
+      "restore_relative_path": "var/lib/jason/deployment-manifest.json"
+    },
+    {
+      "id": "identity-authority",
+      "state_class": "authority-and-identity",
+      "strategy": "sqlite_backup",
+      "required": true,
+      "source_relative_path": "var/lib/jason/authority/authority.sqlite3",
+      "restore_relative_path": "var/lib/jason/authority/authority.sqlite3"
+    },
+    {
+      "id": "client-boundaries",
+      "state_class": "provider-client-mappings",
+      "strategy": "sqlite_backup",
+      "required": true,
+      "source_relative_path": "var/lib/jason/authority/client-boundaries.sqlite3",
+      "restore_relative_path": "var/lib/jason/authority/client-boundaries.sqlite3"
+    },
+    {
+      "id": "orchestration-events",
+      "state_class": "audit-and-orchestration",
+      "strategy": "sqlite_backup",
+      "required": true,
+      "source_relative_path": "var/lib/jason/openclaw/orchestration-events.sqlite3",
+      "restore_relative_path": "var/lib/jason/openclaw/orchestration-events.sqlite3"
+    },
+    {
+      "id": "approval-continuations",
+      "state_class": "workflow-state",
+      "strategy": "sqlite_backup",
+      "required": true,
+      "source_relative_path": "var/lib/jason/openclaw/approval-continuations.sqlite3",
+      "restore_relative_path": "var/lib/jason/openclaw/approval-continuations.sqlite3"
+    },
+    {
+      "id": "playbook-state",
+      "state_class": "workflow-state",
+      "strategy": "directory_files",
+      "required": false,
+      "source_relative_path": "var/lib/jason/playbooks",
+      "restore_relative_path": "var/lib/jason/playbooks"
+    },
+    {
+      "id": "procurement-state",
+      "state_class": "business-operational-state",
+      "strategy": "directory_files",
+      "required": false,
+      "source_relative_path": "var/lib/jason/openclaw/procurement",
+      "restore_relative_path": "var/lib/jason/openclaw/procurement"
+    },
+    {
+      "id": "resolution-memory",
+      "state_class": "business-operational-state",
+      "strategy": "directory_files",
+      "required": false,
+      "source_relative_path": "var/lib/jason/resolution-memory",
+      "restore_relative_path": "var/lib/jason/resolution-memory"
+    },
+    {
+      "id": "provider-secrets",
+      "state_class": "provider-secrets",
+      "strategy": "external_adapter",
+      "required": true,
+      "adapter": "governed_secret_export"
+    },
+    {
+      "id": "signing-key-material",
+      "state_class": "signing-and-recovery-keys",
+      "strategy": "external_adapter",
+      "required": true,
+      "adapter": "governed_key_export"
+    },
+    {
+      "id": "kfs-postgresql",
+      "state_class": "business-operational-state",
+      "strategy": "external_adapter",
+      "required": false,
+      "adapter": "kfs_postgresql_backup"
+    },
+    {
+      "id": "machine-bound-identity",
+      "state_class": "host-bound-identity",
+      "strategy": "metadata_only",
+      "required": false,
+      "metadata": {
+        "reenrollment_required": true
+      }
+    }
+  ]
+}

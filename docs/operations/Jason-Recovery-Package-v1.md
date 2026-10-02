@@ -85,3 +85,83 @@ plan-restore decrypts the package in memory, validates the internal recovery-sta
 restore-to-root repeats the same validation and applies only a ready_for_restore plan to a non-live target root. It refuses blocked and re-enrollment-required plans before creating restored state.
 
 Restore output reports state classes, target paths, hashes, and status but never prints recovered secret contents.
+
+## Full Recovery Export collection
+
+The recovery work now includes a collection contract for building a Full Recovery Export from a non-production Jason root.
+
+Collection strategies are explicit:
+
+- file: collect a declared regular file;
+- sqlite_backup: create a SQLite-consistent snapshot using the SQLite backup API and verify integrity;
+- directory_files: walk a declared durable directory while rejecting symlinks;
+- metadata_only: record reconstruction/re-enrollment metadata without copying unsafe state;
+- external_adapter: require a governed provider-native exporter for state that cannot be safely copied as files.
+
+Required local state or required adapters fail closed when unavailable. Optional state is recorded as missing rather than silently treated as present.
+
+The default v1 collection contract includes configuration, policy, Deployment Manifest, authority/client-boundary/orchestration/approval-continuation SQLite state, optional playbook/business state, and explicit required adapters for governed provider secrets and signing/recovery key material.
+
+The recovery CLI adds plan-export. This command validates local recovery sources and adapter availability without reading or printing secret values.
+
+A synthetic round-trip acceptance now proves:
+
+source Jason root
+→ consistent state collection
+→ governed secret/key adapter payloads
+→ encrypted signed package
+→ decrypt
+→ recovery plan
+→ explicit machine re-enrollment completion
+→ restore to clean root
+
+The encrypted package file is written with mode 0600 and contains no plaintext secret or signing-key content.
+
+## Built-in OpenBao recovery adapters
+
+The Full Recovery Export now consumes Jason's existing governed OpenBao recovery model rather than enumerating provider secret values.
+
+The governed secret adapter:
+
+- selects the newest declared OpenBao Raft snapshot;
+- requires the snapshot and checksum sidecar to be private regular files;
+- verifies the snapshot SHA-256 before inclusion;
+- places the snapshot and checksum only inside the encrypted recovery package.
+
+The governed key adapter:
+
+- requires the protected OpenBao initialization artifact to have private permissions;
+- validates the recorded Shamir recovery structure without printing any share or token;
+- packages the protected initialization artifact only inside the encrypted recovery package;
+- includes trusted-key registry/material from the canonical Jason trusted-key directory when present.
+
+The recovery CLI now exposes export-from-root for non-live roots. The command requires an X25519 recovery-recipient public key and Ed25519 signer private key, writes the resulting package atomically with mode 0600, and emits only non-secret summary metadata.
+
+The implementation still refuses export-from-root when target-root is the live filesystem root. Production export activation remains a separate exact-plan Owner-approved operation.
+
+## KFS PostgreSQL native recovery
+
+KFS history is recovered through PostgreSQL-native artifacts rather than by copying the live PostgreSQL data directory.
+
+The KFS backup helper:
+
+- uses pg_dump custom format;
+- uses PGPASSFILE so the database password is never placed on the command line;
+- uses --no-owner and --no-acl for portability;
+- verifies the artifact with pg_restore --list before accepting it;
+- writes the dump and receipt with private permissions;
+- records SHA-256, size, database, host, port, user, format, and verified status;
+- refuses the live filesystem root in the non-production implementation.
+
+The Full Recovery Export built-in KFS adapter includes only a verified dump whose digest and size match the receipt.
+
+The matching restore helper:
+
+- requires explicit candidate database-restore authorization;
+- requires the target host/database/user/port to match the backup receipt;
+- verifies the dump again with pg_restore --list;
+- restores with --single-transaction, --clean, --if-exists, --no-owner, --no-acl, and --exit-on-error;
+- uses PGPASSFILE and never emits the password value;
+- refuses the live filesystem root.
+
+If no KFS backup artifact exists, the v1 collection records KFS as optional-missing rather than copying PostgreSQL volume files.

@@ -10,6 +10,7 @@ import pytest
 from tools.full_recovery_restore import (
     INTERNAL_MANIFEST_MEMBER,
     RecoveryRestoreError,
+    acknowledge_reenrollment,
     apply_recovery_restore_plan,
     assemble_recovery_members,
     plan_recovery_restore,
@@ -227,4 +228,51 @@ def test_live_root_is_not_a_supported_restore_target():
             payload_manifest_schema=schema(),
             target_root="/",
             expected_source_deployment_identity_sha256=SOURCE_ID,
+        )
+
+
+def test_reenrollment_acknowledgement_clears_only_named_reenrollment_blockers(tmp_path):
+    members = assemble_recovery_members(
+        source_deployment_identity_sha256=SOURCE_ID,
+        payloads=(),
+        metadata_only=(
+            ("host-bound-identity", {"identity": "synthetic-tpm-registration"}),
+        ),
+    )
+    plan = plan_recovery_restore(
+        decrypted_members=members,
+        state_inventory=inventory(),
+        payload_manifest_schema=schema(),
+        target_root=tmp_path / "restored",
+        expected_source_deployment_identity_sha256=SOURCE_ID,
+    )
+    assert plan.status == "blocked_for_reenrollment"
+    ready = acknowledge_reenrollment(
+        plan=plan,
+        completed_state_classes=("host-bound-identity",),
+    )
+    assert ready.status == "ready_for_restore"
+    assert ready.blockers == ()
+    assert all(action.action != "reenroll" for action in ready.actions)
+
+
+def test_reenrollment_acknowledgement_rejects_unrequested_state_class(tmp_path):
+    members = assemble_recovery_members(
+        source_deployment_identity_sha256=SOURCE_ID,
+        payloads=(),
+        metadata_only=(
+            ("host-bound-identity", {"identity": "synthetic-tpm-registration"}),
+        ),
+    )
+    plan = plan_recovery_restore(
+        decrypted_members=members,
+        state_inventory=inventory(),
+        payload_manifest_schema=schema(),
+        target_root=tmp_path / "restored",
+        expected_source_deployment_identity_sha256=SOURCE_ID,
+    )
+    with pytest.raises(RecoveryRestoreError, match="not required"):
+        acknowledge_reenrollment(
+            plan=plan,
+            completed_state_classes=("provider-secrets",),
         )
