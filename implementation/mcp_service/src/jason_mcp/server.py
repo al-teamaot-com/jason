@@ -3286,6 +3286,51 @@ def _canonicalize_governed_action_arguments(
             title=title,
         )
 
+    if capability_name == "service.product.vendor.create":
+        if "payload" in raw:
+            if set(raw) != {"payload"} or not isinstance(raw.get("payload"), Mapping):
+                raise ValueError("AUTOTASK_PRODUCT_VENDOR_CREATE_ARGUMENTS_INVALID")
+            payload_input = dict(raw["payload"])
+        else:
+            payload_input = raw
+        allowed = {
+            "productID", "vendorID", "isActive", "isDefault",
+            "vendorCost", "vendorPartNumber",
+        }
+        unknown = set(payload_input) - allowed
+        if unknown:
+            raise ValueError(
+                "AUTOTASK_PRODUCT_VENDOR_CREATE_UNSUPPORTED_ARGUMENTS:"
+                + ",".join(sorted(unknown))
+            )
+        payload = dict(payload_input)
+        for key in ("productID", "vendorID"):
+            value = payload.get(key)
+            if isinstance(value, bool):
+                raise ValueError(f"AUTOTASK_PRODUCT_VENDOR_CREATE_{key.upper()}_REQUIRED")
+            try:
+                value = int(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"AUTOTASK_PRODUCT_VENDOR_CREATE_{key.upper()}_REQUIRED") from exc
+            if value < 1:
+                raise ValueError(f"AUTOTASK_PRODUCT_VENDOR_CREATE_{key.upper()}_REQUIRED")
+            payload[key] = value
+        if "vendorCost" in payload:
+            try:
+                payload["vendorCost"] = float(payload["vendorCost"])
+            except (TypeError, ValueError) as exc:
+                raise ValueError("AUTOTASK_PRODUCT_VENDOR_CREATE_VENDORCOST_INVALID") from exc
+            if payload["vendorCost"] < 0:
+                raise ValueError("AUTOTASK_PRODUCT_VENDOR_CREATE_VENDORCOST_INVALID")
+        if "vendorPartNumber" in payload:
+            payload["vendorPartNumber"] = str(payload["vendorPartNumber"]).strip()
+            if len(payload["vendorPartNumber"]) > 100:
+                raise ValueError("AUTOTASK_PRODUCT_VENDOR_CREATE_PART_NUMBER_INVALID")
+        for key in ("isActive", "isDefault"):
+            if key in payload and not isinstance(payload[key], bool):
+                raise ValueError(f"AUTOTASK_PRODUCT_VENDOR_CREATE_{key.upper()}_INVALID")
+        return {"payload": payload}
+
     if capability_name == "endpoint.alert.resolve":
         allowed = {"alert_uid", "device_uid", "resource_id"}
         unknown = set(raw) - allowed
