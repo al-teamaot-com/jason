@@ -51,7 +51,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                     state_root=state_root,
                     candidate_sha=SHA_A,
                     rollback_sha=SHA_B,
-                    change_class="feature",
+                    change_class="release_blocker",
                     owner_approved=False,
                 )
             self.assertEqual(record["state"], "release_candidate")
@@ -74,7 +74,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                         state_root=Path(td),
                         candidate_sha=SHA_A,
                         rollback_sha=SHA_B,
-                        change_class="feature",
+                        change_class="release_blocker",
                         owner_approved=False,
                     )
 
