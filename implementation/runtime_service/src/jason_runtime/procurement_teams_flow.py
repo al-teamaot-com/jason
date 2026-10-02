@@ -729,6 +729,8 @@ class ProcurementWorkerExecutor:
                 "procurement_submission_id": str(submission["submission_id"]),
                 "procurement_digest": str(submission["digest"]),
                 "submitted_by": str(submission["requester_principal_id"]),
+                "submitted_email": str(submission["requester_email"]).strip().casefold(),
+                "submitted_microsoft_object_id": str(submission["requester_microsoft_object_id"]).strip(),
             },
             policy_ids=(PROCUREMENT_POLICY_ID,),
             authority_context_id=decision.execution_context.context_id,
