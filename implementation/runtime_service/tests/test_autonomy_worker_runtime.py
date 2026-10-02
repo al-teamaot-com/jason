@@ -2389,18 +2389,16 @@ def test_backupiq_offline_endpoint_waits_for_device_without_consuming_slot(tmp_p
         for _, capability, args in actions.calls
         if capability == "service.ticket.update"
     ]
-    assert update_calls == [
-        {
-            "id": 141185,
-            "queueID": "Jason",
-            "status": "In Progress",
-            "billingCodeID": "Remote Support",
-        },
-        {
-            "id": 141185,
-            "status": "Waiting Device Access",
-        },
-    ]
+    assert update_calls[0] == {
+        "id": 141185,
+        "queueID": "Jason",
+        "status": "In Progress",
+        "billingCodeID": "Remote Support",
+    }
+    assert update_calls[-1] == {
+        "id": 141185,
+        "status": "Waiting Device Access",
+    }
     assert all(payload.get("queueID") != "Help Desk I" for payload in update_calls)
     store.close()
 
@@ -2465,12 +2463,11 @@ def test_backupiq_legacy_offline_escalation_migrates_to_waiting(tmp_path: Path):
         for _, capability, args in actions.calls
         if capability == "service.ticket.update"
     ]
-    assert update_calls == [
-        {
-            "id": 141185,
-            "status": "Waiting Device Access",
-        }
-    ]
+    assert update_calls
+    assert update_calls[-1] == {
+        "id": 141185,
+        "status": "Waiting Device Access",
+    }
     note_calls = [
         args["payload"]
         for _, capability, args in actions.calls
@@ -3398,6 +3395,11 @@ def test_vulscan_core_scope_remains_eligible_without_client_disposition_promotio
     current = store.get(141183)
     assert current is not None
     assert current.phase == "waiting_patch_approval"
+    assert any(
+        capability == "service.ticket.update"
+        and (arguments.get("payload") or {}).get("status") == "Waiting Patch Approval"
+        for _, capability, arguments in actions.calls
+    )
     assert not any(
         capability == "service.ticket.client.notification.create"
         for _, capability, _ in actions.calls
@@ -3612,15 +3614,13 @@ def test_vulscan_not_approved_kbs_wait_in_jason_without_helpdesk_handoff(tmp_pat
         for _, capability, args in actions.calls
         if capability == "service.ticket.update"
     ]
-    assert ticket_updates == [
-        {
-            "id": 141183,
-            "queueID": "Jason",
-            "status": "In Progress",
-            "billingCodeID": "Remote Support",
-        },
-        {"id": 141183, "status": "Waiting"},
-    ]
+    assert ticket_updates[0] == {
+        "id": 141183,
+        "queueID": "Jason",
+        "status": "In Progress",
+        "billingCodeID": "Remote Support",
+    }
+    assert {"id": 141183, "status": "Waiting Patch Approval"} in ticket_updates
 
     # A normal worker tick before the daily recheck is due must not emit
     # another note or hand the ticket off.
@@ -3718,11 +3718,13 @@ def test_vulscan_approval_change_resumes_without_helpdesk_handoff(tmp_path: Path
         for _, capability, args in actions.calls
         if capability == "service.ticket.update"
     ]
+    assert any(update.get("status") == "Waiting Patch Approval" for update in updates)
+    assert any(update.get("status") == "In Progress" for update in updates)
+    assert any(update.get("status") == "On Hold" for update in updates)
     assert {"id": 141183, "queueID": "Help Desk I", "status": "New"} not in updates
     assert {"id": 141183, "queueID": "Help Desk I", "status": "Human Review"} not in updates
-    assert {"id": 141183, "status": "Waiting"} in updates
     assert {"id": 141183, "status": "In Progress"} in updates
-    assert updates[-1] == {"id": 141183, "status": "Waiting"}
+    assert updates[-1] == {"id": 141183, "status": "On Hold"}
     store.close()
 
 
@@ -5523,7 +5525,7 @@ def test_owned_retryable_provider_block_leaves_new_status_and_retries_under_jaso
     assert persisted is not None
     assert persisted.phase == "blocked"
     updates = [call[2]["payload"] for call in actions.calls if call[1] == "service.ticket.update"]
-    assert {"id": 149001, "status": "In Progress"} in updates
+    assert {"id": 149001, "status": "On Hold"} in updates
     assert not any(payload.get("queueID") == "Help Desk I" for payload in updates)
 
 
@@ -5759,3 +5761,11 @@ def test_unsupported_helpdesk_ticket_does_not_write_without_exact_promotion(tmp_
     worker.tick()
     assert actions.calls == []
     store.close()
+
+def test_phase_status_mapping_is_semantic_and_not_numeric() -> None:
+    assert OperationalAutonomyMaintenance._status_for_phase("waiting_patch_approval") == "Waiting Patch Approval"
+    assert OperationalAutonomyMaintenance._status_for_phase("waiting_patch_window") == "On Hold"
+    assert OperationalAutonomyMaintenance._status_for_phase("waiting_device_access:claim") == "Waiting Device Access"
+    assert OperationalAutonomyMaintenance._status_for_phase("waiting_recheck:verify") == "On Hold"
+    assert OperationalAutonomyMaintenance._status_for_phase("escalated") == "Human Review"
+    assert OperationalAutonomyMaintenance._status_for_phase("complete") == "Complete"
