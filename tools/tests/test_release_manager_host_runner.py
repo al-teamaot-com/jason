@@ -141,6 +141,14 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         )
         self.assertNotIn("/home/al/projects/jason", service)
 
+    def test_preprod_state_clone_uses_live_container_not_host_cp(self):
+        source = (ROOT / "tools" / "release_manager_host_runner.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"docker",\n            "cp"', source)
+        self.assertIn('f"jason-runtime:{container_path}/."', source)
+        self.assertNotIn('run(["cp", "-a", source', source)
+
     def test_exact_sha_rejects_symbolic_ref(self):
         with self.assertRaises(runner.ReleaseManagerError):
             runner.exact_sha("main", "candidate_sha")
