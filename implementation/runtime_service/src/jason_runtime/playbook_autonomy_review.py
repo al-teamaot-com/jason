@@ -28,7 +28,7 @@ from autonomous_remediation.playbook_autonomy_scope import (
     registered_autonomy_scope,
 )
 from connectors.microsoft_graph.teams_approval_channel import render_approval_card
-from connectors.src.jason_connectors.approval_requests import (
+from orchestrator.approval_requests import (
     ApprovalDecision,
     ApprovalRequest,
     ApprovalRequestService,
