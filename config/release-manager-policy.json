@@ -1,0 +1,79 @@
+{
+  "schema_version": "1.0",
+  "enabled": true,
+  "mode": "non_production_only",
+  "production_transition_enabled": false,
+  "preproduction": {
+    "configured": false,
+    "environment_name": "jason-preprod",
+    "automatic_deploy": false,
+    "require_exact_candidate_sha": true,
+    "require_identical_artifact_digest": true
+  },
+  "priority": {
+    "order": [
+      "production_incident",
+      "support",
+      "release_blocker",
+      "production_eligible",
+      "todo",
+      "cleanup"
+    ],
+    "support_first": true,
+    "max_active_support_repairs": 2,
+    "todo_may_start_when_support_capacity_available": false,
+    "todo_may_continue_when_support_capacity_full": true
+  },
+  "states": [
+    "requested",
+    "development",
+    "dev_verified",
+    "release_candidate",
+    "preproduction",
+    "preprod_verified",
+    "production_eligible",
+    "production",
+    "production_verified",
+    "closed",
+    "blocked",
+    "failed",
+    "rolled_back"
+  ],
+  "transitions": {
+    "requested": ["development", "blocked"],
+    "development": ["dev_verified", "blocked", "failed"],
+    "dev_verified": ["release_candidate", "development", "blocked"],
+    "release_candidate": ["preproduction", "development", "blocked"],
+    "preproduction": ["preprod_verified", "development", "blocked", "failed"],
+    "preprod_verified": ["production_eligible", "development", "blocked"],
+    "production_eligible": ["production", "development", "blocked"],
+    "production": ["production_verified", "rolled_back", "failed"],
+    "production_verified": ["closed", "rolled_back"],
+    "blocked": ["development", "requested"],
+    "failed": ["development", "rolled_back"],
+    "rolled_back": ["development", "closed"],
+    "closed": []
+  },
+  "required_development_evidence": [
+    "source_sha",
+    "tests_passed",
+    "required_checks_passed"
+  ],
+  "required_release_candidate_evidence": [
+    "candidate_sha",
+    "artifact_digest",
+    "immutable"
+  ],
+  "required_preproduction_evidence": [
+    "deployed_sha",
+    "artifact_digest",
+    "acceptance_passed",
+    "failure_path_tests_passed",
+    "rollback_readiness_passed"
+  ],
+  "support_impact": {
+    "required_before_production_eligible": true,
+    "blocking_items_must_be_empty": true,
+    "self_support_item_may_remain_open_until_production_verification": true
+  }
+}
