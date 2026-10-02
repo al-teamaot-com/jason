@@ -55,5 +55,15 @@
     "new_duplicate_provider_plumbing_fails_ci": true,
     "existing_legacy_paths_are_migrated_incrementally": true,
     "provider_specific_business_decisions_in_callers_are_forbidden": true
-  }
+  },
+  "forbidden_runtime_module_prefixes_for_callers": [
+    "autotask_",
+    "datto_",
+    "microsoft_",
+    "dnsfilter_",
+    "kfs_",
+    "teams_approval_delivery",
+    "teams_message_send",
+    "provider_read_"
+  ]
 }
