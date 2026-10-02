@@ -8,7 +8,9 @@
     "implementation/runtime_service/src/jason_runtime/*analysis*.py",
     "implementation/runtime_service/src/jason_runtime/*worker*.py",
     "implementation/runtime_service/src/jason_runtime/*maintenance*.py",
-    "implementation/runtime_service/src/jason_runtime/playbook_*.py"
+    "implementation/runtime_service/src/jason_runtime/playbook_*.py",
+    "implementation/runtime_service/src/jason_runtime/*notification*.py",
+    "implementation/runtime_service/src/jason_runtime/*reconciliation*.py"
   ],
   "provider_boundary_path_globs": [
     "implementation/connectors/**/*.py",
@@ -20,7 +22,8 @@
     "implementation/runtime_service/src/jason_runtime/teams_message_send.py",
     "implementation/runtime_service/src/jason_runtime/provider_read_*.py",
     "implementation/orchestrator/*capability_catalog.py",
-    "implementation/orchestrator/connector_invoker.py"
+    "implementation/orchestrator/connector_invoker.py",
+    "implementation/runtime_service/src/jason_runtime/teams_*delivery.py"
   ],
   "forbidden_import_prefixes_for_callers": [
     "connectors.",
