@@ -5624,3 +5624,102 @@ def test_phase_status_mapping_is_semantic_and_not_numeric() -> None:
     assert OperationalAutonomyMaintenance._status_for_phase("waiting_recheck:verify") == "On Hold"
     assert OperationalAutonomyMaintenance._status_for_phase("escalated") == "Human Review"
     assert OperationalAutonomyMaintenance._status_for_phase("complete") == "Complete"
+
+
+def test_monitoring_alert_nonretryable_block_handoffs_to_human_review(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    work = OperationalWork(
+        ticket_id=140933,
+        ticket_number="T20260925.9999",
+        title="Vulnerability Detected by VulScan - Missing Critical Security Patch",
+        playbook_id="vulscan_missing_patch",
+        source_queue="Monitoring Alert",
+        company_id=507,
+        configuration_item_id=0,
+        device_uid="",
+        hostname="",
+        phase="blocked",
+        last_reason=(
+            "configuration item id is missing and endpoint correlation remains "
+            "ambiguous after multi-signal scoring"
+        ),
+    )
+
+    store.put(work)
+    worker._synchronize_blocked_ticket_lifecycle(work, candidate())
+
+    current = store.get(140933)
+    assert current is not None
+    assert current.phase == "escalated"
+    updates = [
+        arguments["payload"]
+        for _, capability, arguments in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert {
+        "id": 140933,
+        "queueID": "Help Desk I",
+        "status": "Human Review",
+    } in updates
+    assert any(
+        capability == "service.ticket.note.create"
+        for _, capability, _ in actions.calls
+    )
+    store.close()
+
+
+def test_monitoring_alert_retryable_block_uses_on_hold_without_handoff(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    work = OperationalWork(
+        ticket_id=140933,
+        ticket_number="T20260925.9999",
+        title="[Monitor] Antivirus status issue",
+        playbook_id="datto_edr_av",
+        source_queue="Monitoring Alert",
+        company_id=507,
+        configuration_item_id=1583,
+        device_uid="device-uid-1",
+        hostname="PC-1",
+        phase="blocked",
+        last_reason="PROVIDER_HTTP_STATUS_503",
+    )
+
+    store.put(work)
+    worker._synchronize_blocked_ticket_lifecycle(work, candidate())
+
+    current = store.get(140933)
+    assert current is not None
+    assert current.phase == "blocked"
+    updates = [
+        arguments["payload"]
+        for _, capability, arguments in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert {"id": 140933, "status": "On Hold"} in updates
+    assert not any(
+        update.get("queueID") == "Help Desk I"
+        for update in updates
+    )
+    store.close()
