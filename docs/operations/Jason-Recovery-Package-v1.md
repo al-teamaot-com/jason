@@ -27,3 +27,15 @@ The library supports:
 This foundation does not yet read Production state, export OpenBao, stream large databases, manage Owner recovery-key custody, or restore onto a live host.
 
 Those operations remain blocked until state classification, consistency, key-custody, and restore planning are complete and separately validated.
+
+## Inspection and validation CLI
+
+The non-production foundation now includes:
+
+- python tools/jason_recovery.py inspect PACKAGE
+- python tools/jason_recovery.py validate PACKAGE --signer-public-key SIGNER_PEM
+- python tools/jason_recovery.py validate PACKAGE --signer-public-key SIGNER_PEM --recovery-private-key RECOVERY_PEM
+
+Inspection exposes only package metadata. Signature validation does not require the recovery private key. Optional decryptability validation decrypts in memory to prove key/package compatibility but does not print recovered member contents.
+
+Export-from-live-state and restore remain intentionally unavailable.
