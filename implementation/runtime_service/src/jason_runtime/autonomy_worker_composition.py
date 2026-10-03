@@ -47,6 +47,7 @@ def build_autonomy_worker_maintenance(
     owned_autotask_resource_ids: Iterable[int] = (),
     max_active_work_items: int = 2,
     interval_seconds: int = 60,
+    zero_eligible_recheck_seconds: int = 900,
     targeted_wake_retry_seconds: int = 300,
     audit=None,
     completion_notifier=None,
@@ -108,6 +109,7 @@ def build_autonomy_worker_maintenance(
         promotion_store=promotion_store,
         max_active_work_items=max_active_work_items,
         interval_seconds=interval_seconds,
+        zero_eligible_recheck_seconds=zero_eligible_recheck_seconds,
         audit=audit,
         completion_notifier=completion_notifier,
     )

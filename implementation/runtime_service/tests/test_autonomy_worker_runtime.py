@@ -5723,3 +5723,59 @@ def test_monitoring_alert_retryable_block_uses_on_hold_without_handoff(tmp_path:
         for update in updates
     )
     store.close()
+
+
+class EmptyCountingQueueSource:
+    def __init__(self):
+        self.calls = 0
+
+    def reconcile_candidates(self):
+        self.calls += 1
+        return ()
+
+
+def test_zero_active_zero_eligible_backs_off_full_scan_for_15_minutes(tmp_path: Path):
+    source = EmptyCountingQueueSource()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    clock = iter((0.0, 60.0, 899.0, 900.0)).__next__
+    worker = OperationalAutonomyMaintenance(
+        queue_source=source,
+        reads=Reads(),
+        actions=Actions(),
+        store=store,
+        promotion_store=PromotionStore(),
+        interval_seconds=60,
+        zero_eligible_recheck_seconds=900,
+        monotonic=clock,
+    )
+
+    worker.tick()
+    worker.tick()
+    worker.tick()
+    worker.tick()
+
+    assert source.calls == 2
+    store.close()
+
+
+def test_targeted_reconcile_bypasses_zero_eligible_idle_backoff(tmp_path: Path):
+    source = EmptyCountingQueueSource()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    clock = iter((0.0, 60.0)).__next__
+    worker = OperationalAutonomyMaintenance(
+        queue_source=source,
+        reads=Reads(),
+        actions=Actions(),
+        store=store,
+        promotion_store=PromotionStore(),
+        interval_seconds=60,
+        zero_eligible_recheck_seconds=900,
+        monotonic=clock,
+    )
+
+    worker.tick()
+    worker.request_reconcile("targeted_wake:new_ticket")
+    worker.tick()
+
+    assert source.calls == 2
+    store.close()
