@@ -28,6 +28,7 @@ class TicketDiscoveryTrace:
     unique_candidates: int = 0
     duplicate_items: int = 0
     assigned_elsewhere: int = 0
+    excluded_ticket_source: int = 0
     queue_pages: Mapping[str, int] = field(default_factory=dict)
 
 
@@ -55,6 +56,7 @@ class AutotaskQueueDiscoveryConfig:
     assessment_include_assigned: bool = False
     use_open_status_search: bool = False
     owned_resource_ids: tuple[int, ...] = ()
+    excluded_ticket_source_labels: tuple[str, ...] = ("Recurring",)
 
     def __post_init__(self) -> None:
         if not 1 <= self.page_size <= 500:
@@ -74,6 +76,7 @@ class AutotaskQueueSource:
         self._priority_scores: dict[int, int] | None = None
         self._critical_priority_ids: set[int] | None = None
         self._status_labels_by_id: dict[int, str] | None = None
+        self._ticket_source_ids: set[int] | None = None
         self.last_trace = TicketDiscoveryTrace()
 
     def reconcile_candidates(self) -> Sequence[QueueCandidate]:
@@ -88,6 +91,7 @@ class AutotaskQueueSource:
             "provider_items": 0,
             "duplicate_items": 0,
             "assigned_elsewhere": 0,
+            "excluded_ticket_source": 0,
             "queue_pages": {},
         }
         for queue_label in self.config.owned_queue_labels:
@@ -126,6 +130,7 @@ class AutotaskQueueSource:
             unique_candidates=len(candidates),
             duplicate_items=int(trace["duplicate_items"]),
             assigned_elsewhere=int(trace["assigned_elsewhere"]),
+            excluded_ticket_source=int(trace["excluded_ticket_source"]),
             queue_pages=dict(trace["queue_pages"]),
         )
         return tuple(candidates[key] for key in sorted(candidates, key=lambda value: int(value)))
@@ -160,6 +165,9 @@ class AutotaskQueueSource:
                 if not items:
                     break
                 for ticket in items:
+                    if self._is_excluded_ticket_source(ticket.get("source")):
+                        trace["excluded_ticket_source"] += 1
+                        continue
                     ticket_id = self._positive_int(ticket.get("id"), "ticket id")
                     assigned = self._assigned_resource_id(ticket.get("assignedResourceID"))
                     assigned_elsewhere = (
@@ -243,12 +251,14 @@ class AutotaskQueueSource:
         queue_field = by_name.get("queueID")
         priority_field = by_name.get("priority")
         status_field = by_name.get("status")
+        source_field = by_name.get("source")
         if (
             not isinstance(queue_field, Mapping)
             or not isinstance(priority_field, Mapping)
             or not isinstance(status_field, Mapping)
+            or not isinstance(source_field, Mapping)
         ):
-            raise ValueError("Autotask ticket queue/priority/status metadata is incomplete")
+            raise ValueError("Autotask ticket queue/priority/status/source metadata is incomplete")
 
         self._queue_ids = self._active_picklist_map(queue_field)
         self._priority_scores = self._priority_score_map(priority_field)
@@ -256,6 +266,19 @@ class AutotaskQueueSource:
         self._status_labels_by_id = {
             value: label for label, value in self._active_picklist_map(status_field).items()
         }
+        source_map = self._active_picklist_map(source_field)
+        missing = [label for label in self.config.excluded_ticket_source_labels if label not in source_map]
+        if missing:
+            raise ValueError("Autotask ticket source is missing or inactive: " + ", ".join(missing))
+        self._ticket_source_ids = {source_map[label] for label in self.config.excluded_ticket_source_labels}
+
+    def _is_excluded_ticket_source(self, value: Any) -> bool:
+        if not self.config.excluded_ticket_source_labels:
+            return False
+        assert self._ticket_source_ids is not None
+        if value is None or value == "":
+            return False
+        return self._positive_int(value, "ticket source") in self._ticket_source_ids
 
     def _required_queue_id(self, label: str) -> int:
         assert self._queue_ids is not None
