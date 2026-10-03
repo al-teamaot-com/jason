@@ -111,6 +111,65 @@ def test_safe_search_expands_model_phrase_and_pairs_test_with_source(tmp_path, m
     assert any(call[-1] == 'selected_gt_active_slots' for call in calls)
 
 
+def test_safe_search_pairs_src_package_source_with_project_level_test(tmp_path, monkeypatch):
+    source = tmp_path / 'implementation' / 'runtime_service' / 'src' / 'jason_runtime' / 'capability_lifecycle.py'
+    test = tmp_path / 'implementation' / 'runtime_service' / 'tests' / 'test_capability_lifecycle.py'
+    source.parent.mkdir(parents=True)
+    test.parent.mkdir(parents=True)
+    source.write_text('def retirement_eligible(): return True\n', encoding='utf-8')
+    test.write_text('def test_retirement_eligible(): pass\n', encoding='utf-8')
+
+    def fake_run(args, **kwargs):
+        if args[-1] == 'retirement_eligible':
+            return source.relative_to(tmp_path).as_posix()
+        return ''
+
+    monkeypatch.setattr(worker, 'run', fake_run)
+    excerpts = worker.safe_search(
+        tmp_path,
+        ['retirement_eligible'],
+        Gate(),
+        {'max_changed_lines': 800, 'max_changed_files': 25},
+    )
+    paths = [entry['path'] for entry in excerpts]
+    assert source.relative_to(tmp_path).as_posix() in paths
+    assert test.relative_to(tmp_path).as_posix() in paths
+
+
+def test_safe_search_pairs_same_directory_source_and_test(tmp_path, monkeypatch):
+    source = tmp_path / 'implementation' / 'autonomous_remediation' / 'autonomous_principal.py'
+    test = tmp_path / 'implementation' / 'autonomous_remediation' / 'test_autonomous_principal.py'
+    source.parent.mkdir(parents=True)
+    source.write_text('def retirement_evidence(): return True\n', encoding='utf-8')
+    test.write_text('def test_retirement_evidence(): pass\n', encoding='utf-8')
+
+    def fake_run(args, **kwargs):
+        if args[-1] == 'retirement_evidence':
+            return source.relative_to(tmp_path).as_posix()
+        return ''
+
+    monkeypatch.setattr(worker, 'run', fake_run)
+    excerpts = worker.safe_search(
+        tmp_path,
+        ['retirement_evidence'],
+        Gate(),
+        {'max_changed_lines': 800, 'max_changed_files': 25},
+    )
+    paths = [entry['path'] for entry in excerpts]
+    assert source.relative_to(tmp_path).as_posix() in paths
+    assert test.relative_to(tmp_path).as_posix() in paths
+
+
+def test_companion_source_paths_maps_project_level_test_layout():
+    companions = worker.companion_source_paths(
+        'implementation/runtime_service/src/jason_runtime/capability_lifecycle.py'
+    )
+    assert (
+        'implementation/runtime_service/tests/test_capability_lifecycle.py'
+        in companions
+    )
+
+
 def test_expanded_search_terms_are_bounded_and_preserve_identifiers():
     terms = ['selected_gt_active_slots selected_gt_eligible repair worker slot selection'] * 8
     expanded = worker.expanded_search_terms(terms)
