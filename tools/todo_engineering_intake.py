@@ -27,9 +27,9 @@ TODO_PATH = Path("docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md")
 SUPPORT_PATH = Path("SUPPORT.md")
 
 TODO_HEADING = re.compile(r"^###\s+(TODO-[A-Z]+-\d+)\s+—\s+(.+?)\s*$")
-FIELD = re.compile(r"^- \*\*(Priority|Status):\*\*\s*(.+?)\s*$")
+FIELD = re.compile(r"^- \*\*(Priority|Status|Autonomous engineering readiness):\*\*\s*(.+?)\s*$")
 ISSUE_TODO = re.compile(r"(?im)^\s*-\s*TODO item\s*:\s*(TODO-[A-Z]+-[0-9]+)\s*$")
-EXECUTABLE_STATUSES = ("planned", "in progress")
+EXECUTABLE_STATUS = "approved for autonomous engineering"
 PRIORITY = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}
 
 
@@ -68,12 +68,17 @@ class TodoItem:
     title: str
     priority: str
     status: str
+    readiness: str
     section: str
 
     @property
     def executable(self) -> bool:
-        status = self.status.casefold()
-        return any(status.startswith(value) for value in EXECUTABLE_STATUSES)
+        status = self.status.casefold().strip()
+        readiness = self.readiness.casefold().strip()
+        return (
+            status.startswith(EXECUTABLE_STATUS)
+            and readiness.startswith("approved")
+        )
 
 
 def parse_todo_sections(text: str) -> list[TodoItem]:
@@ -99,6 +104,7 @@ def parse_todo_sections(text: str) -> list[TodoItem]:
                 title=match.group(2).strip(),
                 priority=fields.get("priority", ""),
                 status=fields.get("status", ""),
+                readiness=fields.get("autonomous engineering readiness", ""),
                 section="\n".join(section_lines).strip(),
             )
         )
@@ -245,8 +251,9 @@ def issue_body(item: TodoItem) -> str:
 - TODO item: {item.item_id}
 - TODO priority: {item.priority}
 - TODO source status: {item.status}
+- TODO readiness: {item.readiness}
 - **Autonomous development:** owner-approved
-- Approval source: governed Project Jason TODO backlog policy
+- Approval source: governed Project Jason TODO readiness record
 - Development worker: jason-owner-approved-development-worker
 - Release path: Jason Release Manager required
 - Production deployment authority: none
