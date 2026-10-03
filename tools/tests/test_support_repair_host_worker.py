@@ -146,6 +146,7 @@ def test_companion_source_paths_maps_package_level_registry_test():
     )
     assert 'implementation/kernel/capabilities/service.py' in companions
     assert 'implementation/kernel/capabilities/contracts.py' in companions
+    assert 'implementation/kernel/capabilities/repository.py' in companions
 
 
 def test_safe_search_does_not_let_generic_term_exhaust_later_concepts(tmp_path, monkeypatch):

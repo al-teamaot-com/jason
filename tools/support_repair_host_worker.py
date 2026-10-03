@@ -344,6 +344,7 @@ def companion_source_paths(path: str) -> list[str]:
         # while implementation lives in <package>/service.py and contracts.py.
         add(project_root / source_stem / 'service.py')
         add(project_root / source_stem / 'contracts.py')
+        add(project_root / source_stem / 'repository.py')
         # Common Python package layout: project/tests/test_x.py maps to
         # project/src/<package>/x.py. Exact package resolution is completed by
         # bounded repository matching in safe_search.

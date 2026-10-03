@@ -75,3 +75,14 @@ def test_blocked_marker_excludes_issue():
     )
     assert module.APPROVAL.search(body)
     assert module.BLOCKED.search(body)
+
+
+def test_source_context_blocker_detects_missing_excerpt_context():
+    assert module.source_context_blocker(
+        'The supplied excerpts do not expose enough registry persistence and would require unseen code.'
+    )
+    assert module.source_context_blocker(
+        'Cannot form a complete, exact replacement without enough surrounding file context.'
+    )
+    assert not module.source_context_blocker('Owner approval is required for production deployment.')
+    assert not module.source_context_blocker('Provider credential is unavailable.')
