@@ -22,6 +22,7 @@ from kernel.identity_authority import IdentityAuthorityService
 from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
 
 from .autonomy_shadow_runtime import GovernedAutonomyReadPort
+from .ticket_split_runtime import SQLiteTicketSplitStore, TicketSplitExecutor
 from .autonomy_targeted_wake_runtime import (
     CompositeAutonomyMaintenance,
     TargetedWakeMaintenance,
@@ -100,6 +101,10 @@ def build_autonomy_worker_maintenance(
         orchestrator=orchestrator,
         promotion_store=promotion_store,
     )
+    ticket_splitter = TicketSplitExecutor(
+        actions=actions,
+        store=SQLiteTicketSplitStore(work_db.with_name("ticket-split.sqlite3")),
+    )
     worker = OperationalAutonomyMaintenance(
         queue_source=queue_source,
         reads=reads,
@@ -110,6 +115,7 @@ def build_autonomy_worker_maintenance(
         interval_seconds=interval_seconds,
         audit=audit,
         completion_notifier=completion_notifier,
+        ticket_splitter=ticket_splitter,
     )
     targeted_reads = GovernedAutonomyReadPort(
         request_factory=request_factory,

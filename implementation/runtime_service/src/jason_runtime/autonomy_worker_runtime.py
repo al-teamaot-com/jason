@@ -87,6 +87,7 @@ from .unexpected_shutdown_analysis import (
 )
 from .approved_client_messages import resolve_approved_client_message
 from .technical_notes import TechnicalNote, canonical_title, legacy_technical_note, render_technical_note
+from .ticket_split_runtime import TicketSplitRequest, TicketSplitTarget
 from autonomous_remediation.offline_ticket_augmentation import (
     SiteContextEvidence,
     SiteWitness,
@@ -177,6 +178,16 @@ VULSCAN_SCOPE = PlaybookScope(
     playbook_version="1.0.0",
     policy_id="playbook-autonomy:vulscan_missing_patch",
     required_action_capabilities=(
+        "service.ticket.note.create",
+        "service.ticket.update",
+    ),
+)
+VULSCAN_SPLIT_SCOPE = PlaybookScope(
+    playbook_id="vulscan_multi_device_split",
+    playbook_version="1.0.0",
+    policy_id="playbook-autonomy:vulscan_multi_device_split",
+    required_action_capabilities=(
+        "service.ticket.create",
         "service.ticket.note.create",
         "service.ticket.update",
     ),
@@ -827,6 +838,7 @@ class OperationalAutonomyMaintenance:
         monotonic: Callable[[], float] = time.monotonic,
         audit=None,
         completion_notifier=None,
+        ticket_splitter=None,
     ) -> None:
         if not 1 <= int(max_active_work_items) <= 20:
             raise ValueError("max_active_work_items must be between 1 and 20")
@@ -848,6 +860,7 @@ class OperationalAutonomyMaintenance:
         self.monotonic = monotonic
         self.audit = audit
         self.completion_notifier = completion_notifier
+        self.ticket_splitter = ticket_splitter
         self._next_due = 0.0
         self._resource_automation_cache: dict[int, bool] = {}
         self._ticket_status_cache: dict[int, str] = {}
@@ -2049,6 +2062,16 @@ class OperationalAutonomyMaintenance:
                 break
             candidate_evaluations += 1
             try:
+                if self._split_multi_device_vulscan(candidate, scope):
+                    admission_attempts += 1
+                    started += 1
+                    classifications[int(candidate.resource_id)] = (
+                        "complete",
+                        "multi_device_split_complete",
+                        candidate.source_version,
+                        True,
+                    )
+                    continue
                 work = self._admit(candidate, scope)
             except Exception as exc:
                 message = str(exc).casefold()
@@ -2437,6 +2460,220 @@ class OperationalAutonomyMaintenance:
             "vulnerability detected by vulscan" in title
             or "missing critical security patch" in title
         )
+
+    @staticmethod
+    def _vulscan_affected_nodes(ticket: Mapping[str, Any]) -> tuple[str, ...]:
+        description = str(ticket.get("description") or "")
+        match = re.search(r"Affected Nodes:\s*(.+)", description, flags=re.IGNORECASE | re.DOTALL)
+        if match is None:
+            return ()
+        material = match.group(1)
+        nodes = []
+        for node in re.findall(
+            r"(?:Discovery Agent\s+)?([A-Za-z0-9_.-]+)\s*\([^)]*\)",
+            material,
+            flags=re.IGNORECASE,
+        ):
+            normalized = str(node).strip()
+            if normalized and normalized.casefold() not in {value.casefold() for value in nodes}:
+                nodes.append(normalized)
+        return tuple(nodes)
+
+    def _resolve_vulscan_split_target(
+        self,
+        *,
+        company_id: int,
+        hostname: str,
+        source_title: str,
+        source_description: str,
+    ) -> TicketSplitTarget:
+        data = self._read_data(
+            "service.configuration.search",
+            {"company_id": company_id, "name": hostname, "page_size": 25},
+        )
+        raw_items = data.get("items")
+        if not isinstance(raw_items, list):
+            raise OperationalAutonomyError("VulScan split configuration search returned invalid items")
+        matches = [
+            item
+            for item in raw_items
+            if isinstance(item, Mapping)
+            and item.get("isActive") is True
+            and self._company_id(item.get("companyID")) == company_id
+            and str(
+                item.get("rmmDeviceAuditHostname")
+                or item.get("referenceTitle")
+                or ""
+            ).strip().casefold() == hostname.casefold()
+            and str(item.get("referenceNumber") or "").strip()
+        ]
+        unique = {int(item.get("id")): item for item in matches if item.get("id")}
+        if len(unique) != 1:
+            raise OperationalAutonomyError(
+                f"VulScan split target {hostname!r} did not resolve to exactly one active same-company CI"
+            )
+        ci = next(iter(unique.values()))
+        ci_id = self._positive_int(ci.get("id"), "configuration item id")
+        device_uid = str(ci.get("referenceNumber") or "").strip()
+        endpoint = self._read_record(
+            "endpoint.device.read",
+            {"resource_id": device_uid},
+        )
+        endpoint_uid = str(
+            endpoint.get("resource_id")
+            or endpoint.get("uid")
+            or endpoint.get("deviceUid")
+            or ""
+        ).strip()
+        endpoint_hostname = str(
+            endpoint.get("hostname")
+            or endpoint.get("hostName")
+            or endpoint.get("name")
+            or ""
+        ).strip()
+        if endpoint_uid != device_uid:
+            raise OperationalAutonomyError(
+                f"VulScan split target {hostname!r} failed exact DRMM UID readback"
+            )
+        if endpoint_hostname.casefold() != hostname.casefold():
+            raise OperationalAutonomyError(
+                f"VulScan split target {hostname!r} failed DRMM hostname readback"
+            )
+        child_title = f"{source_title} - {hostname}"
+        child_description = (
+            f"Target device: {hostname}\n"
+            f"Target Datto UID: {device_uid}\n\n"
+            f"Original VulScan finding:\n{source_description.strip()}"
+        )
+        return TicketSplitTarget(
+            target_key=device_uid,
+            title=child_title,
+            description=child_description,
+            configuration_item_id=ci_id,
+        )
+
+    def _split_multi_device_vulscan(self, candidate, scope: PlaybookScope) -> bool:
+        if scope.playbook_id != VULSCAN_SCOPE.playbook_id:
+            return False
+        nodes = self._vulscan_affected_nodes(candidate.context)
+        if len(nodes) < 2:
+            return False
+        if self.ticket_splitter is None:
+            raise OperationalAutonomyError("ticket split runtime is unavailable")
+        if not self._scope_is_promoted(VULSCAN_SPLIT_SCOPE):
+            raise OperationalAutonomyError("multi-device VulScan split scope is not promoted")
+
+        ticket = candidate.context
+        source_ticket_id = self._positive_int(ticket.get("id"), "ticket id")
+        source_ticket_number = str(
+            ticket.get("ticketNumber")
+            or ticket.get("ticket_number")
+            or source_ticket_id
+        ).strip()
+        company_id = self._company_id(ticket.get("companyID"))
+        if company_id <= 0:
+            raise OperationalAutonomyError("multi-device VulScan split requires a client company")
+        source_title = str(ticket.get("title") or "").strip()
+        source_description = str(ticket.get("description") or "").strip()
+        targets = tuple(
+            self._resolve_vulscan_split_target(
+                company_id=company_id,
+                hostname=hostname,
+                source_title=source_title,
+                source_description=source_description,
+            )
+            for hostname in nodes
+        )
+
+        # Claim the source before performing a composite write so the PSA visibly
+        # reflects that Jason is processing the alert.
+        claim = self.actions.execute(
+            VULSCAN_SPLIT_SCOPE,
+            "service.ticket.update",
+            {
+                "payload": {
+                    "id": source_ticket_id,
+                    "queueID": "Jason",
+                    "status": "In Progress",
+                    "billingCodeID": "Remote Support",
+                }
+            },
+        )
+        verification = self._action_data(claim).get("jasonVerification")
+        if not (
+            isinstance(verification, Mapping)
+            and verification.get("readbackVerified") is True
+        ):
+            raise OperationalAutonomyError("VulScan split source claim was not verified")
+
+        result = self.ticket_splitter.execute(
+            scope=VULSCAN_SPLIT_SCOPE,
+            request=TicketSplitRequest(
+                source_ticket_id=source_ticket_id,
+                source_ticket_number=source_ticket_number,
+                company_id=company_id,
+                queue_id="Jason",
+                priority=self._positive_int(ticket.get("priority") or 1, "priority"),
+                status="New",
+                issue_type=(
+                    self._positive_int(ticket.get("issueType"), "issueType")
+                    if ticket.get("issueType") not in (None, "", 0, "0")
+                    else None
+                ),
+                sub_issue_type=(
+                    self._positive_int(ticket.get("subIssueType"), "subIssueType")
+                    if ticket.get("subIssueType") not in (None, "", 0, "0")
+                    else None
+                ),
+                ticket_type=(
+                    self._positive_int(ticket.get("ticketType"), "ticketType")
+                    if ticket.get("ticketType") not in (None, "", 0, "0")
+                    else None
+                ),
+                targets=targets,
+            ),
+        )
+        child_summary = ", ".join(
+            f"{target.title.rsplit(' - ', 1)[-1]} -> ticket {child.child_ticket_id}"
+            for target, child in zip(targets, result.children)
+        )
+        self.actions.execute(
+            VULSCAN_SPLIT_SCOPE,
+            "service.ticket.note.create",
+            {
+                "payload": {
+                    "ticketID": source_ticket_id,
+                    "title": "Jason - Multi-device VulScan Split",
+                    "description": (
+                        f"Jason split this multi-device VulScan alert into {len(result.children)} "
+                        f"one-device child tickets. {child_summary}. "
+                        "Each child has one verified Autotask CI and preserves this source ticket lineage."
+                    ),
+                    "noteType": 3,
+                    "publish": 1,
+                }
+            },
+        )
+        complete = self.actions.execute(
+            VULSCAN_SPLIT_SCOPE,
+            "service.ticket.update",
+            {"payload": {"id": source_ticket_id, "status": "Complete"}},
+        )
+        complete_verification = self._action_data(complete).get("jasonVerification")
+        fields = (
+            complete_verification.get("verifiedFields")
+            if isinstance(complete_verification, Mapping)
+            else None
+        )
+        if not (
+            isinstance(complete_verification, Mapping)
+            and complete_verification.get("readbackVerified") is True
+            and isinstance(fields, Sequence)
+            and not isinstance(fields, (str, bytes))
+            and "status" in {str(value) for value in fields}
+        ):
+            raise OperationalAutonomyError("VulScan split source completion was not verified")
+        return True
 
     @staticmethod
     def _is_disk_bad_block_ticket(ticket: Mapping[str, Any]) -> bool:
