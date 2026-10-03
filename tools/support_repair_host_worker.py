@@ -320,16 +320,50 @@ def search_path_priority(path: str) -> tuple[int, str]:
     return rank, normalized
 
 def companion_source_paths(path: str) -> list[str]:
-    """Return obvious implementation/test companions without guessing content."""
+    """Return deterministic source/test companions for common repository layouts."""
     candidate = Path(path)
     parts = list(candidate.parts)
     companions: list[str] = []
+
+    def add(value: Path) -> None:
+        normalized = value.as_posix()
+        if normalized not in companions:
+            companions.append(normalized)
+
+    if candidate.name.startswith('test_'):
+        add(candidate.parent / candidate.name[5:])
+
     if 'tests' in parts and candidate.name.startswith('test_'):
         test_index = len(parts) - 1 - parts[::-1].index('tests')
-        source = Path(*parts[:test_index], candidate.name[5:])
-        companions.append(source.as_posix())
-    elif candidate.suffix == '.py':
-        companions.append((candidate.parent / 'tests' / f'test_{candidate.name}').as_posix())
+        project_root = Path(*parts[:test_index])
+        source_name = candidate.name[5:]
+        add(project_root / source_name)
+        add(project_root / 'src' / source_name)
+        # Common Python package layout: project/tests/test_x.py maps to
+        # project/src/<package>/x.py. Exact package resolution is completed by
+        # bounded repository matching in safe_search.
+        return companions
+
+    if candidate.suffix != '.py':
+        return companions
+
+    test_name = f'test_{candidate.name}'
+    add(candidate.parent / test_name)
+    add(candidate.parent / 'tests' / test_name)
+
+    # Map project/src/package/module.py to project/tests/test_module.py.
+    if 'src' in parts:
+        src_index = parts.index('src')
+        if src_index > 0:
+            project_root = Path(*parts[:src_index])
+            add(project_root / 'tests' / test_name)
+
+    # Map project/package/module.py to project/tests/test_module.py for the
+    # repository's implementation/<component>/... layout.
+    if len(parts) >= 3 and parts[0] == 'implementation':
+        project_root = Path(*parts[:2])
+        add(project_root / 'tests' / test_name)
+
     return companions
 
 
