@@ -90,6 +90,8 @@ The native implementation boundary is split deliberately:
 
 A support item stops automatically only for a genuine governance/capability blocker: constitutional change, broader authority/permission, secret exposure, provider bypass, client-scope expansion, unapproved disruptive behavior, ambiguous evidence, denied repair path, bounded retry exhaustion, or missing acceptance evidence. A blocked item does not consume an active implementation slot; Jason continues other independent support items within the configured active-work limit.
 
+For every autonomously claimed Support List item, the support-repair lane must emit owner lifecycle events through the same canonical governed Teams owner-notification path used for TODO engineering: **repair started**, **blocked / owner action required** when applicable, and **production-verified complete**. The start message identifies the support ID, defect summary, and repair scope. The blocked message identifies the exact blocker and required owner action. The completion message identifies the merged/deployed revision and the production acceptance evidence that proves the defect is resolved. A support fix is not "complete" for notification purposes merely because code was committed, CI passed, or a PR merged. Notification delivery uses the same durable message/correlation identity, provider/readback verification, bounded retry, duplicate suppression, and `SUPPORT-CONN-037` reliability requirements as TODO lifecycle messages.
+
 The canonical operational logic is `docs/playbooks/Jason-Support-List-Autonomous-Repair.md`.
 
 ## Production boundary
