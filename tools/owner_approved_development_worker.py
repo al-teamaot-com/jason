@@ -255,10 +255,12 @@ def select_items(
 
 def source_context_blocker(reason: str) -> bool:
     text = str(reason or '').casefold()
-    markers = (
+    explicit_markers = (
         'supplied excerpt',
+        'provided excerpt',
         'source excerpt',
         'source context',
+        'repository context',
         'unseen code',
         'unseen repository',
         'not expose enough',
@@ -267,7 +269,30 @@ def source_context_blocker(reason: str) -> bool:
         'cannot form a complete, exact replacement',
         "can't form a complete, exact replacement",
     )
-    return any(marker in text for marker in markers)
+    if any(marker in text for marker in explicit_markers):
+        return True
+    context_terms = (
+        'excerpt',
+        'context',
+        'surrounding code',
+        'surrounding call site',
+        'unseen api',
+        'unseen interface',
+    )
+    shortage_terms = (
+        'insufficient',
+        'incomplete',
+        'not enough',
+        'does not expose',
+        'do not expose',
+        'missing',
+        'would require inventing',
+        'require inventing',
+    )
+    return (
+        any(term in text for term in context_terms)
+        and any(term in text for term in shortage_terms)
+    )
 
 
 def reconcile_removed_approval(state: dict[str, Any], eligible_ids: set[str]) -> None:
