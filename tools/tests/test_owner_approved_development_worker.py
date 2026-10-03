@@ -84,5 +84,8 @@ def test_source_context_blocker_detects_missing_excerpt_context():
     assert module.source_context_blocker(
         'Cannot form a complete, exact replacement without enough surrounding file context.'
     )
+    assert module.source_context_blocker(
+        'The provided excerpts are insufficient to form exact replacements; the incomplete repository context would require inventing unseen API surface.'
+    )
     assert not module.source_context_blocker('Owner approval is required for production deployment.')
     assert not module.source_context_blocker('Provider credential is unavailable.')
