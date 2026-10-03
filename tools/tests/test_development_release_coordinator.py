@@ -150,6 +150,35 @@ class DevelopmentReleaseCoordinatorTests(unittest.TestCase):
         self.assertIn("Native repository implementation worker: **yes**", rendered)
         self.assertIn("Maximum active support repairs: **2**", rendered)
 
+    def test_render_surfaces_todo_engineering_autonomy(self):
+        board = {
+            "generated_at": "2026-10-02T00:00:00+00:00",
+            "main_sha": "abc",
+            "production": {},
+            "preproduction": {"configured": True},
+            "release_attention": "none",
+            "development_recommendation": "none",
+            "pr_states": [],
+            "older_open_pr_count": 0,
+            "overlaps": [],
+            "support": [],
+            "todos": [],
+            "production_policy": {},
+            "autonomous_repair_policy": {},
+            "support_autonomy_policy": {},
+            "todo_autonomy_policy": {
+                "enabled": True,
+                "owner_approved": True,
+                "eligibility_statuses": ["Planned", "In progress"],
+                "max_open_todo_issues": 1,
+            },
+        }
+        rendered = coordinator.render(board)
+        self.assertIn("Governed TODO intake enabled: **yes**", rendered)
+        self.assertIn("Standing owner approval for actionable TODO intake: **yes**", rendered)
+        self.assertIn("Planned, In progress", rendered)
+        self.assertIn("Maximum open TODO engineering issues: **1**", rendered)
+
     def test_sensitive_overlap_paths(self):
         self.assertTrue(coordinator.sensitive("implementation/runtime/app.py"))
         self.assertTrue(coordinator.sensitive("tools/example.py"))

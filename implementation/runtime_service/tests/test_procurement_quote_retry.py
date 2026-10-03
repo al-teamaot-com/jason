@@ -179,3 +179,147 @@ def test_missing_vendor_retry_reuses_persisted_vendor_before_product(tmp_path):
     assert second.calls[0][1]["defaultVendorID"] == 700
     assert second.calls[1][1]["vendorID"] == 700
     assert "Catalog product 701" in result["summary"]
+
+
+class RetryBinder:
+    def bind(self, evidence):
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            principal_id="person-requester",
+            organization_id="aot",
+            email_address="requester@teamaot.com",
+        )
+
+
+def _retryable_missing_vendor_submission():
+    submission = _missing_vendor_submission()
+    submission.update({
+        "requester_microsoft_object_id": "object-1",
+        "requester_email": "requester@teamaot.com",
+    })
+    return submission
+
+
+def test_failed_execution_is_persisted_as_retryable(tmp_path):
+    store = SQLiteProcurementSubmissionStore(tmp_path / "retry-state.sqlite3")
+    submission = _retryable_missing_vendor_submission()
+    store.put_new(submission["submission_id"], submission)
+
+    worker = VendorWorker(fail_on="service.product.create")
+    flow = ProcurementTeamsFlow(
+        identity_binder=RetryBinder(),
+        request_factory=None,
+        orchestrator=None,
+        store=store,
+        worker=worker,
+        approval_service=None,
+        approval_sender=None,
+        owner_ids=(),
+    )
+
+    with pytest.raises(RuntimeError, match="simulated provider interruption"):
+        flow.execute_submission_with_retry_state(
+            submission,
+            owner_approval_id=None,
+        )
+
+    persisted = store.get(submission["submission_id"])
+    assert persisted["status"] == "failed_retryable"
+    assert persisted["execution_attempts"] == 1
+    assert persisted["execution_error_type"] == "RuntimeError"
+    assert persisted["result"]["vendor_id"] == 700
+    assert persisted["result"]["created_vendor"] is True
+
+
+def test_failed_retryable_card_submit_resumes_without_duplicate_vendor(tmp_path):
+    store = SQLiteProcurementSubmissionStore(tmp_path / "retry-submit.sqlite3")
+    submission = _retryable_missing_vendor_submission()
+    store.put_new(submission["submission_id"], submission)
+
+    first_worker = VendorWorker(fail_on="service.product.create")
+    first_flow = ProcurementTeamsFlow(
+        identity_binder=RetryBinder(),
+        request_factory=None,
+        orchestrator=None,
+        store=store,
+        worker=first_worker,
+        approval_service=None,
+        approval_sender=None,
+        owner_ids=(),
+    )
+    with pytest.raises(RuntimeError, match="simulated provider interruption"):
+        first_flow.execute_submission_with_retry_state(
+            submission,
+            owner_approval_id=None,
+        )
+
+    second_worker = VendorWorker()
+    second_flow = ProcurementTeamsFlow(
+        identity_binder=RetryBinder(),
+        request_factory=None,
+        orchestrator=None,
+        store=store,
+        worker=second_worker,
+        approval_service=None,
+        approval_sender=None,
+        owner_ids=(),
+    )
+    result = second_flow.handle_submit(
+        submission_id=submission["submission_id"],
+        selections={},
+        microsoft_tenant_id="tenant-1",
+        microsoft_object_id="object-1",
+        conversation_id="conversation-1",
+        channel_response_id="message-2",
+        submitted_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+    )
+
+    assert result["status"] == "completed"
+    assert [call[0] for call in second_worker.calls] == [
+        "service.product.create",
+        "service.product.vendor.create",
+    ]
+    assert "service.vendor.create" not in [call[0] for call in second_worker.calls]
+    persisted = store.get(submission["submission_id"])
+    assert persisted["status"] == "catalog_ready"
+    assert persisted["execution_attempts"] == 2
+    assert persisted["result"]["vendor_id"] == 700
+    assert persisted["result"]["product_id"] == 701
+
+
+def test_legacy_submitted_card_can_resume_after_upgrade(tmp_path):
+    store = SQLiteProcurementSubmissionStore(tmp_path / "legacy-submitted.sqlite3")
+    submission = _retryable_missing_vendor_submission()
+    assert submission["status"] == "submitted"
+    store.put_new(submission["submission_id"], submission)
+
+    worker = VendorWorker()
+    flow = ProcurementTeamsFlow(
+        identity_binder=RetryBinder(),
+        request_factory=None,
+        orchestrator=None,
+        store=store,
+        worker=worker,
+        approval_service=None,
+        approval_sender=None,
+        owner_ids=(),
+    )
+    result = flow.handle_submit(
+        submission_id=submission["submission_id"],
+        selections={},
+        microsoft_tenant_id="tenant-1",
+        microsoft_object_id="object-1",
+        conversation_id="conversation-1",
+        channel_response_id="message-upgrade-retry",
+        submitted_at=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+    )
+
+    assert result["status"] == "completed"
+    assert [call[0] for call in worker.calls] == [
+        "service.vendor.create",
+        "service.product.create",
+        "service.product.vendor.create",
+    ]
+    persisted = store.get(submission["submission_id"])
+    assert persisted["status"] == "catalog_ready"
+    assert persisted["execution_attempts"] == 1

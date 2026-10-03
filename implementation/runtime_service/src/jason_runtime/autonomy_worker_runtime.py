@@ -850,11 +850,91 @@ class OperationalAutonomyMaintenance:
         self.completion_notifier = completion_notifier
         self._next_due = 0.0
         self._resource_automation_cache: dict[int, bool] = {}
+        self._ticket_status_cache: dict[int, str] = {}
+
+    @staticmethod
+    def _status_for_phase(phase: str) -> str | None:
+        value = str(phase or "")
+        if value == "waiting_patch_approval":
+            return "Waiting Patch Approval"
+        if value == "waiting_patch_window":
+            return "On Hold"
+        if value.startswith("waiting_device_access:"):
+            return "Waiting Device Access"
+        if value.startswith("waiting_recheck:"):
+            return "On Hold"
+        if value == "waiting_client_notification_authority":
+            return "On Hold"
+        if value == "approval_pending":
+            return "Human Review"
+        if value == "escalated":
+            return "Human Review"
+        if value == "complete":
+            return "Complete"
+        if value == "blocked":
+            return "On Hold"
+        return None
+
+    def _update_ticket_status_verified(self, work: OperationalWork, status: str) -> None:
+        normalized = str(status).strip()
+        if self._ticket_status_cache.get(work.ticket_id, "").casefold() == normalized.casefold():
+            return
+        output = self.actions.execute(
+            self._scope_for_work(work),
+            "service.ticket.update",
+            {"payload": {"id": work.ticket_id, "status": normalized}},
+        )
+        verification = self._action_data(output).get("jasonVerification")
+        fields = verification.get("verifiedFields") if isinstance(verification, Mapping) else None
+        if not (
+            isinstance(verification, Mapping)
+            and verification.get("readbackVerified") is True
+            and isinstance(fields, Sequence)
+            and not isinstance(fields, (str, bytes))
+            and "status" in {str(value) for value in fields}
+        ):
+            raise OperationalAutonomyError(
+                f"ticket status transition to {normalized!r} was not verified by provider readback"
+            )
+        self._ticket_status_cache[work.ticket_id] = normalized
+
+    def _reconcile_ticket_status_for_phase(
+        self,
+        work: OperationalWork,
+        observed_status: str | None = None,
+    ) -> None:
+        desired = self._status_for_phase(work.phase)
+        if not desired:
+            return
+        observed = str(observed_status or "").strip()
+        if observed.casefold() == desired.casefold():
+            self._ticket_status_cache[work.ticket_id] = desired
+            return
+        self._update_ticket_status_verified(work, desired)
 
     def request_reconcile(self, reason: str) -> None:
         """Request a full queue reconciliation on the next maintenance tick."""
         del reason
         self._next_due = 0.0
+
+
+    def _audit_diagnostic(self, event_type: str, payload: Mapping[str, Any]) -> None:
+        """Emit one canonical worker diagnostic event without affecting ticket flow."""
+        if self.audit is None:
+            return
+        event_id = f"autonomy-worker-{uuid4().hex}"
+        self.audit.append(
+            event_type,
+            {
+                "execution_id": event_id,
+                "correlation_id": event_id,
+                "organization_id": "aot",
+                "principal_id": "jason-autonomy-worker",
+                "capability_name": "autonomy.ticket.worker.scan",
+                "stage": "completed",
+                **dict(payload),
+            },
+        )
 
     def _reconcile_orphaned_waiting_device_rows(
         self,
@@ -904,7 +984,7 @@ class OperationalAutonomyMaintenance:
                 )
             except Exception as exc:
                 if self.audit is not None:
-                    self.audit.record(
+                    self._audit_diagnostic(
                         "autonomy.waiting_device_reverse_reconcile.failed",
                         {
                             "ticket_id": work.ticket_id,
@@ -1405,7 +1485,7 @@ class OperationalAutonomyMaintenance:
                     self._augment_offline_ticket_context(item)
                 except Exception as exc:
                     if self.audit is not None:
-                        self.audit.record(
+                        self._audit_diagnostic(
                             "autonomy.offline_ticket_augmentation.failed",
                             {
                                 "ticket_id": int(item.resource_id),
@@ -1545,7 +1625,17 @@ class OperationalAutonomyMaintenance:
                 )
                 self.store.put(existing)
             if existing is not None and existing.phase in TERMINAL_PHASES:
+                observed_version = str(item.source_version or "").strip() or None
                 if (
+                    existing.phase == "blocked"
+                    and observed_version
+                    and observed_version != existing.source_version
+                ):
+                    # New PSA/provider evidence gets a fresh admission decision
+                    # before any automatic Human Review disposition.
+                    self.store.delete(ticket_id)
+                    existing = None
+                elif (
                     existing.phase == "blocked"
                     and self._recoverable_block_retry_due(existing)
                 ):
@@ -1556,7 +1646,7 @@ class OperationalAutonomyMaintenance:
                         self._synchronize_blocked_ticket_lifecycle(existing, item)
                     except Exception as exc:
                         if self.audit is not None:
-                            self.audit.record(
+                            self._audit_diagnostic(
                                 "autonomy.blocked_ticket_lifecycle_sync.failed",
                                 {
                                     "ticket_id": ticket_id,
@@ -1631,6 +1721,10 @@ class OperationalAutonomyMaintenance:
                         )
                     continue
                 if existing.phase in {"waiting_patch_approval", "waiting_patch_window"}:
+                    self._reconcile_ticket_status_for_phase(
+                        existing,
+                        item.context.get("_jason_source_status_label"),
+                    )
                     interval = (
                         VULSCAN_APPROVAL_RECHECK_SECONDS
                         if existing.phase == "waiting_patch_approval"
@@ -1642,6 +1736,7 @@ class OperationalAutonomyMaintenance:
                         or (datetime.now(timezone.utc) - updated).total_seconds() >= interval
                     )
                     if due:
+                        self._update_ticket_status_verified(existing, "In Progress")
                         existing = self._replace(
                             existing,
                             phase="vulscan_investigate",
@@ -1665,6 +1760,10 @@ class OperationalAutonomyMaintenance:
                     )
                     continue
                 if existing.phase.startswith("waiting_device_access:"):
+                    self._reconcile_ticket_status_for_phase(
+                        existing,
+                        item.context.get("_jason_source_status_label"),
+                    )
                     waiting_phase = existing.phase
                     try:
                         access_state, deb = self._device_access_state(existing)
@@ -1781,7 +1880,12 @@ class OperationalAutonomyMaintenance:
                         )
                     continue
                 if existing.phase.startswith("waiting_recheck:"):
+                    self._reconcile_ticket_status_for_phase(
+                        existing,
+                        item.context.get("_jason_source_status_label"),
+                    )
                     if len(self.store.list_open()) < self.max_active_work_items:
+                        self._update_ticket_status_verified(existing, "In Progress")
                         waiting_phase = existing.phase
                         resume_phase = waiting_phase.split(":", 1)[1]
                         waiting_since = existing.updated_at
@@ -2163,6 +2267,9 @@ class OperationalAutonomyMaintenance:
                 "provider_http_status_502",
                 "provider_http_status_503",
                 "provider_http_status_504",
+                "autotask ci and drmm hostname do not match",
+                "autotask ci rmm hostname and drmm hostname do not match",
+                "same-company configuration and datto hostname do not match",
             )
         )
 
@@ -2176,23 +2283,19 @@ class OperationalAutonomyMaintenance:
         return age >= RECOVERABLE_BLOCK_RETRY_SECONDS
 
     def _synchronize_blocked_ticket_lifecycle(self, work: OperationalWork, candidate) -> None:
-        if str(candidate.source_queue).strip().casefold() != "jason":
+        current_queue = str(candidate.source_queue or "").strip().casefold()
+        origin_queue = str(work.source_queue or "").strip().casefold()
+        # Do not override a human/workflow move made after Jason persisted the
+        # block. Automatic disposition is limited to the original intake queue
+        # or Jason's own claimed-work queue.
+        if current_queue not in {origin_queue, "jason"}:
             return
         status_label = str(
             candidate.context.get("_jason_source_status_label") or ""
         ).strip()
         if self._block_is_retryable(work):
-            if status_label.casefold() == "new":
-                self.actions.execute(
-                    self._scope_for_work(work),
-                    "service.ticket.update",
-                    {
-                        "payload": {
-                            "id": work.ticket_id,
-                            "status": "In Progress",
-                        }
-                    },
-                )
+            if status_label.casefold() != "on hold":
+                self._update_ticket_status_verified(work, "On Hold")
             return
 
         self._write_note(
@@ -2200,8 +2303,8 @@ class OperationalAutonomyMaintenance:
             (
                 "Jason cannot safely continue this ticket automatically. "
                 f"Blocker: {work.last_reason}. "
-                "The ticket is being returned to Help Desk I for technician review "
-                "instead of remaining untriaged in the Jason queue."
+                "The ticket is being routed to Help Desk I for technician review "
+                "instead of remaining in an intake queue with a misleading active/new state."
             ),
             "Jason - Human Review Required",
         )
@@ -2320,6 +2423,11 @@ class OperationalAutonomyMaintenance:
             "low disk space" in title
             or "critical low disk space" in title
             or "hard disk full" in title
+            or (
+                "drive has" in title
+                and "used out of" in title
+                and "% used" in title
+            )
         )
 
     @staticmethod
@@ -2636,7 +2744,11 @@ class OperationalAutonomyMaintenance:
             if isinstance(item, Mapping)
             and item.get("isActive") is True
             and str(item.get("referenceNumber") or "").strip() == endpoint_uid
-            and str(item.get("referenceTitle") or "").strip().casefold() == hostname.casefold()
+            and str(
+                item.get("rmmDeviceAuditHostname")
+                or item.get("referenceTitle")
+                or ""
+            ).strip().casefold() == hostname.casefold()
         ]
         if len(matches) != 1:
             return None
@@ -2675,8 +2787,11 @@ class OperationalAutonomyMaintenance:
                 if isinstance(item, Mapping)
                 and item.get("isActive") is True
                 and self._company_id(item.get("companyID")) == company_id
-                and str(item.get("referenceTitle") or "").strip().casefold()
-                == structured_hostname.casefold()
+                and str(
+                    item.get("rmmDeviceAuditHostname")
+                    or item.get("referenceTitle")
+                    or ""
+                ).strip().casefold() == structured_hostname.casefold()
                 and str(item.get("referenceNumber") or "").strip()
             ]
             if len(matches) == 1:
@@ -2795,7 +2910,11 @@ class OperationalAutonomyMaintenance:
             and item.get("isActive") is True
             and self._company_id(item.get("companyID")) == company_id
             and str(item.get("referenceNumber") or "").strip() == endpoint_uid
-            and str(item.get("referenceTitle") or "").strip().casefold() == hostname.casefold()
+            and str(
+                item.get("rmmDeviceAuditHostname")
+                or item.get("referenceTitle")
+                or ""
+            ).strip().casefold() == hostname.casefold()
         ]
         if len(matches) != 1:
             raise OperationalAutonomyError(
@@ -2859,8 +2978,12 @@ class OperationalAutonomyMaintenance:
             raise OperationalAutonomyError("configuration is inactive")
 
         device_uid = str(ci.get("referenceNumber") or "").strip()
-        hostname = str(ci.get("referenceTitle") or "").strip()
-        if not device_uid or not hostname:
+        ci_hostname = str(
+            ci.get("rmmDeviceAuditHostname")
+            or ci.get("dattoHostname")
+            or ""
+        ).strip()
+        if not device_uid:
             raise OperationalAutonomyError("configuration lacks exact DRMM identity")
 
         endpoint = self._read_record(
@@ -2880,10 +3003,21 @@ class OperationalAutonomyMaintenance:
         ).strip()
         if endpoint_uid != device_uid:
             raise OperationalAutonomyError("DRMM device identity mismatch")
-        if endpoint_hostname.casefold() != hostname.casefold():
+        if (
+            ci_hostname
+            and endpoint_hostname
+            and endpoint_hostname.casefold() != ci_hostname.casefold()
+        ):
             raise OperationalAutonomyError(
-                "Autotask CI and DRMM hostname do not match"
+                "Autotask CI RMM hostname and DRMM hostname do not match"
             )
+        hostname = (
+            endpoint_hostname
+            or ci_hostname
+            or str(ci.get("referenceTitle") or "").strip()
+        )
+        if not hostname:
+            raise OperationalAutonomyError("configuration lacks DRMM hostname evidence")
 
         work = OperationalWork(
             ticket_id=ticket_id,
@@ -4216,6 +4350,7 @@ class OperationalAutonomyMaintenance:
                 note,
                 "Jason - VulScan - Waiting Patch Approval",
             )
+            self._update_ticket_status_verified(work, "Waiting Patch Approval")
             self.store.put(
                 self._replace(
                     work,
@@ -4230,6 +4365,7 @@ class OperationalAutonomyMaintenance:
                 note,
                 "Jason - VulScan - Waiting Patch Window",
             )
+            self._update_ticket_status_verified(work, "On Hold")
             self.store.put(
                 self._replace(
                     work,
@@ -6612,7 +6748,7 @@ class OperationalAutonomyMaintenance:
             self._synchronize_blocked_ticket_lifecycle(work, candidate)
         except Exception as exc:
             if self.audit is not None:
-                self.audit.record(
+                self._audit_diagnostic(
                     "autonomy.blocked_ticket_lifecycle_sync.failed",
                     {
                         "ticket_id": ticket_id,

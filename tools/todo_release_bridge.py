@@ -1,0 +1,456 @@
+#!/usr/bin/env python3
+"""Bridge merged TODO development work into Jason Release Manager."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Mapping
+
+DEFAULT_REPO = Path("/home/al/projects/jason")
+DEFAULT_SPOOL = Path("/var/lib/jason/openclaw/support-repair")
+DEFAULT_RELEASE_STATE = Path("/var/lib/jason/openclaw/release-manager")
+DEFAULT_RELEASE_RUNNER = Path.home() / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+DEFAULT_RELEASE_SOURCE = Path.home() / ".local" / "lib" / "jason" / "release-manager-source"
+WORKTREE_ROOT = Path("/home/al/jason-worktrees/todo-closure")
+TODO_PATH = Path("docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md")
+
+TODO_META = re.compile(r"(?im)^\s*-\s*TODO item\s*:\s*(TODO-[A-Z]+-[0-9]+)\s*$")
+DEV_META = re.compile(r"(?im)^\s*-\s*Development issue\s*:\s*#([1-9][0-9]*)\s*$")
+SHA = re.compile(r"^[0-9a-f]{40}$")
+
+
+class TodoReleaseBridgeError(RuntimeError):
+    pass
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def run(args: list[str], *, cwd: Path | None = None, check: bool = True) -> str:
+    completed = subprocess.run(
+        args,
+        cwd=cwd,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if check and completed.returncode != 0:
+        raise TodoReleaseBridgeError(
+            f"command failed ({args[0]}): {completed.stdout[-1200:]}"
+        )
+    return completed.stdout.strip()
+
+
+def gh_json(args: list[str], *, cwd: Path) -> Any:
+    raw = run(["gh", *args], cwd=cwd)
+    return json.loads(raw) if raw else None
+
+
+def atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temp = path.with_suffix(path.suffix + ".tmp")
+    temp.write_text(json.dumps(dict(payload), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temp.chmod(0o600)
+    temp.replace(path)
+
+
+def load_state(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"schema_version": "1.0", "items": {}}
+    value = json.loads(path.read_text(encoding="utf-8"))
+    return value if isinstance(value, dict) else {"schema_version": "1.0", "items": {}}
+
+
+def todo_issues(repo: Path) -> list[dict[str, Any]]:
+    issues = gh_json(
+        [
+            "issue", "list", "--state", "open", "--limit", "200",
+            "--json", "number,title,body,url,updatedAt",
+        ],
+        cwd=repo,
+    ) or []
+    result = []
+    for issue in issues:
+        body = str(issue.get("body") or "")
+        match = TODO_META.search(body)
+        if not match:
+            continue
+        result.append(
+            {
+                "todo_id": match.group(1).upper(),
+                "issue_number": int(issue["number"]),
+                "title": str(issue.get("title") or ""),
+                "url": str(issue.get("url") or ""),
+            }
+        )
+    return result
+
+
+def merged_prs_by_issue(repo: Path) -> dict[int, dict[str, Any]]:
+    prs = gh_json(
+        [
+            "pr", "list", "--state", "merged", "--limit", "200",
+            "--json", "number,title,body,url,mergedAt,mergeCommit",
+        ],
+        cwd=repo,
+    ) or []
+    result: dict[int, dict[str, Any]] = {}
+    for pr in prs:
+        match = DEV_META.search(str(pr.get("body") or ""))
+        if not match:
+            continue
+        merge = pr.get("mergeCommit") if isinstance(pr.get("mergeCommit"), Mapping) else {}
+        merge_sha = str((merge or {}).get("oid") or "").strip().casefold()
+        if not SHA.fullmatch(merge_sha):
+            continue
+        result[int(match.group(1))] = {
+            "pr_number": int(pr["number"]),
+            "pr_url": str(pr.get("url") or ""),
+            "merge_sha": merge_sha,
+            "merged_at": str(pr.get("mergedAt") or ""),
+        }
+    return result
+
+
+def release_id(merge_sha: str) -> str:
+    if not SHA.fullmatch(merge_sha):
+        raise TodoReleaseBridgeError("merge SHA must be exact")
+    return "release-" + merge_sha[:16]
+
+
+def release_record(state_root: Path, merge_sha: str) -> dict[str, Any] | None:
+    path = state_root / "records" / f"{release_id(merge_sha)}.json"
+    if not path.exists():
+        return None
+    value = json.loads(path.read_text(encoding="utf-8"))
+    return value if isinstance(value, dict) else None
+
+
+def prepare_release(
+    *,
+    repo: Path,
+    merge_sha: str,
+    release_runner: Path,
+    release_source: Path,
+    release_state: Path,
+) -> dict[str, Any]:
+    if not release_runner.is_file():
+        raise TodoReleaseBridgeError("Release Manager runner is not installed")
+    if not release_source.exists():
+        raise TodoReleaseBridgeError("Release Manager immutable source is unavailable")
+    raw = run(
+        [
+            "/usr/bin/python3",
+            str(release_runner),
+            "--repo",
+            str(release_source),
+            "--state-root",
+            str(release_state),
+            "prepare",
+            "--candidate-sha",
+            merge_sha,
+            "--change-class",
+            "todo",
+        ],
+        cwd=repo,
+    )
+    value = json.loads(raw)
+    if not isinstance(value, dict):
+        raise TodoReleaseBridgeError("Release Manager prepare returned invalid record")
+    return value
+
+
+def update_todo_text(
+    text: str,
+    *,
+    todo_id: str,
+    release: Mapping[str, Any],
+) -> str:
+    heading = re.search(
+        rf"(?im)^###\s+{re.escape(todo_id)}\s+—\s+.+$",
+        text,
+    )
+    if not heading:
+        raise TodoReleaseBridgeError(f"TODO item not found: {todo_id}")
+    remainder = text[heading.end():]
+    next_heading = re.search(
+        r"(?im)^###\s+TODO-[A-Z]+-[0-9]+\s+—\s+.+$",
+        remainder,
+    )
+    end = heading.end() + next_heading.start() if next_heading else len(text)
+    section = text[heading.start():end]
+
+    if str(release.get("state") or "") != "closed":
+        raise TodoReleaseBridgeError("TODO cannot close before Release Manager state closed")
+    production = release.get("production") if isinstance(release.get("production"), Mapping) else {}
+    sha = str(production.get("live_sha") or "").strip().casefold()
+    if not SHA.fullmatch(sha):
+        raise TodoReleaseBridgeError("closed release missing production SHA")
+    rid = str(release.get("release_id") or "")
+    verified = str(production.get("verified_at") or release.get("updated_at") or now())
+
+    status_re = re.compile(r"(?im)^- \*\*Status:\*\*\s*.+$")
+    status_line = (
+        f"- **Status:** Implemented — production verified {verified}; "
+        f"release {rid}; SHA {sha}"
+    )
+    if status_re.search(section):
+        section = status_re.sub(status_line, section, count=1)
+    else:
+        section = section.rstrip() + "\n" + status_line + "\n"
+
+    evidence_line = (
+        f"- **Implementation evidence:** Jason Release Manager {rid} reached "
+        f"closed; production SHA {sha}."
+    )
+    if "**Implementation evidence:**" not in section:
+        section = section.rstrip() + "\n" + evidence_line + "\n"
+
+    return text[:heading.start()] + section + text[end:]
+
+
+def find_closure_pr(repo: Path, todo_id: str) -> dict[str, Any] | None:
+    prs = gh_json(
+        [
+            "pr", "list", "--state", "all", "--limit", "200",
+            "--json", "number,title,body,url,mergedAt,state",
+        ],
+        cwd=repo,
+    ) or []
+    marker = f"- TODO closure: {todo_id}"
+    for pr in prs:
+        if marker in str(pr.get("body") or ""):
+            return dict(pr)
+    return None
+
+
+def create_closure_pr(
+    repo: Path,
+    *,
+    todo_id: str,
+    issue_number: int,
+    release: Mapping[str, Any],
+) -> int:
+    existing = find_closure_pr(repo, todo_id)
+    if existing:
+        return int(existing["number"])
+
+    production = release.get("production") if isinstance(release.get("production"), Mapping) else {}
+    sha = str(production.get("live_sha") or "")
+    rid = str(release.get("release_id") or "")
+    branch = f"close/todo-{todo_id.casefold()}-{sha[:12]}"
+    path = WORKTREE_ROOT / todo_id.casefold()
+    WORKTREE_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    if path.exists():
+        run(["git", "worktree", "remove", "--force", str(path)], cwd=repo, check=False)
+    run(["git", "fetch", "--no-tags", "origin", "main"], cwd=repo)
+    run(["git", "worktree", "add", "-B", branch, str(path), "origin/main"], cwd=repo)
+
+    backlog = path / TODO_PATH
+    original = backlog.read_text(encoding="utf-8")
+    updated = update_todo_text(original, todo_id=todo_id, release=release)
+    backlog.write_text(updated, encoding="utf-8")
+
+    run(["git", "add", str(TODO_PATH)], cwd=path)
+    run(["git", "commit", "-m", f"Close {todo_id} after production verification"], cwd=path)
+    run(["git", "push", "-u", "origin", branch], cwd=path)
+
+    body = f"""## TODO production closure
+
+- TODO closure: {todo_id}
+- Development issue: #{issue_number}
+- Release ID: {rid}
+- Production SHA: {sha}
+- Release Manager state: closed
+- Production verified: yes
+
+## Organizational outcome
+
+Update the governed TODO backlog only after authoritative Release Manager
+production verification. No runtime/provider behavior changes in this PR.
+
+## Integration coordination
+
+Integration coordination: documentation-only TODO closure; reconcile current main before merge.
+
+## Verification
+
+- [x] Release Manager record is closed.
+- [x] Production live SHA is exact and recorded.
+- [x] TODO status is changed to Implemented with release evidence.
+
+## Documentation impact
+
+- [x] Documentation updated
+"""
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+        handle.write(body)
+        body_path = Path(handle.name)
+    try:
+        raw = run(
+            [
+                "gh", "pr", "create", "--base", "main", "--head", branch,
+                "--title", f"Close {todo_id} after production verification",
+                "--body-file", str(body_path),
+            ],
+            cwd=repo,
+        )
+    finally:
+        body_path.unlink(missing_ok=True)
+    match = re.search(r"/pull/(\d+)", raw)
+    if not match:
+        raise TodoReleaseBridgeError("could not determine TODO closure PR number")
+    return int(match.group(1))
+
+
+def close_issue(repo: Path, issue_number: int, release: Mapping[str, Any]) -> None:
+    rid = str(release.get("release_id") or "")
+    production = release.get("production") if isinstance(release.get("production"), Mapping) else {}
+    sha = str(production.get("live_sha") or "")
+    run(
+        [
+            "gh", "issue", "close", str(issue_number),
+            "--comment",
+            f"Implemented and production-verified by Jason Release Manager {rid} at {sha}.",
+        ],
+        cwd=repo,
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--repo", type=Path, default=DEFAULT_REPO)
+    parser.add_argument("--spool", type=Path, default=DEFAULT_SPOOL)
+    parser.add_argument("--release-state", type=Path, default=DEFAULT_RELEASE_STATE)
+    parser.add_argument("--release-runner", type=Path, default=DEFAULT_RELEASE_RUNNER)
+    parser.add_argument("--release-source", type=Path, default=DEFAULT_RELEASE_SOURCE)
+    args = parser.parse_args()
+
+    repo = args.repo.resolve()
+    spool = args.spool.resolve()
+    state_path = spool / "todo-release-state.json"
+    state = load_state(state_path)
+    state.setdefault("items", {})
+
+    run(["git", "fetch", "--no-tags", "origin", "main"], cwd=repo)
+    prs = merged_prs_by_issue(repo)
+
+    for issue in todo_issues(repo):
+        todo_id = issue["todo_id"]
+        record = state["items"].setdefault(
+            todo_id,
+            {
+                "phase": "waiting_development_merge",
+                "issue_number": issue["issue_number"],
+                "updated_at": now(),
+            },
+        )
+        merged = prs.get(issue["issue_number"])
+        if not merged:
+            record.update({"phase": "waiting_development_merge", "updated_at": now()})
+            continue
+
+        merge_sha = merged["merge_sha"]
+        record.update(
+            {
+                "development_pr": merged["pr_number"],
+                "merge_sha": merge_sha,
+                "release_id": release_id(merge_sha),
+                "updated_at": now(),
+            }
+        )
+
+        release = release_record(args.release_state.resolve(), merge_sha)
+        if release is None:
+            try:
+                release = prepare_release(
+                    repo=repo,
+                    merge_sha=merge_sha,
+                    release_runner=args.release_runner.expanduser().resolve(),
+                    release_source=args.release_source.expanduser().resolve(),
+                    release_state=args.release_state.resolve(),
+                )
+            except Exception as exc:
+                record.update(
+                    {
+                        "phase": "release_prepare_blocked",
+                        "reason": f"{type(exc).__name__}: {str(exc)[:900]}",
+                        "updated_at": now(),
+                    }
+                )
+                continue
+
+        release_state = str(release.get("state") or "")
+        record["release_state"] = release_state
+
+        if release_state == "closed":
+            closure = find_closure_pr(repo, todo_id)
+            if closure and closure.get("mergedAt"):
+                close_issue(repo, issue["issue_number"], release)
+                record.update(
+                    {
+                        "phase": "complete",
+                        "closure_pr": int(closure["number"]),
+                        "reason": "",
+                        "updated_at": now(),
+                    }
+                )
+                continue
+            try:
+                number = create_closure_pr(
+                    repo,
+                    todo_id=todo_id,
+                    issue_number=issue["issue_number"],
+                    release=release,
+                )
+                record.update(
+                    {
+                        "phase": "closure_validating",
+                        "closure_pr": number,
+                        "reason": "",
+                        "updated_at": now(),
+                    }
+                )
+            except Exception as exc:
+                record.update(
+                    {
+                        "phase": "closure_blocked",
+                        "reason": f"{type(exc).__name__}: {str(exc)[:900]}",
+                        "updated_at": now(),
+                    }
+                )
+            continue
+
+        if release_state in {"failed", "rolled_back", "blocked"}:
+            record.update(
+                {
+                    "phase": "release_blocked",
+                    "reason": f"Release Manager state is {release_state}",
+                    "updated_at": now(),
+                }
+            )
+        else:
+            record.update(
+                {
+                    "phase": "waiting_release",
+                    "reason": "",
+                    "updated_at": now(),
+                }
+            )
+
+    state["updated_at"] = now()
+    atomic_json(state_path, state)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

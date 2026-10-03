@@ -241,7 +241,6 @@ class AutotaskProcurementMutationConnector(AutotaskMutationConnector):
             # by the conversational payload.
             normalized.update({
                 "companyType": 7,
-                "ownerResourceID": 29682892,
                 "territoryID": 29682778,
                 "companyCategoryID": 1,
                 "currencyID": 1,

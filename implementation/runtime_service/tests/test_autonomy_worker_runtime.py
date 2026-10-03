@@ -595,6 +595,77 @@ def test_orphaned_waiting_device_completed_ticket_retires_local_wait(tmp_path: P
     store.close()
 
 
+def test_orphaned_waiting_device_read_failure_does_not_abort_scan_with_canonical_audit(tmp_path: Path):
+    # Regression for production issues #787/#790: audit diagnostics must use the canonical envelope.
+    class EmptyQueueSource:
+        def reconcile_candidates(self):
+            return ()
+
+    class DeniedTicketReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.ticket.read":
+                raise PermissionError("INFORMATION_RELEASE_DENIED")
+            return super().execute(capability, arguments)
+
+    class CanonicalAudit:
+        def __init__(self):
+            self.events = []
+
+        def append(self, event_type, payload):
+            for key in (
+                "execution_id",
+                "correlation_id",
+                "organization_id",
+                "principal_id",
+                "capability_name",
+                "stage",
+            ):
+                assert payload[key]
+            self.events.append((event_type, dict(payload)))
+
+    audit = CanonicalAudit()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    store.put(OperationalWork(
+        ticket_id=140933,
+        ticket_number="T20260925.9999",
+        title="[Monitor] Antivirus status issue",
+        playbook_id="datto_edr_av",
+        source_queue="Jason",
+        company_id=507,
+        configuration_item_id=1583,
+        device_uid="device-uid-1",
+        hostname="PC-1",
+        phase="waiting_device_access:health_wait",
+        last_reason="endpoint offline",
+    ))
+    worker = OperationalAutonomyMaintenance(
+        queue_source=EmptyQueueSource(),
+        reads=DeniedTicketReads(),
+        actions=Actions(),
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+        audit=audit,
+    )
+
+    worker.tick()
+
+    latest = store.latest_scan()
+    assert latest is not None
+    assert latest.evaluated == 0
+    assert any(
+        event_type == "autonomy.waiting_device_reverse_reconcile.failed"
+        for event_type, _ in audit.events
+    )
+    assert any(
+        event_type == "orchestration.capability.completed"
+        for event_type, _ in audit.events
+    )
+    store.close()
+
+
 def test_orphaned_waiting_device_open_ticket_stops_without_psa_override(tmp_path: Path):
     class EmptyQueueSource:
         def reconcile_candidates(self):
@@ -992,6 +1063,110 @@ def test_worker_accepts_provider_native_datto_device_identity(tmp_path: Path):
     assert work.device_uid == "device-uid-1"
     assert work.hostname == "PC-1"
     store.close()
+
+
+def test_worker_uses_rmm_audit_hostname_when_reference_title_is_generic(tmp_path: Path):
+    class GenericTitleReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "item": {
+                                "id": 1583,
+                                "companyID": 507,
+                                "isActive": True,
+                                "referenceNumber": "device-uid-1",
+                                "referenceTitle": "Mac",
+                                "rmmDeviceAuditHostname": "PC-1",
+                            }
+                        }
+                    },
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()),
+        reads=GenericTitleReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    work = store.get(140933)
+    assert work is not None
+    assert work.device_uid == "device-uid-1"
+    assert work.hostname == "PC-1"
+    assert work.phase == "health_wait"
+    store.close()
+
+
+def test_exact_resource_id_can_bind_when_ci_display_title_is_not_hostname(tmp_path: Path):
+    class GenericTitleNoAuditHostnameReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "data": {
+                            "item": {
+                                "id": 1583,
+                                "companyID": 507,
+                                "isActive": True,
+                                "referenceNumber": "device-uid-1",
+                                "referenceTitle": "Mac",
+                            }
+                        }
+                    },
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()),
+        reads=GenericTitleNoAuditHostnameReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    work = store.get(140933)
+    assert work is not None
+    assert work.device_uid == "device-uid-1"
+    assert work.hostname == "PC-1"
+    assert work.phase == "health_wait"
+    store.close()
+
+
+def test_legacy_hostname_mismatch_block_is_retryable():
+    work = OperationalWork(
+        ticket_id=140933,
+        ticket_number="T20260925.9999",
+        title="Antivirus status is Not running for PC-1",
+        playbook_id="datto_edr_av",
+        source_queue="Monitoring Alert",
+        company_id=507,
+        configuration_item_id=1583,
+        device_uid="device-uid-1",
+        hostname="PC-1",
+        phase="blocked",
+        last_reason="Autotask CI and DRMM hostname do not match",
+    )
+    assert OperationalAutonomyMaintenance._block_is_retryable(work) is True
 
 
 def dns_candidate(title="DNS Agent service isStopped for PC-1"):
@@ -2317,18 +2492,16 @@ def test_backupiq_offline_endpoint_waits_for_device_without_consuming_slot(tmp_p
         for _, capability, args in actions.calls
         if capability == "service.ticket.update"
     ]
-    assert update_calls == [
-        {
-            "id": 141185,
-            "queueID": "Jason",
-            "status": "In Progress",
-            "billingCodeID": "Remote Support",
-        },
-        {
-            "id": 141185,
-            "status": "Waiting Device Access",
-        },
-    ]
+    assert update_calls[0] == {
+        "id": 141185,
+        "queueID": "Jason",
+        "status": "In Progress",
+        "billingCodeID": "Remote Support",
+    }
+    assert update_calls[-1] == {
+        "id": 141185,
+        "status": "Waiting Device Access",
+    }
     assert all(payload.get("queueID") != "Help Desk I" for payload in update_calls)
     store.close()
 
@@ -2393,12 +2566,11 @@ def test_backupiq_legacy_offline_escalation_migrates_to_waiting(tmp_path: Path):
         for _, capability, args in actions.calls
         if capability == "service.ticket.update"
     ]
-    assert update_calls == [
-        {
-            "id": 141185,
-            "status": "Waiting Device Access",
-        }
-    ]
+    assert update_calls
+    assert update_calls[-1] == {
+        "id": 141185,
+        "status": "Waiting Device Access",
+    }
     note_calls = [
         args["payload"]
         for _, capability, args in actions.calls
@@ -2760,6 +2932,14 @@ def test_backupiq_second_reinstall_is_blocked_before_component_dispatch(tmp_path
         if capability == "automation.component.execute"
     ]
     store.close()
+
+
+def test_low_disk_matcher_recognizes_aem_drive_usage_title():
+    title = (
+        "E: Drive has 2,456.4 GB used out of 2,682.6 GB (92% Used) "
+        "(has passed 90.0 % Used for 5 mins) for VMHOST"
+    )
+    assert OperationalAutonomyMaintenance._is_low_disk_ticket({"title": title}) is True
 
 
 def low_disk_candidate():
@@ -3306,6 +3486,11 @@ def test_vulscan_core_scope_remains_eligible_without_client_disposition_promotio
     current = store.get(141183)
     assert current is not None
     assert current.phase == "waiting_patch_approval"
+    assert any(
+        capability == "service.ticket.update"
+        and (arguments.get("payload") or {}).get("status") == "Waiting Patch Approval"
+        for _, capability, arguments in actions.calls
+    )
     assert not any(
         capability == "service.ticket.client.notification.create"
         for _, capability, _ in actions.calls
@@ -3520,14 +3705,13 @@ def test_vulscan_not_approved_kbs_wait_in_jason_without_helpdesk_handoff(tmp_pat
         for _, capability, args in actions.calls
         if capability == "service.ticket.update"
     ]
-    assert ticket_updates == [
-        {
-            "id": 141183,
-            "queueID": "Jason",
-            "status": "In Progress",
-            "billingCodeID": "Remote Support",
-        },
-    ]
+    assert ticket_updates[0] == {
+        "id": 141183,
+        "queueID": "Jason",
+        "status": "In Progress",
+        "billingCodeID": "Remote Support",
+    }
+    assert {"id": 141183, "status": "Waiting Patch Approval"} in ticket_updates
 
     # A normal worker tick before the daily recheck is due must not emit
     # another note or hand the ticket off.
@@ -3625,6 +3809,9 @@ def test_vulscan_approval_change_resumes_without_helpdesk_handoff(tmp_path: Path
         for _, capability, args in actions.calls
         if capability == "service.ticket.update"
     ]
+    assert any(update.get("status") == "Waiting Patch Approval" for update in updates)
+    assert any(update.get("status") == "In Progress" for update in updates)
+    assert any(update.get("status") == "On Hold" for update in updates)
     assert {"id": 141183, "queueID": "Help Desk I", "status": "New"} not in updates
     assert {"id": 141183, "queueID": "Help Desk I", "status": "Human Review"} not in updates
     store.close()
@@ -5426,5 +5613,113 @@ def test_owned_retryable_provider_block_leaves_new_status_and_retries_under_jaso
     assert persisted is not None
     assert persisted.phase == "blocked"
     updates = [call[2]["payload"] for call in actions.calls if call[1] == "service.ticket.update"]
-    assert {"id": 149001, "status": "In Progress"} in updates
+    assert {"id": 149001, "status": "On Hold"} in updates
     assert not any(payload.get("queueID") == "Help Desk I" for payload in updates)
+
+
+def test_phase_status_mapping_is_semantic_and_not_numeric() -> None:
+    assert OperationalAutonomyMaintenance._status_for_phase("waiting_patch_approval") == "Waiting Patch Approval"
+    assert OperationalAutonomyMaintenance._status_for_phase("waiting_patch_window") == "On Hold"
+    assert OperationalAutonomyMaintenance._status_for_phase("waiting_device_access:claim") == "Waiting Device Access"
+    assert OperationalAutonomyMaintenance._status_for_phase("waiting_recheck:verify") == "On Hold"
+    assert OperationalAutonomyMaintenance._status_for_phase("escalated") == "Human Review"
+    assert OperationalAutonomyMaintenance._status_for_phase("complete") == "Complete"
+
+
+def test_monitoring_alert_nonretryable_block_handoffs_to_human_review(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    work = OperationalWork(
+        ticket_id=140933,
+        ticket_number="T20260925.9999",
+        title="Vulnerability Detected by VulScan - Missing Critical Security Patch",
+        playbook_id="vulscan_missing_patch",
+        source_queue="Monitoring Alert",
+        company_id=507,
+        configuration_item_id=0,
+        device_uid="",
+        hostname="",
+        phase="blocked",
+        last_reason=(
+            "configuration item id is missing and endpoint correlation remains "
+            "ambiguous after multi-signal scoring"
+        ),
+    )
+
+    store.put(work)
+    worker._synchronize_blocked_ticket_lifecycle(work, candidate())
+
+    current = store.get(140933)
+    assert current is not None
+    assert current.phase == "escalated"
+    updates = [
+        arguments["payload"]
+        for _, capability, arguments in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert {
+        "id": 140933,
+        "queueID": "Help Desk I",
+        "status": "Human Review",
+    } in updates
+    assert any(
+        capability == "service.ticket.note.create"
+        for _, capability, _ in actions.calls
+    )
+    store.close()
+
+
+def test_monitoring_alert_retryable_block_uses_on_hold_without_handoff(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    work = OperationalWork(
+        ticket_id=140933,
+        ticket_number="T20260925.9999",
+        title="[Monitor] Antivirus status issue",
+        playbook_id="datto_edr_av",
+        source_queue="Monitoring Alert",
+        company_id=507,
+        configuration_item_id=1583,
+        device_uid="device-uid-1",
+        hostname="PC-1",
+        phase="blocked",
+        last_reason="PROVIDER_HTTP_STATUS_503",
+    )
+
+    store.put(work)
+    worker._synchronize_blocked_ticket_lifecycle(work, candidate())
+
+    current = store.get(140933)
+    assert current is not None
+    assert current.phase == "blocked"
+    updates = [
+        arguments["payload"]
+        for _, capability, arguments in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert {"id": 140933, "status": "On Hold"} in updates
+    assert not any(
+        update.get("queueID") == "Help Desk I"
+        for update in updates
+    )
+    store.close()
