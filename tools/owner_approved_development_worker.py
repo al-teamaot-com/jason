@@ -566,6 +566,25 @@ def main() -> int:
                     gate,
                     policy,
                 )
+                prior_history = [
+                    str(value).strip()
+                    for value in list(record.get('source_history') or record.get('source_paths') or [])
+                    if str(value).strip()
+                ]
+                if expansion_search and prior_history:
+                    prior_excerpts = support.source_excerpts_for_paths(
+                        worktree,
+                        prior_history,
+                        gate,
+                        policy,
+                        limit=6,
+                        content_limit=8000,
+                    )
+                    excerpts = support.merge_source_excerpts(
+                        prior_excerpts,
+                        excerpts[:8],
+                        max_total=14,
+                    )
                 if not excerpts:
                     record.update({
                         'phase': 'blocked',
@@ -587,10 +606,20 @@ def main() -> int:
                         'source_excerpts': excerpts,
                     },
                 )
+                history = [
+                    str(value).strip()
+                    for value in list(record.get('source_history') or record.get('source_paths') or [])
+                    if str(value).strip()
+                ]
+                for value in excerpts:
+                    path = str(value.get('path') or '').strip()
+                    if path and path not in history:
+                        history.append(path)
                 record.update({
                     'phase': 'implementing',
                     'reasoning_request_id': edit_rid,
                     'source_paths': [str(value.get('path') or '') for value in excerpts],
+                    'source_history': history[-40:],
                     'updated_at': now(),
                 })
                 continue

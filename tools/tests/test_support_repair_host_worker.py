@@ -421,3 +421,36 @@ def test_load_self_heal_incidents_returns_repair_required_items(tmp_path):
     assert len(items) == 1
     assert items[0]['id'] == 'SUPPORT-AUTO-ABCDEF123456'
     assert items[0]['acceptance'] == 'restore'
+
+
+def test_source_excerpts_for_paths_is_bounded_and_policy_filtered(tmp_path):
+    allowed = tmp_path / 'implementation' / 'kernel' / 'capabilities' / 'service.py'
+    allowed.parent.mkdir(parents=True, exist_ok=True)
+    allowed.write_text('service-body', encoding='utf-8')
+    missing = 'implementation/kernel/capabilities/missing.py'
+    excerpts = worker.source_excerpts_for_paths(
+        tmp_path,
+        [allowed.relative_to(tmp_path).as_posix(), missing],
+        Gate(),
+        {'max_changed_lines': 800, 'max_changed_files': 25},
+        limit=1,
+    )
+    assert [item['path'] for item in excerpts] == [allowed.relative_to(tmp_path).as_posix()]
+
+
+def test_merge_source_excerpts_keeps_prior_context_and_adds_new():
+    prior = [
+        {'path': 'implementation/kernel/capabilities/repository.py', 'content': 'repo'},
+        {'path': 'implementation/kernel/capabilities/service.py', 'content': 'service'},
+    ]
+    current = [
+        {'path': 'implementation/kernel/capabilities/service.py', 'content': 'new-service'},
+        {'path': 'implementation/kernel/system_registry/contracts.py', 'content': 'system'},
+    ]
+    merged = worker.merge_source_excerpts(prior, current, max_total=3)
+    assert [item['path'] for item in merged] == [
+        'implementation/kernel/capabilities/repository.py',
+        'implementation/kernel/capabilities/service.py',
+        'implementation/kernel/system_registry/contracts.py',
+    ]
+    assert merged[1]['content'] == 'service'
