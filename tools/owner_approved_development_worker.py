@@ -541,8 +541,13 @@ def main() -> int:
                     for value in list(result.get('search_terms') or [])
                     if str(value).strip()
                 ]
+                expansion_search = int(record.get('context_expansion_attempts', 0)) > 0
                 if blocked_reason and (
-                    not search_terms or not source_context_blocker(blocked_reason)
+                    not search_terms
+                    or (
+                        not expansion_search
+                        and not source_context_blocker(blocked_reason)
+                    )
                 ):
                     record.update({
                         'phase': 'blocked',
@@ -552,8 +557,8 @@ def main() -> int:
                     continue
                 if blocked_reason:
                     record['reason'] = (
-                        'Continuing bounded source discovery from context-only '
-                        f'search-plan blocker: {blocked_reason[:500]}'
+                        'Continuing bounded source discovery from context-expansion '
+                        f'search plan: {blocked_reason[:500]}'
                     )
                 excerpts = support.safe_search(
                     worktree,

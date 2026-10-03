@@ -108,3 +108,26 @@ def test_authority_search_plan_blocker_remains_terminal_even_with_terms():
     terms = ['production gate']
     assert not module.source_context_blocker(blocked)
     assert blocked and (not terms or not module.source_context_blocker(blocked))
+
+
+def test_recorded_context_expansion_consumes_useful_search_terms_despite_wording():
+    record = {'context_expansion_attempts': 2}
+    blocked = 'Additional exact repository source is still needed; without that surrounding code the implementation area remains ambiguous.'
+    terms = ['CapabilityDefinition(', 'retirement_state']
+    expansion_search = int(record.get('context_expansion_attempts', 0)) > 0
+    terminal = bool(blocked) and (
+        not terms or (not expansion_search and not module.source_context_blocker(blocked))
+    )
+    assert expansion_search
+    assert not terminal
+
+
+def test_initial_non_context_blocker_with_terms_stays_terminal():
+    record = {'context_expansion_attempts': 0}
+    blocked = 'Owner approval is required before production deployment.'
+    terms = ['production gate']
+    expansion_search = int(record.get('context_expansion_attempts', 0)) > 0
+    terminal = bool(blocked) and (
+        not terms or (not expansion_search and not module.source_context_blocker(blocked))
+    )
+    assert terminal
