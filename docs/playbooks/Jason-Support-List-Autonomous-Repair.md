@@ -21,6 +21,7 @@ Each approved support item is in exactly one durable state and progresses withou
 `identified -> claimed -> diagnosing -> implementing -> validating -> pr_active -> ci_repair -> merge_ready -> deployed -> production_verifying -> complete`
 Alternate terminal/intermediate states: `blocked`, `escalated`, `waiting_external_dependency`.
 No state named or equivalent to “waiting for owner to say proceed” is valid for already-approved support work.
+Owner-notification state is durable and duplicate-suppressed: record whether `repair_started`, `blocked_owner_action`, and `production_verified_complete` were successfully delivered/readback-verified for the current support workstream.
 ## 7. Diagnostic Workflow
 Use authoritative repository, CI, runtime, GitHub issue, and production evidence. Reproduce the defect where safe. Separate symptom, root cause, and acceptance proof. Prefer the smallest shared root cause that resolves multiple support items without broadening scope.
 
@@ -45,7 +46,16 @@ Any claimed support item with no meaningful progress across three scheduled reco
 Confirm missing dependencies, avoid duplicate dependency issues, cross-reference them, and mark the support item `waiting_external_dependency`. Continue another independent eligible support item when capacity permits.
 
 ## 14. Documentation Requirements
-Keep `SUPPORT.md`, the GitHub support issue, repair PR, CI evidence, release evidence, and production acceptance synchronized. Record implementation commit/PR, regression proof, deployment revision, rollback target, and production verification. Never record secrets.
+Keep `SUPPORT.md`, the GitHub support issue, repair PR, CI evidence, release evidence, and production acceptance synchronized. Record implementation commit/PR, regression proof, deployment revision, rollback target, production verification, and owner-notification correlation/message evidence. Never record secrets.
+
+## 14A. Owner Teams Lifecycle Notifications
+When an eligible support item is first claimed for repair, send Al one governed Teams **Repair Started** message containing the support ID, concise defect summary, and bounded repair scope. Do not resend it on every reconciliation.
+
+If work becomes genuinely blocked on owner action or authority, send one **Blocked / Owner Action Required** message containing the support ID, exact blocker, evidence already gathered, and the smallest action or decision needed from the owner. Use the standardized Owner Action Request structure where applicable.
+
+After the repair is deployed and the support item's explicit production acceptance criteria pass, send one **Production-Verified Complete** message containing the support ID, repaired behavior, merged/deployed revision, and concise acceptance evidence. CI success, merge success, or deployment alone is not sufficient for this completion message.
+
+All support lifecycle messages use the canonical governed Teams owner path. Delivery is not complete until the exact destination plus durable message/correlation identity are captured and provider/readback verification proves the intended message exists. Apply bounded retry and duplicate suppression. Persistent unverified delivery becomes a support/health condition and must not silently mark the owner as notified.
 
 ## 15. Failure Handling
 A failed read, test, check, merge, deployment, verification, or documentation gate is actionable repair evidence. If caused by the repair, diagnose and correct it automatically. Do not silently leave a failed gate awaiting manual continuation.
@@ -65,7 +75,7 @@ Record original defect, root cause, files/behavior changed, tests, PR/merge, pro
 Required now: GitHub support/PR/check access; isolated repository worktree/branch operations; test execution; governed release/deployment evidence; production status/acceptance reads; support documentation updates; persisted automation state; and the native support-repair reasoning/host-worker boundary. The runtime model has no shell, GitHub credentials, or deployment authority. The host worker has no model credential and may apply only exact-text edits that pass J-CHANGE-002 path, size, test, and merge gates.
 
 ## 21. Acceptance Test
-Use the current active support repair set as the acceptance case. Prove that an open support item is picked up without a new owner prompt, an active repair PR is continued instead of duplicated, repair-owned CI/documentation failures are corrected, eligible release proceeds through the existing governed lane, production acceptance is required before closure, and a true governance/capability blocker stops safely.
+Use the current active support repair set as the acceptance case. Prove that an open support item is picked up without a new owner prompt; exactly one Repair Started Teams message is delivered and readback-verified; an active repair PR is continued instead of duplicated; repair-owned CI/documentation failures are corrected; a controlled owner-action blocker produces exactly one Blocked / Owner Action Required message; eligible release proceeds through the existing governed lane; production acceptance is required before closure; exactly one Production-Verified Complete message is delivered and readback-verified only after acceptance succeeds; and a true governance/capability blocker stops safely.
 
 ## 22. Section Goal Closure
 Close this Section Goal only after one support item completes end-to-end through the native Jason support-repair worker from autonomous pickup through production-verified closure without an owner “proceed” prompt.
