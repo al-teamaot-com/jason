@@ -176,6 +176,12 @@ jobs:
         run: python3 -B -m unittest tools.tests.test_release_manager_gate
       - name: Test production Release Manager host runner
         run: python3 -B -m unittest tools.tests.test_release_manager_host_runner
+      - name: Test governed TODO engineering intake
+        run: python3 -B -m unittest tools.tests.test_todo_engineering_intake
+      - name: Test TODO Release Manager bridge
+        run: python3 -B -m unittest tools.tests.test_todo_release_bridge
+      - name: Test TODO engineering host wiring
+        run: python3 -B -m unittest tools.tests.test_install_support_repair_host_worker
       - name: Test host PR integration reconciler
         run: python3 -B -m unittest tools.tests.test_pr_integration_source_reconciler
       - name: Test autonomous repair release classifier

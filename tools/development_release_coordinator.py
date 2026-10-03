@@ -346,6 +346,7 @@ def collect(api: Api, config: dict[str, Any]) -> dict[str, Any]:
         "production_policy": config.get("production", {}),
         "autonomous_repair_policy": config.get("production", {}).get("autonomous_repair", {}),
         "support_autonomy_policy": config.get("support_autonomy", {}),
+        "todo_autonomy_policy": config.get("todo_autonomy", {}),
     }
 
 
@@ -446,6 +447,29 @@ def render(board: dict[str, Any]) -> str:
     )
     lines.append(
         "- Closure requires explicit production acceptance evidence; merge/deploy alone never closes a support item."
+    )
+
+    todo_autonomy = board.get("todo_autonomy_policy", {})
+    lines.extend(["", "## TODO engineering autonomy", ""])
+    lines.append(
+        f"- Governed TODO intake enabled: **{'yes' if todo_autonomy.get('enabled') else 'no'}**."
+    )
+    lines.append(
+        f"- Standing owner approval for actionable TODO intake: **{'yes' if todo_autonomy.get('owner_approved') else 'no'}**."
+    )
+    lines.append(
+        "- Eligible statuses: **"
+        + ", ".join(str(value) for value in todo_autonomy.get("eligibility_statuses", []))
+        + "**."
+    )
+    lines.append(
+        f"- Maximum open TODO engineering issues: **{todo_autonomy.get('max_open_todo_issues', 0)}**."
+    )
+    lines.append(
+        "- TODO completion requires Release Manager production verification and state **closed**."
+    )
+    lines.append(
+        "- Protected-core production approval remains exact-owner-approval only."
     )
 
     lines.extend(
