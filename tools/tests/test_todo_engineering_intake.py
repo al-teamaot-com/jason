@@ -17,10 +17,11 @@ SPEC.loader.exec_module(module)
 
 TODO_TEXT = """# Backlog
 
-### TODO-OPS-010 — Planned high priority item
+### TODO-OPS-010 — Approved high priority item
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-03
+- **Autonomous engineering readiness:** Approved
 - **Risk level:** Moderate
 - **Idea:** Build the thing.
 
@@ -28,13 +29,21 @@ TODO_TEXT = """# Backlog
 
 - **Priority:** P0
 - **Status:** Proposed
+- **Autonomous engineering readiness:** Not reviewed
 - **Idea:** Save this idea only.
 
-### TODO-OPS-012 — In progress item
+### TODO-OPS-012 — Planned but not approved item
 
 - **Priority:** P2
-- **Status:** In progress — initial design exists
-- **Idea:** Finish the thing.
+- **Status:** Planned
+- **Autonomous engineering readiness:** Not reviewed
+- **Idea:** Do not start this automatically.
+
+### TODO-OPS-013 — Status approved but readiness missing
+
+- **Priority:** P1
+- **Status:** Approved for Autonomous Engineering
+- **Idea:** Fail closed without readiness evidence.
 """
 
 
@@ -43,18 +52,20 @@ class TodoEngineeringIntakeTests(unittest.TestCase):
         items = module.parse_todo_sections(TODO_TEXT)
         self.assertEqual(
             [item.item_id for item in items],
-            ["TODO-OPS-010", "TODO-OPS-011", "TODO-OPS-012"],
+            ["TODO-OPS-010", "TODO-OPS-011", "TODO-OPS-012", "TODO-OPS-013"],
         )
         self.assertEqual(items[0].priority, "P1")
-        self.assertEqual(items[0].status, "Planned")
+        self.assertTrue(items[0].status.startswith("Approved for Autonomous Engineering"))
+        self.assertEqual(items[0].readiness, "Approved")
         self.assertIn("Build the thing.", items[0].section)
 
-    def test_only_planned_and_in_progress_are_executable(self):
+    def test_only_owner_approved_ready_items_are_executable(self):
         items = module.parse_todo_sections(TODO_TEXT)
         status = {item.item_id: item.executable for item in items}
         self.assertTrue(status["TODO-OPS-010"])
-        self.assertTrue(status["TODO-OPS-012"])
         self.assertFalse(status["TODO-OPS-011"])
+        self.assertFalse(status["TODO-OPS-012"])
+        self.assertFalse(status["TODO-OPS-013"])
 
     def test_support_first_blocks_todo_when_repair_capacity_exists(self):
         todos = module.parse_todo_sections(TODO_TEXT)
@@ -120,13 +131,13 @@ class TodoEngineeringIntakeTests(unittest.TestCase):
             max_support_repairs=2,
             existing_issues={"TODO-OPS-010": {"number": 5}},
         )
-        self.assertIsNotNone(candidate)
-        self.assertEqual(candidate.item_id, "TODO-OPS-012")
+        self.assertIsNone(candidate)
 
     def test_issue_body_binds_development_to_release_manager_completion(self):
         item = module.parse_todo_sections(TODO_TEXT)[0]
         body = module.issue_body(item)
         self.assertIn("- TODO item: TODO-OPS-010", body)
+        self.assertIn("- TODO readiness: Approved", body)
         self.assertIn("- **Autonomous development:** owner-approved", body)
         self.assertIn("Release path: Jason Release Manager required", body)
         self.assertIn("production_verified", body)
