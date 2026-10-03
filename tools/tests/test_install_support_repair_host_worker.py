@@ -50,6 +50,15 @@ class InstallSupportRepairHostWorkerTests(unittest.TestCase):
         self.assertLess(todo_index, development_index)
         self.assertLess(development_index, bridge_index)
 
+    def test_installer_binds_nonlogin_systemd_user_bus(self):
+        installer = (self.root / "tools/install_support_repair_host_worker.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("XDG_RUNTIME_DIR", installer)
+        self.assertIn("DBUS_SESSION_BUS_ADDRESS", installer)
+        self.assertIn("unix:path=/run/user/{uid}/bus", installer)
+        self.assertIn("env=systemd_env", installer)
+
     def test_support_repair_timer_runs_daily_at_0230_and_remains_persistent(self):
         timer = (
             self.root
