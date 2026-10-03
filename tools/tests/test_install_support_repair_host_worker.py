@@ -50,6 +50,20 @@ class InstallSupportRepairHostWorkerTests(unittest.TestCase):
         self.assertLess(todo_index, development_index)
         self.assertLess(development_index, bridge_index)
 
+    def test_engineering_service_uses_immutable_installed_source(self):
+        service = (
+            self.root
+            / "infrastructure/openclaw-operations/systemd/user/jason-support-repair-worker.service"
+        ).read_text(encoding="utf-8")
+        installer = (self.root / "tools/install_support_repair_host_worker.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("/home/al/.local/lib/jason/engineering-worker-source", service)
+        self.assertNotIn("--repo /home/al/projects/jason", service)
+        self.assertNotIn("WorkingDirectory=/home/al/projects/jason", service)
+        self.assertIn("engineering-worker-source", installer)
+        self.assertIn("source_link.symlink_to(repo, target_is_directory=True)", installer)
+
     def test_installer_binds_nonlogin_systemd_user_bus(self):
         installer = (self.root / "tools/install_support_repair_host_worker.py").read_text(
             encoding="utf-8"
