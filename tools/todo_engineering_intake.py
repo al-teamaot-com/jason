@@ -136,6 +136,16 @@ def load_support_state(spool: Path) -> dict[str, Any]:
     return value if isinstance(value, dict) else {"items": {}}
 
 
+def blocked_support_ids(state: Mapping[str, Any]) -> list[str]:
+    items = state.get("items") if isinstance(state.get("items"), Mapping) else {}
+    return sorted(
+        str(item_id)
+        for item_id, record in items.items()
+        if isinstance(record, Mapping)
+        and str(record.get("phase") or "") == "blocked"
+    )
+
+
 def active_support_ids(state: Mapping[str, Any]) -> list[str]:
     active_phases = {
         "identified",
@@ -207,6 +217,7 @@ def select_candidate(
         support,
         todo_summary,
         active_support_ids=active_support_ids(support_state),
+        blocked_support_ids=blocked_support_ids(support_state),
         max_active_support_repairs=max_support_repairs,
     )
     if not plan["todo_start_allowed"]:
@@ -349,6 +360,7 @@ def main() -> int:
         config.get("support_autonomy", {}).get("max_active_items", args.max_support_repairs)
     )
     active_support = len(active_support_ids(support_state))
+    blocked_support = len(blocked_support_ids(support_state))
     active_development = active_development_count(spool)
     engineering_limit = max(
         1,
@@ -373,6 +385,7 @@ def main() -> int:
         "status": "idle" if candidate is None else "candidate_selected",
         "reason": reason,
         "active_support_repairs": active_support,
+        "blocked_support_repairs": blocked_support,
         "active_development_items": active_development,
         "engineering_capacity": engineering_limit,
         "existing_todo_issues": {
