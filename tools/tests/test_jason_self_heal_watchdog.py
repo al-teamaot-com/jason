@@ -279,6 +279,20 @@ def test_generic_invariant_selected_cannot_exceed_eligible(tmp_path):
     assert evidence["cycles"][0]["cycle_id"] == "c1"
 
 
+def test_generic_invariant_selected_cannot_exceed_active_slots(tmp_path):
+    db = tmp_path / "behavior.sqlite3"
+    now_iso = datetime.now(timezone.utc).isoformat()
+    _create_behavior_db(
+        db,
+        [("c2", now_iso, 4, 4, 0, 0, 0, 1, 2, 0, 0)],
+    )
+
+    failures, evidence = module.autonomy_behavior_anomalies(db)
+
+    assert any("selected_gt_active_slots" in item for item in failures)
+    assert evidence["cycles"][0]["cycle_id"] == "c2"
+
+
 def test_behavior_baseline_detects_unexpected_selection_efficiency_collapse(tmp_path):
     db = tmp_path / "behavior.sqlite3"
     rows = []
