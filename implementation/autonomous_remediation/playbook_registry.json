@@ -488,6 +488,49 @@
       }
     },
     {
+      "id": "vulscan_multi_device_split",
+      "name": "Jason - VulScan Multi-Device Ticket Split",
+      "version": "1.0.0",
+      "lifecycle": "production",
+      "enabled": true,
+      "source": "docs/playbooks/Jason-VulScan-Multi-Device-Split.md",
+      "trigger": {
+        "title_contains": [
+          "Vulnerability Detected by VulScan"
+        ],
+        "description_contains": [
+          "Affected Nodes:"
+        ],
+        "minimum_affected_nodes": 2
+      },
+      "review_status": "owner_approved_pending_live_acceptance",
+      "autonomy": {
+        "activation": "autonomous",
+        "required_gates": [
+          "trigger",
+          "multi_device_identity",
+          "all_targets_exact",
+          "ticket_create_authority",
+          "governance_precheck"
+        ],
+        "allowed_capabilities": [
+          "service.ticket.create",
+          "service.ticket.note.create",
+          "service.ticket.update"
+        ],
+        "policy_id": "playbook-autonomy:vulscan_multi_device_split",
+        "allowed_branches": [
+          "parse_multi_device_alert",
+          "resolve_exact_targets",
+          "split_into_verified_child_tickets",
+          "document_lineage",
+          "complete_source_after_verified_split"
+        ],
+        "approval_bound_branches": [],
+        "disruptive_branches": []
+      }
+    },
+    {
       "id": "windows_time_source",
       "name": "Jason - Windows Time Source Self-Heal",
       "version": "0.1.0",

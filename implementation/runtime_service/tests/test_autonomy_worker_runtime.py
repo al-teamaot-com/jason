@@ -16,7 +16,10 @@ from jason_runtime.autonomy_worker_runtime import (
     OperationalAutonomyMaintenance,
     OperationalWork,
     SQLiteOperationalWorkStore,
+    VULSCAN_SCOPE,
+    VULSCAN_SPLIT_SCOPE,
 )
+from jason_runtime.ticket_split_runtime import SQLiteTicketSplitStore, TicketSplitExecutor
 
 
 class PromotionStore:
@@ -5723,3 +5726,175 @@ def test_monitoring_alert_retryable_block_uses_on_hold_without_handoff(tmp_path:
         for update in updates
     )
     store.close()
+
+
+class VulScanSplitReads(Reads):
+    CONFIGS = {
+        "PC-A": {
+            "id": 2001,
+            "companyID": 507,
+            "isActive": True,
+            "referenceNumber": "uid-a",
+            "referenceTitle": "PC-A",
+            "rmmDeviceAuditHostname": "PC-A",
+        },
+        "PC-B": {
+            "id": 2002,
+            "companyID": 507,
+            "isActive": True,
+            "referenceNumber": "uid-b",
+            "referenceTitle": "PC-B",
+            "rmmDeviceAuditHostname": "PC-B",
+        },
+    }
+
+    def execute(self, capability, arguments):
+        if capability == "service.configuration.search":
+            name = str(arguments.get("name") or "")
+            item = self.CONFIGS.get(name)
+            return {
+                "status": "succeeded",
+                "evidence": {"data": {"items": [] if item is None else [item]}},
+            }
+        if capability == "endpoint.device.read":
+            uid = str(arguments["resource_id"])
+            by_uid = {item["referenceNumber"]: item for item in self.CONFIGS.values()}
+            item = by_uid[uid]
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "record": {
+                        "resource_id": uid,
+                        "hostname": item["rmmDeviceAuditHostname"],
+                        "online": True,
+                    }
+                },
+            }
+        return super().execute(capability, arguments)
+
+
+class VulScanSplitActions(Actions):
+    def __init__(self):
+        super().__init__()
+        self.ticket_ids = iter((3001, 3002, 3003, 3004))
+
+    def execute(self, scope, capability, arguments):
+        if capability == "service.ticket.create":
+            self.calls.append((scope.playbook_id, capability, arguments))
+            ticket_id = next(self.ticket_ids)
+            return {
+                "data": {
+                    "itemId": ticket_id,
+                    "jasonVerification": {
+                        "readbackVerified": True,
+                        "ticketId": ticket_id,
+                        "verifiedFields": ["companyID", "title"],
+                    },
+                }
+            }
+        if capability == "service.ticket.note.create":
+            self.calls.append((scope.playbook_id, capability, arguments))
+            return {"data": {"itemId": 9001}}
+        return super().execute(scope, capability, arguments)
+
+
+def multi_device_vulscan_candidate():
+    return QueueCandidate(
+        resource_id="141900",
+        priority=100,
+        source_queue="Monitoring Alert",
+        owned_by_jason=False,
+        urgent=True,
+        context={
+            "id": 141900,
+            "ticketNumber": "T20261003.0900",
+            "title": "Vulnerability Detected by VulScan - Missing Critical Security Patch - KB5129195",
+            "description": (
+                "Issue: Missing Critical Security Patch - KB5129195\r\n"
+                "Severity: Critical\r\n"
+                "Affected Nodes: Discovery Agent PC-A (192.168.1.10 / AA:AA:AA:AA:AA:AA), "
+                "PC-B (192.168.1.11 / BB:BB:BB:BB:BB:BB)"
+            ),
+            "companyID": 507,
+            "configurationItemID": None,
+            "priority": 1,
+            "issueType": 23,
+            "subIssueType": 497,
+            "ticketType": 3,
+            "_jason_source_status_label": "New",
+        },
+    )
+
+
+def test_multi_device_vulscan_split_creates_one_child_per_verified_device(tmp_path: Path):
+    actions = VulScanSplitActions()
+    split_store = SQLiteTicketSplitStore(tmp_path / "split.sqlite3")
+    splitter = TicketSplitExecutor(actions=actions, store=split_store)
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(multi_device_vulscan_candidate()),
+        reads=VulScanSplitReads(),
+        actions=actions,
+        store=SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3"),
+        promotion_store=ExactPromotionStore(
+            approved_scopes={
+                ("vulscan_missing_patch", "1.0.0"),
+                ("vulscan_multi_device_split", "1.0.0"),
+            }
+        ),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+        ticket_splitter=splitter,
+    )
+
+    assert worker._split_multi_device_vulscan(
+        multi_device_vulscan_candidate(),
+        VULSCAN_SCOPE,
+    ) is True
+
+    creates = [
+        arguments["payload"]
+        for _, capability, arguments in actions.calls
+        if capability == "service.ticket.create"
+    ]
+    assert len(creates) == 2
+    assert {item["configurationItemID"] for item in creates} == {2001, 2002}
+    assert all(item["queueID"] == "Jason" for item in creates)
+    assert all(item["status"] == "New" for item in creates)
+    assert all("Source ticket: T20261003.0900" in item["description"] for item in creates)
+    updates = [
+        arguments["payload"]
+        for _, capability, arguments in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert updates[0]["queueID"] == "Jason"
+    assert updates[0]["status"] == "In Progress"
+    assert updates[-1] == {"id": 141900, "status": "Complete"}
+    assert len(split_store.list_for_source(141900)) == 2
+    split_store.close()
+
+
+def test_vulscan_split_requires_separate_promoted_create_scope(tmp_path: Path):
+    actions = VulScanSplitActions()
+    split_store = SQLiteTicketSplitStore(tmp_path / "split.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(multi_device_vulscan_candidate()),
+        reads=VulScanSplitReads(),
+        actions=actions,
+        store=SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3"),
+        promotion_store=ExactPromotionStore(
+            approved_scopes={("vulscan_missing_patch", "1.0.0")}
+        ),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+        ticket_splitter=TicketSplitExecutor(actions=actions, store=split_store),
+    )
+
+    with pytest.raises(OperationalAutonomyError, match="split scope is not promoted"):
+        worker._split_multi_device_vulscan(
+            multi_device_vulscan_candidate(),
+            VULSCAN_SCOPE,
+        )
+    assert not any(capability == "service.ticket.create" for _, capability, _ in actions.calls)
+    split_store.close()
