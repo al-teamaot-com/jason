@@ -62,10 +62,30 @@ def main() -> int:
         path.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(path, 0o700)
 
+    uid = os.getuid()
+    systemd_env = os.environ.copy()
+    systemd_env.setdefault('XDG_RUNTIME_DIR', f'/run/user/{uid}')
+    systemd_env.setdefault(
+        'DBUS_SESSION_BUS_ADDRESS',
+        f'unix:path=/run/user/{uid}/bus',
+    )
+
     if args.activate:
-        subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True)
-        subprocess.run(['systemctl', '--user', 'enable', '--now', 'jason-support-repair-worker.timer'], check=True)
-        subprocess.run(['systemctl', '--user', 'is-active', '--quiet', 'jason-support-repair-worker.timer'], check=True)
+        subprocess.run(
+            ['systemctl', '--user', 'daemon-reload'],
+            check=True,
+            env=systemd_env,
+        )
+        subprocess.run(
+            ['systemctl', '--user', 'enable', '--now', 'jason-support-repair-worker.timer'],
+            check=True,
+            env=systemd_env,
+        )
+        subprocess.run(
+            ['systemctl', '--user', 'is-active', '--quiet', 'jason-support-repair-worker.timer'],
+            check=True,
+            env=systemd_env,
+        )
 
     print(f"WORKER_PATH={install_root / 'support_repair_host_worker.py'}")
     print(f"SPOOL_PATH={spool}")
