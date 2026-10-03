@@ -337,8 +337,13 @@ def companion_source_paths(path: str) -> list[str]:
         test_index = len(parts) - 1 - parts[::-1].index('tests')
         project_root = Path(*parts[:test_index])
         source_name = candidate.name[5:]
+        source_stem = Path(source_name).stem
         add(project_root / source_name)
         add(project_root / 'src' / source_name)
+        # Package-level registry/service tests commonly use test_<package>.py
+        # while implementation lives in <package>/service.py and contracts.py.
+        add(project_root / source_stem / 'service.py')
+        add(project_root / source_stem / 'contracts.py')
         # Common Python package layout: project/tests/test_x.py maps to
         # project/src/<package>/x.py. Exact package resolution is completed by
         # bounded repository matching in safe_search.
@@ -368,7 +373,8 @@ def companion_source_paths(path: str) -> list[str]:
 
 
 def safe_search(worktree: Path, terms: list[str], gate, policy: Mapping[str, Any]) -> list[dict[str, str]]:
-    candidates: set[str] = set()
+    candidate_scores: dict[str, int] = {}
+    concept_scores: list[tuple[dict[str, int], set[str], str | None]] = []
 
     def eligible_path(path: str) -> str | None:
         path = path.strip()
@@ -380,34 +386,113 @@ def safe_search(worktree: Path, terms: list[str], gate, policy: Mapping[str, Any
             return None
         return path
 
-    # Collect a bounded candidate pool across all useful terms before choosing
-    # excerpts. This avoids generic terms (for example "capability") filling the
-    # eight excerpt slots with README/docs entries before implementation source is
-    # even considered. Path ordering is deterministic and still bounded.
-    for term in expanded_search_terms(terms):
-        output = run(['git', 'grep', '-l', '-I', '-i', '-F', term], cwd=worktree, check=False)
-        for raw in output.splitlines():
-            path = eligible_path(raw)
-            if path is not None:
-                candidates.add(path)
-            if len(candidates) >= 500:
+    def normalized_tokens(value: str) -> set[str]:
+        tokens: set[str] = set()
+        for raw in re.split(r'[^a-z0-9]+', value.casefold()):
+            if len(raw) < 4:
+                continue
+            token = raw
+            if token.endswith('ies') and len(token) > 4:
+                token = token[:-3] + 'y'
+            elif token.endswith('s') and len(token) > 4:
+                token = token[:-1]
+            tokens.add(token)
+        return tokens
+
+    # Score each reasoning concept separately. This preserves conceptual coverage
+    # across multi-part engineering work instead of letting one broad subsystem or
+    # one high-frequency token consume every excerpt slot. Candidate metadata is
+    # bounded by repository paths; actual file reads remain bounded below.
+    for raw_concept in terms[:8]:
+        if not isinstance(raw_concept, str) or len(raw_concept.strip()) < 2:
+            continue
+        group: dict[str, int] = {}
+        expanded = expanded_search_terms([raw_concept])
+        for term in expanded:
+            output = run(['git', 'grep', '-l', '-I', '-i', '-F', term], cwd=worktree, check=False)
+            matched_this_term: set[str] = set()
+            for raw in output.splitlines():
+                path = eligible_path(raw)
+                if path is None or path in matched_this_term:
+                    continue
+                group[path] = group.get(path, 0) + 1
+                candidate_scores[path] = candidate_scores.get(path, 0) + 1
+                matched_this_term.add(path)
+        if group:
+            concept_tokens = normalized_tokens(raw_concept)
+            ordered = [
+                token
+                for token in re.split(r'[^a-z0-9]+', raw_concept.casefold())
+                if len(token) >= 4
+            ]
+            subject = None
+            if ordered:
+                subject = ordered[0]
+                if subject.endswith('ies') and len(subject) > 4:
+                    subject = subject[:-3] + 'y'
+                elif subject.endswith('s') and len(subject) > 4:
+                    subject = subject[:-1]
+            concept_scores.append((group, concept_tokens, subject))
+
+    query_tokens = normalized_tokens(' '.join(str(term) for term in terms[:8]))
+
+    def relevance_key(
+        path: str,
+        score: int,
+        tokens: set[str],
+        subject: str | None = None,
+    ) -> tuple[int, int, int, str]:
+        path_tokens = normalized_tokens(path)
+        path_overlap = len(tokens & path_tokens)
+        subject_bonus = 5 if subject is not None and subject in path_tokens else 0
+        source_rank, normalized = search_path_priority(path)
+        return (
+            source_rank,
+            -(score + (3 * path_overlap) + subject_bonus),
+            -score,
+            normalized,
+        )
+
+    paths: list[str] = []
+
+    # First pass: one best source candidate per reasoning concept.
+    for group, concept_tokens, subject in concept_scores:
+        ranked = sorted(
+            group,
+            key=lambda path: relevance_key(
+                path, group[path], concept_tokens, subject
+            ),
+        )
+        for path in ranked:
+            if path not in paths:
+                paths.append(path)
                 break
-        if len(candidates) >= 500:
+        if len(paths) >= 8:
             break
 
-    paths = sorted(candidates, key=search_path_priority)[:8]
+    # Second pass: fill any remaining slots by aggregate relevance.
+    if len(paths) < 8:
+        ranked_all = sorted(
+            candidate_scores,
+            key=lambda path: relevance_key(
+                path, candidate_scores[path], query_tokens
+            ),
+        )
+        for path in ranked_all:
+            if path not in paths:
+                paths.append(path)
+            if len(paths) >= 8:
+                break
 
-    # If search finds a test but not its obvious implementation (or vice versa),
-    # include the companion when it exists and remains J-CHANGE-002 eligible. This
-    # gives edit reasoning enough exact source context without broad repository reads.
+    # Add deterministic implementation/test companions where they exist.
     for path in list(paths):
         for companion in companion_source_paths(path):
             eligible = eligible_path(companion)
             if eligible is not None and eligible not in paths:
                 paths.append(eligible)
-            if len(paths) >= 10:
+            if len(paths) >= 12:
                 break
-        if len(paths) >= 10:
+        if len(paths) >= 12:
             break
 
     excerpts = []
