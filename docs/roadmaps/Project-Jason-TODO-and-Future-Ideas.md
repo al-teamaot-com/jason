@@ -1116,14 +1116,19 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-GOV-002 — Capability retirement and deprecation process
 
 - **Priority:** P2
-- **Status:** Proposed
+- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-03
 - **Risk level:** Moderate
 - **Idea:** Define how capabilities are deprecated, replaced, migrated, and removed.
 - **Why it matters:** Prevents undocumented drift and abandoned features.
-- **Why not now:** The capability registry is still early.
-- **Prerequisites:** capability ownership, usage telemetry, versioning, migration notices.
-- **Decision owner:** Jason Governance Authority
-- **Review trigger:** Before the first breaking capability change.
+- **Autonomous engineering readiness:** Approved
+- **Approved scope:** Build the generic configuration/registry-driven capability and provider deprecation/retirement process, dependency and usage checks, replacement binding, migration-state tracking, CI/documentation enforcement, and deterministic retirement eligibility. Do not delete provider-side client data or broaden unrelated execution authority.
+- **Authority basis:** Owner approval of this TODO authorizes the subordinate backend/configuration work required to implement the approved scope, subject to the Jason Constitution and existing policy. No separate approval is required for ordinary implementation plumbing that remains inside this scope.
+- **Required capabilities:** Existing capability/provider lifecycle registries, System Registry dependency graph, audit/usage evidence where available, CI/release controls, and documentation control plane. Missing subordinate implementation primitives may be built under this TODO when they do not expand scope or violate policy.
+- **Retirement rule:** Jason may autonomously retire a capability only when authoritative evidence proves **no active consumer/dependent still uses it** and a **replacement is already implemented, production-accepted, and tested**. If either condition is unknown, incomplete, ambiguous, or false, retirement fails closed and remains non-retired. Deprecation/migration preparation may proceed autonomously within the approved scope.
+- **Acceptance test:** Use a bounded synthetic or non-production capability dependency fixture to prove: an in-use capability cannot retire; a capability with no replacement cannot retire; a replacement that exists but is not production-accepted/tested cannot authorize retirement; a capability with zero active consumers and an accepted/tested replacement can retire; the replacement relationship and retirement evidence are durable; and stale/retired references are rejected or migrated safely. Prove rollback/reinstatement behavior before applying the process to a material production capability.
+- **Open questions:** None for initial implementation.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Review only if retirement would require provider-side destructive action, constitutional/policy change, materially broader authority, or a future proposal to retire capabilities without a proven replacement.
 
 ### TODO-GOV-003 — Formal risk taxonomy for requests and communications
 
