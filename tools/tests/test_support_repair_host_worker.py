@@ -46,6 +46,41 @@ class Gate:
 
 
 
+def test_safe_search_prefers_source_over_docs(tmp_path, monkeypatch):
+    for rel in [
+        'README.md',
+        'docs/architecture/example.md',
+        'config/example.json',
+        'tools/example.py',
+        'implementation/kernel/capability_registry.py',
+    ]:
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('capability lifecycle', encoding='utf-8')
+
+    def fake_run(args, **kwargs):
+        if args[-1] in {'capability lifecycle', 'capability', 'lifecycle'}:
+            return '\n'.join([
+                'README.md',
+                'docs/architecture/example.md',
+                'config/example.json',
+                'tools/example.py',
+                'implementation/kernel/capability_registry.py',
+            ])
+        return ''
+
+    monkeypatch.setattr(worker, 'run', fake_run)
+    excerpts = worker.safe_search(
+        tmp_path,
+        ['capability lifecycle'],
+        Gate(),
+        {'max_changed_lines': 800, 'max_changed_files': 25},
+    )
+    paths = [entry['path'] for entry in excerpts]
+    assert paths[0] == 'implementation/kernel/capability_registry.py'
+    assert paths.index('tools/example.py') < paths.index('docs/architecture/example.md')
+
+
 def test_safe_search_expands_model_phrase_and_pairs_test_with_source(tmp_path, monkeypatch):
     source = tmp_path / 'tools' / 'jason_self_heal_watchdog.py'
     test = tmp_path / 'tools' / 'tests' / 'test_jason_self_heal_watchdog.py'
