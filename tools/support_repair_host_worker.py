@@ -246,30 +246,104 @@ def ensure_worktree(repo: Path, item_id: str, branch: str | None = None) -> Path
     return path
 
 
+_SEARCH_STOP_WORDS = {
+    'about', 'after', 'against', 'because', 'between', 'compare', 'could', 'defect',
+    'during', 'from', 'into', 'issue', 'jason', 'likely', 'logic', 'more', 'process',
+    'repair', 'reported', 'should', 'state', 'support', 'than', 'that', 'their', 'there',
+    'these', 'this', 'through', 'using', 'when', 'where', 'which', 'with', 'worker',
+}
+
+
+def expanded_search_terms(terms: list[str]) -> list[str]:
+    """Turn model search phrases into deterministic literal grep candidates.
+
+    The reasoning model often returns descriptive multi-word phrases that are useful
+    to a human but too specific for fixed-string repository grep. Preserve each
+    original phrase, then add bounded identifier/keyword tokens so exact source
+    symbols such as ``selected_gt_active_slots`` can still be located.
+    """
+    expanded: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: str) -> None:
+        value = value.strip()
+        key = value.casefold()
+        if len(value) < 2 or key in seen:
+            return
+        seen.add(key)
+        expanded.append(value)
+
+    for raw in terms[:8]:
+        if not isinstance(raw, str):
+            continue
+        text = raw.strip()
+        if len(text) < 2:
+            continue
+        add(text)
+        for token in re.findall(r'[A-Za-z0-9_.:/-]{4,}', text):
+            if token.casefold() in _SEARCH_STOP_WORDS:
+                continue
+            add(token)
+            for part in re.split(r'[_:/.\-]+', token):
+                if len(part) >= 4 and part.casefold() not in _SEARCH_STOP_WORDS:
+                    add(part)
+            if len(expanded) >= 40:
+                break
+        if len(expanded) >= 40:
+            break
+    return expanded[:40]
+
+
+def companion_source_paths(path: str) -> list[str]:
+    """Return obvious implementation/test companions without guessing content."""
+    candidate = Path(path)
+    parts = list(candidate.parts)
+    companions: list[str] = []
+    if 'tests' in parts and candidate.name.startswith('test_'):
+        test_index = len(parts) - 1 - parts[::-1].index('tests')
+        source = Path(*parts[:test_index], candidate.name[5:])
+        companions.append(source.as_posix())
+    elif candidate.suffix == '.py':
+        companions.append((candidate.parent / 'tests' / f'test_{candidate.name}').as_posix())
+    return companions
+
+
 def safe_search(worktree: Path, terms: list[str], gate, policy: Mapping[str, Any]) -> list[dict[str, str]]:
     paths: list[str] = []
-    for term in terms[:8]:
-        if not isinstance(term, str) or len(term.strip()) < 2:
-            continue
-        output = run(['git', 'grep', '-l', '-I', '-i', '-F', term.strip()], cwd=worktree, check=False)
+
+    def add_path(path: str) -> None:
+        path = path.strip()
+        if not path or path in paths or path.startswith('.git'):
+            return
+        if gate.path_denial_reason(path, dict(policy)):
+            return
+        if not (worktree / path).is_file():
+            return
+        paths.append(path)
+
+    for term in expanded_search_terms(terms):
+        output = run(['git', 'grep', '-l', '-I', '-i', '-F', term], cwd=worktree, check=False)
         for raw in output.splitlines():
-            path = raw.strip()
-            if not path or path in paths:
-                continue
-            if gate.path_denial_reason(path, dict(policy)):
-                continue
-            if path.startswith('.git'):
-                continue
-            paths.append(path)
+            add_path(raw)
+            if len(paths) >= 8:
+                break
+        if len(paths) >= 8:
+            break
+
+    # If search finds a test but not its obvious implementation (or vice versa),
+    # include the companion when it exists and remains J-CHANGE-002 eligible. This
+    # gives edit reasoning enough exact source context without broad repository reads.
+    for path in list(paths):
+        for companion in companion_source_paths(path):
+            add_path(companion)
             if len(paths) >= 10:
                 break
         if len(paths) >= 10:
             break
+
     excerpts = []
     for path in paths:
         candidate = worktree / path
-        if not candidate.is_file():
-            continue
         try:
             text = candidate.read_text(encoding='utf-8')
         except UnicodeDecodeError:
@@ -564,25 +638,38 @@ def eligible_premerge(repo: Path, pr_number: int, gate, policy: Mapping[str, Any
 def select_reconcile_ids(state: Mapping[str, Any], support: list[dict[str, str]], max_active: int) -> list[str]:
     items = state.get('items') if isinstance(state.get('items'), Mapping) else {}
     terminal_phases = {'complete', 'blocked', 'escalated'}
+    queued_phases = {'identified'}
     active_work_phases = {
-        'identified', 'diagnosing', 'implementing',
+        'diagnosing', 'implementing',
         'ci_repair_needed', 'ci_repairing',
     }
+
+    # Passive lifecycle states such as PR validation, deployment waiting, and
+    # production verification must continue to reconcile, but queued/identified
+    # work does not consume a repair slot until it is explicitly selected below.
     selected = [
         key for key, value in items.items()
-        if isinstance(value, Mapping) and value.get('phase') not in terminal_phases
+        if isinstance(value, Mapping)
+        and value.get('phase') not in terminal_phases
+        and value.get('phase') not in queued_phases
     ]
     active_count = sum(
         1 for value in items.values()
         if isinstance(value, Mapping) and value.get('phase') in active_work_phases
     )
+
     for item in support:
         item_id = item['id']
         if item_id in selected:
             continue
         existing = items.get(item_id) if isinstance(items, Mapping) else None
         existing = existing if isinstance(existing, Mapping) else {}
-        if existing.get('phase') in terminal_phases:
+        phase = existing.get('phase')
+        if phase in terminal_phases:
+            continue
+        if phase not in queued_phases and phase is not None:
+            # Another nonterminal state was already selected above or is an
+            # unknown state that should not be silently promoted into active work.
             continue
         if active_count >= max(1, int(max_active)):
             break
