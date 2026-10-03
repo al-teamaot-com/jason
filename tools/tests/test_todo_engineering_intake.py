@@ -67,6 +67,17 @@ class TodoEngineeringIntakeTests(unittest.TestCase):
         self.assertFalse(status["TODO-OPS-012"])
         self.assertFalse(status["TODO-OPS-013"])
 
+    def test_identified_support_is_queued_not_active_capacity(self):
+        state = {
+            "items": {
+                "SUPPORT-OPS-001": {"phase": "identified"},
+                "SUPPORT-OPS-002": {"phase": "diagnosing"},
+                "SUPPORT-OPS-003": {"phase": "blocked"},
+            }
+        }
+        self.assertEqual(module.active_support_ids(state), ["SUPPORT-OPS-002"])
+        self.assertEqual(module.blocked_support_ids(state), ["SUPPORT-OPS-003"])
+
     def test_support_first_blocks_todo_when_repair_capacity_exists(self):
         todos = module.parse_todo_sections(TODO_TEXT)
         support = (

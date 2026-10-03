@@ -154,7 +154,6 @@ def blocked_support_ids(state: Mapping[str, Any]) -> list[str]:
 
 def active_support_ids(state: Mapping[str, Any]) -> list[str]:
     active_phases = {
-        "identified",
         "diagnosing",
         "implementing",
         "ci_repair_needed",
