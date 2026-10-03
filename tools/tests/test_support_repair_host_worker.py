@@ -117,6 +117,40 @@ def test_apply_edits_requires_exact_single_anchor(tmp_path):
         raise AssertionError('ambiguous anchor was accepted')
 
 
+def test_identified_items_are_queued_and_do_not_bypass_active_limit():
+    state = {
+        'items': {
+            'SUPPORT-OPS-001': {'phase': 'identified'},
+            'SUPPORT-OPS-002': {'phase': 'identified'},
+            'SUPPORT-OPS-003': {'phase': 'identified'},
+        }
+    }
+    support = [
+        {'id': 'SUPPORT-OPS-001'},
+        {'id': 'SUPPORT-OPS-002'},
+        {'id': 'SUPPORT-OPS-003'},
+    ]
+    selected = worker.select_reconcile_ids(state, support, 2)
+    assert selected == ['SUPPORT-OPS-001', 'SUPPORT-OPS-002']
+
+
+def test_existing_active_work_consumes_slot_before_identified_queue():
+    state = {
+        'items': {
+            'SUPPORT-OPS-001': {'phase': 'diagnosing'},
+            'SUPPORT-OPS-002': {'phase': 'identified'},
+            'SUPPORT-OPS-003': {'phase': 'identified'},
+        }
+    }
+    support = [
+        {'id': 'SUPPORT-OPS-001'},
+        {'id': 'SUPPORT-OPS-002'},
+        {'id': 'SUPPORT-OPS-003'},
+    ]
+    selected = worker.select_reconcile_ids(state, support, 2)
+    assert selected == ['SUPPORT-OPS-001', 'SUPPORT-OPS-002']
+
+
 def test_blocked_item_does_not_consume_active_slot():
     state = {
         'items': {
