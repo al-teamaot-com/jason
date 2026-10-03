@@ -65,6 +65,18 @@ The board shows recently active PRs and summarizes older open PRs rather than al
 
 Human roadmap authority remains controlling. The coordinator may recommend; it may not silently reorder or approve work.
 
+## Autonomous TODO engineering readiness
+
+The TODO roadmap is not itself an execution queue. A TODO becomes eligible for autonomous engineering only after an owner-approved readiness record declares the exact scope, dependencies, authority basis, safety class, required capabilities, acceptance test, production path, and `open_questions=none`. Material changes to that approved scope invalidate readiness and return the item to Design Review.
+
+The readiness model is configuration/state-driven. Adding or approving another TODO should normally update the governed readiness record rather than require a new hard-coded runtime branch. Code remains appropriate for generic engine primitives, provider adapters, safety invariants, schema validation, and genuinely new capability families.
+
+For every autonomously admitted TODO, the engineering coordinator must emit owner lifecycle events at three points: **started**, **blocked / needs decision**, and **production accepted**. Those events use the canonical governed Teams owner-notification path. A send is not considered delivered until an exact destination, durable message/correlation identity, and provider/readback verification are present. Transient failures receive bounded retry with duplicate suppression; persistent unverified delivery becomes a support/health condition instead of a silent success. Current Teams reliability is tracked in `SUPPORT-CONN-037`.
+
+A blocked TODO does not expand authority and should not prevent independent approved TODOs from being evaluated. Constitutional change, new permission/secret requirements, client/provider scope expansion, disruptive production action, or unresolved material design ambiguity requires owner decision and returns the item to a non-executable state.
+
+Canonical roadmap design item: `TODO-GOV-006`.
+
 ## Autonomous Support List
 
 Approved open `SUPPORT-*` defects are an owner-authorized break/fix work queue, not merely advisory recommendations. When `support_autonomy.enabled=true`, Jason must reconcile the list continuously and may carry an eligible defect through diagnosis, bounded implementation, regression testing, repair PR creation, CI correction, J-CHANGE-002 eligibility, governed autonomous deployment, production acceptance, documentation, and closure without waiting for another owner `proceed` message.

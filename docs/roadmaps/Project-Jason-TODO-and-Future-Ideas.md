@@ -1310,6 +1310,25 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / AOT Owner
 - **Review trigger:** When Teams communications work expands beyond chat/proactive messages or when a supported Teams real-time media path is selected.
 
+
+### TODO-GOV-006 — Configuration-driven TODO engineering readiness and owner lifecycle notifications
+
+- **Priority:** P1
+- **Status:** Approved design — implementation pending
+- **Risk level:** Moderate
+- **Idea:** Add a generic configuration/state-driven readiness and approval record that separates a proposed TODO from work Jason is authorized to implement autonomously. Once an item is approved for autonomous engineering, the engineering system may pick it up without another `proceed` message, but only within the approved scope and existing governance.
+- **Why it matters:** The roadmap currently mixes ideas, partially specified work, blocked dependencies, and implementation-ready work. Jason needs a deterministic admission gate so autonomous engineering never invents missing requirements, broadens authority, or starts work before questions are answered. The owner also needs reliable visibility without manually asking for status.
+- **Readiness requirements:** A TODO is not eligible for autonomous engineering until its machine-readable/configuration-backed readiness record confirms the exact goal, included/excluded scope, required capabilities, dependencies, authority basis, safety class, human-approval boundaries, acceptance criteria, controlled test target, rollback/failure behavior, production path, documentation impact, and `open_questions=none`. Material scope change invalidates the approval and returns the item to Design Review.
+- **Lifecycle:** `Proposed -> Design Review -> Ready for Approval -> Approved for Autonomous Engineering -> In Development -> Validating -> Production Accepted -> Complete`. A blocked implementation enters `Blocked / Needs Decision` without consuming the only engineering slot when other approved independent work exists.
+- **Owner notification contract:** For every TODO that enters autonomous engineering, send Al a governed Microsoft Teams update at (1) work start, (2) any blocker/Needs Decision state, and (3) production acceptance. Start messages must identify the TODO and approved scope. Block messages must identify the exact blocker/question, completed evidence, and what is needed from the owner. Production messages must identify the deployed/accepted revision and acceptance result. Routine internal step-by-step noise is not required.
+- **Delivery requirement:** A notification is not considered delivered until the canonical Teams owner path returns a durable message/correlation identifier and the exact message is verified by provider/readback evidence. Transient send/readback failure gets bounded retry with duplicate suppression. Persistent inability to verify delivery becomes an explicit support/health condition; it must not silently mark the owner as notified. `SUPPORT-CONN-037` tracks current Teams reliability.
+- **Configuration principle:** Implement the readiness schema, lifecycle states, notification events, thresholds, and destination reference as configuration/registry/state wherever practical. New TODO approvals should be data/configuration changes, not new hard-coded branches. Code remains appropriate for generic engine primitives, provider adapters, safety invariants, validation, and genuinely new capability classes.
+- **Authority boundary:** Approval authorizes implementation of the exact recorded TODO scope only. It does not authorize constitutional changes, broader permissions, new secrets, client/provider scope expansion, disruptive production actions, or material design decisions absent from the approved record. Any such condition moves the TODO to `Blocked / Needs Decision`.
+- **Acceptance test:** Approve one bounded non-disruptive TODO through the readiness record; prove it is selected automatically; verify the start Teams message by readback; force one controlled blocker and verify the block message/readback without duplicate sends; clear the blocker; complete CI/merge/deployment through existing governed release lanes; verify the production-accepted Teams message/readback; then materially change the TODO scope and prove the prior approval becomes stale and the item is no longer eligible.
+- **Prerequisites:** Canonical TODO schema/registry, owner identity and canonical Teams destination, governed Teams proactive send/readback, existing isolated worktree/PR/CI/merge/release machinery, and existing autonomous SUPPORT repair lane.
+- **Decision owner:** AOT Owner / Jason Governance Authority
+- **Review trigger:** Implement before enabling general autonomous TODO engineering.
+
 ---
 
 ## New-item template
@@ -1326,6 +1345,12 @@ Copy this section when adding an idea:
 - **Why it matters:**
 - **Why not now:**
 - **Prerequisites:**
+- **Autonomous engineering readiness:** Not reviewed / Design Review / Ready for Approval / Approved
+- **Approved scope:**
+- **Authority basis:**
+- **Required capabilities:**
+- **Acceptance test:**
+- **Open questions:**
 - **Decision owner:**
 - **Review trigger:**
 ```
