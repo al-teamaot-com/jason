@@ -6798,7 +6798,7 @@ class OperationalAutonomyMaintenance:
 
     def _maybe_write_gpt_insights(self, candidate) -> None:
         """Add one evidence-first technician-assist note for unsupported Help Desk work."""
-        if str(candidate.source_queue).strip().casefold() not in {"help desk i", "help desk ii"}:
+        if str(candidate.source_queue).strip().casefold() != "help desk i":
             return
         if not self._scope_is_promoted(GPT_INSIGHTS_SCOPE):
             return
