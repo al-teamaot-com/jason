@@ -912,6 +912,7 @@ def _project_endpoint_collection(
         "alerts",
         "software",
         "patches",
+        "policies",
         "applications",
         "items",
         "results",
@@ -1575,6 +1576,11 @@ def _governed_read_for_identity(
                 collection_kind="patches",
             )
             if capability_name == "endpoint.patch.search"
+            else _project_endpoint_collection(
+                result.output,
+                collection_kind="patch_policies",
+            )
+            if capability_name == "endpoint.patch.policy.read"
             else _project_dynamic_evidence(
                 capability_name,
                 result.output,
@@ -5973,6 +5979,12 @@ def _project_dynamic_evidence(
             collection_kind="patches",
         )
 
+    if capability_name == "endpoint.patch.policy.read":
+        return _project_endpoint_collection(
+            output,
+            collection_kind="patch_policies",
+        )
+
     data = output.get("data")
 
     if not isinstance(data, Mapping):
@@ -6410,6 +6422,7 @@ def execute_read_capability(
         "endpoint.alert.search",
         "endpoint.software.search",
         "endpoint.patch.search",
+        "endpoint.patch.policy.read",
     }
 
     if capability_name not in known_projected:
