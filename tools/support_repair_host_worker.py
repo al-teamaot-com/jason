@@ -638,25 +638,38 @@ def eligible_premerge(repo: Path, pr_number: int, gate, policy: Mapping[str, Any
 def select_reconcile_ids(state: Mapping[str, Any], support: list[dict[str, str]], max_active: int) -> list[str]:
     items = state.get('items') if isinstance(state.get('items'), Mapping) else {}
     terminal_phases = {'complete', 'blocked', 'escalated'}
+    queued_phases = {'identified'}
     active_work_phases = {
-        'identified', 'diagnosing', 'implementing',
+        'diagnosing', 'implementing',
         'ci_repair_needed', 'ci_repairing',
     }
+
+    # Passive lifecycle states such as PR validation, deployment waiting, and
+    # production verification must continue to reconcile, but queued/identified
+    # work does not consume a repair slot until it is explicitly selected below.
     selected = [
         key for key, value in items.items()
-        if isinstance(value, Mapping) and value.get('phase') not in terminal_phases
+        if isinstance(value, Mapping)
+        and value.get('phase') not in terminal_phases
+        and value.get('phase') not in queued_phases
     ]
     active_count = sum(
         1 for value in items.values()
         if isinstance(value, Mapping) and value.get('phase') in active_work_phases
     )
+
     for item in support:
         item_id = item['id']
         if item_id in selected:
             continue
         existing = items.get(item_id) if isinstance(items, Mapping) else None
         existing = existing if isinstance(existing, Mapping) else {}
-        if existing.get('phase') in terminal_phases:
+        phase = existing.get('phase')
+        if phase in terminal_phases:
+            continue
+        if phase not in queued_phases and phase is not None:
+            # Another nonterminal state was already selected above or is an
+            # unknown state that should not be silently promoted into active work.
             continue
         if active_count >= max(1, int(max_active)):
             break
