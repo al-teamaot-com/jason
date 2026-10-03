@@ -22,6 +22,7 @@ BLOCKED = re.compile(
 )
 META = re.compile(r'(?im)^\s*-\s*Development issue\s*:\s*#([1-9][0-9]*)\s*$')
 ACTIVE_PHASES = {'identified', 'diagnosing', 'implementing', 'ci_repair_needed', 'ci_repairing'}
+SUPPORT_ACTIVE_PHASES = ACTIVE_PHASES - {'identified'}
 TERMINAL_PHASES = {'pr_ready', 'blocked', 'complete'}
 
 
@@ -88,7 +89,7 @@ def active_support_count(spool: Path) -> int:
     items = state.get('items') if isinstance(state.get('items'), Mapping) else {}
     return sum(
         1 for value in items.values()
-        if isinstance(value, Mapping) and str(value.get('phase') or '') in ACTIVE_PHASES
+        if isinstance(value, Mapping) and str(value.get('phase') or '') in SUPPORT_ACTIVE_PHASES
     )
 
 
@@ -224,8 +225,12 @@ def select_items(
     *,
     capacity: int,
 ) -> list[str]:
-    if capacity <= 0:
-        return []
+    """Select all existing nonterminal work plus up to ``capacity`` new claims.
+
+    Existing approved development must remain reconcilable even when it already
+    consumes the active-work limit; otherwise a full worker self-starves and can
+    never advance or fail closed. ``capacity`` therefore means new-claim capacity.
+    """
     records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
     eligible_ids = {item['id'] for item in eligible}
     selected = [
@@ -233,9 +238,10 @@ def select_items(
         if item_id in eligible_ids
         and isinstance(record, Mapping)
         and str(record.get('phase') or '') not in TERMINAL_PHASES
-    ][:capacity]
+    ]
+    new_claims = 0
     for item in eligible:
-        if len(selected) >= capacity:
+        if new_claims >= max(0, int(capacity)):
             break
         if item['id'] in selected:
             continue
@@ -243,6 +249,7 @@ def select_items(
         if isinstance(record, Mapping) and str(record.get('phase') or '') in TERMINAL_PHASES:
             continue
         selected.append(item['id'])
+        new_claims += 1
     return selected
 
 

@@ -28,8 +28,18 @@ def test_select_items_respects_capacity_and_terminal_state():
         {'id': 'DEV-11', 'issue_number': 11},
         {'id': 'DEV-12', 'issue_number': 12},
     ]
-    assert module.select_items(state, eligible, capacity=1) == ['DEV-10']
-    assert module.select_items(state, eligible, capacity=2) == ['DEV-10', 'DEV-12']
+    assert module.select_items(state, eligible, capacity=0) == ['DEV-10']
+    assert module.select_items(state, eligible, capacity=1) == ['DEV-10', 'DEV-12']
+def test_existing_active_development_reconciles_when_new_capacity_is_zero():
+    state = {'items': {'DEV-10': {'phase': 'diagnosing'}, 'DEV-11': {'phase': 'implementing'}}}
+    eligible = [
+        {'id': 'DEV-10', 'issue_number': 10},
+        {'id': 'DEV-11', 'issue_number': 11},
+        {'id': 'DEV-12', 'issue_number': 12},
+    ]
+    assert module.select_items(state, eligible, capacity=0) == ['DEV-10', 'DEV-11']
+
+
 def test_removed_approval_stops_nonterminal_work():
     state = {
         'items': {
@@ -51,6 +61,7 @@ def test_active_support_count_reduces_development_capacity(tmp_path):
             'items': {
                 'SUPPORT-OPS-1': {'phase': 'implementing'},
                 'SUPPORT-OPS-2': {'phase': 'blocked'},
+                'SUPPORT-OPS-3': {'phase': 'identified'},
             }
         },
     )
