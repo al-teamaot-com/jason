@@ -90,15 +90,22 @@ def work_priority_plan(
     todos: list[dict[str, str]],
     *,
     active_support_ids: list[str] | None = None,
+    blocked_support_ids: list[str] | None = None,
     max_active_support_repairs: int = 2,
 ) -> dict[str, Any]:
     active = set(active_support_ids or [])
-    open_support = [item for item in support if item["id"] not in active]
+    blocked = set(blocked_support_ids or [])
+    open_support = [
+        item
+        for item in support
+        if item["id"] not in active and item["id"] not in blocked
+    ]
     available = max(0, max_active_support_repairs - len(active))
     support_to_start = open_support[:available]
     capacity_full = available == 0
     return {
         "active_support_repairs": sorted(active),
+        "blocked_support_repairs": sorted(blocked),
         "available_support_slots": available,
         "support_to_start": [item["id"] for item in support_to_start],
         "next_support_item": open_support[0]["id"] if open_support else None,
