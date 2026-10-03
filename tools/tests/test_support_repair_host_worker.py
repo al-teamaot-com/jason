@@ -44,6 +44,80 @@ class Gate:
         return '/tests/' in path or Path(path).name.startswith('test_')
 
 
+
+
+def test_safe_search_prefers_source_over_docs(tmp_path, monkeypatch):
+    for rel in [
+        'README.md',
+        'docs/architecture/example.md',
+        'config/example.json',
+        'tools/example.py',
+        'implementation/kernel/capability_registry.py',
+    ]:
+        target = tmp_path / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('capability lifecycle', encoding='utf-8')
+
+    def fake_run(args, **kwargs):
+        if args[-1] in {'capability lifecycle', 'capability', 'lifecycle'}:
+            return '\n'.join([
+                'README.md',
+                'docs/architecture/example.md',
+                'config/example.json',
+                'tools/example.py',
+                'implementation/kernel/capability_registry.py',
+            ])
+        return ''
+
+    monkeypatch.setattr(worker, 'run', fake_run)
+    excerpts = worker.safe_search(
+        tmp_path,
+        ['capability lifecycle'],
+        Gate(),
+        {'max_changed_lines': 800, 'max_changed_files': 25},
+    )
+    paths = [entry['path'] for entry in excerpts]
+    assert paths[0] == 'implementation/kernel/capability_registry.py'
+    assert paths.index('tools/example.py') < paths.index('docs/architecture/example.md')
+
+
+def test_safe_search_expands_model_phrase_and_pairs_test_with_source(tmp_path, monkeypatch):
+    source = tmp_path / 'tools' / 'jason_self_heal_watchdog.py'
+    test = tmp_path / 'tools' / 'tests' / 'test_jason_self_heal_watchdog.py'
+    source.parent.mkdir(parents=True)
+    test.parent.mkdir(parents=True)
+    source.write_text('selected_gt_active_slots = True\n', encoding='utf-8')
+    test.write_text('def test_selected_gt_active_slots(): pass\n', encoding='utf-8')
+
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        if args[-1] == 'selected_gt_active_slots':
+            return 'tools/tests/test_jason_self_heal_watchdog.py'
+        return ''
+
+    monkeypatch.setattr(worker, 'run', fake_run)
+    excerpts = worker.safe_search(
+        tmp_path,
+        ['autonomy invariant selected_gt_active_slots repair worker slot selection'],
+        Gate(),
+        {'max_changed_lines': 800, 'max_changed_files': 25},
+    )
+
+    paths = [entry['path'] for entry in excerpts]
+    assert 'tools/tests/test_jason_self_heal_watchdog.py' in paths
+    assert 'tools/jason_self_heal_watchdog.py' in paths
+    assert any(call[-1] == 'selected_gt_active_slots' for call in calls)
+
+
+def test_expanded_search_terms_are_bounded_and_preserve_identifiers():
+    terms = ['selected_gt_active_slots selected_gt_eligible repair worker slot selection'] * 8
+    expanded = worker.expanded_search_terms(terms)
+    assert 'selected_gt_active_slots' in expanded
+    assert 'selected_gt_eligible' in expanded
+    assert len(expanded) <= 40
+
 def test_apply_edits_rejects_denied_path(tmp_path):
     target = tmp_path / 'implementation/connectors/example.py'
     target.parent.mkdir(parents=True)
@@ -76,6 +150,40 @@ def test_apply_edits_requires_exact_single_anchor(tmp_path):
         assert 'occur once' in str(exc)
     else:
         raise AssertionError('ambiguous anchor was accepted')
+
+
+def test_identified_items_are_queued_and_do_not_bypass_active_limit():
+    state = {
+        'items': {
+            'SUPPORT-OPS-001': {'phase': 'identified'},
+            'SUPPORT-OPS-002': {'phase': 'identified'},
+            'SUPPORT-OPS-003': {'phase': 'identified'},
+        }
+    }
+    support = [
+        {'id': 'SUPPORT-OPS-001'},
+        {'id': 'SUPPORT-OPS-002'},
+        {'id': 'SUPPORT-OPS-003'},
+    ]
+    selected = worker.select_reconcile_ids(state, support, 2)
+    assert selected == ['SUPPORT-OPS-001', 'SUPPORT-OPS-002']
+
+
+def test_existing_active_work_consumes_slot_before_identified_queue():
+    state = {
+        'items': {
+            'SUPPORT-OPS-001': {'phase': 'diagnosing'},
+            'SUPPORT-OPS-002': {'phase': 'identified'},
+            'SUPPORT-OPS-003': {'phase': 'identified'},
+        }
+    }
+    support = [
+        {'id': 'SUPPORT-OPS-001'},
+        {'id': 'SUPPORT-OPS-002'},
+        {'id': 'SUPPORT-OPS-003'},
+    ]
+    selected = worker.select_reconcile_ids(state, support, 2)
+    assert selected == ['SUPPORT-OPS-001', 'SUPPORT-OPS-002']
 
 
 def test_blocked_item_does_not_consume_active_slot():

@@ -1116,14 +1116,19 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-GOV-002 — Capability retirement and deprecation process
 
 - **Priority:** P2
-- **Status:** Proposed
+- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-03
 - **Risk level:** Moderate
 - **Idea:** Define how capabilities are deprecated, replaced, migrated, and removed.
 - **Why it matters:** Prevents undocumented drift and abandoned features.
-- **Why not now:** The capability registry is still early.
-- **Prerequisites:** capability ownership, usage telemetry, versioning, migration notices.
-- **Decision owner:** Jason Governance Authority
-- **Review trigger:** Before the first breaking capability change.
+- **Autonomous engineering readiness:** Approved
+- **Approved scope:** Build the generic configuration/registry-driven capability and provider deprecation/retirement process, dependency and usage checks, replacement binding, migration-state tracking, CI/documentation enforcement, and deterministic retirement eligibility. Do not delete provider-side client data or broaden unrelated execution authority.
+- **Authority basis:** Owner approval of this TODO authorizes the subordinate backend/configuration work required to implement the approved scope, subject to the Jason Constitution and existing policy. No separate approval is required for ordinary implementation plumbing that remains inside this scope.
+- **Required capabilities:** Existing capability/provider lifecycle registries, System Registry dependency graph, audit/usage evidence where available, CI/release controls, and documentation control plane. Missing subordinate implementation primitives may be built under this TODO when they do not expand scope or violate policy.
+- **Retirement rule:** Jason may autonomously retire a capability only when authoritative evidence proves **no active consumer/dependent still uses it** and a **replacement is already implemented, production-accepted, and tested**. If either condition is unknown, incomplete, ambiguous, or false, retirement fails closed and remains non-retired. Deprecation/migration preparation may proceed autonomously within the approved scope.
+- **Acceptance test:** Use a bounded synthetic or non-production capability dependency fixture to prove: an in-use capability cannot retire; a capability with no replacement cannot retire; a replacement that exists but is not production-accepted/tested cannot authorize retirement; a capability with zero active consumers and an accepted/tested replacement can retire; the replacement relationship and retirement evidence are durable; and stale/retired references are rejected or migrated safely. Prove rollback/reinstatement behavior before applying the process to a material production capability.
+- **Open questions:** None for initial implementation.
+- **Decision owner:** Jason Governance Authority / AOT Owner
+- **Review trigger:** Review only if retirement would require provider-side destructive action, constitutional/policy change, materially broader authority, or a future proposal to retire capabilities without a proven replacement.
 
 ### TODO-GOV-003 — Formal risk taxonomy for requests and communications
 
@@ -1310,6 +1315,25 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / AOT Owner
 - **Review trigger:** When Teams communications work expands beyond chat/proactive messages or when a supported Teams real-time media path is selected.
 
+
+### TODO-GOV-006 — Configuration-driven TODO engineering readiness and owner lifecycle notifications
+
+- **Priority:** P1
+- **Status:** Approved design — implementation pending
+- **Risk level:** Moderate
+- **Idea:** Add a generic configuration/state-driven readiness and approval record that separates a proposed TODO from work Jason is authorized to implement autonomously. Once an item is approved for autonomous engineering, the engineering system may pick it up without another `proceed` message, but only within the approved scope and existing governance.
+- **Why it matters:** The roadmap currently mixes ideas, partially specified work, blocked dependencies, and implementation-ready work. Jason needs a deterministic admission gate so autonomous engineering never invents missing requirements, broadens authority, or starts work before questions are answered. The owner also needs reliable visibility without manually asking for status.
+- **Readiness requirements:** A TODO is not eligible for autonomous engineering until its machine-readable/configuration-backed readiness record confirms the exact goal, included/excluded scope, required capabilities, dependencies, authority basis, safety class, human-approval boundaries, acceptance criteria, controlled test target, rollback/failure behavior, production path, documentation impact, and `open_questions=none`. Material scope change invalidates the approval and returns the item to Design Review.
+- **Lifecycle:** `Proposed -> Design Review -> Ready for Approval -> Approved for Autonomous Engineering -> In Development -> Validating -> Production Accepted -> Complete`. A blocked implementation enters `Blocked / Needs Decision` without consuming the only engineering slot when other approved independent work exists.
+- **Owner notification contract:** For every TODO that enters autonomous engineering, send Al a governed Microsoft Teams update at (1) work start, (2) any blocker/Needs Decision state, and (3) production acceptance. Apply the same lifecycle visibility to autonomous Support List repairs: (1) repair started, (2) blocked/owner action required when applicable, and (3) production-verified complete. Start messages identify the TODO/support ID and approved/bounded scope. Block messages identify the exact blocker/question, completed evidence, and what is needed from the owner. Completion messages identify the deployed/accepted revision and acceptance result. Routine internal step-by-step noise is not required.
+- **Delivery requirement:** A notification is not considered delivered until the canonical Teams owner path returns a durable message/correlation identifier and the exact message is verified by provider/readback evidence. Transient send/readback failure gets bounded retry with duplicate suppression. Persistent inability to verify delivery becomes an explicit support/health condition; it must not silently mark the owner as notified. `SUPPORT-CONN-037` tracks current Teams reliability.
+- **Configuration principle:** Implement the readiness schema, lifecycle states, notification events, thresholds, and destination reference as configuration/registry/state wherever practical. New TODO approvals should be data/configuration changes, not new hard-coded branches. Code remains appropriate for generic engine primitives, provider adapters, safety invariants, validation, and genuinely new capability classes.
+- **Authority boundary:** Approval authorizes implementation of the exact recorded TODO scope only. It does not authorize constitutional changes, broader permissions, new secrets, client/provider scope expansion, disruptive production actions, or material design decisions absent from the approved record. Any such condition moves the TODO to `Blocked / Needs Decision`.
+- **Acceptance test:** Approve one bounded non-disruptive TODO through the readiness record; prove it is selected automatically; verify the start Teams message by readback; force one controlled blocker and verify the block message/readback without duplicate sends; clear the blocker; complete CI/merge/deployment through existing governed release lanes; verify the production-accepted Teams message/readback; then materially change the TODO scope and prove the prior approval becomes stale and the item is no longer eligible.
+- **Prerequisites:** Canonical TODO schema/registry, owner identity and canonical Teams destination, governed Teams proactive send/readback, existing isolated worktree/PR/CI/merge/release machinery, and existing autonomous SUPPORT repair lane.
+- **Decision owner:** AOT Owner / Jason Governance Authority
+- **Review trigger:** Implement before enabling general autonomous TODO engineering.
+
 ---
 
 ## New-item template
@@ -1326,6 +1350,12 @@ Copy this section when adding an idea:
 - **Why it matters:**
 - **Why not now:**
 - **Prerequisites:**
+- **Autonomous engineering readiness:** Not reviewed / Design Review / Ready for Approval / Approved
+- **Approved scope:**
+- **Authority basis:**
+- **Required capabilities:**
+- **Acceptance test:**
+- **Open questions:**
 - **Decision owner:**
 - **Review trigger:**
 ```

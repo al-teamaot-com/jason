@@ -24,6 +24,7 @@ class InstallSupportRepairHostWorkerTests(unittest.TestCase):
         self.assertTrue((root / "tools/owner_approved_development_worker.py").is_file())
         self.assertTrue((root / "tools/todo_engineering_intake.py").is_file())
         self.assertTrue((root / "tools/todo_release_bridge.py").is_file())
+        self.assertTrue((root / "tools/release_manager_gate.py").is_file())
 
     def test_engineering_service_runs_support_before_owner_approved_development(self):
         service = (
@@ -63,6 +64,13 @@ class InstallSupportRepairHostWorkerTests(unittest.TestCase):
         self.assertNotIn("WorkingDirectory=/home/al/projects/jason", service)
         self.assertIn("engineering-worker-source", installer)
         self.assertIn("source_link.symlink_to(repo, target_is_directory=True)", installer)
+
+    def test_installer_copies_todo_release_gate_dependency(self):
+        installer = (self.root / "tools/install_support_repair_host_worker.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("release_manager_gate = repo / 'tools' / 'release_manager_gate.py'", installer)
+        self.assertIn("install_root / 'release_manager_gate.py'", installer)
 
     def test_installer_binds_nonlogin_systemd_user_bus(self):
         installer = (self.root / "tools/install_support_repair_host_worker.py").read_text(
