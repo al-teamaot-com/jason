@@ -535,16 +535,29 @@ def main() -> int:
                     })
                     continue
                 result = response.get('result') or {}
-                if result.get('blocked_reason'):
+                blocked_reason = str(result.get('blocked_reason') or '').strip()
+                search_terms = [
+                    str(value).strip()
+                    for value in list(result.get('search_terms') or [])
+                    if str(value).strip()
+                ]
+                if blocked_reason and (
+                    not search_terms or not source_context_blocker(blocked_reason)
+                ):
                     record.update({
                         'phase': 'blocked',
-                        'reason': str(result['blocked_reason']),
+                        'reason': blocked_reason,
                         'updated_at': now(),
                     })
                     continue
+                if blocked_reason:
+                    record['reason'] = (
+                        'Continuing bounded source discovery from context-only '
+                        f'search-plan blocker: {blocked_reason[:500]}'
+                    )
                 excerpts = support.safe_search(
                     worktree,
-                    list(result.get('search_terms') or []),
+                    search_terms,
                     gate,
                     policy,
                 )

@@ -89,3 +89,22 @@ def test_source_context_blocker_detects_missing_excerpt_context():
     )
     assert not module.source_context_blocker('Owner approval is required for production deployment.')
     assert not module.source_context_blocker('Provider credential is unavailable.')
+
+
+def test_context_only_search_plan_with_terms_is_actionable():
+    result = {
+        'blocked_reason': 'Additional exact repository source is still needed; the provided context is incomplete.',
+        'search_terms': ['CapabilityDefinition(', 'class CapabilityDefinition'],
+    }
+    blocked = str(result.get('blocked_reason') or '').strip()
+    terms = [str(value).strip() for value in result.get('search_terms') or [] if str(value).strip()]
+    assert terms
+    assert module.source_context_blocker(blocked)
+    assert not (blocked and (not terms or not module.source_context_blocker(blocked)))
+
+
+def test_authority_search_plan_blocker_remains_terminal_even_with_terms():
+    blocked = 'Owner approval is required before protected production deployment.'
+    terms = ['production gate']
+    assert not module.source_context_blocker(blocked)
+    assert blocked and (not terms or not module.source_context_blocker(blocked))
