@@ -46,6 +46,13 @@ def main() -> int:
 
     install_root = home / '.local' / 'lib' / 'jason'
     user_units = home / '.config' / 'systemd' / 'user'
+    source_link = install_root / 'engineering-worker-source'
+    if source_link.is_symlink() or source_link.exists():
+        if source_link.is_dir() and not source_link.is_symlink():
+            raise RuntimeError('engineering-worker-source exists and is not a symlink')
+        source_link.unlink()
+    source_link.parent.mkdir(parents=True, exist_ok=True)
+    source_link.symlink_to(repo, target_is_directory=True)
     _copy(runner, install_root / 'support_repair_host_worker.py', 0o700)
     _copy(development_runner, install_root / 'owner_approved_development_worker.py', 0o700)
     _copy(todo_intake_runner, install_root / 'todo_engineering_intake.py', 0o700)
