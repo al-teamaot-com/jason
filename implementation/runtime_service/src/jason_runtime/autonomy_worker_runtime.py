@@ -824,6 +824,7 @@ class OperationalAutonomyMaintenance:
         max_admission_attempts_per_scan: int = 4,
         max_candidate_evaluations_per_scan: int = 40,
         interval_seconds: int = 60,
+        zero_eligible_recheck_seconds: int | None = None,
         monotonic: Callable[[], float] = time.monotonic,
         audit=None,
         completion_notifier=None,
@@ -836,6 +837,13 @@ class OperationalAutonomyMaintenance:
             raise ValueError("max_candidate_evaluations_per_scan must be between 1 and 200")
         if int(interval_seconds) < 30:
             raise ValueError("operational autonomy interval must be at least 30 seconds")
+        if (
+            zero_eligible_recheck_seconds is not None
+            and int(zero_eligible_recheck_seconds) < int(interval_seconds)
+        ):
+            raise ValueError(
+                "zero-eligible recheck interval cannot be shorter than the normal interval"
+            )
         self.queue_source = queue_source
         self.reads = reads
         self.actions = actions
@@ -845,6 +853,11 @@ class OperationalAutonomyMaintenance:
         self.max_admission_attempts_per_scan = int(max_admission_attempts_per_scan)
         self.max_candidate_evaluations_per_scan = int(max_candidate_evaluations_per_scan)
         self.interval_seconds = int(interval_seconds)
+        self.zero_eligible_recheck_seconds = (
+            int(zero_eligible_recheck_seconds)
+            if zero_eligible_recheck_seconds is not None
+            else self.interval_seconds
+        )
         self.monotonic = monotonic
         self.audit = audit
         self.completion_notifier = completion_notifier
@@ -2158,6 +2171,18 @@ class OperationalAutonomyMaintenance:
         )
         self.store.record_scan(snapshot)
         self._emit_scan_reflection(snapshot)
+
+        # A confirmed idle state should not cause wasteful full-queue polling.
+        # Keep normal short cadence while work is active or eligible, but when a
+        # complete scan proves both active=0 and eligible=0, back off full
+        # admission reconciliation to no more often than every 15 minutes.
+        # Targeted wakes and other meaningful events still call request_reconcile()
+        # and explicitly bypass this idle backoff.
+        if snapshot.active_slots == 0 and snapshot.eligible == 0:
+            self._next_due = max(
+                self._next_due,
+                now + self.zero_eligible_recheck_seconds,
+            )
 
     def _emit_scan_reflection(self, snapshot: TicketScanSnapshot) -> None:
         if self.audit is None:
