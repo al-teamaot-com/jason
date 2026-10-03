@@ -198,3 +198,47 @@ def test_clarification_required_is_successful_conversation_transport():
         response.body["status"]
         == "clarification_required"
     )
+
+
+def test_health_probe_can_degrade_runtime_health():
+    ingress = Ingress()
+    app = RuntimeHttpApplication(
+        ingress,
+        health_probe=lambda: {
+            "status": "degraded",
+            "ticket_worker": "heartbeat_stale",
+        },
+    )
+
+    response = app.dispatch(
+        method="GET",
+        path="/healthz",
+        headers={},
+        body=b"",
+    )
+
+    assert response.status_code == 503
+    assert response.body["status"] == "degraded"
+    assert response.body["ticket_worker"] == "heartbeat_stale"
+    assert ingress.requests == []
+
+
+def test_health_probe_failure_fails_health_closed():
+    ingress = Ingress()
+
+    def broken_probe():
+        raise RuntimeError("synthetic health probe failure")
+
+    response = RuntimeHttpApplication(
+        ingress,
+        health_probe=broken_probe,
+    ).dispatch(
+        method="GET",
+        path="/healthz",
+        headers={},
+        body=b"",
+    )
+
+    assert response.status_code == 503
+    assert response.body["status"] == "degraded"
+    assert response.body["ticket_worker"] == "health_probe_failed"

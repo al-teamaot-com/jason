@@ -27,14 +27,36 @@ def http_runtime_settings(settings: RuntimeSettings) -> RuntimeSettings:
     )
 
 
+def ticket_worker_runtime_settings(settings: RuntimeSettings) -> RuntimeSettings:
+    """Enable only operational ticket autonomy for the dedicated worker process."""
+
+    return replace(
+        settings,
+        autonomy_worker_enabled=True,
+        autonomy_shadow_enabled=False,
+        autonomy_review_enabled=False,
+        support_repair_autonomy_enabled=False,
+    )
+
+
+def auxiliary_maintenance_runtime_settings(settings: RuntimeSettings) -> RuntimeSettings:
+    """Disable ticket autonomy while preserving the remaining maintenance services."""
+
+    return replace(settings, autonomy_worker_enabled=False)
+
+
 def run_autonomy_maintenance_process(
     settings: RuntimeSettings,
     *,
+    maintenance_profile: str = "all",
     idle_sleep_seconds: float = 0.5,
 ) -> None:
     """Own autonomy maintenance in a separate process with fresh SQLite connections."""
 
-    application = build_runtime_application(settings)
+    application = build_runtime_application(
+        settings,
+        maintenance_profile=maintenance_profile,
+    )
     maintenance = application.maintenance
     if maintenance is None:
         return
