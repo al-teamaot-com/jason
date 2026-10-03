@@ -65,6 +65,18 @@ The board shows recently active PRs and summarizes older open PRs rather than al
 
 Human roadmap authority remains controlling. The coordinator may recommend; it may not silently reorder or approve work.
 
+## Autonomous TODO engineering readiness
+
+The TODO roadmap is not itself an execution queue. A TODO becomes eligible for autonomous engineering only after an owner-approved readiness record declares the exact scope, dependencies, authority basis, safety class, required capabilities, acceptance test, production path, and `open_questions=none`. Material changes to that approved scope invalidate readiness and return the item to Design Review.
+
+The readiness model is configuration/state-driven. Adding or approving another TODO should normally update the governed readiness record rather than require a new hard-coded runtime branch. Code remains appropriate for generic engine primitives, provider adapters, safety invariants, schema validation, and genuinely new capability families.
+
+For every autonomously admitted TODO, the engineering coordinator must emit owner lifecycle events at three points: **started**, **blocked / needs decision**, and **production accepted**. Those events use the canonical governed Teams owner-notification path. A send is not considered delivered until an exact destination, durable message/correlation identity, and provider/readback verification are present. Transient failures receive bounded retry with duplicate suppression; persistent unverified delivery becomes a support/health condition instead of a silent success. Current Teams reliability is tracked in `SUPPORT-CONN-037`.
+
+A blocked TODO does not expand authority and should not prevent independent approved TODOs from being evaluated. Constitutional change, new permission/secret requirements, client/provider scope expansion, disruptive production action, or unresolved material design ambiguity requires owner decision and returns the item to a non-executable state.
+
+Canonical roadmap design item: `TODO-GOV-006`.
+
 ## Autonomous Support List
 
 Approved open `SUPPORT-*` defects are an owner-authorized break/fix work queue, not merely advisory recommendations. When `support_autonomy.enabled=true`, Jason must reconcile the list continuously and may carry an eligible defect through diagnosis, bounded implementation, regression testing, repair PR creation, CI correction, J-CHANGE-002 eligibility, governed autonomous deployment, production acceptance, documentation, and closure without waiting for another owner `proceed` message.
@@ -77,6 +89,8 @@ The native implementation boundary is split deliberately:
 - support closure requires the item's explicit production acceptance criteria. CI success, merge, deployment, or generic health alone do not prove resolution.
 
 A support item stops automatically only for a genuine governance/capability blocker: constitutional change, broader authority/permission, secret exposure, provider bypass, client-scope expansion, unapproved disruptive behavior, ambiguous evidence, denied repair path, bounded retry exhaustion, or missing acceptance evidence. A blocked item does not consume an active implementation slot; Jason continues other independent support items within the configured active-work limit.
+
+For every autonomously claimed Support List item, the support-repair lane must emit owner lifecycle events through the same canonical governed Teams owner-notification path used for TODO engineering: **repair started**, **blocked / owner action required** when applicable, and **production-verified complete**. The start message identifies the support ID, defect summary, and repair scope. The blocked message identifies the exact blocker and required owner action. The completion message identifies the merged/deployed revision and the production acceptance evidence that proves the defect is resolved. A support fix is not "complete" for notification purposes merely because code was committed, CI passed, or a PR merged. Notification delivery uses the same durable message/correlation identity, provider/readback verification, bounded retry, duplicate suppression, and `SUPPORT-CONN-037` reliability requirements as TODO lifecycle messages.
 
 The canonical operational logic is `docs/playbooks/Jason-Support-List-Autonomous-Repair.md`.
 
