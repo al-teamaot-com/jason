@@ -294,6 +294,31 @@ def expanded_search_terms(terms: list[str]) -> list[str]:
     return expanded[:40]
 
 
+
+
+def search_path_priority(path: str) -> tuple[int, str]:
+    """Prefer implementation-bearing source over narrative documentation."""
+    normalized = path.casefold()
+    if normalized.startswith('implementation/'):
+        rank = 0
+    elif normalized.startswith('tools/'):
+        rank = 1
+    elif normalized.startswith('config/'):
+        rank = 2
+    elif normalized.startswith('infrastructure/'):
+        rank = 3
+    elif normalized.startswith('scripts/'):
+        rank = 4
+    elif normalized.startswith('.github/'):
+        rank = 5
+    elif normalized.startswith('docs/'):
+        rank = 8
+    elif normalized in {'readme.md', 'support.md'}:
+        rank = 9
+    else:
+        rank = 6
+    return rank, normalized
+
 def companion_source_paths(path: str) -> list[str]:
     """Return obvious implementation/test companions without guessing content."""
     candidate = Path(path)
@@ -309,33 +334,43 @@ def companion_source_paths(path: str) -> list[str]:
 
 
 def safe_search(worktree: Path, terms: list[str], gate, policy: Mapping[str, Any]) -> list[dict[str, str]]:
-    paths: list[str] = []
+    candidates: set[str] = set()
 
-    def add_path(path: str) -> None:
+    def eligible_path(path: str) -> str | None:
         path = path.strip()
-        if not path or path in paths or path.startswith('.git'):
-            return
+        if not path or path.startswith('.git'):
+            return None
         if gate.path_denial_reason(path, dict(policy)):
-            return
+            return None
         if not (worktree / path).is_file():
-            return
-        paths.append(path)
+            return None
+        return path
 
+    # Collect a bounded candidate pool across all useful terms before choosing
+    # excerpts. This avoids generic terms (for example "capability") filling the
+    # eight excerpt slots with README/docs entries before implementation source is
+    # even considered. Path ordering is deterministic and still bounded.
     for term in expanded_search_terms(terms):
         output = run(['git', 'grep', '-l', '-I', '-i', '-F', term], cwd=worktree, check=False)
         for raw in output.splitlines():
-            add_path(raw)
-            if len(paths) >= 8:
+            path = eligible_path(raw)
+            if path is not None:
+                candidates.add(path)
+            if len(candidates) >= 500:
                 break
-        if len(paths) >= 8:
+        if len(candidates) >= 500:
             break
+
+    paths = sorted(candidates, key=search_path_priority)[:8]
 
     # If search finds a test but not its obvious implementation (or vice versa),
     # include the companion when it exists and remains J-CHANGE-002 eligible. This
     # gives edit reasoning enough exact source context without broad repository reads.
     for path in list(paths):
         for companion in companion_source_paths(path):
-            add_path(companion)
+            eligible = eligible_path(companion)
+            if eligible is not None and eligible not in paths:
+                paths.append(eligible)
             if len(paths) >= 10:
                 break
         if len(paths) >= 10:
