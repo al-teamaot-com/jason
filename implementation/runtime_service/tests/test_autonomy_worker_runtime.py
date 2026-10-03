@@ -5979,3 +5979,36 @@ def test_unsupported_helpdesk_ticket_does_not_write_without_exact_promotion(tmp_
     worker.tick()
     assert actions.calls == []
     store.close()
+
+
+def test_gpt_insights_does_not_run_in_help_desk_ii(tmp_path: Path):
+    item = QueueCandidate(
+        resource_id="140997",
+        priority=50,
+        source_queue="Help Desk II",
+        owned_by_jason=False,
+        urgent=False,
+        context={
+            "id": 140997,
+            "ticketNumber": "T20261003.0097",
+            "title": "Printer problem",
+            "description": "Printer is not working.",
+            "companyID": 507,
+            "configurationItemID": 1583,
+        },
+    )
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("gpt_insights_tech_assist",)),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    assert not any(capability == "service.ticket.note.create" for _, capability, _ in actions.calls)
+    store.close()
