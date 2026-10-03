@@ -26,6 +26,10 @@ class Reads:
                         {"value": "42", "label": "Waiting Device Access", "isActive": True},
                         {"value": "99", "label": "Complete", "isActive": True},
                     ]},
+                    {"name": "source", "picklistValues": [
+                        {"value": "2", "label": "Phone", "isActive": True},
+                        {"value": "13", "label": "Recurring", "isActive": True},
+                    ]},
                 ]}},
             }
         queue = arguments["filters"]["queueID"]
@@ -33,21 +37,21 @@ class Reads:
         items = []
         if queue == 100 and status == "In Progress":
             items = [
-                {"id": 10, "priority": 2, "queueID": 100, "status": 8, "assignedResourceID": 99,
+                {"id": 10, "priority": 2, "queueID": 100, "status": 8, "source": 2, "assignedResourceID": 99,
                  "lastTrackedModificationDateTime": "2026-09-25T10:00:00Z", "title": "owned"},
-                {"id": 11, "priority": 4, "queueID": 100, "status": 8, "assignedResourceID": None,
+                {"id": 11, "priority": 4, "queueID": 100, "status": 8, "source": 2, "assignedResourceID": None,
                  "lastTrackedModificationDateTime": "2026-09-25T10:01:00Z", "title": "critical"},
             ]
         if queue == 100 and status == "Waiting Device Access":
             items = [
-                {"id": 12, "priority": 2, "queueID": 100, "status": 42, "assignedResourceID": None,
+                {"id": 12, "priority": 2, "queueID": 100, "status": 42, "source": 2, "assignedResourceID": None,
                  "lastTrackedModificationDateTime": "2026-09-25T10:05:00Z", "title": "waiting device"},
             ]
         if queue == 200 and status == "New":
             items = [
-                {"id": 20, "priority": 1, "queueID": 200, "status": 1, "assignedResourceID": None,
+                {"id": 20, "priority": 1, "queueID": 200, "status": 1, "source": 2, "assignedResourceID": None,
                  "lastTrackedModificationDateTime": "2026-09-25T10:02:00Z", "title": "unassigned"},
-                {"id": 21, "priority": 4, "queueID": 200, "status": 1, "assignedResourceID": 123,
+                {"id": 21, "priority": 4, "queueID": 200, "status": 1, "source": 2, "assignedResourceID": 123,
                  "lastTrackedModificationDateTime": "2026-09-25T10:03:00Z", "title": "human-owned"},
             ]
         return {"status": "succeeded", "evidence": {"data": {"items": items}}}
@@ -114,7 +118,7 @@ def test_configured_jason_resource_assignment_is_eligible_outside_jason_queue():
             result = super().execute(capability, arguments)
             if capability == "service.ticket.search" and arguments["filters"]["queueID"] == 200 and arguments["status"] == "New":
                 result = {"status": "succeeded", "evidence": {"data": {"items": [
-                    {"id": 22, "priority": 4, "queueID": 200, "status": 1, "assignedResourceID": 999,
+                    {"id": 22, "priority": 4, "queueID": 200, "status": 1, "source": 2, "assignedResourceID": 999,
                      "lastTrackedModificationDateTime": "2026-09-25T10:04:00Z", "title": "jason assigned"},
                 ]}}}
             return result
@@ -151,12 +155,12 @@ def test_queue_discovery_paginates_until_short_page():
             after = arguments.get("after_resource_id")
             if after is None:
                 items = [
-                    {"id": 20, "priority": 1, "queueID": 200, "status": 1, "assignedResourceID": None, "title": "page 1 a"},
-                    {"id": 21, "priority": 2, "queueID": 200, "status": 1, "assignedResourceID": None, "title": "page 1 b"},
+                    {"id": 20, "priority": 1, "queueID": 200, "status": 1, "source": 2, "assignedResourceID": None, "title": "page 1 a"},
+                    {"id": 21, "priority": 2, "queueID": 200, "status": 1, "source": 2, "assignedResourceID": None, "title": "page 1 b"},
                 ]
             elif after == 21:
                 items = [
-                    {"id": 22, "priority": 1, "queueID": 200, "status": 1, "assignedResourceID": None, "title": "page 2"},
+                    {"id": 22, "priority": 1, "queueID": 200, "status": 1, "source": 2, "assignedResourceID": None, "title": "page 2"},
                 ]
             else:
                 raise AssertionError(f"unexpected cursor: {after}")
@@ -253,3 +257,23 @@ def test_ticket_search_fails_after_two_attempts():
         raise AssertionError("persistent search failure must still fail closed")
     ticket_calls = [args for capability, args in reads.calls if capability == "service.ticket.search"]
     assert len(ticket_calls) == 2
+
+
+def test_recurring_source_is_excluded_from_jason_admission():
+    class RecurringReads(Reads):
+        def execute(self, capability, arguments):
+            result = super().execute(capability, arguments)
+            if capability == "service.ticket.search" and arguments["filters"]["queueID"] == 200 and arguments["status"] == "New":
+                return {"status": "succeeded", "evidence": {"data": {"items": [
+                    {"id": 40, "priority": 1, "queueID": 200, "status": 1, "source": 13, "assignedResourceID": None,
+                     "lastTrackedModificationDateTime": "2026-10-03T12:00:00Z", "title": "recurring maintenance"},
+                    {"id": 41, "priority": 1, "queueID": 200, "status": 1, "source": 2, "assignedResourceID": None,
+                     "lastTrackedModificationDateTime": "2026-10-03T12:01:00Z", "title": "phone ticket"},
+                ]}}}
+            return result
+
+    source = AutotaskQueueSource(reads=RecurringReads(), config=config(owned_queue_labels=()))
+    found = {item.resource_id for item in source.reconcile_candidates()}
+    assert "40" not in found
+    assert "41" in found
+    assert source.last_trace.excluded_ticket_source == 1
