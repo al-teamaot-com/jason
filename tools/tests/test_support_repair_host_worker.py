@@ -81,6 +81,129 @@ def test_safe_search_prefers_source_over_docs(tmp_path, monkeypatch):
     assert paths.index('tools/example.py') < paths.index('docs/architecture/example.md')
 
 
+def test_safe_search_prefers_concept_subject_owned_source_path(tmp_path, monkeypatch):
+    capability = tmp_path / 'implementation' / 'kernel' / 'capabilities' / 'service.py'
+    lifecycle = tmp_path / 'implementation' / 'kernel' / 'system_registry' / 'lifecycle_registry.py'
+    capability.parent.mkdir(parents=True, exist_ok=True)
+    lifecycle.parent.mkdir(parents=True, exist_ok=True)
+    capability.write_text('capability lifecycle registry\n', encoding='utf-8')
+    lifecycle.write_text('lifecycle registry retirement\n', encoding='utf-8')
+
+    def fake_run(args, **kwargs):
+        term = args[-1]
+        if term == 'capability':
+            return capability.relative_to(tmp_path).as_posix()
+        if term in {'lifecycle', 'registry'}:
+            return '\n'.join([
+                capability.relative_to(tmp_path).as_posix(),
+                lifecycle.relative_to(tmp_path).as_posix(),
+            ])
+        if term == 'retirement':
+            return lifecycle.relative_to(tmp_path).as_posix()
+        return ''
+
+    monkeypatch.setattr(worker, 'run', fake_run)
+    excerpts = worker.safe_search(
+        tmp_path,
+        ['capability lifecycle registry retirement'],
+        Gate(),
+        {'max_changed_lines': 800, 'max_changed_files': 25},
+    )
+    assert excerpts[0]['path'] == capability.relative_to(tmp_path).as_posix()
+
+
+def test_safe_search_preserves_distinct_reasoning_concept_coverage(tmp_path, monkeypatch):
+    first = tmp_path / 'implementation' / 'kernel' / 'capabilities' / 'service.py'
+    second = tmp_path / 'implementation' / 'kernel' / 'system_registry' / 'contracts.py'
+    first.parent.mkdir(parents=True, exist_ok=True)
+    second.parent.mkdir(parents=True, exist_ok=True)
+    first.write_text('capability lifecycle retirement\n', encoding='utf-8')
+    second.write_text('dependency graph consumers\n', encoding='utf-8')
+
+    def fake_run(args, **kwargs):
+        term = args[-1]
+        if term in {'capability', 'lifecycle', 'retirement'}:
+            return first.relative_to(tmp_path).as_posix()
+        if term in {'dependency', 'graph', 'consumers'}:
+            return second.relative_to(tmp_path).as_posix()
+        return ''
+
+    monkeypatch.setattr(worker, 'run', fake_run)
+    excerpts = worker.safe_search(
+        tmp_path,
+        ['capability lifecycle retirement', 'dependency graph consumers'],
+        Gate(),
+        {'max_changed_lines': 800, 'max_changed_files': 25},
+    )
+    paths = [entry['path'] for entry in excerpts]
+    assert first.relative_to(tmp_path).as_posix() in paths
+    assert second.relative_to(tmp_path).as_posix() in paths
+
+
+def test_companion_source_paths_maps_package_level_registry_test():
+    companions = worker.companion_source_paths(
+        'implementation/kernel/tests/test_capabilities.py'
+    )
+    assert 'implementation/kernel/capabilities/service.py' in companions
+    assert 'implementation/kernel/capabilities/contracts.py' in companions
+
+
+def test_safe_search_does_not_let_generic_term_exhaust_later_concepts(tmp_path, monkeypatch):
+    generic_paths = []
+    for index in range(505):
+        target = tmp_path / 'implementation' / f'generic_{index:03d}.py'
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('capability\n', encoding='utf-8')
+        generic_paths.append(target.relative_to(tmp_path).as_posix())
+    lifecycle = tmp_path / 'implementation' / 'kernel' / 'capabilities' / 'service.py'
+    lifecycle.parent.mkdir(parents=True, exist_ok=True)
+    lifecycle.write_text('capability retirement\n', encoding='utf-8')
+    lifecycle_path = lifecycle.relative_to(tmp_path).as_posix()
+
+    def fake_run(args, **kwargs):
+        term = args[-1]
+        if term == 'capability':
+            return '\n'.join(generic_paths + [lifecycle_path])
+        if term == 'retirement':
+            return lifecycle_path
+        return ''
+
+    monkeypatch.setattr(worker, 'run', fake_run)
+    excerpts = worker.safe_search(
+        tmp_path,
+        ['capability retirement'],
+        Gate(),
+        {'max_changed_lines': 800, 'max_changed_files': 25},
+    )
+    assert excerpts[0]['path'] == lifecycle_path
+
+
+def test_safe_search_prefers_multi_concept_match_over_alphabetical_source(tmp_path, monkeypatch):
+    generic = tmp_path / 'implementation' / 'aaa_generic.py'
+    lifecycle = tmp_path / 'implementation' / 'kernel' / 'capabilities' / 'service.py'
+    generic.parent.mkdir(parents=True)
+    lifecycle.parent.mkdir(parents=True)
+    generic.write_text('capability only\n', encoding='utf-8')
+    lifecycle.write_text('capability lifecycle registry retirement\n', encoding='utf-8')
+
+    def fake_run(args, **kwargs):
+        term = args[-1]
+        if term == 'capability':
+            return 'implementation/aaa_generic.py\nimplementation/kernel/capabilities/service.py'
+        if term in {'lifecycle', 'registry', 'retirement'}:
+            return 'implementation/kernel/capabilities/service.py'
+        return ''
+
+    monkeypatch.setattr(worker, 'run', fake_run)
+    excerpts = worker.safe_search(
+        tmp_path,
+        ['capability lifecycle registry retirement'],
+        Gate(),
+        {'max_changed_lines': 800, 'max_changed_files': 25},
+    )
+    assert excerpts[0]['path'] == 'implementation/kernel/capabilities/service.py'
+
+
 def test_safe_search_expands_model_phrase_and_pairs_test_with_source(tmp_path, monkeypatch):
     source = tmp_path / 'tools' / 'jason_self_heal_watchdog.py'
     test = tmp_path / 'tools' / 'tests' / 'test_jason_self_heal_watchdog.py'
