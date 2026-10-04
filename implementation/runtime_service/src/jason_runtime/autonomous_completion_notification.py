@@ -51,6 +51,9 @@ EXECUTE_GRANT_ID = "grant-jason-autonomy-worker-teams-autonomy-completion-v1"
 
 _ALLOWED_EVENTS = frozenset(
     {
+        "work_started",
+        "work_blocked",
+        "work_completed",
         "patch_completed",
         "deployment_completed",
         "support_item_resolved",
@@ -267,9 +270,48 @@ def _bounded(value: Any, field: str, maximum: int = 300) -> str:
     return text
 
 
-def _render(arguments: Mapping[str, Any]) -> tuple[str, str]:
+def _adaptive_card(
+    *,
+    title: str,
+    summary: str,
+    color: str,
+    facts: tuple[tuple[str, str], ...] = (),
+) -> dict[str, Any]:
+    body: list[dict[str, Any]] = [
+        {
+            "type": "TextBlock",
+            "text": title,
+            "weight": "Bolder",
+            "size": "Large",
+            "color": color,
+            "wrap": True,
+        },
+        {"type": "TextBlock", "text": summary, "wrap": True},
+    ]
+    if facts:
+        body.append(
+            {
+                "type": "FactSet",
+                "facts": [
+                    {"title": key, "value": value}
+                    for key, value in facts
+                ],
+            }
+        )
+    return {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": body,
+    }
+
+
+def _render(arguments: Mapping[str, Any]) -> tuple[str, str, dict[str, Any]]:
     allowed = {
         "event_type",
+        "work_id",
+        "work_title",
+        "summary",
         "candidate_sha",
         "support_item",
         "ticket_number",
@@ -291,6 +333,45 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str]:
     if event not in _ALLOWED_EVENTS:
         raise ValueError("unsupported autonomous completion event_type")
 
+    if event in {"work_started", "work_blocked", "work_completed"}:
+        work_id = _bounded(arguments.get("work_id"), "work_id", 80)
+        title = _bounded(arguments.get("work_title"), "work_title", 180)
+        summary = _bounded(arguments.get("summary"), "summary", 400)
+        if event == "work_started":
+            text = f"Jason started {work_id}: {title}. {summary}"
+            card = _adaptive_card(
+                title="Jason work started",
+                summary=summary,
+                color="Accent",
+                facts=(("Work item", work_id), ("Scope", title)),
+            )
+            return event, text, card
+        if event == "work_completed":
+            text = f"Jason completed {work_id}: {title}. {summary}"
+            card = _adaptive_card(
+                title="Jason work verified",
+                summary=summary,
+                color="Good",
+                facts=(("Work item", work_id), ("Scope", title)),
+            )
+            return event, text, card
+        owner_action = str(arguments.get("owner_action") or "").strip()
+        if owner_action:
+            owner_action = _bounded(owner_action, "owner_action", 300)
+        text = f"Jason blocked on {work_id}: {title}. {summary}"
+        if owner_action:
+            text += f" Owner action: {owner_action}."
+        facts = [("Work item", work_id), ("Scope", title)]
+        if owner_action:
+            facts.append(("Owner action", owner_action))
+        card = _adaptive_card(
+            title="Jason needs attention",
+            summary=summary,
+            color="Attention",
+            facts=tuple(facts),
+        )
+        return event, text, card
+
     if event == "deployment_completed":
         candidate = _bounded(arguments.get("candidate_sha"), "candidate_sha", 40)
         support = _bounded(arguments.get("support_item"), "support_item", 80)
@@ -298,9 +379,15 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str]:
             raise ValueError("candidate_sha must be exact")
         text = (
             "Jason autonomous deployment completed successfully. "
-            f"Support item {support}; live revision {candidate[:12]}… verified healthy."
+            f"Support item {support}; live revision {candidate[:12]} verified healthy."
         )
-        return event, text
+        card = _adaptive_card(
+            title="Jason production verified",
+            summary="Deployment completed and production verification passed.",
+            color="Good",
+            facts=(("Work item", support), ("Revision", candidate[:12])),
+        )
+        return event, text, card
 
     if event == "self_heal_escalation":
         degraded = _bounded(arguments.get("degraded_function"), "degraded_function", 160)
@@ -312,7 +399,17 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str]:
             f"Degraded function: {degraded}. Evidence: {evidence}. "
             f"Recovery attempted: {attempts}. Owner action required: {owner_action}."
         )
-        return event, text
+        card = _adaptive_card(
+            title="Jason action required",
+            summary=evidence,
+            color="Attention",
+            facts=(
+                ("Affected", degraded),
+                ("Jason tried", attempts),
+                ("Owner action", owner_action),
+            ),
+        )
+        return event, text, card
 
     if event == "patch_completed":
         ticket = _bounded(arguments.get("ticket_number"), "ticket_number", 80)
@@ -322,7 +419,13 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str]:
             "Jason autonomous patch work completed successfully. "
             f"Ticket {ticket}; device {hostname}; verified patch state: {patch}."
         )
-        return event, text
+        card = _adaptive_card(
+            title="Jason patch work verified",
+            summary=patch,
+            color="Good",
+            facts=(("Ticket", ticket), ("Device", hostname)),
+        )
+        return event, text, card
 
     support = _bounded(arguments.get("support_item"), "support_item", 80)
     detail = _bounded(arguments.get("resolution_summary"), "resolution_summary", 300)
@@ -330,7 +433,13 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str]:
         f"Jason autonomously resolved support item {support}. "
         f"Verified resolution: {detail}."
     )
-    return event, text
+    card = _adaptive_card(
+        title="Jason support repair verified",
+        summary=detail,
+        color="Good",
+        facts=(("Support item", support),),
+    )
+    return event, text, card
 
 
 @dataclass(slots=True)
@@ -349,7 +458,7 @@ class AutonomousCompletionTeamsInvoker:
         if request.permission_mode != "execute":
             raise PermissionError("autonomous completion notification requires execute permission")
 
-        event, text = _render(dict(request.arguments or {}))
+        event, text, card = _render(dict(request.arguments or {}))
         binding = self.bindings.find_active_by_jason_identity(
             jason_identity_id=RECIPIENT_JASON_IDENTITY
         )
@@ -367,6 +476,7 @@ class AutonomousCompletionTeamsInvoker:
             "aadObjectId": aad,
             "tenantId": tenant,
             "text": text,
+            "card": card,
         }
         plan = ExecutionPlan(
             principal_id=request.principal_id,
@@ -510,6 +620,96 @@ def build_notifier(
     return GovernedAutonomousCompletionNotifier(
         request_factory=request_factory,
         orchestrator=orchestrator,
+    )
+
+
+@dataclass(slots=True)
+class AutonomousWorkLifecycleNotificationMaintenance:
+    notifier: GovernedAutonomousCompletionNotifier
+    spool_root: Path = Path("/var/lib/jason/openclaw/autonomous-repair")
+    interval_seconds: int = 30
+    now: Any = None
+    _next_due_at: Any = None
+
+    def __post_init__(self) -> None:
+        if self.interval_seconds < 15:
+            raise ValueError("lifecycle notification interval must be at least 15 seconds")
+        if self.now is None:
+            from datetime import datetime, timezone
+            self.now = lambda: datetime.now(timezone.utc)
+
+    def tick(self) -> bool:
+        from datetime import timedelta
+        current = self.now()
+        if self._next_due_at is not None and current < self._next_due_at:
+            return False
+        self._next_due_at = current + timedelta(seconds=self.interval_seconds)
+
+        events = self.spool_root / "lifecycle-events"
+        notified = self.spool_root / "lifecycle-notifications"
+        if not events.exists():
+            return False
+        notified.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+        handled = False
+        for path in sorted(events.glob("*.json"), key=lambda item: item.stat().st_mtime):
+            marker = notified / path.name
+            if marker.exists():
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+            event_type = str(payload.get("event_type") or "").strip().casefold()
+            if event_type not in {"work_started", "work_blocked", "work_completed"}:
+                continue
+            work_id = str(payload.get("work_id") or "").strip()
+            work_title = str(payload.get("work_title") or "").strip()
+            summary = str(payload.get("summary") or "").strip()
+            if not work_id or not work_title or not summary:
+                continue
+            arguments = {
+                "work_id": work_id,
+                "work_title": work_title,
+                "summary": summary,
+            }
+            owner_action = str(payload.get("owner_action") or "").strip()
+            if owner_action:
+                arguments["owner_action"] = owner_action
+            result = self.notifier.send(event_type, **arguments)
+            message_id = str(result.get("message_id") or "").strip()
+            if not message_id:
+                raise RuntimeError("lifecycle Teams notification missing message id")
+            temp = marker.with_suffix(marker.suffix + ".tmp")
+            temp.write_text(
+                json.dumps(
+                    {
+                        "event_type": event_type,
+                        "work_id": work_id,
+                        "message_id": message_id,
+                        "notified_at": current.isoformat(),
+                    },
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            os.chmod(temp, 0o600)
+            os.replace(temp, marker)
+            handled = True
+        return handled
+
+
+def build_work_lifecycle_notification_maintenance(
+    *,
+    notifier: GovernedAutonomousCompletionNotifier | None,
+    spool_root: Path = Path("/var/lib/jason/openclaw/autonomous-repair"),
+):
+    if notifier is None:
+        return None
+    return AutonomousWorkLifecycleNotificationMaintenance(
+        notifier=notifier,
+        spool_root=spool_root,
     )
 
 
