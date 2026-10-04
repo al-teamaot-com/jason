@@ -75,3 +75,59 @@ def test_blocked_marker_excludes_issue():
     )
     assert module.APPROVAL.search(body)
     assert module.BLOCKED.search(body)
+
+
+def test_source_context_blocker_detects_missing_excerpt_context():
+    assert module.source_context_blocker(
+        'The supplied excerpts do not expose enough registry persistence and would require unseen code.'
+    )
+    assert module.source_context_blocker(
+        'Cannot form a complete, exact replacement without enough surrounding file context.'
+    )
+    assert module.source_context_blocker(
+        'The provided excerpts are insufficient to form exact replacements; the incomplete repository context would require inventing unseen API surface.'
+    )
+    assert not module.source_context_blocker('Owner approval is required for production deployment.')
+    assert not module.source_context_blocker('Provider credential is unavailable.')
+
+
+def test_context_only_search_plan_with_terms_is_actionable():
+    result = {
+        'blocked_reason': 'Additional exact repository source is still needed; the provided context is incomplete.',
+        'search_terms': ['CapabilityDefinition(', 'class CapabilityDefinition'],
+    }
+    blocked = str(result.get('blocked_reason') or '').strip()
+    terms = [str(value).strip() for value in result.get('search_terms') or [] if str(value).strip()]
+    assert terms
+    assert module.source_context_blocker(blocked)
+    assert not (blocked and (not terms or not module.source_context_blocker(blocked)))
+
+
+def test_authority_search_plan_blocker_remains_terminal_even_with_terms():
+    blocked = 'Owner approval is required before protected production deployment.'
+    terms = ['production gate']
+    assert not module.source_context_blocker(blocked)
+    assert blocked and (not terms or not module.source_context_blocker(blocked))
+
+
+def test_recorded_context_expansion_consumes_useful_search_terms_despite_wording():
+    record = {'context_expansion_attempts': 2}
+    blocked = 'Additional exact repository source is still needed; without that surrounding code the implementation area remains ambiguous.'
+    terms = ['CapabilityDefinition(', 'retirement_state']
+    expansion_search = int(record.get('context_expansion_attempts', 0)) > 0
+    terminal = bool(blocked) and (
+        not terms or (not expansion_search and not module.source_context_blocker(blocked))
+    )
+    assert expansion_search
+    assert not terminal
+
+
+def test_initial_non_context_blocker_with_terms_stays_terminal():
+    record = {'context_expansion_attempts': 0}
+    blocked = 'Owner approval is required before production deployment.'
+    terms = ['production gate']
+    expansion_search = int(record.get('context_expansion_attempts', 0)) > 0
+    terminal = bool(blocked) and (
+        not terms or (not expansion_search and not module.source_context_blocker(blocked))
+    )
+    assert terminal

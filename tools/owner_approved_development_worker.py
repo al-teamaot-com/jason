@@ -253,6 +253,48 @@ def select_items(
     return selected
 
 
+def source_context_blocker(reason: str) -> bool:
+    text = str(reason or '').casefold()
+    explicit_markers = (
+        'supplied excerpt',
+        'provided excerpt',
+        'source excerpt',
+        'source context',
+        'repository context',
+        'unseen code',
+        'unseen repository',
+        'not expose enough',
+        'missing source',
+        'enough surrounding',
+        'cannot form a complete, exact replacement',
+        "can't form a complete, exact replacement",
+    )
+    if any(marker in text for marker in explicit_markers):
+        return True
+    context_terms = (
+        'excerpt',
+        'context',
+        'surrounding code',
+        'surrounding call site',
+        'unseen api',
+        'unseen interface',
+    )
+    shortage_terms = (
+        'insufficient',
+        'incomplete',
+        'not enough',
+        'does not expose',
+        'do not expose',
+        'missing',
+        'would require inventing',
+        'require inventing',
+    )
+    return (
+        any(term in text for term in context_terms)
+        and any(term in text for term in shortage_terms)
+    )
+
+
 def reconcile_removed_approval(state: dict[str, Any], eligible_ids: set[str]) -> None:
     items = state.get('items') if isinstance(state.get('items'), Mapping) else {}
     for item_id, record in items.items():
@@ -493,16 +535,34 @@ def main() -> int:
                     })
                     continue
                 result = response.get('result') or {}
-                if result.get('blocked_reason'):
+                blocked_reason = str(result.get('blocked_reason') or '').strip()
+                search_terms = [
+                    str(value).strip()
+                    for value in list(result.get('search_terms') or [])
+                    if str(value).strip()
+                ]
+                expansion_search = int(record.get('context_expansion_attempts', 0)) > 0
+                if blocked_reason and (
+                    not search_terms
+                    or (
+                        not expansion_search
+                        and not source_context_blocker(blocked_reason)
+                    )
+                ):
                     record.update({
                         'phase': 'blocked',
-                        'reason': str(result['blocked_reason']),
+                        'reason': blocked_reason,
                         'updated_at': now(),
                     })
                     continue
+                if blocked_reason:
+                    record['reason'] = (
+                        'Continuing bounded source discovery from context-expansion '
+                        f'search plan: {blocked_reason[:500]}'
+                    )
                 excerpts = support.safe_search(
                     worktree,
-                    list(result.get('search_terms') or []),
+                    search_terms,
                     gate,
                     policy,
                 )
@@ -530,6 +590,7 @@ def main() -> int:
                 record.update({
                     'phase': 'implementing',
                     'reasoning_request_id': edit_rid,
+                    'source_paths': [str(value.get('path') or '') for value in excerpts],
                     'updated_at': now(),
                 })
                 continue
@@ -552,11 +613,41 @@ def main() -> int:
                     continue
                 result = response.get('result') or {}
                 if result.get('blocked_reason'):
-                    record.update({
-                        'phase': 'blocked',
-                        'reason': str(result['blocked_reason']),
-                        'updated_at': now(),
-                    })
+                    blocked_reason = str(result['blocked_reason'])
+                    expansion_attempts = int(record.get('context_expansion_attempts', 0))
+                    if source_context_blocker(blocked_reason) and expansion_attempts < 3:
+                        rid = queue_reasoning(
+                            spool,
+                            kind='search_plan',
+                            item=item,
+                            context={
+                                'work_class': 'owner_approved_development_context_expansion',
+                                'approved_scope': item['body'][:5000],
+                                'prior_context_blocker': blocked_reason[:1800],
+                                'previous_source_paths': list(record.get('source_paths') or [])[:20],
+                                'instruction': (
+                                    'Find additional exact repository source needed to resolve the '
+                                    'prior context blocker. Preserve the approved scope and do not '
+                                    'request broader authority.'
+                                ),
+                            },
+                        )
+                        record.update({
+                            'phase': 'diagnosing',
+                            'reasoning_request_id': rid,
+                            'context_expansion_attempts': expansion_attempts + 1,
+                            'reason': (
+                                'Automatic source-context expansion requested after edit-plan '
+                                f'blocker: {blocked_reason[:500]}'
+                            ),
+                            'updated_at': now(),
+                        })
+                    else:
+                        record.update({
+                            'phase': 'blocked',
+                            'reason': blocked_reason,
+                            'updated_at': now(),
+                        })
                     continue
                 support.apply_edits(
                     worktree,
