@@ -58,4 +58,4 @@ Do not introduce a second project-level architecture authority under this direct
 
 ## Release management
 
-`Jason-Release-Manager.md` defines the evidence-gated development, immutable candidate, isolated pre-production, Production Eligible, serialized promotion, verification, and rollback lifecycle. The daily 02:30 engineering window may promote only an already-eligible release and never creates eligibility by itself.
+`Jason-Release-Manager.md` defines the evidence-gated development, immutable candidate, isolated pre-production, Production Eligible, serialized promotion, verification, and rollback lifecycle. Unattended promotion runs every five minutes during the approved production window (weekdays 17:00-05:00 America/New_York and continuously on weekends), may promote only an already-eligible release, and never creates eligibility by itself.
