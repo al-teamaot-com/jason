@@ -655,6 +655,27 @@ def run_preproduction(repo: Path, state_root: Path, record: dict[str, Any]) -> d
             shutil.rmtree(scratch, ignore_errors=True)
 
 
+def publish_production_closeout(repo: Path, candidate_sha: str) -> dict[str, str]:
+    script = repo / "tools" / "publish_documentation_reconciliation.sh"
+    if not script.is_file():
+        raise ReleaseManagerError("production evidence publisher is missing")
+    env = os.environ.copy()
+    env["JASON_DOCUMENTATION_REPO_ROOT"] = str(repo)
+    publication = run(
+        [str(script), "production", candidate_sha],
+        cwd=repo,
+        env=env,
+    )
+    if "DOCUMENTATION_SUCCESS_RECONCILIATION=PASS mode=production" not in publication:
+        raise ReleaseManagerError("production documentation reconciliation did not pass")
+    if "CONTROL_BOARD_PUBLICATION=PASS" not in publication:
+        raise ReleaseManagerError("production control-board publication did not pass")
+    return {
+        "documentation": "pass",
+        "control_board": "pass",
+    }
+
+
 def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
     if record.get("state") != "production_eligible":
         raise ReleaseManagerError("release is not Production Eligible")
@@ -687,6 +708,10 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
         live = wait_live_runtime()
         alignment = live_production_alignment(str(candidate["candidate_sha"]))
         live_digest = image_id("jason-runtime:production")
+        closeout = publish_production_closeout(
+            deploy_worktree,
+            str(candidate["candidate_sha"]),
+        )
         record["production"] = {
             "live_sha": live["revision"],
             "artifact_digest": live_digest,
@@ -697,6 +722,8 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
             "mcp_revision": alignment["mcp_revision"],
             "host_revision": alignment["host_revision"],
             "host_release": alignment["host_release"],
+            "documentation_reconciliation": closeout["documentation"],
+            "control_board_publication": closeout["control_board"],
             "verified_at": now(),
         }
         gate_transition(repo, record, "production_verified")
