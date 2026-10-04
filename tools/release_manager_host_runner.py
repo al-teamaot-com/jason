@@ -20,6 +20,7 @@ import time
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from typing import Any
 
 import release_manager_gate as gate
@@ -45,8 +46,27 @@ class ReleaseManagerError(RuntimeError):
     pass
 
 
+PRODUCTION_TIME_ZONE = ZoneInfo("America/New_York")
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def production_window_open(at: datetime | None = None) -> bool:
+    """Return whether unattended production promotion is currently permitted.
+
+    Weekdays: 17:00 through 04:59 America/New_York.
+    Weekends: continuously open.
+    Explicit owner-driven `promote` remains available outside this scheduler gate.
+    """
+    observed = at or datetime.now(timezone.utc)
+    if observed.tzinfo is None:
+        raise ValueError("production window evaluation requires timezone-aware time")
+    local = observed.astimezone(PRODUCTION_TIME_ZONE)
+    if local.weekday() >= 5:
+        return True
+    return local.hour >= 17 or local.hour < 5
 
 
 def run(args: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> str:
@@ -314,6 +334,10 @@ def copy_state_from_live_container(
     )
 
 
+def preprod_scratch_path(state_root: Path, release_id: str) -> Path:
+    return state_root.parent.parent / "release-manager-preprod" / release_id
+
+
 def create_preprod_container(
     *,
     live: dict[str, Any],
@@ -326,7 +350,11 @@ def create_preprod_container(
     name = "jason-runtime-preprod-" + candidate_sha[:12]
     subprocess.run(["docker", "rm", "-f", name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    scratch = state_root / "preprod" / release_id
+    # Pre-production clones must live outside the live OpenClaw state tree.
+    # Production state_root is /var/lib/jason/openclaw/release-manager; placing
+    # scratch below state_root recursively copies the destination back into
+    # itself when cloning /var/lib/jason/openclaw.
+    scratch = preprod_scratch_path(state_root, release_id)
     if scratch.exists():
         shutil.rmtree(scratch)
     scratch.mkdir(parents=True, mode=0o700)
@@ -337,6 +365,12 @@ def create_preprod_container(
         source = str(mount.get("Source") or "")
         if destination in {"/var/lib/jason/authority", "/var/lib/jason/openclaw"}:
             clone = scratch / destination.rsplit("/", 1)[-1]
+            source_path = Path(source).resolve()
+            clone_path = clone.resolve()
+            if clone_path == source_path or source_path in clone_path.parents:
+                raise ReleaseManagerError(
+                    f"pre-production clone destination is nested under live state source: {destination}"
+                )
             copy_state_from_live_container(destination, clone)
             mount_sources[destination] = str(clone)
 
@@ -757,6 +791,8 @@ def production_gate_result(repo: Path, record: dict[str, Any]) -> dict[str, Any]
 
 
 def promote_eligible(repo: Path, state_root: Path) -> bool:
+    if not production_window_open():
+        return False
     records = state_root / "records"
     if not records.exists():
         return False
@@ -843,6 +879,9 @@ def main() -> int:
         print(json.dumps(record, indent=2))
         return 0
     if args.command == "promote-eligible":
+        if not production_window_open():
+            print("RELEASE_MANAGER=WINDOW_CLOSED")
+            return 0
         print("RELEASE_MANAGER=" + ("PROMOTED" if promote_eligible(repo, state_root) else "IDLE"))
         return 0
     if args.command == "status":

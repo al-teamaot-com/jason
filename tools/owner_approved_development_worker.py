@@ -308,6 +308,38 @@ def reconcile_removed_approval(state: dict[str, Any], eligible_ids: set[str]) ->
                 'reason': 'Owner-approved development marker is no longer present; work stopped fail-closed.',
                 'updated_at': now(),
             })
+def sync_lifecycle_notification(
+    record: dict[str, Any],
+    item: Mapping[str, Any],
+    *,
+    event_root: Path,
+) -> None:
+    try:
+        if not record.get('lifecycle_started_fingerprint'):
+            fingerprint = support.emit_lifecycle_event(
+                event_type='work_started',
+                work_id=str(item['id']),
+                work_title=str(item['title']),
+                summary='Owner-approved autonomous engineering has started.',
+                event_root=event_root,
+            )
+            record['lifecycle_started_fingerprint'] = fingerprint
+        if str(record.get('phase') or '') == 'blocked':
+            reason = str(record.get('reason') or 'Engineering stopped at a bounded blocker.').strip()
+            fingerprint = support.emit_lifecycle_event(
+                event_type='work_blocked',
+                work_id=str(item['id']),
+                work_title=str(item['title']),
+                summary=reason,
+                owner_action='Review the blocker only if Jason cannot resolve it within existing authority.',
+                event_root=event_root,
+            )
+            record['lifecycle_blocked_fingerprint'] = fingerprint
+        record.pop('lifecycle_notification_error', None)
+    except Exception as exc:
+        record['lifecycle_notification_error'] = f'{type(exc).__name__}: {str(exc)[:300]}'
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument('--repo', type=Path, default=DEFAULT_REPO)
@@ -705,6 +737,12 @@ def main() -> int:
                 'reason': f'{type(exc).__name__}: {str(exc)[:900]}',
                 'updated_at': now(),
             })
+        finally:
+            sync_lifecycle_notification(
+                record,
+                item,
+                event_root=spool.parent / 'autonomous-repair' / 'lifecycle-events',
+            )
 
     state['support_active_at_claim'] = support_active
     state['max_active_engineering'] = max(1, int(args.max_active))

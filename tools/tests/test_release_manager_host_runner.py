@@ -2,6 +2,7 @@ import importlib.util
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -28,6 +29,40 @@ SHA_B = "b" * 40
 class ReleaseManagerHostRunnerTests(unittest.TestCase):
     def test_release_id_is_deterministic(self):
         self.assertEqual(runner.record_id(SHA_A), "release-" + "a" * 16)
+
+    def test_production_window_weekday_evening_and_overnight(self):
+        self.assertTrue(
+            runner.production_window_open(
+                datetime(2026, 10, 5, 21, 0, tzinfo=timezone.utc)
+            )
+        )
+        self.assertTrue(
+            runner.production_window_open(
+                datetime(2026, 10, 6, 8, 59, tzinfo=timezone.utc)
+            )
+        )
+        self.assertFalse(
+            runner.production_window_open(
+                datetime(2026, 10, 6, 9, 0, tzinfo=timezone.utc)
+            )
+        )
+        self.assertFalse(
+            runner.production_window_open(
+                datetime(2026, 10, 6, 20, 59, tzinfo=timezone.utc)
+            )
+        )
+
+    def test_production_window_weekend_is_continuous(self):
+        for hour in (0, 6, 12, 18, 23):
+            self.assertTrue(
+                runner.production_window_open(
+                    datetime(2026, 10, 4, hour, 0, tzinfo=timezone.utc)
+                )
+            )
+
+    def test_production_window_rejects_naive_time(self):
+        with self.assertRaisesRegex(ValueError, "timezone-aware"):
+            runner.production_window_open(datetime(2026, 10, 5, 12, 0))
 
     def test_preprod_mutation_guards_disable_known_write_paths(self):
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_AUTOTASK_MUTATION_ENABLED"], "false")
@@ -133,6 +168,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 return record
 
             with (
+                patch.object(runner, "production_window_open", return_value=True),
                 patch.object(
                     runner,
                     "production_gate_result",
@@ -172,6 +208,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
 
             promoted = []
             with (
+                patch.object(runner, "production_window_open", return_value=True),
                 patch.object(runner, "production_gate_result", side_effect=gate_result),
                 patch.object(
                     runner,
@@ -261,6 +298,41 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(runner.ReleaseManagerError, "production alignment mismatch"):
                 runner.live_production_alignment(SHA_A)
+
+    def test_preprod_scratch_is_outside_live_openclaw_tree(self):
+        state_root = Path("/var/lib/jason/openclaw/release-manager")
+        scratch = runner.preprod_scratch_path(state_root, "release-test")
+        self.assertEqual(scratch, Path("/var/lib/jason/release-manager-preprod/release-test"))
+        self.assertFalse(str(scratch).startswith("/var/lib/jason/openclaw/"))
+
+    def test_preprod_clone_rejects_destination_nested_under_live_source(self):
+        with tempfile.TemporaryDirectory() as td:
+            source = Path(td)
+            state_root = source / "openclaw" / "release-manager"
+            state_root.mkdir(parents=True)
+            live = {
+                "inspect": {
+                    "Config": {"Env": [], "Labels": {}},
+                    "HostConfig": {"NetworkMode": "bridge", "Tmpfs": {}},
+                    "Mounts": [
+                        {
+                            "Type": "bind",
+                            "Source": str(source),
+                            "Destination": "/var/lib/jason/openclaw",
+                            "RW": True,
+                        }
+                    ],
+                    "NetworkSettings": {"Networks": {}},
+                }
+            }
+            with self.assertRaisesRegex(runner.ReleaseManagerError, "nested under live state source"):
+                runner.create_preprod_container(
+                    live=live,
+                    candidate_image="jason-runtime:test",
+                    candidate_sha=SHA_A,
+                    state_root=state_root,
+                    release_id="release-test",
+                )
 
     def test_postcutover_verifier_waits_for_healthy_runtime(self):
         with patch.object(
