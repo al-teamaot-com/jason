@@ -117,6 +117,50 @@ def live_runtime() -> dict[str, Any]:
     }
 
 
+def live_production_alignment(candidate_sha: str) -> dict[str, Any]:
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    runtime = live_runtime()
+
+    mcp_raw = json.loads(output(["docker", "inspect", "jason-mcp-pilot"]))[0]
+    mcp_labels = mcp_raw.get("Config", {}).get("Labels") or {}
+    mcp_revision = str(
+        mcp_labels.get("com.teamaot.jason.source_revision") or ""
+    ).casefold()
+    if not SHA.fullmatch(mcp_revision):
+        raise ReleaseManagerError("live jason-mcp-pilot source revision is not an exact SHA")
+    if str(mcp_raw.get("State", {}).get("Status") or "") != "running":
+        raise ReleaseManagerError("live jason-mcp-pilot is not running")
+
+    current_release = Path("/opt/jason/current").resolve()
+    host_revision = current_release.name.casefold()
+    if not SHA.fullmatch(host_revision):
+        raise ReleaseManagerError("/opt/jason/current does not resolve to an exact SHA release")
+
+    observed = {
+        "runtime_revision": runtime["revision"],
+        "mcp_revision": mcp_revision,
+        "host_revision": host_revision,
+        "host_release": str(current_release),
+    }
+    mismatches = [
+        f"{name}={value}"
+        for name, value in (
+            ("runtime", observed["runtime_revision"]),
+            ("mcp", observed["mcp_revision"]),
+            ("host", observed["host_revision"]),
+        )
+        if value != candidate_sha
+    ]
+    if mismatches:
+        raise ReleaseManagerError(
+            "production alignment mismatch for candidate "
+            + candidate_sha
+            + ": "
+            + ", ".join(mismatches)
+        )
+    return observed
+
+
 def wait_live_runtime(attempts: int = 30, interval_seconds: int = 2) -> dict[str, Any]:
     last_health = "unknown"
     for _ in range(attempts):
@@ -597,12 +641,18 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
             env=env,
         )
         live = wait_live_runtime()
+        alignment = live_production_alignment(str(candidate["candidate_sha"]))
         live_digest = image_id("jason-runtime:production")
         record["production"] = {
             "live_sha": live["revision"],
             "artifact_digest": live_digest,
             "health_passed": True,
             "deployment_script_passed": "DEPLOYMENT=PASS" in deploy_output,
+            "alignment_verified": True,
+            "runtime_revision": alignment["runtime_revision"],
+            "mcp_revision": alignment["mcp_revision"],
+            "host_revision": alignment["host_revision"],
+            "host_release": alignment["host_release"],
             "verified_at": now(),
         }
         gate_transition(repo, record, "production_verified")
