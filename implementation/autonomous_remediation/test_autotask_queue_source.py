@@ -27,6 +27,7 @@ class Reads:
                         {"value": "99", "label": "Complete", "isActive": True},
                     ]},
                     {"name": "source", "picklistValues": [
+                        {"value": "-2", "label": "Insourced", "isActive": True},
                         {"value": "2", "label": "Phone", "isActive": True},
                         {"value": "13", "label": "Recurring", "isActive": True},
                     ]},
