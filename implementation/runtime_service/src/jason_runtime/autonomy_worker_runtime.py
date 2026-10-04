@@ -1470,7 +1470,7 @@ class OperationalAutonomyMaintenance:
                             "title": note_title,
                             "description": body,
                             "noteType": 3,
-                            "publish": 1,
+                            "publish": 2,
                         }
                     },
                 )
@@ -2674,7 +2674,7 @@ class OperationalAutonomyMaintenance:
                         "Each child has one verified Autotask CI and preserves this source ticket lineage."
                     ),
                     "noteType": 3,
-                    "publish": 1,
+                    "publish": 2,
                 }
             },
         )
@@ -6919,7 +6919,7 @@ class OperationalAutonomyMaintenance:
                 "title": gpt_insights_note_title(update=update),
                 "description": body,
                 "noteType": 3,
-                "publish": 1,
+                "publish": 2,
             }},
         )
         self.store.remember_augmentation_state(
@@ -7220,7 +7220,7 @@ class OperationalAutonomyMaintenance:
                     "title": title,
                     "description": body,
                     "noteType": 3,
-                    "publish": 1,
+                    "publish": 2,
                 }
             },
         )
