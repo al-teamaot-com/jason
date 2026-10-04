@@ -131,3 +131,29 @@ def test_initial_non_context_blocker_with_terms_stays_terminal():
         not terms or (not expansion_search and not module.source_context_blocker(blocked))
     )
     assert terminal
+
+
+def test_source_history_is_sticky_across_context_expansion():
+    record = {
+        'source_paths': [
+            'implementation/kernel/capabilities/repository.py',
+            'implementation/kernel/capabilities/service.py',
+        ]
+    }
+    history = [
+        str(value).strip()
+        for value in list(record.get('source_history') or record.get('source_paths') or [])
+        if str(value).strip()
+    ]
+    new_paths = [
+        'implementation/kernel/system_registry/contracts.py',
+        'implementation/kernel/capabilities/service.py',
+    ]
+    for path in new_paths:
+        if path not in history:
+            history.append(path)
+    assert history == [
+        'implementation/kernel/capabilities/repository.py',
+        'implementation/kernel/capabilities/service.py',
+        'implementation/kernel/system_registry/contracts.py',
+    ]
