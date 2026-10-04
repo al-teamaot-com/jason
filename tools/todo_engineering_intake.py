@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import release_manager_gate as release_gate
+import support_repair_host_worker as support_worker
 
 DEFAULT_REPO = Path("/home/al/projects/jason")
 DEFAULT_SPOOL = Path("/var/lib/jason/openclaw/support-repair")
@@ -206,8 +207,14 @@ def select_candidate(
     support_state: Mapping[str, Any],
     max_support_repairs: int,
     existing_issues: Mapping[str, Any],
+    eligible_support_ids: set[str] | None = None,
 ) -> tuple[TodoItem | None, str]:
     support = release_gate.parse_support(support_text)
+    if eligible_support_ids is not None:
+        support = [
+            item for item in support
+            if item["id"] in eligible_support_ids
+        ]
     todo_summary = [
         {
             "id": item.item_id,
@@ -383,6 +390,7 @@ def main() -> int:
             support_state=support_state,
             max_support_repairs=support_limit,
             existing_issues=issues,
+            eligible_support_ids=support_worker.open_support_issue_ids(repo),
         )
 
     state: dict[str, Any] = {
