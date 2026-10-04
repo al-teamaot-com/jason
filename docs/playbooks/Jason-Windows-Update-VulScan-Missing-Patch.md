@@ -53,6 +53,22 @@ Before diagnostics:
 
 If identity is ambiguous, set state=identification_blocked and stop rather than guessing.
 
+### Multi-device source alerts
+
+If the source VulScan ticket contains two or more independently named affected nodes:
+1. do **not** force the source ticket into the one-ticket/one-device association gate;
+2. parse the affected-node list;
+3. resolve every node to exactly one active same-company Autotask CI and exact DRMM resource ID/hostname;
+4. require the separately promoted `vulscan_multi_device_split@1.0.0` split playbook;
+5. invoke the shared **Jason Ticket Split Runtime Contract** once with one target per verified endpoint;
+6. create each child in queue **Jason**, status **New**, with exactly one CI and preserved source-ticket lineage;
+7. require post-create readback for every child;
+8. write the verified child IDs to the source ticket;
+9. only after all children are verified, set the source ticket **Complete**;
+10. let each child re-enter the normal one-device VulScan playbook independently.
+
+If any listed node cannot be resolved exactly, fail closed before source completion. Already verified children remain idempotently reusable on retry; Jason must not create duplicates.
+
 ## 5. Expected State
 
 Healthy state requires:
@@ -65,7 +81,19 @@ Healthy state requires:
 
 ## 6. State Model
 
-identified -> patch_state_check
+identified ->
+- multi_device_split_required
+- patch_state_check
+
+multi_device_split_required ->
+- split_creating_children
+- identification_blocked
+
+split_creating_children ->
+- split_complete
+- blocked
+
+split_complete -> complete_source
 
 patch_state_check ->
 - complete_candidate
@@ -453,6 +481,16 @@ Core diagnostic/classification branch (exact existing `vulscan_missing_patch@1.0
 - DRMM patch search
 - persisted state and scheduler/recheck support
 
+Multi-device split branch (exact `vulscan_multi_device_split@1.0.0` promotion):
+- `service.ticket.create`
+- `service.ticket.note.create`
+- `service.ticket.update`
+- Autotask configuration search/read
+- DRMM endpoint read
+- shared Jason Ticket Split Runtime Contract and durable split ledger
+
+This branch is separately promotion-bound. Ticket creation authority is not inherited by the v1.0 diagnostic branch or v1.1 client-disposition branch.
+
 Client-disposition branch (exact `vulscan_missing_patch@1.1.0` promotion):
 - all required core ticket/update capabilities used by the disposition branch
 - `service.ticket.client.notification.create`
@@ -515,6 +553,14 @@ Acceptance must prove:
 29. a Gromelski ticket that reaches client disposition without v1.1.0 promotion enters waiting_client_notification_authority, releases its active slot, and performs no contact/status/client-message mutation
 30. activating the exact v1.1.0 client-disposition promotion automatically resumes the preserved ticket and uses workflow_id=vulscan_missing_patch plus template_id=vulscan-approved-or-installed-v1
 31. the approved-workflow connector reconstructs canned title/body server-side; autonomous VulScan does not supply free-form client wording or an arbitrary recipient
+32. a VulScan source ticket with two or more affected nodes is split before the one-device admission gate
+33. each affected node resolves to exactly one active same-company CI and exact DRMM UID/hostname
+34. each verified node receives exactly one child ticket in queue Jason with one CI and source lineage
+35. a repeated split invocation reuses previously verified children and creates no duplicates
+36. partial child-create failure leaves the source open and resumes only the missing children on retry
+37. source completion occurs only after every requested child has provider readback
+38. the `vulscan_multi_device_split@1.0.0` playbook cannot create tickets unless its exact durable promotion includes service.ticket.create
+39. the two historical multi-device alerts T20260929.0033 and T20260930.0041 can be replayed safely as controlled acceptance cases without guessing a single source CI
 
 ## 22. Section Goal Closure
 
