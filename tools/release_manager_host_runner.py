@@ -207,26 +207,36 @@ def required_checks(repo: Path) -> list[str]:
 
 
 def github_checks(candidate_sha: str, required: list[str]) -> dict[str, Any]:
-    url = (
-        "https://api.github.com/repos/al-teamaot-com/jason/commits/"
-        + candidate_sha
-        + "/check-runs"
-    )
-    request = urllib.request.Request(
-        url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "project-jason-release-manager",
-        },
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        payload = json.loads(response.read().decode("utf-8"))
     latest: dict[str, dict[str, Any]] = {}
-    for item in payload.get("check_runs") or []:
-        name = str(item.get("name") or "")
-        if name and (name not in latest or int(item.get("id", 0)) > int(latest[name].get("id", 0))):
-            latest[name] = item
+    # GitHub returns only 30 check runs by default. Busy merge SHAs can exceed
+    # that easily (reruns/classifiers included), so required protected checks
+    # may otherwise be falsely reported as missing. Traverse a bounded set of
+    # 100-item pages and retain the newest run for each check name.
+    for page in range(1, 11):
+        url = (
+            "https://api.github.com/repos/al-teamaot-com/jason/commits/"
+            + candidate_sha
+            + f"/check-runs?per_page=100&page={page}"
+        )
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "project-jason-release-manager",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        items = payload.get("check_runs") or []
+        for item in items:
+            name = str(item.get("name") or "")
+            if name and (name not in latest or int(item.get("id", 0)) > int(latest[name].get("id", 0))):
+                latest[name] = item
+        if len(items) < 100:
+            break
+    else:
+        raise ReleaseManagerError("GitHub check-run pagination exceeded bounded limit")
     failures = []
     for name in required:
         item = latest.get(name)
