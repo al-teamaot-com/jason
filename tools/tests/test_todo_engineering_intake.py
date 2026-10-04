@@ -95,6 +95,25 @@ class TodoEngineeringIntakeTests(unittest.TestCase):
         self.assertIsNone(candidate)
         self.assertIn("Support-first", reason)
 
+    def test_support_row_without_repair_issue_does_not_create_phantom_pressure(self):
+        todos = module.parse_todo_sections(TODO_TEXT)
+        support = (
+            "| ID | Priority | Status | Title | Evidence | Acceptance |\n"
+            "| --- | --- | --- | --- | --- | --- |\n"
+            "| SUPPORT-OPS-099 | P1 | Open | Broken thing | evidence | fix |\n"
+        )
+        candidate, reason = module.select_candidate(
+            todos=todos,
+            support_text=support,
+            support_state={"items": {}},
+            max_support_repairs=2,
+            existing_issues={},
+            eligible_support_ids=set(),
+        )
+        self.assertEqual(reason, "eligible")
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate.item_id, "TODO-OPS-010")
+
     def test_blocked_support_does_not_starve_todo_forever(self):
         todos = module.parse_todo_sections(TODO_TEXT)
         support = (
