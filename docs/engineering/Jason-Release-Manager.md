@@ -15,7 +15,7 @@
 - the exact image tested in pre-production is the image promoted to production;
 - pre-production cannot write production state or activate provider mutations;
 - Support List impact is checked before Production Eligible;
-- the 02:30 window promotes only an already-eligible release;
+- unattended promotion runs only during the approved production window: weekdays 17:00-05:00 America/New_York and continuously on weekends;
 - protected-core releases require owner approval bound to the exact candidate SHA;
 - production success requires live SHA, image identity, and health verification;
 - failed verification rolls back to the recorded known-good revision.
@@ -24,7 +24,7 @@
 
 The Release Manager applies when a protected-main software revision is nominated for production promotion.
 
-The daily automatic production window is 02:30 America/New_York. The clock is only a promotion trigger; it never creates Production Eligible status.
+The automatic production window is weekdays 17:00-05:00 America/New_York and continuously from Friday 17:00 through Monday 05:00. During the window, the Release Manager reconciles eligible releases every five minutes. The schedule is only a promotion trigger; it never creates Production Eligible status. Explicit owner-driven promotion remains available outside the unattended window.
 
 ## 3. Scope and Boundaries
 
@@ -127,7 +127,7 @@ No blind deployment retries.
 
 ## 11. Periodic Rechecks
 
-The 02:30 timer invokes `promote-eligible` once daily.
+The production-window timer invokes `promote-eligible` every five minutes while the approved window is open. The host runner independently enforces the same window so a stale/persistent timer cannot promote outside it.
 
 It:
 - scans durable release records;
@@ -234,7 +234,7 @@ For the initial production activation:
 8. classify Production Eligible;
 9. promote that same image;
 10. verify exact live SHA/image/health;
-11. confirm 02:30 timer is enabled;
+11. confirm the weekday 17:00-05:00 and weekend-continuous production-window timer is enabled;
 12. confirm no release can skip gates;
 13. preserve rollback-current artifact.
 
