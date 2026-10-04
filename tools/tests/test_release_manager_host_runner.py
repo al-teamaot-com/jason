@@ -262,6 +262,68 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(runner.ReleaseManagerError, "production alignment mismatch"):
                 runner.live_production_alignment(SHA_A)
 
+    def test_preprod_scratch_is_outside_live_openclaw_tree(self):
+        live = {
+            "inspect": {
+                "Config": {"Env": [], "Labels": {}},
+                "HostConfig": {"NetworkMode": "bridge", "Tmpfs": {}},
+                "Mounts": [
+                    {
+                        "Type": "bind",
+                        "Source": "/var/lib/jason/openclaw",
+                        "Destination": "/var/lib/jason/openclaw",
+                        "RW": True,
+                    }
+                ],
+                "NetworkSettings": {"Networks": {}},
+            }
+        }
+        state_root = Path("/var/lib/jason/openclaw/release-manager")
+        with (
+            patch.object(runner, "copy_state_from_live_container") as copy_state,
+            patch.object(runner.subprocess, "run"),
+            patch.object(runner, "run"),
+        ):
+            _, scratch = runner.create_preprod_container(
+                live=live,
+                candidate_image="jason-runtime:test",
+                candidate_sha=SHA_A,
+                state_root=state_root,
+                release_id="release-test",
+            )
+        self.assertEqual(scratch, Path("/var/lib/jason/release-manager-preprod/release-test"))
+        clone = copy_state.call_args.args[1]
+        self.assertFalse(str(clone).startswith("/var/lib/jason/openclaw/"))
+
+    def test_preprod_clone_rejects_destination_nested_under_live_source(self):
+        with tempfile.TemporaryDirectory() as td:
+            source = Path(td)
+            state_root = source / "openclaw" / "release-manager"
+            state_root.mkdir(parents=True)
+            live = {
+                "inspect": {
+                    "Config": {"Env": [], "Labels": {}},
+                    "HostConfig": {"NetworkMode": "bridge", "Tmpfs": {}},
+                    "Mounts": [
+                        {
+                            "Type": "bind",
+                            "Source": str(source),
+                            "Destination": "/var/lib/jason/openclaw",
+                            "RW": True,
+                        }
+                    ],
+                    "NetworkSettings": {"Networks": {}},
+                }
+            }
+            with self.assertRaisesRegex(runner.ReleaseManagerError, "nested under live state source"):
+                runner.create_preprod_container(
+                    live=live,
+                    candidate_image="jason-runtime:test",
+                    candidate_sha=SHA_A,
+                    state_root=state_root,
+                    release_id="release-test",
+                )
+
     def test_postcutover_verifier_waits_for_healthy_runtime(self):
         with patch.object(
             runner,
