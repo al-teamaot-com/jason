@@ -174,6 +174,35 @@ def active_support_ids(state: Mapping[str, Any]) -> list[str]:
     )
 
 
+def capacity_consuming_todo_issue_count(
+    issues: Mapping[str, Mapping[str, Any]],
+    spool: Path,
+) -> int:
+    """Count open TODO issues that still consume admission capacity.
+
+    Blocked development remains durably bound to its existing TODO issue for
+    duplicate suppression, but it must not permanently consume a new-work slot.
+    """
+    path = spool / "development-state.json"
+    if not path.exists():
+        return len(issues)
+    value = json.loads(path.read_text(encoding="utf-8"))
+    records = value.get("items") if isinstance(value, Mapping) else {}
+    records = records if isinstance(records, Mapping) else {}
+    blocked_issue_numbers = {
+        int(record.get("issue_number"))
+        for record in records.values()
+        if isinstance(record, Mapping)
+        and str(record.get("phase") or "") == "blocked"
+        and str(record.get("issue_number") or "").isdigit()
+    }
+    return sum(
+        1
+        for issue in issues.values()
+        if int(issue.get("number", 0) or 0) not in blocked_issue_numbers
+    )
+
+
 def active_development_count(spool: Path) -> int:
     path = spool / "development-state.json"
     if not path.exists():
@@ -381,8 +410,10 @@ def main() -> int:
     )
     if active_support + active_development >= engineering_limit:
         candidate, reason = None, "Engineering capacity is already fully occupied"
-    elif len(issues) >= int(policy.get("max_open_todo_issues", 1)):
-        candidate, reason = None, "Maximum open TODO engineering issues already reached"
+    elif capacity_consuming_todo_issue_count(issues, spool) >= int(
+        policy.get("max_open_todo_issues", 1)
+    ):
+        candidate, reason = None, "Maximum capacity-consuming TODO engineering issues already reached"
     else:
         candidate, reason = select_candidate(
             todos=todos,
@@ -405,6 +436,7 @@ def main() -> int:
         "existing_todo_issues": {
             item_id: int(issue["number"]) for item_id, issue in sorted(issues.items())
         },
+        "capacity_consuming_todo_issues": capacity_consuming_todo_issue_count(issues, spool),
     }
 
     if candidate is None:
