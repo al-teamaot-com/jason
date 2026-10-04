@@ -24,6 +24,7 @@ from typing import Any, Mapping
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_REPO = Path('/home/al/projects/jason')
 DEFAULT_SPOOL = Path('/var/lib/jason/openclaw/support-repair')
+DEFAULT_LIFECYCLE_EVENT_ROOT = Path('/var/lib/jason/openclaw/autonomous-repair/lifecycle-events')
 SUPPORT_ROW = re.compile(r'^\|\s*(SUPPORT-[^|]+?)\s*\|\s*(P\d)\s*\|\s*([^|]+?)\s*\|\s*([^|]+?)\s*\|\s*([^|]*?)\s*\|\s*([^|]*?)\s*\|')
 SUPPORT_ID_PATTERN = r'SUPPORT-(?:[A-Z]+-[0-9]+|AUTO-[A-F0-9]{12})'
 META = re.compile(rf'(?im)^\s*-\s*Support item\s*:\s*({SUPPORT_ID_PATTERN})\s*$')
@@ -49,6 +50,43 @@ def atomic_json(path: Path, payload: Mapping[str, Any]) -> None:
         handle.flush()
         os.fsync(handle.fileno())
     os.replace(temp, path)
+
+
+def emit_lifecycle_event(
+    *,
+    event_type: str,
+    work_id: str,
+    work_title: str,
+    summary: str,
+    owner_action: str = '',
+    event_root: Path | None = None,
+) -> str:
+    event_root = Path(event_root or DEFAULT_LIFECYCLE_EVENT_ROOT)
+    event_type = str(event_type).strip().casefold()
+    if event_type not in {'work_started', 'work_blocked', 'work_completed'}:
+        raise WorkerError('unsupported lifecycle event type')
+    work_id = str(work_id).strip()[:80]
+    work_title = str(work_title).strip()[:180]
+    summary = str(summary).strip()[:400]
+    owner_action = str(owner_action).strip()[:300]
+    if not work_id or not work_title or not summary:
+        raise WorkerError('lifecycle event requires work id, title, and summary')
+    fingerprint = hashlib.sha256(
+        '|'.join((event_type, work_id, work_title, summary, owner_action)).encode('utf-8')
+    ).hexdigest()[:24]
+    atomic_json(
+        event_root / f'{fingerprint}.json',
+        {
+            'event_type': event_type,
+            'work_id': work_id,
+            'work_title': work_title,
+            'summary': summary,
+            'owner_action': owner_action,
+            'fingerprint': fingerprint,
+            'created_at': now(),
+        },
+    )
+    return fingerprint
 
 
 def run(args: list[str], *, cwd: Path | None = None, check: bool = True) -> str:
@@ -899,6 +937,45 @@ def save_state(path: Path, state: Mapping[str, Any]) -> None:
     atomic_json(path, state)
 
 
+def sync_support_lifecycle_notification(
+    record: dict[str, Any],
+    item: Mapping[str, Any],
+    *,
+    event_root: Path,
+) -> None:
+    try:
+        if not record.get('lifecycle_started_fingerprint'):
+            record['lifecycle_started_fingerprint'] = emit_lifecycle_event(
+                event_type='work_started',
+                work_id=str(item['id']),
+                work_title=str(item['title']),
+                summary='Autonomous support repair has started.',
+                event_root=event_root,
+            )
+        phase = str(record.get('phase') or '')
+        if phase == 'blocked':
+            reason = str(record.get('reason') or 'Support repair stopped at a bounded blocker.').strip()
+            record['lifecycle_blocked_fingerprint'] = emit_lifecycle_event(
+                event_type='work_blocked',
+                work_id=str(item['id']),
+                work_title=str(item['title']),
+                summary=reason,
+                owner_action='Review only if Jason cannot resolve the blocker within existing authority.',
+                event_root=event_root,
+            )
+        if phase == 'complete' and not record.get('lifecycle_completed_fingerprint'):
+            record['lifecycle_completed_fingerprint'] = emit_lifecycle_event(
+                event_type='work_completed',
+                work_id=str(item['id']),
+                work_title=str(item['title']),
+                summary='Production acceptance and support closure are verified complete.',
+                event_root=event_root,
+            )
+        record.pop('lifecycle_notification_error', None)
+    except Exception as exc:
+        record['lifecycle_notification_error'] = f'{type(exc).__name__}: {str(exc)[:300]}'
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument('--repo', type=Path, default=DEFAULT_REPO)
@@ -1202,6 +1279,12 @@ def main() -> int:
                 'reason': f'{type(exc).__name__}: {str(exc)[:900]}',
                 'updated_at': now(),
             })
+        finally:
+            sync_support_lifecycle_notification(
+                record,
+                item,
+                event_root=spool.parent / 'autonomous-repair' / 'lifecycle-events',
+            )
 
     state['updated_at'] = now()
     save_state(state_path, state)

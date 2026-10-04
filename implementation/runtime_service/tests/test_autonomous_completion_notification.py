@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from jason_runtime.autonomous_completion_notification import (
     AutonomousCompletionTeamsInvoker,
     AutonomousDeploymentCompletionNotificationMaintenance,
+    AutonomousWorkLifecycleNotificationMaintenance,
     SelfHealEscalationNotificationMaintenance,
     _render,
 )
@@ -112,8 +113,65 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
             self.assertFalse(maintenance.tick())
             self.assertEqual(len(notifier.calls), 1)
 
+    def test_work_started_render_is_concise_adaptive_card(self):
+        event, text, card = _render(
+            {
+                "event_type": "work_started",
+                "work_id": "TODO-COMM-004",
+                "work_title": "Governed Teams interaction and owner operations",
+                "summary": "Owner-approved autonomous engineering has started.",
+            }
+        )
+        self.assertEqual(event, "work_started")
+        self.assertIn("TODO-COMM-004", text)
+        self.assertEqual(card["type"], "AdaptiveCard")
+        self.assertEqual(card["body"][0]["color"], "Accent")
+        self.assertNotIn("health_metric:", json.dumps(card))
+
+    def test_work_completed_render_is_green(self):
+        event, text, card = _render(
+            {
+                "event_type": "work_completed",
+                "work_id": "SUPPORT-OPS-100",
+                "work_title": "Example repair",
+                "summary": "Production acceptance and support closure are verified complete.",
+            }
+        )
+        self.assertEqual(event, "work_completed")
+        self.assertIn("completed", text.casefold())
+        self.assertEqual(card["body"][0]["color"], "Good")
+
+    def test_lifecycle_event_notifies_once_and_persists_message_id(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            events = root / "lifecycle-events"
+            events.mkdir(parents=True)
+            payload = {
+                "event_type": "work_blocked",
+                "work_id": "TODO-OPS-009",
+                "work_title": "Human-review handoff to Help Desk I",
+                "summary": "Controlled acceptance found a generic status mismatch.",
+                "owner_action": "No action required; Jason is correcting source.",
+            }
+            (events / "abc.json").write_text(json.dumps(payload), encoding="utf-8")
+            notifier = Notifier()
+            maintenance = AutonomousWorkLifecycleNotificationMaintenance(
+                notifier=notifier,
+                spool_root=root,
+                interval_seconds=15,
+                now=lambda: datetime(2026, 10, 4, 13, 0, tzinfo=timezone.utc),
+            )
+            self.assertTrue(maintenance.tick())
+            self.assertEqual(notifier.calls[0][0], "work_blocked")
+            marker = root / "lifecycle-notifications" / "abc.json"
+            self.assertTrue(marker.exists())
+            self.assertEqual(json.loads(marker.read_text())["message_id"], "message-1")
+            maintenance._next_due_at = None
+            self.assertFalse(maintenance.tick())
+            self.assertEqual(len(notifier.calls), 1)
+
     def test_self_heal_escalation_render_is_bounded_and_actionable(self):
-        event, text = _render(
+        event, text, card = _render(
             {
                 "event_type": "self_heal_escalation",
                 "degraded_function": "jason_mcp_status",
@@ -125,6 +183,8 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
         self.assertEqual(event, "self_heal_escalation")
         self.assertIn("owner action", text.casefold())
         self.assertIn("jason_mcp_status", text)
+        self.assertEqual(card["type"], "AdaptiveCard")
+        self.assertEqual(card["body"][0]["color"], "Attention")
 
     def test_self_heal_escalation_notifies_once(self):
         with tempfile.TemporaryDirectory() as td:

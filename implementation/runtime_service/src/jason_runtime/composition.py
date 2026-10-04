@@ -208,6 +208,7 @@ from orchestrator.teams_request_factory import GovernedTeamsOrchestrationRequest
 from .autonomous_completion_notification import (
     build_deployment_notification_maintenance,
     build_self_heal_escalation_notification_maintenance,
+    build_work_lifecycle_notification_maintenance,
     build_invoker as build_autonomous_completion_invoker,
     build_notifier as build_autonomous_completion_notifier,
     ensure_authority as ensure_autonomous_completion_authority,
@@ -2300,6 +2301,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         orchestrator=orchestrator,
         promotion_db=settings.autonomy_promotion_db,
     )
+    autonomous_work_lifecycle_notification_maintenance = (
+        build_work_lifecycle_notification_maintenance(
+            notifier=autonomous_completion_notifier,
+        )
+    )
     autonomous_deployment_completion_notification_maintenance = (
         build_deployment_notification_maintenance(
             notifier=autonomous_completion_notifier,
@@ -2376,6 +2382,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
     )
     autonomy_maintenance = CompositeAutonomyMaintenance(
         playbook_review_maintenance,
+        autonomous_work_lifecycle_notification_maintenance,
         autonomous_deployment_completion_notification_maintenance,
         self_heal_escalation_notification_maintenance,
         support_repair_reasoning_maintenance,

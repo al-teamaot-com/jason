@@ -8,6 +8,51 @@ assert SPEC.loader is not None
 SPEC.loader.exec_module(worker)
 
 
+def test_emit_lifecycle_event_is_deterministic_and_bounded(tmp_path):
+    root = tmp_path / 'events'
+    first = worker.emit_lifecycle_event(
+        event_type='work_started',
+        work_id='SUPPORT-OPS-100',
+        work_title='Example repair',
+        summary='Autonomous support repair has started.',
+        event_root=root,
+    )
+    second = worker.emit_lifecycle_event(
+        event_type='work_started',
+        work_id='SUPPORT-OPS-100',
+        work_title='Example repair',
+        summary='Autonomous support repair has started.',
+        event_root=root,
+    )
+    assert first == second
+    paths = list(root.glob('*.json'))
+    assert len(paths) == 1
+    payload = worker.json.loads(paths[0].read_text())
+    assert payload['work_id'] == 'SUPPORT-OPS-100'
+    assert payload['event_type'] == 'work_started'
+
+
+def test_sync_support_lifecycle_writes_start_and_blocker(tmp_path):
+    record = {'phase': 'blocked', 'reason': 'controlled blocker'}
+    item = {'id': 'SUPPORT-OPS-100', 'title': 'Example repair'}
+    root = tmp_path / 'events'
+    worker.sync_support_lifecycle_notification(record, item, event_root=root)
+    assert record['lifecycle_started_fingerprint']
+    assert record['lifecycle_blocked_fingerprint']
+    payloads = [worker.json.loads(p.read_text()) for p in root.glob('*.json')]
+    assert {p['event_type'] for p in payloads} == {'work_started', 'work_blocked'}
+
+
+def test_sync_support_lifecycle_writes_verified_completion(tmp_path):
+    record = {'phase': 'complete'}
+    item = {'id': 'SUPPORT-OPS-100', 'title': 'Example repair'}
+    root = tmp_path / 'events'
+    worker.sync_support_lifecycle_notification(record, item, event_root=root)
+    assert record['lifecycle_completed_fingerprint']
+    payloads = [worker.json.loads(p.read_text()) for p in root.glob('*.json')]
+    assert {p['event_type'] for p in payloads} == {'work_started', 'work_completed'}
+
+
 def test_parse_support_prioritizes_open_items_and_keeps_acceptance():
     text = '''| ID | Priority | Status | Item | Current blocker / evidence | Acceptance criteria |\n| --- | --- | --- | --- | --- | --- |\n| SUPPORT-OPS-200 | P2 | Open | Later | evidence 2 | acceptance 2 |\n| SUPPORT-OPS-100 | P1 | Open | First | evidence 1 | acceptance 1 |\n| SUPPORT-OPS-050 | P1 | Closed 2026-09-29 | Closed | e | a |\n'''
     parsed = worker.parse_support(text)
