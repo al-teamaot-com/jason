@@ -21,3 +21,14 @@ def test_succeeded_status_is_none_error_class():
         )
         == "none"
     )
+
+
+def test_connector_authorization_denied_is_bounded_authority_error_class():
+    assert (
+        _error_class(
+            status="failed",
+            error_code="CONNECTOR_AUTHORIZATION_DENIED",
+            reason_codes=("capability_invocation_failed",),
+        )
+        == "authority_denied"
+    )

@@ -260,16 +260,26 @@ class AutotaskQueueSource:
         ):
             raise ValueError("Autotask ticket queue/priority/status/source metadata is incomplete")
 
-        self._queue_ids = self._active_picklist_map(queue_field)
-        self._priority_scores = self._priority_score_map(priority_field)
-        self._critical_priority_ids = self._priority_ids_for_label(priority_field, "Critical")
-        self._status_labels_by_id = {
+        # Validate all live metadata before publishing any cached state.  Autotask
+        # Ticket Source picklist IDs are provider-native signed integers (for
+        # example, Insourced=-2), unlike queue/status/priority identifiers which
+        # are positive IDs.  A failed source parse must not leave a partially
+        # initialized cache that later skips metadata validation.
+        queue_ids = self._active_picklist_map(queue_field)
+        priority_scores = self._priority_score_map(priority_field)
+        critical_priority_ids = self._priority_ids_for_label(priority_field, "Critical")
+        status_labels_by_id = {
             value: label for label, value in self._active_picklist_map(status_field).items()
         }
-        source_map = self._active_picklist_map(source_field)
+        source_map = self._active_picklist_map(source_field, allow_signed_values=True)
         missing = [label for label in self.config.excluded_ticket_source_labels if label not in source_map]
         if missing:
             raise ValueError("Autotask ticket source is missing or inactive: " + ", ".join(missing))
+
+        self._queue_ids = queue_ids
+        self._priority_scores = priority_scores
+        self._critical_priority_ids = critical_priority_ids
+        self._status_labels_by_id = status_labels_by_id
         self._ticket_source_ids = {source_map[label] for label in self.config.excluded_ticket_source_labels}
 
     def _is_excluded_ticket_source(self, value: Any) -> bool:
@@ -287,7 +297,11 @@ class AutotaskQueueSource:
         return self._queue_ids[label]
 
     @staticmethod
-    def _active_picklist_map(field: Mapping[str, Any]) -> dict[str, int]:
+    def _active_picklist_map(
+        field: Mapping[str, Any],
+        *,
+        allow_signed_values: bool = False,
+    ) -> dict[str, int]:
         values = field.get("picklistValues")
         if not isinstance(values, list):
             raise ValueError("Autotask picklist metadata is invalid")
@@ -298,7 +312,11 @@ class AutotaskQueueSource:
             label = str(item.get("label") or "").strip()
             if not label:
                 continue
-            value = AutotaskQueueSource._positive_int(item.get("value"), "picklist value")
+            value = (
+                AutotaskQueueSource._integer(item.get("value"), "picklist value")
+                if allow_signed_values
+                else AutotaskQueueSource._positive_int(item.get("value"), "picklist value")
+            )
             if label in result and result[label] != value:
                 raise ValueError(f"Autotask picklist label is ambiguous: {label}")
             result[label] = value
@@ -347,6 +365,16 @@ class AutotaskQueueSource:
         if parsed < 1:
             raise ValueError("assignedResourceID must be a positive integer when present")
         return parsed
+
+    @staticmethod
+    def _integer(value: Any, label: str) -> int:
+        if isinstance(value, bool):
+            raise ValueError(f"{label} must be an integer")
+        try:
+            return int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{label} must be an integer") from exc
+
 
     @staticmethod
     def _positive_int(value: Any, label: str) -> int:
