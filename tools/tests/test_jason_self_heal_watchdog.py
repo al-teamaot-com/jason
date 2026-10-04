@@ -55,7 +55,7 @@ def test_queue_support_repair_persists_stable_auto_support_item(tmp_path, monkey
 
     assert payload["support_item"] == "SUPPORT-AUTO-ABCDEF123456"
     assert payload["state"] == "repair_required"
-    assert calls[-1][:4] == ["systemctl", "--user", "start", "jason-support-repair-worker.service"]
+    assert calls[-1] == ["systemctl", "--user", "start", "--no-block", "jason-support-repair-worker.service"]
 
 
 def test_escalation_payload_requires_owner_action(tmp_path):
