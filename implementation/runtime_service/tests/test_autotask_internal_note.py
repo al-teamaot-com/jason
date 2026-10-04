@@ -372,7 +372,7 @@ class _Transport:
                             else "Synthetic internal note"
                         ),
                         "noteType": 3,
-                        "publish": 1,
+                        "publish": 2,
                         "creatorResourceID": self.resource_id,
                         "impersonatorCreatorResourceID": impersonator,
                     }
@@ -400,7 +400,7 @@ def _connector_request(principal_id="person-al"):
                 "title": "Jason internal note",
                 "description": "Synthetic internal note",
                 "noteType": 3,
-                "publish": 1,
+                "publish": 2,
             }
         },
     )

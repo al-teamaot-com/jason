@@ -182,7 +182,7 @@ def test_existing_exact_marker_avoids_duplicate_write(tmp_path):
         "title": spec.note_title,
         "description": spec.note_body,
         "noteType": 3,
-        "publish": 1,
+        "publish": 2,
     }
     store = SQLitePlaybookAutonomyApprovalStore(tmp_path / "promotions.sqlite3")
     _promote(store)
@@ -223,7 +223,7 @@ def test_success_requires_exact_promotion_and_independent_post_read(tmp_path):
             "title": spec.note_title,
             "description": spec.note_body,
             "noteType": 3,
-            "publish": 1,
+            "publish": 2,
         }
         return result
 
@@ -252,7 +252,7 @@ def test_success_requires_exact_promotion_and_independent_post_read(tmp_path):
             "ticketID": 8870,
             "description": spec.note_body,
             "noteType": 3,
-            "publish": 1,
+            "publish": 2,
             "title": spec.note_title,
         }
     }
@@ -272,7 +272,7 @@ def test_duplicate_marker_records_fail_closed(tmp_path):
         "title": spec.note_title,
         "description": spec.note_body,
         "noteType": 3,
-        "publish": 1,
+        "publish": 2,
     }
     store = SQLitePlaybookAutonomyApprovalStore(tmp_path / "promotions.sqlite3")
     _promote(store)

@@ -337,7 +337,7 @@ class DailyDrmmAlertReconciliationMaintenance:
         self.actions.execute(
             RECONCILIATION_SCOPE,
             "service.ticket.note.create",
-            {"payload": {"ticketID": int(ticket_id), "title": "Jason - Scheduled DRMM Reconciliation - Resolution", "description": note, "noteType": 3, "publish": 1}},
+            {"payload": {"ticketID": int(ticket_id), "title": "Jason - Scheduled DRMM Reconciliation - Resolution", "description": note, "noteType": 3, "publish": 2}},
         )
         self.actions.execute(
             RECONCILIATION_SCOPE,
