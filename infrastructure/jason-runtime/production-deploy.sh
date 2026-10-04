@@ -4,6 +4,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMAGE="${JASON_RUNTIME_PRODUCTION_IMAGE:-jason-runtime:production}"
 REVISION="${JASON_SOURCE_REVISION_OVERRIDE:-}"
+COMPLETION_TEAMS_PROFILE="${JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE:-person-al-v1}"
 
 if [ -z "$REVISION" ]; then
   REVISION="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
@@ -16,6 +17,7 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 ROLLBACK="jason-runtime-rollback-$STAMP"
 
 exec python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-runtime   --image "$IMAGE"   --rollback "$ROLLBACK"   --source-revision "$REVISION"   --harden \
+  --set-env "JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE=$COMPLETION_TEAMS_PROFILE" \
   --promote-image-tag jason-runtime:production \
   --promote-image-tag jason-runtime:local \
   --rollback-image-tag jason-runtime:rollback-current \

@@ -48,3 +48,10 @@ def test_runtime_compose_enables_owner_autonomous_completion_teams_notifications
         "JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE: "
         "${JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE:-person-al-v1}"
     ) in compose
+
+
+# Additive to the broader deployment acceptance harness tracked in #810.\ndef test_production_deploy_preserves_owner_autonomous_completion_teams_notifications():
+    deploy = (_repo_root() / "infrastructure/jason-runtime/production-deploy.sh").read_text(encoding="utf-8")
+
+    assert 'COMPLETION_TEAMS_PROFILE="${JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE:-person-al-v1}"' in deploy
+    assert '--set-env "JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE=$COMPLETION_TEAMS_PROFILE"' in deploy
