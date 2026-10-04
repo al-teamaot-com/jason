@@ -476,7 +476,7 @@ def queue_support_repair(root: Path, fp: str, failures: list[str], evidence: Map
     }
     path = root / "incidents" / f"{fp}.json"
     atomic_json(path, incident)
-    run(["systemctl", "--user", "start", "jason-support-repair-worker.service"], timeout=10)
+    run(["systemctl", "--user", "start", "--no-block", "jason-support-repair-worker.service"], timeout=10)
     return path
 
 

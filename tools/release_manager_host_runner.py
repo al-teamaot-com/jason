@@ -117,6 +117,50 @@ def live_runtime() -> dict[str, Any]:
     }
 
 
+def live_production_alignment(candidate_sha: str) -> dict[str, Any]:
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    runtime = live_runtime()
+
+    mcp_raw = json.loads(output(["docker", "inspect", "jason-mcp-pilot"]))[0]
+    mcp_labels = mcp_raw.get("Config", {}).get("Labels") or {}
+    mcp_revision = str(
+        mcp_labels.get("com.teamaot.jason.source_revision") or ""
+    ).casefold()
+    if not SHA.fullmatch(mcp_revision):
+        raise ReleaseManagerError("live jason-mcp-pilot source revision is not an exact SHA")
+    if str(mcp_raw.get("State", {}).get("Status") or "") != "running":
+        raise ReleaseManagerError("live jason-mcp-pilot is not running")
+
+    current_release = Path("/opt/jason/current").resolve()
+    host_revision = current_release.name.casefold()
+    if not SHA.fullmatch(host_revision):
+        raise ReleaseManagerError("/opt/jason/current does not resolve to an exact SHA release")
+
+    observed = {
+        "runtime_revision": runtime["revision"],
+        "mcp_revision": mcp_revision,
+        "host_revision": host_revision,
+        "host_release": str(current_release),
+    }
+    mismatches = [
+        f"{name}={value}"
+        for name, value in (
+            ("runtime", observed["runtime_revision"]),
+            ("mcp", observed["mcp_revision"]),
+            ("host", observed["host_revision"]),
+        )
+        if value != candidate_sha
+    ]
+    if mismatches:
+        raise ReleaseManagerError(
+            "production alignment mismatch for candidate "
+            + candidate_sha
+            + ": "
+            + ", ".join(mismatches)
+        )
+    return observed
+
+
 def wait_live_runtime(attempts: int = 30, interval_seconds: int = 2) -> dict[str, Any]:
     last_health = "unknown"
     for _ in range(attempts):
@@ -163,26 +207,36 @@ def required_checks(repo: Path) -> list[str]:
 
 
 def github_checks(candidate_sha: str, required: list[str]) -> dict[str, Any]:
-    url = (
-        "https://api.github.com/repos/al-teamaot-com/jason/commits/"
-        + candidate_sha
-        + "/check-runs"
-    )
-    request = urllib.request.Request(
-        url,
-        headers={
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "project-jason-release-manager",
-        },
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        payload = json.loads(response.read().decode("utf-8"))
     latest: dict[str, dict[str, Any]] = {}
-    for item in payload.get("check_runs") or []:
-        name = str(item.get("name") or "")
-        if name and (name not in latest or int(item.get("id", 0)) > int(latest[name].get("id", 0))):
-            latest[name] = item
+    # GitHub returns only 30 check runs by default. Busy merge SHAs can exceed
+    # that easily (reruns/classifiers included), so required protected checks
+    # may otherwise be falsely reported as missing. Traverse a bounded set of
+    # 100-item pages and retain the newest run for each check name.
+    for page in range(1, 11):
+        url = (
+            "https://api.github.com/repos/al-teamaot-com/jason/commits/"
+            + candidate_sha
+            + f"/check-runs?per_page=100&page={page}"
+        )
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "project-jason-release-manager",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        items = payload.get("check_runs") or []
+        for item in items:
+            name = str(item.get("name") or "")
+            if name and (name not in latest or int(item.get("id", 0)) > int(latest[name].get("id", 0))):
+                latest[name] = item
+        if len(items) < 100:
+            break
+    else:
+        raise ReleaseManagerError("GitHub check-run pagination exceeded bounded limit")
     failures = []
     for name in required:
         item = latest.get(name)
@@ -260,6 +314,10 @@ def copy_state_from_live_container(
     )
 
 
+def preprod_scratch_path(state_root: Path, release_id: str) -> Path:
+    return state_root.parent.parent / "release-manager-preprod" / release_id
+
+
 def create_preprod_container(
     *,
     live: dict[str, Any],
@@ -272,7 +330,11 @@ def create_preprod_container(
     name = "jason-runtime-preprod-" + candidate_sha[:12]
     subprocess.run(["docker", "rm", "-f", name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    scratch = state_root / "preprod" / release_id
+    # Pre-production clones must live outside the live OpenClaw state tree.
+    # Production state_root is /var/lib/jason/openclaw/release-manager; placing
+    # scratch below state_root recursively copies the destination back into
+    # itself when cloning /var/lib/jason/openclaw.
+    scratch = preprod_scratch_path(state_root, release_id)
     if scratch.exists():
         shutil.rmtree(scratch)
     scratch.mkdir(parents=True, mode=0o700)
@@ -283,6 +345,12 @@ def create_preprod_container(
         source = str(mount.get("Source") or "")
         if destination in {"/var/lib/jason/authority", "/var/lib/jason/openclaw"}:
             clone = scratch / destination.rsplit("/", 1)[-1]
+            source_path = Path(source).resolve()
+            clone_path = clone.resolve()
+            if clone_path == source_path or source_path in clone_path.parents:
+                raise ReleaseManagerError(
+                    f"pre-production clone destination is nested under live state source: {destination}"
+                )
             copy_state_from_live_container(destination, clone)
             mount_sources[destination] = str(clone)
 
@@ -597,12 +665,18 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
             env=env,
         )
         live = wait_live_runtime()
+        alignment = live_production_alignment(str(candidate["candidate_sha"]))
         live_digest = image_id("jason-runtime:production")
         record["production"] = {
             "live_sha": live["revision"],
             "artifact_digest": live_digest,
             "health_passed": True,
             "deployment_script_passed": "DEPLOYMENT=PASS" in deploy_output,
+            "alignment_verified": True,
+            "runtime_revision": alignment["runtime_revision"],
+            "mcp_revision": alignment["mcp_revision"],
+            "host_revision": alignment["host_revision"],
+            "host_release": alignment["host_release"],
             "verified_at": now(),
         }
         gate_transition(repo, record, "production_verified")

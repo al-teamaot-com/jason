@@ -39,3 +39,12 @@ def test_runtime_image_drops_to_host_state_owner_uid_and_uses_internal_entrypoin
     assert "USER 1000:1000" in dockerfile
     assert "/app/implementation/cap-007/src" in dockerfile
     assert 'CMD ["python", "-m", "jason_runtime.main"]' in dockerfile
+
+
+def test_runtime_compose_enables_owner_autonomous_completion_teams_notifications():
+    compose = (_repo_root() / "infrastructure/jason-runtime/compose.yaml").read_text(encoding="utf-8")
+
+    assert (
+        "JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE: "
+        "${JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE:-person-al-v1}"
+    ) in compose

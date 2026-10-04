@@ -5947,6 +5947,7 @@ def test_unsupported_helpdesk_ticket_gets_one_gpt_insights_note_when_promoted(tm
     notes = [args["payload"] for _, capability, args in actions.calls if capability == "service.ticket.note.create"]
     assert len(notes) == 1
     assert notes[0]["title"] == "GPT Insights"
+    assert notes[0]["publish"] == 2
     assert "Wired: Ethernet (Rigginsco.local)" in notes[0]["description"]
     assert "do not ask the technician or user to rediscover it" in notes[0]["description"]
     assert not any(capability == "service.ticket.update" for _, capability, _ in actions.calls)

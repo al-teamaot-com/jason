@@ -507,6 +507,61 @@ def safe_search(worktree: Path, terms: list[str], gate, policy: Mapping[str, Any
     return excerpts
 
 
+def source_excerpts_for_paths(
+    worktree: Path,
+    paths: list[str],
+    gate,
+    policy: Mapping[str, Any],
+    *,
+    limit: int = 6,
+    content_limit: int = 8000,
+) -> list[dict[str, str]]:
+    """Read a bounded, policy-eligible set of previously discovered sources."""
+    excerpts: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for raw in paths:
+        path = str(raw or '').strip()
+        if not path or path in seen or path.startswith('.git'):
+            continue
+        if gate.path_denial_reason(path, dict(policy)):
+            continue
+        candidate = worktree / path
+        if not candidate.is_file():
+            continue
+        try:
+            text = candidate.read_text(encoding='utf-8')
+        except UnicodeDecodeError:
+            continue
+        excerpts.append({'path': path, 'content': text[:content_limit]})
+        seen.add(path)
+        if len(excerpts) >= max(0, int(limit)):
+            break
+    return excerpts
+
+
+def merge_source_excerpts(
+    prior: list[dict[str, str]],
+    current: list[dict[str, str]],
+    *,
+    max_total: int = 14,
+) -> list[dict[str, str]]:
+    """Keep prior context while admitting fresh discovery, without unbounded growth."""
+    merged: list[dict[str, str]] = []
+    seen: set[str] = set()
+    # Previous context is deliberately sticky during a bounded expansion because
+    # later searches are meant to add missing call sites, not replace already
+    # useful registry/service/repository evidence.
+    for item in [*prior, *current]:
+        path = str(item.get('path') or '').strip()
+        if not path or path in seen:
+            continue
+        merged.append({'path': path, 'content': str(item.get('content') or '')})
+        seen.add(path)
+        if len(merged) >= max(1, int(max_total)):
+            break
+    return merged
+
+
 def changed_files(worktree: Path) -> list[str]:
     output = run(['git', 'diff', '--name-only'], cwd=worktree)
     return [line.strip() for line in output.splitlines() if line.strip()]

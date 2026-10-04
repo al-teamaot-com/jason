@@ -35,6 +35,42 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED"], "false")
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_AUTOTASK_PROCUREMENT_MCP_PROFILE"], "")
 
+    def test_github_checks_reads_required_check_beyond_first_page(self):
+        import io
+        import json
+
+        first_page = {
+            "check_runs": [
+                {
+                    "id": index + 1000,
+                    "name": f"noise-{index}",
+                    "status": "completed",
+                    "conclusion": "success",
+                }
+                for index in range(100)
+            ]
+        }
+        second_page = {
+            "check_runs": [
+                {
+                    "id": 5000,
+                    "name": "runtime-service",
+                    "status": "completed",
+                    "conclusion": "success",
+                }
+            ]
+        }
+        responses = [
+            io.BytesIO(json.dumps(first_page).encode("utf-8")),
+            io.BytesIO(json.dumps(second_page).encode("utf-8")),
+        ]
+        with patch.object(runner.urllib.request, "urlopen", side_effect=responses) as urlopen:
+            result = runner.github_checks(SHA_A, ["runtime-service"])
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["failures"], [])
+        self.assertEqual(urlopen.call_count, 2)
+        self.assertIn("per_page=100&page=2", urlopen.call_args_list[1].args[0].full_url)
+
     def test_create_record_builds_once_after_protected_checks(self):
         with tempfile.TemporaryDirectory() as td:
             state_root = Path(td)
@@ -197,6 +233,69 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         self.assertIn('"docker",\n            "cp"', source)
         self.assertIn('f"jason-runtime:{container_path}/."', source)
         self.assertNotIn('run(["cp", "-a", source', source)
+
+    def test_live_production_alignment_requires_runtime_mcp_and_host_same_sha(self):
+        mcp = {
+            "Config": {"Labels": {"com.teamaot.jason.source_revision": SHA_A}},
+            "State": {"Status": "running"},
+        }
+        with (
+            patch.object(runner, "live_runtime", return_value={"revision": SHA_A}),
+            patch.object(runner, "output", return_value=__import__("json").dumps([mcp])),
+            patch.object(runner.Path, "resolve", return_value=Path("/opt/jason/releases") / SHA_A),
+        ):
+            result = runner.live_production_alignment(SHA_A)
+        self.assertEqual(result["runtime_revision"], SHA_A)
+        self.assertEqual(result["mcp_revision"], SHA_A)
+        self.assertEqual(result["host_revision"], SHA_A)
+
+    def test_live_production_alignment_fails_closed_on_mcp_or_host_drift(self):
+        mcp = {
+            "Config": {"Labels": {"com.teamaot.jason.source_revision": SHA_B}},
+            "State": {"Status": "running"},
+        }
+        with (
+            patch.object(runner, "live_runtime", return_value={"revision": SHA_A}),
+            patch.object(runner, "output", return_value=__import__("json").dumps([mcp])),
+            patch.object(runner.Path, "resolve", return_value=Path("/opt/jason/releases") / SHA_A),
+        ):
+            with self.assertRaisesRegex(runner.ReleaseManagerError, "production alignment mismatch"):
+                runner.live_production_alignment(SHA_A)
+
+    def test_preprod_scratch_is_outside_live_openclaw_tree(self):
+        state_root = Path("/var/lib/jason/openclaw/release-manager")
+        scratch = runner.preprod_scratch_path(state_root, "release-test")
+        self.assertEqual(scratch, Path("/var/lib/jason/release-manager-preprod/release-test"))
+        self.assertFalse(str(scratch).startswith("/var/lib/jason/openclaw/"))
+
+    def test_preprod_clone_rejects_destination_nested_under_live_source(self):
+        with tempfile.TemporaryDirectory() as td:
+            source = Path(td)
+            state_root = source / "openclaw" / "release-manager"
+            state_root.mkdir(parents=True)
+            live = {
+                "inspect": {
+                    "Config": {"Env": [], "Labels": {}},
+                    "HostConfig": {"NetworkMode": "bridge", "Tmpfs": {}},
+                    "Mounts": [
+                        {
+                            "Type": "bind",
+                            "Source": str(source),
+                            "Destination": "/var/lib/jason/openclaw",
+                            "RW": True,
+                        }
+                    ],
+                    "NetworkSettings": {"Networks": {}},
+                }
+            }
+            with self.assertRaisesRegex(runner.ReleaseManagerError, "nested under live state source"):
+                runner.create_preprod_container(
+                    live=live,
+                    candidate_image="jason-runtime:test",
+                    candidate_sha=SHA_A,
+                    state_root=state_root,
+                    release_id="release-test",
+                )
 
     def test_postcutover_verifier_waits_for_healthy_runtime(self):
         with patch.object(
