@@ -150,7 +150,7 @@ class ControlledAutonomyInternalNotePilot:
                     "ticketID": self.spec.ticket_id,
                     "description": self.spec.note_body,
                     "noteType": 3,
-                    "publish": 1,
+                    "publish": 2,
                     "title": self.spec.note_title,
                 }
             },
@@ -267,7 +267,7 @@ class ControlledAutonomyInternalNotePilot:
             and str(item.get("title") or "") == self.spec.note_title
             and str(item.get("description") or "") == self.spec.note_body
             and int(item.get("noteType") or 0) == 3
-            and int(item.get("publish") or 0) == 1
+            and int(item.get("publish") or 0) == 2
         ]
 
     @staticmethod

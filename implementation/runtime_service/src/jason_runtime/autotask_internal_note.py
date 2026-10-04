@@ -170,7 +170,7 @@ def _internal_note_definition(*, now: datetime):
                 "aot_owner_organization_scope"
             ),
             "note_type": "3",
-            "publish": "1",
+            "publish": "2",
         }
     )
 
@@ -450,17 +450,17 @@ class AutotaskInternalNoteConnector(
                 "internal note visibility metadata is invalid"
             ) from error
 
-        if note_type != 3 or publish != 1:
+        if note_type != 3 or publish != 2:
             raise ConnectorAuthorizationError(
                 "internal note visibility must remain "
-                "noteType=3,publish=1"
+                "noteType=3,publish=2"
             )
 
         expected = {
             "ticketID": ticket_id,
             "description": description,
             "noteType": 3,
-            "publish": 1,
+            "publish": 2,
         }
 
         title = str(
@@ -645,7 +645,7 @@ class AutotaskInternalNoteConnector(
                 "ticket note type failed readback"
             )
 
-        if observed_publish != 1:
+        if observed_publish != 2:
             raise AutotaskInternalNoteVerificationError(
                 "ticket note publish failed readback"
             )
