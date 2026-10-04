@@ -314,6 +314,10 @@ def copy_state_from_live_container(
     )
 
 
+def preprod_scratch_path(state_root: Path, release_id: str) -> Path:
+    return state_root.parent.parent / "release-manager-preprod" / release_id
+
+
 def create_preprod_container(
     *,
     live: dict[str, Any],
@@ -326,7 +330,11 @@ def create_preprod_container(
     name = "jason-runtime-preprod-" + candidate_sha[:12]
     subprocess.run(["docker", "rm", "-f", name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-    scratch = state_root / "preprod" / release_id
+    # Pre-production clones must live outside the live OpenClaw state tree.
+    # Production state_root is /var/lib/jason/openclaw/release-manager; placing
+    # scratch below state_root recursively copies the destination back into
+    # itself when cloning /var/lib/jason/openclaw.
+    scratch = preprod_scratch_path(state_root, release_id)
     if scratch.exists():
         shutil.rmtree(scratch)
     scratch.mkdir(parents=True, mode=0o700)
@@ -337,6 +345,12 @@ def create_preprod_container(
         source = str(mount.get("Source") or "")
         if destination in {"/var/lib/jason/authority", "/var/lib/jason/openclaw"}:
             clone = scratch / destination.rsplit("/", 1)[-1]
+            source_path = Path(source).resolve()
+            clone_path = clone.resolve()
+            if clone_path == source_path or source_path in clone_path.parents:
+                raise ReleaseManagerError(
+                    f"pre-production clone destination is nested under live state source: {destination}"
+                )
             copy_state_from_live_container(destination, clone)
             mount_sources[destination] = str(clone)
 
