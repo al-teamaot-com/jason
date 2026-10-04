@@ -1,9 +1,11 @@
 [Unit]
-Description=Run Jason autonomous support repair reconciliation daily at 2:30 AM
+Description=Run Jason autonomous engineering throughout the approved production window
 
 [Timer]
-OnCalendar=*-*-* 02:30:00
-AccuracySec=1min
+OnCalendar=Mon..Fri *-*-* 00..04:00/5:00 America/New_York
+OnCalendar=Mon..Fri *-*-* 17..23:00/5:00 America/New_York
+OnCalendar=Sat,Sun *-*-* *:00/5:00 America/New_York
+AccuracySec=15s
 Persistent=true
 Unit=jason-support-repair-worker.service
 
