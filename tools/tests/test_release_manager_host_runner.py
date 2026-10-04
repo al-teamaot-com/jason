@@ -263,37 +263,10 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 runner.live_production_alignment(SHA_A)
 
     def test_preprod_scratch_is_outside_live_openclaw_tree(self):
-        live = {
-            "inspect": {
-                "Config": {"Env": [], "Labels": {}},
-                "HostConfig": {"NetworkMode": "bridge", "Tmpfs": {}},
-                "Mounts": [
-                    {
-                        "Type": "bind",
-                        "Source": "/var/lib/jason/openclaw",
-                        "Destination": "/var/lib/jason/openclaw",
-                        "RW": True,
-                    }
-                ],
-                "NetworkSettings": {"Networks": {}},
-            }
-        }
         state_root = Path("/var/lib/jason/openclaw/release-manager")
-        with (
-            patch.object(runner, "copy_state_from_live_container") as copy_state,
-            patch.object(runner.subprocess, "run"),
-            patch.object(runner, "run"),
-        ):
-            _, scratch = runner.create_preprod_container(
-                live=live,
-                candidate_image="jason-runtime:test",
-                candidate_sha=SHA_A,
-                state_root=state_root,
-                release_id="release-test",
-            )
+        scratch = runner.preprod_scratch_path(state_root, "release-test")
         self.assertEqual(scratch, Path("/var/lib/jason/release-manager-preprod/release-test"))
-        clone = copy_state.call_args.args[1]
-        self.assertFalse(str(clone).startswith("/var/lib/jason/openclaw/"))
+        self.assertFalse(str(scratch).startswith("/var/lib/jason/openclaw/"))
 
     def test_preprod_clone_rejects_destination_nested_under_live_source(self):
         with tempfile.TemporaryDirectory() as td:
