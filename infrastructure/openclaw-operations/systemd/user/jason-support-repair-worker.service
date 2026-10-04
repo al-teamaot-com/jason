@@ -1,5 +1,5 @@
 [Unit]
-Description=Jason 2:30 autonomous engineering window worker
+Description=Jason autonomous engineering production-window worker
 After=network-online.target
 Wants=network-online.target
 
