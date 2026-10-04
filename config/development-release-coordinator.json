@@ -81,7 +81,7 @@
       "In progress"
     ],
     "max_active_items": 1,
-    "max_open_todo_issues": 1,
+    "max_open_todo_issues": 3,
     "intake_worker": "jason-todo-engineering-intake",
     "development_worker": "jason-owner-approved-development-worker",
     "release_manager_required": true,
