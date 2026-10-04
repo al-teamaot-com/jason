@@ -198,6 +198,34 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         self.assertIn('f"jason-runtime:{container_path}/."', source)
         self.assertNotIn('run(["cp", "-a", source', source)
 
+    def test_live_production_alignment_requires_runtime_mcp_and_host_same_sha(self):
+        mcp = {
+            "Config": {"Labels": {"com.teamaot.jason.source_revision": SHA_A}},
+            "State": {"Status": "running"},
+        }
+        with (
+            patch.object(runner, "live_runtime", return_value={"revision": SHA_A}),
+            patch.object(runner, "output", return_value=__import__("json").dumps([mcp])),
+            patch.object(runner.Path, "resolve", return_value=Path("/opt/jason/releases") / SHA_A),
+        ):
+            result = runner.live_production_alignment(SHA_A)
+        self.assertEqual(result["runtime_revision"], SHA_A)
+        self.assertEqual(result["mcp_revision"], SHA_A)
+        self.assertEqual(result["host_revision"], SHA_A)
+
+    def test_live_production_alignment_fails_closed_on_mcp_or_host_drift(self):
+        mcp = {
+            "Config": {"Labels": {"com.teamaot.jason.source_revision": SHA_B}},
+            "State": {"Status": "running"},
+        }
+        with (
+            patch.object(runner, "live_runtime", return_value={"revision": SHA_A}),
+            patch.object(runner, "output", return_value=__import__("json").dumps([mcp])),
+            patch.object(runner.Path, "resolve", return_value=Path("/opt/jason/releases") / SHA_A),
+        ):
+            with self.assertRaisesRegex(runner.ReleaseManagerError, "production alignment mismatch"):
+                runner.live_production_alignment(SHA_A)
+
     def test_postcutover_verifier_waits_for_healthy_runtime(self):
         with patch.object(
             runner,
