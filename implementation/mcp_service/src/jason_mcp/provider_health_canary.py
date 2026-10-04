@@ -40,7 +40,7 @@ def _error_class(
         return "none"
     if status == "denied":
         return "authority_denied"
-    if "authority" in text or "no_matching_authority_grant" in text:
+    if "authority" in text or "authorization" in text or "no_matching_authority_grant" in text:
         return "authority_denied"
     if "information" in text or "request_access" in text:
         return "information_release_denied"
