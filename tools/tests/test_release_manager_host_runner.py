@@ -35,6 +35,42 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED"], "false")
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_AUTOTASK_PROCUREMENT_MCP_PROFILE"], "")
 
+    def test_github_checks_reads_required_check_beyond_first_page(self):
+        import io
+        import json
+
+        first_page = {
+            "check_runs": [
+                {
+                    "id": index + 1000,
+                    "name": f"noise-{index}",
+                    "status": "completed",
+                    "conclusion": "success",
+                }
+                for index in range(100)
+            ]
+        }
+        second_page = {
+            "check_runs": [
+                {
+                    "id": 5000,
+                    "name": "runtime-service",
+                    "status": "completed",
+                    "conclusion": "success",
+                }
+            ]
+        }
+        responses = [
+            io.BytesIO(json.dumps(first_page).encode("utf-8")),
+            io.BytesIO(json.dumps(second_page).encode("utf-8")),
+        ]
+        with patch.object(runner.urllib.request, "urlopen", side_effect=responses) as urlopen:
+            result = runner.github_checks(SHA_A, ["runtime-service"])
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["failures"], [])
+        self.assertEqual(urlopen.call_count, 2)
+        self.assertIn("per_page=100&page=2", urlopen.call_args_list[1].args[0].full_url)
+
     def test_create_record_builds_once_after_protected_checks(self):
         with tempfile.TemporaryDirectory() as td:
             state_root = Path(td)
