@@ -179,6 +179,16 @@ class DevelopmentReleaseCoordinatorTests(unittest.TestCase):
         self.assertIn("Planned, In progress", rendered)
         self.assertIn("Maximum open TODO engineering issues: **1**", rendered)
 
+
+    def test_repository_todo_open_issue_capacity_matches_engineering_capacity(self):
+        import json
+        from pathlib import Path
+
+        config = json.loads((Path(__file__).resolve().parents[2] / "config/development-release-coordinator.json").read_text())
+        todo = config["todo_autonomy"]
+        self.assertEqual(todo["max_open_todo_issues"], 3)
+        self.assertEqual(todo["max_active_items"], 1)
+
     def test_sensitive_overlap_paths(self):
         self.assertTrue(coordinator.sensitive("implementation/runtime/app.py"))
         self.assertTrue(coordinator.sensitive("tools/example.py"))
