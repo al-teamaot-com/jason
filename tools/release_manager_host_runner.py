@@ -314,6 +314,10 @@ def copy_state_from_live_container(
     )
 
 
+def preprod_scratch_path(state_root: Path, release_id: str) -> Path:
+    return state_root.parent.parent / "release-manager-preprod" / release_id
+
+
 def create_preprod_container(
     *,
     live: dict[str, Any],
@@ -330,7 +334,7 @@ def create_preprod_container(
     # Production state_root is /var/lib/jason/openclaw/release-manager; placing
     # scratch below state_root recursively copies the destination back into
     # itself when cloning /var/lib/jason/openclaw.
-    scratch = state_root.parent.parent / "release-manager-preprod" / release_id
+    scratch = preprod_scratch_path(state_root, release_id)
     if scratch.exists():
         shutil.rmtree(scratch)
     scratch.mkdir(parents=True, mode=0o700)
