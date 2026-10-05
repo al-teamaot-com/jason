@@ -150,7 +150,7 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
     "saas_alerts.readonly": frozenset({"api_key", "partner_id"}),
     "vulscan.readonly": frozenset({"api_key"}),
     "quickbooks.oauth_client": frozenset({"client_id", "client_secret"}),
-    "quickbooks.production.oauth_client": frozenset({"client_id", "client_secret"}),
+    "quickbooks.production.oauth_client": frozenset({"client_id", "client_secret", "token_key_b64"}),
 }
 
 

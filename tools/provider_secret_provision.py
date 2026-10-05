@@ -261,8 +261,8 @@ PROVIDERS: dict[str, dict[str, object]] = {
     "quickbooks_production": {
         "logical_name": "quickbooks.production.oauth_client",
         "secret_path": "secret/data/connectors/quickbooks/production/oauth-client",
-        "fields": ("client_id", "client_secret"),
-        "required_fields": ("client_id", "client_secret"),
+        "fields": ("client_id", "client_secret", "token_key_b64"),
+        "required_fields": ("client_id", "client_secret", "token_key_b64"),
         "policy_name": "jason-quickbooks-production-oauth-client-read",
         "role_name": "jason-quickbooks-production-oauth-client-read",
         "connector_identity": "quickbooks-production-oauth-client",
