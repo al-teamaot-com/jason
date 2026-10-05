@@ -106,7 +106,10 @@ from jason_runtime.autotask_internal_note import (
     autotask_internal_note_mcp_surface_enabled,
 )
 from orchestrator.provider_mutation_capability_catalog import (
+    SERVICE_PURCHASE_ORDER_ITEM_UPDATE,
+    SERVICE_PURCHASE_ORDER_UPDATE,
     SERVICE_TICKET_ATTACHMENT_CREATE,
+    SERVICE_TICKET_CHARGE_UPDATE,
 )
 from jason_runtime.composition import RuntimeSettings, build_runtime_application
 from jason_runtime.resolution_memory_runtime import (
