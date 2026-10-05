@@ -36,7 +36,10 @@
     "infrastructure/jason-runtime/production-deploy.sh",
     "tools/deploy_live_container.py",
     "implementation/orchestrator/*",
-    "implementation/kernel/*"
+    "implementation/kernel/*",
+    "tools/release_host_reconcile_worker.py",
+    "tools/install_release_host_reconciler.py",
+    "infrastructure/openclaw-operations/systemd/jason-release-host-reconcile.*"
   ],
   "priority": {
     "order": [
@@ -90,7 +93,8 @@
   "required_release_candidate_evidence": [
     "candidate_sha",
     "artifact_digest",
-    "immutable"
+    "immutable",
+    "mcp_artifact_digest"
   ],
   "required_preproduction_evidence": [
     "deployed_sha",
@@ -99,13 +103,24 @@
     "failure_path_tests_passed",
     "rollback_readiness_passed",
     "writable_state_isolated",
-    "provider_mutations_disabled"
+    "provider_mutations_disabled",
+    "mcp_artifact_digest"
   ],
   "required_production_verification_evidence": [
     "live_sha",
     "artifact_digest",
     "health_passed",
-    "deployment_script_passed"
+    "deployment_script_passed",
+    "mcp_artifact_digest",
+    "mcp_deployment_script_passed",
+    "host_reconciliation_passed",
+    "release_manager_install_passed",
+    "release_manager_source_revision",
+    "release_manager_timer_active",
+    "alignment_verified",
+    "runtime_revision",
+    "mcp_revision",
+    "host_revision"
   ],
   "support_impact": {
     "required_before_production_eligible": true,

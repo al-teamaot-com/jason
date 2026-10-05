@@ -235,6 +235,12 @@ def evaluate_transition(
             reasons.append("pre-production deployed SHA differs from release candidate")
         if preprod.get("artifact_digest") != candidate.get("artifact_digest"):
             reasons.append("pre-production artifact digest differs from release candidate")
+        if preprod.get("mcp_artifact_digest") != candidate.get(
+            "mcp_artifact_digest"
+        ):
+            reasons.append(
+                "pre-production MCP artifact digest differs from release candidate"
+            )
         if preprod.get("writable_state_isolated") is not True:
             reasons.append("pre-production writable state is not isolated")
         if preprod.get("provider_mutations_disabled") is not True:
@@ -253,6 +259,12 @@ def evaluate_transition(
             reasons.append("Production Eligible requires exact pre-production SHA")
         if candidate.get("artifact_digest") != preprod.get("artifact_digest"):
             reasons.append("Production Eligible requires exact pre-production artifact")
+        if candidate.get("mcp_artifact_digest") != preprod.get(
+            "mcp_artifact_digest"
+        ):
+            reasons.append(
+                "Production Eligible requires exact pre-production MCP artifact"
+            )
         if preprod.get("acceptance_passed") is not True:
             reasons.append("pre-production acceptance has not passed")
 
@@ -284,6 +296,23 @@ def evaluate_transition(
             reasons.append("live production SHA differs from release candidate")
         if prod.get("artifact_digest") != candidate.get("artifact_digest"):
             reasons.append("live production artifact differs from pre-production artifact")
+        if prod.get("mcp_artifact_digest") != candidate.get(
+            "mcp_artifact_digest"
+        ):
+            reasons.append(
+                "live production MCP artifact differs from pre-production artifact"
+            )
+        candidate_sha = str(candidate.get("candidate_sha") or "")
+        for field in (
+            "runtime_revision",
+            "mcp_revision",
+            "host_revision",
+            "release_manager_source_revision",
+        ):
+            if prod.get(field) != candidate_sha:
+                reasons.append(
+                    f"production {field} differs from release candidate"
+                )
 
     return {
         "schema_version": "2.0",
