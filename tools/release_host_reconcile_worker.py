@@ -71,29 +71,34 @@ def _mcp_revision() -> str:
     return value
 
 
+def _git(*args: str) -> list[str]:
+    return [
+        "git",
+        "-c",
+        f"safe.directory={REPO}",
+        "-C",
+        str(REPO),
+        *args,
+    ]
+
+
 def _verify_main(source_revision: str) -> None:
+    # Network/source freshness belongs to the unprivileged Release Manager,
+    # which verifies protected main immediately before issuing a request.
+    # The root boundary deliberately performs only local immutable/ref checks.
     subprocess.run(
-        ["git", "-C", str(REPO), "fetch", "--no-tags", "origin", "main"],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    subprocess.run(
-        ["git", "-C", str(REPO), "cat-file", "-e", f"{source_revision}^{{commit}}"],
+        _git("cat-file", "-e", f"{source_revision}^{{commit}}"),
         check=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
     completed = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(REPO),
+        _git(
             "merge-base",
             "--is-ancestor",
             source_revision,
             "origin/main",
-        ],
+        ),
         check=False,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -145,6 +150,14 @@ def _process(path: Path) -> None:
         if not script.is_file():
             raise HostReconcileError("immutable host reconciliation script is missing")
 
+        script_env = os.environ.copy()
+        script_env.update(
+            {
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "safe.directory",
+                "GIT_CONFIG_VALUE_0": str(REPO),
+            }
+        )
         completed = subprocess.run(
             [str(script), source_revision],
             check=True,
@@ -152,6 +165,7 @@ def _process(path: Path) -> None:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             timeout=240,
+            env=script_env,
         )
         resolved = CURRENT.resolve().name.casefold()
         if resolved != source_revision:

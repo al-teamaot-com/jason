@@ -11,7 +11,9 @@ def test_root_worker_is_bounded_to_exact_sha_and_live_mcp():
     assert "live MCP revision does not match requested host release" in text
     assert 'Path("/opt/jason/current")' in text
     assert '"reconcile_production_host_services.sh"' in text
-    assert '"fetch", "--no-tags", "origin", "main"' in text
+    assert "safe.directory={REPO}" in text
+    assert '"fetch", "--no-tags", "origin", "main"' not in text
+    assert "Network/source freshness belongs to the unprivileged Release Manager" in text
     assert "merge-base" in text
     assert "--is-ancestor" in text
 
@@ -53,3 +55,15 @@ def test_privileged_boundary_contains_no_sudo_or_docker_privilege_escalation():
     assert "sudo " not in combined
     assert "--privileged" not in combined
     assert "/var/run/docker.sock" not in combined
+
+
+def test_root_worker_scopes_git_safe_directory_to_reconcile_subprocess():
+    text = (ROOT / "tools" / "release_host_reconcile_worker.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"GIT_CONFIG_COUNT": "1"' in text
+    assert '"GIT_CONFIG_KEY_0": "safe.directory"' in text
+    assert '"GIT_CONFIG_VALUE_0": str(REPO)' in text
+    assert "env=script_env" in text
+    assert "git config --system" not in text
+    assert "git config --global" not in text
