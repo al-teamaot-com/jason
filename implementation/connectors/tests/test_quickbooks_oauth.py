@@ -6,6 +6,7 @@ import pytest
 
 from connectors.quickbooks import oauth
 from connectors.quickbooks.oauth import (
+    QUICKBOOKS_PRODUCTION_REDIRECT_URI_DEFAULT,
     QUICKBOOKS_SCOPE,
     QuickBooksOAuthError,
     QuickBooksOAuthStore,
@@ -27,6 +28,21 @@ def test_begin_oauth_persists_bounded_state_and_accounting_scope(tmp_path):
 
     assert "client_id=public-client-id" in url
     assert "client_secret" not in url
+    assert "com.intuit.quickbooks.accounting" in url
+    assert "payment" not in url.casefold()
+    assert store.status().pending_authorization is True
+
+
+def test_begin_production_oauth_is_accounting_only_and_uses_production_callback(tmp_path):
+    store = QuickBooksOAuthStore(tmp_path / "production-oauth.sqlite3")
+    url = begin_quickbooks_oauth(
+        store,
+        client_id="production-public-client-id",
+        environment="production",
+        redirect_uri=QUICKBOOKS_PRODUCTION_REDIRECT_URI_DEFAULT,
+    )
+    assert "client_id=production-public-client-id" in url
+    assert "quickbooks%2Fproduction%2Fcallback" in url
     assert "com.intuit.quickbooks.accounting" in url
     assert "payment" not in url.casefold()
     assert store.status().pending_authorization is True
