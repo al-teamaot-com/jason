@@ -1,5 +1,5 @@
 [Unit]
-Description=Run Jason autonomous engineering throughout the approved production window
+Description=Run Jason autonomous engineering continuously 24x7
 
 [Timer]
 OnCalendar=*-*-* *:00/5:00 America/New_York
