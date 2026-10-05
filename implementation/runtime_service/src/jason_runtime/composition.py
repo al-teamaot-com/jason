@@ -1654,7 +1654,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             transport=http_transport,
             audit=ConnectorEventAudit(orchestration_events),
             bindings=source_authorization_bindings,
-            environment="sandbox",
+            environment=quickbooks_activation.environment or "sandbox",
         )
         if quickbooks_activation.enabled
         else None

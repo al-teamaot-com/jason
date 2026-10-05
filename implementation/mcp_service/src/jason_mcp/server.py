@@ -78,9 +78,13 @@ from connectors.dnsfilter.mcp_oauth import (
     DnsFilterMcpOAuthStore,
     complete_dnsfilter_oauth,
 )
-from connectors.quickbooks.connector import QUICKBOOKS_LOGICAL_SECRET
+from connectors.quickbooks.connector import (
+    QUICKBOOKS_LOGICAL_SECRET,
+    QUICKBOOKS_PRODUCTION_LOGICAL_SECRET,
+)
 from connectors.quickbooks.oauth import (
     QUICKBOOKS_OAUTH_DB_DEFAULT,
+    QUICKBOOKS_PRODUCTION_OAUTH_DB_DEFAULT,
     QuickBooksOAuthError,
     QuickBooksOAuthStore,
     complete_quickbooks_oauth,
@@ -181,22 +185,43 @@ JASON_DNSFILTER_MCP_OAUTH_DB = Path(
         str(DNSFILTER_MCP_OAUTH_DB_DEFAULT),
     )
 )
-JASON_QUICKBOOKS_OAUTH_DB = Path(
+JASON_QUICKBOOKS_DEVELOPMENT_OAUTH_DB = Path(
     os.environ.get(
-        "JASON_QUICKBOOKS_OAUTH_DB",
-        str(QUICKBOOKS_OAUTH_DB_DEFAULT),
+        "JASON_QUICKBOOKS_DEVELOPMENT_OAUTH_DB",
+        os.environ.get(
+            "JASON_QUICKBOOKS_OAUTH_DB",
+            str(QUICKBOOKS_OAUTH_DB_DEFAULT),
+        ),
     )
 )
-JASON_QUICKBOOKS_OPENBAO_ROLE_ID_PATH = Path(
+JASON_QUICKBOOKS_PRODUCTION_OAUTH_DB = Path(
     os.environ.get(
-        "JASON_QUICKBOOKS_OPENBAO_ROLE_ID_PATH",
-        "/run/jason-secrets/openbao/quickbooks/role_id",
+        "JASON_QUICKBOOKS_PRODUCTION_OAUTH_DB",
+        str(QUICKBOOKS_PRODUCTION_OAUTH_DB_DEFAULT),
     )
 )
-JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH = Path(
+JASON_QUICKBOOKS_DEVELOPMENT_OPENBAO_ROLE_ID_PATH = Path(
     os.environ.get(
-        "JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH",
-        "/run/jason-secrets/openbao/quickbooks/secret_id",
+        "JASON_QUICKBOOKS_DEVELOPMENT_OPENBAO_ROLE_ID_PATH",
+        "/run/jason-secrets/openbao/quickbooks-development/role_id",
+    )
+)
+JASON_QUICKBOOKS_DEVELOPMENT_OPENBAO_SECRET_ID_PATH = Path(
+    os.environ.get(
+        "JASON_QUICKBOOKS_DEVELOPMENT_OPENBAO_SECRET_ID_PATH",
+        "/run/jason-secrets/openbao/quickbooks-development/secret_id",
+    )
+)
+JASON_QUICKBOOKS_PRODUCTION_OPENBAO_ROLE_ID_PATH = Path(
+    os.environ.get(
+        "JASON_QUICKBOOKS_PRODUCTION_OPENBAO_ROLE_ID_PATH",
+        "/run/jason-secrets/openbao/quickbooks-production/role_id",
+    )
+)
+JASON_QUICKBOOKS_PRODUCTION_OPENBAO_SECRET_ID_PATH = Path(
+    os.environ.get(
+        "JASON_QUICKBOOKS_PRODUCTION_OPENBAO_SECRET_ID_PATH",
+        "/run/jason-secrets/openbao/quickbooks-production/secret_id",
     )
 )
 
@@ -7082,16 +7107,30 @@ transport_security = TransportSecuritySettings(
 )
 
 
-def _quickbooks_oauth_credentials() -> Mapping[str, str]:
+def _quickbooks_oauth_credentials(environment: str) -> Mapping[str, str]:
+    is_production = str(environment).strip().casefold() == "production"
     resolver = OpenBaoSecretResolver(
         base_url=os.environ.get("JASON_OPENBAO_URL", "http://openbao:8200"),
-        role_id_path=JASON_QUICKBOOKS_OPENBAO_ROLE_ID_PATH,
-        secret_id_path=JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH,
+        role_id_path=(
+            JASON_QUICKBOOKS_PRODUCTION_OPENBAO_ROLE_ID_PATH
+            if is_production
+            else JASON_QUICKBOOKS_DEVELOPMENT_OPENBAO_ROLE_ID_PATH
+        ),
+        secret_id_path=(
+            JASON_QUICKBOOKS_PRODUCTION_OPENBAO_SECRET_ID_PATH
+            if is_production
+            else JASON_QUICKBOOKS_DEVELOPMENT_OPENBAO_SECRET_ID_PATH
+        ),
+    )
+    logical_secret = (
+        QUICKBOOKS_PRODUCTION_LOGICAL_SECRET
+        if is_production
+        else QUICKBOOKS_LOGICAL_SECRET
     )
     return resolver.resolve(
-        QUICKBOOKS_LOGICAL_SECRET,
+        logical_secret,
         ConnectorContext(
-            correlation_id="quickbooks-oauth-callback",
+            correlation_id=f"quickbooks-{environment}-oauth-callback",
             principal_id="svc-jason-mcp-oauth",
             organization_id="aot",
             client_id=None,
@@ -7101,8 +7140,12 @@ def _quickbooks_oauth_credentials() -> Mapping[str, str]:
     )
 
 
-async def quickbooks_oauth_callback(request: StarletteRequest):
-    """Complete the Intuit OAuth authorization-code callback without exposing tokens."""
+async def _complete_quickbooks_oauth_callback(
+    request: StarletteRequest,
+    *,
+    environment: str,
+):
+    """Complete one environment-bound Intuit OAuth callback without exposing tokens."""
 
     error = str(request.query_params.get("error") or "").strip()
     if error:
@@ -7124,20 +7167,31 @@ async def quickbooks_oauth_callback(request: StarletteRequest):
             },
             status_code=400,
         )
+    store_path = (
+        JASON_QUICKBOOKS_PRODUCTION_OAUTH_DB
+        if environment == "production"
+        else JASON_QUICKBOOKS_DEVELOPMENT_OAUTH_DB
+    )
     try:
         status = await asyncio.to_thread(
             complete_quickbooks_oauth,
-            QuickBooksOAuthStore(JASON_QUICKBOOKS_OAUTH_DB),
-            credentials=_quickbooks_oauth_credentials(),
+            QuickBooksOAuthStore(store_path),
+            credentials=_quickbooks_oauth_credentials(environment),
             code=code,
             state=state,
             realm_id=realm_id,
         )
     except Exception as exc:
         if isinstance(exc, QuickBooksOAuthError):
-            logger.warning("QuickBooks OAuth callback failed without token disclosure")
+            logger.warning(
+                "QuickBooks %s OAuth callback failed without token disclosure",
+                environment,
+            )
         else:
-            logger.exception("QuickBooks OAuth callback failed without token disclosure")
+            logger.exception(
+                "QuickBooks %s OAuth callback failed without token disclosure",
+                environment,
+            )
         return JSONResponse(
             {
                 "status": "error",
@@ -7145,6 +7199,17 @@ async def quickbooks_oauth_callback(request: StarletteRequest):
                     "QuickBooks authorization could not be completed. "
                     "Restart the governed connection flow."
                 ),
+            },
+            status_code=400,
+        )
+    if status.environment != environment:
+        logger.error(
+            "QuickBooks OAuth environment mismatch; refusing connection status"
+        )
+        return JSONResponse(
+            {
+                "status": "error",
+                "message": "QuickBooks OAuth environment mismatch.",
             },
             status_code=400,
         )
@@ -7156,6 +7221,18 @@ async def quickbooks_oauth_callback(request: StarletteRequest):
             "environment": status.environment,
             "realm_bound": bool(status.realm_id),
         }
+    )
+
+
+async def quickbooks_oauth_callback(request: StarletteRequest):
+    return await _complete_quickbooks_oauth_callback(
+        request, environment="sandbox"
+    )
+
+
+async def quickbooks_production_oauth_callback(request: StarletteRequest):
+    return await _complete_quickbooks_oauth_callback(
+        request, environment="production"
     )
 
 
@@ -7304,6 +7381,11 @@ app.add_route(
 app.add_route(
     "/oauth/quickbooks/callback",
     quickbooks_oauth_callback,
+    methods=["GET"],
+)
+app.add_route(
+    "/oauth/quickbooks/production/callback",
+    quickbooks_production_oauth_callback,
     methods=["GET"],
 )
 

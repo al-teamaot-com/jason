@@ -258,6 +258,24 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "credential_dir_mode": 0o750,
         "credential_file_mode": 0o640,
     },
+    "quickbooks_production": {
+        "logical_name": "quickbooks.production.oauth_client",
+        "secret_path": "secret/data/connectors/quickbooks/production/oauth-client",
+        "fields": ("client_id", "client_secret"),
+        "required_fields": ("client_id", "client_secret"),
+        "policy_name": "jason-quickbooks-production-oauth-client-read",
+        "role_name": "jason-quickbooks-production-oauth-client-read",
+        "connector_identity": "quickbooks-production-oauth-client",
+        "environment": "production",
+        "credential_dir": Path(
+            "/var/lib/jason/runtime-secrets/openbao/"
+            "quickbooks-production-oauth-client-approle"
+        ),
+        "credential_uid": 0,
+        "credential_gid": 1000,
+        "credential_dir_mode": 0o750,
+        "credential_file_mode": 0o640,
+    },
 }
 
 DEFAULT_ADDRESS = "http://127.0.0.1:8200"

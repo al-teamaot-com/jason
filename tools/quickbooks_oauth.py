@@ -7,10 +7,15 @@ from pathlib import Path
 
 from connectors.core.contracts import ConnectorContext
 from connectors.core.openbao_secrets import OpenBaoSecretResolver
-from connectors.quickbooks.connector import QUICKBOOKS_LOGICAL_SECRET
+from connectors.quickbooks.connector import (
+    QUICKBOOKS_LOGICAL_SECRET,
+    QUICKBOOKS_PRODUCTION_LOGICAL_SECRET,
+)
 from connectors.quickbooks.oauth import (
     QUICKBOOKS_OAUTH_DB_DEFAULT,
+    QUICKBOOKS_PRODUCTION_OAUTH_DB_DEFAULT,
     QUICKBOOKS_REDIRECT_URI_DEFAULT,
+    QUICKBOOKS_PRODUCTION_REDIRECT_URI_DEFAULT,
     QuickBooksOAuthError,
     QuickBooksOAuthStore,
     begin_quickbooks_oauth,
@@ -24,6 +29,14 @@ DEFAULT_SECRET_ID = Path(
     "/var/lib/jason/runtime-secrets/openbao/"
     "quickbooks-development-oauth-client-approle/secret-id"
 )
+PRODUCTION_ROLE_ID = Path(
+    "/var/lib/jason/runtime-secrets/openbao/"
+    "quickbooks-production-oauth-client-approle/role-id"
+)
+PRODUCTION_SECRET_ID = Path(
+    "/var/lib/jason/runtime-secrets/openbao/"
+    "quickbooks-production-oauth-client-approle/secret-id"
+)
 
 
 def _credentials(args) -> dict[str, str]:
@@ -32,9 +45,14 @@ def _credentials(args) -> dict[str, str]:
         role_id_path=Path(args.role_id),
         secret_id_path=Path(args.secret_id),
     )
+    logical_secret = (
+        QUICKBOOKS_PRODUCTION_LOGICAL_SECRET
+        if args.environment == "production"
+        else QUICKBOOKS_LOGICAL_SECRET
+    )
     return dict(
         resolver.resolve(
-            QUICKBOOKS_LOGICAL_SECRET,
+            logical_secret,
             ConnectorContext(
                 correlation_id="quickbooks-oauth-operator",
                 principal_id="aot-operator",
@@ -49,17 +67,28 @@ def _credentials(args) -> dict[str, str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Manage Project Jason's QuickBooks OAuth sandbox connection."
+        description="Manage Project Jason QuickBooks OAuth connections."
     )
     parser.add_argument("action", choices=("status", "start", "clear"))
-    parser.add_argument("--db", default=str(QUICKBOOKS_OAUTH_DB_DEFAULT))
-    parser.add_argument("--redirect-uri", default=QUICKBOOKS_REDIRECT_URI_DEFAULT)
-    parser.add_argument("--environment", choices=("sandbox",), default="sandbox")
+    parser.add_argument("--db")
+    parser.add_argument("--redirect-uri")
+    parser.add_argument("--environment", choices=("sandbox", "production"), default="sandbox")
     parser.add_argument("--openbao-url", default="http://127.0.0.1:8200")
-    parser.add_argument("--role-id", default=str(DEFAULT_ROLE_ID))
-    parser.add_argument("--secret-id", default=str(DEFAULT_SECRET_ID))
+    parser.add_argument("--role-id")
+    parser.add_argument("--secret-id")
     parser.add_argument("--confirm", action="store_true")
     args = parser.parse_args()
+
+    if args.environment == "production":
+        args.db = args.db or str(QUICKBOOKS_PRODUCTION_OAUTH_DB_DEFAULT)
+        args.redirect_uri = args.redirect_uri or QUICKBOOKS_PRODUCTION_REDIRECT_URI_DEFAULT
+        args.role_id = args.role_id or str(PRODUCTION_ROLE_ID)
+        args.secret_id = args.secret_id or str(PRODUCTION_SECRET_ID)
+    else:
+        args.db = args.db or str(QUICKBOOKS_OAUTH_DB_DEFAULT)
+        args.redirect_uri = args.redirect_uri or QUICKBOOKS_REDIRECT_URI_DEFAULT
+        args.role_id = args.role_id or str(DEFAULT_ROLE_ID)
+        args.secret_id = args.secret_id or str(DEFAULT_SECRET_ID)
 
     store = QuickBooksOAuthStore(Path(args.db))
     if args.action == "status":

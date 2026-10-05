@@ -22,8 +22,14 @@ QUICKBOOKS_SCOPE = "com.intuit.quickbooks.accounting"
 QUICKBOOKS_REDIRECT_URI_DEFAULT = (
     "https://mcp-jason.teamaot.com/oauth/quickbooks/callback"
 )
+QUICKBOOKS_PRODUCTION_REDIRECT_URI_DEFAULT = (
+    "https://mcp-jason.teamaot.com/oauth/quickbooks/production/callback"
+)
 QUICKBOOKS_OAUTH_DB_DEFAULT = Path(
     "/var/lib/jason/openclaw/quickbooks/oauth.sqlite3"
+)
+QUICKBOOKS_PRODUCTION_OAUTH_DB_DEFAULT = Path(
+    "/var/lib/jason/openclaw/quickbooks-production/oauth.sqlite3"
 )
 QUICKBOOKS_ENVIRONMENTS = frozenset({"sandbox", "production"})
 
