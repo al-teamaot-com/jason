@@ -23,6 +23,7 @@ from orchestrator.quickbooks_capability_catalog import (
 )
 from jason_runtime.quickbooks_read_activation import (
     QUICKBOOKS_READ_ACTIVATION_ENV,
+    QUICKBOOKS_READ_PRODUCTION_PROFILE,
     QUICKBOOKS_READ_SANDBOX_PROFILE,
     QuickBooksReadActivationError,
     apply_quickbooks_read_activation_from_env,
@@ -73,13 +74,32 @@ def test_unknown_profile_fails_without_registry_mutation():
         apply_quickbooks_read_activation_profile(
             capabilities=capabilities,
             providers=providers,
-            profile="quickbooks-production-read-v1",
+            profile="quickbooks-write-v1",
         )
 
     assert providers.get(
         QUICKBOOKS_PROVIDER
     ).lifecycle_status is ProviderLifecycle.PLANNED
 
+
+
+
+def test_exact_production_profile_activates_read_catalog_for_production():
+    capabilities, providers = _registries()
+
+    state = apply_quickbooks_read_activation_profile(
+        capabilities=capabilities,
+        providers=providers,
+        profile=QUICKBOOKS_READ_PRODUCTION_PROFILE,
+    )
+
+    assert state.enabled is True
+    assert state.environment == "production"
+    assert set(state.capability_names) == QUICKBOOKS_CAPABILITIES
+    provider = providers.get(QUICKBOOKS_PROVIDER)
+    assert provider.lifecycle_status is ProviderLifecycle.AVAILABLE
+    assert provider.health_status is ProviderHealth.HEALTHY
+    assert provider.approval_status is ProviderApproval.APPROVED
 
 def test_exact_sandbox_profile_activates_only_quickbooks_read_catalog():
     capabilities, providers = _registries()
@@ -91,6 +111,7 @@ def test_exact_sandbox_profile_activates_only_quickbooks_read_catalog():
     )
 
     assert state.enabled is True
+    assert state.environment == "sandbox"
     assert set(state.capability_names) == QUICKBOOKS_CAPABILITIES
     provider = providers.get(QUICKBOOKS_PROVIDER)
     assert provider.lifecycle_status is ProviderLifecycle.AVAILABLE
