@@ -11,7 +11,9 @@ def test_root_worker_is_bounded_to_exact_sha_and_live_mcp():
     assert "live MCP revision does not match requested host release" in text
     assert 'Path("/opt/jason/current")' in text
     assert '"reconcile_production_host_services.sh"' in text
-    assert '"fetch", "--no-tags", "origin", "main"' in text
+    assert "safe.directory={REPO}" in text
+    assert '"fetch", "--no-tags", "origin", "main"' not in text
+    assert "Network/source freshness belongs to the unprivileged Release Manager" in text
     assert "merge-base" in text
     assert "--is-ancestor" in text
 

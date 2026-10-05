@@ -71,29 +71,34 @@ def _mcp_revision() -> str:
     return value
 
 
+def _git(*args: str) -> list[str]:
+    return [
+        "git",
+        "-c",
+        f"safe.directory={REPO}",
+        "-C",
+        str(REPO),
+        *args,
+    ]
+
+
 def _verify_main(source_revision: str) -> None:
+    # Network/source freshness belongs to the unprivileged Release Manager,
+    # which verifies protected main immediately before issuing a request.
+    # The root boundary deliberately performs only local immutable/ref checks.
     subprocess.run(
-        ["git", "-C", str(REPO), "fetch", "--no-tags", "origin", "main"],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    subprocess.run(
-        ["git", "-C", str(REPO), "cat-file", "-e", f"{source_revision}^{{commit}}"],
+        _git("cat-file", "-e", f"{source_revision}^{{commit}}"),
         check=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
     completed = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(REPO),
+        _git(
             "merge-base",
             "--is-ancestor",
             source_revision,
             "origin/main",
-        ],
+        ),
         check=False,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
