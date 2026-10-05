@@ -1139,7 +1139,7 @@ def _internal_note_arguments(
         "ticketID": durable_ticket_id,
         "description": description,
         "noteType": 3,
-        "publish": 1,
+        "publish": 2,
     }
 
     payload["title"] = normalized_title
@@ -3264,6 +3264,21 @@ def _canonicalize_governed_action_arguments(
             "visibility": visibility,
             "data_base64": _base64.b64encode(decoded).decode("ascii"),
         }
+
+    if capability_name in {
+        SERVICE_PURCHASE_ORDER_UPDATE,
+        SERVICE_PURCHASE_ORDER_ITEM_UPDATE,
+        SERVICE_TICKET_CHARGE_UPDATE,
+    } and "payload" not in raw:
+        payload = dict(raw)
+        route = {}
+        if "resource_id" in payload and "id" not in payload:
+            payload["id"] = payload.pop("resource_id")
+        if capability_name == SERVICE_TICKET_CHARGE_UPDATE:
+            ticket_id = payload.pop("ticket_id", payload.pop("ticketID", None))
+            if ticket_id is not None:
+                route["ticketID"] = ticket_id
+        return {**route, "payload": payload}
 
     if capability_name == SERVICE_TICKET_NOTE_CREATE:
         if "payload" in raw:
@@ -6649,17 +6664,12 @@ def execute_governed_capability(
     # Carry current conversational approval inside the governed argument
     # envelope so approval does not depend on an out-of-band tool parameter.
     #
-    # This reserved value is consumed here and is never forwarded to Datto.
-    datto_explicit_approval = False
-
-    if capability_name == "automation.component.execute":
-        datto_explicit_approval = (
-            execution_arguments.pop(
-                "explicit_approval",
-                False,
-            )
-            is True
-        )
+    # This reserved control value is consumed by the MCP boundary and is never
+    # forwarded to providers. Keeping it out of provider arguments prevents
+    # otherwise-valid governed actions from failing schema/allowlist checks.
+    explicit_approval = (
+        execution_arguments.pop("explicit_approval", False) is True
+    )
 
     projected = _discoverable_capability(
         capability_name
@@ -6688,7 +6698,7 @@ def execute_governed_capability(
     return _governed_execute(
         capability_name=capability_name,
         arguments=execution_arguments,
-        explicit_approval=datto_explicit_approval,
+        explicit_approval=explicit_approval,
     )
 
 
