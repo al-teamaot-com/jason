@@ -267,3 +267,11 @@ def test_missing_root_host_reconciler_blocks_before_production_transition():
         assert release["state"] == "production_eligible"
         gate.assert_not_called()
         run_command.assert_not_called()
+
+
+def test_mcp_candidate_uses_established_governed_base_not_production():
+    source = (ROOT / "tools" / "release_manager_host_runner.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'base = "jason-mcp:generic-governed-8f1e864947a2"' in source
+    assert 'base = "jason-mcp:production"' not in source

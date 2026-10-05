@@ -328,7 +328,8 @@ def build_mcp_candidate(
 ) -> tuple[str, str, str]:
     path = worktree(repo, state_root, candidate_sha)
     tag = f"jason-mcp:release-{candidate_sha[:12]}"
-    base = "jason-mcp:production"
+    # Stable governed base prevents stale source files from inheriting from live production.
+    base = "jason-mcp:generic-governed-8f1e864947a2"
     base_id = image_id(base)
     try:
         run(

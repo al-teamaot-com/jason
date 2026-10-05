@@ -73,6 +73,12 @@ def _mcp_revision() -> str:
 
 def _verify_main(source_revision: str) -> None:
     subprocess.run(
+        ["git", "-C", str(REPO), "fetch", "--no-tags", "origin", "main"],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    subprocess.run(
         ["git", "-C", str(REPO), "cat-file", "-e", f"{source_revision}^{{commit}}"],
         check=True,
         stdout=subprocess.DEVNULL,
