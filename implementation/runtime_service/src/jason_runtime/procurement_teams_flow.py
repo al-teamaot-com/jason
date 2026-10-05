@@ -65,6 +65,8 @@ from .procurement_inventory_billing import AllocationPlan
 PROCUREMENT_APPROVAL_CAPABILITY = "procurement.submission.execute"
 PROCUREMENT_WORKER_ID = "jason-procurement-worker"
 PROCUREMENT_POLICY_ID = "aot-procurement-delegated-spend-v1"
+CANONICAL_SHIPPING_PRODUCT_ID = 29683988
+CANONICAL_SHIPPING_PRODUCT_NAME = "Shipping"
 
 PROCUREMENT_SOURCE_KINDS = frozenset({
     "website_url",
@@ -526,9 +528,21 @@ def _card(payload: Mapping[str, Any]) -> dict[str, Any]:
             {
                 "type": "Input.Number",
                 "id": "freight",
-                "label": "Freight",
+                "label": "Freight / Shipping",
                 "value": 0,
                 "min": 0,
+            },
+            {
+                "type": "TextBlock",
+                "text": (
+                    "Autotask shipping code: "
+                    + CANONICAL_SHIPPING_PRODUCT_NAME
+                    + " (Product "
+                    + str(CANONICAL_SHIPPING_PRODUCT_ID)
+                    + ")"
+                ),
+                "isSubtle": True,
+                "wrap": True,
             },
             {
                 "type": "Input.Number",
@@ -1480,6 +1494,8 @@ class ProcurementTeamsFlow:
                 "pending_receipt" if customer_quantity else "no_customer_allocation"
             ),
             "freight": f"{freight:.2f}",
+            "freight_product_id": CANONICAL_SHIPPING_PRODUCT_ID,
+            "freight_product_name": CANONICAL_SHIPPING_PRODUCT_NAME,
             "tax": f"{tax:.2f}",
             "fees": f"{fees:.2f}",
             "total_commitment": f"{commitment:.2f}",
@@ -1550,6 +1566,16 @@ class ProcurementTeamsFlow:
                     ("AT Part #", str(submission["at_part_number"])),
                     ("Quantity", str(submission["quantity"])),
                     ("AOT Cost", "$" + str(submission["product"]["cost"]) + " each"),
+                    (
+                        "Freight / Shipping",
+                        "$"
+                        + str(submission["freight"])
+                        + " via "
+                        + str(submission["freight_product_name"])
+                        + " (AT product "
+                        + str(submission["freight_product_id"])
+                        + ")",
+                    ),
                     ("Total Commitment", "$" + str(submission["total_commitment"])),
                     ("Spending Limit", "$" + str(submission["spending_limit"])),
                     ("Allocation", (
