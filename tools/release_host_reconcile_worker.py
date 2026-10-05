@@ -150,6 +150,19 @@ def _process(path: Path) -> None:
         if not script.is_file():
             raise HostReconcileError("immutable host reconciliation script is missing")
 
+        release_dir = Path("/opt/jason/releases") / source_revision
+        if release_dir.exists():
+            meta = release_dir.lstat()
+            if release_dir.is_symlink() or not stat.S_ISDIR(meta.st_mode):
+                raise HostReconcileError(
+                    "target immutable release path is not a real directory"
+                )
+            if meta.st_uid != 0:
+                raise HostReconcileError(
+                    "target immutable release directory is not root-owned"
+                )
+            os.chmod(release_dir, 0o755)
+
         script_env = os.environ.copy()
         script_env.update(
             {
@@ -158,15 +171,31 @@ def _process(path: Path) -> None:
                 "GIT_CONFIG_VALUE_0": str(REPO),
             }
         )
-        completed = subprocess.run(
-            [str(script), source_revision],
-            check=True,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=240,
-            env=script_env,
-        )
+        previous_umask = os.umask(0o022)
+        try:
+            completed = subprocess.run(
+                [str(script), source_revision],
+                check=True,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=240,
+                env=script_env,
+            )
+        except subprocess.CalledProcessError as exc:
+            detail = str(exc.stdout or "").strip()
+            raise HostReconcileError(
+                "immutable host reconciliation script failed"
+                + (": " + detail[-3000:] if detail else "")
+            ) from exc
+        finally:
+            os.umask(previous_umask)
+
+        release_meta = release_dir.stat()
+        if release_meta.st_uid != 0 or (release_meta.st_mode & 0o055) != 0o055:
+            raise HostReconcileError(
+                "immutable release directory is not safely traversable"
+            )
         resolved = CURRENT.resolve().name.casefold()
         if resolved != source_revision:
             raise HostReconcileError(
