@@ -87,4 +87,4 @@ This owner instruction approves continuous processing of approved Support List d
 
 ## Execution cadence
 
-The native host worker runs every five minutes during the approved production window: weekdays 17:00-05:00 America/New_York and continuously on weekends. Operators may manually start `jason-support-repair-worker.service` at any time for an immediate support-list reconciliation; the windowed timer is the normal autonomous cadence.
+The native host worker runs every five minutes, 24x7. Operators may manually start `jason-support-repair-worker.service` at any time for an immediate support-list reconciliation; the continuous timer is the normal autonomous cadence.

@@ -30,35 +30,15 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
     def test_release_id_is_deterministic(self):
         self.assertEqual(runner.record_id(SHA_A), "release-" + "a" * 16)
 
-    def test_production_window_weekday_evening_and_overnight(self):
-        self.assertTrue(
-            runner.production_window_open(
-                datetime(2026, 10, 5, 21, 0, tzinfo=timezone.utc)
-            )
-        )
-        self.assertTrue(
-            runner.production_window_open(
-                datetime(2026, 10, 6, 8, 59, tzinfo=timezone.utc)
-            )
-        )
-        self.assertFalse(
-            runner.production_window_open(
-                datetime(2026, 10, 6, 9, 0, tzinfo=timezone.utc)
-            )
-        )
-        self.assertFalse(
-            runner.production_window_open(
-                datetime(2026, 10, 6, 20, 59, tzinfo=timezone.utc)
-            )
-        )
-
-    def test_production_window_weekend_is_continuous(self):
-        for hour in (0, 6, 12, 18, 23):
-            self.assertTrue(
-                runner.production_window_open(
-                    datetime(2026, 10, 4, hour, 0, tzinfo=timezone.utc)
-                )
-            )
+    def test_production_window_is_continuous_24x7(self):
+        for observed in (
+            datetime(2026, 10, 5, 13, 0, tzinfo=timezone.utc),
+            datetime(2026, 10, 5, 21, 0, tzinfo=timezone.utc),
+            datetime(2026, 10, 6, 9, 0, tzinfo=timezone.utc),
+            datetime(2026, 10, 6, 20, 59, tzinfo=timezone.utc),
+            datetime(2026, 10, 4, 12, 0, tzinfo=timezone.utc),
+        ):
+            self.assertTrue(runner.production_window_open(observed))
 
     def test_production_window_rejects_naive_time(self):
         with self.assertRaisesRegex(ValueError, "timezone-aware"):

@@ -81,21 +81,13 @@ class InstallSupportRepairHostWorkerTests(unittest.TestCase):
         self.assertIn("unix:path=/run/user/{uid}/bus", installer)
         self.assertIn("env=systemd_env", installer)
 
-    def test_support_repair_timer_runs_through_approved_production_window(self):
+    def test_support_repair_timer_runs_24x7(self):
         timer = (
             self.root
             / "infrastructure/openclaw-operations/systemd/user/jason-support-repair-worker.timer"
         ).read_text(encoding="utf-8")
         self.assertIn(
-            "OnCalendar=Mon..Fri *-*-* 00..04:00/5:00 America/New_York",
-            timer,
-        )
-        self.assertIn(
-            "OnCalendar=Mon..Fri *-*-* 17..23:00/5:00 America/New_York",
-            timer,
-        )
-        self.assertIn(
-            "OnCalendar=Sat,Sun *-*-* *:00/5:00 America/New_York",
+            "OnCalendar=*-*-* *:00/5:00 America/New_York",
             timer,
         )
         self.assertIn("AccuracySec=15s", timer)

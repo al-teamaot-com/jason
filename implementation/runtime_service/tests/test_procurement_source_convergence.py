@@ -1,9 +1,12 @@
+import pytest
+
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 from jason_runtime.procurement_teams_flow import (
     PROCUREMENT_WRITE_CAPABILITIES,
+    ProcurementFlowError,
     ProcurementTeamsFlow,
     SQLiteProcurementSubmissionStore,
     _card,
@@ -384,3 +387,31 @@ def test_url_ticket_hint_is_verified_and_prefilled_in_card(tmp_path):
         if item.get("id") == "ticket_number"
     )
     assert ticket_input["value"] == "T20191013.0001"
+
+
+def test_multiline_normalized_source_fails_closed_instead_of_collapsing(tmp_path):
+    flow = _flow(tmp_path)
+    normalized = {
+        "source_kind": "vendor_invoice",
+        "source_reference": "invoice:MULTI-100",
+        "source_acquisition": "document_extraction",
+        "source_confidence": "document_verified",
+        "vendor": {"name": "Staples"},
+        "lines": [
+            {"name": "Item A", "sku": "A-1", "unit_cost": "10.00"},
+            {"name": "Item B", "sku": "B-1", "unit_cost": "20.00"},
+        ],
+    }
+
+    with pytest.raises(
+        ProcurementFlowError,
+        match="requires catalog resolution for every line",
+    ):
+        flow.handle_normalized_source(
+            normalized=normalized,
+            microsoft_tenant_id="tenant",
+            microsoft_object_id="object",
+            conversation_id="conv",
+            message_id="msg",
+            occurred_at=NOW,
+        )
