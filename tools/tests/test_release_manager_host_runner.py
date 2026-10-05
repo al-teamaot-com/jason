@@ -90,12 +90,33 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             state_root = Path(td)
             with (
-                patch.object(runner, "live_runtime", return_value={"revision": SHA_B, "image_id": "sha256:old"}),
+                patch.object(
+                    runner,
+                    "live_production_alignment",
+                    return_value={
+                        "runtime_revision": SHA_B,
+                        "mcp_revision": SHA_B,
+                        "host_revision": SHA_B,
+                    },
+                ),
                 patch.object(runner, "verify_candidate_on_main"),
                 patch.object(runner, "changed_files", return_value=["docs/operations/example.md"]),
                 patch.object(runner, "required_checks", return_value=["runtime-service"]),
                 patch.object(runner, "github_checks", return_value={"passed": True, "required": ["runtime-service"], "failures": []}),
-                patch.object(runner, "build_candidate", return_value=("jason-runtime:release-test", "sha256:new")),
+                patch.object(
+                    runner,
+                    "build_candidate",
+                    return_value=("jason-runtime:release-test", "sha256:new"),
+                ),
+                patch.object(
+                    runner,
+                    "build_mcp_candidate",
+                    return_value=(
+                        "jason-mcp:release-test",
+                        "sha256:mcp-new",
+                        "sha256:mcp-base",
+                    ),
+                ),
             ):
                 record = runner.create_record(
                     repo=ROOT,
@@ -108,12 +129,24 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             self.assertEqual(record["state"], "release_candidate")
             self.assertEqual(record["release_candidate"]["candidate_sha"], SHA_A)
             self.assertEqual(record["release_candidate"]["artifact_digest"], "sha256:new")
+            self.assertEqual(
+                record["release_candidate"]["mcp_artifact_digest"],
+                "sha256:mcp-new",
+            )
             self.assertTrue((state_root / "records" / f"{record['release_id']}.json").exists())
 
     def test_create_record_rejects_required_check_failure(self):
         with tempfile.TemporaryDirectory() as td:
             with (
-                patch.object(runner, "live_runtime", return_value={"revision": SHA_B, "image_id": "sha256:old"}),
+                patch.object(
+                    runner,
+                    "live_production_alignment",
+                    return_value={
+                        "runtime_revision": SHA_B,
+                        "mcp_revision": SHA_B,
+                        "host_revision": SHA_B,
+                    },
+                ),
                 patch.object(runner, "verify_candidate_on_main"),
                 patch.object(runner, "changed_files", return_value=[]),
                 patch.object(runner, "required_checks", return_value=["runtime-service"]),
@@ -128,6 +161,34 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                         change_class="release_blocker",
                         owner_approved=False,
                     )
+
+    def test_create_record_fails_closed_on_divergent_baseline(self):
+        with tempfile.TemporaryDirectory() as td:
+            with (
+                patch.object(
+                    runner,
+                    "live_production_alignment",
+                    side_effect=runner.ReleaseManagerError(
+                        "production alignment mismatch"
+                    ),
+                ),
+                patch.object(runner, "build_candidate") as build_runtime,
+                patch.object(runner, "build_mcp_candidate") as build_mcp,
+            ):
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError,
+                    "production alignment mismatch",
+                ):
+                    runner.create_record(
+                        repo=ROOT,
+                        state_root=Path(td),
+                        candidate_sha=SHA_A,
+                        rollback_sha=SHA_B,
+                        change_class="release_blocker",
+                        owner_approved=True,
+                    )
+            build_runtime.assert_not_called()
+            build_mcp.assert_not_called()
 
     def test_promote_eligible_serializes_to_one_release(self):
         with tempfile.TemporaryDirectory() as td:
@@ -202,22 +263,62 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
 
             self.assertEqual(promoted, [runner.record_id(second_sha)])
 
-    def test_production_preflight_uses_exact_candidate_worktree(self):
+    def test_production_preflight_uses_exact_candidate_worktree_for_runtime_and_mcp(self):
         with tempfile.TemporaryDirectory() as td:
             state_root = Path(td)
             candidate_tree = state_root / "candidate-tree"
-            script = candidate_tree / "infrastructure" / "jason-runtime" / "production-deploy.sh"
-            script.parent.mkdir(parents=True)
-            script.write_text("#!/bin/sh\n", encoding="utf-8")
+            runtime_script = (
+                candidate_tree
+                / "infrastructure"
+                / "jason-runtime"
+                / "production-deploy.sh"
+            )
+            mcp_script = (
+                candidate_tree
+                / "infrastructure"
+                / "jason-mcp"
+                / "production-deploy.sh"
+            )
+            runtime_script.parent.mkdir(parents=True)
+            mcp_script.parent.mkdir(parents=True)
+            runtime_script.write_text("#!/bin/sh\n", encoding="utf-8")
+            mcp_script.write_text("#!/bin/sh\n", encoding="utf-8")
             with (
+                patch.object(runner, "require_host_reconciler_ready") as host_ready,
                 patch.object(runner, "worktree", return_value=candidate_tree) as make_tree,
                 patch.object(runner, "remove_worktree") as remove_tree,
                 patch.object(runner, "run", return_value="PREFLIGHT=PASS") as run_command,
             ):
-                runner.production_preflight(ROOT, state_root, "image:test", SHA_A)
+                runner.production_preflight(
+                    ROOT,
+                    state_root,
+                    "jason-runtime:test",
+                    "jason-mcp:test",
+                    SHA_A,
+                )
+            host_ready.assert_called_once_with(state_root)
             make_tree.assert_called_once_with(ROOT, state_root, SHA_A)
-            self.assertEqual(run_command.call_args.args[0][0], str(script))
-            self.assertEqual(run_command.call_args.kwargs["cwd"], candidate_tree)
+            self.assertEqual(run_command.call_count, 2)
+            self.assertEqual(
+                run_command.call_args_list[0].args[0][0],
+                str(runtime_script),
+            )
+            self.assertEqual(
+                run_command.call_args_list[1].args[0][0],
+                str(mcp_script),
+            )
+            self.assertEqual(
+                run_command.call_args_list[0].kwargs["env"][
+                    "JASON_RUNTIME_PRODUCTION_IMAGE"
+                ],
+                "jason-runtime:test",
+            )
+            self.assertEqual(
+                run_command.call_args_list[1].kwargs["env"][
+                    "JASON_MCP_PRODUCTION_IMAGE"
+                ],
+                "jason-mcp:test",
+            )
             remove_tree.assert_called_once_with(ROOT, candidate_tree)
 
     def test_installer_source_contains_non_login_user_bus_binding(self):
@@ -255,6 +356,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         mcp = {
             "Config": {"Labels": {"com.teamaot.jason.source_revision": SHA_A}},
             "State": {"Status": "running"},
+            "Image": "sha256:mcp",
         }
         with (
             patch.object(runner, "live_runtime", return_value={"revision": SHA_A}),
@@ -270,6 +372,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         mcp = {
             "Config": {"Labels": {"com.teamaot.jason.source_revision": SHA_B}},
             "State": {"Status": "running"},
+            "Image": "sha256:mcp",
         }
         with (
             patch.object(runner, "live_runtime", return_value={"revision": SHA_A}),

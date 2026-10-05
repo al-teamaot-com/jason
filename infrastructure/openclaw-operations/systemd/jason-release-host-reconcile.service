@@ -1,0 +1,14 @@
+[Unit]
+Description=Jason root-owned host release reconciliation worker
+After=docker.service
+ConditionPathExists=/usr/local/lib/jason/release_host_reconcile_worker.py
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /usr/local/lib/jason/release_host_reconcile_worker.py
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0027
+TimeoutStartSec=300

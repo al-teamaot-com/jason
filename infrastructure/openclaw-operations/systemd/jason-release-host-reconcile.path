@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch for governed Jason host release reconciliation requests
+
+[Path]
+DirectoryNotEmpty=/var/lib/jason/openclaw/release-manager/host-reconcile/requests
+Unit=jason-release-host-reconcile.service
+
+[Install]
+WantedBy=multi-user.target

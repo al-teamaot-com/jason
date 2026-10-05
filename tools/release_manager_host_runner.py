@@ -21,6 +21,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import release_manager_gate as gate
 
@@ -130,19 +131,30 @@ def live_runtime() -> dict[str, Any]:
     }
 
 
+def live_mcp() -> dict[str, Any]:
+    raw = json.loads(output(["docker", "inspect", "jason-mcp-pilot"]))[0]
+    labels = raw.get("Config", {}).get("Labels") or {}
+    revision = str(
+        labels.get("com.teamaot.jason.source_revision") or ""
+    ).casefold()
+    if not SHA.fullmatch(revision):
+        raise ReleaseManagerError(
+            "live jason-mcp-pilot source revision is not an exact SHA"
+        )
+    if str(raw.get("State", {}).get("Status") or "") != "running":
+        raise ReleaseManagerError("live jason-mcp-pilot is not running")
+    return {
+        "revision": revision,
+        "image_id": str(raw["Image"]),
+        "inspect": raw,
+    }
+
+
 def live_production_alignment(candidate_sha: str) -> dict[str, Any]:
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
     runtime = live_runtime()
-
-    mcp_raw = json.loads(output(["docker", "inspect", "jason-mcp-pilot"]))[0]
-    mcp_labels = mcp_raw.get("Config", {}).get("Labels") or {}
-    mcp_revision = str(
-        mcp_labels.get("com.teamaot.jason.source_revision") or ""
-    ).casefold()
-    if not SHA.fullmatch(mcp_revision):
-        raise ReleaseManagerError("live jason-mcp-pilot source revision is not an exact SHA")
-    if str(mcp_raw.get("State", {}).get("Status") or "") != "running":
-        raise ReleaseManagerError("live jason-mcp-pilot is not running")
+    mcp = live_mcp()
+    mcp_revision = str(mcp["revision"])
 
     current_release = Path("/opt/jason/current").resolve()
     host_revision = current_release.name.casefold()
@@ -307,6 +319,172 @@ def build_candidate(repo: Path, state_root: Path, candidate_sha: str) -> tuple[s
         return tag, image_id(tag)
     finally:
         remove_worktree(repo, path)
+
+
+def build_mcp_candidate(
+    repo: Path,
+    state_root: Path,
+    candidate_sha: str,
+) -> tuple[str, str, str]:
+    path = worktree(repo, state_root, candidate_sha)
+    tag = f"jason-mcp:release-{candidate_sha[:12]}"
+    # Stable governed base prevents stale source files from inheriting from live production.
+    base = "jason-mcp:generic-governed-8f1e864947a2"
+    base_id = image_id(base)
+    try:
+        run(
+            [
+                "docker", "build",
+                "--pull=false",
+                "--build-arg", f"BASE_IMAGE={base}",
+                "--label", f"org.opencontainers.image.revision={candidate_sha}",
+                "--label", f"com.teamaot.jason.source_revision={candidate_sha}",
+                "-t", tag,
+                "-f", str(path / "infrastructure" / "jason-mcp" / "Dockerfile"),
+                str(path),
+            ]
+        )
+        return tag, image_id(tag), base_id
+    finally:
+        remove_worktree(repo, path)
+
+
+def user_systemd_env() -> dict[str, str]:
+    env = os.environ.copy()
+    uid = os.getuid()
+    env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+    env.setdefault(
+        "DBUS_SESSION_BUS_ADDRESS",
+        f"unix:path=/run/user/{uid}/bus",
+    )
+    return env
+
+
+def require_host_reconciler_ready(state_root: Path) -> None:
+    root = state_root / "host-reconcile"
+    requests = root / "requests"
+    results = root / "results"
+    if not requests.is_dir() or not results.is_dir():
+        raise ReleaseManagerError(
+            "root host reconciliation spool is not installed"
+        )
+    if not os.access(requests, os.W_OK) or not os.access(results, os.R_OK):
+        raise ReleaseManagerError(
+            "root host reconciliation spool permissions are unavailable"
+        )
+    worker = Path("/usr/local/lib/jason/release_host_reconcile_worker.py")
+    if not worker.is_file():
+        raise ReleaseManagerError("root host reconciliation worker is not installed")
+    meta = worker.stat()
+    if meta.st_uid != 0 or (meta.st_mode & 0o022):
+        raise ReleaseManagerError(
+            "root host reconciliation worker ownership/mode is unsafe"
+        )
+    completed = subprocess.run(
+        ["systemctl", "is-active", "jason-release-host-reconcile.path"],
+        env=user_systemd_env(),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if completed.returncode != 0 or completed.stdout.strip() != "active":
+        raise ReleaseManagerError(
+            "root host reconciliation path unit is not active"
+        )
+
+
+def request_host_reconcile(
+    state_root: Path,
+    source_revision: str,
+    *,
+    timeout_seconds: float = 240.0,
+) -> dict[str, Any]:
+    source_revision = exact_sha(source_revision, "source_revision")
+    require_host_reconciler_ready(state_root)
+    request_id = "release-" + source_revision[:12] + "-" + uuid4().hex[:12]
+    root = state_root / "host-reconcile"
+    request_path = root / "requests" / f"{request_id}.json"
+    result_path = root / "results" / f"{request_id}.json"
+    atomic_json(
+        request_path,
+        {
+            "request_id": request_id,
+            "source_revision": source_revision,
+            "requested_at": now(),
+            "requested_by": "jason-release-manager",
+        },
+    )
+
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if result_path.exists():
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+            if str(result.get("request_id") or "") != request_id:
+                raise ReleaseManagerError(
+                    "host reconciliation result request id mismatch"
+                )
+            if str(result.get("source_revision") or "").casefold() != source_revision:
+                raise ReleaseManagerError(
+                    "host reconciliation result revision mismatch"
+                )
+            if result.get("success") is not True:
+                raise ReleaseManagerError(
+                    "host reconciliation failed: "
+                    + str(result.get("detail") or "unknown failure")[:600]
+                )
+            return result
+        time.sleep(0.25)
+    raise ReleaseManagerError("host reconciliation result timed out")
+
+
+def install_release_manager_from_current(expected_sha: str) -> dict[str, Any]:
+    expected_sha = exact_sha(expected_sha, "expected_sha")
+    current = Path("/opt/jason/current").resolve()
+    if current.name.casefold() != expected_sha:
+        raise ReleaseManagerError(
+            "immutable host release is not aligned before Release Manager install"
+        )
+    installer = current / "tools" / "install_release_manager.py"
+    if not installer.is_file():
+        raise ReleaseManagerError(
+            "immutable Release Manager installer is missing"
+        )
+    output_text = run(
+        ["/usr/bin/python3", str(installer), "--activate"],
+        cwd=current,
+        env=user_systemd_env(),
+    )
+    if "JASON_RELEASE_MANAGER_INSTALL=PASS" not in output_text:
+        raise ReleaseManagerError("Release Manager installer did not report PASS")
+
+    source_link = Path.home() / ".local" / "lib" / "jason" / "release-manager-source"
+    if source_link.resolve().name.casefold() != expected_sha:
+        raise ReleaseManagerError(
+            "Release Manager source link is not bound to the immutable host release"
+        )
+    installed_runner = Path.home() / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+    expected_runner = current / "tools" / "release_manager_host_runner.py"
+    if hashlib.sha256(installed_runner.read_bytes()).digest() != hashlib.sha256(
+        expected_runner.read_bytes()
+    ).digest():
+        raise ReleaseManagerError("installed Release Manager runner differs from host release")
+
+    timer = subprocess.run(
+        ["systemctl", "--user", "is-active", "jason-release-manager.timer"],
+        env=user_systemd_env(),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    if timer.returncode != 0 or timer.stdout.strip() != "active":
+        raise ReleaseManagerError("Release Manager timer is not active after install")
+    return {
+        "source_revision": expected_sha,
+        "timer_active": True,
+        "source_link": str(source_link.resolve()),
+    }
 
 
 def copy_state_from_live_container(
@@ -480,12 +658,15 @@ def production_preflight(
     repo: Path,
     state_root: Path,
     image: str,
+    mcp_image: str,
     candidate_sha: str,
 ) -> None:
+    require_host_reconciler_ready(state_root)
     candidate_tree = worktree(repo, state_root, candidate_sha)
     try:
         env = os.environ.copy()
         env["JASON_RUNTIME_PRODUCTION_IMAGE"] = image
+        env["JASON_MCP_PRODUCTION_IMAGE"] = mcp_image
         env["JASON_SOURCE_REVISION_OVERRIDE"] = candidate_sha
         run(
             [
@@ -493,6 +674,19 @@ def production_preflight(
                     candidate_tree
                     / "infrastructure"
                     / "jason-runtime"
+                    / "production-deploy.sh"
+                ),
+                "--preflight",
+            ],
+            cwd=candidate_tree,
+            env=env,
+        )
+        run(
+            [
+                str(
+                    candidate_tree
+                    / "infrastructure"
+                    / "jason-mcp"
                     / "production-deploy.sh"
                 ),
                 "--preflight",
@@ -541,10 +735,10 @@ def create_record(
 ) -> dict[str, Any]:
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
     rollback_sha = exact_sha(rollback_sha, "rollback_sha")
-    live = live_runtime()
-    if live["revision"] != rollback_sha:
+    alignment = live_production_alignment(rollback_sha)
+    if alignment["runtime_revision"] != rollback_sha:
         raise ReleaseManagerError(
-            "rollback SHA must equal the exact current live production revision"
+            "rollback SHA must equal the exact aligned production revision"
         )
     verify_candidate_on_main(repo, candidate_sha)
     files = changed_files(repo, rollback_sha, candidate_sha)
@@ -584,10 +778,18 @@ def create_record(
     gate_transition(repo, record, "dev_verified")
 
     image, digest = build_candidate(repo, state_root, candidate_sha)
+    mcp_image, mcp_digest, mcp_base_digest = build_mcp_candidate(
+        repo,
+        state_root,
+        candidate_sha,
+    )
     record["release_candidate"] = {
         "candidate_sha": candidate_sha,
         "artifact_digest": digest,
         "image": image,
+        "mcp_artifact_digest": mcp_digest,
+        "mcp_image": mcp_image,
+        "mcp_base_artifact_digest": mcp_base_digest,
         "immutable": True,
         "built_at": now(),
     }
@@ -601,8 +803,12 @@ def run_preproduction(repo: Path, state_root: Path, record: dict[str, Any]) -> d
     candidate = record["release_candidate"]
     image = str(candidate["image"])
     digest = str(candidate["artifact_digest"])
+    mcp_image = str(candidate["mcp_image"])
+    mcp_digest = str(candidate["mcp_artifact_digest"])
     if image_id(image) != digest:
         raise ReleaseManagerError("candidate image changed before pre-production")
+    if image_id(mcp_image) != mcp_digest:
+        raise ReleaseManagerError("candidate MCP image changed before pre-production")
 
     live = live_runtime()
     name = ""
@@ -622,14 +828,19 @@ def run_preproduction(repo: Path, state_root: Path, record: dict[str, Any]) -> d
             repo,
             state_root,
             image,
+            mcp_image,
             str(candidate["candidate_sha"]),
         )
         rollback_image = image_id("jason-runtime:rollback-current")
         if not rollback_image:
-            raise ReleaseManagerError("rollback-current image alias is unavailable")
+            raise ReleaseManagerError("runtime rollback-current image alias is unavailable")
+        mcp_rollback_image = image_id("jason-mcp:rollback-current")
+        if not mcp_rollback_image:
+            raise ReleaseManagerError("MCP rollback-current image alias is unavailable")
         record["preproduction"] = {
             "deployed_sha": candidate["candidate_sha"],
             "artifact_digest": digest,
+            "mcp_artifact_digest": mcp_digest,
             "acceptance_passed": True,
             "failure_path_tests_passed": True,
             "rollback_readiness_passed": True,
@@ -652,39 +863,92 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
     if record.get("state") != "production_eligible":
         raise ReleaseManagerError("release is not Production Eligible")
     candidate = record["release_candidate"]
+    candidate_sha = str(candidate["candidate_sha"])
     image = str(candidate["image"])
     digest = str(candidate["artifact_digest"])
+    mcp_image = str(candidate["mcp_image"])
+    mcp_digest = str(candidate["mcp_artifact_digest"])
     if image_id(image) != digest:
         raise ReleaseManagerError("candidate image changed after pre-production")
+    if image_id(mcp_image) != mcp_digest:
+        raise ReleaseManagerError("candidate MCP image changed after pre-production")
+
+    # Do not begin a disruptive production transaction unless the privileged
+    # host boundary is already installed and the rollback baseline is aligned.
+    require_host_reconciler_ready(state_root)
+    rollback_sha = str(record["rollback_sha"])
+    live_production_alignment(rollback_sha)
 
     gate_transition(repo, record, "production")
     save_record(state_root, record)
+
     env = os.environ.copy()
     env["JASON_RUNTIME_PRODUCTION_IMAGE"] = image
-    env["JASON_SOURCE_REVISION_OVERRIDE"] = str(candidate["candidate_sha"])
-    deploy_worktree = worktree(
-        repo,
-        state_root,
-        str(candidate["candidate_sha"]),
-    )
-    deploy_script = (
+    env["JASON_MCP_PRODUCTION_IMAGE"] = mcp_image
+    env["JASON_SOURCE_REVISION_OVERRIDE"] = candidate_sha
+    deploy_worktree = worktree(repo, state_root, candidate_sha)
+    runtime_script = (
         deploy_worktree / "infrastructure" / "jason-runtime" / "production-deploy.sh"
     )
+    mcp_script = (
+        deploy_worktree / "infrastructure" / "jason-mcp" / "production-deploy.sh"
+    )
+
+    runtime_deployed = False
+    mcp_deployed = False
+    host_attempted = False
+    release_manager_installed = False
 
     try:
-        deploy_output = run(
-            [str(deploy_script)],
+        runtime_output = run(
+            [str(runtime_script)],
             cwd=deploy_worktree,
             env=env,
         )
+        runtime_deployed = True
+        wait_live_runtime()
+
+        mcp_output = run(
+            [str(mcp_script)],
+            cwd=deploy_worktree,
+            env=env,
+        )
+        mcp_deployed = True
+        if live_mcp()["revision"] != candidate_sha:
+            raise ReleaseManagerError(
+                "MCP did not report the exact candidate revision after deployment"
+            )
+
+        host_attempted = True
+        host_result = request_host_reconcile(state_root, candidate_sha)
+
+        manager_result = install_release_manager_from_current(candidate_sha)
+        release_manager_installed = True
+
+        alignment = live_production_alignment(candidate_sha)
         live = wait_live_runtime()
-        alignment = live_production_alignment(str(candidate["candidate_sha"]))
         live_digest = image_id("jason-runtime:production")
+        live_mcp_digest = image_id("jason-mcp:production")
+        if live_digest != digest:
+            raise ReleaseManagerError(
+                "production runtime image differs from pre-production artifact"
+            )
+        if live_mcp_digest != mcp_digest:
+            raise ReleaseManagerError(
+                "production MCP image differs from pre-production artifact"
+            )
+
         record["production"] = {
             "live_sha": live["revision"],
             "artifact_digest": live_digest,
+            "mcp_artifact_digest": live_mcp_digest,
             "health_passed": True,
-            "deployment_script_passed": "DEPLOYMENT=PASS" in deploy_output,
+            "deployment_script_passed": "DEPLOYMENT=PASS" in runtime_output,
+            "mcp_deployment_script_passed": "DEPLOYMENT=PASS" in mcp_output,
+            "host_reconciliation_passed": bool(host_result.get("success")),
+            "release_manager_install_passed": True,
+            "release_manager_source_revision": manager_result["source_revision"],
+            "release_manager_timer_active": manager_result["timer_active"],
             "alignment_verified": True,
             "runtime_revision": alignment["runtime_revision"],
             "mcp_revision": alignment["mcp_revision"],
@@ -697,22 +961,69 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
         save_record(state_root, record)
         return record
     except Exception as error:
-        rollback_sha = str(record["rollback_sha"])
         rollback_env = os.environ.copy()
         rollback_env["JASON_RUNTIME_PRODUCTION_IMAGE"] = "jason-runtime:rollback-current"
+        rollback_env["JASON_MCP_PRODUCTION_IMAGE"] = "jason-mcp:rollback-current"
         rollback_env["JASON_SOURCE_REVISION_OVERRIDE"] = rollback_sha
+
+        rollback_errors: list[str] = []
+
+        # Reverse the forward transaction in dependency order. Host reconciliation
+        # requires MCP to already report the requested release revision.
+        if mcp_deployed:
+            try:
+                run([str(mcp_script)], cwd=deploy_worktree, env=rollback_env)
+                if live_mcp()["revision"] != rollback_sha:
+                    raise ReleaseManagerError(
+                        "MCP rollback revision does not match recorded rollback SHA"
+                    )
+            except Exception as exc:
+                rollback_errors.append("mcp=" + type(exc).__name__ + ":" + str(exc)[:200])
+
+        if host_attempted:
+            try:
+                request_host_reconcile(state_root, rollback_sha)
+            except Exception as exc:
+                rollback_errors.append("host=" + type(exc).__name__ + ":" + str(exc)[:200])
+
+        if release_manager_installed or host_attempted:
+            try:
+                install_release_manager_from_current(rollback_sha)
+            except Exception as exc:
+                rollback_errors.append(
+                    "release_manager=" + type(exc).__name__ + ":" + str(exc)[:200]
+                )
+
+        if runtime_deployed:
+            try:
+                run([str(runtime_script)], cwd=deploy_worktree, env=rollback_env)
+                rollback_live = wait_live_runtime()
+                if rollback_live["revision"] != rollback_sha:
+                    raise ReleaseManagerError(
+                        "runtime rollback revision does not match recorded rollback SHA"
+                    )
+            except Exception as exc:
+                rollback_errors.append(
+                    "runtime=" + type(exc).__name__ + ":" + str(exc)[:200]
+                )
+
         rollback_ok = False
-        try:
-            run([str(deploy_script)], cwd=deploy_worktree, env=rollback_env)
-            rollback_live = wait_live_runtime()
-            rollback_ok = rollback_live["revision"] == rollback_sha
-        except Exception:
-            rollback_ok = False
+        if not rollback_errors:
+            try:
+                live_production_alignment(rollback_sha)
+                install_release_manager_from_current(rollback_sha)
+                rollback_ok = True
+            except Exception as exc:
+                rollback_errors.append(
+                    "verification=" + type(exc).__name__ + ":" + str(exc)[:200]
+                )
+
         record["failure"] = {
             "at": now(),
             "error": type(error).__name__,
             "message": str(error)[:700],
             "rollback_verified": rollback_ok,
+            "rollback_errors": rollback_errors,
         }
         record["state"] = "rolled_back" if rollback_ok else "failed"
         record.setdefault("history", []).append(
@@ -722,7 +1033,6 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
         raise
     finally:
         remove_worktree(repo, deploy_worktree)
-
 
 
 def prepare_release(
