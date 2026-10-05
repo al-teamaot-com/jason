@@ -92,6 +92,7 @@ def _new_secret_id(
     *, address: str, admin_token: str, provider: str
 ) -> tuple[str, str]:
     spec = base.PROVIDERS[provider]
+    environment = str(spec.get("environment", "production"))
     response = base.api_request(
         address,
         f"auth/approle/role/{spec['role_name']}/secret-id",
@@ -101,7 +102,7 @@ def _new_secret_id(
             "metadata": json.dumps(
                 {
                     "connector": str(spec["connector_identity"]),
-                    "environment": "production",
+                    "environment": environment,
                 }
             ),
             "ttl": "2160h",
@@ -140,6 +141,7 @@ def _write_rotation_metadata(provider: str, accessor: str) -> None:
             "expires_at_utc": (now + timedelta(days=90)).isoformat(),
             "secret_id_accessor": accessor,
             "rotation_required": True,
+            "environment": str(spec.get("environment", "production")),
             "last_identity_rotation_utc": now.isoformat(),
             "service_token_ttl_seconds": 300,
             "service_token_explicit_max_ttl_seconds": 300,
