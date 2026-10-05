@@ -257,8 +257,8 @@ def test_quickbooks_production_contract_is_isolated_from_development() -> None:
     assert prod["secret_path"] == (
         "secret/data/connectors/quickbooks/production/oauth-client"
     )
-    assert prod["fields"] == ("client_id", "client_secret")
-    assert prod["required_fields"] == ("client_id", "client_secret")
+    assert prod["fields"] == ("client_id", "client_secret", "token_key_b64")
+    assert prod["required_fields"] == ("client_id", "client_secret", "token_key_b64")
     assert prod["policy_name"] == "jason-quickbooks-production-oauth-client-read"
     assert prod["role_name"] == "jason-quickbooks-production-oauth-client-read"
     assert prod["connector_identity"] == "quickbooks-production-oauth-client"
