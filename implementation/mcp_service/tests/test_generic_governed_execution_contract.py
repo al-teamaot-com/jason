@@ -166,6 +166,61 @@ def test_generic_execution_dispatches_explicit_action(monkeypatch):
     assert captured["explicit_approval"] is False
 
 
+def test_generic_execution_strips_reserved_explicit_approval_for_non_datto(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_discoverable_capability",
+        lambda name: {"capability": name, "read_only": False, "action_enabled": True},
+    )
+    captured = {}
+
+    def governed_execute(*, capability_name, arguments, explicit_approval=False):
+        captured.update(
+            capability_name=capability_name,
+            arguments=arguments,
+            explicit_approval=explicit_approval,
+        )
+        return {"status": "succeeded"}
+
+    monkeypatch.setattr(server, "_governed_execute", governed_execute)
+    result = server.execute_governed_capability(
+        capability="communication.teams.message.send",
+        arguments={
+            "aad_object_id": "aad-1",
+            "tenant_id": "tenant-1",
+            "text": "test",
+            "explicit_approval": True,
+        },
+    )
+
+    assert result["status"] == "succeeded"
+    assert captured["arguments"] == {
+        "aad_object_id": "aad-1",
+        "tenant_id": "tenant-1",
+        "text": "test",
+    }
+    assert captured["explicit_approval"] is True
+
+
+def test_procurement_updates_accept_flat_mcp_arguments():
+    po = server._canonicalize_governed_action_arguments(
+        server.SERVICE_PURCHASE_ORDER_UPDATE,
+        {"resource_id": 1066, "status": 5},
+    )
+    poi = server._canonicalize_governed_action_arguments(
+        server.SERVICE_PURCHASE_ORDER_ITEM_UPDATE,
+        {"resource_id": 83, "ticketID": 134783, "chargeID": 1424},
+    )
+    charge = server._canonicalize_governed_action_arguments(
+        server.SERVICE_TICKET_CHARGE_UPDATE,
+        {"resource_id": 1424, "ticket_id": 134783, "status": 5},
+    )
+
+    assert po == {"payload": {"id": 1066, "status": 5}}
+    assert poi == {"payload": {"id": 83, "ticketID": 134783, "chargeID": 1424}}
+    assert charge == {"ticketID": 134783, "payload": {"id": 1424, "status": 5}}
+
+
 def test_generic_execution_rejects_unexposed_capability(monkeypatch):
     monkeypatch.setattr(
         server,
