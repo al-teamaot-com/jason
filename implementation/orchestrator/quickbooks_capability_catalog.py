@@ -32,8 +32,8 @@ ACCOUNTING_VENDOR_SEARCH = "accounting.vendor.search"
 ACCOUNTING_CUSTOMER_SEARCH = "accounting.customer.search"
 ACCOUNTING_INVOICE_SEARCH = "accounting.invoice.search"
 ACCOUNTING_BILL_SEARCH = "accounting.bill.search"
-ACCOUNTING_PROFIT_LOSS_READ = "accounting.report.profit_loss.read"
-ACCOUNTING_BALANCE_SHEET_READ = "accounting.report.balance_sheet.read"
+ACCOUNTING_PROFIT_LOSS_READ = "accounting.report.profit-loss.read"
+ACCOUNTING_BALANCE_SHEET_READ = "accounting.report.balance-sheet.read"
 
 QUICKBOOKS_CAPABILITIES = frozenset(
     {
