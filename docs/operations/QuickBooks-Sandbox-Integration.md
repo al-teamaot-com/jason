@@ -26,7 +26,7 @@ Run interactively on Jason:
 
 ```bash
 cd /home/al/projects/jason
-sudo .venv/bin/python tools/provider_secret_provision.py create quickbooks_development
+sudo .venv/bin/python tools/provider_secret_provision.py quickbooks_development
 ```
 
 Use the tool's interactive prompts. Verify secret metadata/projection without printing secret values according to `docs/operations/Provider-Secret-Provisioning.md`.
