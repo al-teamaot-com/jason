@@ -328,6 +328,152 @@ def _submission_digest(payload: Mapping[str, Any]) -> str:
     ).hexdigest()
 
 
+def _po_execution_plan(
+    submission: Mapping[str, Any],
+) -> tuple[dict[str, Any], ...] | None:
+    """Return a fully resolved approved PO line plan or fail closed.
+
+    New multi-line submissions use po_lines. Legacy single-line submissions may
+    omit it, but a source that declares more than one item can never fall back
+    to the legacy one-line executor.
+    """
+    raw_lines = submission.get("po_lines")
+    declared_count = submission.get("source_item_count")
+    if raw_lines is None:
+        if declared_count not in (None, "", 1, "1"):
+            raise ProcurementFlowError(
+                "multi-line source has no approved PO line plan; refusing PO creation"
+            )
+        return None
+    if not isinstance(raw_lines, list) or not raw_lines:
+        raise ProcurementFlowError(
+            "approved PO line plan must contain at least one line"
+        )
+    if declared_count not in (None, ""):
+        try:
+            expected = int(declared_count)
+        except Exception as exc:
+            raise ProcurementFlowError("source item count is invalid") from exc
+        if expected != len(raw_lines):
+            raise ProcurementFlowError(
+                "approved PO line plan does not represent every source item"
+            )
+
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in raw_lines:
+        if not isinstance(raw, Mapping):
+            raise ProcurementFlowError(
+                "approved PO line plan contains an invalid line"
+            )
+        line_id = str(raw.get("line_id") or "").strip()
+        if not line_id or line_id in seen:
+            raise ProcurementFlowError(
+                "approved PO lines require unique stable line ids"
+            )
+        seen.add(line_id)
+        description = str(raw.get("description") or "").strip()
+        if not description:
+            raise ProcurementFlowError(
+                f"PO line {line_id} is missing a description"
+            )
+        quantity = _bounded_int(
+            raw.get("quantity"),
+            field=f"PO line {line_id} quantity",
+        )
+        unit_cost = _decimal(
+            raw.get("unit_cost"),
+            field=f"PO line {line_id} unit cost",
+        )
+        disposition = str(
+            raw.get("disposition") or "purchase_order_item"
+        ).strip().casefold()
+        if disposition not in {
+            "purchase_order_item",
+            "informational_no_charge",
+        }:
+            raise ProcurementFlowError(
+                f"PO line {line_id} has an unsupported disposition"
+            )
+
+        product_id = raw.get("product_id")
+        if disposition == "purchase_order_item":
+            if not str(product_id or "").isdigit() or int(product_id) < 1:
+                raise ProcurementFlowError(
+                    f"PO line {line_id} is not resolved to an Autotask product"
+                )
+            product_id = int(product_id)
+        else:
+            if unit_cost != Decimal("0.00"):
+                raise ProcurementFlowError(
+                    f"informational no-charge line {line_id} must have zero cost"
+                )
+            product_id = None
+
+        try:
+            customer_quantity = int(raw.get("customer_quantity") or 0)
+            aot_stock_quantity = int(raw.get("aot_stock_quantity") or 0)
+        except Exception as exc:
+            raise ProcurementFlowError(
+                f"PO line {line_id} allocation is invalid"
+            ) from exc
+        if customer_quantity < 0 or aot_stock_quantity < 0:
+            raise ProcurementFlowError(
+                f"PO line {line_id} allocation cannot be negative"
+            )
+        if customer_quantity + aot_stock_quantity != quantity:
+            raise ProcurementFlowError(
+                f"PO line {line_id} allocation does not equal ordered quantity"
+            )
+
+        normalized.append(
+            {
+                "line_id": line_id,
+                "description": description,
+                "quantity": quantity,
+                "unit_cost": unit_cost,
+                "product_id": product_id,
+                "disposition": disposition,
+                "customer_quantity": customer_quantity,
+                "aot_stock_quantity": aot_stock_quantity,
+            }
+        )
+
+    merchandise = sum(
+        (line["unit_cost"] * line["quantity"] for line in normalized),
+        Decimal("0.00"),
+    ).quantize(Decimal("0.01"))
+    freight = _decimal(submission.get("freight") or "0", field="freight")
+    tax = _decimal(submission.get("tax") or "0", field="tax")
+    fees = _decimal(submission.get("fees") or "0", field="fees")
+    approved_total = _decimal(
+        submission.get("total_commitment"),
+        field="approved total commitment",
+    )
+    calculated = (merchandise + freight + tax + fees).quantize(
+        Decimal("0.01")
+    )
+    if calculated != approved_total:
+        raise ProcurementFlowError(
+            "approved PO total does not reconcile to lines + freight + tax + fees"
+        )
+
+    # The governed PO connector exposes Freight but not explicit deterministic
+    # monetary tax/fee fields. Never silently drop an approved amount.
+    if tax != Decimal("0.00"):
+        raise ProcurementFlowError(
+            "nonzero tax is not yet deterministically writable to Autotask PO; "
+            "refusing PO creation"
+        )
+    if fees != Decimal("0.00"):
+        raise ProcurementFlowError(
+            "nonzero fees are not yet deterministically writable to Autotask PO; "
+            "refusing PO creation"
+        )
+
+    return tuple(normalized)
+
+
 def _domain(url: Any) -> str | None:
     value = str(url or "").strip()
     if not value:
@@ -1112,10 +1258,20 @@ class ProcurementTeamsFlow:
         if source_kind not in PROCUREMENT_SOURCE_KINDS:
             raise ProcurementFlowError("Unsupported normalized procurement source kind.")
         vendor = normalized.get("vendor")
-        product = normalized.get("product")
+        raw_lines = normalized.get("lines")
+        if isinstance(raw_lines, list):
+            if len(raw_lines) != 1:
+                raise ProcurementFlowError(
+                    "Multi-line procurement source requires catalog resolution for "
+                    "every line before PO approval; refusing to collapse it to one product."
+                )
+            product = raw_lines[0]
+        else:
+            product = normalized.get("product")
         if not isinstance(vendor, Mapping) or not isinstance(product, Mapping):
             raise ProcurementFlowError(
-                "Normalized procurement source requires one vendor and one product line."
+                "Normalized procurement source requires one vendor and a resolvable "
+                "product line."
             )
         principal, evidence = self._principal(
             tenant=microsoft_tenant_id,
@@ -1622,6 +1778,12 @@ class ProcurementTeamsFlow:
         if str(current.get("digest")) != str(submission.get("digest")):
             raise PermissionError("procurement submission changed after authorization")
 
+        po_plan = (
+            _po_execution_plan(submission)
+            if submission.get("create_po")
+            else None
+        )
+
         correlation = f"corr_proc_exec_{uuid4().hex}"
         existing_result = current.get("result")
         result: dict[str, Any] = (
@@ -1675,11 +1837,25 @@ class ProcurementTeamsFlow:
             result.setdefault("vendor_id", int(vendor_id))
             result.setdefault("created_vendor", False)
 
+        planned_product_ids = (
+            [
+                int(line["product_id"])
+                for line in po_plan or ()
+                if line["disposition"] == "purchase_order_item"
+            ]
+            if po_plan is not None
+            else []
+        )
         product_id = (
-            result.get("product_id")
+            planned_product_ids[0]
+            if planned_product_ids
+            else result.get("product_id")
             or submission["product"].get("existing_product_id")
         )
         created_product = bool(result.get("created_product", False))
+        if product_id is None and po_plan is not None:
+            # Catalog changes must have happened before final PO approval.
+            product_id = 0
         if product_id is None:
             product_output = self.worker.execute(
                 capability_name=SERVICE_PRODUCT_CREATE,
@@ -1707,7 +1883,11 @@ class ProcurementTeamsFlow:
             created_product = True
             checkpoint(product_id=int(product_id), created_product=True)
 
-        if created_product and not result.get("product_vendor_created"):
+        if (
+            created_product
+            and int(product_id) > 0
+            and not result.get("product_vendor_created")
+        ):
             self.worker.execute(
                 capability_name=SERVICE_PRODUCT_VENDOR_CREATE,
                 payload={
@@ -1733,10 +1913,14 @@ class ProcurementTeamsFlow:
                 product_vendor_created=True,
             )
 
-        result.setdefault("product_id", int(product_id))
+        result.setdefault(
+            "product_id",
+            int(product_id) if int(product_id) > 0 else None,
+        )
         result.setdefault("created_product", created_product)
         result.setdefault("purchase_order_id", None)
         result.setdefault("purchase_order_item_id", None)
+        result.setdefault("purchase_order_item_ids", {})
         result.setdefault("purchase_order_submitted", False)
         result.setdefault("client_quote_id", None)
         result.setdefault("quote_location_id", None)
@@ -1894,6 +2078,28 @@ class ProcurementTeamsFlow:
 
 
         if submission.get("create_po"):
+            informational_lines = (
+                [
+                    line
+                    for line in po_plan or ()
+                    if line["disposition"] == "informational_no_charge"
+                ]
+                if po_plan is not None
+                else []
+            )
+            informational_note = (
+                " | no-charge source lines: "
+                + "; ".join(
+                    str(line["line_id"])
+                    + " "
+                    + str(line["description"])
+                    + " x"
+                    + str(line["quantity"])
+                    for line in informational_lines
+                )
+                if informational_lines
+                else ""
+            )
             po_payload: dict[str, Any] = {
                 "vendorID": int(vendor_id),
                 "freight": float(Decimal(str(submission["freight"]))),
@@ -1904,6 +2110,7 @@ class ProcurementTeamsFlow:
                     + str(submission["source_url"])
                     + " | submitted by "
                     + str(submission["requester_name"])
+                    + informational_note
                 )[:4000],
                 "purchaseOrderTemplateID": 102,
                 "shipToName": self.ship_to_name,
@@ -1931,35 +2138,102 @@ class ProcurementTeamsFlow:
             else:
                 po_id = int(po_id)
 
-            po_item_id = result.get("purchase_order_item_id")
-            if not po_item_id:
-                po_item_output = self.worker.execute(
-                    capability_name=SERVICE_PURCHASE_ORDER_ITEM_CREATE,
-                    payload={
-                        "orderID": po_id,
-                        "productID": int(product_id),
-                        "inventoryLocationID": int(self.inventory_location_id),
-                        "quantity": int(submission["quantity"]),
-                        "unitCost": float(
-                            Decimal(str(submission["product"]["cost"]))
-                        ),
-                        "memo": (
-                            str(submission["source_url"])
-                            + " | customer="
-                            + str(submission["customer_quantity"])
-                            + " | AOT stock="
-                            + str(submission["aot_stock_quantity"])
-                        )[:4000],
-                    },
-                    submission=submission,
-                    correlation_id=correlation,
-                )
-                po_item_id = _resource_id(po_item_output)
-                checkpoint(purchase_order_item_id=po_item_id)
+            if po_plan is None:
+                po_item_id = result.get("purchase_order_item_id")
+                if not po_item_id:
+                    po_item_output = self.worker.execute(
+                        capability_name=SERVICE_PURCHASE_ORDER_ITEM_CREATE,
+                        payload={
+                            "orderID": po_id,
+                            "productID": int(product_id),
+                            "inventoryLocationID": int(self.inventory_location_id),
+                            "quantity": int(submission["quantity"]),
+                            "unitCost": float(
+                                Decimal(str(submission["product"]["cost"]))
+                            ),
+                            "memo": (
+                                str(submission["source_url"])
+                                + " | customer="
+                                + str(submission["customer_quantity"])
+                                + " | AOT stock="
+                                + str(submission["aot_stock_quantity"])
+                            )[:4000],
+                        },
+                        submission=submission,
+                        correlation_id=correlation,
+                    )
+                    po_item_id = _resource_id(po_item_output)
+                    checkpoint(purchase_order_item_id=po_item_id)
+                else:
+                    po_item_id = int(po_item_id)
             else:
-                po_item_id = int(po_item_id)
+                item_ids = dict(result.get("purchase_order_item_ids") or {})
+                required_lines = [
+                    line
+                    for line in po_plan
+                    if line["disposition"] == "purchase_order_item"
+                ]
+                for line in required_lines:
+                    line_id = str(line["line_id"])
+                    if line_id in item_ids:
+                        continue
+                    po_item_output = self.worker.execute(
+                        capability_name=SERVICE_PURCHASE_ORDER_ITEM_CREATE,
+                        payload={
+                            "orderID": po_id,
+                            "productID": int(line["product_id"]),
+                            "inventoryLocationID": int(self.inventory_location_id),
+                            "quantity": int(line["quantity"]),
+                            "unitCost": float(line["unit_cost"]),
+                            "memo": (
+                                str(submission["source_url"])
+                                + " | line="
+                                + line_id
+                                + " | "
+                                + str(line["description"])
+                                + " | customer="
+                                + str(line["customer_quantity"])
+                                + " | AOT stock="
+                                + str(line["aot_stock_quantity"])
+                            )[:4000],
+                        },
+                        submission=submission,
+                        correlation_id=correlation,
+                    )
+                    item_ids[line_id] = _resource_id(po_item_output)
+                    checkpoint(purchase_order_item_ids=dict(item_ids))
+
+                expected_ids = {
+                    str(line["line_id"])
+                    for line in required_lines
+                }
+                if set(item_ids) != expected_ids or any(
+                    not str(item_ids.get(line_id) or "").isdigit()
+                    for line_id in expected_ids
+                ):
+                    raise ProcurementFlowError(
+                        "not every approved PO product line has durable Autotask "
+                        "item readback"
+                    )
+                po_item_id = (
+                    int(item_ids[sorted(expected_ids)[0]])
+                    if expected_ids
+                    else None
+                )
+                checkpoint(
+                    purchase_order_item_ids=dict(item_ids),
+                    purchase_order_item_id=po_item_id,
+                    po_line_plan_verified=True,
+                )
 
             if not result.get("purchase_order_submitted"):
+                if (
+                    po_plan is not None
+                    and not result.get("po_line_plan_verified")
+                ):
+                    raise ProcurementFlowError(
+                        "PO line plan is not fully verified; refusing PO submission"
+                    )
                 self.worker.execute(
                     capability_name=SERVICE_PURCHASE_ORDER_UPDATE,
                     payload={"id": po_id, "status": 2},

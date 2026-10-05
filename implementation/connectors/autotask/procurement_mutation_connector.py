@@ -149,7 +149,7 @@ SAFE_FIELDS = {
     }),
     "autotask.purchase.order.item.update": frozenset({
         "id", "productID", "inventoryLocationID", "quantity",
-        "unitCost", "estimatedArrivalDate", "memo",
+        "unitCost", "estimatedArrivalDate", "memo", "ticketID", "chargeID",
     }),
     "autotask.purchase.order.item.receiving.create": frozenset({
         "purchaseOrderItemID", "quantityNowReceiving", "serialNumber",
@@ -164,7 +164,7 @@ SAFE_FIELDS = {
     "autotask.ticket.charge.update": frozenset({
         "id", "productID", "billingCodeID", "costType", "chargeType",
         "datePurchased", "name", "unitQuantity", "unitCost", "unitPrice",
-        "isBillableToCompany", "description", "notes",
+        "isBillableToCompany", "description", "notes", "status",
         "internalPurchaseOrderNumber", "purchaseOrderNumber",
     }),
 }

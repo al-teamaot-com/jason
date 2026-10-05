@@ -630,6 +630,26 @@ Hard invariant:
 
 Negative quantities, over-allocation, under-allocation, or customer allocation without an exact ticket fail closed.
 
+### Multi-line PO fail-closed gate
+
+Final PO approval is a transaction approval, not catalog approval. Before any Autotask PO write, Jason must have an approved immutable PO line plan that represents every source item.
+
+For each source item the plan must persist a stable line ID, description, quantity, unit cost, allocation, disposition, and (for a real PO item) the resolved Autotask product ID. A paid/product line with no resolved Autotask product fails closed before PO creation.
+
+Zero-cost vendor lines that do not require an Autotask catalog record may use the explicit `informational_no_charge` disposition. They remain part of the approved source-line plan and are preserved in PO audit/memo evidence; they must never disappear silently.
+
+Before the first PO write, Jason must prove:
+
+1. declared source item count equals the approved PO line-plan count;
+2. every required PO item is resolved to an Autotask product;
+3. each line allocation equals its ordered quantity;
+4. merchandise + freight + tax + fees exactly equals the approved total commitment;
+5. every nonzero monetary field has a deterministic Autotask write mapping.
+
+The governed Autotask PO connector currently supports a native Freight amount but does not expose an explicit deterministic monetary field for tax or miscellaneous fees. Until such a mapping is implemented and verified, nonzero tax or fees fail closed before PO creation rather than being silently dropped.
+
+During execution, Jason persists one durable Autotask PO-item ID per approved product line. A retry reuses those checkpoints and creates only missing lines. The PO may transition to submitted only when every required line has durable readback evidence. Partial line creation is therefore retryable, but partial PO submission is prohibited.
+
 ### Receiving is not release
 
 Receiving and stock release are different lifecycle transitions:
