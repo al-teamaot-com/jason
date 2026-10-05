@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import os
 import secrets
@@ -13,6 +14,8 @@ from typing import Any, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from connectors.core.contracts import ConnectorConfigurationError
 
@@ -32,6 +35,8 @@ QUICKBOOKS_PRODUCTION_OAUTH_DB_DEFAULT = Path(
     "/var/lib/jason/openclaw/quickbooks-production/oauth.sqlite3"
 )
 QUICKBOOKS_ENVIRONMENTS = frozenset({"sandbox", "production"})
+_TOKEN_ENCRYPTION_PREFIX = "enc:v1:"
+_TOKEN_ENCRYPTION_AAD = b"project-jason:quickbooks-oauth:v1"
 
 
 class QuickBooksOAuthError(RuntimeError):
@@ -51,13 +56,20 @@ class QuickBooksOAuthStatus:
 class QuickBooksOAuthStore:
     """Protected rotating OAuth state for one authorized QuickBooks company.
 
-    Static Intuit app credentials are intentionally not stored here. They remain in
-    OpenBao. This store contains the provider-issued rotating access/refresh tokens,
-    the server-derived Realm ID, environment, and short-lived authorization state.
+    Static Intuit app credentials remain in OpenBao. Sandbox OAuth token state is
+    protected by owner-only filesystem permissions. Production OAuth token state
+    additionally requires AES-256-GCM encryption using a key supplied from the
+    production OpenBao secret; plaintext production token payloads fail closed.
     """
 
-    def __init__(self, path: Path = QUICKBOOKS_OAUTH_DB_DEFAULT) -> None:
+    def __init__(
+        self,
+        path: Path = QUICKBOOKS_OAUTH_DB_DEFAULT,
+        *,
+        require_encryption: bool = False,
+    ) -> None:
         self.path = Path(path)
+        self.require_encryption = bool(require_encryption)
         self._initialized = False
 
     def _raw_connect(self) -> sqlite3.Connection:
@@ -146,7 +158,102 @@ class QuickBooksOAuthStore:
             )
         return dict(row)
 
-    def get_token(self) -> dict[str, Any] | None:
+    @staticmethod
+    def _token_crypto_key(credentials: Mapping[str, str] | None) -> bytes:
+        encoded = str((credentials or {}).get("token_key_b64") or "").strip()
+        if not encoded:
+            raise QuickBooksOAuthError(
+                "QuickBooks production token encryption key is unavailable."
+            )
+        try:
+            key = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise QuickBooksOAuthError(
+                "QuickBooks production token encryption key is invalid."
+            ) from exc
+        if len(key) != 32:
+            raise QuickBooksOAuthError(
+                "QuickBooks production token encryption key must be 256 bits."
+            )
+        return key
+
+    def _encode_payload(
+        self,
+        payload: Mapping[str, Any],
+        *,
+        credentials: Mapping[str, str] | None,
+    ) -> str:
+        serialized = json.dumps(dict(payload), sort_keys=True).encode("utf-8")
+        if not self.require_encryption:
+            return serialized.decode("utf-8")
+        key = self._token_crypto_key(credentials)
+        nonce = os.urandom(12)
+        ciphertext = AESGCM(key).encrypt(
+            nonce,
+            serialized,
+            _TOKEN_ENCRYPTION_AAD,
+        )
+        return _TOKEN_ENCRYPTION_PREFIX + base64.b64encode(
+            nonce + ciphertext
+        ).decode("ascii")
+
+    def _decode_payload(
+        self,
+        stored: str,
+        *,
+        credentials: Mapping[str, str] | None,
+    ) -> dict[str, Any]:
+        raw = str(stored)
+        if not raw.startswith(_TOKEN_ENCRYPTION_PREFIX):
+            if self.require_encryption:
+                raise QuickBooksOAuthError(
+                    "QuickBooks production OAuth token state is not encrypted."
+                )
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise QuickBooksOAuthError(
+                    "QuickBooks OAuth token state is invalid."
+                ) from exc
+        else:
+            key = self._token_crypto_key(credentials)
+            try:
+                blob = base64.b64decode(
+                    raw[len(_TOKEN_ENCRYPTION_PREFIX):],
+                    validate=True,
+                )
+                if len(blob) <= 12:
+                    raise ValueError("encrypted payload is too short")
+                plaintext = AESGCM(key).decrypt(
+                    blob[:12],
+                    blob[12:],
+                    _TOKEN_ENCRYPTION_AAD,
+                )
+                payload = json.loads(plaintext.decode("utf-8"))
+            except (
+                ValueError,
+                binascii.Error,
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+            ) as exc:
+                raise QuickBooksOAuthError(
+                    "QuickBooks encrypted OAuth token state could not be read."
+                ) from exc
+            except Exception as exc:
+                raise QuickBooksOAuthError(
+                    "QuickBooks encrypted OAuth token state could not be read."
+                ) from exc
+        if not isinstance(payload, dict):
+            raise QuickBooksOAuthError(
+                "QuickBooks OAuth token state has an invalid shape."
+            )
+        return payload
+
+    def get_token(
+        self,
+        *,
+        credentials: Mapping[str, str] | None = None,
+    ) -> dict[str, Any] | None:
         with self._connect() as connection:
             row = connection.execute(
                 """
@@ -157,7 +264,10 @@ class QuickBooksOAuthStore:
             ).fetchone()
         if row is None:
             return None
-        payload = json.loads(row["payload_json"])
+        payload = self._decode_payload(
+            str(row["payload_json"]),
+            credentials=credentials,
+        )
         payload["_expires_at"] = int(row["expires_at"])
         payload["_realm_id"] = str(row["realm_id"])
         payload["_environment"] = str(row["environment"])
@@ -169,6 +279,7 @@ class QuickBooksOAuthStore:
         *,
         realm_id: str,
         environment: str,
+        credentials: Mapping[str, str] | None = None,
     ) -> None:
         _require_environment(environment)
         realm = _require_realm_id(realm_id)
@@ -190,6 +301,10 @@ class QuickBooksOAuthStore:
                 "QuickBooks token response did not contain a valid expiration."
             )
         expires_at = int(time.time()) + expires_in
+        stored_payload = self._encode_payload(
+            token,
+            credentials=credentials,
+        )
         with self._connect() as connection:
             connection.execute(
                 """
@@ -204,7 +319,7 @@ class QuickBooksOAuthStore:
                     updated_at=excluded.updated_at
                 """,
                 (
-                    json.dumps(token, sort_keys=True),
+                    stored_payload,
                     expires_at,
                     realm,
                     environment,
@@ -217,8 +332,12 @@ class QuickBooksOAuthStore:
             connection.execute("DELETE FROM oauth_token")
             connection.execute("DELETE FROM oauth_pending")
 
-    def status(self) -> QuickBooksOAuthStatus:
-        token = self.get_token()
+    def status(
+        self,
+        *,
+        credentials: Mapping[str, str] | None = None,
+    ) -> QuickBooksOAuthStatus:
+        token = self.get_token(credentials=credentials)
         now = int(time.time())
         with self._connect() as connection:
             pending = connection.execute(
@@ -373,8 +492,9 @@ def complete_quickbooks_oauth(
         payload,
         realm_id=_require_realm_id(realm_id),
         environment=str(pending["environment"]),
+        credentials=credentials,
     )
-    return store.status()
+    return store.status(credentials=credentials)
 
 
 def refresh_quickbooks_oauth(
@@ -382,7 +502,7 @@ def refresh_quickbooks_oauth(
     *,
     credentials: Mapping[str, str],
 ) -> QuickBooksOAuthStatus:
-    current = store.get_token()
+    current = store.get_token(credentials=credentials)
     if current is None:
         raise QuickBooksOAuthError("QuickBooks is not connected.")
     refresh_token = str(current.get("refresh_token") or "").strip()
@@ -403,8 +523,9 @@ def refresh_quickbooks_oauth(
         payload,
         realm_id=str(current["_realm_id"]),
         environment=str(current["_environment"]),
+        credentials=credentials,
     )
-    return store.status()
+    return store.status(credentials=credentials)
 
 
 def quickbooks_access_context(
@@ -413,12 +534,12 @@ def quickbooks_access_context(
     credentials: Mapping[str, str],
     refresh_window_seconds: int = 120,
 ) -> tuple[str, str, str]:
-    token = store.get_token()
+    token = store.get_token(credentials=credentials)
     if token is None:
         raise QuickBooksOAuthError("QuickBooks is not connected.")
     if int(token.get("_expires_at") or 0) <= int(time.time()) + refresh_window_seconds:
         refresh_quickbooks_oauth(store, credentials=credentials)
-        token = store.get_token()
+        token = store.get_token(credentials=credentials)
     if token is None:
         raise QuickBooksOAuthError("QuickBooks OAuth state is unavailable.")
     access_token = str(token.get("access_token") or "").strip()
