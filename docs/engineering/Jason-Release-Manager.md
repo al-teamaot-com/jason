@@ -15,7 +15,7 @@
 - the exact image tested in pre-production is the image promoted to production;
 - pre-production cannot write production state or activate provider mutations;
 - Support List impact is checked before Production Eligible;
-- unattended promotion runs only during the approved production window: weekdays 17:00-05:00 America/New_York and continuously on weekends;
+- unattended promotion runs every five minutes, 24x7;
 - protected-core releases require owner approval bound to the exact candidate SHA;
 - production success requires live SHA, image identity, and health verification;
 - failed verification rolls back to the recorded known-good revision.
@@ -24,7 +24,7 @@
 
 The Release Manager applies when a protected-main software revision is nominated for production promotion.
 
-The automatic production window is weekdays 17:00-05:00 America/New_York and continuously from Friday 17:00 through Monday 05:00. During the window, the Release Manager reconciles eligible releases every five minutes. The schedule is only a promotion trigger; it never creates Production Eligible status. Explicit owner-driven promotion remains available outside the unattended window.
+The automatic production window is continuous 24x7. The Release Manager reconciles eligible releases every five minutes. The schedule is only a promotion trigger; it never creates Production Eligible status.
 
 ## 3. Scope and Boundaries
 
@@ -127,7 +127,7 @@ No blind deployment retries.
 
 ## 11. Periodic Rechecks
 
-The production-window timer invokes `promote-eligible` every five minutes while the approved window is open. The host runner independently enforces the same window so a stale/persistent timer cannot promote outside it.
+The production timer invokes `promote-eligible` every five minutes, 24x7. The host runner retains the centralized production-window policy gate, which is currently continuously open under owner-approved policy.
 
 It:
 - scans durable release records;
@@ -234,7 +234,7 @@ For the initial production activation:
 8. classify Production Eligible;
 9. promote that same image;
 10. verify exact live SHA/image/health;
-11. confirm the weekday 17:00-05:00 and weekend-continuous production-window timer is enabled;
+11. confirm the 24x7 five-minute production timer is enabled;
 12. confirm no release can skip gates;
 13. preserve rollback-current artifact.
 
