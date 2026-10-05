@@ -14,8 +14,8 @@ This provider is intentionally **read-only** in its first implementation. It exi
 - Authentication: OAuth 2.0 authorization code + refresh token
 - Authorized OAuth scope: `com.intuit.quickbooks.accounting`
 - Payments scope: **not authorized**
-- Current approved environment: **sandbox only**
-- Production state: blocked pending separate Intuit production credentials, production assessment/compliance completion, and a new explicit Jason production activation profile.
+- Current live/accepted environment: **sandbox**
+- Production implementation state: code-ready but **not live**. Activation remains blocked until Intuit approves the Production Key/app assessment, separate production credentials are provisioned, the AOT live company is explicitly authorized, and production acceptance succeeds.
 
 ## Trust and isolation boundary
 
@@ -29,7 +29,12 @@ Callers may not supply:
 
 The connector fails closed if the OAuth environment does not match the active Jason connector profile.
 
-Static Intuit application credentials are stored in OpenBao under the development-only logical secret `quickbooks.oauth_client`. Rotating provider-issued OAuth access/refresh tokens and the OAuth-bound Realm ID are stored in the protected QuickBooks OAuth state database.
+Static Intuit application credentials are isolated by environment in OpenBao:
+
+- development: `quickbooks.oauth_client` at `secret/data/connectors/quickbooks/development/oauth-client`;
+- production: `quickbooks.production.oauth_client` at `secret/data/connectors/quickbooks/production/oauth-client`.
+
+Sandbox OAuth state uses `/var/lib/jason/openclaw/quickbooks/oauth.sqlite3`. Production OAuth state uses the separate `/var/lib/jason/openclaw/quickbooks-production/oauth.sqlite3` store and requires AES-256-GCM application-layer encryption. The production token encryption key is supplied from OpenBao as `token_key_b64`; plaintext production token rows fail closed.
 
 No OAuth token, Client Secret, or provider credential may be emitted to logs, chat output, evidence, documentation, fixtures, or source control.
 
@@ -65,14 +70,19 @@ Unknown requester authorization fails closed as service-only evidence.
 
 The provider and capabilities are registered in dormant PILOT/PLANNED state.
 
-Sandbox activation requires the exact profile:
+Activation is explicit and environment-bound:
 
-`JASON_QUICKBOOKS_READ_PROFILE=quickbooks-sandbox-read-v1`
+- sandbox: `JASON_QUICKBOOKS_READ_PROFILE=quickbooks-sandbox-read-v1`;
+- production: `JASON_QUICKBOOKS_READ_PROFILE=quickbooks-production-read-v1`.
 
-No production profile exists in this implementation. Adding one is a separate trust decision and change.
+The production profile selects the production API base, production-only OpenBao AppRole, and production-only encrypted OAuth state. Production deployment fails closed if the production AppRole is unavailable; it does not fall back to sandbox credentials or tokens.
+
+The existence of the production profile is **not** approval to connect live books. The Intuit Production Key assessment, production keys, live-company OAuth authorization, and AOT production acceptance remain separate required gates.
 
 ## Compliance constraints
 
 Project Jason must follow the current Intuit Developer Terms, QuickBooks Online terms applicable to the connected company, OAuth requirements, production assessment requirements, privacy/security requirements, and branding/marketplace rules applicable to the deployment.
 
-The connector must remain least-privilege. A new Intuit scope or QuickBooks write operation requires a separate reviewed change; technical API availability is not authority to use it.
+The connector must remain least-privilege. Production remains read-only with the Accounting scope only. A new Intuit scope, Payments access, or any QuickBooks write operation requires a separate reviewed change; technical API availability is not authority to use it.
+
+QuickBooks response bodies are not written to Jason's connector/orchestration event stores; those stores retain operational metadata only. The Jason host must not be represented as using full-disk encryption unless that control is separately implemented and verified.
