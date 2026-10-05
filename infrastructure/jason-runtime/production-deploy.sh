@@ -5,6 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMAGE="${JASON_RUNTIME_PRODUCTION_IMAGE:-jason-runtime:production}"
 REVISION="${JASON_SOURCE_REVISION_OVERRIDE:-}"
 COMPLETION_TEAMS_PROFILE="${JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE:-person-al-v1}"
+QUICKBOOKS_READ_PROFILE="${JASON_QUICKBOOKS_READ_PROFILE:-}"
 
 if [ -z "$REVISION" ]; then
   REVISION="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
@@ -18,6 +19,12 @@ ROLLBACK="jason-runtime-rollback-$STAMP"
 
 exec python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-runtime   --image "$IMAGE"   --rollback "$ROLLBACK"   --source-revision "$REVISION"   --harden \
   --set-env "JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE=$COMPLETION_TEAMS_PROFILE" \
+  --set-env "JASON_QUICKBOOKS_OPENBAO_ROLE_ID_PATH=/run/jason-secrets/openbao/quickbooks/role_id" \
+  --set-env "JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH=/run/jason-secrets/openbao/quickbooks/secret_id" \
+  --set-env "JASON_QUICKBOOKS_OAUTH_DB=/var/lib/jason/openclaw/quickbooks/oauth.sqlite3" \
+  --set-env "JASON_QUICKBOOKS_READ_PROFILE=$QUICKBOOKS_READ_PROFILE" \
+  --add-readonly-bind "${JASON_QUICKBOOKS_OPENBAO_ROLE_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/quickbooks-development-oauth-client-approle/role-id}:/run/jason-secrets/openbao/quickbooks/role_id" \
+  --add-readonly-bind "${JASON_QUICKBOOKS_OPENBAO_SECRET_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/quickbooks-development-oauth-client-approle/secret-id}:/run/jason-secrets/openbao/quickbooks/secret_id" \
   --promote-image-tag jason-runtime:production \
   --promote-image-tag jason-runtime:local \
   --rollback-image-tag jason-runtime:rollback-current \
