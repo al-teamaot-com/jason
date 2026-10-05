@@ -90,9 +90,17 @@ def main() -> int:
         args.role_id = args.role_id or str(DEFAULT_ROLE_ID)
         args.secret_id = args.secret_id or str(DEFAULT_SECRET_ID)
 
-    store = QuickBooksOAuthStore(Path(args.db))
+    store = QuickBooksOAuthStore(
+        Path(args.db),
+        require_encryption=(args.environment == "production"),
+    )
     if args.action == "status":
-        status = store.status()
+        credentials = _credentials(args) if args.environment == "production" else None
+        try:
+            status = store.status(credentials=credentials)
+        finally:
+            if credentials is not None:
+                credentials.clear()
         print(
             json.dumps(
                 {
