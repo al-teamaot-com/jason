@@ -16,6 +16,7 @@ Provider documentation describes implementation details and constraints for a pa
 - [IT Glue Reference Provider](IT-Glue-Reference-Provider.md)
 - [Microsoft Graph Provider](Microsoft-Graph-Provider.md)
 - [Microsoft Graph Application Identity](Microsoft-Graph-Application-Identity.md)
+- [QuickBooks Online Provider](QuickBooks-Online-Provider.md)
 
 ## Authority boundary
 
