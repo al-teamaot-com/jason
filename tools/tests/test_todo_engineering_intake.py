@@ -1,6 +1,8 @@
 import importlib.util
 import sys
 import unittest
+import tempfile
+import json
 from pathlib import Path
 
 TOOLS = Path(__file__).resolve().parents[1]
@@ -95,6 +97,25 @@ class TodoEngineeringIntakeTests(unittest.TestCase):
         self.assertIsNone(candidate)
         self.assertIn("Support-first", reason)
 
+    def test_support_row_without_repair_issue_does_not_create_phantom_pressure(self):
+        todos = module.parse_todo_sections(TODO_TEXT)
+        support = (
+            "| ID | Priority | Status | Title | Evidence | Acceptance |\n"
+            "| --- | --- | --- | --- | --- | --- |\n"
+            "| SUPPORT-OPS-099 | P1 | Open | Broken thing | evidence | fix |\n"
+        )
+        candidate, reason = module.select_candidate(
+            todos=todos,
+            support_text=support,
+            support_state={"items": {}},
+            max_support_repairs=2,
+            existing_issues={},
+            eligible_support_ids=set(),
+        )
+        self.assertEqual(reason, "eligible")
+        self.assertIsNotNone(candidate)
+        self.assertEqual(candidate.item_id, "TODO-OPS-010")
+
     def test_blocked_support_does_not_starve_todo_forever(self):
         todos = module.parse_todo_sections(TODO_TEXT)
         support = (
@@ -134,6 +155,37 @@ class TodoEngineeringIntakeTests(unittest.TestCase):
         self.assertEqual(candidate.item_id, "TODO-OPS-010")
 
     def test_existing_todo_issue_is_not_duplicated(self):
+        todos = module.parse_todo_sections(TODO_TEXT)
+        candidate, _ = module.select_candidate(
+            todos=todos,
+            support_text="",
+            support_state={"items": {}},
+            max_support_repairs=2,
+            existing_issues={"TODO-OPS-010": {"number": 5}},
+        )
+        self.assertIsNone(candidate)
+
+    def test_blocked_todo_issue_does_not_consume_open_issue_capacity(self):
+        issues = {
+            "TODO-GOV-002": {"number": 866},
+            "TODO-COMM-001": {"number": 947},
+            "TODO-COMM-004": {"number": 948},
+        }
+        with tempfile.TemporaryDirectory() as td:
+            spool = Path(td)
+            (spool / "development-state.json").write_text(
+                json.dumps({
+                    "items": {
+                        "DEV-866": {"issue_number": 866, "phase": "blocked"},
+                        "DEV-947": {"issue_number": 947, "phase": "diagnosing"},
+                        "DEV-948": {"issue_number": 948, "phase": "diagnosing"},
+                    }
+                }),
+                encoding="utf-8",
+            )
+            self.assertEqual(module.capacity_consuming_todo_issue_count(issues, spool), 2)
+
+    def test_blocked_issue_still_suppresses_duplicate_todo_intake(self):
         todos = module.parse_todo_sections(TODO_TEXT)
         candidate, _ = module.select_candidate(
             todos=todos,

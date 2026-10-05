@@ -67,7 +67,10 @@ Jason may use this backlog as an engineering intake source under the governed TO
 ### TODO-OPS-001 — Operational Resolution Memory and case-based troubleshooting reuse
 
 - **Priority:** P1
-- **Status:** In progress — governed search/reuse and confirmed-case ingestion are production-deployed; first verified-case capture and later reuse proof pending
+- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-04
+- **Implementation state at approval:** In progress — governed search/reuse and confirmed-case ingestion are production-deployed; first verified-case capture and later reuse proof pending
+- **Autonomous engineering readiness:** Approved
+- **Authority basis:** Owner approval on 2026-10-04 authorizes autonomous engineering only within this exact TODO scope; existing Jason governance, client/provider boundaries, protected-core release approval, financial authority, and disruptive-action controls remain unchanged.
 - **Risk level:** Moderate
 - **Idea:** Build a governed Resolution Memory that captures structured outcomes from alerts, tickets, diagnostics, governed executions, technician corrections, and verified resolutions so Jason can find comparable historical cases and use what worked — and what failed — to choose better first diagnostic and remediation steps.
 - **Why it matters:** Many MSP incidents recur with substantially the same symptoms, products, error codes, service states, versions, or environmental conditions. Reusing verified prior outcomes can reduce mean time to resolution, avoid repeating known dead ends, improve first-action quality, and turn AOT's accumulated operating experience into durable institutional knowledge.
@@ -110,7 +113,10 @@ Jason may use this backlog as an engineering intake source under the governed TO
 ### TODO-OPS-002 — Governed BackupIQ ticket-processing playbook
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-04
+- **Implementation state at approval:** Planned
+- **Autonomous engineering readiness:** Approved
+- **Authority basis:** Owner approval on 2026-10-04 authorizes autonomous engineering only within this exact TODO scope; existing Jason governance, client/provider boundaries, protected-core release approval, financial authority, and disruptive-action controls remain unchanged.
 - **Risk level:** High
 - **Idea:** Build and productionize an end-to-end governed Jason playbook for Autotask tickets titled `BackupIQ: Backup for asset is not available for AOT Office`, including asset resolution, availability gating, periodic rechecks, Endpoint Backup diagnostics, bounded remediation, dependency-ticket creation, full command/result documentation, and verified successful-backup closure.
 - **Current blocker:** The playbook requires the Datto Endpoint Backup API details/credentials available at the Owner's desk so Jason can verify backup inventory/state and require an authoritative successful backup before ticket closure. Do not substitute DRMM agent state alone for backup-success evidence.
@@ -562,7 +568,10 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-OPS-003 — Evidence-backed cyber insurance and security questionnaire readiness
 
 - **Priority:** P1
-- **Status:** Planned
+- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-04
+- **Implementation state at approval:** Planned
+- **Autonomous engineering readiness:** Approved
+- **Authority basis:** Owner approval on 2026-10-04 authorizes autonomous engineering only within this exact TODO scope; existing Jason governance, client/provider boundaries, protected-core release approval, financial authority, and disruptive-action controls remain unchanged.
 - **Risk level:** Moderate
 - **Idea:** Give Jason a governed, evidence-backed workflow for answering client cyber-insurance, PII/security, compliance, and vendor-security questionnaires using authoritative client-specific data instead of assumptions or generic AOT standards.
 - **Why it matters:** AOT is regularly asked to complete technical portions of insurance/security forms. Jason should be able to collect current evidence across managed endpoints, Microsoft 365/Entra, email security, backup systems, DNS/security services, network/security appliances, security-awareness training, Autotask, and IT Glue; distinguish confirmed facts from client-owned business/legal questions; identify exceptions; and produce a traceable answer package.
@@ -644,7 +653,10 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-COMM-001 — Governed client communication framework
 
 - **Priority:** P1
-- **Status:** Planned — foundation pieces exist; draft-assist and controlled client-send acceptance remain
+- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-04
+- **Implementation state at approval:** Planned — foundation pieces exist; draft-assist and controlled client-send acceptance remain
+- **Autonomous engineering readiness:** Approved
+- **Authority basis:** Owner approval on 2026-10-04 authorizes autonomous engineering only within this exact TODO scope; existing Jason governance, client/provider boundaries, protected-core release approval, financial authority, and disruptive-action controls remain unchanged.
 - **Risk level:** High
 - **Idea:** Maintain one governed communication framework for audience policy, deterministic templates, evidence-grounded Proposed Reply assistance, and eventual approved client delivery through supported channels.
 - **Why it matters:** Audience filtering, templates, reply drafting, and Autotask client notification are stages of the same communication decision and delivery pipeline.
@@ -660,7 +672,10 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-COMM-004 — Governed Teams interaction and owner operations
 
 - **Priority:** P1
-- **Status:** In progress — approval/information-request paths are production-proven; lifecycle-card source implementation completed 2026-10-04; production acceptance and typed-override acceptance remain
+- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-04
+- **Implementation state at approval:** In progress — approval/information-request paths are production-proven; lifecycle-card source implementation completed 2026-10-04; production acceptance and typed-override acceptance remain
+- **Autonomous engineering readiness:** Approved
+- **Authority basis:** Owner approval on 2026-10-04 authorizes autonomous engineering only within this exact TODO scope; existing Jason governance, client/provider boundaries, protected-core release approval, financial authority, and disruptive-action controls remain unchanged.
 - **Risk level:** High
 - **Idea:** Make Microsoft Teams Jason's low-volume governed interaction surface for approvals, information requests, meaningful lifecycle notifications, exceptions, and owner/technician action-required events.
 - **Current evidence:** Authenticated Adaptive Card Approve/Deny flow is production-proven with single-use decision handling and replay/conflict protection. Normal authenticated Teams conversation ingress is also production-proven. Source now extends the existing governed autonomous Teams channel with concise color/severity Adaptive Cards and credential-blind lifecycle event spooling from the owner-approved development and support-repair workers. Start and blocker events are deduplicated and runtime delivery requires a provider message ID before the notification is marked delivered. Focused notifier/worker regression: 50/50 PASS; runtime composition/deployment-contract regression: 26/26 PASS.
@@ -703,7 +718,10 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-CONN-005 — Microsoft 365 / Entra security-posture reads
 
 - **Priority:** P1
-- **Status:** In progress — governed Entra posture read code deployed; production acceptance blocked by current Microsoft app consent/profile
+- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-04
+- **Implementation state at approval:** In progress — governed Entra posture read code deployed; production acceptance blocked by current Microsoft app consent/profile
+- **Autonomous engineering readiness:** Approved
+- **Authority basis:** Owner approval on 2026-10-04 authorizes autonomous engineering only within this exact TODO scope; existing Jason governance, client/provider boundaries, protected-core release approval, financial authority, and disruptive-action controls remain unchanged.
 - **Risk level:** High
 - **Idea:** Add narrow governed read-only capabilities for MFA registration/enforcement, Conditional Access, privileged-account MFA, legacy-authentication restrictions, Exchange Online protection configuration, external-message tagging, quarantine, attachment/link protection, and related tenant security posture.
 - **Implemented checkpoint (2026-09-19):** Deployed governed `identity.authentication.methods.read`, `identity.conditional.access.search`, `identity.directory.role.search`, and `identity.directory.role.members.search`. Existing `identity.user.search` remains healthy through the same tenant-bound Microsoft path. Live authentication-method and Conditional Access probes reached Microsoft Graph and failed with HTTP 403 under the existing narrow `directory-read` application consent. Directory-role enumeration reached Graph but returned HTTP 400 and remains pending provider-contract/permission validation. No tenant consent or credential authority was broadened.
@@ -775,7 +793,10 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-OPS-007 — Invoice-to-catalog and purchase-order workflow
 
 - **Priority:** P1 — implement before Duo Security API integration
-- **Status:** In progress — governed PO mutations live; lifecycle orchestration foundation implemented
+- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-04
+- **Implementation state at approval:** In progress — governed PO mutations live; lifecycle orchestration foundation implemented
+- **Autonomous engineering readiness:** Approved
+- **Authority basis:** Owner approval on 2026-10-04 authorizes autonomous engineering only within this exact TODO scope; existing Jason governance, client/provider boundaries, protected-core release approval, financial authority, and disruptive-action controls remain unchanged.
 - **Risk level:** High
 - **Idea:** Give Jason a governed procurement workflow that can read vendor invoices from an approved mailbox, reconcile invoice line items against Autotask products, services, and other catalog/inventory records, propose any required catalog additions or updates, propose purchase-order additions, and create the approved Autotask records with authoritative readback.
 - **Why it matters:** Vendor invoices routinely contain products, services, licensing, hardware, freight, and other billable or inventory-related items that must be represented consistently in Autotask before purchasing and billing workflows can be completed. Automating the comparison and proposal work can reduce repetitive finance/operations effort while preserving human approval for financial commitments and master-data changes.

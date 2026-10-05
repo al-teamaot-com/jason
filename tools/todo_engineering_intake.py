@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import release_manager_gate as release_gate
+import support_repair_host_worker as support_worker
 
 DEFAULT_REPO = Path("/home/al/projects/jason")
 DEFAULT_SPOOL = Path("/var/lib/jason/openclaw/support-repair")
@@ -173,6 +174,35 @@ def active_support_ids(state: Mapping[str, Any]) -> list[str]:
     )
 
 
+def capacity_consuming_todo_issue_count(
+    issues: Mapping[str, Mapping[str, Any]],
+    spool: Path,
+) -> int:
+    """Count open TODO issues that still consume admission capacity.
+
+    Blocked development remains durably bound to its existing TODO issue for
+    duplicate suppression, but it must not permanently consume a new-work slot.
+    """
+    path = spool / "development-state.json"
+    if not path.exists():
+        return len(issues)
+    value = json.loads(path.read_text(encoding="utf-8"))
+    records = value.get("items") if isinstance(value, Mapping) else {}
+    records = records if isinstance(records, Mapping) else {}
+    blocked_issue_numbers = {
+        int(record.get("issue_number"))
+        for record in records.values()
+        if isinstance(record, Mapping)
+        and str(record.get("phase") or "") == "blocked"
+        and str(record.get("issue_number") or "").isdigit()
+    }
+    return sum(
+        1
+        for issue in issues.values()
+        if int(issue.get("number", 0) or 0) not in blocked_issue_numbers
+    )
+
+
 def active_development_count(spool: Path) -> int:
     path = spool / "development-state.json"
     if not path.exists():
@@ -206,8 +236,14 @@ def select_candidate(
     support_state: Mapping[str, Any],
     max_support_repairs: int,
     existing_issues: Mapping[str, Any],
+    eligible_support_ids: set[str] | None = None,
 ) -> tuple[TodoItem | None, str]:
     support = release_gate.parse_support(support_text)
+    if eligible_support_ids is not None:
+        support = [
+            item for item in support
+            if item["id"] in eligible_support_ids
+        ]
     todo_summary = [
         {
             "id": item.item_id,
@@ -374,8 +410,10 @@ def main() -> int:
     )
     if active_support + active_development >= engineering_limit:
         candidate, reason = None, "Engineering capacity is already fully occupied"
-    elif len(issues) >= int(policy.get("max_open_todo_issues", 1)):
-        candidate, reason = None, "Maximum open TODO engineering issues already reached"
+    elif capacity_consuming_todo_issue_count(issues, spool) >= int(
+        policy.get("max_open_todo_issues", 1)
+    ):
+        candidate, reason = None, "Maximum capacity-consuming TODO engineering issues already reached"
     else:
         candidate, reason = select_candidate(
             todos=todos,
@@ -383,6 +421,7 @@ def main() -> int:
             support_state=support_state,
             max_support_repairs=support_limit,
             existing_issues=issues,
+            eligible_support_ids=support_worker.open_support_issue_ids(repo),
         )
 
     state: dict[str, Any] = {
@@ -397,6 +436,7 @@ def main() -> int:
         "existing_todo_issues": {
             item_id: int(issue["number"]) for item_id, issue in sorted(issues.items())
         },
+        "capacity_consuming_todo_issues": capacity_consuming_todo_issue_count(issues, spool),
     }
 
     if candidate is None:
