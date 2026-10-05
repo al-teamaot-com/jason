@@ -219,7 +219,10 @@ def build_quickbooks_read_invoker(
         secrets=secrets,
         transport=transport,
         audit=audit,
-        oauth_store=QuickBooksOAuthStore(oauth_db),
+        oauth_store=QuickBooksOAuthStore(
+            oauth_db,
+            require_encryption=(environment == "production"),
+        ),
         expected_environment=environment,
     )
     delegate = GovernedConnectorCapabilityInvoker(
