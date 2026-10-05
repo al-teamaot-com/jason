@@ -1090,6 +1090,33 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** AOT Owner / Jason Governance Authority
 - **Review trigger:** Implement before enabling general autonomous TODO engineering.
 
+### TODO-OPS-010 — OpenClaw lifecycle and upgrade management
+
+- **Priority:** P1
+- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-05
+- **Risk level:** High
+- **Idea:** Treat OpenClaw as a first-class Jason production dependency with governed release evaluation, staged candidate testing, controlled after-hours/weekend cutover, exact-version verification, and deterministic rollback.
+- **Why it matters:** OpenClaw is part of Jason's core runtime path. An unmanaged or ad-hoc OpenClaw update can affect sessions, tool/plugin behavior, gateway reliability, Teams interaction, model routing, workers, and MCP integration. Jason should know exactly which OpenClaw version belongs to each production state and be able to prove or roll back that state.
+- **Maintenance-window policy:** OpenClaw production cutovers must occur during an appropriate after-hours or weekend maintenance window. There is no fixed 2:30 AM engineering/release window. The maintenance window should be selected based on change risk, expected interruption, acceptance-test scope, rollback needs, and current AOT operating conditions.
+- **Lifecycle:** detect release -> collect official release/security notes -> classify relevance/risk -> build isolated candidate -> run Jason-specific acceptance suite -> approve candidate automatically when all standing policy gates pass -> schedule eligible after-hours/weekend cutover -> snapshot/retain prior production version -> activate candidate -> verify complete Jason stack -> automatically roll back on failed acceptance -> record final production manifest and evidence.
+- **Release selection policy:** Do not automatically chase every upstream OpenClaw release. Prefer a proven release cadence, with security/reliability fixes prioritized. Allow staying one tested release behind current when that reduces operational risk. Emergency security fixes may be accelerated under existing emergency/change governance.
+- **Candidate isolation:** Never overwrite the active OpenClaw installation as the first upgrade step. Install/build the candidate in a separate immutable/versioned location and validate from exact source/package identity before cutover.
+- **Acceptance suite:** At minimum verify OpenClaw startup/health, Jason bridge, MCP status/tool exposure, governed Autotask reads, one controlled governed write/readback, Datto reads, Teams outbound send/readback and inbound reply handling, autonomous ticket scan, Support worker, TODO engineering worker, model routing, persisted session recovery, restart/reconnect behavior, and no unexpected direct-provider access.
+- **Rollback:** Preserve the exact previous accepted OpenClaw package/tree/configuration before cutover. Failed production acceptance must atomically restore the previous OpenClaw target, restart affected services, and independently verify Jason's known-good production behavior. Do not leave a partially upgraded state.
+- **Production manifest:** Jason release evidence should record at least Jason source SHA, runtime image/revision, MCP image/revision, OpenClaw version/source identity, bridge version, engineering-worker source, configuration/policy version, and acceptance evidence so the production state is reproducible.
+- **Update evidence:** Record release notes reviewed, candidate version, security/reliability rationale, test results, maintenance-window decision, activation timestamp, rollback point, post-cutover verification, and final outcome.
+- **Owner communication:** Do not require owner involvement for routine candidate evaluation, staging, testing, or a fully successful pre-authorized after-hours/weekend cutover. Notify the owner when a release requires material risk/policy judgment, a vendor/account action, an acceptance test fails and no safe self-heal exists, or rollback does not restore the known-good state.
+- **Governance requirements:** Preserve Jason constitutional controls, exact-version/source verification, immutable release practices, provider/client isolation, no disruptive action outside approved maintenance authority, protected-core release controls, evidence-before-assertion, and automatic rollback on failed verification.
+- **Autonomous engineering readiness:** Approved
+- **Approved scope:** Implement release discovery/evaluation, candidate isolation, Jason-specific acceptance testing, maintenance-window eligibility, exact-version production manifesting, governed cutover orchestration, automatic rollback, and owner notification only for true decision/external blockers. This approval does not authorize bypassing provider/security controls, broad sudo/passwordless root, or arbitrary disruptive maintenance outside the bounded OpenClaw lifecycle workflow.
+- **Authority basis:** AOT Owner approval in conversation on 2026-10-05; existing Jason release/governance policies remain authoritative.
+- **Required capabilities:** Official OpenClaw release/version discovery; immutable candidate package/source handling; local service/process health reads; Jason bridge/MCP/runtime acceptance calls; release manifest persistence; controlled service cutover/restart under bounded maintenance authority; rollback pointer/state management; Teams owner notification through canonical verified path.
+- **Acceptance test:** Starting from current production OpenClaw 2026.7.1, stage a newer selected candidate without changing production; prove the complete acceptance suite; perform one controlled after-hours/weekend cutover; verify exact candidate identity across OpenClaw/bridge/Jason dependencies; force one synthetic post-cutover acceptance failure in a controlled test and prove automatic rollback to the exact prior accepted OpenClaw state; prove the production manifest reflects the final state and no manual reinstall is required for rollback.
+- **Open questions:** None material to begin engineering. Release-specific vendor/security notes may create bounded implementation questions during a future candidate evaluation.
+- **Decision owner:** AOT Owner / Jason Governance Authority
+- **Review trigger:** Begin autonomous engineering now. Review policy only if OpenClaw's release architecture materially changes, a maintenance window would require customer-visible disruption beyond standing authority, or the upgrade introduces a new external dependency/permission class.
+
+
 ## Legacy ID aliases and consolidation map
 
 These aliases preserve old PR, support, session, and conversation references. An alias never creates implementation authority.
