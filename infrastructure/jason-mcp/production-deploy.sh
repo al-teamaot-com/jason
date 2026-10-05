@@ -22,6 +22,11 @@ for arg in "$@"; do
 done
 
 python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-mcp-pilot   --image "$IMAGE"   --rollback "$ROLLBACK"   --source-revision "$REVISION"   --harden \
+  --set-env JASON_QUICKBOOKS_OPENBAO_ROLE_ID_PATH=/run/jason-secrets/openbao/quickbooks/role_id \
+  --set-env JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH=/run/jason-secrets/openbao/quickbooks/secret_id \
+  --set-env JASON_QUICKBOOKS_OAUTH_DB=/var/lib/jason/openclaw/quickbooks/oauth.sqlite3 \
+  --add-readonly-bind "${JASON_QUICKBOOKS_OPENBAO_ROLE_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/quickbooks-development-oauth-client-approle/role-id}:/run/jason-secrets/openbao/quickbooks/role_id" \
+  --add-readonly-bind "${JASON_QUICKBOOKS_OPENBAO_SECRET_ID_HOST_PATH:-/var/lib/jason/runtime-secrets/openbao/quickbooks-development-oauth-client-approle/secret-id}:/run/jason-secrets/openbao/quickbooks/secret_id" \
   --promote-image-tag jason-mcp:production \
   --rollback-image-tag jason-mcp:rollback-current \
   --health-url http://127.0.0.1:8000/healthz   "$@"
