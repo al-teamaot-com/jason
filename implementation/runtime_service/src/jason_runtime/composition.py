@@ -372,6 +372,11 @@ from .reflection_runtime import (
     register_reflection_runtime_foundation,
 )
 from .return_path import OpenClawReturnPathConversationIngress, OpenClawReturnPathTransport
+from .quickbooks_reads import (
+    build_quickbooks_read_invoker,
+    register_quickbooks_read_invokers,
+    register_quickbooks_runtime_foundation,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -465,6 +470,15 @@ class RuntimeSettings:
     dnsfilter_mcp_enabled: bool = False
     dnsfilter_mcp_oauth_db: Path = Path(
         "/var/lib/jason/openclaw/dnsfilter-mcp/oauth.sqlite3"
+    )
+    quickbooks_openbao_role_id_path: Path = Path(
+        "/run/jason-secrets/openbao/quickbooks/role_id"
+    )
+    quickbooks_openbao_secret_id_path: Path = Path(
+        "/run/jason-secrets/openbao/quickbooks/secret_id"
+    )
+    quickbooks_oauth_db: Path = Path(
+        "/var/lib/jason/openclaw/quickbooks/oauth.sqlite3"
     )
     microsoft_openbao_role_id_path: Path = Path(
         "/run/jason-secrets/openbao/microsoft-graph/role_id"
@@ -782,6 +796,24 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_DNSFILTER_MCP_OAUTH_DB",
                     "/var/lib/jason/openclaw/dnsfilter-mcp/oauth.sqlite3",
+                )
+            ),
+            quickbooks_openbao_role_id_path=Path(
+                os.getenv(
+                    "JASON_QUICKBOOKS_OPENBAO_ROLE_ID_PATH",
+                    "/run/jason-secrets/openbao/quickbooks/role_id",
+                )
+            ),
+            quickbooks_openbao_secret_id_path=Path(
+                os.getenv(
+                    "JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH",
+                    "/run/jason-secrets/openbao/quickbooks/secret_id",
+                )
+            ),
+            quickbooks_oauth_db=Path(
+                os.getenv(
+                    "JASON_QUICKBOOKS_OAUTH_DB",
+                    "/var/lib/jason/openclaw/quickbooks/oauth.sqlite3",
                 )
             ),
             microsoft_openbao_role_id_path=Path(
@@ -1314,6 +1346,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         )
     )
     register_email_send(capabilities=capabilities, providers=providers)
+    quickbooks_activation = register_quickbooks_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+    )
 
     integration_broker = IntegrationBroker(
         capabilities=capabilities,
@@ -1608,6 +1645,20 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         transport=http_transport,
         audit=ConnectorEventAudit(orchestration_events),
     )
+    quickbooks_read_invoker = (
+        build_quickbooks_read_invoker(
+            openbao_url=settings.openbao_url,
+            role_id_path=settings.quickbooks_openbao_role_id_path,
+            secret_id_path=settings.quickbooks_openbao_secret_id_path,
+            oauth_db=settings.quickbooks_oauth_db,
+            transport=http_transport,
+            audit=ConnectorEventAudit(orchestration_events),
+            bindings=source_authorization_bindings,
+            environment="sandbox",
+        )
+        if quickbooks_activation.enabled
+        else None
+    )
     ticket_create_invoker = build_autotask_ticket_create_invoker(
         openbao_url=settings.openbao_url,
         role_id_path=settings.autotask_write_openbao_role_id_path,
@@ -1893,6 +1944,11 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         invokers=invokers,
         invoker=provider_read_invoker,
     )
+    if quickbooks_read_invoker is not None:
+        register_quickbooks_read_invokers(
+            invokers=invokers,
+            invoker=quickbooks_read_invoker,
+        )
     register_autotask_ticket_create_invoker(
         invokers=invokers,
         invoker=ticket_create_invoker,
