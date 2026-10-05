@@ -59,12 +59,12 @@ def test_callback_state_is_single_use_and_realm_is_server_derived(tmp_path, monk
         },
         code="one-time-code",
         state=state,
-        realm_id="9341458418110656",
+        realm_id="1234567890123456",
     )
 
     assert status.connected is True
     assert status.environment == "sandbox"
-    assert status.realm_id == "9341458418110656"
+    assert status.realm_id == "1234567890123456"
     assert status.has_refresh_token is True
     assert status.pending_authorization is False
 
@@ -77,7 +77,7 @@ def test_callback_state_is_single_use_and_realm_is_server_derived(tmp_path, monk
             },
             code="replayed-code",
             state=state,
-            realm_id="9341458418110656",
+            realm_id="1234567890123456",
         )
 
 
@@ -89,7 +89,7 @@ def test_access_context_refreshes_and_persists_newest_refresh_token(tmp_path, mo
             "refresh_token": "old-refresh",
             "expires_in": 1,
         },
-        realm_id="9341458418110656",
+        realm_id="1234567890123456",
         environment="sandbox",
     )
 
@@ -113,7 +113,7 @@ def test_access_context_refreshes_and_persists_newest_refresh_token(tmp_path, mo
     )
 
     assert access == "new-access"
-    assert realm == "9341458418110656"
+    assert realm == "1234567890123456"
     assert environment == "sandbox"
     assert store.get_token()["refresh_token"] == "new-refresh"
 
