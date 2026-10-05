@@ -150,6 +150,14 @@ def _process(path: Path) -> None:
         if not script.is_file():
             raise HostReconcileError("immutable host reconciliation script is missing")
 
+        script_env = os.environ.copy()
+        script_env.update(
+            {
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": "safe.directory",
+                "GIT_CONFIG_VALUE_0": str(REPO),
+            }
+        )
         completed = subprocess.run(
             [str(script), source_revision],
             check=True,
@@ -157,6 +165,7 @@ def _process(path: Path) -> None:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             timeout=240,
+            env=script_env,
         )
         resolved = CURRENT.resolve().name.casefold()
         if resolved != source_revision:
