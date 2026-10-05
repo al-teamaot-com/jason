@@ -65,7 +65,7 @@ def _build(tmp_path):
             "refresh_token": "sandbox-refresh",
             "expires_in": 3600,
         },
-        realm_id="9341458418110656",
+        realm_id="1234567890123456",
         environment="sandbox",
     )
     secrets = FakeSecrets()
@@ -93,7 +93,7 @@ def test_company_read_uses_oauth_bound_realm_and_sandbox_base(tmp_path):
     assert call["method"] == "GET"
     assert call["url"] == (
         "https://sandbox-quickbooks.api.intuit.com/v3/company/"
-        "9341458418110656/companyinfo/9341458418110656"
+        "1234567890123456/companyinfo/1234567890123456"
     )
     assert call["headers"]["Authorization"] == "Bearer sandbox-access"
     assert secrets.calls == ["quickbooks.oauth_client"]
@@ -132,7 +132,7 @@ def test_account_search_builds_only_fixed_entity_query(tmp_path):
     )
 
     call = transport.calls[-1]
-    assert call["url"].endswith("/v3/company/9341458418110656/query")
+    assert call["url"].endswith("/v3/company/1234567890123456/query")
     assert call["params"] == {
         "query": "select * from Account startposition 5 maxresults 25"
     }
