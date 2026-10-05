@@ -55,3 +55,15 @@ def test_privileged_boundary_contains_no_sudo_or_docker_privilege_escalation():
     assert "sudo " not in combined
     assert "--privileged" not in combined
     assert "/var/run/docker.sock" not in combined
+
+
+def test_root_worker_scopes_git_safe_directory_to_reconcile_subprocess():
+    text = (ROOT / "tools" / "release_host_reconcile_worker.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"GIT_CONFIG_COUNT": "1"' in text
+    assert '"GIT_CONFIG_KEY_0": "safe.directory"' in text
+    assert '"GIT_CONFIG_VALUE_0": str(REPO)' in text
+    assert "env=script_env" in text
+    assert "git config --system" not in text
+    assert "git config --global" not in text
