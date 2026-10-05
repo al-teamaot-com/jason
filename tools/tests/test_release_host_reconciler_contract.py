@@ -67,3 +67,22 @@ def test_root_worker_scopes_git_safe_directory_to_reconcile_subprocess():
     assert "env=script_env" in text
     assert "git config --system" not in text
     assert "git config --global" not in text
+
+
+def test_root_worker_normalizes_immutable_release_traversal_without_global_umask_change():
+    text = (ROOT / "tools" / "release_host_reconcile_worker.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'Path("/opt/jason/releases") / source_revision' in text
+    assert "os.chmod(release_dir, 0o755)" in text
+    assert "previous_umask = os.umask(0o022)" in text
+    assert "os.umask(previous_umask)" in text
+    assert "immutable release directory is not safely traversable" in text
+
+
+def test_host_reconcile_script_explicitly_sets_release_root_mode():
+    text = (
+        ROOT / "tools" / "reconcile_production_host_services.sh"
+    ).read_text(encoding="utf-8")
+    assert 'chown root:root "$RELEASE_DIR"' in text
+    assert 'chmod 0755 "$RELEASE_DIR"' in text
