@@ -7175,7 +7175,10 @@ async def _complete_quickbooks_oauth_callback(
     try:
         status = await asyncio.to_thread(
             complete_quickbooks_oauth,
-            QuickBooksOAuthStore(store_path),
+            QuickBooksOAuthStore(
+                store_path,
+                require_encryption=(environment == "production"),
+            ),
             credentials=_quickbooks_oauth_credentials(environment),
             code=code,
             state=state,
