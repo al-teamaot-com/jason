@@ -70,11 +70,20 @@ from jason_runtime.autonomy_execution_pilot import (
 )
 from orchestrator.teams_identity_binding import MicrosoftIdentityBinding
 from connectors.datto_rmm.site_variables import sanitize_site_variables_for_principal
+from connectors.core.contracts import ConnectorContext
+from connectors.core.openbao_secrets import OpenBaoSecretResolver
 from connectors.dnsfilter.mcp_oauth import (
     DNSFILTER_MCP_OAUTH_DB_DEFAULT,
     DnsFilterMcpOAuthError,
     DnsFilterMcpOAuthStore,
     complete_dnsfilter_oauth,
+)
+from connectors.quickbooks.connector import QUICKBOOKS_LOGICAL_SECRET
+from connectors.quickbooks.oauth import (
+    QUICKBOOKS_OAUTH_DB_DEFAULT,
+    QuickBooksOAuthError,
+    QuickBooksOAuthStore,
+    complete_quickbooks_oauth,
 )
 from connectors.datto_edr.threat_correlation import (
     AmbiguousThreatCorrelationError,
@@ -170,6 +179,24 @@ JASON_DNSFILTER_MCP_OAUTH_DB = Path(
     os.environ.get(
         "JASON_DNSFILTER_MCP_OAUTH_DB",
         str(DNSFILTER_MCP_OAUTH_DB_DEFAULT),
+    )
+)
+JASON_QUICKBOOKS_OAUTH_DB = Path(
+    os.environ.get(
+        "JASON_QUICKBOOKS_OAUTH_DB",
+        str(QUICKBOOKS_OAUTH_DB_DEFAULT),
+    )
+)
+JASON_QUICKBOOKS_OPENBAO_ROLE_ID_PATH = Path(
+    os.environ.get(
+        "JASON_QUICKBOOKS_OPENBAO_ROLE_ID_PATH",
+        "/run/jason-secrets/openbao/quickbooks/role_id",
+    )
+)
+JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH = Path(
+    os.environ.get(
+        "JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH",
+        "/run/jason-secrets/openbao/quickbooks/secret_id",
     )
 )
 
@@ -7055,6 +7082,83 @@ transport_security = TransportSecuritySettings(
 )
 
 
+def _quickbooks_oauth_credentials() -> Mapping[str, str]:
+    resolver = OpenBaoSecretResolver(
+        base_url=os.environ.get("JASON_OPENBAO_URL", "http://openbao:8200"),
+        role_id_path=JASON_QUICKBOOKS_OPENBAO_ROLE_ID_PATH,
+        secret_id_path=JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH,
+    )
+    return resolver.resolve(
+        QUICKBOOKS_LOGICAL_SECRET,
+        ConnectorContext(
+            correlation_id="quickbooks-oauth-callback",
+            principal_id="svc-jason-mcp-oauth",
+            organization_id="aot",
+            client_id=None,
+            capability="quickbooks.oauth.complete",
+            mode="execute",
+        ),
+    )
+
+
+async def quickbooks_oauth_callback(request: StarletteRequest):
+    """Complete the Intuit OAuth authorization-code callback without exposing tokens."""
+
+    error = str(request.query_params.get("error") or "").strip()
+    if error:
+        return JSONResponse(
+            {
+                "status": "error",
+                "message": "QuickBooks authorization was not completed.",
+            },
+            status_code=400,
+        )
+    code = str(request.query_params.get("code") or "").strip()
+    state = str(request.query_params.get("state") or "").strip()
+    realm_id = str(request.query_params.get("realmId") or "").strip()
+    if not code or not state or not realm_id:
+        return JSONResponse(
+            {
+                "status": "error",
+                "message": "QuickBooks OAuth callback is missing required parameters.",
+            },
+            status_code=400,
+        )
+    try:
+        status = await asyncio.to_thread(
+            complete_quickbooks_oauth,
+            QuickBooksOAuthStore(JASON_QUICKBOOKS_OAUTH_DB),
+            credentials=_quickbooks_oauth_credentials(),
+            code=code,
+            state=state,
+            realm_id=realm_id,
+        )
+    except Exception as exc:
+        if isinstance(exc, QuickBooksOAuthError):
+            logger.warning("QuickBooks OAuth callback failed without token disclosure")
+        else:
+            logger.exception("QuickBooks OAuth callback failed without token disclosure")
+        return JSONResponse(
+            {
+                "status": "error",
+                "message": (
+                    "QuickBooks authorization could not be completed. "
+                    "Restart the governed connection flow."
+                ),
+            },
+            status_code=400,
+        )
+    return JSONResponse(
+        {
+            "status": "connected",
+            "provider": "quickbooks",
+            "connected": status.connected,
+            "environment": status.environment,
+            "realm_bound": bool(status.realm_id),
+        }
+    )
+
+
 async def dnsfilter_oauth_callback(request: StarletteRequest):
     """Complete DNSFilter OAuth authorization-code + PKCE callback."""
 
@@ -7195,6 +7299,11 @@ app.add_route(
 app.add_route(
     "/oauth/dnsfilter/callback",
     dnsfilter_oauth_callback,
+    methods=["GET"],
+)
+app.add_route(
+    "/oauth/quickbooks/callback",
+    quickbooks_oauth_callback,
     methods=["GET"],
 )
 
