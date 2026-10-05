@@ -84,6 +84,8 @@ if [ ! -d "$RELEASE_DIR" ]; then
   chown -R root:root "$TMP_RELEASE"
   mv "$TMP_RELEASE" "$RELEASE_DIR"
 fi
+chown root:root "$RELEASE_DIR"
+chmod 0755 "$RELEASE_DIR"
 
 for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}" "${MAINTENANCE_TIMERS[@]}" "${OBSOLETE_UNITS[@]}"; do
   if [ -f "/etc/systemd/system/$unit" ]; then
