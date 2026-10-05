@@ -45,6 +45,9 @@ The database contains rotating provider-issued tokens and Realm ID. File mode is
 
 The same durable OAuth state must be mounted into the MCP callback edge and Jason runtime before authorization is started. Do not create independent token stores for the edge and runtime.
 
+Deployment wiring mounts the QuickBooks development AppRole read-only at
+`/run/jason-secrets/openbao/quickbooks/{role_id,secret_id}` in both the MCP edge and runtime. The runtime activation profile remains empty by default; mounting credentials alone does not activate QuickBooks read capabilities.
+
 ## Start authorization
 
 After the exact reviewed source is deployed to the callback edge and the required OpenBao AppRole/OAuth-state mounts are present, start the sandbox authorization flow from an authorized operator shell:
