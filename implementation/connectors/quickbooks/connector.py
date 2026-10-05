@@ -23,6 +23,7 @@ from .oauth import (
 
 QUICKBOOKS_PROVIDER = "quickbooks"
 QUICKBOOKS_LOGICAL_SECRET = "quickbooks.oauth_client"
+QUICKBOOKS_PRODUCTION_LOGICAL_SECRET = "quickbooks.production.oauth_client"
 
 QUICKBOOKS_COMPANY_READ = "quickbooks.company.read"
 QUICKBOOKS_ACCOUNT_SEARCH = "quickbooks.account.search"
@@ -73,6 +74,11 @@ class QuickBooksConnector:
                 "QuickBooks expected environment must be sandbox or production."
             )
         self._expected_environment = expected
+        self._logical_secret = (
+            QUICKBOOKS_PRODUCTION_LOGICAL_SECRET
+            if expected == "production"
+            else QUICKBOOKS_LOGICAL_SECRET
+        )
 
     def execute(self, request: ConnectorRequest) -> ConnectorResult:
         require_capability(request, self.capabilities)
@@ -86,7 +92,7 @@ class QuickBooksConnector:
         self._validate_arguments(operation, arguments)
 
         credentials = self._secrets.resolve(
-            QUICKBOOKS_LOGICAL_SECRET,
+            self._logical_secret,
             request.context,
         )
         try:

@@ -18,6 +18,7 @@ from orchestrator.quickbooks_capability_catalog import (
 
 QUICKBOOKS_READ_ACTIVATION_ENV = "JASON_QUICKBOOKS_READ_PROFILE"
 QUICKBOOKS_READ_SANDBOX_PROFILE = "quickbooks-sandbox-read-v1"
+QUICKBOOKS_READ_PRODUCTION_PROFILE = "quickbooks-production-read-v1"
 
 
 class QuickBooksReadActivationError(RuntimeError):
@@ -29,6 +30,7 @@ class QuickBooksReadActivationState:
     profile: str
     enabled: bool
     capability_names: tuple[str, ...]
+    environment: str | None = None
 
 
 def apply_quickbooks_read_activation_profile(
@@ -43,8 +45,14 @@ def apply_quickbooks_read_activation_profile(
             profile="",
             enabled=False,
             capability_names=(),
+            environment=None,
         )
-    if normalized != QUICKBOOKS_READ_SANDBOX_PROFILE:
+    profile_environment = {
+        QUICKBOOKS_READ_SANDBOX_PROFILE: "sandbox",
+        QUICKBOOKS_READ_PRODUCTION_PROFILE: "production",
+    }
+    environment = profile_environment.get(normalized)
+    if environment is None:
         raise QuickBooksReadActivationError(
             "unsupported QuickBooks read activation profile"
         )
@@ -119,6 +127,7 @@ def apply_quickbooks_read_activation_profile(
         profile=normalized,
         enabled=True,
         capability_names=tuple(sorted(QUICKBOOKS_CAPABILITIES)),
+        environment=environment,
     )
 
 
