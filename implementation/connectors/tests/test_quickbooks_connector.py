@@ -100,6 +100,31 @@ def test_company_read_uses_oauth_bound_realm_and_sandbox_base(tmp_path):
     assert audit.events[0][1]["realm_bound_by_oauth"] is True
 
 
+def test_company_read_uses_production_secret_and_production_base(tmp_path):
+    store = QuickBooksOAuthStore(tmp_path / "production-oauth.sqlite3")
+    store.set_token(
+        {"access_token": "production-access", "refresh_token": "production-refresh", "expires_in": 3600},
+        realm_id="2222222222222222",
+        environment="production",
+    )
+    secrets = FakeSecrets()
+    transport = FakeTransport()
+    audit = FakeAudit()
+    connector = QuickBooksConnector(
+        secrets=secrets, transport=transport, audit=audit, oauth_store=store,
+        expected_environment="production",
+    )
+    result = connector.execute(ConnectorRequest(_context(QUICKBOOKS_COMPANY_READ), {}))
+    assert result.provider == "quickbooks"
+    call = transport.calls[-1]
+    assert call["url"] == (
+        "https://quickbooks.api.intuit.com/v3/company/"
+        "2222222222222222/companyinfo/2222222222222222"
+    )
+    assert secrets.calls == ["quickbooks.production.oauth_client"]
+    assert audit.events[0][1]["environment"] == "production"
+
+
 def test_raw_query_realm_and_environment_are_rejected_before_provider_call(tmp_path):
     connector, secrets, transport, _ = _build(tmp_path)
 
