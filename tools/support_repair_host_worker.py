@@ -334,6 +334,24 @@ def expanded_search_terms(terms: list[str]) -> list[str]:
 
 
 
+def bounded_relevant_excerpt(text: str, terms: list[str], *, limit: int = 14000) -> str:
+    if len(text) <= limit:
+        return text
+    lowered = text.casefold()
+    hits = []
+    for term in expanded_search_terms(terms):
+        pos = lowered.find(term.casefold())
+        if pos >= 0:
+            hits.append(pos)
+    if not hits:
+        return text[:limit]
+    center = min(hits)
+    start = max(0, center - limit // 3)
+    end = min(len(text), start + limit)
+    start = max(0, end - limit)
+    return text[start:end]
+
+
 def search_path_priority(path: str) -> tuple[int, str]:
     """Prefer implementation-bearing source over narrative documentation."""
     normalized = path.casefold()
@@ -541,7 +559,7 @@ def safe_search(worktree: Path, terms: list[str], gate, policy: Mapping[str, Any
             text = candidate.read_text(encoding='utf-8')
         except UnicodeDecodeError:
             continue
-        excerpts.append({'path': path, 'content': text[:14000]})
+        excerpts.append({'path': path, 'content': bounded_relevant_excerpt(text, terms, limit=14000)})
     return excerpts
 
 
@@ -708,7 +726,7 @@ def diff_excerpts(worktree: Path, gate, policy: Mapping[str, Any]) -> list[dict[
             text = target.read_text(encoding='utf-8')
         except UnicodeDecodeError:
             continue
-        excerpts.append({'path': path, 'content': text[:14000]})
+        excerpts.append({'path': path, 'content': bounded_relevant_excerpt(text, terms, limit=14000)})
         if len(excerpts) >= 10:
             break
     return excerpts
