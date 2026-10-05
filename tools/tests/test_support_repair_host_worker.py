@@ -499,3 +499,32 @@ def test_merge_source_excerpts_keeps_prior_context_and_adds_new():
         'implementation/kernel/system_registry/contracts.py',
     ]
     assert merged[1]['content'] == 'service'
+
+
+def test_bounded_relevant_excerpt_includes_match_beyond_file_prefix():
+    text = 'header\n' + ('x' * 18000) + '\ndef target_selection_logic():\n    return True\n'
+    excerpt = worker.bounded_relevant_excerpt(
+        text, ['target_selection_logic'], content_limit=6000
+    )
+    assert 'header' in excerpt
+    assert 'target_selection_logic' in excerpt
+    assert len(excerpt) <= 6000
+
+
+def test_proposed_test_edits_requires_actual_declared_test_edit():
+    policy = {'max_changed_lines': 800, 'max_changed_files': 25}
+    edits = [
+        {'path': 'implementation/example.py', 'old_text': 'a', 'new_text': 'b'},
+    ]
+    assert worker.proposed_test_edits(
+        edits, ['implementation/tests/test_example.py'], Gate(), policy
+    ) == []
+
+    edits.append({
+        'path': 'implementation/tests/test_example.py',
+        'old_text': 'old test',
+        'new_text': 'new test',
+    })
+    assert worker.proposed_test_edits(
+        edits, ['implementation/tests/test_example.py'], Gate(), policy
+    ) == ['implementation/tests/test_example.py']
