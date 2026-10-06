@@ -209,7 +209,7 @@ VULSCAN_SPLIT_SCOPE = PlaybookScope(
 )
 VULSCAN_CLIENT_DISPOSITION_SCOPE = PlaybookScope(
     playbook_id="vulscan_missing_patch",
-    playbook_version="1.1.0",
+    playbook_version="1.2.0",
     policy_id="playbook-autonomy:vulscan_missing_patch",
     required_action_capabilities=(
         "service.ticket.note.create",
@@ -4310,7 +4310,7 @@ class OperationalAutonomyMaintenance:
                 (
                     "STATUS: WAITING - CLIENT NOTIFICATION AUTHORITY. "
                     "NEXT STEP: Jason will resume automatically when the exact "
-                    "VulScan v1.1.0 client-disposition scope is durably promoted. "
+                    "VulScan v1.2.0 client-disposition scope is durably promoted. "
                     "The patch classification is preserved. "
                     "CHANGES MADE: No client contact change, client notification, "
                     "or Close Pending transition was attempted."
