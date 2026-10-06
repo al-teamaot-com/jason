@@ -35,6 +35,8 @@ MAINTENANCE_TIMERS=(
   jason-openclaw-authority-health.timer
   jason-documentation-reconciliation.timer
 )
+PROVIDER_CANARY_SERVICE=jason-provider-health-canary.service
+PROVIDER_CANARY_TIMER=jason-provider-health-canary.timer
 OBSOLETE_UNITS=(
   jason-communication-template-exporter.service
   jason-completion-gap-exporter.service
@@ -87,7 +89,7 @@ fi
 chown root:root "$RELEASE_DIR"
 chmod 0755 "$RELEASE_DIR"
 
-for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}" "${MAINTENANCE_TIMERS[@]}" "${OBSOLETE_UNITS[@]}"; do
+for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}" "${MAINTENANCE_TIMERS[@]}" "$PROVIDER_CANARY_SERVICE" "$PROVIDER_CANARY_TIMER" "${OBSOLETE_UNITS[@]}"; do
   if [ -f "/etc/systemd/system/$unit" ]; then
     cp -a "/etc/systemd/system/$unit" "$BACKUP_DIR/$unit.before"
   fi
@@ -104,6 +106,11 @@ done
 for unit in "${MAINTENANCE_SERVICES[@]}" "${MAINTENANCE_TIMERS[@]}"; do
   src="$RELEASE_DIR/infrastructure/openclaw-operations/systemd/$unit"
   test -f "$src" || { echo "ERROR: missing canonical maintenance unit: $src" >&2; exit 2; }
+  install -o root -g root -m 0644 "$src" "/etc/systemd/system/$unit"
+done
+for unit in "$PROVIDER_CANARY_SERVICE" "$PROVIDER_CANARY_TIMER"; do
+  src="$RELEASE_DIR/infrastructure/showcase/systemd/$unit"
+  test -f "$src" || { echo "ERROR: missing canonical provider-canary unit: $src" >&2; exit 2; }
   install -o root -g root -m 0644 "$src" "/etc/systemd/system/$unit"
 done
 
@@ -132,6 +139,8 @@ done
 for timer in "${MAINTENANCE_TIMERS[@]}"; do
   systemctl enable --now "$timer"
 done
+systemctl enable --now "$PROVIDER_CANARY_TIMER"
+systemctl start "$PROVIDER_CANARY_SERVICE"
 for unit in "${MAINTENANCE_SERVICES[@]}"; do
   systemctl start "$unit"
 done
@@ -151,6 +160,16 @@ for timer in "${MAINTENANCE_TIMERS[@]}"; do
     exit 3
   fi
 done
+if [ "$(systemctl is-active "$PROVIDER_CANARY_TIMER")" != "active" ]; then
+  echo "ERROR: $PROVIDER_CANARY_TIMER is not active after reconciliation." >&2
+  systemctl status "$PROVIDER_CANARY_TIMER" --no-pager -l || true
+  exit 3
+fi
+if [ "$(systemctl show "$PROVIDER_CANARY_SERVICE" -p Result --value)" != "success" ]; then
+  echo "ERROR: $PROVIDER_CANARY_SERVICE did not complete successfully." >&2
+  systemctl status "$PROVIDER_CANARY_SERVICE" --no-pager -l || true
+  exit 3
+fi
 for unit in "${MAINTENANCE_SERVICES[@]}"; do
   if [ "$(systemctl show "$unit" -p Result --value)" != "success" ]; then
     echo "ERROR: $unit did not complete successfully." >&2
@@ -171,7 +190,7 @@ for port in "${VERIFY_PORTS[@]}"; do
     exit 5
   }
 done
-for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}"; do
+for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}" "$PROVIDER_CANARY_SERVICE"; do
   wd="$(systemctl show "$unit" -p WorkingDirectory --value)"
   ex="$(systemctl show "$unit" -p ExecStart --value)"
   if printf '%s %s' "$wd" "$ex" | grep -qE '/home/al/(projects/jason|jason-worktrees/)'; then

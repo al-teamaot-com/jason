@@ -53,6 +53,29 @@ def test_wrong_principal_cannot_use_canary_policy():
     )
 
 
+
+def test_graph_canary_requires_validated_aot_monitoring_boundary():
+    assert is_provider_health_canary_request(
+        request=request(
+            client_id="client-aot-internal",
+            arguments={
+                "display_name": PROVIDER_HEALTH_CANARY_SENTINEL,
+                "page_size": 1,
+            },
+        ),
+        capability_name="identity.user.search",
+    )
+    assert not is_provider_health_canary_request(
+        request=request(
+            client_id=None,
+            arguments={
+                "display_name": PROVIDER_HEALTH_CANARY_SENTINEL,
+                "page_size": 1,
+            },
+        ),
+        capability_name="identity.user.search",
+    )
+
 def test_only_empty_provider_output_is_canary_releasable():
     assert provider_health_canary_output_is_empty(
         output={"data": {"items": []}}

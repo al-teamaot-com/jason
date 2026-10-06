@@ -476,3 +476,50 @@ def test_production_convergence_detects_legacy_window_contradiction(tmp_path, mo
     assert "production_convergence_intent_contradiction:legacy_daily_window_present" in failures
     assert "production_convergence_intent_contradiction:coordinator_not_24x7" in failures
     assert "production_convergence_intent_contradiction:legacy_coordinator_time_present" in failures
+
+
+def test_provider_canary_monitoring_rejects_stale_report(tmp_path, monkeypatch):
+    report = tmp_path / "provider-health-canaries.json"
+    report.write_text(
+        json.dumps({"generated_at_epoch": 1.0, "results": []}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        module,
+        "run",
+        lambda args, **kwargs: SimpleNamespace(returncode=1, stdout="inactive\n", stderr=""),
+    )
+
+    failures, evidence = module.provider_canary_monitoring_failures(
+        report, max_age_seconds=60
+    )
+
+    assert "provider_canary_report_stale" in failures
+    assert "provider_canary_timer_inactive" in failures
+    assert evidence["fresh"] is False
+
+
+def test_provider_canary_monitoring_accepts_fresh_report(tmp_path, monkeypatch):
+    report = tmp_path / "provider-health-canaries.json"
+    report.write_text(
+        json.dumps(
+            {
+                "generated_at_epoch": datetime.now(timezone.utc).timestamp(),
+                "results": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        module,
+        "run",
+        lambda args, **kwargs: SimpleNamespace(returncode=0, stdout="active\n", stderr=""),
+    )
+
+    failures, evidence = module.provider_canary_monitoring_failures(
+        report, max_age_seconds=60
+    )
+
+    assert failures == []
+    assert evidence["fresh"] is True
+    assert evidence["timer_active"] is True
