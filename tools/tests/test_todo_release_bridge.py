@@ -106,6 +106,7 @@ class TodoReleaseBridgeTests(unittest.TestCase):
             self.assertEqual(result["state"], "production_eligible")
             args = run_cmd.call_args.args[0]
             self.assertIn("prepare", args)
+            self.assertEqual(args[args.index("--repo") + 1], str(root))
             self.assertIn("--candidate-sha", args)
             self.assertIn(SHA, args)
             self.assertIn("--change-class", args)
@@ -119,3 +120,38 @@ class TodoReleaseBridgeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_upstream_commitment_state_reports_real_development_blocker():
+    phase, reason = module.upstream_commitment_state(
+        {'phase': 'blocked', 'reason': 'provider consent required'}
+    )
+    assert phase == 'development_blocked'
+    assert reason == 'provider consent required'
+    phase, _ = module.upstream_commitment_state({'phase': 'pr_ready'})
+    assert phase == 'waiting_development_merge'
+
+
+def test_commitment_summary_flags_empty_release_queue_with_upstream_work():
+    summary = module.commitment_summary(
+        {
+            'TODO-OPS-001': {'phase': 'development_in_progress'},
+            'TODO-OPS-002': {'phase': 'development_blocked'},
+            'TODO-OPS-003': {'phase': 'complete'},
+        }
+    )
+    assert summary['approved_commitment_count'] == 3
+    assert summary['outstanding_count'] == 2
+    assert summary['blocked_count'] == 1
+    assert summary['upstream_pending_count'] == 2
+    assert summary['release_pending_count'] == 0
+    assert summary['release_queue_empty_but_upstream_pending'] is True
+
+
+def test_development_records_by_issue_reads_durable_worker_state(tmp_path):
+    (tmp_path / 'development-state.json').write_text(
+        json.dumps({'items': {'DEV-42': {'issue_number': 42, 'phase': 'blocked'}}}),
+        encoding='utf-8',
+    )
+    records = module.development_records_by_issue(tmp_path)
+    assert records[42]['phase'] == 'blocked'

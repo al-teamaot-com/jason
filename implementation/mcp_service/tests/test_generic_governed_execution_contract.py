@@ -1260,3 +1260,49 @@ def test_ticket_activity_report_rejects_unbounded_or_naive_windows():
         "2026-09-29T03:00:00+00:00",
     )
     assert too_large["status"] == "rejected"
+
+
+def test_status_surfaces_upstream_approved_production_commitments(monkeypatch, tmp_path):
+    state = tmp_path / 'todo-release-state.json'
+    state.write_text(
+        json.dumps(
+            {
+                'updated_at': '2026-10-06T19:00:00+00:00',
+                'items': {
+                    'TODO-OPS-001': {
+                        'issue_number': 951,
+                        'phase': 'development_blocked',
+                        'reason': 'source context blocker',
+                    },
+                    'TODO-OPS-007': {
+                        'issue_number': 954,
+                        'phase': 'waiting_development_merge',
+                        'reason': '',
+                    },
+                },
+                'summary': {
+                    'approved_commitment_count': 2,
+                    'outstanding_count': 2,
+                    'blocked_count': 1,
+                    'upstream_pending_count': 2,
+                    'release_pending_count': 0,
+                    'release_queue_empty_but_upstream_pending': True,
+                    'phases': {
+                        'development_blocked': 1,
+                        'waiting_development_merge': 1,
+                    },
+                },
+            }
+        ),
+        encoding='utf-8',
+    )
+    monkeypatch.setenv('JASON_TODO_RELEASE_STATE', str(state))
+    monkeypatch.setattr(server, '_active_action_capabilities', lambda: [])
+    monkeypatch.setattr(server, '_autonomous_ticket_work_snapshot', lambda: {'status': 'succeeded'})
+
+    result = server.jason_mcp_status()
+    commitments = result['production_commitments']
+    assert commitments['outstanding_count'] == 2
+    assert commitments['blocked_count'] == 1
+    assert commitments['release_queue_empty_but_upstream_pending'] is True
+    assert [item['todo_id'] for item in commitments['items']] == ['TODO-OPS-001', 'TODO-OPS-007']
