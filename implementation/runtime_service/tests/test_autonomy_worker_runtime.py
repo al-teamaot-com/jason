@@ -3538,7 +3538,7 @@ def test_vulscan_client_disposition_waits_then_resumes_on_exact_v11_promotion(
         for _, capability, args in actions.calls
     )
 
-    promotions.approved_scopes.add(("vulscan_missing_patch", "1.1.0"))
+    promotions.approved_scopes.add(("vulscan_missing_patch", "1.2.0"))
     worker.tick()
 
     final = store.get(141183)
@@ -3583,7 +3583,7 @@ def test_gromelski_approved_pending_stays_internal_until_technical_completion(
         promotion_store=ExactPromotionStore(
             approved_scopes=(
                 ("vulscan_missing_patch", "1.0.0"),
-                ("vulscan_missing_patch", "1.1.0"),
+                ("vulscan_missing_patch", "1.2.0"),
             )
         ),
         max_active_work_items=2,
