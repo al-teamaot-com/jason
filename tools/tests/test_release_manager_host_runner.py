@@ -86,6 +86,54 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         self.assertEqual(urlopen.call_count, 2)
         self.assertIn("per_page=100&page=2", urlopen.call_args_list[1].args[0].full_url)
 
+    def test_support_repair_state_context_classifies_active_and_blocked(self):
+        import json
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            state_root = root / "release-manager"
+            support_root = root / "support-repair"
+            support_root.mkdir(parents=True)
+            (support_root / "state.json").write_text(
+                json.dumps(
+                    {
+                        "items": {
+                            "SUPPORT-AUTO-A": {"phase": "blocked"},
+                            "SUPPORT-AUTO-B": {"phase": "implementing"},
+                            "SUPPORT-AUTO-C": {"phase": "identified"},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            active, blocked = runner.support_repair_state_context(state_root)
+            self.assertEqual(active, ["SUPPORT-AUTO-B"])
+            self.assertEqual(blocked, ["SUPPORT-AUTO-A"])
+
+    def test_feature_gate_ignores_support_rows_without_open_repair_issue(self):
+        with tempfile.TemporaryDirectory() as td:
+            record = {
+                "state": "requested",
+                "change_class": "feature",
+                "active_support_repairs": [],
+            }
+            with (
+                patch.object(runner, "open_support_issue_ids", return_value=set()),
+                patch.object(
+                    runner,
+                    "support_repair_state_context",
+                    return_value=([], []),
+                ),
+            ):
+                runner.gate_transition(
+                    ROOT,
+                    Path(td),
+                    record,
+                    "development",
+                )
+            self.assertEqual(record["state"], "development")
+            self.assertEqual(record["eligible_support_items"], [])
+
     def test_create_record_builds_once_after_protected_checks(self):
         with tempfile.TemporaryDirectory() as td:
             state_root = Path(td)
