@@ -614,6 +614,12 @@ The Teams card exposes independent controls:
 
 The controls are independent. Creating a client quote does not create a PO. Creating a PO does not create a client quote unless explicitly selected.
 
+### Canonical shipping / freight rule
+
+Autotask Product ID **29683988**, name **Shipping**, is the canonical Jason product for shipping-related charges. Vendor terminology such as shipping, freight, delivery, shipping and handling, freight charge, `FRT-`, or equivalent carrier/shipping labels must normalize to this existing product rather than create vendor-specific shipping products.
+
+The approval card **Freight / Shipping** section must identify the canonical Shipping product and capture the actual vendor freight amount. When a purchase order is created, that amount is written to Autotask's native PO **Freight** field. If shipping later becomes customer-billable, use Product ID **29683988** for the corresponding shipping charge. The canonical product identity and the monetary freight amount are separate persisted facts and must both survive approval/readback.
+
 ### Explicit ticket rule for client quotes
 
 A client quote may be created only when one exact Autotask ticket has been resolved and persisted. The quote audit record must retain ticket ID/number/title/company, created Opportunity ID, created Quote ID, created QuoteItem IDs, and source/procurement submission ID.

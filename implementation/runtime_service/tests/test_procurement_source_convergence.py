@@ -5,6 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from jason_runtime.procurement_teams_flow import (
+    CANONICAL_SHIPPING_PRODUCT_ID,
+    CANONICAL_SHIPPING_PRODUCT_NAME,
     PROCUREMENT_WRITE_CAPABILITIES,
     ProcurementFlowError,
     ProcurementTeamsFlow,
@@ -99,6 +101,55 @@ def test_vendor_quote_and_url_use_same_submission_shape_and_card_controls(tmp_pa
     assert toggle_ids == {"create_po", "create_client_quote"}
     input_ids = {item.get("id") for item in card["body"]}
     assert {"quantity", "customer_quantity", "aot_stock_quantity", "ticket_number"} <= input_ids
+    freight_input = next(
+        item for item in card["body"]
+        if item.get("id") == "freight"
+    )
+    assert freight_input["label"] == "Freight / Shipping"
+    shipping_note = next(
+        item for item in card["body"]
+        if item.get("type") == "TextBlock"
+        and "Autotask shipping code:" in str(item.get("text") or "")
+    )
+    assert CANONICAL_SHIPPING_PRODUCT_NAME in shipping_note["text"]
+    assert str(CANONICAL_SHIPPING_PRODUCT_ID) in shipping_note["text"]
+
+
+class ApprovalRecorder:
+    def create(self, request, *, now):
+        return request
+
+
+def test_owner_approval_identifies_canonical_shipping_product(tmp_path):
+    flow = _flow(tmp_path)
+    flow.approval_service = ApprovalRecorder()
+    flow.owner_ids = ("person-owner",)
+    submission = {
+        "submission_id": "procsub-shipping",
+        "digest": "digest",
+        "requester_principal_id": "person-requester",
+        "requester_name": "Requester",
+        "vendor": {"name": "National AZON"},
+        "product": {"name": "Paper", "cost": "86.11"},
+        "at_part_number": "3873V027",
+        "quantity": 2,
+        "customer_quantity": 0,
+        "aot_stock_quantity": 2,
+        "ticket_number": None,
+        "retail_price": "109.00",
+        "billing_treatment": "no_charge_internal",
+        "freight": "35.37",
+        "freight_product_id": CANONICAL_SHIPPING_PRODUCT_ID,
+        "freight_product_name": CANONICAL_SHIPPING_PRODUCT_NAME,
+        "total_commitment": "207.59",
+        "spending_limit": "100.00",
+        "source_url": "invoice:PSI393904",
+    }
+    approval = flow._create_owner_approval(submission)
+    facts = dict(approval.presentation.facts)
+    assert facts["Freight / Shipping"] == (
+        "$35.37 via Shipping (AT product 29683988)"
+    )
 
 
 def test_card_source_is_not_a_second_procurement_execution_path(tmp_path):
