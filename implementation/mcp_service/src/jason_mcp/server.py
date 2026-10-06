@@ -116,6 +116,7 @@ from orchestrator.provider_read_capability_catalog import (
 )
 from jason_runtime.autotask_internal_note import (
     SERVICE_TICKET_NOTE_CREATE,
+    SERVICE_TICKET_NOTE_UPDATE,
     autotask_internal_note_mcp_surface_enabled,
 )
 from orchestrator.provider_mutation_capability_catalog import (
@@ -1908,7 +1909,10 @@ def _project_action_result(
             result["verified_fields"] = [str(value) for value in fields[:20]]
         return result
 
-    if capability_name == "service.ticket.note.create":
+    if capability_name in {
+        SERVICE_TICKET_NOTE_CREATE,
+        SERVICE_TICKET_NOTE_UPDATE,
+    }:
         verification = data.get("jasonVerification")
 
         if not isinstance(verification, Mapping):
@@ -3355,6 +3359,78 @@ def _canonicalize_governed_action_arguments(
             note=note,
             title=title,
         )
+
+    if capability_name == SERVICE_TICKET_NOTE_UPDATE:
+        if "payload" in raw:
+            allowed_outer = {"payload", "expectedDescriptionSha256", "updateMode"}
+            unknown_outer = set(raw) - allowed_outer
+            if unknown_outer or not isinstance(raw.get("payload"), Mapping):
+                raise ValueError("AUTOTASK_INTERNAL_NOTE_UPDATE_ARGUMENTS_INVALID")
+            payload_input = dict(raw["payload"])
+            expected_hash = str(raw.get("expectedDescriptionSha256") or "").strip().casefold()
+            update_mode = str(raw.get("updateMode") or "").strip().casefold()
+        else:
+            allowed = {
+                "ticket_id", "ticketID", "note_id", "id", "note",
+                "description", "title", "expected_description_sha256",
+                "expectedDescriptionSha256", "update_mode", "updateMode",
+            }
+            unknown = set(raw) - allowed
+            if unknown:
+                raise ValueError(
+                    "AUTOTASK_INTERNAL_NOTE_UPDATE_UNSUPPORTED_ARGUMENTS:"
+                    + ",".join(sorted(unknown))
+                )
+            ticket_id = raw.get("ticket_id", raw.get("ticketID"))
+            note_id = raw.get("note_id", raw.get("id"))
+            description = raw.get("note", raw.get("description"))
+            title = str(raw.get("title") or "").strip()
+            payload_input = {
+                "ticketID": ticket_id,
+                "id": note_id,
+                "title": title,
+                "description": description,
+                "noteType": 3,
+                "publish": 2,
+            }
+            expected_hash = str(
+                raw.get("expected_description_sha256", raw.get("expectedDescriptionSha256"))
+                or ""
+            ).strip().casefold()
+            update_mode = str(
+                raw.get("update_mode", raw.get("updateMode")) or ""
+            ).strip().casefold()
+        allowed_payload = {"ticketID", "id", "title", "description", "noteType", "publish"}
+        if set(payload_input) - allowed_payload:
+            raise ValueError("AUTOTASK_INTERNAL_NOTE_UPDATE_PAYLOAD_INVALID")
+        for key in ("ticketID", "id"):
+            value = payload_input.get(key)
+            if isinstance(value, bool):
+                raise ValueError("AUTOTASK_INTERNAL_NOTE_UPDATE_ID_REQUIRED")
+            try:
+                value = int(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("AUTOTASK_INTERNAL_NOTE_UPDATE_ID_REQUIRED") from exc
+            if value < 1:
+                raise ValueError("AUTOTASK_INTERNAL_NOTE_UPDATE_ID_REQUIRED")
+            payload_input[key] = value
+        title = str(payload_input.get("title") or "").strip()
+        description = str(payload_input.get("description") or "")
+        if not title or not description:
+            raise ValueError("AUTOTASK_INTERNAL_NOTE_UPDATE_CONTENT_REQUIRED")
+        payload_input["title"] = title
+        payload_input["description"] = description
+        payload_input["noteType"] = 3
+        payload_input["publish"] = 2
+        if len(expected_hash) != 64 or any(ch not in "0123456789abcdef" for ch in expected_hash):
+            raise ValueError("AUTOTASK_INTERNAL_NOTE_UPDATE_HASH_REQUIRED")
+        if update_mode not in {"append", "replace"}:
+            raise ValueError("AUTOTASK_INTERNAL_NOTE_UPDATE_MODE_INVALID")
+        return {
+            "payload": payload_input,
+            "expectedDescriptionSha256": expected_hash,
+            "updateMode": update_mode,
+        }
 
     if capability_name == "service.product.vendor.create":
         if "payload" in raw:

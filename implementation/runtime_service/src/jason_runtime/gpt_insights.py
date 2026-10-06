@@ -3,12 +3,10 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
 
 BASE_TITLE = "GPT Insights"
-UPDATE_PREFIX = "GPT Insights - Update"
-AUGMENTATION_ID = "gpt_insights_tech_assist_v0_1"
+AUGMENTATION_ID = "gpt_insights_tech_assist_v0_2"
 
 NETWORK_COMMAND = (
     "$up=Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object Status -eq 'Up'; "
@@ -94,7 +92,6 @@ def material_fingerprint(evidence: InsightEvidence) -> str:
         "category": evidence.category,
         "device_name": evidence.device_name,
         "device_online": evidence.device_online,
-        "last_seen": evidence.last_seen,
         "operating_system": evidence.operating_system,
         "connection_summary": evidence.connection_summary,
         "related_ticket_count": evidence.related_ticket_count,
@@ -104,12 +101,6 @@ def material_fingerprint(evidence: InsightEvidence) -> str:
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
-
-def note_title(*, update: bool, now: datetime | None = None) -> str:
-    if not update:
-        return BASE_TITLE
-    stamp = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    return f"{UPDATE_PREFIX} {stamp}"
 
 
 def render_insight(evidence: InsightEvidence) -> str:

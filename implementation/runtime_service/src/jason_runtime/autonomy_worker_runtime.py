@@ -103,7 +103,6 @@ from .gpt_insights import (
     classify_ticket as classify_gpt_insights_ticket,
     connection_summary as gpt_insights_connection_summary,
     material_fingerprint as gpt_insights_fingerprint,
-    note_title as gpt_insights_note_title,
     render_insight as render_gpt_insight,
 )
 
@@ -241,9 +240,21 @@ OFFLINE_AUGMENTATION_SCOPE = PlaybookScope(
 )
 GPT_INSIGHTS_SCOPE = PlaybookScope(
     playbook_id="gpt_insights_tech_assist",
-    playbook_version="0.1.0",
+    playbook_version="0.2.0",
     policy_id="playbook-autonomy:gpt_insights_tech_assist",
-    required_action_capabilities=("service.ticket.note.create",),
+    required_action_capabilities=(
+        "service.ticket.note.create",
+        "service.ticket.note.update",
+    ),
+)
+JASON_ACTIVITY_SCOPE = PlaybookScope(
+    playbook_id="jason_activity_log",
+    playbook_version="0.1.0",
+    policy_id="playbook-autonomy:jason_activity_log",
+    required_action_capabilities=(
+        "service.ticket.note.create",
+        "service.ticket.note.update",
+    ),
 )
 PLAYBOOK_SCOPES = {
     EDR_SCOPE.playbook_id: EDR_SCOPE,
@@ -258,6 +269,7 @@ PLAYBOOK_SCOPES = {
     IDLE_LOG_OFF_SCOPE.playbook_id: IDLE_LOG_OFF_SCOPE,
     OFFLINE_AUGMENTATION_SCOPE.playbook_id: OFFLINE_AUGMENTATION_SCOPE,
     GPT_INSIGHTS_SCOPE.playbook_id: GPT_INSIGHTS_SCOPE,
+    JASON_ACTIVITY_SCOPE.playbook_id: JASON_ACTIVITY_SCOPE,
 }
 
 HEALTH_COMPONENT_NAME = "Check Datto EDR/AV Status AOT Ver 12122025-1"
@@ -1506,6 +1518,19 @@ class OperationalAutonomyMaintenance:
         by_id = {int(item.resource_id): item for item in candidates}
         self._reconcile_orphaned_waiting_device_rows(by_id)
 
+        # GPT Insights is a technician-assist augmentation for every eligible
+        # Help Desk I / New ticket. It is independent of remediation matching and
+        # never claims, moves, or otherwise changes the ticket.
+        if self._scope_is_promoted(GPT_INSIGHTS_SCOPE):
+            for item in candidates[: self.max_candidate_evaluations_per_scan]:
+                try:
+                    self._maybe_write_gpt_insights(item)
+                except Exception as exc:
+                    self._audit_diagnostic(
+                        "gpt_insights.review.failed",
+                        {"ticket_id": int(item.resource_id), "error_type": type(exc).__name__},
+                    )
+
         # Ticket augmentation is deliberately independent of queue ownership and
         # active-work capacity. It may add read-only context to a technician-owned
         # offline ticket, but it never claims, requeues, or changes ticket status.
@@ -1848,6 +1873,11 @@ class OperationalAutonomyMaintenance:
                                     else "Exact endpoint is online again; resuming preserved work."
                                 )
                             )
+                            self._best_effort_jason_activity(
+                                existing,
+                                event="Device Available",
+                                detail=resume_reason,
+                            )
                             existing = self._replace(
                                 existing,
                                 phase=resume_phase,
@@ -1999,13 +2029,6 @@ class OperationalAutonomyMaintenance:
                 continue
             scope = self._match_scope(item.context)
             if scope is None:
-                try:
-                    self._maybe_write_gpt_insights(item)
-                except Exception as exc:
-                    self._audit_diagnostic(
-                        "gpt_insights.review.failed",
-                        {"ticket_id": ticket_id, "error_type": type(exc).__name__},
-                    )
                 unsupported += 1
                 classifications[ticket_id] = (
                     "unsupported_capability", "no_applicable_promoted_playbook",
@@ -2291,11 +2314,17 @@ class OperationalAutonomyMaintenance:
                     }
                 },
             )
+        wait_reason = self._device_wait_reason(access_state, deb)
+        self._best_effort_jason_activity(
+            work,
+            event="Device Check",
+            detail=wait_reason + "; no remediation attempted while endpoint access is unavailable.",
+        )
         self.store.put(
             self._replace(
                 work,
                 phase=f"waiting_device_access:{work.phase}",
-                last_reason=self._device_wait_reason(access_state, deb),
+                last_reason=wait_reason,
             )
         )
         return True
@@ -6796,9 +6825,145 @@ class OperationalAutonomyMaintenance:
                 "human-review handoff readback did not verify queue and status"
             )
 
+    @staticmethod
+    def _note_description_sha256(value: str) -> str:
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _exact_internal_note(notes, title: str):
+        matches = [
+            dict(note)
+            for note in notes
+            if isinstance(note, Mapping)
+            and str(note.get("title") or "").strip() == title
+            and int(note.get("noteType") or 0) == 3
+            and int(note.get("publish") or 0) == 2
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    def _update_living_internal_note(
+        self,
+        *,
+        scope: PlaybookScope,
+        ticket_id: int,
+        note: Mapping[str, Any],
+        title: str,
+        new_body: str,
+        mode: str,
+    ) -> None:
+        note_id = self._positive_int(note.get("id"), "ticket note id")
+        current_body = str(note.get("description") or "")
+        self.actions.execute(
+            scope,
+            "service.ticket.note.update",
+            {
+                "payload": {
+                    "id": note_id,
+                    "ticketID": int(ticket_id),
+                    "title": title,
+                    "description": new_body,
+                    "noteType": 3,
+                    "publish": 2,
+                },
+                "expectedDescriptionSha256": self._note_description_sha256(current_body),
+                "updateMode": mode,
+            },
+        )
+
+    def _append_jason_activity(
+        self,
+        work: OperationalWork,
+        *,
+        event: str,
+        detail: str,
+    ) -> None:
+        if not self._scope_is_promoted(JASON_ACTIVITY_SCOPE):
+            return
+        timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z")
+        entry = f"{timestamp} - {event}: {str(detail).strip()}"
+        notes = self._read_data(
+            "service.ticket.notes.search", {"ticket_id": int(work.ticket_id)}
+        ).get("items")
+        notes = notes if isinstance(notes, list) else []
+        living = self._exact_internal_note(notes, "Jason Activity")
+        if living is None:
+            self.actions.execute(
+                JASON_ACTIVITY_SCOPE,
+                "service.ticket.note.create",
+                {"payload": {
+                    "ticketID": int(work.ticket_id),
+                    "title": "Jason Activity",
+                    "description": "Jason Activity\n\n" + entry,
+                    "noteType": 3,
+                    "publish": 2,
+                }},
+            )
+            return
+        current = str(living.get("description") or "")
+        # Suppress a duplicate state/result even when the timestamp would differ.
+        normalized_detail = f"{event}: {str(detail).strip()}"
+        if any(
+            line.strip().endswith(normalized_detail)
+            for line in current.splitlines()
+        ):
+            return
+        # Keep the live Autotask note bounded. A rollover is a new Jason-owned note,
+        # while the durable SQLite activity ledger remains the complete history.
+        title = "Jason Activity"
+        if len(current) + len(entry) + 2 > 24000:
+            existing_rollovers = [
+                note for note in notes
+                if isinstance(note, Mapping)
+                and str(note.get("title") or "").startswith("Jason Activity ")
+            ]
+            title = f"Jason Activity {len(existing_rollovers) + 2}"
+            self.actions.execute(
+                JASON_ACTIVITY_SCOPE,
+                "service.ticket.note.create",
+                {"payload": {
+                    "ticketID": int(work.ticket_id),
+                    "title": title,
+                    "description": title + "\n\n" + entry,
+                    "noteType": 3,
+                    "publish": 2,
+                }},
+            )
+            return
+        self._update_living_internal_note(
+            scope=JASON_ACTIVITY_SCOPE,
+            ticket_id=work.ticket_id,
+            note=living,
+            title="Jason Activity",
+            new_body=current + "\n\n" + entry,
+            mode="append",
+        )
+
+    def _best_effort_jason_activity(
+        self,
+        work: OperationalWork,
+        *,
+        event: str,
+        detail: str,
+    ) -> None:
+        try:
+            self._append_jason_activity(work, event=event, detail=detail)
+        except Exception as exc:
+            if self.audit is not None:
+                self._audit_diagnostic(
+                    "jason_activity.log.failed",
+                    {
+                        "ticket_id": int(work.ticket_id),
+                        "event": str(event)[:80],
+                        "error_type": type(exc).__name__,
+                    },
+                )
+
+
     def _maybe_write_gpt_insights(self, candidate) -> None:
         """Add one evidence-first technician-assist note for unsupported Help Desk work."""
         if str(candidate.source_queue).strip().casefold() != "help desk i":
+            return
+        if str(candidate.context.get("_jason_source_status_label") or "").strip().casefold() != "new":
             return
         if not self._scope_is_promoted(GPT_INSIGHTS_SCOPE):
             return
@@ -6811,10 +6976,8 @@ class OperationalAutonomyMaintenance:
 
         notes = self._read_data("service.ticket.notes.search", {"ticket_id": ticket_id}).get("items")
         notes = notes if isinstance(notes, list) else []
-        has_base = any(
-            isinstance(note, Mapping) and str(note.get("title") or "").strip().casefold() == "gpt insights"
-            for note in notes
-        )
+        living_note = self._exact_internal_note(notes, "GPT Insights")
+        has_base = living_note is not None
 
         company_id = self._company_id(context.get("companyID"))
         device_name = None
@@ -6909,19 +7072,29 @@ class OperationalAutonomyMaintenance:
         if prior_fingerprint == fingerprint:
             return
 
-        update = has_base
         body = render_gpt_insight(evidence)
-        self.actions.execute(
-            GPT_INSIGHTS_SCOPE,
-            "service.ticket.note.create",
-            {"payload": {
-                "ticketID": ticket_id,
-                "title": gpt_insights_note_title(update=update),
-                "description": body,
-                "noteType": 3,
-                "publish": 2,
-            }},
-        )
+        if has_base and living_note is not None:
+            if str(living_note.get("description") or "") != body:
+                self._update_living_internal_note(
+                    scope=GPT_INSIGHTS_SCOPE,
+                    ticket_id=ticket_id,
+                    note=living_note,
+                    title="GPT Insights",
+                    new_body=body,
+                    mode="replace",
+                )
+        else:
+            self.actions.execute(
+                GPT_INSIGHTS_SCOPE,
+                "service.ticket.note.create",
+                {"payload": {
+                    "ticketID": ticket_id,
+                    "title": "GPT Insights",
+                    "description": body,
+                    "noteType": 3,
+                    "publish": 2,
+                }},
+            )
         self.store.remember_augmentation_state(
             ticket_id=ticket_id, augmentation_id=GPT_INSIGHTS_AUGMENTATION_ID,
             source_version=str(candidate.source_version or "") or None,
@@ -6929,7 +7102,7 @@ class OperationalAutonomyMaintenance:
         )
         self._audit_diagnostic(
             "gpt_insights.note.created",
-            {"ticket_id": ticket_id, "update": update, "category": category},
+            {"ticket_id": ticket_id, "update": has_base, "category": category},
         )
 
     def _assigned_new_ticket_is_unworked(self, candidate) -> bool:
@@ -7101,6 +7274,11 @@ class OperationalAutonomyMaintenance:
                     error.work,
                     phase="waiting_device_access:claim",
                     last_reason=str(error)[:500],
+                )
+                self._best_effort_jason_activity(
+                    waiting_work,
+                    event="Device Check",
+                    detail=str(error)[:500] + "; no remediation attempted while endpoint access is unavailable.",
                 )
                 self.store.put(waiting_work)
             return

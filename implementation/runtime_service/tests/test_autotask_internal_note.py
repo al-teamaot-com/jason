@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from datetime import datetime, timezone
 from typing import Any, Mapping
 
@@ -14,6 +15,7 @@ from connectors.autotask.mutation_connector import (
     AUTOTASK_MUTATION_ENABLED_ENV,
 )
 from connectors.core.contracts import (
+    ConnectorAuthorizationError,
     ConnectorContext,
     ConnectorRequest,
 )
@@ -26,6 +28,7 @@ from jason_runtime.autotask_internal_note import (
     AutotaskInternalNoteConnector,
     AutotaskInternalNoteVerificationError,
     SERVICE_TICKET_NOTE_CREATE,
+    SERVICE_TICKET_NOTE_UPDATE,
     configured_autotask_internal_note_autonomy_resource_id,
     register_autotask_internal_note_runtime_foundation,
 )
@@ -84,6 +87,10 @@ def test_internal_note_foundation_is_dormant_by_default(
         capability_name=SERVICE_TICKET_NOTE_CREATE,
         version="1.0",
     )
+    update_capability = capabilities.get(
+        capability_name=SERVICE_TICKET_NOTE_UPDATE,
+        version="1.0",
+    )
 
     provider = providers.get(
         AUTOTASK_INTERNAL_NOTE_PROVIDER
@@ -95,6 +102,8 @@ def test_internal_note_foundation_is_dormant_by_default(
     )
 
     assert capability.client_isolation_required is False
+    assert update_capability.lifecycle_status is CapabilityLifecycle.BUILDING
+    assert update_capability.client_isolation_required is False
 
     assert (
         provider.lifecycle_status
@@ -142,6 +151,7 @@ def test_exact_profile_activates_only_internal_note(
 
     assert state.capability_names == (
         SERVICE_TICKET_NOTE_CREATE,
+        SERVICE_TICKET_NOTE_UPDATE,
     )
 
     assert state.provider_ids == (
@@ -176,6 +186,7 @@ def test_exact_profile_activates_only_internal_note(
     assert provider.capabilities == frozenset(
         {
             SERVICE_TICKET_NOTE_CREATE,
+            SERVICE_TICKET_NOTE_UPDATE,
         }
     )
 
@@ -281,11 +292,17 @@ class _Transport:
         mismatch=False,
         resource_email="al@example.com",
         resource_id=77,
+        note_creator_id=None,
+        note_title="Jason internal note",
+        note_description="Synthetic internal note",
     ):
         self.requests: list[dict[str, Any]] = []
         self.mismatch = mismatch
         self.resource_email = resource_email
         self.resource_id = resource_id
+        self.note_creator_id = resource_id if note_creator_id is None else int(note_creator_id)
+        self.note_title = note_title
+        self.note_description = note_description
 
     def request(
         self,
@@ -346,9 +363,24 @@ class _Transport:
                 "/V1.0/Tickets/12345/Notes"
             )
         ):
+            if isinstance(json, Mapping):
+                self.note_title = str(json.get("title") or self.note_title)
+                self.note_description = str(json.get("description") or self.note_description)
             return {
                 "itemId": 222,
             }
+
+        if (
+            method == "PATCH"
+            and url.endswith(
+                "/V1.0/Tickets/12345/Notes"
+            )
+        ):
+            if not isinstance(json, Mapping) or int(json.get("id") or 0) != 222:
+                raise AssertionError("unexpected update payload")
+            self.note_title = str(json.get("title") or self.note_title)
+            self.note_description = str(json.get("description") or self.note_description)
+            return {"itemId": 222}
 
         if (
             method == "GET"
@@ -365,15 +397,15 @@ class _Transport:
                 "items": [
                     {
                         "id": 222,
-                        "title": "Jason internal note",
+                        "title": self.note_title,
                         "description": (
                             "WRONG"
                             if self.mismatch
-                            else "Synthetic internal note"
+                            else self.note_description
                         ),
                         "noteType": 3,
                         "publish": 2,
-                        "creatorResourceID": self.resource_id,
+                        "creatorResourceID": self.note_creator_id,
                         "impersonatorCreatorResourceID": impersonator,
                     }
                 ]
@@ -641,3 +673,145 @@ def test_autonomous_service_principal_fails_closed_without_api_resource_id(monke
         request["method"] == "POST"
         for request in transport.requests
     )
+
+
+def _update_connector_request(
+    *,
+    current: str,
+    replacement: str,
+    title: str = "GPT Insights",
+    mode: str = "replace",
+    expected_hash: str | None = None,
+):
+    return ConnectorRequest(
+        context=ConnectorContext(
+            correlation_id="corr-internal-note-update",
+            principal_id="jason-autonomy-worker",
+            organization_id="aot",
+            client_id=None,
+            capability="autotask.ticket.note.update",
+            mode="execute",
+        ),
+        arguments={
+            "payload": {
+                "id": 222,
+                "ticketID": 12345,
+                "title": title,
+                "description": replacement,
+                "noteType": 3,
+                "publish": 2,
+            },
+            "expectedDescriptionSha256": expected_hash
+            or hashlib.sha256(current.encode("utf-8")).hexdigest(),
+            "updateMode": mode,
+        },
+    )
+
+
+def test_autonomous_internal_note_update_replaces_only_owned_gpt_insights(monkeypatch):
+    _enable_mutation(monkeypatch)
+    transport = _Transport(
+        resource_email="jasonrw@teamaot.com",
+        resource_id=29682930,
+        note_title="GPT Insights",
+        note_description="Initial insight",
+    )
+    result = _connector(
+        transport, _Audit(), autonomy_api_resource_id=29682930
+    ).execute(
+        _update_connector_request(
+            current="Initial insight",
+            replacement="Updated insight",
+        )
+    )
+    assert result.data["jasonVerification"]["readbackVerified"] is True
+    assert result.data["jasonVerification"]["ticketNoteId"] == 222
+    assert transport.note_description == "Updated insight"
+    assert [r["method"] for r in transport.requests].count("PATCH") == 1
+
+
+def test_autonomous_internal_note_update_appends_activity_without_rewriting_history(monkeypatch):
+    _enable_mutation(monkeypatch)
+    current = "Jason Activity\n\n2026-10-06 07:00 ET - Device check: offline."
+    replacement = current + "\n\n2026-10-06 08:00 ET - Recheck: device online."
+    transport = _Transport(
+        resource_email="jasonrw@teamaot.com",
+        resource_id=29682930,
+        note_title="Jason Activity",
+        note_description=current,
+    )
+    _connector(
+        transport, _Audit(), autonomy_api_resource_id=29682930
+    ).execute(
+        _update_connector_request(
+            current=current,
+            replacement=replacement,
+            title="Jason Activity",
+            mode="append",
+        )
+    )
+    assert transport.note_description == replacement
+    assert [r["method"] for r in transport.requests].count("PATCH") == 1
+
+
+def test_autonomous_internal_note_update_rejects_stale_hash_before_patch(monkeypatch):
+    _enable_mutation(monkeypatch)
+    transport = _Transport(
+        resource_email="jasonrw@teamaot.com",
+        resource_id=29682930,
+        note_title="GPT Insights",
+        note_description="Current body",
+    )
+    with pytest.raises(ConnectorAuthorizationError, match="changed since"):
+        _connector(
+            transport, _Audit(), autonomy_api_resource_id=29682930
+        ).execute(
+            _update_connector_request(
+                current="Current body",
+                replacement="New body",
+                expected_hash="0" * 64,
+            )
+        )
+    assert not [r for r in transport.requests if r["method"] == "PATCH"]
+
+
+def test_autonomous_internal_note_update_rejects_technician_owned_note_before_patch(monkeypatch):
+    _enable_mutation(monkeypatch)
+    transport = _Transport(
+        resource_email="jasonrw@teamaot.com",
+        resource_id=29682930,
+        note_creator_id=77,
+        note_title="GPT Insights",
+        note_description="Current body",
+    )
+    with pytest.raises(ConnectorAuthorizationError, match="not created by"):
+        _connector(
+            transport, _Audit(), autonomy_api_resource_id=29682930
+        ).execute(
+            _update_connector_request(
+                current="Current body", replacement="New body"
+            )
+        )
+    assert not [r for r in transport.requests if r["method"] == "PATCH"]
+
+
+def test_activity_replace_mode_is_rejected_before_patch(monkeypatch):
+    _enable_mutation(monkeypatch)
+    transport = _Transport(
+        resource_email="jasonrw@teamaot.com",
+        resource_id=29682930,
+        note_title="Jason Activity",
+        note_description="Original activity",
+    )
+    with pytest.raises(ConnectorAuthorizationError, match="replace mode"):
+        _connector(
+            transport, _Audit(), autonomy_api_resource_id=29682930
+        ).execute(
+            _update_connector_request(
+                current="Original activity",
+                replacement="Rewritten activity",
+                title="Jason Activity",
+                mode="replace",
+            )
+        )
+    assert not [r for r in transport.requests if r["method"] == "PATCH"]

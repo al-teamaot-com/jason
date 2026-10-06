@@ -6384,6 +6384,44 @@
       "created_by": "Jason Constitutional Certification"
     },
     {
+      "registry_id": "capability.service.ticket.note.update",
+      "entity_type": "capability",
+      "display_name": "Update Jason-Owned Service Ticket Note",
+      "environment": "production-pilot",
+      "lifecycle_status": "registered",
+      "declared_state": {
+        "capability_name": "service.ticket.note.update",
+        "provider_neutral": "true",
+        "read_only": "false",
+        "risk": "high",
+        "operation": "update",
+        "live_lifecycle": "active",
+        "ownership_boundary": "jason_autonomy_resource_only",
+        "optimistic_concurrency": "sha256_current_body"
+      },
+      "dependencies": [
+        "component.central-orchestrator",
+        "governance.jkd-001"
+      ],
+      "verification_methods": [
+        "live-capability-registry-proof-v1",
+        "ticket-note-owner-pre-read-and-post-readback-v1"
+      ],
+      "steward": "technology-steward",
+      "authority_references": [
+        "J-002 Article IV",
+        "J-002 Article XIX",
+        "J-101"
+      ],
+      "evidence_references": [
+        "docs/playbooks/Jason-GPT-Insights-Tech-Assist.md",
+        "docs/playbooks/Jason-Activity-Living-Work-Log.md"
+      ],
+      "source_version": "2026-10-06.1",
+      "created_at": "2026-10-06T11:00:00Z",
+      "created_by": "Project Jason Owner-approved implementation"
+    },
+    {
       "registry_id": "capability.service.ticket.notes.search",
       "entity_type": "capability",
       "display_name": "Read Service Ticket Notes",

@@ -585,36 +585,87 @@
     {
       "id": "gpt_insights_tech_assist",
       "name": "GPT Insights - Help Desk Tech Assist",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "lifecycle": "production",
       "enabled": true,
       "source": "docs/playbooks/Jason-GPT-Insights-Tech-Assist.md",
       "trigger": {
         "queue_in": [
-          "Help Desk I",
-          "Help Desk II"
+          "Help Desk I"
         ],
-        "no_applicable_promoted_playbook": true
+        "status_in": [
+          "New"
+        ],
+        "excluded_ticket_sources": [
+          "Recurring"
+        ]
       },
-      "review_status": "owner_approved_2026-10-01",
+      "review_status": "owner_approved_living_internal_note_scope_2026-10-06",
       "autonomy": {
         "activation": "autonomous",
         "required_gates": [
-          "help_desk_queue",
-          "unsupported_by_promoted_playbook",
+          "help_desk_i_queue",
+          "status_new",
+          "ticket_source_not_recurring",
           "evidence_first",
           "no_avoidable_human_question",
           "internal_note_only",
+          "jason_owned_note_update_only",
+          "optimistic_concurrency",
           "autonomy_approved"
         ],
         "allowed_capabilities": [
-          "service.ticket.note.create"
+          "service.ticket.note.create",
+          "service.ticket.note.update"
         ],
         "policy_id": "playbook-autonomy:gpt_insights_tech_assist",
         "allowed_branches": [
           "read_only_evidence_collection",
           "internal_note_create",
-          "material_update_note"
+          "living_note_update"
+        ],
+        "approval_bound_branches": [],
+        "disruptive_branches": [],
+        "note_contract": {
+          "title": "GPT Insights",
+          "single_living_note": true,
+          "update_only_on_material_evidence_change": true,
+          "provider_owned_note_verification_required": true
+        }
+      }
+    },
+    {
+      "id": "jason_activity_log",
+      "name": "Jason Activity - Living Internal Work Log",
+      "version": "0.1.0",
+      "lifecycle": "production",
+      "enabled": true,
+      "source": "docs/playbooks/Jason-Activity-Living-Work-Log.md",
+      "trigger": {
+        "operational_event": true,
+        "meaningful_state_change_only": true
+      },
+      "review_status": "owner_approved_shared_internal_activity_log_2026-10-06",
+      "autonomy": {
+        "activation": "autonomous",
+        "required_gates": [
+          "exact_ticket",
+          "meaningful_activity",
+          "internal_note_only",
+          "jason_owned_note_update_only",
+          "append_only",
+          "optimistic_concurrency",
+          "autonomy_approved"
+        ],
+        "allowed_capabilities": [
+          "service.ticket.note.create",
+          "service.ticket.note.update"
+        ],
+        "policy_id": "playbook-autonomy:jason_activity_log",
+        "allowed_branches": [
+          "create_activity_note",
+          "append_activity_entry",
+          "rollover_activity_note"
         ],
         "approval_bound_branches": [],
         "disruptive_branches": []

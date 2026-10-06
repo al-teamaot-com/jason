@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from dataclasses import dataclass, replace
 from datetime import datetime
@@ -50,6 +51,7 @@ from orchestrator.execution_plan import normalize_provider_relative_path
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.provider_mutation_capability_catalog import (
     SERVICE_TICKET_NOTE_CREATE,
+    SERVICE_TICKET_NOTE_UPDATE,
     autotask_mutation_capability_definitions,
 )
 from orchestrator.service import CapabilityInvoker
@@ -73,6 +75,10 @@ _PROVIDER_CAPABILITY_MAP = {
         AUTOTASK_INTERNAL_NOTE_PROVIDER,
         SERVICE_TICKET_NOTE_CREATE,
     ): "autotask.ticket.note.create",
+    (
+        AUTOTASK_INTERNAL_NOTE_PROVIDER,
+        SERVICE_TICKET_NOTE_UPDATE,
+    ): "autotask.ticket.note.update",
 }
 
 
@@ -209,6 +215,64 @@ def _internal_note_definition(*, now: datetime):
     )
 
 
+def _internal_note_update_definition(*, now: datetime):
+    matches = [
+        definition
+        for definition in autotask_mutation_capability_definitions(now=now)
+        if definition.capability_name == SERVICE_TICKET_NOTE_UPDATE
+    ]
+    if len(matches) != 1:
+        raise AutotaskInternalNoteActivationError(
+            "internal note update capability definition is not unique"
+        )
+    base = matches[0]
+    metadata = dict(base.metadata)
+    metadata.update(
+        {
+            "activation_state": "internal_note_mcp_source_only_not_activated",
+            "mcp_action_enabled": "true",
+            "pilot_scope": "jason_owned_internal_note_update",
+            "autonomy_only": "true",
+            "ownership_rule": "creator_resource_must_equal_jason_autonomy_resource",
+            "optimistic_concurrency": "sha256_current_description_required",
+            "note_type": "3",
+            "publish": "2",
+        }
+    )
+    evidence = CapabilityEvidence(
+        required=True,
+        requirements=(
+            "authenticated workload identity",
+            "provider native TicketNote update permission",
+            "exact target ticket and note id",
+            "pre-mutation Jason ownership readback",
+            "exact current-description SHA-256 match",
+            "provider mutation result",
+            "post-mutation verification result",
+        ),
+        verification_requirements=(
+            "principal is the dedicated Jason autonomy workload",
+            "target note creator equals the configured Jason Autotask API resource",
+            "target note remains internal noteType=3,publish=2",
+            "target note title is unchanged",
+            "current description hash matches the caller-bound expected hash",
+            "append mode preserves the entire prior body as a prefix",
+            "replace mode is limited to the GPT Insights living note",
+            "post-mutation readback matches the intended durable note body",
+        ),
+    )
+    return replace(
+        base,
+        business_purpose=(
+            "Update one Jason-owned internal Autotask note with optimistic "
+            "concurrency and mandatory readback."
+        ),
+        client_isolation_required=False,
+        evidence=evidence,
+        metadata=metadata,
+    )
+
+
 def _internal_note_provider(
     *,
     now: datetime,
@@ -230,6 +294,7 @@ def _internal_note_provider(
         capabilities=frozenset(
             {
                 SERVICE_TICKET_NOTE_CREATE,
+                SERVICE_TICKET_NOTE_UPDATE,
             }
         ),
         supported_classifications=frozenset(
@@ -273,7 +338,7 @@ def _internal_note_provider(
             "connector_id": "autotask",
             "resource_authority": "service_management",
             "write_capability": "true",
-            "mutation_scope": "ticket_note_create_only",
+            "mutation_scope": "ticket_note_create_and_jason_owned_update",
             "provider_native_impersonation_required": "true",
             "activation_state": (
                 "internal_note_mcp_source_only_not_activated"
@@ -312,12 +377,14 @@ class _PreparedAutotaskInternalNote:
     request: ConnectorRequest
     expected: Mapping[str, Any]
     prepared: PreparedRequest
+    expected_current_sha256: str | None = None
+    update_mode: str | None = None
 
 
 class AutotaskInternalNoteConnector(
     AutotaskMutationConnector
 ):
-    """Exact TicketNote-create connector with mandatory readback."""
+    """Exact internal TicketNote create/update connector with mandatory readback."""
 
     def __init__(
         self,
@@ -393,6 +460,7 @@ class AutotaskInternalNoteConnector(
     capabilities = frozenset(
         {
             "autotask.ticket.note.create",
+            "autotask.ticket.note.update",
         }
     )
 
@@ -471,6 +539,186 @@ class AutotaskInternalNoteConnector(
             expected["title"] = title
 
         return expected
+
+    @staticmethod
+    def _description_sha256(value: str) -> str:
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    def _read_notes_as_requester(
+        self,
+        *,
+        request: ConnectorRequest,
+        ticket_id: int,
+    ) -> tuple[list[Mapping[str, Any]], int]:
+        verify_context = replace(
+            request.context, capability="autotask.ticket.notes.list", mode="observe"
+        )
+        verify_request = ConnectorRequest(
+            context=verify_context, arguments={"ticket_id": int(ticket_id)}
+        )
+        credentials = dict(self._secrets.resolve(self.logical_secret, verify_context))
+        try:
+            prepared = AutotaskConnector.prepare_request(
+                self, verify_request, credentials
+            )
+            if self._is_autonomous_api_user_request(verify_request):
+                resource_id = self._autonomy_api_resource_id
+                if resource_id is None:
+                    raise AutotaskInternalNoteVerificationError(
+                        "autonomous API-user resource id unavailable during readback"
+                    )
+                headers = dict(prepared.headers)
+                headers.pop("ImpersonationResourceId", None)
+            else:
+                email = self._trusted_email(verify_request)
+                if email is None:
+                    raise AutotaskInternalNoteVerificationError(
+                        "trusted requester binding unavailable during readback"
+                    )
+                resource_id = self._resolve_impersonation_resource_id(
+                    prepared=prepared, email=email
+                )
+                headers = dict(prepared.headers)
+                headers["ImpersonationResourceId"] = str(resource_id)
+        finally:
+            credentials.clear()
+        response = self._transport.request(
+            method="GET",
+            url=prepared.url,
+            headers=headers,
+            params=prepared.params,
+            json=None,
+            timeout_seconds=prepared.timeout_seconds,
+        )
+        items = response.get("items") if isinstance(response, Mapping) else None
+        if not isinstance(items, list):
+            raise AutotaskInternalNoteVerificationError(
+                "ticket note readback response was invalid"
+            )
+        return [dict(item) for item in items if isinstance(item, Mapping)], int(resource_id)
+
+    def _owned_note_for_update(
+        self,
+        *,
+        request: ConnectorRequest,
+        ticket_id: int,
+        note_id: int,
+        expected_title: str,
+        expected_current_sha256: str,
+        update_mode: str,
+        new_description: str,
+    ) -> Mapping[str, Any]:
+        if not self._is_autonomous_api_user_request(request):
+            raise ConnectorAuthorizationError(
+                "internal note update is restricted to the Jason autonomy workload"
+            )
+        items, resource_id = self._read_notes_as_requester(
+            request=request, ticket_id=ticket_id
+        )
+        matches = []
+        for item in items:
+            try:
+                candidate_id = int(item.get("id"))
+            except (TypeError, ValueError):
+                continue
+            if candidate_id == note_id:
+                matches.append(item)
+        if len(matches) != 1:
+            raise ConnectorAuthorizationError(
+                "target internal note was not uniquely observed before update"
+            )
+        observed = matches[0]
+        try:
+            creator = int(observed.get("creatorResourceID"))
+            note_type = int(observed.get("noteType"))
+            publish = int(observed.get("publish"))
+        except (TypeError, ValueError) as error:
+            raise ConnectorAuthorizationError(
+                "target internal note metadata is invalid"
+            ) from error
+        if creator != resource_id:
+            raise ConnectorAuthorizationError(
+                "target internal note was not created by the Jason autonomy resource"
+            )
+        if observed.get("impersonatorCreatorResourceID") not in (None, "", 0, "0"):
+            raise ConnectorAuthorizationError(
+                "target internal note is not a direct Jason autonomy note"
+            )
+        if note_type != 3 or publish != 2:
+            raise ConnectorAuthorizationError(
+                "target note is not an internal Jason note"
+            )
+        observed_title = str(observed.get("title") or "").strip()
+        if not observed_title or observed_title != expected_title:
+            raise ConnectorAuthorizationError(
+                "target internal note title changed or does not match"
+            )
+        current = str(observed.get("description") or "")
+        if self._description_sha256(current) != expected_current_sha256:
+            raise ConnectorAuthorizationError(
+                "target internal note changed since the caller read it"
+            )
+        if update_mode == "append":
+            if len(new_description) <= len(current) or not new_description.startswith(
+                current + "\n"
+            ):
+                raise ConnectorAuthorizationError(
+                    "append-only internal note update does not preserve prior content"
+                )
+        elif update_mode == "replace":
+            if expected_title != "GPT Insights":
+                raise ConnectorAuthorizationError(
+                    "replace mode is limited to the GPT Insights living note"
+                )
+        else:
+            raise ConnectorAuthorizationError("internal note update mode is invalid")
+        return observed
+
+    def _expected_update_payload(
+        self, request: ConnectorRequest
+    ) -> tuple[dict[str, Any], str, str]:
+        raw = request.arguments.get("payload")
+        if not isinstance(raw, Mapping):
+            raise ConnectorAuthorizationError("internal note update payload is required")
+        payload = dict(raw)
+        ticket_id = _positive_int(payload.get("ticketID"), label="ticketID")
+        note_id = _positive_int(payload.get("id"), label="ticket note id")
+        description = str(payload.get("description") or "")
+        title = str(payload.get("title") or "").strip()
+        if not description or not title:
+            raise ConnectorAuthorizationError(
+                "internal note update title and description are required"
+            )
+        try:
+            note_type = int(payload.get("noteType"))
+            publish = int(payload.get("publish"))
+        except (TypeError, ValueError) as error:
+            raise ConnectorAuthorizationError(
+                "internal note update visibility metadata is invalid"
+            ) from error
+        if note_type != 3 or publish != 2:
+            raise ConnectorAuthorizationError(
+                "internal note update must remain noteType=3,publish=2"
+            )
+        expected_hash = str(
+            request.arguments.get("expectedDescriptionSha256") or ""
+        ).strip().casefold()
+        if len(expected_hash) != 64 or any(ch not in "0123456789abcdef" for ch in expected_hash):
+            raise ConnectorAuthorizationError(
+                "internal note update requires current description SHA-256"
+            )
+        update_mode = str(request.arguments.get("updateMode") or "").strip().casefold()
+        if update_mode not in {"append", "replace"}:
+            raise ConnectorAuthorizationError("internal note update mode is invalid")
+        expected = {
+            "id": note_id,
+            "ticketID": ticket_id,
+            "title": title,
+            "description": description,
+            "noteType": 3,
+            "publish": 2,
+        }
+        return expected, expected_hash, update_mode
 
     @staticmethod
     def _created_note_id(
@@ -713,36 +961,74 @@ class AutotaskInternalNoteConnector(
     def prepare_governed_execution(
         self, request: ConnectorRequest
     ) -> ProviderPreparedExecution:
-        if request.context.capability != "autotask.ticket.note.create":
-            raise ConnectorAuthorizationError(
-                "internal-note connector exposes only TicketNote create"
+        if request.context.capability == "autotask.ticket.note.create":
+            expected = self._expected_payload(request)
+            expected_hash = None
+            update_mode = None
+            resource_identifier = str(expected["ticketID"])
+        elif request.context.capability == "autotask.ticket.note.update":
+            expected, expected_hash, update_mode = self._expected_update_payload(request)
+            self._owned_note_for_update(
+                request=request,
+                ticket_id=int(expected["ticketID"]),
+                note_id=int(expected["id"]),
+                expected_title=str(expected["title"]),
+                expected_current_sha256=expected_hash,
+                update_mode=update_mode,
+                new_description=str(expected["description"]),
             )
-        expected = self._expected_payload(request)
+            resource_identifier = f"{expected['ticketID']}:{expected['id']}"
+        else:
+            raise ConnectorAuthorizationError(
+                "internal-note connector exposes only TicketNote create/update"
+            )
         normalized_request = ConnectorRequest(
             context=request.context,
-            arguments={**dict(request.arguments), "payload": dict(expected)},
+            arguments={
+                "payload": dict(expected),
+                **(
+                    {
+                        "expectedDescriptionSha256": expected_hash,
+                        "updateMode": update_mode,
+                    }
+                    if expected_hash is not None
+                    else {}
+                ),
+            },
         )
         if normalized_request.context.mode != "execute":
-            raise ConnectorAuthorizationError("Autotask mutation requires explicit execute mode.")
+            raise ConnectorAuthorizationError(
+                "Autotask mutation requires explicit execute mode."
+            )
         if not autotask_mutation_execution_enabled():
             raise PermissionError("AUTOTASK_MUTATION_EXECUTION_DISABLED")
         credentials = self._secrets.resolve(self.logical_secret, normalized_request.context)
-        prepared = self.prepare_request(
-            normalized_request,
-            credentials,
-        )
+        prepared = self.prepare_request(normalized_request, credentials)
         relative_path = prepared.audit_operation or urlsplit(prepared.url).path
         return ProviderPreparedExecution(
             provider_capability=request.context.capability,
             action_method=prepared.method,
             resource_type="service_ticket_note",
-            resource_identifier=str(expected["ticketID"]),
+            resource_identifier=resource_identifier,
             normalized_path=relative_path,
             payload=dict(prepared.json or {}),
             parameters=dict(prepared.params or {}),
-            symbolic_resolutions={},
+            symbolic_resolutions={
+                **(
+                    {
+                        "expected_description_sha256": expected_hash,
+                        "update_mode": update_mode,
+                    }
+                    if expected_hash is not None
+                    else {}
+                )
+            },
             opaque=_PreparedAutotaskInternalNote(
-                request=normalized_request, expected=dict(expected), prepared=prepared
+                request=normalized_request,
+                expected=dict(expected),
+                prepared=prepared,
+                expected_current_sha256=expected_hash,
+                update_mode=update_mode,
             ),
         )
 
@@ -756,91 +1042,91 @@ class AutotaskInternalNoteConnector(
         expected = dict(opaque.expected)
         prepared = opaque.prepared
         if prepared_execution.provider_capability != request.context.capability:
-            raise PermissionError("prepared Autotask provider capability no longer matches authorized execution plan")
-        if str(prepared.method).strip().upper() != str(prepared_execution.action_method).strip().upper():
-            raise PermissionError("prepared Autotask method no longer matches authorized execution plan")
-        observed_path = normalize_provider_relative_path(prepared.audit_operation or urlsplit(prepared.url).path)
-        if observed_path != normalize_provider_relative_path(prepared_execution.normalized_path):
-            raise PermissionError("prepared Autotask path no longer matches authorized execution plan")
-        if str(expected["ticketID"]) != str(prepared_execution.resource_identifier):
-            raise PermissionError("prepared Autotask ticket-note target no longer matches authorized execution plan")
+            raise PermissionError(
+                "prepared Autotask provider capability no longer matches authorized execution plan"
+            )
+        if str(prepared.method).strip().upper() != str(
+            prepared_execution.action_method
+        ).strip().upper():
+            raise PermissionError(
+                "prepared Autotask method no longer matches authorized execution plan"
+            )
+        observed_path = normalize_provider_relative_path(
+            prepared.audit_operation or urlsplit(prepared.url).path
+        )
+        if observed_path != normalize_provider_relative_path(
+            prepared_execution.normalized_path
+        ):
+            raise PermissionError(
+                "prepared Autotask path no longer matches authorized execution plan"
+            )
+        expected_resource = (
+            f"{expected['ticketID']}:{expected['id']}"
+            if request.context.capability == "autotask.ticket.note.update"
+            else str(expected["ticketID"])
+        )
+        if expected_resource != str(prepared_execution.resource_identifier):
+            raise PermissionError(
+                "prepared Autotask ticket-note target no longer matches authorized execution plan"
+            )
         if dict(prepared.json or {}) != dict(prepared_execution.payload):
-            raise PermissionError("prepared Autotask payload no longer matches authorized execution plan")
+            raise PermissionError(
+                "prepared Autotask payload no longer matches authorized execution plan"
+            )
         if dict(prepared.params or {}) != dict(prepared_execution.parameters):
-            raise PermissionError("prepared Autotask parameters no longer match authorized execution plan")
+            raise PermissionError(
+                "prepared Autotask parameters no longer match authorized execution plan"
+            )
+        if request.context.capability == "autotask.ticket.note.update":
+            expected_hash = str(opaque.expected_current_sha256 or "")
+            update_mode = str(opaque.update_mode or "")
+            if dict(prepared_execution.symbolic_resolutions or {}) != {
+                "expected_description_sha256": expected_hash,
+                "update_mode": update_mode,
+            }:
+                raise PermissionError(
+                    "prepared Autotask note-update concurrency binding changed"
+                )
+            # Re-read immediately before PATCH so a technician or another process
+            # cannot be overwritten after the execution plan was authorized.
+            self._owned_note_for_update(
+                request=request,
+                ticket_id=int(expected["ticketID"]),
+                note_id=int(expected["id"]),
+                expected_title=str(expected["title"]),
+                expected_current_sha256=expected_hash,
+                update_mode=update_mode,
+                new_description=str(expected["description"]),
+            )
         self._audit_mutation_event("connector.mutation.requested", request)
         try:
             if not autotask_mutation_execution_enabled():
                 raise PermissionError("AUTOTASK_MUTATION_EXECUTION_DISABLED")
             payload = self._transport.request(
-                method=prepared.method, url=prepared.url, headers=prepared.headers,
-                params=prepared.params, json=prepared.json, timeout_seconds=prepared.timeout_seconds,
+                method=prepared.method,
+                url=prepared.url,
+                headers=prepared.headers,
+                params=prepared.params,
+                json=prepared.json,
+                timeout_seconds=prepared.timeout_seconds,
             )
         except Exception as error:
-            self._audit_mutation_event("connector.mutation.failed", request, error_type=type(error).__name__)
+            self._audit_mutation_event(
+                "connector.mutation.failed", request, error_type=type(error).__name__
+            )
             raise
         self._audit_mutation_event("connector.mutation.completed", request)
-        result = ConnectorResult(capability=request.context.capability, provider=self.provider_name, data=payload)
-        note_id = self._created_note_id(result.data)
+        result = ConnectorResult(
+            capability=request.context.capability, provider=self.provider_name, data=payload
+        )
+        note_id = (
+            int(expected["id"])
+            if request.context.capability == "autotask.ticket.note.update"
+            else self._created_note_id(result.data)
+        )
         try:
             verification = self._verify_created_note(
                 request=request, expected=expected, note_id=note_id
-            )
-        except Exception as error:
-            self._audit.record(
-                "connector.mutation.verification_failed", request.context,
-                {"provider": self.provider_name, "capability": request.context.capability, "error_type": type(error).__name__},
-            )
-            if isinstance(error, AutotaskInternalNoteVerificationError):
-                raise
-            raise AutotaskInternalNoteVerificationError(
-                "internal note post-mutation verification failed"
-            ) from error
-        self._audit.record(
-            "connector.mutation.verified", request.context,
-            {"provider": self.provider_name, "capability": request.context.capability, "ticket_note_id": note_id},
-        )
-        data = dict(result.data)
-        data["jasonVerification"] = dict(verification)
-        return ConnectorResult(
-            capability=result.capability, provider=result.provider, data=data,
-            evidence_ids=(*result.evidence_ids, f"autotask:ticket-note:{note_id}"),
-            warnings=result.warnings,
-        )
-
-    def execute(
-        self,
-        request: ConnectorRequest,
-    ) -> ConnectorResult:
-        if (
-            request.context.capability
-            != "autotask.ticket.note.create"
-        ):
-            raise ConnectorAuthorizationError(
-                "internal-note connector exposes only "
-                "TicketNote create"
-            )
-
-        expected = self._expected_payload(
-            request
-        )
-
-        # The parent performs all existing mutation gates,
-        # write-secret resolution, requester lookup, provider
-        # entityInformation preflight, one POST, and mutation audit.
-        result = super().execute(
-            request
-        )
-
-        note_id = self._created_note_id(
-            result.data
-        )
-
-        try:
-            verification = self._verify_created_note(
-                request=request,
-                expected=expected,
-                note_id=note_id,
             )
         except Exception as error:
             self._audit.record(
@@ -852,17 +1138,11 @@ class AutotaskInternalNoteConnector(
                     "error_type": type(error).__name__,
                 },
             )
-
-            if isinstance(
-                error,
-                AutotaskInternalNoteVerificationError,
-            ):
+            if isinstance(error, AutotaskInternalNoteVerificationError):
                 raise
-
             raise AutotaskInternalNoteVerificationError(
                 "internal note post-mutation verification failed"
             ) from error
-
         self._audit.record(
             "connector.mutation.verified",
             request.context,
@@ -872,27 +1152,24 @@ class AutotaskInternalNoteConnector(
                 "ticket_note_id": note_id,
             },
         )
-
-        data = dict(
-            result.data
-        )
-
-        data[
-            "jasonVerification"
-        ] = dict(
-            verification
-        )
-
+        data = dict(result.data)
+        data["jasonVerification"] = dict(verification)
         return ConnectorResult(
             capability=result.capability,
             provider=result.provider,
             data=data,
-            evidence_ids=(
-                *result.evidence_ids,
-                f"autotask:ticket-note:{note_id}",
-            ),
+            evidence_ids=(*result.evidence_ids, f"autotask:ticket-note:{note_id}"),
             warnings=result.warnings,
         )
+
+    def execute(
+        self, request: ConnectorRequest
+    ) -> ConnectorResult:
+        # Keep direct connector tests/legacy callers on the same safety contract
+        # as governed execution. No approval or authority gate is bypassed by this
+        # helper; those remain external to the connector.
+        prepared_execution = self.prepare_governed_execution(request)
+        return self.execute_governed_execution(prepared_execution)
 
 
 def _validate_pre_activation_contract(
@@ -900,114 +1177,61 @@ def _validate_pre_activation_contract(
     capabilities: CapabilityRegistryService,
     providers: ExecutionProviderRegistryService,
 ) -> None:
-    capability = capabilities.get(
-        capability_name=SERVICE_TICKET_NOTE_CREATE,
-        version="1.0",
-    )
-
-    provider = providers.get(
-        AUTOTASK_INTERNAL_NOTE_PROVIDER
-    )
-
-    metadata = capability.metadata
-
-    if (
-        capability.lifecycle_status
-        is not CapabilityLifecycle.BUILDING
-    ):
-        raise AutotaskInternalNoteActivationError(
-            "internal note capability is not BUILDING"
+    for capability_name in (SERVICE_TICKET_NOTE_CREATE, SERVICE_TICKET_NOTE_UPDATE):
+        capability = capabilities.get(
+            capability_name=capability_name, version="1.0"
         )
-
-    if (
-        str(
-            metadata.get(
-                "provider_neutral",
-                "",
+        metadata = capability.metadata
+        if capability.lifecycle_status is not CapabilityLifecycle.BUILDING:
+            raise AutotaskInternalNoteActivationError(
+                f"{capability_name} is not BUILDING"
             )
-        ).casefold()
-        != "true"
-    ):
-        raise AutotaskInternalNoteActivationError(
-            "internal note capability is not provider-neutral"
-        )
-
-    if (
-        str(
-            metadata.get(
-                "write_capability",
-                "",
+        if str(metadata.get("provider_neutral", "")).casefold() != "true":
+            raise AutotaskInternalNoteActivationError(
+                f"{capability_name} is not provider-neutral"
             )
-        ).casefold()
-        != "true"
-    ):
-        raise AutotaskInternalNoteActivationError(
-            "internal note capability is not marked writable"
-        )
-
-    if (
-        str(
-            metadata.get(
-                "provider_native_impersonation_required",
-                "",
+        if str(metadata.get("write_capability", "")).casefold() != "true":
+            raise AutotaskInternalNoteActivationError(
+                f"{capability_name} is not marked writable"
             )
-        ).casefold()
-        != "true"
-    ):
-        raise AutotaskInternalNoteActivationError(
-            "requester impersonation requirement drifted"
-        )
-
-    if not capability.approval.required:
-        raise AutotaskInternalNoteActivationError(
-            "internal note capability unexpectedly lacks approval"
-        )
-
-    if not capability.idempotency_key_required:
-        raise AutotaskInternalNoteActivationError(
-            "internal note capability unexpectedly lacks "
-            "idempotency requirement"
-        )
-
-    if capability.maximum_attempts != 1:
-        raise AutotaskInternalNoteActivationError(
-            "internal note capability permits provider retry"
-        )
-
-    if capability.client_isolation_required:
-        raise AutotaskInternalNoteActivationError(
-            "Owner pilot unexpectedly requires a single "
-            "client-bound identity"
-        )
-
-    if (
-        provider.lifecycle_status
-        is not ProviderLifecycle.PLANNED
-    ):
+        if (
+            str(metadata.get("provider_native_impersonation_required", "")).casefold()
+            != "true"
+        ):
+            raise AutotaskInternalNoteActivationError(
+                "requester impersonation requirement drifted"
+            )
+        if not capability.approval.required:
+            raise AutotaskInternalNoteActivationError(
+                f"{capability_name} unexpectedly lacks approval"
+            )
+        if not capability.idempotency_key_required:
+            raise AutotaskInternalNoteActivationError(
+                f"{capability_name} unexpectedly lacks idempotency requirement"
+            )
+        if capability.maximum_attempts != 1:
+            raise AutotaskInternalNoteActivationError(
+                f"{capability_name} permits provider retry"
+            )
+        if capability.client_isolation_required:
+            raise AutotaskInternalNoteActivationError(
+                "Owner pilot unexpectedly requires a single client-bound identity"
+            )
+    provider = providers.get(AUTOTASK_INTERNAL_NOTE_PROVIDER)
+    if provider.lifecycle_status is not ProviderLifecycle.PLANNED:
         raise AutotaskInternalNoteActivationError(
             "internal note provider is not PLANNED"
         )
-
-    if (
-        provider.health_status
-        is not ProviderHealth.UNKNOWN
-    ):
+    if provider.health_status is not ProviderHealth.UNKNOWN:
         raise AutotaskInternalNoteActivationError(
             "internal note provider health drifted"
         )
-
-    if (
-        provider.approval_status
-        is not ProviderApproval.PILOT
-    ):
+    if provider.approval_status is not ProviderApproval.PILOT:
         raise AutotaskInternalNoteActivationError(
             "internal note provider approval drifted"
         )
-
     if provider.capabilities != frozenset(
-        {
-            SERVICE_TICKET_NOTE_CREATE,
-        }
+        {SERVICE_TICKET_NOTE_CREATE, SERVICE_TICKET_NOTE_UPDATE}
     ):
         raise AutotaskInternalNoteActivationError(
             "internal note provider capability scope drifted"
@@ -1051,11 +1275,12 @@ def apply_autotask_internal_note_activation(
         providers=providers,
     )
 
-    capabilities.set_lifecycle(
-        capability_name=SERVICE_TICKET_NOTE_CREATE,
-        version="1.0",
-        lifecycle_status=CapabilityLifecycle.ACTIVE,
-    )
+    for capability_name in (SERVICE_TICKET_NOTE_CREATE, SERVICE_TICKET_NOTE_UPDATE):
+        capabilities.set_lifecycle(
+            capability_name=capability_name,
+            version="1.0",
+            lifecycle_status=CapabilityLifecycle.ACTIVE,
+        )
 
     providers.set_approval(
         provider_id=AUTOTASK_INTERNAL_NOTE_PROVIDER,
@@ -1080,6 +1305,7 @@ def apply_autotask_internal_note_activation(
         ),
         capability_names=(
             SERVICE_TICKET_NOTE_CREATE,
+            SERVICE_TICKET_NOTE_UPDATE,
         ),
     )
 
@@ -1091,9 +1317,10 @@ def register_autotask_internal_note_runtime_foundation(
     now: datetime,
 ) -> AutotaskInternalNoteActivationState:
     capabilities.register(
-        _internal_note_definition(
-            now=now,
-        )
+        _internal_note_definition(now=now)
+    )
+    capabilities.register(
+        _internal_note_update_definition(now=now)
     )
 
     providers.register(
@@ -1150,7 +1377,5 @@ def register_autotask_internal_note_invoker(
     invokers: CapabilityInvokerRegistry,
     invoker: CapabilityInvoker,
 ) -> None:
-    invokers.register(
-        SERVICE_TICKET_NOTE_CREATE,
-        invoker,
-    )
+    invokers.register(SERVICE_TICKET_NOTE_CREATE, invoker)
+    invokers.register(SERVICE_TICKET_NOTE_UPDATE, invoker)

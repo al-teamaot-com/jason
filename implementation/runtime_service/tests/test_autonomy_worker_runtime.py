@@ -12,6 +12,8 @@ from types import SimpleNamespace
 from autonomous_remediation.autonomous_queue_worker import QueueCandidate
 from jason_runtime.autonomy_worker_runtime import (
     BACKUPIQ_SCOPE,
+    GPT_INSIGHTS_SCOPE,
+    JASON_ACTIVITY_SCOPE,
     OperationalAutonomyError,
     OperationalAutonomyMaintenance,
     OperationalWork,
@@ -34,6 +36,7 @@ class PromotionStore:
             allowed_capabilities=(
                 "automation.component.execute",
                 "service.ticket.note.create",
+                "service.ticket.note.update",
                 "service.ticket.update",
                 "service.ticket.client.notification.create",
             ),
@@ -6012,4 +6015,154 @@ def test_gpt_insights_does_not_run_in_help_desk_ii(tmp_path: Path):
     )
     worker.tick()
     assert not any(capability == "service.ticket.note.create" for _, capability, _ in actions.calls)
+    store.close()
+
+
+def test_gpt_insights_updates_single_living_note_on_material_change(tmp_path: Path):
+    class InsightReads(Reads):
+        def __init__(self):
+            super().__init__()
+            self.ticket_notes = [{
+                "id": 9001, "title": "GPT Insights", "description": "old insight",
+                "noteType": 3, "publish": 2, "creatorResourceID": 29682930,
+            }]
+        def execute(self, capability, arguments):
+            if capability == "service.ticket.search":
+                return {"status":"succeeded","evidence":{"data":{"items":[]}}}
+            return super().execute(capability, arguments)
+    item = QueueCandidate(
+        resource_id="140996", priority=50, source_queue="Help Desk I",
+        owned_by_jason=False, urgent=False,
+        context={
+            "id":140996,"ticketNumber":"T20261006.0096",
+            "title":"Printer problem","description":"Printer is not working.",
+            "companyID":507,"configurationItemID":1583,
+            "_jason_source_status_label":"New",
+        },
+    )
+    reads=InsightReads(); actions=Actions()
+    store=SQLiteOperationalWorkStore(tmp_path/"worker.sqlite3")
+    store.remember_augmentation_state(
+        ticket_id=140996, augmentation_id="gpt_insights_tech_assist_v0_2",
+        source_version=None, classification="printing", evidence_fingerprint="old-fingerprint"
+    )
+    worker=OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item), reads=reads, actions=actions, store=store,
+        promotion_store=ExactPromotionStore(approved_scopes={("gpt_insights_tech_assist","0.2.0")}),
+        max_active_work_items=2, interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    creates=[x for x in actions.calls if x[1]=="service.ticket.note.create"]
+    updates=[x for x in actions.calls if x[1]=="service.ticket.note.update"]
+    assert creates == []
+    assert len(updates)==1
+    payload=updates[0][2]["payload"]
+    assert payload["id"]==9001
+    assert payload["title"]=="GPT Insights"
+    assert updates[0][2]["updateMode"]=="replace"
+    assert len(updates[0][2]["expectedDescriptionSha256"])==64
+    store.close()
+
+
+def test_gpt_insights_runs_before_promoted_remediation_matching_for_helpdesk_new(tmp_path: Path):
+    item=candidate(title="[Monitor] Antivirus status issue")
+    item=replace(item, source_queue="Help Desk I", context={**item.context,"_jason_source_status_label":"New"})
+    actions=Actions(); store=SQLiteOperationalWorkStore(tmp_path/"worker.sqlite3")
+    worker=OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item), reads=Reads(), actions=actions, store=store,
+        promotion_store=ExactPromotionStore(approved_scopes={("gpt_insights_tech_assist","0.2.0"),("datto_edr_av","1.3.0")}),
+        max_active_work_items=2, interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    notes=[x for x in actions.calls if x[1]=="service.ticket.note.create"]
+    assert any(x[2]["payload"]["title"]=="GPT Insights" for x in notes)
+    assert store.get(int(item.resource_id)) is not None
+    store.close()
+
+
+def test_gpt_insights_does_not_run_on_helpdesk_i_non_new(tmp_path: Path):
+    item=QueueCandidate(
+        resource_id="140995", priority=50, source_queue="Help Desk I",
+        owned_by_jason=False, urgent=False,
+        context={"id":140995,"ticketNumber":"T20261006.0095","title":"Printer problem",
+                 "description":"Printer problem","companyID":507,"configurationItemID":1583,
+                 "_jason_source_status_label":"In Progress"},
+    )
+    actions=Actions(); store=SQLiteOperationalWorkStore(tmp_path/"worker.sqlite3")
+    worker=OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item), reads=Reads(), actions=actions, store=store,
+        promotion_store=ExactPromotionStore(approved_scopes={("gpt_insights_tech_assist","0.2.0")}),
+        max_active_work_items=2, interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    assert not any(x[1] in {"service.ticket.note.create","service.ticket.note.update"} for x in actions.calls)
+    store.close()
+
+
+def test_jason_activity_appends_offline_check_once(tmp_path: Path):
+    class ActivityReads(Reads):
+        def __init__(self):
+            super().__init__()
+            self.ticket_notes=[{
+                "id":9100,"title":"Jason Activity",
+                "description":"Jason Activity\n\n2026-10-06 06:00 ET - Work Start: claimed ticket.",
+                "noteType":3,"publish":2,"creatorResourceID":29682930,
+            }]
+    actions=Actions(); store=SQLiteOperationalWorkStore(tmp_path/"worker.sqlite3")
+    worker=OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()), reads=ActivityReads(), actions=actions, store=store,
+        promotion_store=ExactPromotionStore(approved_scopes={("jason_activity_log","0.1.0")}),
+        max_active_work_items=2, interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+    work=OperationalWork(
+        ticket_id=140933,ticket_number="T20260925.9999",title="test",playbook_id="datto_edr_av",
+        source_queue="Jason",company_id=507,configuration_item_id=1583,device_uid="device-uid-1",
+        hostname="PC-1",phase="claim",last_reason="",updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    worker._append_jason_activity(work,event="Device Check",detail="Endpoint is offline; no remediation attempted.")
+    updates=[x for x in actions.calls if x[1]=="service.ticket.note.update"]
+    assert len(updates)==1
+    assert updates[0][2]["updateMode"]=="append"
+    store.close()
+
+
+def test_jason_activity_suppresses_same_meaningful_state(tmp_path: Path):
+    class ActivityReads(Reads):
+        def __init__(self):
+            super().__init__()
+            self.ticket_notes=[{
+                "id":9100,"title":"Jason Activity",
+                "description":"Jason Activity\n\n2026-10-06 06:00 ET - Device Check: Endpoint is offline; no remediation attempted.",
+                "noteType":3,"publish":2,"creatorResourceID":29682930,
+            }]
+    actions=Actions(); store=SQLiteOperationalWorkStore(tmp_path/"worker.sqlite3")
+    worker=OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()), reads=ActivityReads(), actions=actions, store=store,
+        promotion_store=ExactPromotionStore(approved_scopes={("jason_activity_log","0.1.0")}),
+        max_active_work_items=2, interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+    work=OperationalWork(
+        ticket_id=140933,ticket_number="T20260925.9999",title="test",playbook_id="datto_edr_av",
+        source_queue="Jason",company_id=507,configuration_item_id=1583,device_uid="device-uid-1",
+        hostname="PC-1",phase="claim",last_reason="",updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    worker._append_jason_activity(work,event="Device Check",detail="Endpoint is offline; no remediation attempted.")
+    assert not any(x[1] in {"service.ticket.note.create","service.ticket.note.update"} for x in actions.calls)
+    store.close()
+
+
+def test_best_effort_activity_failure_does_not_raise(tmp_path: Path):
+    actions=Actions(); store=SQLiteOperationalWorkStore(tmp_path/"worker.sqlite3")
+    worker=OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()), reads=Reads(), actions=actions, store=store,
+        promotion_store=ExactPromotionStore(approved_scopes={("jason_activity_log","0.1.0")}),
+        max_active_work_items=2, interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+    work=OperationalWork(
+        ticket_id=140933,ticket_number="T20260925.9999",title="test",playbook_id="datto_edr_av",
+        source_queue="Jason",company_id=507,configuration_item_id=1583,device_uid="device-uid-1",
+        hostname="PC-1",phase="claim",last_reason="",updated_at=datetime.now(timezone.utc).isoformat(),
+    )
+    worker._append_jason_activity=lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("note path down"))
+    worker._best_effort_jason_activity(work,event="Device Check",detail="offline")
     store.close()

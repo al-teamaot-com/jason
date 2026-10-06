@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from jason_mcp import server
 
 
@@ -1260,3 +1262,63 @@ def test_ticket_activity_report_rejects_unbounded_or_naive_windows():
         "2026-09-29T03:00:00+00:00",
     )
     assert too_large["status"] == "rejected"
+
+
+def test_internal_note_update_canonicalizes_friendly_arguments_and_fixes_visibility():
+    result = server._canonicalize_governed_action_arguments(
+        server.SERVICE_TICKET_NOTE_UPDATE,
+        {
+            "ticket_id": 12345,
+            "note_id": 222,
+            "title": "GPT Insights",
+            "description": "Updated evidence",
+            "expected_description_sha256": "a" * 64,
+            "update_mode": "replace",
+        },
+    )
+    assert result == {
+        "payload": {
+            "ticketID": 12345,
+            "id": 222,
+            "title": "GPT Insights",
+            "description": "Updated evidence",
+            "noteType": 3,
+            "publish": 2,
+        },
+        "expectedDescriptionSha256": "a" * 64,
+        "updateMode": "replace",
+    }
+
+
+def test_internal_note_update_rejects_missing_concurrency_hash():
+    with pytest.raises(ValueError, match="HASH_REQUIRED"):
+        server._canonicalize_governed_action_arguments(
+            server.SERVICE_TICKET_NOTE_UPDATE,
+            {
+                "ticket_id": 12345,
+                "note_id": 222,
+                "title": "GPT Insights",
+                "description": "Updated evidence",
+                "update_mode": "replace",
+            },
+        )
+
+
+def test_internal_note_update_rejects_arbitrary_payload_fields():
+    with pytest.raises(ValueError, match="PAYLOAD_INVALID"):
+        server._canonicalize_governed_action_arguments(
+            server.SERVICE_TICKET_NOTE_UPDATE,
+            {
+                "payload": {
+                    "ticketID": 12345,
+                    "id": 222,
+                    "title": "GPT Insights",
+                    "description": "Updated evidence",
+                    "noteType": 3,
+                    "publish": 2,
+                    "creatorResourceID": 99,
+                },
+                "expectedDescriptionSha256": "a" * 64,
+                "updateMode": "replace",
+            },
+        )
