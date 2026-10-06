@@ -1059,6 +1059,34 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / AOT Owner
 - **Review trigger:** Run one controlled production handoff when the owner is available for the bounded acceptance window or when an equivalent pre-approved non-disruptive test ticket is designated.
 
+### TODO-OPS-010 — Proactive managed toner inventory and replenishment
+
+- **Priority:** P1
+- **Status:** Planned — owner-approved roadmap inclusion 2026-10-06
+- **Risk level:** Moderate
+- **Autonomous engineering readiness:** Design Review
+- **Authority basis:** Owner approval on 2026-10-06 authorizes roadmap inclusion and shadow-mode design/testing only. It does not authorize automatic toner shipment, purchase, billing, or other financial commitment.
+- **Idea:** Build a governed toner-inventory ledger that correlates Kyocera Fleet Services (KFS) device/consumable events with Autotask configuration items, toner tickets, AOT toner orders/shipments, and procurement records so Jason can estimate onsite spare toner inventory per device/color and proactively identify replenishment needs without depending on the customer to call.
+- **Business policy:** Managed clients generally may stock no more than one unopened spare of each required toner color, and toner for covered devices must be supplied by AOT. Customer calls are useful confirmation but are not authoritative or required for the workflow.
+- **Core state model:** Track each device/color as 'spare=1', 'spare=0', or 'unknown', plus current installed toner level, last KFS 'toner_low'/'toner_empty'/'toner_changed' event, last AOT shipment/order, and any open/in-transit replenishment.
+- **Primary inference:** An AOT delivery can move the expected spare state toward '1'; a KFS 'toner_changed' event normally means the onsite spare was consumed and moves the expected spare state toward '0' unless later AOT delivery evidence proves otherwise. A cartridge change with no reconcilable AOT supply history is an exception requiring investigation, not silent acceptance.
+- **Identity foundation:** Maintain a durable cross-reference between Autotask configuration item, AOT machine/equipment ID, KFS device ID, KFS serial number, model, and toner part numbers. Resolve known lookup defects such as cases where technicians report 'NOT IN KFS' while Jason's retained KFS data contains the machine and valid toner readings.
+- **Expected behavior:**
+  1. Reconcile managed copier identities across Autotask and KFS.
+  2. Build/maintain the per-device, per-color toner ledger.
+  3. Correlate KFS replacement events with AOT toner tickets, orders, shipments, PO/vendor evidence, and delivery state.
+  4. Suppress duplicate replenishment candidates when an open/recent order, shipment, or toner ticket already covers the color.
+  5. Identify 'spare=0' or 'unknown' conditions and explain the evidence used.
+  6. Use current toner %, consumption trajectory, meter usage, and prior replacement cadence to forecast when the installed cartridge is likely to require replacement, while keeping the spare ledger separate from forecast confidence.
+  7. Start in shadow mode and compare Jason predictions with actual toner tickets/replacements before enabling any fulfillment action.
+  8. After controlled acceptance, present bounded replenishment candidates for approval; straight-through fulfillment requires separate explicit standing authority and financial/procurement safeguards.
+- **Important safeguards:** Never infer that a customer may stock more than one spare merely because they requested multiples; preserve approved client exceptions explicitly. Never ship/order solely from a low-percentage threshold. Never create a duplicate order when fulfillment is already pending. Customer statements do not override authoritative KFS/AOT evidence without reconciliation. Missing or conflicting device identity fails to 'unknown'/exception rather than guessing.
+- **Dependencies:** Existing KFS retained-history collector and governed print reads; Autotask configuration/ticket reads; normalized AOT toner order/shipment evidence; TODO-OPS-007 procurement/catalog/PO foundation for downstream ordering; TODO-CONN-013 approved-mailbox evidence where vendor shipping/ETA or invoice evidence is needed. TODO-OPS-001 Resolution Memory may learn recurring exceptions but must not grant fulfillment authority.
+- **Initial evidence:** Live review on 2026-10-06 showed predictive/replenishment value in machines including 1346, 1355, 1291, 1111, and 1253. In particular, KFS replacement events for 1111 and 1253 preceded customer 'none on shelf'/'no more toner on shelf' requests, supporting cartridge replacement as a strong spare-consumption signal. Machine 1346 demonstrated an identity/lookup defect: the ticket reported no KFS information while Jason's retained KFS history contained the device and toner readings.
+- **Acceptance test:** In shadow mode, reconcile a controlled sample of toner tickets and KFS replacement events; prove exact device/color identity; derive the expected spare state with evidence; detect known 'spare=0' cases before or without the customer call; suppress cases with an existing replenishment; flag unrecognized cartridge-source exceptions; and produce zero autonomous shipments or financial commitments. Promotion beyond shadow mode requires measured accuracy, duplicate-suppression proof, and explicit owner approval.
+- **Decision owner:** Jason Governance Authority / AOT Operations Owner
+- **Review trigger:** Begin design now using retained KFS history and Autotask toner-ticket history; use additional production history to calibrate forecast thresholds while the ledger and shadow-mode correlation are being built.
+
 ### TODO-COMMS-004 — Microsoft Teams voice-call conversation with Jason
 
 - **Priority:** P2
