@@ -800,6 +800,7 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Risk level:** High
 - **Idea:** Give Jason a governed procurement workflow that can read vendor invoices from an approved mailbox, reconcile invoice line items against Autotask products, services, and other catalog/inventory records, propose any required catalog additions or updates, propose purchase-order additions, and create the approved Autotask records with authoritative readback.
 - **Why it matters:** Vendor invoices routinely contain products, services, licensing, hardware, freight, and other billable or inventory-related items that must be represented consistently in Autotask before purchasing and billing workflows can be completed. Automating the comparison and proposal work can reduce repetitive finance/operations effort while preserving human approval for financial commitments and master-data changes.
+- **Operational demand inputs:** This workflow may also receive normalized, evidence-backed procurement demand from other governed Jason workflows. The first defined upstream source is TODO-OPS-010 proactive toner replenishment. Such demand must enter the same vendor/product/catalog/PO/approval/invoice lifecycle and must not create a parallel purchasing path.
 - **Required capabilities:**
   - governed search/read of an approved invoice mailbox and attachments;
   - reliable invoice extraction for vendor, invoice number/date, PO reference, quantities, SKU/part number, description, unit cost, extended cost, tax/freight, and totals;
@@ -813,19 +814,19 @@ When complete, document the implementation, tests, capability changes, and remai
   - explicit approval for financial commitments and master-data creation unless a future narrowly scoped standing policy is approved;
   - post-write readback, totals verification, and audit evidence.
 - **Expected workflow:**
-  1. Search the designated mailbox for a new or requested vendor invoice.
-  2. Parse and normalize the invoice without exposing unnecessary sensitive content.
-  3. Resolve the vendor and any referenced PO/customer/project context.
-  4. Compare each invoice line to existing Autotask products, services, and other supported catalog/inventory records.
+  1. Accept either a bounded vendor-invoice trigger or a normalized governed procurement-demand record from an approved upstream workflow such as TODO-OPS-010.
+  2. Parse/normalize the invoice or validate the upstream demand record without exposing unnecessary sensitive content; preserve source evidence and an idempotency/correlation key.
+  3. Resolve the vendor and any referenced PO/customer/project/device/destination context.
+  4. Compare each requested item/invoice line to existing Autotask products, services, and other supported catalog/inventory records.
   5. Reuse an existing exact/approved match where appropriate.
   6. If no safe match exists, propose a new product/service/inventory record with normalized name, vendor/SKU, description, cost, and other required fields.
-  7. Compare the invoice against existing PO lines and propose additions/adjustments where necessary.
-  8. Present the proposed catalog changes and PO changes for approval with invoice evidence and totals.
+  7. Compare the invoice or upstream demand against existing PO lines/open fulfillment and propose additions/adjustments only where necessary.
+  8. Present the proposed catalog changes and PO changes for approval with the originating evidence, quantities, destination, and totals.
   9. After approval, create only the approved records through Central Orchestrator.
-  10. Read back every created/updated item and PO line and verify invoice quantity/cost/total reconciliation.
-  11. Preserve the invoice-to-Autotask correlation for audit and future duplicate detection.
+  10. Read back every created/updated item and PO line and verify quantity/cost/total reconciliation against the originating invoice or demand record.
+  11. Preserve the source-demand/invoice-to-Autotask correlation for audit, closed-loop status updates, and future duplicate detection.
 - **Safeguards:**
-  - never create a financial commitment solely because an invoice exists;
+  - never create a financial commitment solely because an invoice or upstream demand record exists;
   - never silently create duplicate products/services when an equivalent approved catalog item already exists;
   - fail closed on ambiguous vendor, SKU, unit-of-measure, tax/freight allocation, or PO matching;
   - do not infer customer billability, markup, GL treatment, or accounting classification without approved policy/evidence;
@@ -1081,9 +1082,12 @@ When complete, document the implementation, tests, capability changes, and remai
   7. Start in shadow mode and compare Jason predictions with actual toner tickets/replacements before enabling any fulfillment action.
   8. After controlled acceptance, present bounded replenishment candidates for approval; straight-through fulfillment requires separate explicit standing authority and financial/procurement safeguards.
 - **Important safeguards:** Never infer that a customer may stock more than one spare merely because they requested multiples; preserve approved client exceptions explicitly. Never ship/order solely from a low-percentage threshold. Never create a duplicate order when fulfillment is already pending. Customer statements do not override authoritative KFS/AOT evidence without reconciliation. Missing or conflicting device identity fails to 'unknown'/exception rather than guessing.
+- **Procurement relationship:** TODO-OPS-010 is an upstream demand-generation workflow for TODO-OPS-007, not a separate ordering system. Once a toner replenishment candidate is evidence-backed and permitted to advance beyond shadow mode, Jason must hand a normalized demand record into the existing procurement lifecycle rather than create an independent toner purchase path.
+- **Procurement handoff contract:** The demand record must include exact client/company, Autotask configuration item, AOT machine ID, KFS device/serial, toner color, approved toner part/SKU, quantity required to restore the normal one-spare policy, evidence for the current spare state, related ticket(s), existing order/shipment checks, destination, and correlation/idempotency key. TODO-OPS-007 then owns vendor/product resolution, catalog matching, PO creation, approval, purchasing, shipping/ETA evidence, invoice reconciliation, and authoritative completion readback.
+- **Closed-loop behavior:** Confirmed procurement fulfillment updates the toner ledger toward 'spare=1'. A later KFS 'toner_changed' event consumes that expected spare and moves the ledger toward 'spare=0', which can generate the next normalized demand record only after duplicate/open-fulfillment checks.
 - **Dependencies:** Existing KFS retained-history collector and governed print reads; Autotask configuration/ticket reads; normalized AOT toner order/shipment evidence; TODO-OPS-007 procurement/catalog/PO foundation for downstream ordering; TODO-CONN-013 approved-mailbox evidence where vendor shipping/ETA or invoice evidence is needed. TODO-OPS-001 Resolution Memory may learn recurring exceptions but must not grant fulfillment authority.
 - **Initial evidence:** Live review on 2026-10-06 showed predictive/replenishment value in machines including 1346, 1355, 1291, 1111, and 1253. In particular, KFS replacement events for 1111 and 1253 preceded customer 'none on shelf'/'no more toner on shelf' requests, supporting cartridge replacement as a strong spare-consumption signal. Machine 1346 demonstrated an identity/lookup defect: the ticket reported no KFS information while Jason's retained KFS history contained the device and toner readings.
-- **Acceptance test:** In shadow mode, reconcile a controlled sample of toner tickets and KFS replacement events; prove exact device/color identity; derive the expected spare state with evidence; detect known 'spare=0' cases before or without the customer call; suppress cases with an existing replenishment; flag unrecognized cartridge-source exceptions; and produce zero autonomous shipments or financial commitments. Promotion beyond shadow mode requires measured accuracy, duplicate-suppression proof, and explicit owner approval.
+- **Acceptance test:** In shadow mode, reconcile a controlled sample of toner tickets and KFS replacement events; prove exact device/color identity; derive the expected spare state with evidence; detect known 'spare=0' cases before or without the customer call; suppress cases with an existing replenishment; flag unrecognized cartridge-source exceptions; and produce zero autonomous shipments or financial commitments. Also prove that one eligible replenishment candidate can be converted into the normalized procurement handoff record expected by TODO-OPS-007 without creating a duplicate PO/order or bypassing its approval controls. Promotion beyond shadow mode requires measured accuracy, duplicate-suppression proof, and explicit owner approval.
 - **Decision owner:** Jason Governance Authority / AOT Operations Owner
 - **Review trigger:** Begin design now using retained KFS history and Autotask toner-ticket history; use additional production history to calibrate forecast thresholds while the ledger and shadow-mode correlation are being built.
 
