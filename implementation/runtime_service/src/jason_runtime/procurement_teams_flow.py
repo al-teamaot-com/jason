@@ -708,11 +708,39 @@ def _po_card(payload: Mapping[str, Any]) -> dict[str, Any]:
     vendor = dict(payload["vendor"])
     products = payload.get("parts")
     part_count = len(products) if isinstance(products, list) and products else 1
-    return {
-        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-        "type": "AdaptiveCard",
-        "version": "1.4",
-        "body": [
+    raw_company_resolution = payload.get("company_resolution")
+    company_resolution = (
+        dict(raw_company_resolution)
+        if isinstance(raw_company_resolution, Mapping)
+        else {}
+    )
+    raw_company_candidates = company_resolution.get("candidates")
+    company_candidates = (
+        [dict(item) for item in raw_company_candidates if isinstance(item, Mapping)]
+        if isinstance(raw_company_candidates, list)
+        else []
+    )
+    company_choices = []
+    for candidate in company_candidates:
+        company_id = candidate.get("id")
+        if not str(company_id or "").isdigit():
+            continue
+        name = str(candidate.get("name") or candidate.get("companyName") or "").strip()
+        address = str(candidate.get("address") or "").strip()
+        confidence = str(candidate.get("confidence") or "").strip()
+        title = name or ("Autotask Company " + str(company_id))
+        if address:
+            title += " — " + address
+        if confidence:
+            title += " — " + confidence
+        company_choices.append({"title": title[:250], "value": str(company_id)})
+    company_default = str(
+        company_resolution.get("selected_id")
+        or company_resolution.get("recommended_id")
+        or ""
+    ).strip()
+    company_status = str(company_resolution.get("status") or "unresolved").strip()
+    body = [
             {
                 "type": "Container",
                 "style": "emphasis",
@@ -737,8 +765,28 @@ def _po_card(payload: Mapping[str, Any]) -> dict[str, Any]:
                     {"title": "Vendor", "value": str(vendor["name"])},
                     {"title": "Parts", "value": str(part_count)},
                     {"title": "Source", "value": str(payload.get("source_reference") or payload.get("source_url") or "")},
+                    {"title": "Company match", "value": company_status.title()},
                 ],
             },
+        ]
+    if company_choices:
+        body.append(
+            {
+                "type": "Input.ChoiceSet",
+                "id": "company_id",
+                "label": "Autotask Company",
+                "style": "compact",
+                "value": company_default,
+                "isRequired": True,
+                "choices": company_choices
+                + [{"title": "None of these / Search Autotask", "value": "__search__"}],
+            }
+        )
+    return {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.4",
+        "body": body + [
             {
                 "type": "Input.Toggle",
                 "id": "create_po",
@@ -1909,7 +1957,7 @@ class ProcurementTeamsFlow:
         allowed = {
             "card_stage", "create_po", "create_client_quote", "at_part_number", "item_class",
             "retail_price", "quantity", "customer_quantity", "aot_stock_quantity",
-            "ticket_number", "billing_treatment", "freight", "tax", "fees",
+            "company_id", "ticket_number", "billing_treatment", "freight", "tax", "fees",
         }
         if set(selections) - allowed:
             raise PermissionError("procurement card contained unsupported selections")
@@ -1937,6 +1985,22 @@ class ProcurementTeamsFlow:
 
         ticket_number = str(selections.get("ticket_number") or "").strip()
         correlation = self.request_factory.new_correlation_id()
+        selected_company = None
+        company_selection = str(selections.get("company_id") or "").strip()
+        if company_selection == "__search__":
+            raise ProcurementFlowError(
+                "Company remains unresolved; search/select the correct Autotask company before processing."
+            )
+        if company_selection:
+            if not company_selection.isdigit() or int(company_selection) < 1:
+                raise ProcurementFlowError("Selected Autotask company is invalid.")
+            selected_company = self._company(
+                company_id=int(company_selection),
+                principal=principal,
+                evidence=evidence,
+                correlation_id=correlation,
+            )
+
         ticket = None
         if customer_quantity or create_client_quote:
             if not ticket_number:
@@ -1949,6 +2013,14 @@ class ProcurementTeamsFlow:
                 evidence=evidence,
                 correlation_id=correlation,
             )
+            if (
+                selected_company is not None
+                and ticket.get("companyID") is not None
+                and int(ticket["companyID"]) != int(company_selection)
+            ):
+                raise ProcurementFlowError(
+                    "Selected company conflicts with the resolved ticket company."
+                )
 
         if create_client_quote and customer_quantity < 1:
             raise ProcurementFlowError(
@@ -2041,6 +2113,18 @@ class ProcurementTeamsFlow:
             "quantity": quantity,
             "customer_quantity": customer_quantity,
             "aot_stock_quantity": aot_stock_quantity,
+            "selected_company_id": (
+                int(company_selection) if selected_company is not None else None
+            ),
+            "selected_company_name": (
+                str(
+                    selected_company.get("companyName")
+                    or selected_company.get("name")
+                    or ""
+                )
+                if selected_company is not None
+                else None
+            ),
             "ticket_number": ticket_number or None,
             "ticket_id": int(ticket["id"]) if ticket else None,
             "ticket_title": str(ticket.get("title") or "") if ticket else None,
@@ -2542,9 +2626,13 @@ class ProcurementTeamsFlow:
                 "taxRegionID": 1,
                 "useItemDescriptionsFrom": 1,
             }
-            if submission.get("ticket_company_id"):
+            purchase_for_company_id = (
+                submission.get("ticket_company_id")
+                or submission.get("selected_company_id")
+            )
+            if purchase_for_company_id:
                 po_payload["purchaseForCompanyID"] = int(
-                    submission["ticket_company_id"]
+                    purchase_for_company_id
                 )
             po_id = result.get("purchase_order_id")
             if not po_id:
