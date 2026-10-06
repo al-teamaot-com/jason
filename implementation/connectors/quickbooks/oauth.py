@@ -12,15 +12,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from connectors.core.contracts import ConnectorConfigurationError
 
-QUICKBOOKS_AUTHORIZATION_URL = "https://appcenter.intuit.com/connect/oauth2"
-QUICKBOOKS_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
+QUICKBOOKS_DISCOVERY_URLS = {
+    "sandbox": "https://developer.api.intuit.com/.well-known/openid_sandbox_configuration",
+    "production": "https://developer.api.intuit.com/.well-known/openid_configuration",
+}
+QUICKBOOKS_AUTHORIZATION_HOST = "appcenter.intuit.com"
+QUICKBOOKS_TOKEN_HOST = "oauth.platform.intuit.com"
+QUICKBOOKS_REVOCATION_HOST = "developer.api.intuit.com"
 QUICKBOOKS_SCOPE = "com.intuit.quickbooks.accounting"
 QUICKBOOKS_REDIRECT_URI_DEFAULT = (
     "https://mcp-jason.teamaot.com/oauth/quickbooks/callback"
@@ -41,6 +46,17 @@ _TOKEN_ENCRYPTION_AAD = b"project-jason:quickbooks-oauth:v1"
 
 class QuickBooksOAuthError(RuntimeError):
     """Safe OAuth failure that must never echo credentials or tokens."""
+
+
+class QuickBooksReconnectRequiredError(QuickBooksOAuthError):
+    """OAuth authorization is no longer usable and must be re-established."""
+
+
+@dataclass(frozen=True, slots=True)
+class QuickBooksOAuthEndpoints:
+    authorization_endpoint: str
+    token_endpoint: str
+    revocation_endpoint: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -360,6 +376,60 @@ class QuickBooksOAuthStore:
         )
 
 
+def _require_discovered_endpoint(value: Any, *, expected_host: str) -> str:
+    endpoint = str(value or "").strip()
+    parsed = urlparse(endpoint)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != expected_host
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise QuickBooksOAuthError(
+            "QuickBooks OAuth discovery returned an untrusted endpoint."
+        )
+    return endpoint
+
+
+def _load_oauth_endpoints(environment: str) -> QuickBooksOAuthEndpoints:
+    environment = _require_environment(environment)
+    request = Request(
+        QUICKBOOKS_DISCOVERY_URLS[environment],
+        headers={"Accept": "application/json"},
+    )
+    try:
+        with urlopen(request, timeout=15.0) as response:
+            raw = response.read()
+    except (HTTPError, URLError, TimeoutError, OSError) as exc:
+        raise QuickBooksOAuthError(
+            "QuickBooks OAuth discovery document is unavailable."
+        ) from exc
+    try:
+        payload = json.loads(raw.decode("utf-8")) if raw else {}
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise QuickBooksOAuthError(
+            "QuickBooks OAuth discovery document is invalid."
+        ) from exc
+    if not isinstance(payload, dict):
+        raise QuickBooksOAuthError(
+            "QuickBooks OAuth discovery document has an invalid shape."
+        )
+    return QuickBooksOAuthEndpoints(
+        authorization_endpoint=_require_discovered_endpoint(
+            payload.get("authorization_endpoint"),
+            expected_host=QUICKBOOKS_AUTHORIZATION_HOST,
+        ),
+        token_endpoint=_require_discovered_endpoint(
+            payload.get("token_endpoint"),
+            expected_host=QUICKBOOKS_TOKEN_HOST,
+        ),
+        revocation_endpoint=_require_discovered_endpoint(
+            payload.get("revocation_endpoint"),
+            expected_host=QUICKBOOKS_REVOCATION_HOST,
+        ),
+    )
+
+
 def _require_environment(environment: str) -> str:
     value = str(environment or "").strip().casefold()
     if value not in QUICKBOOKS_ENVIRONMENTS:
@@ -402,6 +472,7 @@ def begin_quickbooks_oauth(
         raise QuickBooksOAuthError(
             "QuickBooks OAuth client ID and redirect URI are required."
         )
+    endpoints = _load_oauth_endpoints(environment)
     state = secrets.token_urlsafe(32)
     store.create_pending(
         state=state,
@@ -417,20 +488,22 @@ def begin_quickbooks_oauth(
             "state": state,
         }
     )
-    return f"{QUICKBOOKS_AUTHORIZATION_URL}?{query}"
+    return f"{endpoints.authorization_endpoint}?{query}"
 
 
 def _token_request(
     *,
     client_id: str,
     client_secret: str,
+    environment: str,
     form: Mapping[str, str],
 ) -> dict[str, Any]:
     basic = base64.b64encode(
         f"{client_id}:{client_secret}".encode("utf-8")
     ).decode("ascii")
+    endpoints = _load_oauth_endpoints(environment)
     request = Request(
-        QUICKBOOKS_TOKEN_URL,
+        endpoints.token_endpoint,
         data=urlencode(dict(form)).encode("utf-8"),
         method="POST",
         headers={
@@ -443,6 +516,17 @@ def _token_request(
         with urlopen(request, timeout=30.0) as response:
             raw = response.read()
     except HTTPError as exc:
+        error_code = ""
+        try:
+            error_payload = json.loads(exc.read().decode("utf-8"))
+            if isinstance(error_payload, dict):
+                error_code = str(error_payload.get("error") or "").strip().casefold()
+        except (UnicodeDecodeError, json.JSONDecodeError, OSError):
+            error_code = ""
+        if error_code == "invalid_grant":
+            raise QuickBooksReconnectRequiredError(
+                "QuickBooks authorization is no longer valid; reconnect is required."
+            ) from exc
         raise QuickBooksOAuthError(
             f"QuickBooks OAuth token request failed with status {exc.code}."
         ) from exc
@@ -482,6 +566,7 @@ def complete_quickbooks_oauth(
     payload = _token_request(
         client_id=client_id,
         client_secret=client_secret,
+        environment=str(pending["environment"]),
         form={
             "grant_type": "authorization_code",
             "code": code,
@@ -507,24 +592,77 @@ def refresh_quickbooks_oauth(
         raise QuickBooksOAuthError("QuickBooks is not connected.")
     refresh_token = str(current.get("refresh_token") or "").strip()
     if not refresh_token:
-        raise QuickBooksOAuthError(
-            "QuickBooks refresh token is unavailable."
+        store.clear()
+        raise QuickBooksReconnectRequiredError(
+            "QuickBooks refresh token is unavailable; reconnect is required."
         )
     client_id, client_secret = _require_client_credentials(credentials)
-    payload = _token_request(
-        client_id=client_id,
-        client_secret=client_secret,
-        form={
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-        },
-    )
+    try:
+        payload = _token_request(
+            client_id=client_id,
+            client_secret=client_secret,
+            environment=str(current["_environment"]),
+            form={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+            },
+        )
+    except QuickBooksReconnectRequiredError:
+        store.clear()
+        raise
     store.set_token(
         payload,
         realm_id=str(current["_realm_id"]),
         environment=str(current["_environment"]),
         credentials=credentials,
     )
+    return store.status(credentials=credentials)
+
+
+def disconnect_quickbooks_oauth(
+    store: QuickBooksOAuthStore,
+    *,
+    credentials: Mapping[str, str],
+) -> QuickBooksOAuthStatus:
+    current = store.get_token(credentials=credentials)
+    if current is None:
+        store.clear()
+        return store.status(credentials=credentials)
+    token = str(
+        current.get("refresh_token") or current.get("access_token") or ""
+    ).strip()
+    if not token:
+        raise QuickBooksOAuthError(
+            "QuickBooks OAuth token state cannot be revoked safely."
+        )
+    client_id, client_secret = _require_client_credentials(credentials)
+    environment = _require_environment(str(current.get("_environment") or ""))
+    endpoints = _load_oauth_endpoints(environment)
+    basic = base64.b64encode(
+        f"{client_id}:{client_secret}".encode("utf-8")
+    ).decode("ascii")
+    request = Request(
+        endpoints.revocation_endpoint,
+        data=json.dumps({"token": token}).encode("utf-8"),
+        method="POST",
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": f"Basic {basic}",
+        },
+    )
+    try:
+        with urlopen(request, timeout=30.0) as response:
+            response.read()
+    except HTTPError as exc:
+        raise QuickBooksOAuthError(
+            f"QuickBooks OAuth revocation failed with status {exc.code}."
+        ) from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise QuickBooksOAuthError(
+            "QuickBooks OAuth revocation failed."
+        ) from exc
+    store.clear()
     return store.status(credentials=credentials)
 
 

@@ -19,6 +19,7 @@ from connectors.quickbooks.oauth import (
     QuickBooksOAuthError,
     QuickBooksOAuthStore,
     begin_quickbooks_oauth,
+    disconnect_quickbooks_oauth,
 )
 
 DEFAULT_ROLE_ID = Path(
@@ -69,7 +70,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Manage Project Jason QuickBooks OAuth connections."
     )
-    parser.add_argument("action", choices=("status", "start", "clear"))
+    parser.add_argument("action", choices=("status", "start", "disconnect", "clear"))
     parser.add_argument("--db")
     parser.add_argument("--redirect-uri")
     parser.add_argument("--environment", choices=("sandbox", "production"), default="sandbox")
@@ -123,6 +124,31 @@ def main() -> int:
             raise SystemExit("--confirm is required to clear QuickBooks OAuth state")
         store.clear()
         print("QUICKBOOKS_OAUTH=CLEARED")
+        return 0
+
+    if args.action == "disconnect":
+        if not args.confirm:
+            raise SystemExit("--confirm is required to disconnect QuickBooks OAuth")
+        credentials = _credentials(args)
+        try:
+            status = disconnect_quickbooks_oauth(store, credentials=credentials)
+        finally:
+            credentials.clear()
+        print(
+            json.dumps(
+                {
+                    "provider": "quickbooks",
+                    "connected": status.connected,
+                    "environment": status.environment,
+                    "realm_bound": bool(status.realm_id),
+                    "has_refresh_token": status.has_refresh_token,
+                    "pending_authorization": status.pending_authorization,
+                    "secret_values_printed": False,
+                    "disconnected": True,
+                },
+                sort_keys=True,
+            )
+        )
         return 0
 
     credentials = _credentials(args)
