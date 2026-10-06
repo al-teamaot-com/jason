@@ -13,6 +13,7 @@ from connectors.quickbooks.connector import (
     QUICKBOOKS_ACCOUNT_SEARCH,
     QUICKBOOKS_BALANCE_SHEET_READ,
     QUICKBOOKS_COMPANY_READ,
+    QUICKBOOKS_CUSTOMER_CREATE,
     QuickBooksConnector,
 )
 from connectors.quickbooks.oauth import QuickBooksOAuthStore, QuickBooksReconnectRequiredError
@@ -47,14 +48,14 @@ class FakeAudit:
         self.events.append((event_type, dict(details)))
 
 
-def _context(capability, *, organization_id="aot"):
+def _context(capability, *, organization_id="aot", mode="observe"):
     return ConnectorContext(
         correlation_id="corr-qbo-001",
         principal_id="person-al",
         organization_id=organization_id,
         client_id=None,
         capability=capability,
-        mode="observe",
+        mode=mode,
     )
 
 
@@ -255,3 +256,103 @@ def test_completed_read_audits_intuit_tid_without_raw_headers(tmp_path):
         "realm_bound_by_oauth",
         "intuit_tid",
     }
+
+
+def test_customer_create_is_sandbox_only_and_uses_bounded_payload(tmp_path):
+    connector, _, transport, audit = _build(tmp_path)
+
+    result = connector.execute(
+        ConnectorRequest(
+            _context(QUICKBOOKS_CUSTOMER_CREATE, mode="execute"),
+            {
+                "display_name": "Jason Sandbox Write Probe",
+                "company_name": "Atlantic Office Technologies",
+                "given_name": "Jason",
+                "family_name": "Probe",
+                "email": "sandbox-probe@example.invalid",
+                "phone": "555-0100",
+            },
+        )
+    )
+
+    assert result.provider == "quickbooks"
+    call = transport.calls[-1]
+    assert call["method"] == "POST"
+    assert call["url"] == (
+        "https://sandbox-quickbooks.api.intuit.com/v3/company/"
+        "1234567890123456/customer"
+    )
+    assert call["params"] is None
+    assert call["json"] == {
+        "DisplayName": "Jason Sandbox Write Probe",
+        "CompanyName": "Atlantic Office Technologies",
+        "GivenName": "Jason",
+        "FamilyName": "Probe",
+        "PrimaryEmailAddr": {"Address": "sandbox-probe@example.invalid"},
+        "PrimaryPhone": {"FreeFormNumber": "555-0100"},
+    }
+    assert audit.events[0][1]["environment"] == "sandbox"
+
+
+def test_customer_create_requires_execute_mode(tmp_path):
+    connector, secrets, transport, _ = _build(tmp_path)
+
+    with pytest.raises(ConnectorAuthorizationError, match="requires execute mode"):
+        connector.execute(
+            ConnectorRequest(
+                _context(QUICKBOOKS_CUSTOMER_CREATE),
+                {"display_name": "Blocked Probe"},
+            )
+        )
+
+    assert secrets.calls == []
+    assert transport.calls == []
+
+
+def test_customer_create_rejects_raw_payload_and_missing_name(tmp_path):
+    connector, secrets, transport, _ = _build(tmp_path)
+
+    with pytest.raises(ConnectorConfigurationError, match="unsupported argument"):
+        connector.execute(
+            ConnectorRequest(
+                _context(QUICKBOOKS_CUSTOMER_CREATE, mode="execute"),
+                {"payload": {"DisplayName": "raw-provider-payload"}},
+            )
+        )
+
+    with pytest.raises(ConnectorConfigurationError, match="requires display_name"):
+        connector.execute(
+            ConnectorRequest(
+                _context(QUICKBOOKS_CUSTOMER_CREATE, mode="execute"),
+                {},
+            )
+        )
+
+    assert secrets.calls == []
+    assert transport.calls == []
+
+
+def test_customer_create_is_hard_blocked_in_production(tmp_path):
+    store = QuickBooksOAuthStore(tmp_path / "production-oauth.sqlite3")
+    store.set_token(
+        {"access_token": "production-access", "refresh_token": "production-refresh", "expires_in": 3600},
+        realm_id="2222222222222222",
+        environment="production",
+    )
+    secrets = FakeSecrets()
+    transport = FakeTransport()
+    connector = QuickBooksConnector(
+        secrets=secrets, transport=transport, audit=FakeAudit(), oauth_store=store,
+        expected_environment="production",
+    )
+
+    with pytest.raises(ConnectorAuthorizationError, match="sandbox-only"):
+        connector.execute(
+            ConnectorRequest(
+                _context(QUICKBOOKS_CUSTOMER_CREATE, mode="execute"),
+                {"display_name": "Never Create In Production"},
+            )
+        )
+
+    assert secrets.calls == []
+    assert transport.calls == []
