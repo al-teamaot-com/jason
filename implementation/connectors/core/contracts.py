@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Iterator, Mapping, Protocol
+from typing import Any, Iterator, Mapping, MutableMapping, Protocol
 
 from kernel.execution_deadline import (
     GovernedExecutionDeadlineExceeded,
@@ -53,6 +53,7 @@ class ConnectorTransportError(ConnectorError):
         provider_error_code: str | None = None,
         provider_error_param: str | None = None,
         provider_error_message: str | None = None,
+        provider_trace_id: str | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
@@ -62,6 +63,7 @@ class ConnectorTransportError(ConnectorError):
         self.provider_error_code = provider_error_code
         self.provider_error_param = provider_error_param
         self.provider_error_message = provider_error_message
+        self.provider_trace_id = provider_trace_id
         if status_code is not None and type(self) is ConnectorTransportError:
             if 100 <= status_code <= 599:
                 self.error_code = f"PROVIDER_HTTP_STATUS_{status_code}"
@@ -135,6 +137,7 @@ class HttpTransport(Protocol):
         params: Mapping[str, Any] | None = None,
         json: Mapping[str, Any] | None = None,
         timeout_seconds: float = 30.0,
+        response_metadata: MutableMapping[str, str] | None = None,
     ) -> Any: ...
 
     def request_bytes(

@@ -37,6 +37,7 @@ Use these facts when answering the Intuit assessment. Do not claim controls Jaso
 - Production OAuth token payload encrypted using AES-256-GCM.
 - The AES-256-GCM key is stored in the production OpenBao secret as `token_key_b64`.
 - QuickBooks response bodies are not persisted in connector/orchestration event logs; operational metadata is.
+- Intuit `intuit_tid` is captured as allowlisted, bounded troubleshooting metadata on successful responses and provider HTTP failures; raw response headers are not persisted.
 - Requester access requires Jason identity/authority, Central Orchestrator governance, and the existing information-release gate.
 - The Jason host must **not** be represented as having full-disk/LUKS encryption unless that is separately implemented and verified.
 
@@ -119,6 +120,8 @@ Before submitting an Intuit production questionnaire that attests to connection 
 7. Force or naturally exercise one refresh and confirm the newest returned refresh token is persisted.
 
 Do not represent the connect/disconnect/reconnect lifecycle as tested until this acceptance has actually completed.
+
+For Intuit error-handling assessment evidence, also run one sandbox CompanyInfo read with the production-bound transport implementation and confirm a non-empty `intuit_tid` is captured without retaining unrelated response headers or credential material.
 
 ## Start production authorization
 
