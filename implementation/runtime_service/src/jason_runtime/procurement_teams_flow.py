@@ -742,6 +742,21 @@ def _po_card(payload: Mapping[str, Any]) -> dict[str, Any]:
         or ""
     ).strip()
     company_status = str(company_resolution.get("status") or "unresolved").strip()
+    po_facts = [
+        {"title": "Vendor", "value": str(vendor["name"])},
+        {"title": "Parts", "value": str(part_count)},
+        {"title": "Source", "value": str(payload.get("source_reference") or payload.get("source_url") or "")},
+        {"title": "Company match", "value": company_status.title()},
+    ]
+    for title, key in (
+        ("Invoice", "invoice_number"),
+        ("Vendor ref", "vendor_order_reference"),
+        ("Payment", "payment_status"),
+        ("Invoice total", "invoice_total"),
+    ):
+        value = payload.get(key)
+        if value not in (None, ""):
+            po_facts.append({"title": title, "value": str(value)})
     body = [
             {
                 "type": "Container",
@@ -763,12 +778,7 @@ def _po_card(payload: Mapping[str, Any]) -> dict[str, Any]:
             },
             {
                 "type": "FactSet",
-                "facts": [
-                    {"title": "Vendor", "value": str(vendor["name"])},
-                    {"title": "Parts", "value": str(part_count)},
-                    {"title": "Source", "value": str(payload.get("source_reference") or payload.get("source_url") or "")},
-                    {"title": "Company match", "value": company_status.title()},
-                ],
+                "facts": po_facts,
             },
         ]
     if company_choices:
