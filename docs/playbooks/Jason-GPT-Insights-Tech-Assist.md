@@ -1,12 +1,12 @@
 # Jason Playbook: GPT Insights - Help Desk Tech Assist
 
-**Version:** 0.2.0  
-**Status:** Production scope; exact durable owner promotion required  
+**Version:** 0.2.1
+**Status:** Production scope; exact durable owner promotion required
 **Mode:** Advisory, internal-note only
 
 ## 1. Section Goal
 
-**Goal:** Give an AOT technician useful, evidence-grounded help on eligible Help Desk I New tickets that Jason cannot autonomously resolve, without claiming the ticket, changing ticket state, performing remediation, or asking a human for facts Jason can obtain itself.
+**Goal:** Give an AOT technician useful, evidence-grounded help on every eligible Help Desk I New ticket, independently of whether a separate remediation playbook also applies, without claiming the ticket, changing ticket state, performing remediation, or asking a human for facts Jason can obtain itself.
 
 **Success means:**
 - every eligible non-recurring Help Desk I ticket in status `New` receives one internal `GPT Insights` note;
@@ -19,7 +19,6 @@
 - Queue: **Help Desk I**
 - Status: **New**
 - Autotask ticket source is not **Recurring**
-- No applicable promoted remediation playbook matches the ticket.
 
 ## 3. Scope and Boundaries
 
@@ -80,8 +79,7 @@ Before note creation/update:
 - exact Help Desk I queue;
 - exact New status;
 - recurring source exclusion already applied;
-- no promoted remediation playbook applies;
-- exact durable v0.2 owner promotion exists;
+- exact durable v0.2.1 owner promotion exists;
 - update target, if present, is uniquely identified as the Jason-owned `GPT Insights` internal note.
 
 ## 9. Remediation
@@ -185,7 +183,7 @@ Close only after source tests, protected CI, exact durable owner promotion, prod
 Production nomination: `autonomy.activation=autonomous`.
 
 Exact promoted scope:
-- playbook: `gpt_insights_tech_assist@0.2.0`
+- playbook: `gpt_insights_tech_assist@0.2.1`
 - policy: `playbook-autonomy:gpt_insights_tech_assist`
 - capabilities: `service.ticket.note.create`, `service.ticket.note.update`
 

@@ -246,7 +246,7 @@ OFFLINE_AUGMENTATION_SCOPE = PlaybookScope(
 )
 GPT_INSIGHTS_SCOPE = PlaybookScope(
     playbook_id="gpt_insights_tech_assist",
-    playbook_version="0.2.0",
+    playbook_version="0.2.1",
     policy_id="playbook-autonomy:gpt_insights_tech_assist",
     required_action_capabilities=(
         "service.ticket.note.create",
@@ -1533,6 +1533,20 @@ class OperationalAutonomyMaintenance:
         by_id = {int(item.resource_id): item for item in candidates}
         self._reconcile_orphaned_waiting_device_rows(by_id)
 
+        # GPT Insights is a technician-assist augmentation for every eligible
+        # Help Desk I / New ticket. It is independent of remediation matching and
+        # never claims, moves, or otherwise changes the ticket. Recurring-source
+        # tickets are already excluded by the queue source before this point.
+        if self._scope_is_promoted(GPT_INSIGHTS_SCOPE):
+            for item in candidates[: self.max_candidate_evaluations_per_scan]:
+                try:
+                    self._maybe_write_gpt_insights(item)
+                except Exception as exc:
+                    self._audit_diagnostic(
+                        "gpt_insights.review.failed",
+                        {"ticket_id": int(item.resource_id), "error_type": type(exc).__name__},
+                    )
+
         # Ticket augmentation is deliberately independent of queue ownership and
         # active-work capacity. It may add read-only context to a technician-owned
         # offline ticket, but it never claims, requeues, or changes ticket status.
@@ -2026,13 +2040,6 @@ class OperationalAutonomyMaintenance:
                 continue
             scope = self._match_scope(item.context)
             if scope is None:
-                try:
-                    self._maybe_write_gpt_insights(item)
-                except Exception as exc:
-                    self._audit_diagnostic(
-                        "gpt_insights.review.failed",
-                        {"ticket_id": ticket_id, "error_type": type(exc).__name__},
-                    )
                 unsupported += 1
                 classifications[ticket_id] = (
                     "unsupported_capability", "no_applicable_promoted_playbook",
@@ -6878,7 +6885,7 @@ class OperationalAutonomyMaintenance:
                 )
 
     def _maybe_write_gpt_insights(self, candidate) -> None:
-        """Add one evidence-first technician-assist note for unsupported Help Desk work."""
+        """Maintain one evidence-first technician-assist note for eligible Help Desk I/New work."""
         if str(candidate.source_queue).strip().casefold() != "help desk i":
             return
         source_status = str(

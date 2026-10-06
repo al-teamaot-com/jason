@@ -530,6 +530,34 @@ class AutotaskManagedNoteUpdateConnector(AutotaskMutationConnector):
         if dict(prepared.params or {}) != dict(prepared_execution.parameters):
             raise PermissionError("prepared managed-note parameters changed")
 
+        # Optimistic concurrency gate: the target note may have been edited after
+        # the execution plan was prepared. Re-read immediately before PATCH and
+        # require the exact previously authorized body/owner to remain current.
+        current, current_owner_resource_id = self._read_note(
+            request=request,
+            ticket_id=expected["ticketID"],
+            note_id=expected["id"],
+        )
+        if current_owner_resource_id != opaque.owner_resource_id:
+            raise AutotaskManagedNoteUpdateVerificationError(
+                "Jason note owner identity changed before update"
+            )
+        self._verify_owned_note(
+            request=request,
+            observed=current,
+            owner_resource_id=current_owner_resource_id,
+            expected=expected,
+            require_expected_description=False,
+        )
+        current_description = str(current.get("description") or "")
+        if (
+            current_description != opaque.prior_description
+            or _sha256(current_description) != opaque.prior_hash
+        ):
+            raise AutotaskManagedNoteUpdateVerificationError(
+                "managed note changed after execution plan preparation"
+            )
+
         self._audit_mutation_event("connector.mutation.requested", request)
         try:
             if not autotask_mutation_execution_enabled():

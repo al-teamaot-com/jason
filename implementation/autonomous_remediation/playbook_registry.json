@@ -172,7 +172,7 @@
     {
       "id": "gpt_insights_tech_assist",
       "name": "GPT Insights - Help Desk Tech Assist",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "lifecycle": "production",
       "enabled": true,
       "source": "docs/playbooks/Jason-GPT-Insights-Tech-Assist.md",
@@ -185,17 +185,15 @@
         ],
         "excluded_ticket_source_labels": [
           "Recurring"
-        ],
-        "no_applicable_promoted_playbook": true
+        ]
       },
-      "review_status": "owner_approved_2026-10-06_managed_note_update_live_acceptance_required",
+      "review_status": "owner_approved_2026-10-06_all_help_desk_i_new_managed_note_scope",
       "autonomy": {
         "activation": "autonomous",
         "required_gates": [
           "help_desk_i_queue",
           "new_status",
           "recurring_ticket_source_excluded",
-          "unsupported_by_promoted_playbook",
           "evidence_first",
           "no_avoidable_human_question",
           "internal_note_only",

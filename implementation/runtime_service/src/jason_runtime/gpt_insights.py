@@ -94,7 +94,6 @@ def material_fingerprint(evidence: InsightEvidence) -> str:
         "category": evidence.category,
         "device_name": evidence.device_name,
         "device_online": evidence.device_online,
-        "last_seen": evidence.last_seen,
         "operating_system": evidence.operating_system,
         "connection_summary": evidence.connection_summary,
         "related_ticket_count": evidence.related_ticket_count,
