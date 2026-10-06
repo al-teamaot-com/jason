@@ -575,6 +575,7 @@ def test_transport_failure_returns_bounded_provider_diagnostic():
             provider_error_code="account_balance_exhausted",
             provider_error_param="model",
             provider_error_message="The provider account has no remaining service credit.",
+            provider_trace_id="intuit-trace-error-001",
         )
     )
 
@@ -595,6 +596,7 @@ def test_transport_failure_returns_bounded_provider_diagnostic():
         "provider_error_param": "model",
         "provider_error_message":
             "The provider account has no remaining service credit.",
+        "provider_trace_id": "intuit-trace-error-001",
     }
 
     event_type, details = audit.events[-1]
