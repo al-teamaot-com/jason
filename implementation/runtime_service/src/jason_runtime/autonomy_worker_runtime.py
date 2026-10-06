@@ -4641,17 +4641,6 @@ class OperationalAutonomyMaintenance:
                 "VulScan waiting for normal patch processing; one or more exact KBs are "
                 "APPROVED_PENDING."
             )
-            if self._apply_vulscan_client_disposition(
-                work,
-                ticket,
-                continue_monitoring=True,
-            ):
-                self._write_note(
-                    work,
-                    note,
-                    "Jason - VulScan - Waiting Patch Window",
-                )
-                return
         else:
             note += (
                 "Technician review or a separately accepted Windows Update remediation branch "
