@@ -311,6 +311,36 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
 
             self.assertEqual(promoted, [runner.record_id(second_sha)])
 
+
+    def test_worktree_failure_does_not_strand_false_production_state(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            record = {
+                "release_id": runner.record_id(SHA_A),
+                "state": "production_eligible",
+                "rollback_sha": SHA_B,
+                "release_candidate": {
+                    "candidate_sha": SHA_A,
+                    "image": "jason-runtime:test",
+                    "artifact_digest": "sha256:runtime",
+                    "mcp_image": "jason-mcp:test",
+                    "mcp_artifact_digest": "sha256:mcp",
+                },
+            }
+            def image(value):
+                return "sha256:runtime" if value == "jason-runtime:test" else "sha256:mcp"
+            with (
+                patch.object(runner, "image_id", side_effect=image),
+                patch.object(runner, "require_host_reconciler_ready"),
+                patch.object(runner, "live_production_alignment", return_value={}),
+                patch.object(runner, "worktree", side_effect=runner.ReleaseManagerError("repo unavailable")),
+                patch.object(runner, "save_record") as save_record,
+            ):
+                with self.assertRaisesRegex(runner.ReleaseManagerError, "repo unavailable"):
+                    runner.deploy_production(ROOT, root, record)
+            self.assertEqual(record["state"], "production_eligible")
+            save_record.assert_not_called()
+
     def test_production_preflight_uses_exact_candidate_worktree_for_runtime_and_mcp(self):
         with tempfile.TemporaryDirectory() as td:
             state_root = Path(td)
@@ -377,7 +407,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         self.assertIn("DBUS_SESSION_BUS_ADDRESS", installer)
         self.assertIn("unix:path=/run/user/{uid}/bus", installer)
 
-    def test_service_uses_immutable_installed_source_link(self):
+    def test_service_uses_managed_git_source_for_candidate_evidence(self):
         service = (
             ROOT
             / "infrastructure"
@@ -387,7 +417,15 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             / "jason-release-manager.service"
         ).read_text(encoding="utf-8")
         self.assertIn(
-            "/home/al/.local/lib/jason/release-manager-source",
+            "--repo /home/al/.local/lib/jason/engineering-worker-source",
+            service,
+        )
+        self.assertIn(
+            "WorkingDirectory=/home/al/.local/lib/jason/engineering-worker-source",
+            service,
+        )
+        self.assertIn(
+            "/home/al/.local/lib/jason/release_manager_host_runner.py",
             service,
         )
         self.assertNotIn("/home/al/projects/jason", service)
