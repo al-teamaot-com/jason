@@ -572,7 +572,9 @@ def _part_card(
         or product.get("sku")
         or ""
     ).strip()
-    item_class_default = str(saved.get("item_class") or "it")
+    item_class_default = str(
+        saved.get("item_class") or product.get("item_class") or "it"
+    )
     retail_default = str(saved.get("retail_price") or prices[1]["value"])
     quantity_default = int(saved.get("quantity") or product.get("quantity") or 1)
     customer_default = int(saved.get("customer_quantity") or 0)
