@@ -3552,7 +3552,7 @@ def test_vulscan_client_disposition_waits_then_resumes_on_exact_v11_promotion(
     ]
     assert len(client_calls) == 1
     assert client_calls[0]["workflow_id"] == "vulscan_missing_patch"
-    assert client_calls[0]["template_id"] == "vulscan-approved-or-installed-v1"
+    assert client_calls[0]["template_id"] == "vulscan-complete-v1"
     assert client_calls[0]["payload"] == {"ticketID": 141183}
     assert "recipient" not in client_calls[0]
 
@@ -3565,6 +3565,45 @@ def test_vulscan_client_disposition_waits_then_resumes_on_exact_v11_promotion(
         update.get("contactID") == 30684489
         and update.get("status") == "Close Pending"
         for update in updates
+    )
+    store.close()
+
+
+def test_gromelski_approved_pending_stays_internal_until_technical_completion(
+    tmp_path: Path,
+):
+    reads = VulscanBranchReads("APPROVED_PENDING")
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()),
+        reads=reads,
+        actions=actions,
+        store=store,
+        promotion_store=ExactPromotionStore(
+            approved_scopes=(
+                ("vulscan_missing_patch", "1.0.0"),
+                ("vulscan_missing_patch", "1.1.0"),
+            )
+        ),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    current = store.get(141183)
+    assert current is not None
+    assert current.phase == "waiting_patch_window"
+    assert not any(
+        capability == "service.ticket.client.notification.create"
+        for _, capability, _ in actions.calls
+    )
+    assert not any(
+        capability == "service.ticket.update"
+        and (args.get("payload") or {}).get("status") == "Close Pending"
+        for _, capability, args in actions.calls
     )
     store.close()
 
@@ -3969,7 +4008,7 @@ def test_vulscan_all_exact_kbs_installed_without_reboot_completes(tmp_path: Path
     ]
     assert len(notifications) == 1
     assert notifications[0]["workflow_id"] == "vulscan_missing_patch"
-    assert notifications[0]["template_id"] == "vulscan-approved-or-installed-v1"
+    assert notifications[0]["template_id"] == "vulscan-complete-v1"
     assert notifications[0]["payload"] == {"ticketID": 141183}
     assert "recipient" not in notifications[0]
     notes = [args["payload"] for _, capability, args in actions.calls if capability == "service.ticket.note.create"]
