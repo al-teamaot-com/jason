@@ -135,6 +135,7 @@ Before issue creation:
 - Support-first gate allows TODO work.
 
 Before Release Manager handoff:
+- the release bridge uses the managed repository-backed engineering source for Git ancestry/check evidence; immutable installed Release Manager artifacts remain the execution implementation;
 - owner-approved development PR carries `Integration automation: enabled`;
 - protected integration checks are green and current-main reconciliation is complete;
 - development PR merged through the governed source-integration path;

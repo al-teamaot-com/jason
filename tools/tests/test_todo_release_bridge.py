@@ -106,6 +106,7 @@ class TodoReleaseBridgeTests(unittest.TestCase):
             self.assertEqual(result["state"], "production_eligible")
             args = run_cmd.call_args.args[0]
             self.assertIn("prepare", args)
+            self.assertEqual(args[args.index("--repo") + 1], str(root))
             self.assertIn("--candidate-sha", args)
             self.assertIn(SHA, args)
             self.assertIn("--change-class", args)

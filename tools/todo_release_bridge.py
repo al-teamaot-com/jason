@@ -226,7 +226,7 @@ def prepare_release(
             "/usr/bin/python3",
             str(release_runner),
             "--repo",
-            str(release_source),
+            str(repo),
             "--state-root",
             str(release_state),
             "prepare",
