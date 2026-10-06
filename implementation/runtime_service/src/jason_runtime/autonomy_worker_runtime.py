@@ -4322,7 +4322,7 @@ class OperationalAutonomyMaintenance:
                     work,
                     phase="waiting_client_notification_authority",
                     last_reason=(
-                        "VulScan client disposition is waiting for exact v1.1.0 "
+                        "VulScan client disposition is waiting for exact v1.2.0 "
                         "durable promotion; no client communication or Close Pending "
                         "transition was attempted."
                     ),
