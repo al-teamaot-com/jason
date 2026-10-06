@@ -544,4 +544,3 @@ def test_multi_part_po_process_fails_closed_during_teams_acceptance(tmp_path):
             channel_response_id="msg-po",
             submitted_at=NOW,
         )
-        )
