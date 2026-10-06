@@ -183,12 +183,12 @@ def fetch_dnsfilter_sites(
                 arguments={"company_id": 0, "page_number": 1, "page_size": 500},
             )
         ).data
+        items = result.get("data", [])
+        if not isinstance(items, list):
+            raise ReconciliationError("DNSFilter site search returned an invalid shape.")
+        return organization_id, [item for item in items if isinstance(item, Mapping)]
     finally:
         store.close()
-    items = result.get("data", [])
-    if not isinstance(items, list):
-        raise ReconciliationError("DNSFilter site search returned an invalid shape.")
-    return organization_id, [item for item in items if isinstance(item, Mapping)]
 
 
 def apply_scope(
