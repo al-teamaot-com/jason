@@ -12,6 +12,9 @@ This provider is intentionally **read-only** in its first implementation. It exi
 - Vendor: Intuit
 - API: QuickBooks Online Accounting API
 - Authentication: OAuth 2.0 authorization code + refresh token
+- OAuth endpoint discovery: Intuit discovery documents (`openid_sandbox_configuration` for sandbox and `openid_configuration` for production), with HTTPS and expected-host validation
+- Disconnect: Intuit revocation endpoint using the current refresh token, followed by local OAuth-state clearing only after successful revocation
+- Reconnect handling: invalid/expired refresh grants fail closed as an explicit reconnect-required condition
 - Authorized OAuth scope: `com.intuit.quickbooks.accounting`
 - Payments scope: **not authorized**
 - Current live/accepted environment: **sandbox**

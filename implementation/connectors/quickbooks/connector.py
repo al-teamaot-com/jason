@@ -18,6 +18,7 @@ from connectors.core.contracts import (
 from .oauth import (
     QuickBooksOAuthError,
     QuickBooksOAuthStore,
+    QuickBooksReconnectRequiredError,
     quickbooks_access_context,
 )
 
@@ -100,6 +101,15 @@ class QuickBooksConnector:
                 self._oauth_store,
                 credentials=credentials,
             )
+        except QuickBooksReconnectRequiredError as exc:
+            self._audit.record(
+                "connector.authorization_reconnect_required",
+                request.context,
+                {"provider": self.provider_name},
+            )
+            raise ConnectorAuthorizationError(
+                "QuickBooks OAuth connection requires reconnect through the AOT Jason connection workflow."
+            ) from exc
         except QuickBooksOAuthError as exc:
             raise ConnectorAuthorizationError(
                 "QuickBooks OAuth connection is unavailable."

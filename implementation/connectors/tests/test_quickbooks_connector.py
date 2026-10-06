@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from connectors.quickbooks import connector as quickbooks_connector
 from connectors.core.contracts import (
     ConnectorAuthorizationError,
     ConnectorConfigurationError,
@@ -14,7 +15,7 @@ from connectors.quickbooks.connector import (
     QUICKBOOKS_COMPANY_READ,
     QuickBooksConnector,
 )
-from connectors.quickbooks.oauth import QuickBooksOAuthStore
+from connectors.quickbooks.oauth import QuickBooksOAuthStore, QuickBooksReconnectRequiredError
 
 
 class FakeSecrets:
@@ -214,3 +215,20 @@ def test_non_aot_organization_fails_before_secret_resolution(tmp_path):
 
     assert secrets.calls == []
     assert transport.calls == []
+
+
+def test_reconnect_required_is_explicit_and_audited(tmp_path, monkeypatch):
+    connector, _, _, audit = _build(tmp_path)
+    monkeypatch.setattr(
+        quickbooks_connector,
+        "quickbooks_access_context",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            QuickBooksReconnectRequiredError("reconnect is required")
+        ),
+    )
+
+    with pytest.raises(ConnectorAuthorizationError, match="requires reconnect"):
+        connector.execute(ConnectorRequest(_context(QUICKBOOKS_COMPANY_READ), {}))
+
+    assert audit.events[-1][0] == "connector.authorization_reconnect_required"
+    assert audit.events[-1][1] == {"provider": "quickbooks"}
