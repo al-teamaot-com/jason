@@ -173,6 +173,7 @@ def evaluate_transition(
                 reasons.append(f"support item {support_id} is not currently open")
         elif change_class in {"todo", "feature", "enhancement"}:
             active_support = list(record.get("active_support_repairs") or [])
+            blocked_support = list(record.get("blocked_support_repairs") or [])
             maximum = int(
                 (policy.get("priority") or {}).get("max_active_support_repairs", 2)
             )
@@ -180,6 +181,7 @@ def evaluate_transition(
                 support_items,
                 todos,
                 active_support_ids=active_support,
+                blocked_support_ids=blocked_support,
                 max_active_support_repairs=maximum,
             )
             if not plan["todo_start_allowed"]:
