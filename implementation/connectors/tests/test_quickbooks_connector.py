@@ -232,3 +232,26 @@ def test_reconnect_required_is_explicit_and_audited(tmp_path, monkeypatch):
 
     assert audit.events[-1][0] == "connector.authorization_reconnect_required"
     assert audit.events[-1][1] == {"provider": "quickbooks"}
+
+
+def test_completed_read_audits_intuit_tid_without_raw_headers(tmp_path):
+    connector, _, transport, audit = _build(tmp_path)
+    original_request = transport.request
+
+    def request_with_trace(**kwargs):
+        kwargs["response_metadata"]["provider_trace_id"] = "intuit-trace-qbo-789"
+        return original_request(**kwargs)
+
+    transport.request = request_with_trace
+
+    connector.execute(ConnectorRequest(_context(QUICKBOOKS_COMPANY_READ), {}))
+
+    event_type, details = audit.events[-1]
+    assert event_type == "connector.completed"
+    assert details["intuit_tid"] == "intuit-trace-qbo-789"
+    assert set(details) == {
+        "provider",
+        "environment",
+        "realm_bound_by_oauth",
+        "intuit_tid",
+    }

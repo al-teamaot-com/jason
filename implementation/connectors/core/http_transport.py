@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json as json_module
 from socket import timeout as SocketTimeout
-from typing import Any, Mapping
+from typing import Any, Mapping, MutableMapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
@@ -111,6 +111,19 @@ def _provider_error_fields(raw: bytes) -> dict[str, str | None]:
     }
 
 
+def _provider_trace_id(headers: Any) -> str | None:
+    """Return only an allowlisted provider trace identifier from response headers."""
+
+    if headers is None:
+        return None
+    try:
+        raw = headers.get("intuit_tid")
+    except AttributeError:
+        return None
+    value = _bounded_text(raw)
+    return value if value else None
+
+
 def _http_service(url: str) -> str | None:
     from urllib.parse import urlsplit
 
@@ -137,6 +150,7 @@ class UrlLibJsonHttpTransport:
         params: Mapping[str, Any] | None = None,
         json: Mapping[str, Any] | None = None,
         timeout_seconds: float = 30.0,
+        response_metadata: MutableMapping[str, str] | None = None,
     ) -> Any:
         target = url
         if params:
@@ -163,6 +177,9 @@ class UrlLibJsonHttpTransport:
         deadline_limited = effective_timeout < timeout_seconds
         try:
             with urlopen(request, timeout=effective_timeout) as response:
+                provider_trace_id = _provider_trace_id(response.headers)
+                if provider_trace_id and response_metadata is not None:
+                    response_metadata["provider_trace_id"] = provider_trace_id
                 raw = response.read()
         except HTTPError as exc:
             try:
@@ -171,12 +188,16 @@ class UrlLibJsonHttpTransport:
                 raw_error = b""
 
             provider_fields = _provider_error_fields(raw_error)
+            provider_trace_id = _provider_trace_id(exc.headers)
+            if provider_trace_id and response_metadata is not None:
+                response_metadata["provider_trace_id"] = provider_trace_id
 
             raise ConnectorTransportError(
                 f"HTTP transport failed with status {exc.code}",
                 status_code=int(exc.code),
                 retry_after_seconds=_retry_after_seconds(exc.headers),
                 service=_http_service(url),
+                provider_trace_id=provider_trace_id,
                 **provider_fields,
             ) from exc
         except (TimeoutError, SocketTimeout) as exc:

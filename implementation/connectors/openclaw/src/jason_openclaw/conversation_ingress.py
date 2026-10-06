@@ -183,6 +183,7 @@ def _conversation_failure_diagnostic(error: Exception) -> dict[str, object]:
         "provider_error_code": getattr(error, "provider_error_code", None),
         "provider_error_param": getattr(error, "provider_error_param", None),
         "provider_error_message": getattr(error, "provider_error_message", None),
+        "provider_trace_id": getattr(error, "provider_trace_id", None),
     }
 
     return {

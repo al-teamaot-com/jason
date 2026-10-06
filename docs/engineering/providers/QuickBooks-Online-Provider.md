@@ -41,6 +41,8 @@ Sandbox OAuth state uses `/var/lib/jason/openclaw/quickbooks/oauth.sqlite3`. Pro
 
 No OAuth token, Client Secret, or provider credential may be emitted to logs, chat output, evidence, documentation, fixtures, or source control.
 
+For support diagnostics, the shared HTTP transport may capture only the allowlisted Intuit `intuit_tid` response header as a bounded provider trace ID. Successful QuickBooks connector completions audit that value as `intuit_tid`; HTTP failures carry it as sanitized `provider_trace_id` metadata. Raw response headers are not persisted.
+
 ## Canonical read capabilities
 
 - `accounting.company.read`
