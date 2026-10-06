@@ -135,7 +135,9 @@ Before issue creation:
 - Support-first gate allows TODO work.
 
 Before Release Manager handoff:
-- development PR merged;
+- owner-approved development PR carries `Integration automation: enabled`;
+- protected integration checks are green and current-main reconciliation is complete;
+- development PR merged through the governed source-integration path;
 - exact 40-character merge SHA available.
 
 Before TODO closure:
@@ -175,7 +177,10 @@ Each run:
 - reconciles Support priority;
 - checks for eligible TODO intake;
 - lets the shared development worker progress active work;
+- automatically recycles bounded internal source-context/worker blockers while preserving real external/provider/authority blockers;
+- records blocked development as blocked rather than mislabeling it as waiting for merge;
 - reconciles merged TODO development with Release Manager;
+- publishes an approved-commitment summary, including the invariant `release_queue_empty_but_upstream_pending`;
 - checks for production-verified closure.
 
 Unchanged waiting state does not create duplicate issues or closure PRs.
@@ -224,12 +229,14 @@ Examples:
 - Support-first admission denial;
 - duplicate issue;
 - GitHub issue creation/readback failure;
+- owner-approved development blocked before PR creation;
+- PR ready but not merged;
 - merged PR without exact merge SHA;
 - Release Manager unavailable;
 - Release Manager failed/rolled back/blocked;
 - closure PR failure.
 
-No failure may be translated into Implemented.
+A zero-length Release Manager queue is not completion evidence. If any owner-approved commitment remains upstream, status must expose it as outstanding and must not summarize the production pipeline as having nothing pending. No failure may be translated into Implemented.
 
 ## 16. Escalation Criteria
 
@@ -303,7 +310,11 @@ Controlled source/non-production acceptance must prove:
 8. bridge invokes Release Manager prepare rather than deployment plumbing;
 9. TODO closure rejects any release state other than closed;
 10. closure changes only the targeted TODO section;
-11. scheduler order is Support repair -> TODO intake -> development worker -> release bridge.
+11. scheduler order is Support repair -> TODO intake -> development worker -> release bridge;
+12. owner-approved development PRs opt into governed unattended source integration without a second owner phrase;
+13. a blocked development worker is surfaced as `development_blocked`, not `waiting_development_merge`;
+14. an empty release queue with upstream approved work sets `release_queue_empty_but_upstream_pending=true`;
+15. bounded internal worker/context blockers can self-recycle while provider/authority/prerequisite blockers remain fail-closed.
 
 Production activation is separate and must wait for the current Release Manager P0 acceptance path to be healthy.
 

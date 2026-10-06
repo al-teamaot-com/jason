@@ -5686,6 +5686,78 @@ def retire_json_playbook(playbook_id: str) -> dict[str, Any]:
             registry.close()
 
 
+def _production_commitment_snapshot() -> dict[str, object]:
+    path = Path(
+        os.environ.get(
+            "JASON_TODO_RELEASE_STATE",
+            "/var/lib/jason/openclaw/support-repair/todo-release-state.json",
+        )
+    )
+    if not path.exists():
+        return {
+            "status": "unavailable",
+            "reason": "todo_release_state_missing",
+            "outstanding_count": 0,
+            "blocked_count": 0,
+            "upstream_pending_count": 0,
+            "release_pending_count": 0,
+            "release_queue_empty_but_upstream_pending": False,
+            "items": [],
+        }
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "status": "unavailable",
+            "reason": f"todo_release_state_invalid:{type(exc).__name__}",
+            "outstanding_count": 0,
+            "blocked_count": 0,
+            "upstream_pending_count": 0,
+            "release_pending_count": 0,
+            "release_queue_empty_but_upstream_pending": False,
+            "items": [],
+        }
+    items = payload.get("items") if isinstance(payload, Mapping) else {}
+    items = items if isinstance(items, Mapping) else {}
+    summary = payload.get("summary") if isinstance(payload, Mapping) else {}
+    summary = summary if isinstance(summary, Mapping) else {}
+    visible: list[dict[str, object]] = []
+    for todo_id, record in sorted(items.items()):
+        if not isinstance(record, Mapping):
+            continue
+        phase = str(record.get("phase") or "unknown")
+        if phase == "complete":
+            continue
+        visible.append({
+            "todo_id": str(todo_id),
+            "issue_number": record.get("issue_number"),
+            "phase": phase,
+            "reason": str(record.get("reason") or "")[:500],
+            "development_pr": record.get("development_pr"),
+            "release_id": record.get("release_id"),
+        })
+        if len(visible) >= 12:
+            break
+    return {
+        "status": "succeeded",
+        "updated_at": str(payload.get("updated_at") or ""),
+        "approved_commitment_count": int(summary.get("approved_commitment_count", len(items)) or 0),
+        "outstanding_count": int(summary.get("outstanding_count", len(visible)) or 0),
+        "blocked_count": int(summary.get("blocked_count", 0) or 0),
+        "upstream_pending_count": int(summary.get("upstream_pending_count", 0) or 0),
+        "release_pending_count": int(summary.get("release_pending_count", 0) or 0),
+        "release_queue_empty_but_upstream_pending": bool(
+            summary.get("release_queue_empty_but_upstream_pending", False)
+        ),
+        "phases": dict(summary.get("phases") or {}),
+        "items": visible,
+        "items_bounded": len(visible) < len([
+            value for value in items.values()
+            if isinstance(value, Mapping) and str(value.get("phase") or "") != "complete"
+        ]),
+    }
+
+
 @mcp.tool()
 def jason_mcp_status() -> dict[str, object]:
     """Return Jason MCP governed capability state."""
@@ -5722,6 +5794,7 @@ def jason_mcp_status() -> dict[str, object]:
             else None
         ),
         "autonomy_work": _autonomous_ticket_work_snapshot(),
+        "production_commitments": _production_commitment_snapshot(),
     }
 
 

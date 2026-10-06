@@ -94,6 +94,81 @@ def todo_issues(repo: Path) -> list[dict[str, Any]]:
     return result
 
 
+def development_records_by_issue(spool: Path) -> dict[int, dict[str, Any]]:
+    path = spool / 'development-state.json'
+    if not path.exists():
+        return {}
+    value = json.loads(path.read_text(encoding='utf-8'))
+    items = value.get('items') if isinstance(value, Mapping) else {}
+    result: dict[int, dict[str, Any]] = {}
+    if not isinstance(items, Mapping):
+        return result
+    for record in items.values():
+        if not isinstance(record, Mapping):
+            continue
+        raw = record.get('issue_number')
+        if not str(raw or '').isdigit():
+            continue
+        result[int(raw)] = dict(record)
+    return result
+
+
+def upstream_commitment_state(record: Mapping[str, Any] | None) -> tuple[str, str]:
+    if not record:
+        return (
+            'waiting_development_start',
+            'Owner-approved TODO has no durable development-worker record.',
+        )
+    phase = str(record.get('phase') or '').strip()
+    reason = str(record.get('reason') or '').strip()
+    if phase == 'blocked':
+        return 'development_blocked', reason or 'Development worker is blocked.'
+    if phase == 'complete':
+        return (
+            'development_complete_unmerged',
+            reason or 'Development worker says complete but no merged PR was found.',
+        )
+    if phase in {'pr_ready', 'pr_validating', 'ci_repair_needed', 'ci_repairing'}:
+        return 'waiting_development_merge', reason
+    return 'development_in_progress', reason
+
+
+def commitment_summary(items: Mapping[str, Any]) -> dict[str, Any]:
+    phases: dict[str, int] = {}
+    outstanding = 0
+    blocked = 0
+    upstream = 0
+    release_pending = 0
+    for record in items.values():
+        if not isinstance(record, Mapping):
+            continue
+        phase = str(record.get('phase') or 'unknown')
+        phases[phase] = phases.get(phase, 0) + 1
+        if phase != 'complete':
+            outstanding += 1
+        if 'blocked' in phase:
+            blocked += 1
+        if phase in {
+            'waiting_development_start',
+            'development_in_progress',
+            'development_blocked',
+            'development_complete_unmerged',
+            'waiting_development_merge',
+        }:
+            upstream += 1
+        if phase in {'waiting_release', 'release_prepare_blocked', 'release_blocked'}:
+            release_pending += 1
+    return {
+        'approved_commitment_count': len([v for v in items.values() if isinstance(v, Mapping)]),
+        'outstanding_count': outstanding,
+        'blocked_count': blocked,
+        'upstream_pending_count': upstream,
+        'release_pending_count': release_pending,
+        'release_queue_empty_but_upstream_pending': release_pending == 0 and upstream > 0,
+        'phases': dict(sorted(phases.items())),
+    }
+
+
 def merged_prs_by_issue(repo: Path) -> dict[int, dict[str, Any]]:
     prs = gh_json(
         [
@@ -280,7 +355,12 @@ production verification. No runtime/provider behavior changes in this PR.
 
 ## Integration coordination
 
-Integration coordination: documentation-only TODO closure; reconcile current main before merge.
+- Branch baseline SHA: {sha}
+- Current-main reconciliation performed: yes
+- Integration coordination: none
+- Integration automation: enabled
+- Production-impacting change: no; documentation-only TODO closure
+- Intended production release candidate: none
 
 ## Verification
 
@@ -343,6 +423,7 @@ def main() -> int:
 
     run(["git", "fetch", "--no-tags", "origin", "main"], cwd=repo)
     prs = merged_prs_by_issue(repo)
+    development = development_records_by_issue(spool)
 
     for issue in todo_issues(repo):
         todo_id = issue["todo_id"]
@@ -356,7 +437,14 @@ def main() -> int:
         )
         merged = prs.get(issue["issue_number"])
         if not merged:
-            record.update({"phase": "waiting_development_merge", "updated_at": now()})
+            phase, reason = upstream_commitment_state(
+                development.get(issue["issue_number"])
+            )
+            record.update({
+                "phase": phase,
+                "reason": reason,
+                "updated_at": now(),
+            })
             continue
 
         merge_sha = merged["merge_sha"]
@@ -447,6 +535,7 @@ def main() -> int:
                 }
             )
 
+    state["summary"] = commitment_summary(state["items"])
     state["updated_at"] = now()
     atomic_json(state_path, state)
     return 0
