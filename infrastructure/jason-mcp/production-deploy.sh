@@ -4,7 +4,15 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMAGE="${JASON_MCP_PRODUCTION_IMAGE:-jason-mcp:production}"
 REVISION="${JASON_SOURCE_REVISION_OVERRIDE:-}"
-QUICKBOOKS_READ_PROFILE="${JASON_QUICKBOOKS_READ_PROFILE:-}"
+if [ "${JASON_QUICKBOOKS_READ_PROFILE+x}" = "x" ]; then
+  QUICKBOOKS_READ_PROFILE="$JASON_QUICKBOOKS_READ_PROFILE"
+else
+  QUICKBOOKS_READ_PROFILE="$(
+    docker inspect jason-mcp-pilot --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null |
+      sed -n 's/^JASON_QUICKBOOKS_READ_PROFILE=//p' |
+      tail -n 1
+  )"
+fi
 
 if [ -z "$REVISION" ]; then
   REVISION="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"

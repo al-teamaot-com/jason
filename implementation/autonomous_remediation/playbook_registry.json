@@ -170,6 +170,51 @@
       }
     },
     {
+      "id": "gpt_insights_tech_assist",
+      "name": "GPT Insights - Help Desk Tech Assist",
+      "version": "0.2.1",
+      "lifecycle": "production",
+      "enabled": true,
+      "source": "docs/playbooks/Jason-GPT-Insights-Tech-Assist.md",
+      "trigger": {
+        "queue_in": [
+          "Help Desk I"
+        ],
+        "status_in": [
+          "New"
+        ],
+        "excluded_ticket_source_labels": [
+          "Recurring"
+        ]
+      },
+      "review_status": "owner_approved_2026-10-06_all_help_desk_i_new_managed_note_scope",
+      "autonomy": {
+        "activation": "autonomous",
+        "required_gates": [
+          "help_desk_i_queue",
+          "new_status",
+          "recurring_ticket_source_excluded",
+          "evidence_first",
+          "no_avoidable_human_question",
+          "internal_note_only",
+          "jason_owned_note_update",
+          "autonomy_approved"
+        ],
+        "allowed_capabilities": [
+          "service.ticket.note.create",
+          "service.ticket.note.update"
+        ],
+        "policy_id": "playbook-autonomy:gpt_insights_tech_assist",
+        "allowed_branches": [
+          "read_only_evidence_collection",
+          "internal_note_create",
+          "managed_internal_note_update"
+        ],
+        "approval_bound_branches": [],
+        "disruptive_branches": []
+      }
+    },
+    {
       "id": "idle_log_off",
       "name": "Jason - Windows Idle Log Off Compliance / Repair",
       "version": "1.1.0",
@@ -203,6 +248,43 @@
           "service.ticket.update"
         ],
         "policy_id": "playbook-autonomy:idle_log_off"
+      }
+    },
+    {
+      "id": "jason_activity_log",
+      "name": "Jason - Managed Activity Log",
+      "version": "1.0.0",
+      "lifecycle": "production",
+      "enabled": true,
+      "source": "docs/playbooks/Jason-Activity-Log.md",
+      "trigger": {
+        "operational_work_state_change": true,
+        "ticket_required": true
+      },
+      "review_status": "owner_approved_2026-10-06_live_acceptance_required",
+      "autonomy": {
+        "activation": "autonomous",
+        "required_gates": [
+          "persisted_operational_activity",
+          "exact_ticket_identity",
+          "internal_note_only",
+          "jason_owned_note_update",
+          "append_only_activity_history",
+          "duplicate_state_suppression",
+          "autonomy_approved"
+        ],
+        "allowed_capabilities": [
+          "service.ticket.note.create",
+          "service.ticket.note.update"
+        ],
+        "policy_id": "playbook-autonomy:jason_activity_log",
+        "allowed_branches": [
+          "internal_activity_note_create",
+          "append_only_managed_note_update",
+          "activity_note_rollover"
+        ],
+        "approval_bound_branches": [],
+        "disruptive_branches": []
       }
     },
     {
@@ -580,44 +662,6 @@
           "secure_channel_reset",
           "domain_controller_time_configuration"
         ]
-      }
-    },
-    {
-      "id": "gpt_insights_tech_assist",
-      "name": "GPT Insights - Help Desk Tech Assist",
-      "version": "0.1.0",
-      "lifecycle": "production",
-      "enabled": true,
-      "source": "docs/playbooks/Jason-GPT-Insights-Tech-Assist.md",
-      "trigger": {
-        "queue_in": [
-          "Help Desk I",
-          "Help Desk II"
-        ],
-        "no_applicable_promoted_playbook": true
-      },
-      "review_status": "owner_approved_2026-10-01",
-      "autonomy": {
-        "activation": "autonomous",
-        "required_gates": [
-          "help_desk_queue",
-          "unsupported_by_promoted_playbook",
-          "evidence_first",
-          "no_avoidable_human_question",
-          "internal_note_only",
-          "autonomy_approved"
-        ],
-        "allowed_capabilities": [
-          "service.ticket.note.create"
-        ],
-        "policy_id": "playbook-autonomy:gpt_insights_tech_assist",
-        "allowed_branches": [
-          "read_only_evidence_collection",
-          "internal_note_create",
-          "material_update_note"
-        ],
-        "approval_bound_branches": [],
-        "disruptive_branches": []
       }
     }
   ]

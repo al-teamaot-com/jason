@@ -34,6 +34,7 @@ class PromotionStore:
             allowed_capabilities=(
                 "automation.component.execute",
                 "service.ticket.note.create",
+                "service.ticket.note.update",
                 "service.ticket.update",
                 "service.ticket.client.notification.create",
             ),
@@ -6012,4 +6013,223 @@ def test_gpt_insights_does_not_run_in_help_desk_ii(tmp_path: Path):
     )
     worker.tick()
     assert not any(capability == "service.ticket.note.create" for _, capability, _ in actions.calls)
+    store.close()
+
+
+
+def test_gpt_insights_v02_updates_same_note_when_material_evidence_changes(tmp_path: Path):
+    class InsightReads(Reads):
+        def __init__(self):
+            super().__init__()
+            self.online = True
+
+        def execute(self, capability, arguments):
+            if capability == "service.ticket.search":
+                return {"status": "succeeded", "evidence": {"data": {"items": []}}}
+            if capability == "endpoint.device.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {
+                        "record": {
+                            "resource_id": "device-uid-1",
+                            "hostname": "PC-1",
+                            "online": self.online,
+                            "operatingSystem": "Microsoft Windows 11 Pro",
+                        }
+                    },
+                }
+            return super().execute(capability, arguments)
+
+    base = candidate(title="Printer problem")
+    item = replace(
+        base,
+        source_queue="Help Desk I",
+        context={
+            **base.context,
+            "description": "Printer is not working.",
+            "_jason_source_status_label": "New",
+        },
+    )
+    reads = InsightReads()
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=reads,
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("gpt_insights_tech_assist",)),
+        max_active_work_items=2,
+        interval_seconds=30,
+    )
+
+    worker.tick()
+    creates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert len(creates) == 1
+    assert creates[0]["title"] == "GPT Insights"
+
+    reads.ticket_notes = [{
+        "id": 9001,
+        "title": "GPT Insights",
+        "description": creates[0]["description"],
+        "noteType": 3,
+        "publish": 2,
+        "creatorResourceID": 29682930,
+    }]
+    reads.online = False
+    worker.request_reconcile("test:material_evidence_change")
+    worker.tick()
+
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.update"
+    ]
+    assert len(updates) == 1
+    assert updates[0]["id"] == 9001
+    assert updates[0]["title"] == "GPT Insights"
+    assert "offline" in updates[0]["description"]
+    assert not any(
+        str(payload.get("title") or "").startswith("GPT Insights - Update")
+        for payload in updates
+    )
+    store.close()
+
+
+def test_gpt_insights_v02_only_runs_for_help_desk_i_new(tmp_path: Path):
+    base = candidate(title="Printer problem")
+    item = replace(
+        base,
+        source_queue="Help Desk I",
+        context={
+            **base.context,
+            "description": "Printer is not working.",
+            "_jason_source_status_label": "In Progress",
+        },
+    )
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("gpt_insights_tech_assist",)),
+        max_active_work_items=2,
+        interval_seconds=30,
+    )
+    worker.tick()
+    assert not any(
+        capability in {"service.ticket.note.create", "service.ticket.note.update"}
+        for _, capability, _ in actions.calls
+    )
+    store.close()
+
+
+def test_jason_activity_projects_meaningful_state_as_one_living_note(tmp_path: Path):
+    reads = Reads()
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    work = OperationalWork(
+        ticket_id=140933,
+        ticket_number="T20260925.9999",
+        title="Test",
+        playbook_id="datto_edr_av",
+        source_queue="Jason",
+        company_id=507,
+        configuration_item_id=1583,
+        device_uid="device-uid-1",
+        hostname="PC-1",
+        phase="waiting_device_access:claim",
+        last_reason="endpoint offline",
+        updated_at="2026-10-06T10:00:00+00:00",
+    )
+    store.put(work)
+    store.put(replace(
+        work,
+        updated_at="2026-10-06T11:00:00+00:00",
+    ))
+
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()),
+        reads=reads,
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("jason_activity_log",)),
+        max_active_work_items=2,
+        interval_seconds=30,
+    )
+    worker._maybe_sync_jason_activity(work)
+    creates = [
+        args["payload"]
+        for playbook, capability, args in actions.calls
+        if playbook == "jason_activity_log"
+        and capability == "service.ticket.note.create"
+    ]
+    assert len(creates) == 1
+    assert creates[0]["title"] == "Jason Activity"
+    assert creates[0]["description"].count("endpoint offline") == 1
+
+    reads.ticket_notes = [{
+        "id": 9010,
+        "title": "Jason Activity",
+        "description": creates[0]["description"],
+        "noteType": 3,
+        "publish": 2,
+        "creatorResourceID": 29682930,
+    }]
+    resumed = replace(
+        work,
+        phase="claim",
+        last_reason="Exact endpoint is online again; resuming preserved work.",
+        updated_at="2026-10-06T12:00:00+00:00",
+    )
+    store.put(resumed)
+    worker._maybe_sync_jason_activity(resumed)
+    updates = [
+        args["payload"]
+        for playbook, capability, args in actions.calls
+        if playbook == "jason_activity_log"
+        and capability == "service.ticket.note.update"
+    ]
+    assert len(updates) == 1
+    assert updates[0]["id"] == 9010
+    assert updates[0]["description"].startswith(
+        creates[0]["description"] + "\n\n"
+    )
+    assert "online again" in updates[0]["description"]
+    store.close()
+
+
+def test_gpt_insights_v021_runs_even_when_promoted_remediation_playbook_matches(tmp_path: Path):
+    base = candidate(title="[Monitor] Antivirus status issue")
+    item = replace(
+        base,
+        source_queue="Help Desk I",
+        context={**base.context, "_jason_source_status_label": "New"},
+    )
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(
+            promoted=("gpt_insights_tech_assist", "datto_edr_av")
+        ),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    assert any(
+        capability == "service.ticket.note.create"
+        and args.get("payload", {}).get("title") == "GPT Insights"
+        for _, capability, args in actions.calls
+    )
     store.close()
