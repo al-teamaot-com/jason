@@ -137,6 +137,7 @@ Before issue creation:
 Before Release Manager handoff:
 - the release bridge and Release Manager scheduler use the managed repository-backed engineering source for Git ancestry/check evidence and exact candidate worktree creation; immutable installed Release Manager runner/policy artifacts remain the execution implementation;
 - a release cannot enter `production` until the exact candidate worktree and required deploy scripts are materialized successfully;
+- a release cannot reach `production_verified` / `closed` until fresh production documentation reconciliation and Development & Release Control Board publication both pass;
 - owner-approved development PR carries `Integration automation: enabled`;
 - protected integration checks are green and current-main reconciliation is complete;
 - development PR merged through the governed source-integration path;

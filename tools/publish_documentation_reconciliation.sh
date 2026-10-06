@@ -39,6 +39,18 @@ python3 tools/documentation_success_reconciler.py "${ARGS[@]}"
 python3 tools/validate_documentation_control.py
 git diff --check
 
+CONTROL_BOARD_FILE="$(mktemp)"
+cleanup_control_board() { rm -f "$CONTROL_BOARD_FILE"; }
+trap cleanup_control_board EXIT
+GITHUB_TOKEN="$(gh auth token)"
+python3 tools/development_release_coordinator.py \
+  --repository al-teamaot-com/jason \
+  --token "$GITHUB_TOKEN" \
+  --output "$CONTROL_BOARD_FILE"
+unset GITHUB_TOKEN
+gh issue edit 526 --repo al-teamaot-com/jason --body-file "$CONTROL_BOARD_FILE" >/dev/null
+echo "CONTROL_BOARD_PUBLICATION=PASS"
+
 if git diff --quiet -- docs/control/AUTOMATED-CHANGE-STATE.json docs/control/AUTOMATED-CHANGE-STATE.md; then
   echo "DOCUMENTATION_PUBLICATION=NO_CHANGE"
   exit 0

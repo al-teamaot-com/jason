@@ -576,5 +576,38 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             runner.exact_sha("main", "candidate_sha")
 
 
+    def test_publish_production_closeout_requires_documentation_and_board_success(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            script = repo / "tools" / "publish_documentation_reconciliation.sh"
+            script.parent.mkdir(parents=True)
+            script.write_text("#!/bin/sh\n", encoding="utf-8")
+            with patch.object(
+                runner,
+                "run",
+                return_value=(
+                    "DOCUMENTATION_SUCCESS_RECONCILIATION=PASS mode=production\n"
+                    "CONTROL_BOARD_PUBLICATION=PASS"
+                ),
+            ) as execute:
+                result = runner.publish_production_closeout(repo, SHA_A)
+            self.assertEqual(result, {"documentation": "pass", "control_board": "pass"})
+            self.assertEqual(execute.call_args.args[0][1:], ["production", SHA_A])
+
+    def test_publish_production_closeout_fails_closed_without_board_publication(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            script = repo / "tools" / "publish_documentation_reconciliation.sh"
+            script.parent.mkdir(parents=True)
+            script.write_text("#!/bin/sh\n", encoding="utf-8")
+            with patch.object(
+                runner,
+                "run",
+                return_value="DOCUMENTATION_SUCCESS_RECONCILIATION=PASS mode=production",
+            ):
+                with self.assertRaisesRegex(runner.ReleaseManagerError, "control-board publication"):
+                    runner.publish_production_closeout(repo, SHA_A)
+
+
 if __name__ == "__main__":
     unittest.main()
