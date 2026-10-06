@@ -8,7 +8,7 @@ from typing import Any, Mapping, Sequence
 
 BASE_TITLE = "GPT Insights"
 UPDATE_PREFIX = "GPT Insights - Update"
-AUGMENTATION_ID = "gpt_insights_tech_assist_v0_1"
+AUGMENTATION_ID = "gpt_insights_tech_assist_v0_2"
 
 NETWORK_COMMAND = (
     "$up=Get-NetAdapter -Physical -ErrorAction SilentlyContinue | Where-Object Status -eq 'Up'; "

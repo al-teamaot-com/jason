@@ -96,6 +96,7 @@ Operational execute grants are bounded to:
 
 - `automation.component.execute`
 - `service.ticket.note.create`
+- `service.ticket.note.update` — only through the Jason-owned managed-note boundary
 - `service.ticket.update`
 
 Required read grants include exact ticket, CI, resource, endpoint, automation-job, and output reads needed for deterministic admission and verification. The runtime cannot create or broaden these grants.
@@ -114,6 +115,12 @@ Current operational durable promotions are:
 - `idle_log_off@1.0.0` — `pbauto_49092826d1744f41b5b07e2aabd2b1b0`
 
 Standing-safe Datto components used by autonomous resolvers remain independently governed in the durable component-approval registry. Generic PowerShell remains per-run and is rejected for autonomous execution. A playbook promotion never makes a component standing-safe by itself.
+
+### Managed internal-note projection
+
+`service.ticket.note.update` is not a generic Autotask note editor. The production provider boundary requires an exact existing internal note, exact Jason creator identity, an approved managed title (`GPT Insights` or `Jason Activity`), provider update permission, and post-write readback. `Jason Activity` updates are additionally append-only. Before/after bodies and SHA-256 values are retained in Jason's mutation audit.
+
+`gpt_insights_tech_assist@0.2.0` is limited to **Help Desk I / New / non-Recurring** tickets with no applicable promoted remediation playbook. `jason_activity_log@1.0.0` projects meaningful persisted operational state changes into one chronological internal note while suppressing unchanged consecutive polling. Both scopes require separate exact durable owner promotions before unattended use.
 
 ## Runtime and persistent state
 

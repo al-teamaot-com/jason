@@ -478,6 +478,7 @@ _AUTONOMOUS_TICKET_WORKER_READ_GRANTS = (
 _AUTONOMOUS_TICKET_WORKER_ACTION_GRANTS = (
     "automation.component.execute",
     "service.ticket.note.create",
+    "service.ticket.note.update",
     "service.ticket.update",
 )
 _AUTONOMOUS_TICKET_WORKER_REQUIRED_GRANTS = (
@@ -1908,7 +1909,10 @@ def _project_action_result(
             result["verified_fields"] = [str(value) for value in fields[:20]]
         return result
 
-    if capability_name == "service.ticket.note.create":
+    if capability_name in {
+        "service.ticket.note.create",
+        "service.ticket.note.update",
+    }:
         verification = data.get("jasonVerification")
 
         if not isinstance(verification, Mapping):
