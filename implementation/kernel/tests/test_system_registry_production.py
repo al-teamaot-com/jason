@@ -118,9 +118,11 @@ def test_non_host_configured_entities_require_separate_governed_verification() -
 
 def test_docker_container_probe_can_verify_runtime_security_state() -> None:
     registry = registry_from_manifest(MANIFEST)
+    runtime = registry.get("component.jason-runtime")
+    assert runtime.source_version == "6e4e4c0979f3762b8dbd3b8b277850a1899deb18"
     plan = load_verification_plan(PLAN, registry=registry)
     check = next(item for item in plan.checks if item.registry_id == "component.jason-runtime")
-    declared_image = registry.get("component.jason-runtime").declared_state["image"]
+    declared_image = runtime.declared_state["image"]
 
     def command(arguments) -> str:
         assert tuple(arguments) == ("docker", "inspect", "jason-runtime")
