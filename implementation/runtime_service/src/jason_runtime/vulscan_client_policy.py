@@ -8,16 +8,14 @@ GROMELSKI_COMPANY_ID = 597
 GROMELSKI_PRIMARY_CONTACT_ID = 30684489
 GROMELSKI_CLOSE_PENDING_STATUS_ID = 21
 
-VULSCAN_CLIENT_NOTE_TEMPLATE_ID = "vulscan-approved-or-installed-v1"
+VULSCAN_CLIENT_NOTE_TEMPLATE_ID = "vulscan-complete-v1"
 VULSCAN_CLIENT_NOTE_TITLE = "Vulnerability Update"
 VULSCAN_CLIENT_NOTE_BODY = (
-    "The identified vulnerability mentioned in this ticket has been reviewed. "
-    "The required update has either already been installed or has been approved "
-    "for implementation and is scheduled to be applied during the device’s next "
-    "regular patching window in accordance with our maintenance policy.\n\n"
-    "No further action is required at this time. Monitoring will continue to "
-    "confirm successful deployment and remediation. Please reopen the ticket if "
-    "you experience any issues following the update."
+    "The vulnerability identified in this ticket has been reviewed and the "
+    "technical work is complete. Current verification confirms the reported "
+    "vulnerability condition is resolved.\n\n"
+    "No further action is required at this time. Please reply to or reopen the "
+    "ticket if you experience any related issues."
 )
 
 
@@ -52,7 +50,7 @@ GROMELSKI_VULSCAN_POLICY = VulScanDispositionPolicy(
     primary_contact_id=GROMELSKI_PRIMARY_CONTACT_ID,
     client_notification_required=True,
     client_notification_template_id=VULSCAN_CLIENT_NOTE_TEMPLATE_ID,
-    continue_patch_monitoring=True,
+    continue_patch_monitoring=False,
 )
 
 
