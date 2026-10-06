@@ -13,6 +13,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sqlite3
 import statistics
@@ -29,6 +30,12 @@ AUTONOMY_ANOMALY_WINDOW = 12
 AUTONOMY_RECENT_WINDOW = 3
 OUTCOME_CONTRACT_DIRNAME = "contracts"
 AUTONOMY_WORK_DB = Path("/var/lib/jason/openclaw/autonomy-operational-work.sqlite3")
+SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+RELEASE_MANAGER_SOURCE_LINK = Path.home() / ".local/lib/jason/release-manager-source"
+RELEASE_MANAGER_RUNNER = Path.home() / ".local/lib/jason/release_manager_host_runner.py"
+RELEASE_MANAGER_TIMER = Path.home() / ".config/systemd/user/jason-release-manager.timer"
+EXPECTED_RELEASE_TIMER = "OnCalendar=*-*-* *:00/5:00 America/New_York"
+
 WORKFLOW_STALE_SECONDS = {
     "vulscan_client_notification_verify_complete": 15 * 60,
     "vulscan_client_notification_verify_monitoring": 15 * 60,
@@ -85,6 +92,143 @@ def _parse_iso8601(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _container_source_revision(name: str) -> str | None:
+    result = run(
+        [
+            "docker",
+            "inspect",
+            name,
+            "--format",
+            '{{index .Config.Labels "com.teamaot.jason.source_revision"}}',
+        ],
+        timeout=10,
+    )
+    value = result.stdout.strip().casefold() if result.returncode == 0 else ""
+    return value if SHA_RE.fullmatch(value) else None
+
+
+def _sha256(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def production_convergence_failures(
+    *,
+    release_manager_source_link: Path = RELEASE_MANAGER_SOURCE_LINK,
+    installed_runner: Path = RELEASE_MANAGER_RUNNER,
+    installed_timer: Path = RELEASE_MANAGER_TIMER,
+    releases_root: Path | None = None,
+) -> tuple[list[str], dict[str, Any]]:
+    """Verify canonical production intent, installed host state, and live runtime agree.
+
+    The live runtime/MCP revision is the production revision. The exact immutable
+    release for that revision is the source of truth for Release Manager host
+    artifacts. This detects partial deployments and stale host installs without
+    guessing at newer source.
+    """
+    failures: list[str] = []
+    evidence: dict[str, Any] = {}
+    runtime_revision = _container_source_revision("jason-runtime")
+    mcp_revision = _container_source_revision("jason-mcp-pilot")
+    evidence["runtime_revision"] = runtime_revision
+    evidence["mcp_revision"] = mcp_revision
+
+    if runtime_revision is None or mcp_revision is None:
+        failures.append("production_convergence_revision_unavailable")
+        return failures, evidence
+    if runtime_revision != mcp_revision:
+        failures.append("production_convergence_revision_mismatch:runtime_mcp")
+        return failures, evidence
+
+    desired_revision = runtime_revision
+    release_root = releases_root or (Path.home() / "jason-releases")
+    release_dir = release_root / desired_revision
+    evidence["desired_revision"] = desired_revision
+    evidence["release_dir"] = str(release_dir)
+    if not release_dir.is_dir():
+        failures.append("production_convergence_release_source_missing")
+        return failures, evidence
+
+    try:
+        installed_source = release_manager_source_link.resolve(strict=True)
+    except (FileNotFoundError, OSError):
+        installed_source = None
+    evidence["release_manager_source"] = str(installed_source) if installed_source else None
+    if installed_source != release_dir.resolve():
+        failures.append("production_convergence_release_manager_source_drift")
+
+    pairs = (
+        ("runner", release_dir / "tools/release_manager_host_runner.py", installed_runner),
+        (
+            "timer",
+            release_dir / "infrastructure/openclaw-operations/systemd/user/jason-release-manager.timer",
+            installed_timer,
+        ),
+    )
+    artifact_evidence: dict[str, Any] = {}
+    for name, desired, installed in pairs:
+        desired_hash = _sha256(desired)
+        installed_hash = _sha256(installed)
+        artifact_evidence[name] = {
+            "desired": str(desired),
+            "installed": str(installed),
+            "desired_sha256": desired_hash,
+            "installed_sha256": installed_hash,
+        }
+        if desired_hash is None:
+            failures.append(f"production_convergence_desired_artifact_missing:{name}")
+        elif installed_hash != desired_hash:
+            failures.append(f"production_convergence_installed_artifact_drift:{name}")
+    evidence["release_manager_artifacts"] = artifact_evidence
+
+    desired_timer = pairs[1][1]
+    timer_text = desired_timer.read_text(encoding="utf-8") if desired_timer.is_file() else ""
+    evidence["release_manager_24x7_timer_declared"] = EXPECTED_RELEASE_TIMER in timer_text
+    if EXPECTED_RELEASE_TIMER not in timer_text:
+        failures.append("production_convergence_intent_contradiction:release_manager_timer_not_24x7")
+
+    policy = read_json(release_dir / "config/release-manager-policy.json")
+    schedule = policy.get("schedule") if isinstance(policy.get("schedule"), Mapping) else {}
+    coordinator = read_json(release_dir / "config/development-release-coordinator.json")
+    production = coordinator.get("production") if isinstance(coordinator.get("production"), Mapping) else {}
+    automatic_window = production.get("automatic_window") if isinstance(production.get("automatic_window"), Mapping) else {}
+    evidence["release_manager_policy_schedule"] = dict(schedule)
+    evidence["development_release_automatic_window"] = dict(automatic_window)
+    if str(schedule.get("mode") or "").casefold() != "continuous_24x7":
+        failures.append("production_convergence_intent_contradiction:release_policy_not_24x7")
+    if "daily_window_local" in schedule:
+        failures.append("production_convergence_intent_contradiction:legacy_daily_window_present")
+    if str(automatic_window.get("mode") or "").casefold() != "continuous_24x7":
+        failures.append("production_convergence_intent_contradiction:coordinator_not_24x7")
+    if "local_time" in automatic_window:
+        failures.append("production_convergence_intent_contradiction:legacy_coordinator_time_present")
+
+    uid = os.getuid()
+    timer_state = run(
+        [
+            "/usr/bin/env",
+            f"XDG_RUNTIME_DIR=/run/user/{uid}",
+            f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus",
+            "systemctl",
+            "--user",
+            "is-active",
+            "jason-release-manager.timer",
+        ],
+        timeout=10,
+    )
+    active = timer_state.returncode == 0 and timer_state.stdout.strip() == "active"
+    evidence["release_manager_timer_active"] = active
+    if not active:
+        failures.append("production_convergence_release_manager_timer_inactive")
+
+    return sorted(set(failures)), evidence
 
 
 def failed_jason_user_units() -> list[str]:
@@ -396,6 +540,10 @@ def detect(root: Path = DEFAULT_ROOT) -> tuple[list[str], dict[str, Any]]:
     evidence["mcp_status_probe"] = {"ok": ok, "detail": detail}
     if not ok:
         failures.append("mcp_status_functional_failure")
+
+    convergence_failures, convergence_evidence = production_convergence_failures()
+    evidence["production_convergence"] = convergence_evidence
+    failures.extend(convergence_failures)
 
     failed_units = failed_jason_user_units()
     evidence["failed_jason_user_units"] = failed_units

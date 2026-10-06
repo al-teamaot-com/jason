@@ -325,3 +325,140 @@ def test_behavior_baseline_does_not_flag_consistent_low_activity(tmp_path):
     failures, evidence = module.autonomy_behavior_anomalies(db)
 
     assert "autonomy_behavior_anomaly:selection_efficiency_collapse" not in failures
+
+
+def _write_release_manager_fixture(root: Path, revision: str, *, legacy: bool = False) -> Path:
+    release = root / revision
+    (release / "tools").mkdir(parents=True)
+    (release / "config").mkdir(parents=True)
+    unit = release / "infrastructure/openclaw-operations/systemd/user"
+    unit.mkdir(parents=True)
+    (release / "tools/release_manager_host_runner.py").write_text("runner-v1\n", encoding="utf-8")
+    timer = (
+        "[Timer]\nOnCalendar=Mon..Fri *-*-* 17..23:00/5:00 America/New_York\n"
+        if legacy
+        else "[Timer]\nOnCalendar=*-*-* *:00/5:00 America/New_York\n"
+    )
+    (unit / "jason-release-manager.timer").write_text(timer, encoding="utf-8")
+    policy_schedule = (
+        {"automatic_promotion_enabled": True, "daily_window_local": "02:30"}
+        if legacy
+        else {"automatic_promotion_enabled": True, "mode": "continuous_24x7"}
+    )
+    coordinator_window = (
+        {"enabled": True, "local_time": "02:30"}
+        if legacy
+        else {"enabled": True, "mode": "continuous_24x7"}
+    )
+    (release / "config/release-manager-policy.json").write_text(
+        json.dumps({"schedule": policy_schedule}), encoding="utf-8"
+    )
+    (release / "config/development-release-coordinator.json").write_text(
+        json.dumps({"production": {"automatic_window": coordinator_window}}),
+        encoding="utf-8",
+    )
+    return release
+
+
+def test_production_convergence_accepts_exact_live_release(tmp_path, monkeypatch):
+    revision = "a" * 40
+    releases = tmp_path / "releases"
+    release = _write_release_manager_fixture(releases, revision)
+    installed = tmp_path / "installed"
+    installed.mkdir()
+    source_link = installed / "release-manager-source"
+    source_link.symlink_to(release, target_is_directory=True)
+    runner = installed / "release_manager_host_runner.py"
+    timer = installed / "jason-release-manager.timer"
+    runner.write_bytes((release / "tools/release_manager_host_runner.py").read_bytes())
+    timer.write_bytes(
+        (release / "infrastructure/openclaw-operations/systemd/user/jason-release-manager.timer").read_bytes()
+    )
+
+    monkeypatch.setattr(module, "_container_source_revision", lambda name: revision)
+    monkeypatch.setattr(
+        module,
+        "run",
+        lambda args, **kwargs: SimpleNamespace(returncode=0, stdout="active\n", stderr=""),
+    )
+
+    failures, evidence = module.production_convergence_failures(
+        release_manager_source_link=source_link,
+        installed_runner=runner,
+        installed_timer=timer,
+        releases_root=releases,
+    )
+
+    assert failures == []
+    assert evidence["desired_revision"] == revision
+    assert evidence["release_manager_timer_active"] is True
+
+
+def test_production_convergence_detects_stale_installed_release(tmp_path, monkeypatch):
+    revision = "a" * 40
+    old_revision = "b" * 40
+    releases = tmp_path / "releases"
+    release = _write_release_manager_fixture(releases, revision)
+    old_release = _write_release_manager_fixture(releases, old_revision)
+    installed = tmp_path / "installed"
+    installed.mkdir()
+    source_link = installed / "release-manager-source"
+    source_link.symlink_to(old_release, target_is_directory=True)
+    runner = installed / "release_manager_host_runner.py"
+    timer = installed / "jason-release-manager.timer"
+    runner.write_bytes((old_release / "tools/release_manager_host_runner.py").read_bytes())
+    timer.write_bytes(
+        (old_release / "infrastructure/openclaw-operations/systemd/user/jason-release-manager.timer").read_bytes()
+    )
+
+    monkeypatch.setattr(module, "_container_source_revision", lambda name: revision)
+    monkeypatch.setattr(
+        module,
+        "run",
+        lambda args, **kwargs: SimpleNamespace(returncode=0, stdout="active\n", stderr=""),
+    )
+
+    failures, _ = module.production_convergence_failures(
+        release_manager_source_link=source_link,
+        installed_runner=runner,
+        installed_timer=timer,
+        releases_root=releases,
+    )
+
+    assert "production_convergence_release_manager_source_drift" in failures
+
+
+def test_production_convergence_detects_legacy_window_contradiction(tmp_path, monkeypatch):
+    revision = "a" * 40
+    releases = tmp_path / "releases"
+    release = _write_release_manager_fixture(releases, revision, legacy=True)
+    installed = tmp_path / "installed"
+    installed.mkdir()
+    source_link = installed / "release-manager-source"
+    source_link.symlink_to(release, target_is_directory=True)
+    runner = installed / "release_manager_host_runner.py"
+    timer = installed / "jason-release-manager.timer"
+    runner.write_bytes((release / "tools/release_manager_host_runner.py").read_bytes())
+    timer.write_bytes(
+        (release / "infrastructure/openclaw-operations/systemd/user/jason-release-manager.timer").read_bytes()
+    )
+
+    monkeypatch.setattr(module, "_container_source_revision", lambda name: revision)
+    monkeypatch.setattr(
+        module,
+        "run",
+        lambda args, **kwargs: SimpleNamespace(returncode=0, stdout="active\n", stderr=""),
+    )
+
+    failures, _ = module.production_convergence_failures(
+        release_manager_source_link=source_link,
+        installed_runner=runner,
+        installed_timer=timer,
+        releases_root=releases,
+    )
+
+    assert "production_convergence_intent_contradiction:release_manager_timer_not_24x7" in failures
+    assert "production_convergence_intent_contradiction:release_policy_not_24x7" in failures
+    assert "production_convergence_intent_contradiction:legacy_daily_window_present" in failures
+    assert "production_convergence_intent_contradiction:coordinator_not_24x7" in failures
+    assert "production_convergence_intent_contradiction:legacy_coordinator_time_present" in failures
