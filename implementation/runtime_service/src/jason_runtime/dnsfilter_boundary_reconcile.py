@@ -53,6 +53,8 @@ def load_aliases(path: Path) -> dict[str, str]:
     if not path.exists():
         return {}
     raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, Mapping):
+        raise ReconciliationError("DNSFilter alias file must contain an aliases object.")
     aliases = raw.get("aliases", {})
     if not isinstance(aliases, Mapping):
         raise ReconciliationError("DNSFilter alias file must contain an aliases object.")

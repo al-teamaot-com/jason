@@ -72,6 +72,13 @@ def test_load_aliases_normalizes_names_and_company_ids(tmp_path: Path):
     assert load_aliases(path) == {"full circle financial": "458"}
 
 
+def test_load_aliases_rejects_non_object_json_root(tmp_path: Path):
+    path = tmp_path / "aliases.json"
+    path.write_text('[{"aliases": {"FULL CIRCLE FINANCIAL": 458}}]', encoding="utf-8")
+    with pytest.raises(ReconciliationError, match="aliases object"):
+        load_aliases(path)
+
+
 def test_fetch_dnsfilter_sites_rejects_missing_validated_master_boundary(tmp_path: Path):
     boundary_db = tmp_path / "boundary.sqlite3"
     sqlite3.connect(boundary_db).close()
