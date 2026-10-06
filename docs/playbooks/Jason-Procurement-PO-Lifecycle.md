@@ -614,6 +614,12 @@ The Teams card exposes independent controls:
 
 The controls are independent. Creating a client quote does not create a PO. Creating a PO does not create a client quote unless explicitly selected.
 
+### Canonical shipping / freight rule
+
+Autotask Product ID **29683988**, name **Shipping**, is the canonical Jason product for shipping-related charges. Vendor terminology such as shipping, freight, delivery, shipping and handling, freight charge, `FRT-`, or equivalent carrier/shipping labels must normalize to this existing product rather than create vendor-specific shipping products.
+
+The approval card **Freight / Shipping** section must identify the canonical Shipping product and capture the actual vendor freight amount. When a purchase order is created, that amount is written to Autotask's native PO **Freight** field. If shipping later becomes customer-billable, use Product ID **29683988** for the corresponding shipping charge. The canonical product identity and the monetary freight amount are separate persisted facts and must both survive approval/readback.
+
 ### Explicit ticket rule for client quotes
 
 A client quote may be created only when one exact Autotask ticket has been resolved and persisted. The quote audit record must retain ticket ID/number/title/company, created Opportunity ID, created Quote ID, created QuoteItem IDs, and source/procurement submission ID.
@@ -703,6 +709,136 @@ Verification requires the exact ticket charge, exact BillingItem, expected quant
 - Never create a second client quote on retry after successful quote readback.
 - Never repeat a write without first proving whether the first provider call was accepted.
 - Changed quantity, price, ticket, invoice linkage, or provider state produces a new evidence digest and may generate a new notification.
+
+---
+
+## 20B. Teams Procurement Card Resolution Standard (2026-10-06)
+
+This section is the approved Teams interaction standard for the unified procurement path. It does not create a second invoice or purchasing workflow.
+
+### Canonical transaction rule
+
+- One vendor invoice maps to exactly one Autotask PO.
+- One PDF may contain multiple vendor invoices; each vendor invoice is split into its own canonical procurement transaction.
+- Every distinct part/SKU on an invoice is represented by one Part Card, regardless of physical quantity.
+- Part Cards are children of one parent procurement transaction and cannot become orphan purchasing paths.
+- Vendor quote, invoice, URL, API, structured file, and manual evidence all converge into this same transaction model.
+
+### Card sequence and visual identity
+
+1. **Part Card — blue/accent identity**
+   - one card per distinct part/SKU;
+   - resolves product identity, quantity, pricing, allocation, billing treatment, and catalog mapping;
+   - color is reinforced by a textual/icon header so meaning never depends on color alone.
+
+2. **PO Card — purple identity**
+   - exactly one PO card per vendor invoice;
+   - summarizes resolved Part Cards and transaction-level fields;
+   - the pre-execution confirmation remains part of the PO stage.
+
+3. **Confirmation Card — green/good identity**
+   - emitted only after successful governed execution/readback;
+   - includes PO number, vendor invoice, company, products, ticket/no-ticket, totals, payment state, duplicate-check result, and provider verification evidence where available.
+
+Warning/error states use amber/red field or section accents while preserving the base Part/PO/Confirmation card identity.
+
+### Universal field certainty rule
+
+Every required field is classified independently:
+
+- **Resolved** — authoritative evidence establishes the value; prefilled and normally locked unless an explicit override path exists.
+- **Recommended** — evidence strongly favors one candidate but is not authoritative; preselected/editable with rationale.
+- **Unresolved** — multiple or insufficient candidates; no silent selection is permitted.
+
+Any field below authoritative certainty must be selectable/searchable in Teams before Process is enabled. This applies to company, site/location, vendor, product, ticket, device/copier, contract, billing disposition, tax treatment, freight treatment, receiving state, PO/invoice correlation, and any future procurement field.
+
+Candidate lists must be ranked by evidence and include an explicit **None of these / Search** path where applicable.
+
+### Identity resolution rules
+
+Company, vendor, and product resolution are evidence-based rather than exact-name-only.
+
+Company evidence may include:
+- normalized/fuzzy company name and DBA/prefix handling;
+- ship-to/bill-to street, city, state, ZIP;
+- phone/email/contact;
+- prior confirmed vendor-customer alias mapping;
+- KFS/device/customer association;
+- prior procurement/ticket history.
+
+Product evidence may include:
+- SKU/vendor part number;
+- MPN/manufacturer product number;
+- external product ID;
+- vendor product number;
+- description/model family;
+- manufacturer;
+- UPC;
+- existing vendor-product association;
+- unit of measure / pack quantity / yield / color when applicable.
+
+A failed exact lookup never authorizes automatic creation of a company, vendor, or product. Duplicate/candidate resolution occurs before any master-data creation.
+
+### Human correction learning
+
+A technician selection or override is persisted as evidence with:
+- selected canonical object ID;
+- source/vendor alias and relevant address/identifier evidence;
+- confirming technician;
+- timestamp;
+- scope;
+- active/retired state where applicable.
+
+Confirmed mappings may strengthen later resolution but must not bypass conflict detection.
+
+### Draft-only Part Card interaction
+
+Saving a Part Card updates only Jason's persisted procurement draft. It does not create/update:
+- Autotask product/vendor/company;
+- PO/PO item;
+- quote/opportunity;
+- ticket charge;
+- accounting record;
+- vendor order.
+
+All Part Cards must be resolved before the PO card can advance.
+
+### Pre-execution revalidation
+
+Immediately before any provider mutation, Jason re-reads authoritative state and verifies:
+- vendor invoice has not already been processed;
+- no matching PO/order has appeared;
+- selected company/site/vendor/product/ticket/device mappings remain valid;
+- quantities/costs/freight/tax/fees remain unchanged;
+- requester spending authority and required approval remain valid;
+- no duplicate product/PO/ticket charge would be created.
+
+Stale or conflicting state returns the transaction to review rather than executing the original card blindly.
+
+### Idempotency and retry
+
+- Durable invoice identity is vendor identity + vendor invoice number, with date/amount as corroborating evidence.
+- Vendor invoice number, vendor order/customer PO reference, and Autotask PO number are distinct fields.
+- Repeated email/upload/accounting copies of the same invoice resolve to the same canonical transaction.
+- A retry after timeout/readback ambiguity first proves whether the prior write succeeded.
+- A partially completed transaction resumes from persisted successful steps; it never starts over by creating a second PO.
+
+### Completion / confirmation
+
+The green confirmation card is the transaction receipt. At minimum it should report:
+- Autotask PO number/ID and direct link when available;
+- vendor and vendor invoice number;
+- selected company/site;
+- ticket number/title or No Ticket;
+- distinct part count and quantities;
+- existing vs newly created product IDs;
+- total commitment, freight/tax/fees, and payment status;
+- approval reference when required;
+- duplicate-check result;
+- readback/verification result;
+- any incomplete downstream receiving/billing state.
+
+A partial failure card must state exactly which persisted steps succeeded and which failed, and must make clear that retry will continue from the existing transaction.
 
 ---
 

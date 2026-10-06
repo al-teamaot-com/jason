@@ -466,7 +466,19 @@ agent.onActivity("message", async (context) => {
       });
     }
     const adaptiveReply = result?.payload?.reply?.card;
-    if (adaptiveReply && adaptiveReply.type === "AdaptiveCard") {
+    const adaptiveReplies = Array.isArray(result?.payload?.reply?.cards)
+      ? result.payload.reply.cards.filter((card) => card?.type === "AdaptiveCard")
+      : [];
+    if (adaptiveReplies.length > 0) {
+      await context.sendActivity({
+        type: "message",
+        text: String(result?.payload?.reply?.text ?? "Jason procurement"),
+        attachments: adaptiveReplies.map((card) => ({
+          contentType: "application/vnd.microsoft.card.adaptive",
+          content: card,
+        })),
+      });
+    } else if (adaptiveReply && adaptiveReply.type === "AdaptiveCard") {
       await context.sendActivity({
         type: "message",
         text: String(result?.payload?.reply?.text ?? "Jason procurement"),
