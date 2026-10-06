@@ -8,8 +8,24 @@ import pytest
 from connectors.autotask.mutation_connector import AUTOTASK_MUTATION_ENABLED_ENV
 from connectors.core.contracts import ConnectorContext, ConnectorRequest
 from jason_runtime.autotask_managed_note_update import (
+    AUTOTASK_MANAGED_NOTE_UPDATE_PROVIDER,
     AutotaskManagedNoteUpdateConnector,
     AutotaskManagedNoteUpdateVerificationError,
+    register_autotask_managed_note_update_runtime_foundation,
+)
+from jason_runtime.autotask_internal_note import (
+    AUTOTASK_INTERNAL_NOTE_PROFILE,
+    AUTOTASK_INTERNAL_NOTE_PROFILE_ENV,
+)
+from kernel.capabilities import (
+    CapabilityLifecycle,
+    CapabilityRegistryService,
+    InMemoryCapabilityRegistry,
+)
+from kernel.execution_providers import (
+    ExecutionProviderRegistryService,
+    InMemoryExecutionProviderRegistry,
+    ProviderLifecycle,
 )
 
 
@@ -215,3 +231,34 @@ def test_update_rejects_client_visible_or_unmanaged_title_before_patch():
             _request(title="Technician Notes")
         )
     assert not any(r["method"] == "PATCH" for r in transport.requests)
+
+
+
+def test_managed_note_update_foundation_activates_under_existing_internal_note_profile(
+    monkeypatch,
+):
+    monkeypatch.setenv(AUTOTASK_INTERNAL_NOTE_PROFILE_ENV, AUTOTASK_INTERNAL_NOTE_PROFILE)
+    monkeypatch.setenv(AUTOTASK_MUTATION_ENABLED_ENV, "true")
+    capabilities = CapabilityRegistryService(
+        registry=InMemoryCapabilityRegistry()
+    )
+    providers = ExecutionProviderRegistryService(
+        registry=InMemoryExecutionProviderRegistry()
+    )
+    from datetime import datetime, timezone
+
+    state = register_autotask_managed_note_update_runtime_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=datetime.now(timezone.utc),
+    )
+
+    assert state.enabled is True
+    assert state.capability_names == ("service.ticket.note.update",)
+    capability = capabilities.get(
+        capability_name="service.ticket.note.update",
+        version="1.0",
+    )
+    assert capability.lifecycle_status is CapabilityLifecycle.ACTIVE
+    provider = providers.get(AUTOTASK_MANAGED_NOTE_UPDATE_PROVIDER)
+    assert provider.lifecycle_status is ProviderLifecycle.AVAILABLE
