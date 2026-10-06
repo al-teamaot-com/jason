@@ -771,18 +771,23 @@ def gate_transition(
     target: str,
 ) -> None:
     policy = gate.load_json(repo / "config" / "release-manager-policy.json")
-    eligible_support = open_support_issue_ids(repo)
-    support = [
-        item
-        for item in gate.parse_support(
-            (repo / "SUPPORT.md").read_text(encoding="utf-8")
-        )
-        if item["id"] in eligible_support
-    ]
-    active_support, blocked_support = support_repair_state_context(state_root)
-    record["active_support_repairs"] = active_support
-    record["blocked_support_repairs"] = blocked_support
-    record["eligible_support_items"] = sorted(eligible_support)
+    support = gate.parse_support(
+        (repo / "SUPPORT.md").read_text(encoding="utf-8")
+    )
+    if (
+        target == "development"
+        and str(record.get("change_class") or "")
+        in {"todo", "feature", "enhancement"}
+    ):
+        eligible_support = open_support_issue_ids(repo)
+        support = [
+            item for item in support
+            if item["id"] in eligible_support
+        ]
+        active_support, blocked_support = support_repair_state_context(state_root)
+        record["active_support_repairs"] = active_support
+        record["blocked_support_repairs"] = blocked_support
+        record["eligible_support_items"] = sorted(eligible_support)
     todos = gate.parse_todos(
         (repo / "docs" / "roadmaps" / "Project-Jason-TODO-and-Future-Ideas.md").read_text(
             encoding="utf-8"
