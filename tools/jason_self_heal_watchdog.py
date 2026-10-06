@@ -34,6 +34,8 @@ SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 RELEASE_MANAGER_SOURCE_LINK = Path.home() / ".local/lib/jason/release-manager-source"
 RELEASE_MANAGER_RUNNER = Path.home() / ".local/lib/jason/release_manager_host_runner.py"
 RELEASE_MANAGER_TIMER = Path.home() / ".config/systemd/user/jason-release-manager.timer"
+PROVIDER_CANARY_REPORT = Path("/var/lib/jason/provider-health-canaries.json")
+PROVIDER_CANARY_MAX_AGE_SECONDS = 30 * 60
 EXPECTED_RELEASE_TIMER = "OnCalendar=*-*-* *:00/5:00 America/New_York"
 
 WORKFLOW_STALE_SECONDS = {
@@ -148,7 +150,7 @@ def production_convergence_failures(
         return failures, evidence
 
     desired_revision = runtime_revision
-    release_root = releases_root or (Path.home() / "jason-releases")
+    release_root = releases_root or Path("/opt/jason/releases")
     release_dir = release_root / desired_revision
     evidence["desired_revision"] = desired_revision
     evidence["release_dir"] = str(release_dir)
@@ -228,6 +230,41 @@ def production_convergence_failures(
     if not active:
         failures.append("production_convergence_release_manager_timer_inactive")
 
+    return sorted(set(failures)), evidence
+
+
+def provider_canary_monitoring_failures(
+    report_path: Path = PROVIDER_CANARY_REPORT,
+    *,
+    max_age_seconds: int = PROVIDER_CANARY_MAX_AGE_SECONDS,
+) -> tuple[list[str], dict[str, Any]]:
+    failures: list[str] = []
+    evidence: dict[str, Any] = {"report_path": str(report_path), "fresh": False}
+    payload = read_json(report_path)
+    generated = payload.get("generated_at_epoch") if payload else None
+    try:
+        generated_value = float(generated)
+    except (TypeError, ValueError):
+        generated_value = 0.0
+    now_epoch = datetime.now(timezone.utc).timestamp()
+    age_seconds = max(0.0, now_epoch - generated_value) if generated_value > 0 else None
+    evidence["generated_at_epoch"] = generated_value or None
+    evidence["age_seconds"] = age_seconds
+    if not payload or generated_value <= 0:
+        failures.append("provider_canary_report_missing_or_invalid")
+    elif age_seconds is None or age_seconds > max_age_seconds:
+        failures.append("provider_canary_report_stale")
+    else:
+        evidence["fresh"] = True
+
+    timer = run(
+        ["systemctl", "is-active", "jason-provider-health-canary.timer"],
+        timeout=10,
+    )
+    timer_active = timer.returncode == 0 and timer.stdout.strip() == "active"
+    evidence["timer_active"] = timer_active
+    if not timer_active:
+        failures.append("provider_canary_timer_inactive")
     return sorted(set(failures)), evidence
 
 
@@ -566,6 +603,11 @@ def detect(root: Path = DEFAULT_ROOT) -> tuple[list[str], dict[str, Any]]:
     evidence["autonomy_behavior"] = behavior_evidence
     failures.extend(behavior_failures)
 
+    canary_failures, canary_evidence = provider_canary_monitoring_failures()
+    evidence["provider_canary_monitoring"] = canary_evidence
+    failures.extend(canary_failures)
+    canary_fresh = canary_evidence.get("fresh") is True
+
     metrics, metric_error = health_metrics()
     evidence["health_exporter_error"] = metric_error
     if metric_error:
@@ -576,7 +618,7 @@ def detect(root: Path = DEFAULT_ROOT) -> tuple[list[str], dict[str, Any]]:
             if (
                 key.startswith("jason_production_component_health")
                 or key.startswith("jason_mcp_contract")
-                or key.startswith("jason_provider_canary_health")
+                or (canary_fresh and key.startswith("jason_provider_canary_health"))
                 or key == "jason_grafana_configuration_assurance"
             )
             and value == 0
