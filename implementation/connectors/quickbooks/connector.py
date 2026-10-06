@@ -18,6 +18,7 @@ from connectors.core.contracts import (
 from .oauth import (
     QuickBooksOAuthError,
     QuickBooksOAuthStore,
+    QuickBooksReconnectRequiredError,
     quickbooks_access_context,
 )
 
@@ -100,6 +101,15 @@ class QuickBooksConnector:
                 self._oauth_store,
                 credentials=credentials,
             )
+        except QuickBooksReconnectRequiredError as exc:
+            self._audit.record(
+                "connector.authorization_reconnect_required",
+                request.context,
+                {"provider": self.provider_name},
+            )
+            raise ConnectorAuthorizationError(
+                "QuickBooks OAuth connection requires reconnect through the AOT Jason connection workflow."
+            ) from exc
         except QuickBooksOAuthError as exc:
             raise ConnectorAuthorizationError(
                 "QuickBooks OAuth connection is unavailable."
@@ -132,6 +142,7 @@ class QuickBooksConnector:
                 "realm_bound_by_oauth": True,
             },
         )
+        response_metadata: dict[str, str] = {}
         payload = self._transport.request(
             method="GET",
             url=url,
@@ -141,19 +152,24 @@ class QuickBooksConnector:
             },
             params=params,
             timeout_seconds=30.0,
+            response_metadata=response_metadata,
         )
         if not isinstance(payload, Mapping):
             raise ConnectorConfigurationError(
                 "QuickBooks returned an invalid response shape."
             )
+        completion_details: dict[str, Any] = {
+            "provider": self.provider_name,
+            "environment": environment,
+            "realm_bound_by_oauth": True,
+        }
+        provider_trace_id = response_metadata.get("provider_trace_id")
+        if provider_trace_id:
+            completion_details["intuit_tid"] = provider_trace_id
         self._audit.record(
             "connector.completed",
             request.context,
-            {
-                "provider": self.provider_name,
-                "environment": environment,
-                "realm_bound_by_oauth": True,
-            },
+            completion_details,
         )
         return ConnectorResult(
             capability=request.context.capability,

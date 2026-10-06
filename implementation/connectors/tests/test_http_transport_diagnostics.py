@@ -126,3 +126,79 @@ def test_redaction_removes_named_secret_values() -> None:
         redacted = _redact_diagnostic_text(value)
         assert "abc123456789" not in redacted
         assert "[REDACTED]" in redacted
+
+
+def test_http_transport_captures_only_allowlisted_intuit_trace_id(monkeypatch) -> None:
+    from connectors.core import http_transport
+    from connectors.core.http_transport import UrlLibJsonHttpTransport
+
+    class Response:
+        headers = {
+            "intuit_tid": "intuit-trace-123",
+            "X-Internal-Secret": "must-not-be-captured",
+        }
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'{"ok":true}'
+
+    monkeypatch.setattr(http_transport, "urlopen", lambda request, timeout: Response())
+    metadata: dict[str, str] = {}
+
+    result = UrlLibJsonHttpTransport().request(
+        method="GET",
+        url="https://sandbox-quickbooks.api.intuit.com/v3/company/123/companyinfo/123",
+        headers={"Authorization": "Bearer secret-token"},
+        response_metadata=metadata,
+    )
+
+    assert result == {"ok": True}
+    assert metadata == {"provider_trace_id": "intuit-trace-123"}
+    assert "must-not-be-captured" not in str(metadata)
+    assert "secret-token" not in str(metadata)
+
+
+def test_http_transport_preserves_intuit_trace_id_on_http_error(monkeypatch) -> None:
+    from io import BytesIO
+    from urllib.error import HTTPError
+
+    import pytest
+
+    from connectors.core import http_transport
+    from connectors.core.contracts import ConnectorTransportError
+    from connectors.core.http_transport import UrlLibJsonHttpTransport
+
+    error = HTTPError(
+        url="https://sandbox-quickbooks.api.intuit.com/v3/company/123/query",
+        code=400,
+        msg="Bad Request",
+        hdrs={
+            "intuit_tid": "intuit-error-trace-456",
+            "X-Internal-Secret": "must-not-be-captured",
+        },
+        fp=BytesIO(b'{"error":{"code":"4000","message":"Validation failed"}}'),
+    )
+    monkeypatch.setattr(
+        http_transport,
+        "urlopen",
+        lambda request, timeout: (_ for _ in ()).throw(error),
+    )
+    metadata: dict[str, str] = {}
+
+    with pytest.raises(ConnectorTransportError) as captured:
+        UrlLibJsonHttpTransport().request(
+            method="GET",
+            url="https://sandbox-quickbooks.api.intuit.com/v3/company/123/query",
+            headers={"Authorization": "Bearer secret-token"},
+            response_metadata=metadata,
+        )
+
+    assert captured.value.provider_trace_id == "intuit-error-trace-456"
+    assert metadata == {"provider_trace_id": "intuit-error-trace-456"}
+    assert "must-not-be-captured" not in str(captured.value.__dict__)
+    assert "secret-token" not in str(captured.value.__dict__)

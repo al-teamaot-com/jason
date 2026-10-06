@@ -29,11 +29,15 @@ Use these facts when answering the Intuit assessment. Do not claim controls Jaso
 - Initial access: read-only.
 - Accounting scope only; no Payments.
 - OAuth 2.0 authorization-code flow.
+- OAuth authorization, token, and revocation endpoints are resolved from Intuit's environment-appropriate discovery document and accepted only when they remain on the expected Intuit HTTPS hosts.
+- Invalid or expired refresh grants are treated as reconnect-required, the unusable local token state is cleared, and the caller receives an explicit reconnect-required authorization failure.
+- User-requested disconnect uses Intuit's revocation endpoint before local OAuth state is cleared.
 - Production Client ID/Secret stored only in OpenBao.
 - Production OAuth token state stored separately from sandbox.
 - Production OAuth token payload encrypted using AES-256-GCM.
 - The AES-256-GCM key is stored in the production OpenBao secret as `token_key_b64`.
 - QuickBooks response bodies are not persisted in connector/orchestration event logs; operational metadata is.
+- Intuit `intuit_tid` is captured as allowlisted, bounded troubleshooting metadata on successful responses and provider HTTP failures; raw response headers are not persisted.
 - Requester access requires Jason identity/authority, Central Orchestrator governance, and the existing information-release gate.
 - The Jason host must **not** be represented as having full-disk/LUKS encryption unless that is separately implemented and verified.
 
@@ -102,6 +106,22 @@ The callback is:
 The sandbox callback remains separate:
 
 `https://mcp-jason.teamaot.com/oauth/quickbooks/callback`
+
+## Sandbox connection lifecycle acceptance
+
+Before submitting an Intuit production questionnaire that attests to connection lifecycle behavior, run a deliberate sandbox acceptance using the same OAuth implementation:
+
+1. Confirm the sandbox company is connected and a bounded `accounting.company.read` succeeds.
+2. Run `tools/quickbooks_oauth.py disconnect --environment sandbox --confirm`. This must revoke the current Intuit refresh token before clearing local OAuth state.
+3. Confirm sandbox status reports disconnected and no refresh token.
+4. Run `tools/quickbooks_oauth.py start --environment sandbox`, complete the Intuit authorization UI, and reconnect the sandbox company.
+5. Confirm sandbox status reports connected, realm-bound, and refresh-token present.
+6. Run `accounting.company.read` again and confirm the expected sandbox company.
+7. Force or naturally exercise one refresh and confirm the newest returned refresh token is persisted.
+
+Do not represent the connect/disconnect/reconnect lifecycle as tested until this acceptance has actually completed.
+
+For Intuit error-handling assessment evidence, also run one sandbox CompanyInfo read with the production-bound transport implementation and confirm a non-empty `intuit_tid` is captured without retaining unrelated response headers or credential material.
 
 ## Start production authorization
 

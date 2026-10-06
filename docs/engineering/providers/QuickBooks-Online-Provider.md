@@ -12,6 +12,9 @@ This provider is intentionally **read-only** in its first implementation. It exi
 - Vendor: Intuit
 - API: QuickBooks Online Accounting API
 - Authentication: OAuth 2.0 authorization code + refresh token
+- OAuth endpoint discovery: Intuit discovery documents (`openid_sandbox_configuration` for sandbox and `openid_configuration` for production), with HTTPS and expected-host validation
+- Disconnect: Intuit revocation endpoint using the current refresh token, followed by local OAuth-state clearing only after successful revocation
+- Reconnect handling: invalid/expired refresh grants fail closed as an explicit reconnect-required condition
 - Authorized OAuth scope: `com.intuit.quickbooks.accounting`
 - Payments scope: **not authorized**
 - Current live/accepted environment: **sandbox**
@@ -37,6 +40,8 @@ Static Intuit application credentials are isolated by environment in OpenBao:
 Sandbox OAuth state uses `/var/lib/jason/openclaw/quickbooks/oauth.sqlite3`. Production OAuth state uses the separate `/var/lib/jason/openclaw/quickbooks-production/oauth.sqlite3` store and requires AES-256-GCM application-layer encryption. The production token encryption key is supplied from OpenBao as `token_key_b64`; plaintext production token rows fail closed.
 
 No OAuth token, Client Secret, or provider credential may be emitted to logs, chat output, evidence, documentation, fixtures, or source control.
+
+For support diagnostics, the shared HTTP transport may capture only the allowlisted Intuit `intuit_tid` response header as a bounded provider trace ID. Successful QuickBooks connector completions audit that value as `intuit_tid`; HTTP failures carry it as sanitized `provider_trace_id` metadata. Raw response headers are not persisted.
 
 ## Canonical read capabilities
 
