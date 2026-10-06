@@ -113,7 +113,7 @@ Provider connectivity must eventually have low-cadence governed canaries for:
 
 These canaries must execute through the same Jason identity/authority/Central-Orchestrator path as a real request. They must use bounded non-sensitive selectors and export only status, latency, provider name, canonical capability name, and safe error class/reason. They must not log returned user/ticket/document/device records or provider-native identifiers.
 
-**Current state:** all four provider paths have live post-cutover acceptance evidence, but continuous governed provider canaries are not yet deployed. Until the canary implementation exists, the dashboard distinguishes “production contract healthy” from “external provider canary healthy” rather than representing source-code presence as provider health. Issue #181 tracks this work.
+**Current state:** governed provider canaries are implemented for all four provider paths and are required production monitoring. The report must be fresh before per-provider health is treated as current evidence. A missing/stale report or inactive canary timer is a monitoring-substrate failure, not four simultaneous provider outages.
 
 ## Recovery / rollback monitors
 
@@ -193,9 +193,9 @@ The canary workload uses the dedicated service identity `jason-provider-canary` 
 - Autotask: `service.company.search`
 - IT Glue: `documentation.organization.search`
 - Datto RMM: `endpoint.device.search`
-- Microsoft Graph: `identity.user.search`
+- Microsoft Graph: `identity.user.search`, bound to the validated internal AOT boundary `client-aot-internal` so the canary exercises the real tenant-isolation path rather than bypassing it
 
-Each selector is the fixed synthetic value `__jason_provider_canary_nonexistent__`. Information release for the canary service identity is permitted only when the exact capability, exact synthetic selector, exact canary policy, observe-only authority context, and an empty provider result all match. Any returned real record fails closed.
+Each selector is the fixed synthetic value `__jason_provider_canary_nonexistent__`. Microsoft Graph additionally requires the exact validated monitoring client boundary. Information release for the canary service identity is permitted only when the exact capability, exact synthetic selector, exact canary policy, expected client boundary when required, observe-only authority context, and an empty provider result all match. Any returned real record fails closed.
 
 The MCP-contained runner discards provider evidence and emits only provider, canonical capability, health, latency, bounded error class, timestamp, and correlation ID. The host runner writes that sanitized report atomically to `/var/lib/jason/provider-health-canaries.json`. Prometheus reads only the sanitized report through the production-health exporter; Prometheus and the exporter never receive provider credentials or provider records.
 
