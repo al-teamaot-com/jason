@@ -36,10 +36,11 @@
     "protected_core_human_approval_required": true,
     "automatic_window": {
       "enabled": true,
-      "local_time": "02:30",
       "timezone": "America/New_York",
       "only_production_eligible": true,
-      "max_releases_per_window": 1
+      "mode": "continuous_24x7",
+      "reconcile_interval_minutes": 5,
+      "max_concurrent_releases": 1
     }
   },
   "active_display_days": 3,

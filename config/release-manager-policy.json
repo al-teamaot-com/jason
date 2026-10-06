@@ -5,10 +5,11 @@
   "production_transition_enabled": true,
   "schedule": {
     "automatic_promotion_enabled": true,
-    "daily_window_local": "02:30",
     "timezone": "America/New_York",
     "serialized_promotion": true,
-    "max_releases_per_window": 1
+    "mode": "continuous_24x7",
+    "reconcile_interval_minutes": 5,
+    "max_concurrent_releases": 1
   },
   "preproduction": {
     "configured": true,
