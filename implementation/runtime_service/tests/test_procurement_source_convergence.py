@@ -10,6 +10,7 @@ from jason_runtime.procurement_teams_flow import (
     ProcurementTeamsFlow,
     SQLiteProcurementSubmissionStore,
     _card,
+    _cards,
 )
 
 
@@ -388,30 +389,159 @@ def test_url_ticket_hint_is_verified_and_prefilled_in_card(tmp_path):
     )
     assert ticket_input["value"] == "T20191013.0001"
 
-
-def test_multiline_normalized_source_fails_closed_instead_of_collapsing(tmp_path):
+def test_multi_line_invoice_renders_part_cards_plus_one_po_card(tmp_path):
     flow = _flow(tmp_path)
     normalized = {
         "source_kind": "vendor_invoice",
-        "source_reference": "invoice:MULTI-100",
-        "source_acquisition": "document_extraction",
-        "source_confidence": "document_verified",
+        "source_reference": "invoice:42838110-00",
+        "invoice_number": "42838110-00",
+        "vendor_order_reference": "1405-092826",
+        "payment_status": "paid_credit_card",
+        "invoice_total": "208.65",
         "vendor": {"name": "Staples"},
         "lines": [
-            {"name": "Item A", "sku": "A-1", "unit_cost": "10.00"},
-            {"name": "Item B", "sku": "B-1", "unit_cost": "20.00"},
+            {
+                "name": "TK6357 Black Toner",
+                "sku": "KYOTK6357",
+                "mpn": "TK6357",
+                "unit_cost": "91.25",
+                "quantity": 2,
+            },
+            {
+                "name": "WT8500 Waste Container",
+                "sku": "KYOWT8500",
+                "mpn": "WT8500",
+                "unit_cost": "14.15",
+                "quantity": 1,
+            },
         ],
     }
+    result = flow.handle_vendor_document(
+        normalized=normalized,
+        microsoft_tenant_id="tenant",
+        microsoft_object_id="object",
+        conversation_id="conv",
+        message_id="msg",
+        occurred_at=NOW,
+    )
+    payload = flow.store.get(result["submission_id"])
+    assert len(payload["parts"]) == 2
+    assert payload["invoice_number"] == "42838110-00"
+    cards = result["reply"]["cards"]
+    assert len(cards) == 3
+    assert cards[0]["body"][0]["style"] == "accent"
+    assert cards[1]["body"][0]["style"] == "accent"
+    assert cards[2]["body"][0]["style"] == "emphasis"
+    assert cards[2]["body"][0]["items"][0]["text"].startswith("🟪 PURCHASE ORDER")
 
-    with pytest.raises(
-        ProcurementFlowError,
-        match="requires catalog resolution for every line",
-    ):
-        flow.handle_normalized_source(
-            normalized=normalized,
+
+def test_part_card_save_only_updates_jason_draft_state(tmp_path):
+    flow = _flow(tmp_path)
+    normalized = {
+        "source_kind": "vendor_invoice",
+        "source_reference": "invoice:INV-DRYRUN",
+        "vendor": {"name": "Staples"},
+        "product": {
+            "name": "TK6357 Black Toner",
+            "sku": "KYOTK6357",
+            "mpn": "TK6357",
+            "unit_cost": "91.25",
+            "quantity": 2,
+        },
+    }
+    result = flow.handle_vendor_document(
+        normalized=normalized,
+        microsoft_tenant_id="tenant",
+        microsoft_object_id="object",
+        conversation_id="conv",
+        message_id="msg",
+        occurred_at=NOW,
+    )
+    saved = flow.handle_submit(
+        submission_id=result["submission_id"],
+        selections={
+            "card_stage": "part",
+            "part_index": "0",
+            "at_part_number": "TK6357",
+            "item_class": "copy_print",
+            "retail_price": "123.00",
+            "quantity": "2",
+            "customer_quantity": "0",
+            "aot_stock_quantity": "2",
+            "billing_treatment": "no_charge_internal",
+        },
+        microsoft_tenant_id="tenant",
+        microsoft_object_id="object",
+        conversation_id="conv",
+        channel_response_id="msg-save",
+        submitted_at=NOW,
+    )
+    payload = flow.store.get(result["submission_id"])
+    assert payload["status"] == "draft"
+    assert payload["part_resolutions"]["0"]["at_part_number"] == "TK6357"
+    assert payload["part_resolutions"]["0"]["item_class"] == "copy_print"
+    assert saved["reply"]["text"].endswith("No provider write was performed.")
+
+
+def test_multi_part_po_process_fails_closed_during_teams_acceptance(tmp_path):
+    flow = _flow(tmp_path)
+    normalized = {
+        "source_kind": "vendor_invoice",
+        "source_reference": "invoice:INV-MULTI",
+        "vendor": {"name": "Staples"},
+        "lines": [
+            {"name": "Part A", "sku": "A", "unit_cost": "10.00"},
+            {"name": "Part B", "sku": "B", "unit_cost": "20.00"},
+        ],
+    }
+    result = flow.handle_vendor_document(
+        normalized=normalized,
+        microsoft_tenant_id="tenant",
+        microsoft_object_id="object",
+        conversation_id="conv",
+        message_id="msg",
+        occurred_at=NOW,
+    )
+    for index, part in enumerate(("A", "B")):
+        flow.handle_submit(
+            submission_id=result["submission_id"],
+            selections={
+                "card_stage": "part",
+                "part_index": str(index),
+                "at_part_number": part,
+                "item_class": "copy_print",
+                "retail_price": "30.00",
+                "quantity": "1",
+                "customer_quantity": "0",
+                "aot_stock_quantity": "1",
+                "billing_treatment": "no_charge_internal",
+            },
             microsoft_tenant_id="tenant",
             microsoft_object_id="object",
             conversation_id="conv",
-            message_id="msg",
-            occurred_at=NOW,
+            channel_response_id=f"msg-save-{index}",
+            submitted_at=NOW,
+        )
+
+    with pytest.raises(
+        ProcurementFlowError,
+        match="Multi-part PO execution is intentionally blocked",
+    ):
+        flow.handle_submit(
+            submission_id=result["submission_id"],
+            selections={
+                "card_stage": "po",
+                "create_po": "true",
+                "create_client_quote": "false",
+                "ticket_number": "",
+                "freight": "0",
+                "tax": "0",
+                "fees": "0",
+            },
+            microsoft_tenant_id="tenant",
+            microsoft_object_id="object",
+            conversation_id="conv",
+            channel_response_id="msg-po",
+            submitted_at=NOW,
+        )
         )
