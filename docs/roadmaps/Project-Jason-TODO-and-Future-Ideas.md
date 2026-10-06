@@ -941,6 +941,30 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / Finance Owner
 - **Review trigger:** Begin with sandbox authorization-behavior proof before any production credential or financial-data activation.
 
+### TODO-FIN-003 — ConnectBooster / BNG payment reconciliation evidence plane
+
+- **Priority:** P1 — active financial-reconciliation stream
+- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-06
+- **Implementation state at approval:** Planned — validated BNG credential foundation exists on `feature/bng-provider-secret-20260930`; no BNG connector/capability is active in current `main`
+- **Autonomous engineering readiness:** Approved
+- **Authority basis:** Owner approval on 2026-10-06 authorizes autonomous engineering only within this exact read-only reconciliation scope; existing Jason governance, protected-core release controls, financial authority, client/provider isolation, and direct-provider-access rules remain unchanged.
+- **Risk level:** High
+- **Idea:** Add a governed read-only BNG Payment Gateway / ConnectBooster evidence plane so Jason can correlate payment transactions and settlement state with QuickBooks Online and Autotask invoices without creating, capturing, voiding, refunding, or otherwise moving money.
+- **Why it matters:** AOT uses Smart Accounting Hub, QuickBooks Online, and ConnectBooster. Reconciliation is incomplete if Jason can see the Autotask invoice and QBO accounting record but cannot authoritatively determine the gateway transaction/settlement state behind ConnectBooster.
+- **Phase 1 scope:** Implement BNG Query API reads only. Normalize bounded transaction evidence including provider transaction/reference ID, customer/invoice reference when available, amount, transaction type, status, response/result, transaction date, settlement/batch evidence where exposed, and refund/void indicators as read-only facts.
+- **Required correlation path:** `Autotask invoice -> Smart Accounting Hub/QBO invoice -> ConnectBooster/BNG transaction -> QBO payment/balance -> Autotask paid state`. Preserve exact provider identifiers and evidence digests so duplicate or stale records can be distinguished.
+- **Provider strategy:** Smart Accounting Hub remains Kaseya's native Autotask<->QBO sync authority. Jason observes Autotask and QBO authoritative state rather than recreating that sync. BNG is a separate payment-evidence provider used to explain and verify ConnectBooster payment state.
+- **Credential foundation:** Reconcile and port the validated September BNG foundation from `feature/bng-provider-secret-20260930` onto current `main` without copying secret values. Existing durable contract references `bng_gateway.runtime`, the dedicated OpenBao AppRole, and the protected host AppRole artifacts. Re-verify the credential through the canonical provider-secret lifecycle before provider activation.
+- **Safeguards:** Read-only capability only; no Payment API mutation; no capture, sale, authorize, refund, void, recurring billing, Customer Vault mutation, invoice mutation, or stored-payment-method mutation; no card/bank sensitive data may be released into normal Jason output or logs; fail closed on ambiguous invoice/customer/transaction correlation.
+- **Initial capabilities:** provider-neutral transaction search/read and, if the documented Query API exposes them safely, bounded settlement/batch search/read. Capability names and schemas must be provider-neutral even though BNG is the pilot provider.
+- **Reconciliation exceptions:** surface at minimum `payment_missing`, `gateway_succeeded_qbo_open`, `qbo_paid_gateway_unmatched`, `autotask_unpaid_qbo_paid`, `amount_variance`, `duplicate_payment_candidate`, `refund_or_void_unreconciled`, and `settlement_pending_or_unknown` without silently changing financial state.
+- **Acceptance test:** Using controlled/non-sensitive transactions, prove one end-to-end read-only correlation from an Autotask invoice to its QBO invoice/payment evidence and matching BNG transaction; prove a deliberately unmatched record remains unresolved rather than guessed; prove no mutation endpoint is reachable through the registered capability.
+- **Engineering sequence:** 1) port/re-verify BNG credential foundation on current main; 2) implement BNG Query connector and sanitized transport tests; 3) register dormant provider-neutral read capabilities; 4) provider-backed acceptance against AOT BNG account; 5) activate bounded reads; 6) add three-way Autotask/QBO/BNG reconciliation to the procurement/billing reconciliation layer. This work does not depend on Intuit production-write approval.
+- **Explicit non-scope:** BNG/ConnectBooster payment, refund, void, capture, recurring-billing, or vault writes. Any such action requires a separate TODO/capability, explicit financial-action governance, exact target binding, single-attempt semantics, provider readback, and additional owner approval.
+- **Dependencies:** `TODO-FIN-002` QuickBooks governed reads; Autotask invoice reads; current procurement/billing correlation state; existing protected BNG credential foundation.
+- **Decision owner:** Jason Governance Authority / Finance Owner
+- **Review trigger:** Begin immediately as the next read-only financial reconciliation integration; escalate only if provider documentation/account permissions prevent safe Query API evidence or if implementation would require a payment-moving capability.
+
 ---
 
 ## Governance and operational maturity
