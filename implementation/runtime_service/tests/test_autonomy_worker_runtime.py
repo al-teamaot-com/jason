@@ -6203,3 +6203,33 @@ def test_jason_activity_projects_meaningful_state_as_one_living_note(tmp_path: P
     )
     assert "online again" in updates[0]["description"]
     store.close()
+
+
+def test_gpt_insights_v021_runs_even_when_promoted_remediation_playbook_matches(tmp_path: Path):
+    base = candidate(title="[Monitor] Antivirus status issue")
+    item = replace(
+        base,
+        source_queue="Help Desk I",
+        context={**base.context, "_jason_source_status_label": "New"},
+    )
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(
+            promoted=("gpt_insights_tech_assist", "datto_edr_av")
+        ),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    assert any(
+        capability == "service.ticket.note.create"
+        and args.get("payload", {}).get("title") == "GPT Insights"
+        for _, capability, args in actions.calls
+    )
+    store.close()

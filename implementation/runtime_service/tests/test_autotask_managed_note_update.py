@@ -262,3 +262,30 @@ def test_managed_note_update_foundation_activates_under_existing_internal_note_p
     assert capability.lifecycle_status is CapabilityLifecycle.ACTIVE
     provider = providers.get(AUTOTASK_MANAGED_NOTE_UPDATE_PROVIDER)
     assert provider.lifecycle_status is ProviderLifecycle.AVAILABLE
+
+
+class _PrePatchDriftTransport(_Transport):
+    def __init__(self):
+        super().__init__(description="old body")
+        self.note_reads = 0
+
+    def request(self, **kwargs):
+        method = kwargs.get("method")
+        url = kwargs.get("url", "")
+        if method == "GET" and str(url).endswith("/V1.0/Tickets/123/Notes"):
+            self.note_reads += 1
+            if self.note_reads == 2:
+                self.note["description"] = "concurrent technician edit"
+        return super().request(**kwargs)
+
+
+def test_update_rejects_note_changed_after_plan_preparation_before_patch():
+    transport = _PrePatchDriftTransport()
+    connector = _connector(transport)
+    with pytest.raises(
+        AutotaskManagedNoteUpdateVerificationError,
+        match="changed after execution plan preparation",
+    ):
+        connector.execute(_request(description="new body"))
+    assert transport.note_reads == 2
+    assert not any(r["method"] == "PATCH" for r in transport.requests)
