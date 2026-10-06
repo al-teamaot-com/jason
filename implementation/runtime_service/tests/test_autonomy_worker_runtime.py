@@ -6081,6 +6081,7 @@ def test_gpt_insights_v02_updates_same_note_when_material_evidence_changes(tmp_p
         "creatorResourceID": 29682930,
     }]
     reads.online = False
+    worker.request_reconcile("test:material_evidence_change")
     worker.tick()
 
     updates = [
