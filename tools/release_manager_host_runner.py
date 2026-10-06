@@ -698,9 +698,91 @@ def production_preflight(
         remove_worktree(repo, candidate_tree)
 
 
-def gate_transition(repo: Path, record: dict[str, Any], target: str) -> None:
+SUPPORT_ACTIVE_PHASES = frozenset(
+    {
+        "diagnosing",
+        "implementing",
+        "ci_repair_needed",
+        "ci_repairing",
+        "pr_validating",
+        "merged_waiting_deployment",
+        "production_verifying",
+        "closure_validating",
+        "closure_merging",
+    }
+)
+SUPPORT_ID_IN_TITLE = re.compile(r"\\b(SUPPORT-[A-Z]+-[A-Z0-9]+)\\b")
+
+
+def open_support_issue_ids(repo: Path) -> set[str]:
+    raw = run(
+        [
+            "gh",
+            "issue",
+            "list",
+            "--state",
+            "open",
+            "--search",
+            "SUPPORT- in:title",
+            "--limit",
+            "100",
+            "--json",
+            "title",
+        ],
+        cwd=repo,
+    )
+    values = json.loads(raw) if raw else []
+    result: set[str] = set()
+    for issue in values if isinstance(values, list) else []:
+        title = str(issue.get("title") or "") if isinstance(issue, dict) else ""
+        match = SUPPORT_ID_IN_TITLE.search(title)
+        if match:
+            result.add(match.group(1).upper())
+    return result
+
+
+def support_repair_state_context(state_root: Path) -> tuple[list[str], list[str]]:
+    path = state_root.parent / "support-repair" / "state.json"
+    if not path.exists():
+        return [], []
+    value = json.loads(path.read_text(encoding="utf-8"))
+    items = value.get("items") if isinstance(value, dict) else {}
+    if not isinstance(items, dict):
+        return [], []
+    active = sorted(
+        str(item_id)
+        for item_id, record in items.items()
+        if isinstance(record, dict)
+        and str(record.get("phase") or "") in SUPPORT_ACTIVE_PHASES
+    )
+    blocked = sorted(
+        str(item_id)
+        for item_id, record in items.items()
+        if isinstance(record, dict)
+        and str(record.get("phase") or "") == "blocked"
+    )
+    return active, blocked
+
+
+def gate_transition(
+    repo: Path,
+    state_root: Path,
+    record: dict[str, Any],
+    target: str,
+) -> None:
     policy = gate.load_json(repo / "config" / "release-manager-policy.json")
-    support = gate.parse_support((repo / "SUPPORT.md").read_text(encoding="utf-8"))
+    eligible_support = open_support_issue_ids(repo)
+    support = [
+        item
+        for item in gate.parse_support(
+            (repo / "SUPPORT.md").read_text(encoding="utf-8")
+        )
+        if item["id"] in eligible_support
+    ]
+    active_support, blocked_support = support_repair_state_context(state_root)
+    record["active_support_repairs"] = active_support
+    record["blocked_support_repairs"] = blocked_support
+    record["eligible_support_items"] = sorted(eligible_support)
     todos = gate.parse_todos(
         (repo / "docs" / "roadmaps" / "Project-Jason-TODO-and-Future-Ideas.md").read_text(
             encoding="utf-8"
@@ -774,8 +856,8 @@ def create_record(
         },
         "history": [{"at": now(), "state": "requested", "gate": "created"}],
     }
-    gate_transition(repo, record, "development")
-    gate_transition(repo, record, "dev_verified")
+    gate_transition(repo, state_root, record, "development")
+    gate_transition(repo, state_root, record, "dev_verified")
 
     image, digest = build_candidate(repo, state_root, candidate_sha)
     mcp_image, mcp_digest, mcp_base_digest = build_mcp_candidate(
@@ -793,13 +875,13 @@ def create_record(
         "immutable": True,
         "built_at": now(),
     }
-    gate_transition(repo, record, "release_candidate")
+    gate_transition(repo, state_root, record, "release_candidate")
     save_record(state_root, record)
     return record
 
 
 def run_preproduction(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
-    gate_transition(repo, record, "preproduction")
+    gate_transition(repo, state_root, record, "preproduction")
     candidate = record["release_candidate"]
     image = str(candidate["image"])
     digest = str(candidate["artifact_digest"])
@@ -848,8 +930,8 @@ def run_preproduction(repo: Path, state_root: Path, record: dict[str, Any]) -> d
             "provider_mutations_disabled": True,
             "verified_at": now(),
         }
-        gate_transition(repo, record, "preprod_verified")
-        gate_transition(repo, record, "production_eligible")
+        gate_transition(repo, state_root, record, "preprod_verified")
+        gate_transition(repo, state_root, record, "production_eligible")
         save_record(state_root, record)
         return record
     finally:
@@ -879,7 +961,7 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
     rollback_sha = str(record["rollback_sha"])
     live_production_alignment(rollback_sha)
 
-    gate_transition(repo, record, "production")
+    gate_transition(repo, state_root, record, "production")
     save_record(state_root, record)
 
     env = os.environ.copy()
@@ -956,8 +1038,8 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
             "host_release": alignment["host_release"],
             "verified_at": now(),
         }
-        gate_transition(repo, record, "production_verified")
-        gate_transition(repo, record, "closed")
+        gate_transition(repo, state_root, record, "production_verified")
+        gate_transition(repo, state_root, record, "closed")
         save_record(state_root, record)
         return record
     except Exception as error:
