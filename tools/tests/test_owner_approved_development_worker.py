@@ -226,3 +226,34 @@ def test_recycle_self_recoverable_blockers_preserves_real_external_blockers():
     assert state['items']['DEV-1']['phase'] == 'diagnosing'
     assert state['items']['DEV-1']['self_recovery_attempts'] == 1
     assert state['items']['DEV-2']['phase'] == 'blocked'
+
+
+def test_owner_approved_issue_discovery_is_not_limited_to_newest_100(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_gh_json(args, *, cwd):
+        calls.append(list(args))
+        if args[:2] == ['repo', 'view']:
+            return {'nameWithOwner': 'example/jason'}
+        if args[:3] == ['issue', 'list', '--state']:
+            return [
+                {
+                    'number': 866,
+                    'title': 'Older approved item',
+                    'body': '- **Autonomous development:** owner-approved',
+                    'url': 'https://example.invalid/issues/866',
+                    'labels': [],
+                    'updatedAt': '2026-10-03T12:13:30Z',
+                }
+            ]
+        if args[:2] == ['api', 'repos/example/jason/issues/866']:
+            return {'author_association': 'OWNER', 'user': {'login': 'owner'}}
+        raise AssertionError(args)
+
+    monkeypatch.setattr(module.support, 'gh_json', fake_gh_json)
+    items = module.owner_approved_issues(tmp_path)
+
+    issue_list_call = next(call for call in calls if call[:2] == ['issue', 'list'])
+    limit_index = issue_list_call.index('--limit') + 1
+    assert int(issue_list_call[limit_index]) >= 1000
+    assert [item['issue_number'] for item in items] == [866]

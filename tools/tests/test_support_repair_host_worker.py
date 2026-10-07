@@ -381,6 +381,41 @@ def test_apply_edits_requires_exact_single_anchor(tmp_path):
         raise AssertionError('ambiguous anchor was accepted')
 
 
+def test_apply_edits_can_create_bounded_new_file(tmp_path):
+    touched = worker.apply_edits(
+        tmp_path,
+        [
+            {
+                'path': 'implementation/kernel/capabilities/retirement.py',
+                'old_text': '',
+                'new_text': '"""Capability retirement helpers."""\n',
+            }
+        ],
+        Gate(),
+        {'max_changed_lines': 800, 'max_changed_files': 25},
+    )
+    target = tmp_path / 'implementation/kernel/capabilities/retirement.py'
+    assert touched == ['implementation/kernel/capabilities/retirement.py']
+    assert target.read_text(encoding='utf-8') == '"""Capability retirement helpers."""\n'
+
+
+def test_apply_edits_rejects_new_file_over_existing_path(tmp_path):
+    target = tmp_path / 'implementation/example.py'
+    target.parent.mkdir(parents=True)
+    target.write_text('existing\n', encoding='utf-8')
+    try:
+        worker.apply_edits(
+            tmp_path,
+            [{'path': 'implementation/example.py', 'old_text': '', 'new_text': 'replacement\n'}],
+            Gate(),
+            {'max_changed_lines': 800, 'max_changed_files': 25},
+        )
+    except worker.WorkerError as exc:
+        assert 'already exists' in str(exc)
+    else:
+        raise AssertionError('new-file edit overwrote an existing file')
+
+
 def test_identified_items_are_queued_and_do_not_bypass_active_limit():
     state = {
         'items': {

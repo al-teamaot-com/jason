@@ -47,7 +47,7 @@ def repository_name(repo: Path) -> str:
 def owner_approved_issues(repo: Path) -> list[dict[str, Any]]:
     slug = repository_name(repo)
     issues = support.gh_json([
-        'issue', 'list', '--state', 'open', '--limit', '100',
+        'issue', 'list', '--state', 'open', '--limit', '1000',
         '--json', 'number,title,body,url,labels,updatedAt'
     ], cwd=repo) or []
     eligible: list[dict[str, Any]] = []
