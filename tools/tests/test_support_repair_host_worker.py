@@ -589,3 +589,54 @@ def test_self_heal_post_production_verification_allows_unrelated_degradation(tmp
     assert verified is True
     assert 'healthy' in reason
     assert evidence['families'] == ['provider_health']
+
+
+def test_bounded_relevant_excerpt_includes_match_beyond_file_prefix():
+    text = 'header\n' + ('x' * 18000) + '\ndef target_selection_logic():\n    return True\n'
+    excerpt = worker.bounded_relevant_excerpt(
+        text, ['target_selection_logic'], content_limit=6000
+    )
+    assert 'header' in excerpt
+    assert 'target_selection_logic' in excerpt
+    assert len(excerpt) <= 6000
+
+
+def test_proposed_test_edits_requires_actual_declared_test_edit():
+    policy = {'max_changed_lines': 800, 'max_changed_files': 25}
+    edits = [
+        {'path': 'implementation/example.py', 'old_text': 'a', 'new_text': 'b'},
+    ]
+    assert worker.proposed_test_edits(
+        edits, ['implementation/tests/test_example.py'], Gate(), policy
+    ) == []
+
+    edits.append({
+        'path': 'implementation/tests/test_example.py',
+        'old_text': 'old test',
+        'new_text': 'new test',
+    })
+    assert worker.proposed_test_edits(
+        edits, ['implementation/tests/test_example.py'], Gate(), policy
+    ) == ['implementation/tests/test_example.py']
+
+
+def test_safe_search_centers_long_file_excerpt_on_match(tmp_path, monkeypatch):
+    target = tmp_path / 'implementation' / 'runtime_service' / 'src' / 'jason_runtime' / 'long_module.py'
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text('A' * 16000 + '\nself_heal_escalation = True\n' + 'B' * 16000, encoding='utf-8')
+
+    def fake_run(args, **kwargs):
+        if args[-1] in {'self_heal_escalation', 'self', 'heal', 'escalation'}:
+            return target.relative_to(tmp_path).as_posix()
+        return ''
+
+    monkeypatch.setattr(worker, 'run', fake_run)
+    excerpts = worker.safe_search(
+        tmp_path,
+        ['self_heal_escalation'],
+        Gate(),
+        {'max_changed_lines': 800, 'max_changed_files': 25},
+    )
+    assert excerpts
+    assert 'self_heal_escalation = True' in excerpts[0]['content']
+    assert len(excerpts[0]['content']) <= 14000

@@ -603,14 +603,67 @@ def safe_search(worktree: Path, terms: list[str], gate, policy: Mapping[str, Any
             break
 
     excerpts = []
+    expanded_terms = expanded_search_terms(terms)
     for path in paths:
         candidate = worktree / path
         try:
             text = candidate.read_text(encoding='utf-8')
         except UnicodeDecodeError:
             continue
-        excerpts.append({'path': path, 'content': text[:14000]})
+        excerpts.append({
+            'path': path,
+            'content': bounded_relevant_excerpt(text, expanded_terms, content_limit=14000),
+        })
     return excerpts
+
+
+def bounded_relevant_excerpt(
+    text: str,
+    terms: list[str],
+    *,
+    content_limit: int = 14000,
+) -> str:
+    """Return bounded file context that includes literal match neighborhoods.
+
+    Long implementation files previously contributed only their prefix, which could
+    omit the exact function a search term matched. Keep a small prefix for imports
+    and definitions, then add bounded windows around literal matches.
+    """
+    limit = max(1000, int(content_limit))
+    if len(text) <= limit:
+        return text
+
+    prefix_limit = min(2000, limit // 4)
+    chunks = [text[:prefix_limit]]
+    remaining = limit - len(chunks[0])
+    seen_ranges: list[tuple[int, int]] = []
+    lowered = text.casefold()
+
+    for raw in terms[:40]:
+        term = str(raw or '').strip()
+        if len(term) < 2:
+            continue
+        pos = lowered.find(term.casefold())
+        if pos < 0:
+            continue
+        half = min(3000, max(800, remaining // 2))
+        start = max(0, pos - half)
+        end = min(len(text), pos + len(term) + half)
+        if any(not (end <= a or start >= b) for a, b in seen_ranges):
+            continue
+        chunk = text[start:end]
+        if len(chunk) > remaining:
+            chunk = chunk[:remaining]
+            end = start + len(chunk)
+        if not chunk:
+            break
+        chunks.append(f'\n... excerpt near match {term!r} ...\n' + chunk)
+        seen_ranges.append((start, end))
+        remaining = limit - sum(len(value) for value in chunks)
+        if remaining < 800:
+            break
+
+    return ''.join(chunks)[:limit]
 
 
 def source_excerpts_for_paths(
@@ -703,6 +756,25 @@ def apply_edits(worktree: Path, edits: list[Mapping[str, Any]], gate, policy: Ma
     if len(touched) > int(policy.get('max_changed_files', 25)):
         raise WorkerError('proposed repair exceeds changed-file boundary')
     return touched
+
+
+def proposed_test_edits(
+    edits: list[Mapping[str, Any]],
+    test_paths: list[str],
+    gate,
+    policy: Mapping[str, Any],
+) -> list[str]:
+    declared = {str(path).strip() for path in test_paths if str(path).strip()}
+    changed_tests: list[str] = []
+    for edit in edits:
+        path = str(edit.get('path') or '').strip()
+        if not path or gate.path_denial_reason(path, dict(policy)):
+            continue
+        if gate.is_test_path(path, dict(policy)):
+            changed_tests.append(path)
+    if declared:
+        return [path for path in changed_tests if path in declared]
+    return changed_tests
 
 
 def validate_patch(worktree: Path, test_paths: list[str], gate, policy: Mapping[str, Any]) -> list[str]:
@@ -1343,8 +1415,49 @@ def main() -> int:
                 if result.get('blocked_reason'):
                     record.update({'phase': 'blocked', 'reason': str(result['blocked_reason']), 'updated_at': now()})
                     continue
-                apply_edits(worktree, list(result.get('edits') or []), gate, policy)
-                tests = validate_patch(worktree, list(result.get('test_paths') or []), gate, policy)
+                edits = list(result.get('edits') or [])
+                test_paths = list(result.get('test_paths') or [])
+                changed_tests = proposed_test_edits(edits, test_paths, gate, policy)
+                if not changed_tests:
+                    retries = int(record.get('proposal_retries', 0))
+                    if retries >= 2:
+                        record.update({
+                            'phase': 'blocked',
+                            'reason': 'repair proposal retry boundary exhausted without a changed regression test',
+                            'updated_at': now(),
+                        })
+                        continue
+                    context_paths = [
+                        str(edit.get('path') or '').strip()
+                        for edit in edits
+                        if str(edit.get('path') or '').strip()
+                    ] + [str(path) for path in test_paths]
+                    retry_excerpts = source_excerpts_for_paths(
+                        worktree, context_paths, gate, policy, limit=8, content_limit=14000
+                    )
+                    retry_rid = queue_reasoning(
+                        spool,
+                        kind='edit_plan',
+                        item=item,
+                        context={
+                            'validation_feedback': (
+                                'The previous proposal did not include an actual edit to a regression test. '
+                                'Return the smallest source repair plus at least one exact-text edit to a '
+                                'declared regression test path. Do not omit the test edit.'
+                            ),
+                            'source_excerpts': retry_excerpts,
+                        },
+                    )
+                    record.update({
+                        'phase': 'implementing',
+                        'reasoning_request_id': retry_rid,
+                        'proposal_retries': retries + 1,
+                        'reason': 're-prompted repair proposal for missing changed regression test',
+                        'updated_at': now(),
+                    })
+                    continue
+                apply_edits(worktree, edits, gate, policy)
+                tests = validate_patch(worktree, test_paths, gate, policy)
                 number = commit_and_pr(repo, worktree, item, tests[0])
                 record.update({
                     'phase': 'pr_validating',
