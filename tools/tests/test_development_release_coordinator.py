@@ -218,6 +218,19 @@ class DevelopmentReleaseCoordinatorTests(unittest.TestCase):
         self.assertEqual(view["status"], "aligned_and_healthy")
         self.assertEqual(view["freshness"], "fresh")
 
+    def test_production_health_view_missing_timestamp_fails_closed(self):
+        production = {
+            "status": "aligned_and_healthy",
+            "revision": "abc",
+        }
+        view = coordinator.production_health_view(
+            production,
+            max_age_minutes=30,
+            now=coordinator.datetime.fromisoformat("2026-10-07T14:00:00+00:00"),
+        )
+        self.assertEqual(view["status"], "revalidation_required")
+        self.assertEqual(view["freshness"], "missing_timestamp")
+
     def test_sensitive_overlap_paths(self):
         self.assertTrue(coordinator.sensitive("implementation/runtime/app.py"))
         self.assertTrue(coordinator.sensitive("tools/example.py"))
