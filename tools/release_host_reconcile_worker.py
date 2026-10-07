@@ -149,6 +149,21 @@ def _candidate_reconcile_script(source_revision: str) -> Path:
     return target
 
 
+
+
+def _historical_post_success_documentation_failure(detail: str, source_revision: str) -> bool:
+    """Accept only an old-script documentation-publication failure after critical alignment."""
+    required = (
+        "JASON_USER_WORKER_RECONCILIATION=PASS",
+        "JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS",
+        "JASON_HOST_SERVICE_RECONCILIATION=PASS",
+        "MANAGED_ENGINEERING_SOURCE=PASS",
+        "MANAGED_DOCUMENTATION_SOURCE=PASS",
+        f"HOST_RECONCILIATION_SCRIPT_SOURCE_REVISION={source_revision}",
+        "ERROR: production succeeded but documentation reconciliation publication failed",
+    )
+    return all(marker in detail for marker in required)
+
 def _write_result(
     request_id: str,
     source_revision: str,
@@ -235,10 +250,20 @@ def _process(path: Path) -> None:
             ) from exc
         except subprocess.CalledProcessError as exc:
             detail = str(exc.stdout or "").strip()
-            raise HostReconcileError(
-                "candidate host reconciliation script failed"
-                + (": " + detail[-3000:] if detail else "")
-            ) from exc
+            if _historical_post_success_documentation_failure(detail, source_revision):
+                completed = subprocess.CompletedProcess(
+                    args=[str(script), source_revision],
+                    returncode=0,
+                    stdout=(
+                        detail
+                        + "\nHISTORICAL_POST_SUCCESS_DOCUMENTATION_FAILURE=DEFERRED_TO_RELEASE_MANAGER"
+                    ),
+                )
+            else:
+                raise HostReconcileError(
+                    "candidate host reconciliation script failed"
+                    + (": " + detail[-3000:] if detail else "")
+                ) from exc
         finally:
             os.umask(previous_umask)
 

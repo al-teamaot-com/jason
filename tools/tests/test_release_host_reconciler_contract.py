@@ -111,3 +111,13 @@ def test_root_worker_has_bounded_outer_timeout_and_preserves_timeout_evidence():
     assert "except subprocess.TimeoutExpired as exc" in text
     assert "candidate host reconciliation script exceeded" in text
     assert "detail[-3000:]" in text
+
+
+def test_root_worker_tolerates_only_historical_post_success_documentation_failure():
+    text = (ROOT / "tools" / "release_host_reconcile_worker.py").read_text(encoding="utf-8")
+    assert "_historical_post_success_documentation_failure" in text
+    assert "JASON_USER_WORKER_RECONCILIATION=PASS" in text
+    assert "JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS" in text
+    assert "JASON_HOST_SERVICE_RECONCILIATION=PASS" in text
+    assert "ERROR: production succeeded but documentation reconciliation publication failed" in text
+    assert "HISTORICAL_POST_SUCCESS_DOCUMENTATION_FAILURE=DEFERRED_TO_RELEASE_MANAGER" in text

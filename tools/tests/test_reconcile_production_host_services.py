@@ -103,6 +103,7 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'HOST_RECONCILE_STEP_START=' in text
     assert 'HOST_RECONCILE_STEP_PASS=' in text
     assert 'curl --connect-timeout 2 --max-time 5 -fsS' in text
+    assert 'timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"' in text
     assert 'timeout --signal=TERM --kill-after=5s 180s env JASON_REPO_ROOT=' in text
 
 

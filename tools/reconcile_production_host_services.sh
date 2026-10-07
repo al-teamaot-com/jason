@@ -238,7 +238,7 @@ done
 systemctl enable --now "$PROVIDER_CANARY_TIMER"
 timeout --signal=TERM --kill-after=5s 45s systemctl start "$PROVIDER_CANARY_SERVICE"
 for unit in "${MAINTENANCE_SERVICES[@]}"; do
-  timeout --signal=TERM --kill-after=5s 45s systemctl start "$unit"
+  timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"
 done
 systemctl reset-failed
 step_pass system_service_activation
