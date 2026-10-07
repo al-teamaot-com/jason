@@ -54,7 +54,17 @@ def alignment(sha):
     }
 
 
-def fake_gate(_repo, release, target):
+def create_candidate_scripts(candidate_tree: Path) -> None:
+    for relative in (
+        Path("infrastructure/jason-runtime/production-deploy.sh"),
+        Path("infrastructure/jason-mcp/production-deploy.sh"),
+    ):
+        path = candidate_tree / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("#!/bin/sh\n", encoding="utf-8")
+
+
+def fake_gate(_repo, _state_root, release, target):
     release["state"] = target
     release.setdefault("history", []).append(
         {"state": target, "gate": "pass"}
@@ -65,6 +75,7 @@ def test_atomic_deploy_updates_runtime_mcp_host_and_release_manager_before_close
     with tempfile.TemporaryDirectory() as td:
         state_root = Path(td)
         candidate_tree = state_root / "candidate"
+        create_candidate_scripts(candidate_tree)
         events = []
 
         def image_id(name):
@@ -105,6 +116,26 @@ def test_atomic_deploy_updates_runtime_mcp_host_and_release_manager_before_close
             ),
             patch.object(runner, "gate_transition", side_effect=fake_gate),
             patch.object(runner, "worktree", return_value=candidate_tree),
+            patch.object(
+                runner,
+                "verify_candidate_host_reconciliation_contract",
+                return_value={
+                    "candidate_script_verified": True,
+                    "managed_engineering_source_verified": True,
+                    "managed_documentation_source_verified": True,
+                    "developer_checkout_absent": True,
+                },
+            ),
+            patch.object(
+                runner,
+                "verify_host_reconciliation_evidence",
+                return_value={
+                    "candidate_script_verified": True,
+                    "managed_engineering_source_verified": True,
+                    "managed_documentation_source_verified": True,
+                    "developer_checkout_absent": True,
+                },
+            ),
             patch.object(runner, "remove_worktree"),
             patch.object(runner, "run", side_effect=run_command),
             patch.object(
@@ -122,6 +153,11 @@ def test_atomic_deploy_updates_runtime_mcp_host_and_release_manager_before_close
                 runner,
                 "install_release_manager_from_current",
                 side_effect=manager,
+            ),
+            patch.object(
+                runner,
+                "publish_production_closeout",
+                return_value={"documentation": "pass", "control_board": "pass"},
             ),
         ):
             result = runner.deploy_production(ROOT, state_root, record())
@@ -145,6 +181,7 @@ def test_failed_final_alignment_rolls_back_mcp_host_manager_and_runtime():
     with tempfile.TemporaryDirectory() as td:
         state_root = Path(td)
         candidate_tree = state_root / "candidate"
+        create_candidate_scripts(candidate_tree)
         events = []
         align_calls = []
 
@@ -187,6 +224,26 @@ def test_failed_final_alignment_rolls_back_mcp_host_manager_and_runtime():
             patch.object(runner, "live_production_alignment", side_effect=align),
             patch.object(runner, "gate_transition", side_effect=fake_gate),
             patch.object(runner, "worktree", return_value=candidate_tree),
+            patch.object(
+                runner,
+                "verify_candidate_host_reconciliation_contract",
+                return_value={
+                    "candidate_script_verified": True,
+                    "managed_engineering_source_verified": True,
+                    "managed_documentation_source_verified": True,
+                    "developer_checkout_absent": True,
+                },
+            ),
+            patch.object(
+                runner,
+                "verify_host_reconciliation_evidence",
+                return_value={
+                    "candidate_script_verified": True,
+                    "managed_engineering_source_verified": True,
+                    "managed_documentation_source_verified": True,
+                    "developer_checkout_absent": True,
+                },
+            ),
             patch.object(runner, "remove_worktree"),
             patch.object(runner, "run", side_effect=run_command),
             patch.object(
@@ -210,6 +267,11 @@ def test_failed_final_alignment_rolls_back_mcp_host_manager_and_runtime():
                 runner,
                 "install_release_manager_from_current",
                 side_effect=manager,
+            ),
+            patch.object(
+                runner,
+                "publish_production_closeout",
+                return_value={"documentation": "pass", "control_board": "pass"},
             ),
         ):
             release = record()

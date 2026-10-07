@@ -238,6 +238,85 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             build_runtime.assert_not_called()
             build_mcp.assert_not_called()
 
+
+    def test_production_transaction_lock_blocks_second_promoter(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            first_record = {
+                "release_id": "release-first",
+                "release_candidate": {"candidate_sha": SHA_A},
+            }
+            second_record = {
+                "release_id": "release-second",
+                "release_candidate": {"candidate_sha": SHA_B},
+            }
+            first = runner.acquire_production_transaction_lock(ROOT, root, first_record)
+            try:
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerBusy,
+                    "another production release transaction is already active",
+                ):
+                    runner.acquire_production_transaction_lock(ROOT, root, second_record)
+                metadata = (root / "production-transaction.lock").read_text(encoding="utf-8")
+                self.assertIn("release-first", metadata)
+                self.assertIn(SHA_A, metadata)
+            finally:
+                runner.release_production_transaction_lock(first)
+
+            second = runner.acquire_production_transaction_lock(ROOT, root, second_record)
+            runner.release_production_transaction_lock(second)
+
+    def test_deploy_releases_transaction_lock_after_failure(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            release = {
+                "release_id": "release-failing",
+                "release_candidate": {"candidate_sha": SHA_A},
+            }
+            with patch.object(
+                runner,
+                "_deploy_production_locked",
+                side_effect=runner.ReleaseManagerError("forced failure"),
+            ):
+                with self.assertRaisesRegex(runner.ReleaseManagerError, "forced failure"):
+                    runner.deploy_production(ROOT, root, release)
+
+            followup = runner.acquire_production_transaction_lock(
+                ROOT,
+                root,
+                {
+                    "release_id": "release-followup",
+                    "release_candidate": {"candidate_sha": SHA_B},
+                },
+            )
+            runner.release_production_transaction_lock(followup)
+
+    def test_promote_eligible_treats_busy_transaction_as_queued(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            records = root / "records"
+            records.mkdir()
+            payload = {
+                "release_id": runner.record_id(SHA_A),
+                "state": "production_eligible",
+                "created_at": "2026-10-07T17:00:00+00:00",
+            }
+            runner.atomic_json(records / f"{payload['release_id']}.json", payload)
+            with (
+                patch.object(runner, "production_window_open", return_value=True),
+                patch.object(
+                    runner,
+                    "production_gate_result",
+                    return_value={"allowed": True, "protected_core": False, "reasons": []},
+                ),
+                patch.object(
+                    runner,
+                    "deploy_production",
+                    side_effect=runner.ReleaseManagerBusy("busy"),
+                ),
+            ):
+                self.assertFalse(runner.promote_eligible(ROOT, root))
+
     def test_promote_eligible_serializes_to_one_release(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
