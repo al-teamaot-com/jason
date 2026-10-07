@@ -741,16 +741,29 @@ def apply_edits(worktree: Path, edits: list[Mapping[str, Any]], gate, policy: Ma
         if denial:
             raise WorkerError('repair path denied by J-CHANGE-002: ' + denial)
         target = worktree / path
-        if not target.is_file():
-            raise WorkerError(f'repair path does not exist: {path}')
-        text = target.read_text(encoding='utf-8')
-        count = text.count(old)
-        if count != 1:
-            raise WorkerError(f'exact repair anchor must occur once in {path}; found {count}')
+        root = worktree.resolve()
+        parent = target.parent.resolve()
+        if parent != root and root not in parent.parents:
+            raise WorkerError('invalid repair path')
+        if target.exists():
+            if not target.is_file():
+                raise WorkerError(f'repair path is not a file: {path}')
+            if old == '':
+                raise WorkerError(f'new-file repair path already exists: {path}')
+            text = target.read_text(encoding='utf-8')
+            count = text.count(old)
+            if count != 1:
+                raise WorkerError(f'exact repair anchor must occur once in {path}; found {count}')
+            replacement = text.replace(old, new, 1)
+        else:
+            if old != '':
+                raise WorkerError(f'repair path does not exist: {path}')
+            target.parent.mkdir(parents=True, exist_ok=True)
+            replacement = new
         total_delta += old.count('\n') + new.count('\n') + 2
         if total_delta > int(policy.get('max_changed_lines', 800)):
             raise WorkerError('proposed repair exceeds changed-line boundary')
-        target.write_text(text.replace(old, new, 1), encoding='utf-8')
+        target.write_text(replacement, encoding='utf-8')
         if path not in touched:
             touched.append(path)
     if len(touched) > int(policy.get('max_changed_files', 25)):
