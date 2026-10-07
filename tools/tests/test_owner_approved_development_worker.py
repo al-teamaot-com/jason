@@ -98,8 +98,18 @@ def test_source_context_blocker_detects_missing_excerpt_context():
     assert module.source_context_blocker(
         'The provided excerpts are insufficient to form exact replacements; the incomplete repository context would require inventing unseen API surface.'
     )
+    assert module.source_context_blocker(
+        'Blocked: the repository excerpts do not include the specific implementation needed for an exact change.'
+    )
     assert not module.source_context_blocker('Owner approval is required for production deployment.')
     assert not module.source_context_blocker('Provider credential is unavailable.')
+
+
+def test_self_recoverable_blocker_includes_invalid_internal_repair_path():
+    assert module.self_recoverable_blocker(
+        'WorkerError: repair path does not exist: implementation/kernel/capabilities/retirement.py'
+    )
+    assert not module.self_recoverable_blocker('Provider credential is unavailable.')
 
 
 def test_context_only_search_plan_with_terms_is_actionable():

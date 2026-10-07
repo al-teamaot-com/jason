@@ -259,6 +259,7 @@ def source_context_blocker(reason: str) -> bool:
         'supplied excerpt',
         'provided excerpt',
         'source excerpt',
+        'repository excerpt',
         'source context',
         'repository context',
         'unseen code',
@@ -302,6 +303,7 @@ def self_recoverable_blocker(reason: str) -> bool:
         source_context_blocker(reason)
         or 'http transport failed' in text
         or 'no j-change-002-eligible source excerpts matched' in text
+        or 'repair path does not exist:' in text
         or 'autonomous support repair requires a changed regression test' in text
         or 'development worker requires a changed regression test' in text
     )
