@@ -1075,6 +1075,22 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** Complete source implementation and protected CI now; remove the production hold only after the root-reconciler bootstrap is confirmed and a normal guarded release can close successfully.
 
+
+### TODO-CONN-018 — Internet-accessible Jason Control Panel through the AOT AWS endpoint
+
+- **Priority:** P2
+- **Status:** Proposed — idea only; not approved for autonomous engineering or production exposure.
+- **Risk level:** High
+- **Idea:** Publish the Jason Grafana/Control Panel through AOT's existing AWS internet endpoint so authorized AOT staff can securely reach it away from the Jason host/network, while keeping Grafana and all Jason control services private behind the AWS edge.
+- **Why it matters:** A secure remote operator surface would make Jason's health, migrations, configuration, approvals, support state, and governed controls available when the Owner or technicians are off-site without requiring direct network access to the Jason host.
+- **Preferred architecture:** Internet -> existing AOT AWS endpoint -> TLS/WAF/authentication layer -> narrowly scoped reverse proxy -> private Grafana origin. Grafana, Prometheus, exporters, and Jason control APIs must not listen directly on the public internet.
+- **Security requirements:** strong authenticated access with MFA/SSO where practical; TLS only; least-privilege route allowlist; no anonymous Grafana access; no direct public access to Prometheus/exporters/control-service ports; CSRF/session protections; rate limiting/WAF controls; audit of successful and failed access; safe timeout/session expiry; and preservation of Jason's existing action authority/approval rules for every write initiated from Grafana.
+- **Control-plane rule:** Internet exposure must not make Grafana an authority source. Any write-capable panel continues to call a narrowly scoped Jason control service, which performs its own identity, authorization, validation, audit, execution, and verification.
+- **Why not now:** Complete and production-verify Control Panel v2 first, prove the current release/reconciliation path healthy, then review the existing AWS endpoint, authentication method, hostname/certificate, network path, and WAF/proxy controls before any public exposure.
+- **Prerequisites:** production-verified Control Panel v2; confirmed AWS endpoint ownership/topology; authenticated reverse-proxy design; TLS certificate/DNS; MFA/SSO decision; network allow rules; WAF/rate limits; access logging; control-service route inventory; security review; rollback/disable procedure; and external acceptance test proving no backend service is directly exposed.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Revisit after Control Panel v2 is production verified and the existing AWS endpoint can be inspected for a bounded authenticated proxy path.
+
 ### TODO-COMMS-004 — Microsoft Teams voice-call conversation with Jason
 
 - **Priority:** P2
