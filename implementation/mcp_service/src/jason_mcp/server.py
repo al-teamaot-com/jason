@@ -105,6 +105,7 @@ from orchestrator.provider_health_canary_policy import (
     PROVIDER_HEALTH_CANARY_CAPABILITIES,
     PROVIDER_HEALTH_CANARY_POLICY_ID,
     PROVIDER_HEALTH_CANARY_PRINCIPAL,
+    expected_canary_client_id,
 )
 from orchestrator.provider_read_capability_catalog import (
     SERVICE_COMPANY_READ,
@@ -4155,7 +4156,7 @@ def _provider_health_canary_grant_ids(
             subject=PROVIDER_HEALTH_CANARY_PRINCIPAL,
             capability=capability,
             organization=organization,
-            client_id=None,
+            client_id=expected_canary_client_id(capability),
             permission=PermissionMode.OBSERVE,
             approval_required=False,
         )
@@ -4179,6 +4180,7 @@ def provider_health_canary_status() -> dict[str, Any]:
         grants = {
             grant.capability: {
                 "grant_id": grant.grant_id,
+                "client_id": grant.client_id,
                 "permission": grant.permission.value,
                 "approval_required": grant.approval_required,
                 "status": grant.status,
@@ -4229,11 +4231,12 @@ def approve_provider_health_canaries() -> dict[str, Any]:
         created = []
         for capability in sorted(PROVIDER_HEALTH_CANARY_CAPABILITIES):
             exact_capability = _exact_authority_capability(app, capability)
+            client_id = expected_canary_client_id(exact_capability)
             grant_id = _authority_grant_id(
                 subject=PROVIDER_HEALTH_CANARY_PRINCIPAL,
                 capability=exact_capability,
                 organization=organization,
-                client_id=None,
+                client_id=client_id,
                 permission=PermissionMode.OBSERVE,
                 approval_required=False,
             )
@@ -4242,7 +4245,7 @@ def approve_provider_health_canaries() -> dict[str, Any]:
                 subject_id=PROVIDER_HEALTH_CANARY_PRINCIPAL,
                 capability=exact_capability,
                 organization_id=organization,
-                client_id=None,
+                client_id=client_id,
                 permission=PermissionMode.OBSERVE,
                 approval_required=False,
                 status="active",

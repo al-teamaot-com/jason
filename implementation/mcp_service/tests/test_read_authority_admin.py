@@ -126,3 +126,39 @@ def test_write_capability_cannot_be_granted(monkeypatch):
             capability="endpoint.alert.history.search",
             approved_by="person-al",
         )
+
+
+def test_owner_can_create_client_scoped_exact_read_grant(monkeypatch):
+    app, _, _ = fake_runtime()
+    monkeypatch.setattr(admin, "_runtime", lambda: app)
+    monkeypatch.setattr(
+        admin,
+        "approval_owner_identities",
+        lambda: frozenset({"person-al"}),
+    )
+    grant, created = admin.grant_exact_read_authority(
+        subject_id="jason-autonomy-worker",
+        capability="endpoint.alert.history.search",
+        approved_by="person-al",
+        client_id="client-aot-internal",
+    )
+    assert created is True
+    assert grant.client_id == "client-aot-internal"
+    assert grant.permission.value == "observe"
+
+
+def test_client_scope_must_be_exact(monkeypatch):
+    app, _, _ = fake_runtime()
+    monkeypatch.setattr(admin, "_runtime", lambda: app)
+    monkeypatch.setattr(
+        admin,
+        "approval_owner_identities",
+        lambda: frozenset({"person-al"}),
+    )
+    with pytest.raises(admin.ReadAuthorityAdminError, match="AUTHORITY_GRANT_EXACT_CLIENT_REQUIRED"):
+        admin.grant_exact_read_authority(
+            subject_id="jason-autonomy-worker",
+            capability="endpoint.alert.history.search",
+            approved_by="person-al",
+            client_id="client-*",
+        )

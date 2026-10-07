@@ -140,6 +140,8 @@ Before Release Manager handoff:
 - a release cannot reach `production_verified` / `closed` until fresh production documentation reconciliation and Development & Release Control Board publication both pass;
 - production host closeout must install the support-repair/development/TODO workers and self-heal watchdog from the exact production SHA, verify installed file equality and active timers, and preserve a Git-backed managed engineering source;
 - scheduled production services must not depend on a mutable developer checkout such as `/home/al/projects/jason`;
+- before production cutover, Release Manager must inspect the exact candidate host-reconciliation script and reject any developer-checkout dependency or missing managed engineering/documentation source contract;
+- production closeout must prove the privileged host reconciler executed the exact candidate reconciliation script and record candidate-script, managed-source, and developer-checkout-absence evidence before `production_verified` / `closed`;
 - owner-approved development PR carries `Integration automation: enabled`;
 - protected integration checks are green and current-main reconciliation is complete;
 - development PR merged through the governed source-integration path;
