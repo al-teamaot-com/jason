@@ -240,3 +240,93 @@ def test_missing_databases_fail_closed_without_creating_files(tmp_path):
     assert not module.MODEL_USAGE_DB.exists()
     assert not module.ORCHESTRATION_EVENTS_DB.exists()
     assert not module.IDENTITY_BINDINGS_DB.exists()
+
+
+def test_request_event_loader_uses_recent_rowid_window_and_timestamp_filter(tmp_path):
+    module = load_exporter()
+    path = tmp_path / "events.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.executescript(
+        """
+        CREATE TABLE orchestration_events (
+            event_id TEXT PRIMARY KEY,
+            schema_version TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            execution_id TEXT NOT NULL,
+            correlation_id TEXT NOT NULL,
+            organization_id TEXT NOT NULL,
+            principal_id TEXT NOT NULL,
+            capability_name TEXT NOT NULL,
+            stage TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            occurred_at TEXT NOT NULL
+        );
+        """
+    )
+    for index in range(250):
+        recent = index >= 200
+        occurred = (
+            f"2026-09-09T13:{index - 200:02d}:00+00:00"
+            if recent
+            else f"2026-09-01T12:{index % 60:02d}:00+00:00"
+        )
+        connection.execute(
+            "INSERT INTO orchestration_events VALUES (?, '1.0', 'orchestration.request.received', ?, ?, 'aot', ?, ?, 'received', ?, ?)",
+            (
+                f"ev-{index}",
+                f"exec-{index}",
+                f"corr-{index}",
+                "user-al",
+                "endpoint.device.search",
+                json.dumps({"requester_kind": "human", "secret": "do-not-export"}),
+                occurred,
+            ),
+        )
+    connection.commit()
+    connection.close()
+
+    module.EVENT_ROWID_SAFETY_MARGIN = 10
+    cutoff = datetime(2026, 9, 9, 13, 0, tzinfo=timezone.utc)
+    events = module._load_request_events(path, "aot", cutoff)
+
+    assert len(events) == 50
+    assert events[0]["execution_id"] == "exec-200"
+    assert events[-1]["execution_id"] == "exec-249"
+    assert all(event["requester_kind"] == "human" for event in events)
+    assert "do-not-export" not in json.dumps(events, default=str)
+
+
+def test_recent_rowid_floor_keeps_safety_margin(tmp_path):
+    module = load_exporter()
+    path = tmp_path / "events.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.execute("CREATE TABLE orchestration_events (occurred_at TEXT NOT NULL)")
+    for index in range(1, 101):
+        day = 1 if index <= 80 else 9
+        connection.execute(
+            "INSERT INTO orchestration_events(occurred_at) VALUES (?)",
+            (f"2026-09-{day:02d}T12:00:{index % 60:02d}+00:00",),
+        )
+    connection.commit()
+    module.EVENT_ROWID_SAFETY_MARGIN = 5
+    floor = module._recent_rowid_floor(connection, "2026-09-09T00:00:00+00:00")
+    connection.close()
+    assert floor == 76
+
+
+def test_render_cached_metrics_reuses_short_lived_snapshot(monkeypatch):
+    module = load_exporter()
+    module.CACHE_TTL_SECONDS = 20
+    module._cached_metrics = None
+    calls = []
+    times = iter([100.0, 100.1, 105.0])
+    monkeypatch.setattr(module.time, "monotonic", lambda: next(times))
+    monkeypatch.setattr(
+        module,
+        "render_metrics",
+        lambda: calls.append("render") or "snapshot\n",
+    )
+
+    assert module.render_cached_metrics() == "snapshot\n"
+    assert module.render_cached_metrics() == "snapshot\n"
+    assert calls == ["render"]
