@@ -183,8 +183,12 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
         self.assertEqual(event, "self_heal_escalation")
         self.assertIn("owner action", text.casefold())
         self.assertIn("jason_mcp_status", text)
+        self.assertIn("status surface failed twice", text)
+        self.assertIn("restarted jason-mcp-pilot and rechecked", text)
         self.assertEqual(card["type"], "AdaptiveCard")
         self.assertEqual(card["body"][0]["color"], "Attention")
+        self.assertEqual(card["body"][2]["facts"][0]["title"], "Degraded function")
+        self.assertEqual(card["body"][2]["facts"][3]["title"], "Owner action")
 
     def test_self_heal_escalation_notifies_once(self):
         with tempfile.TemporaryDirectory() as td:
