@@ -239,6 +239,128 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             build_mcp.assert_not_called()
 
 
+
+    def test_approve_release_records_exact_sha_and_is_auditable(self):
+        with tempfile.TemporaryDirectory() as td:
+            state_root = Path(td)
+            record = {
+                "state": "production_eligible",
+                "release_candidate": {
+                    "candidate_sha": SHA_A,
+                    "image": "jason-runtime:test",
+                    "artifact_digest": "sha256:runtime",
+                    "mcp_image": "jason-mcp:test",
+                    "mcp_artifact_digest": "sha256:mcp",
+                },
+                "owner_approval": {"approved": False},
+                "history": [],
+            }
+            with (
+                patch.object(runner, "load_record", return_value=record),
+                patch.object(runner, "verify_candidate_on_main"),
+                patch.object(
+                    runner,
+                    "image_id",
+                    side_effect=lambda image: {
+                        "jason-runtime:test": "sha256:runtime",
+                        "jason-mcp:test": "sha256:mcp",
+                    }[image],
+                ),
+                patch.object(runner, "save_record") as save_record,
+            ):
+                approved = runner.approve_release(
+                    ROOT,
+                    state_root,
+                    release_id="release-test",
+                    candidate_sha=SHA_A,
+                )
+            self.assertTrue(approved["owner_approval"]["approved"])
+            self.assertEqual(approved["owner_approval"]["candidate_sha"], SHA_A)
+            self.assertEqual(
+                approved["owner_approval"]["source"],
+                "explicit_owner_instruction",
+            )
+            self.assertEqual(
+                approved["history"][-1]["gate"],
+                "owner_approval_recorded",
+            )
+            save_record.assert_called_once_with(state_root, record)
+
+    def test_approve_release_is_idempotent_for_same_exact_sha(self):
+        record = {
+            "state": "production_eligible",
+            "release_candidate": {
+                "candidate_sha": SHA_A,
+                "image": "jason-runtime:test",
+                "artifact_digest": "sha256:runtime",
+                "mcp_image": "jason-mcp:test",
+                "mcp_artifact_digest": "sha256:mcp",
+            },
+            "owner_approval": {
+                "approved": True,
+                "candidate_sha": SHA_A,
+                "source": "explicit_owner_instruction",
+                "recorded_at": "2026-10-07T18:56:58+00:00",
+            },
+            "history": [],
+        }
+        with (
+            patch.object(runner, "load_record", return_value=record),
+            patch.object(runner, "verify_candidate_on_main"),
+            patch.object(
+                runner,
+                "image_id",
+                side_effect=lambda image: {
+                    "jason-runtime:test": "sha256:runtime",
+                    "jason-mcp:test": "sha256:mcp",
+                }[image],
+            ),
+            patch.object(runner, "save_record") as save_record,
+        ):
+            approved = runner.approve_release(
+                ROOT,
+                Path("/tmp"),
+                release_id="release-test",
+                candidate_sha=SHA_A,
+            )
+        self.assertIs(approved, record)
+        save_record.assert_not_called()
+
+    def test_approve_release_rejects_sha_mismatch(self):
+        record = {
+            "state": "production_eligible",
+            "release_candidate": {"candidate_sha": SHA_A},
+            "owner_approval": {"approved": False},
+        }
+        with patch.object(runner, "load_record", return_value=record):
+            with self.assertRaisesRegex(
+                runner.ReleaseManagerError,
+                "candidate SHA does not match",
+            ):
+                runner.approve_release(
+                    ROOT,
+                    Path("/tmp"),
+                    release_id="release-test",
+                    candidate_sha=SHA_B,
+                )
+
+    def test_approve_release_rejects_noneligible_state(self):
+        record = {
+            "state": "release_candidate",
+            "release_candidate": {"candidate_sha": SHA_A},
+        }
+        with patch.object(runner, "load_record", return_value=record):
+            with self.assertRaisesRegex(
+                runner.ReleaseManagerError,
+                "production_eligible",
+            ):
+                runner.approve_release(
+                    ROOT,
+                    Path("/tmp"),
+                    release_id="release-test",
+                    candidate_sha=SHA_A,
+                )
+
     def test_production_transaction_lock_blocks_second_promoter(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
