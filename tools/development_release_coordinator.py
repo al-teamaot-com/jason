@@ -25,6 +25,12 @@ ROADMAP_STATUS = ROOT / "docs" / "roadmaps" / "Jason-Roadmap-Status.json"
 TODO_BACKLOG = ROOT / "docs" / "roadmaps" / "Project-Jason-TODO-and-Future-Ideas.md"
 SUPPORT = ROOT / "SUPPORT.md"
 AUTOMATED_CHANGE_STATE = ROOT / "docs" / "control" / "AUTOMATED-CHANGE-STATE.json"
+RELEASE_MANAGER_STATE_ROOT = Path(
+    os.environ.get(
+        "JASON_RELEASE_MANAGER_STATE_ROOT",
+        "/var/lib/jason/openclaw/release-manager",
+    )
+)
 
 SENSITIVE_PREFIXES = (
     ".github/workflows/",
@@ -116,6 +122,65 @@ def production_health_view(
     else:
         view["freshness"] = "fresh"
     return view
+
+
+def release_control_view(state_root: Path | None = None) -> dict[str, Any]:
+    root = state_root or RELEASE_MANAGER_STATE_ROOT
+    control_path = root / "production-control-state.json"
+    control: dict[str, Any] = {}
+    if control_path.is_file():
+        try:
+            control = load_json(control_path)
+        except Exception:
+            control = {"circuit_breaker": {"state": "unknown", "reason": "unreadable_control_state"}}
+
+    lock_owner: dict[str, Any] | None = None
+    lock_path = root / "production-transaction.lock"
+    if lock_path.is_file():
+        text_value = lock_path.read_text(encoding="utf-8").strip()
+        if text_value:
+            try:
+                lock_owner = json.loads(text_value)
+            except json.JSONDecodeError:
+                lock_owner = {"unparsed": text_value[:500]}
+
+    active: list[str] = []
+    queued: list[str] = []
+    latest_complete_manifest: dict[str, Any] | None = None
+    records = root / "records"
+    if records.is_dir():
+        for path in sorted(records.glob("release-*.json"), key=lambda value: value.stat().st_mtime):
+            try:
+                record = load_json(path)
+            except Exception:
+                continue
+            state = str(record.get("state") or "")
+            release_id = str(record.get("release_id") or path.stem)
+            if state == "production":
+                active.append(release_id)
+            if state == "production_eligible":
+                queued.append(release_id)
+            manifest = dict((record.get("production") or {}).get("production_manifest") or {})
+            if manifest.get("complete") is True:
+                latest_complete_manifest = manifest
+
+    breaker = dict(control.get("circuit_breaker") or {})
+    lkg = dict(control.get("last_known_good") or {})
+    lkg_manifest = dict(lkg.get("manifest") or {})
+    if latest_complete_manifest is None and lkg_manifest.get("complete") is True:
+        latest_complete_manifest = lkg_manifest
+    return {
+        "circuit_breaker": breaker,
+        "lock_owner": lock_owner,
+        "active_transactions": active,
+        "queued_candidates": queued,
+        "last_known_good_release": lkg.get("release_id"),
+        "last_known_good_revision": lkg_manifest.get("revision"),
+        "current_complete_manifest_revision": (
+            latest_complete_manifest.get("revision") if latest_complete_manifest else None
+        ),
+        "control_state_updated_at": control.get("updated_at"),
+    }
 
 
 def latest_checks(check_runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -373,6 +438,7 @@ def collect(api: Api, config: dict[str, Any]) -> dict[str, Any]:
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "main_sha": main_sha,
         "production": production_view,
+        "release_control": release_control_view(),
         "validated_source": production.get("validated_source", {}),
         "pr_states": pr_states,
         "overlaps": overlaps,
@@ -393,6 +459,11 @@ def collect(api: Api, config: dict[str, Any]) -> dict[str, Any]:
 def render(board: dict[str, Any]) -> str:
     prod = board["production"]
     preprod = board["preproduction"]
+    release_control = dict(board.get("release_control") or {})
+    breaker = dict(release_control.get("circuit_breaker") or {})
+    lock_owner = dict(release_control.get("lock_owner") or {})
+    active_transactions = list(release_control.get("active_transactions") or [])
+    queued_candidates = list(release_control.get("queued_candidates") or [])
     lines = [
         "# Jason Development & Release Control Board",
         "",
@@ -410,6 +481,13 @@ def render(board: dict[str, Any]) -> str:
             else "  "
         ),
         f"**Pre-production environment:** {'configured' if preprod.get('configured') else 'not configured'}  ",
+        f"**Production circuit breaker:** {breaker.get('state', 'unknown')}  ",
+        f"**Production lock owner:** {lock_owner.get('release_id', 'none')}  ",
+        f"**Active production transaction:** {', '.join(active_transactions) if active_transactions else 'none'}  ",
+        f"**Queued production candidates:** {', '.join(queued_candidates) if queued_candidates else 'none'}  ",
+        f"**Last-known-good release:** {release_control.get('last_known_good_release') or 'unknown'}  ",
+        f"**Last-known-good revision:** {release_control.get('last_known_good_revision') or 'unknown'}  ",
+        f"**Current complete production manifest:** {release_control.get('current_complete_manifest_revision') or 'unknown'}  ",
         "",
         "## Release attention",
         "",

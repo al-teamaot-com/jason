@@ -42,6 +42,18 @@ MUTATION_ENV_OVERRIDES = {
     "JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED": "false",
 }
 
+CONTROLLER_SOURCE = Path(__file__).resolve()
+CONTROL_STATE_SCHEMA_VERSION = "1.0"
+USER_CONTROL_TIMERS = (
+    "jason-release-manager.timer",
+    "jason-support-repair-worker.timer",
+    "jason-self-heal-watchdog.timer",
+)
+SYSTEM_CONTROL_TIMERS = (
+    "jason-delegation-maintenance.timer",
+    "jason-openclaw-authority-health.timer",
+)
+
 
 class ReleaseManagerError(RuntimeError):
     pass
@@ -174,6 +186,228 @@ def load_record(state_root: Path, release_id: str) -> dict[str, Any]:
 def save_record(state_root: Path, record: dict[str, Any]) -> None:
     record["updated_at"] = now()
     atomic_json(record_path(state_root, str(record["release_id"])), record)
+
+
+def file_digest(path: Path) -> str:
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def control_state_path(state_root: Path) -> Path:
+    return state_root / "production-control-state.json"
+
+
+def load_control_state(state_root: Path) -> dict[str, Any]:
+    path = control_state_path(state_root)
+    if not path.exists():
+        return {
+            "schema_version": CONTROL_STATE_SCHEMA_VERSION,
+            "circuit_breaker": {"state": "closed", "updated_at": now()},
+            "last_known_good": None,
+        }
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if str(payload.get("schema_version") or "") != CONTROL_STATE_SCHEMA_VERSION:
+        raise ReleaseManagerError("production control-state schema is unsupported")
+    return payload
+
+
+def save_control_state(state_root: Path, payload: dict[str, Any]) -> None:
+    payload["schema_version"] = CONTROL_STATE_SCHEMA_VERSION
+    payload["updated_at"] = now()
+    atomic_json(control_state_path(state_root), payload)
+
+
+def unit_active(unit: str, *, user: bool) -> bool:
+    args = ["systemctl"]
+    env = None
+    if user:
+        args.append("--user")
+        env = user_systemd_env()
+    args.extend(["is-active", unit])
+    completed = subprocess.run(
+        args,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    return completed.returncode == 0 and completed.stdout.strip() == "active"
+
+
+def scheduled_control_alignment() -> dict[str, str]:
+    states: dict[str, str] = {}
+    for unit in USER_CONTROL_TIMERS:
+        active = unit_active(unit, user=True)
+        states[unit] = "active" if active else "inactive"
+        if not active:
+            raise ReleaseManagerError(f"required user control timer is not active: {unit}")
+    for unit in SYSTEM_CONTROL_TIMERS:
+        active = unit_active(unit, user=False)
+        states[unit] = "active" if active else "inactive"
+        if not active:
+            raise ReleaseManagerError(f"required system control timer is not active: {unit}")
+    return states
+
+
+def controller_identity(repo: Path) -> dict[str, Any]:
+    policy_path = repo / "config" / "release-manager-policy.json"
+    if not policy_path.is_file():
+        raise ReleaseManagerError("release-manager policy is missing")
+    source_revision = CONTROLLER_SOURCE.parents[1].name.casefold()
+    return {
+        "executing_controller_path": str(CONTROLLER_SOURCE),
+        "executing_controller_revision": source_revision if SHA.fullmatch(source_revision) else "unknown",
+        "executing_controller_digest": file_digest(CONTROLLER_SOURCE),
+        "policy_digest": file_digest(policy_path),
+        "captured_at": now(),
+    }
+
+
+def verify_controller_identity(pin: dict[str, Any], repo: Path) -> dict[str, Any]:
+    current = controller_identity(repo)
+    for field in (
+        "executing_controller_path",
+        "executing_controller_revision",
+        "executing_controller_digest",
+        "policy_digest",
+    ):
+        if current.get(field) != pin.get(field):
+            raise ReleaseManagerError(f"active Production Manager controller changed mid-transaction: {field}")
+    return current
+
+
+def classify_change_risk(change_class: str, files: list[str]) -> str:
+    paths = [str(value) for value in files]
+    if any(
+        path.startswith("tools/release_manager")
+        or path == "config/release-manager-policy.json"
+        or "release-host-reconcile" in path
+        for path in paths
+    ):
+        return "production_control_core"
+    if any(path.startswith("config/schemas/") or path.endswith(".schema.json") for path in paths):
+        return "schema_or_contract"
+    if change_class in {"support", "release_blocker", "production_incident"}:
+        return "production_repair"
+    return "normal"
+
+
+def capture_production_manifest(expected_sha: str) -> dict[str, Any]:
+    expected_sha = exact_sha(expected_sha, "expected_sha")
+    alignment = live_production_alignment(expected_sha)
+    runtime = live_runtime()
+    mcp = live_mcp()
+    manager_source = Path.home() / ".local" / "lib" / "jason" / "release-manager-source"
+    manager_revision = "unknown"
+    if manager_source.exists():
+        manager_revision = manager_source.resolve().name.casefold()
+    if manager_revision != expected_sha:
+        raise ReleaseManagerError("Release Manager source revision is not aligned with production")
+    timers = scheduled_control_alignment()
+    return {
+        "schema_version": "1.0",
+        "revision": expected_sha,
+        "runtime_revision": alignment["runtime_revision"],
+        "runtime_image_id": runtime["image_id"],
+        "mcp_revision": alignment["mcp_revision"],
+        "mcp_image_id": mcp["image_id"],
+        "host_revision": alignment["host_revision"],
+        "host_release": alignment["host_release"],
+        "release_manager_source_revision": manager_revision,
+        "scheduled_control_units": timers,
+        "complete": True,
+        "observed_at": now(),
+    }
+
+
+def set_last_known_good(
+    state_root: Path,
+    manifest: dict[str, Any],
+    *,
+    release_id: str,
+) -> None:
+    state = load_control_state(state_root)
+    state["last_known_good"] = {
+        "release_id": release_id,
+        "manifest": manifest,
+        "recorded_at": now(),
+    }
+    state["circuit_breaker"] = {
+        "state": "closed",
+        "reason": "production_verified",
+        "updated_at": now(),
+    }
+    save_control_state(state_root, state)
+
+
+def open_circuit_breaker(
+    state_root: Path,
+    record: dict[str, Any],
+    *,
+    reason: str,
+    rollback_verified: bool,
+) -> None:
+    state = load_control_state(state_root)
+    state["circuit_breaker"] = {
+        "state": "open",
+        "reason": reason[:700],
+        "release_id": str(record.get("release_id") or ""),
+        "candidate_sha": str((record.get("release_candidate") or {}).get("candidate_sha") or ""),
+        "rollback_verified": bool(rollback_verified),
+        "opened_at": now(),
+        "updated_at": now(),
+    }
+    save_control_state(state_root, state)
+
+
+def revalidate_circuit_breaker(state_root: Path) -> dict[str, Any]:
+    state = load_control_state(state_root)
+    breaker = dict(state.get("circuit_breaker") or {})
+    if breaker.get("state") != "open":
+        return state
+    lkg = dict(state.get("last_known_good") or {})
+    manifest = dict(lkg.get("manifest") or {})
+    revision = str(manifest.get("revision") or "")
+    if not SHA.fullmatch(revision):
+        raise ReleaseManagerError("production circuit breaker is open and no valid last-known-good manifest exists")
+    try:
+        verified = capture_production_manifest(revision)
+    except Exception as exc:
+        raise ReleaseManagerError(
+            "production circuit breaker is open; authoritative health revalidation failed: " + str(exc)
+        ) from exc
+    state["circuit_breaker"] = {
+        "state": "closed",
+        "reason": "authoritative_health_revalidated",
+        "revalidated_revision": revision,
+        "revalidated_at": now(),
+        "updated_at": now(),
+    }
+    state["last_revalidation"] = verified
+    save_control_state(state_root, state)
+    return state
+
+
+def run_functional_smoke_tests(candidate_sha: str) -> dict[str, Any]:
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    alignment = live_production_alignment(candidate_sha)
+    request = urllib.request.Request("http://127.0.0.1:8080/healthz")
+    with urllib.request.urlopen(request, timeout=5) as response:
+        response.read(4096)
+        status = int(getattr(response, "status", 200) or 200)
+    if status != 200:
+        raise ReleaseManagerError(f"production runtime functional smoke returned HTTP {status}")
+    if live_mcp()["revision"] != candidate_sha:
+        raise ReleaseManagerError("production MCP functional smoke revision mismatch")
+    return {
+        "passed": True,
+        "runtime_healthz_http_status": status,
+        "runtime_mcp_host_alignment": True,
+        "runtime_revision": alignment["runtime_revision"],
+        "mcp_revision": alignment["mcp_revision"],
+        "host_revision": alignment["host_revision"],
+        "verified_at": now(),
+    }
 
 
 def live_runtime() -> dict[str, Any]:
@@ -956,11 +1190,13 @@ def create_record(
         )
 
     release_id = record_id(candidate_sha)
+    risk_profile = classify_change_risk(change_class, files)
     record = {
         "schema_version": "2.0",
         "release_id": release_id,
         "state": "requested",
         "change_class": change_class,
+        "risk_profile": risk_profile,
         "created_at": now(),
         "updated_at": now(),
         "rollback_sha": rollback_sha,
@@ -999,6 +1235,33 @@ def create_record(
         "mcp_base_artifact_digest": mcp_base_digest,
         "immutable": True,
         "built_at": now(),
+        "provenance": {
+            "source_sha": candidate_sha,
+            "builder_host": os.uname().nodename,
+            "builder_process": "release_manager_host_runner",
+            "runtime_artifact_digest": digest,
+            "mcp_artifact_digest": mcp_digest,
+            "policy_digest": file_digest(repo / "config" / "release-manager-policy.json"),
+        },
+    }
+    record["release_manifest"] = {
+        "schema_version": "1.0",
+        "candidate_sha": candidate_sha,
+        "rollback_sha": rollback_sha,
+        "change_class": change_class,
+        "risk_profile": risk_profile,
+        "changed_files": files,
+        "surfaces": [
+            "runtime",
+            "mcp",
+            "immutable_host",
+            "scheduled_control_units",
+            "release_manager",
+            "configuration",
+        ],
+        "runtime_artifact_digest": digest,
+        "mcp_artifact_digest": mcp_digest,
+        "policy_digest": file_digest(repo / "config" / "release-manager-policy.json"),
     }
     gate_transition(repo, state_root, record, "release_candidate")
     save_record(state_root, record)
@@ -1208,6 +1471,23 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         deploy_worktree, candidate_sha
     )
 
+    controller_pin = controller_identity(deploy_worktree)
+    baseline_manifest = capture_production_manifest(rollback_sha)
+    record["controller_pin"] = controller_pin
+    record["last_known_good_manifest"] = baseline_manifest
+    record["pre_mutation_health"] = {
+        "passed": True,
+        "observed_at": baseline_manifest["observed_at"],
+        "revision": rollback_sha,
+        "manifest_complete": bool(baseline_manifest.get("complete")),
+    }
+    set_last_known_good(
+        state_root,
+        baseline_manifest,
+        release_id="baseline-" + rollback_sha[:16],
+    )
+    save_record(state_root, record)
+
     gate_transition(repo, state_root, record, "production")
     save_record(state_root, record)
 
@@ -1263,6 +1543,10 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
                 "production MCP image differs from pre-production artifact"
             )
 
+        controller_verified = verify_controller_identity(controller_pin, deploy_worktree)
+        smoke = run_functional_smoke_tests(candidate_sha)
+        production_manifest = capture_production_manifest(candidate_sha)
+
         closeout = publish_production_closeout(deploy_worktree, candidate_sha)
 
         record["production"] = {
@@ -1270,6 +1554,14 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "artifact_digest": live_digest,
             "mcp_artifact_digest": live_mcp_digest,
             "health_passed": True,
+            "functional_smoke_tests_passed": bool(smoke.get("passed")),
+            "functional_smoke_tests": smoke,
+            "controller_identity_verified": True,
+            "executing_controller_revision": controller_verified["executing_controller_revision"],
+            "last_known_good_manifest_captured": bool(baseline_manifest.get("complete")),
+            "pre_mutation_health_passed": bool(record["pre_mutation_health"].get("passed")),
+            "production_manifest_complete": bool(production_manifest.get("complete")),
+            "production_manifest": production_manifest,
             "deployment_script_passed": "DEPLOYMENT=PASS" in runtime_output,
             "mcp_deployment_script_passed": "DEPLOYMENT=PASS" in mcp_output,
             "host_reconciliation_passed": bool(host_result.get("success")),
@@ -1292,6 +1584,25 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         }
         gate_transition(repo, state_root, record, "production_verified")
         gate_transition(repo, state_root, record, "closed")
+        record["evidence_bundle"] = {
+            "release_id": record["release_id"],
+            "candidate_sha": candidate_sha,
+            "release_manifest": record["release_manifest"],
+            "risk_profile": record["risk_profile"],
+            "owner_approval": record.get("owner_approval"),
+            "preproduction": record.get("preproduction"),
+            "pre_mutation_health": record.get("pre_mutation_health"),
+            "functional_smoke_tests": smoke,
+            "production_manifest": production_manifest,
+            "rollback_target": baseline_manifest,
+            "final_state": "closed",
+            "closed_at": now(),
+        }
+        set_last_known_good(
+            state_root,
+            production_manifest,
+            release_id=str(record["release_id"]),
+        )
         save_record(state_root, record)
         return record
     except Exception as error:
@@ -1363,6 +1674,12 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         record.setdefault("history", []).append(
             {"at": now(), "state": record["state"], "gate": "deployment_failure"}
         )
+        open_circuit_breaker(
+            state_root,
+            record,
+            reason=type(error).__name__ + ": " + str(error),
+            rollback_verified=rollback_ok,
+        )
         save_record(state_root, record)
         raise
     finally:
@@ -1372,6 +1689,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
 def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
     lock = acquire_production_transaction_lock(repo, state_root, record)
     try:
+        revalidate_circuit_breaker(state_root)
         return _deploy_production_locked(repo, state_root, record)
     finally:
         release_production_transaction_lock(lock)
@@ -1386,6 +1704,7 @@ def prepare_release(
     owner_approved: bool = False,
 ) -> dict[str, Any]:
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    revalidate_circuit_breaker(state_root)
     release_id = record_id(candidate_sha)
     path = record_path(state_root, release_id)
 

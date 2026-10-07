@@ -182,6 +182,10 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 "sha256:mcp-new",
             )
             self.assertTrue((state_root / "records" / f"{record['release_id']}.json").exists())
+            self.assertEqual(record["risk_profile"], "production_repair")
+            self.assertEqual(record["release_manifest"]["candidate_sha"], SHA_A)
+            self.assertEqual(record["release_manifest"]["rollback_sha"], SHA_B)
+            self.assertEqual(record["release_candidate"]["provenance"]["source_sha"], SHA_A)
 
     def test_create_record_rejects_required_check_failure(self):
         with tempfile.TemporaryDirectory() as td:
@@ -862,6 +866,114 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 result = runner.publish_production_closeout(repo, SHA_A)
             self.assertEqual(result, {"documentation": "pass", "control_board": "pass"})
             self.assertEqual(execute.call_args.args[0][1:], ["production", SHA_A])
+
+    def test_control_state_circuit_breaker_revalidates_only_against_last_known_good(self):
+        with tempfile.TemporaryDirectory() as td:
+            state_root = Path(td)
+            manifest = {"revision": SHA_B, "complete": True, "observed_at": "2026-10-07T19:00:00+00:00"}
+            runner.set_last_known_good(state_root, manifest, release_id="release-baseline")
+            record = {
+                "release_id": runner.record_id(SHA_A),
+                "release_candidate": {"candidate_sha": SHA_A},
+            }
+            runner.open_circuit_breaker(
+                state_root,
+                record,
+                reason="synthetic failure",
+                rollback_verified=True,
+            )
+            self.assertEqual(
+                runner.load_control_state(state_root)["circuit_breaker"]["state"],
+                "open",
+            )
+            with patch.object(runner, "capture_production_manifest", return_value=manifest) as capture:
+                state = runner.revalidate_circuit_breaker(state_root)
+            capture.assert_called_once_with(SHA_B)
+            self.assertEqual(state["circuit_breaker"]["state"], "closed")
+            self.assertEqual(
+                state["circuit_breaker"]["reason"],
+                "authoritative_health_revalidated",
+            )
+
+    def test_open_circuit_breaker_fails_closed_without_valid_lkg(self):
+        with tempfile.TemporaryDirectory() as td:
+            state_root = Path(td)
+            runner.save_control_state(
+                state_root,
+                {
+                    "circuit_breaker": {"state": "open", "reason": "test"},
+                    "last_known_good": None,
+                },
+            )
+            with self.assertRaisesRegex(runner.ReleaseManagerError, "no valid last-known-good"):
+                runner.revalidate_circuit_breaker(state_root)
+
+    def test_controller_identity_pin_rejects_policy_change(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            policy = repo / "config" / "release-manager-policy.json"
+            policy.parent.mkdir(parents=True)
+            policy.write_text('{"version":1}\n', encoding="utf-8")
+            pin = runner.controller_identity(repo)
+            policy.write_text('{"version":2}\n', encoding="utf-8")
+            with self.assertRaisesRegex(runner.ReleaseManagerError, "changed mid-transaction: policy_digest"):
+                runner.verify_controller_identity(pin, repo)
+
+    def test_change_risk_classifies_release_manager_as_production_control_core(self):
+        self.assertEqual(
+            runner.classify_change_risk(
+                "release_blocker",
+                ["tools/release_manager_host_runner.py"],
+            ),
+            "production_control_core",
+        )
+        self.assertEqual(
+            runner.classify_change_risk("todo", ["docs/operations/example.md"]),
+            "normal",
+        )
+
+    def test_functional_smoke_requires_runtime_mcp_host_alignment_and_http_health(self):
+        import io
+
+        response = io.BytesIO(b'{"status":"ok"}')
+        response.status = 200
+        with (
+            patch.object(
+                runner,
+                "live_production_alignment",
+                return_value={
+                    "runtime_revision": SHA_A,
+                    "mcp_revision": SHA_A,
+                    "host_revision": SHA_A,
+                },
+            ),
+            patch.object(runner, "live_mcp", return_value={"revision": SHA_A}),
+            patch.object(runner.urllib.request, "urlopen", return_value=response),
+        ):
+            result = runner.run_functional_smoke_tests(SHA_A)
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["runtime_healthz_http_status"], 200)
+        self.assertTrue(result["runtime_mcp_host_alignment"])
+
+    def test_release_policy_requires_hardening_production_evidence(self):
+        import json
+
+        policy = json.loads((ROOT / "config" / "release-manager-policy.json").read_text(encoding="utf-8"))
+        production = policy["production"]
+        self.assertTrue(production["circuit_breaker_required"])
+        self.assertTrue(production["last_known_good_manifest_required"])
+        self.assertTrue(production["controller_identity_pinning_required"])
+        self.assertTrue(production["functional_smoke_test_required"])
+        required = set(policy["required_production_verification_evidence"])
+        self.assertTrue(
+            {
+                "functional_smoke_tests_passed",
+                "controller_identity_verified",
+                "last_known_good_manifest_captured",
+                "pre_mutation_health_passed",
+                "production_manifest_complete",
+            }.issubset(required)
+        )
 
     def test_publish_production_closeout_fails_closed_without_board_publication(self):
         with tempfile.TemporaryDirectory() as td:
