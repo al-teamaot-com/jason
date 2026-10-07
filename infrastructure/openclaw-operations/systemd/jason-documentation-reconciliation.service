@@ -10,13 +10,13 @@ Group=al
 WorkingDirectory=/opt/jason/current
 Environment=HOME=/home/al
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-Environment=JASON_DOCUMENTATION_REPO_ROOT=/home/al/projects/jason
+Environment=JASON_DOCUMENTATION_REPO_ROOT=/home/al/.local/lib/jason/documentation-source-repo
 ExecStart=/usr/bin/python3 /opt/jason/current/tools/documentation_source_reconciler.py
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/al/jason-worktrees /home/al/projects/jason
+ReadWritePaths=/home/al/jason-worktrees /home/al/.local/lib/jason/documentation-source-repo
 ReadOnlyPaths=/opt/jason/current
 
 [Install]
