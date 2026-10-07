@@ -144,6 +144,10 @@ prepare_managed_clone() {
 }
 prepare_managed_clone "$ENGINEERING_SOURCE_REPO"
 prepare_managed_clone "$DOCUMENTATION_SOURCE_REPO"
+if [ ! -d "$DOCUMENTATION_SOURCE_REPO/.git" ]; then
+  echo "ERROR: managed documentation Git source was not materialized before unit activation." >&2
+  exit 9
+fi
 
 for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}" "${MAINTENANCE_TIMERS[@]}" "$PROVIDER_CANARY_SERVICE" "$PROVIDER_CANARY_TIMER" "${OBSOLETE_UNITS[@]}"; do
   if [ -f "/etc/systemd/system/$unit" ]; then
