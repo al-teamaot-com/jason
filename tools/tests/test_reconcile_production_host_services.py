@@ -125,4 +125,5 @@ def test_self_heal_user_unit_has_no_developer_checkout_dependency() -> None:
     text = path.read_text(encoding="utf-8")
     assert "WorkingDirectory=/opt/jason/current" in text
     assert "ReadOnlyPaths=/opt/jason/current" in text
+    assert "ExecStart=/usr/bin/python3 /opt/jason/current/tools/jason_self_heal_watchdog.py" in text
     assert "/home/al/projects/jason" not in text
