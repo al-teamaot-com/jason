@@ -95,6 +95,7 @@ from connectors.datto_edr.threat_correlation import (
     correlate_drmm_threat_to_edr_detection,
 )
 from pydantic import AnyHttpUrl
+from jason_mcp.release_approval_request import queue_release_approval_request
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse
 
@@ -4964,6 +4965,56 @@ def _component_approval_owner() -> tuple[str, str]:
     if not owners or principal not in owners:
         raise PermissionError("DATTO_COMPONENT_APPROVAL_OWNER_REQUIRED")
     return principal, organization
+
+
+def _release_approval_owner() -> tuple[str, str]:
+    principal, organization, _, _ = _authenticated_write_identity()
+    owners = approval_owner_identities()
+    if not owners or principal not in owners:
+        raise PermissionError("RELEASE_APPROVAL_OWNER_REQUIRED")
+    return principal, organization
+
+
+@mcp.tool()
+def approve_release_candidate(
+    release_id: str,
+    candidate_sha: str,
+    reason: str = "",
+) -> dict[str, Any]:
+    """Owner-only: approve one exact production-eligible Jason release candidate.
+
+    This records an exact-SHA approval request in shared governed state. It does
+    not promote production directly; the host Release Manager independently
+    validates and consumes the request before its normal promotion transaction.
+    """
+
+    try:
+        principal, organization = _release_approval_owner()
+        state_root = Path(
+            os.getenv(
+                "JASON_RELEASE_MANAGER_STATE_ROOT",
+                "/var/lib/jason/openclaw/release-manager",
+            )
+        )
+        request = queue_release_approval_request(
+            state_root=state_root,
+            release_id=release_id,
+            candidate_sha=candidate_sha,
+            approved_by=principal,
+            organization_id=organization,
+            reason=reason,
+        )
+    except (PermissionError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+
+    return {
+        "status": "succeeded",
+        "release_id": request["release_id"],
+        "candidate_sha": request["candidate_sha"],
+        "approved_by": request["approved_by"],
+        "approval_source": request.get("source", "authenticated_jason_mcp_owner"),
+        "promotion": "separate_release_manager_transaction",
+    }
 
 
 def _component_unsupervised_block_reason(

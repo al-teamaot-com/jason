@@ -189,6 +189,48 @@ class DevelopmentReleaseCoordinatorTests(unittest.TestCase):
         self.assertEqual(todo["max_open_todo_issues"], 3)
         self.assertEqual(todo["max_active_items"], 1)
 
+    def test_production_health_view_marks_stale_health_for_revalidation(self):
+        production = {
+            "status": "aligned_and_healthy",
+            "observed_at": "2026-10-07T13:00:00+00:00",
+            "revision": "abc",
+        }
+        view = coordinator.production_health_view(
+            production,
+            max_age_minutes=30,
+            now=coordinator.datetime.fromisoformat("2026-10-07T14:00:01+00:00"),
+        )
+        self.assertEqual(view["status"], "revalidation_required")
+        self.assertEqual(view["freshness"], "stale")
+        self.assertGreater(view["evidence_age_minutes"], 30)
+
+    def test_production_health_view_keeps_fresh_health(self):
+        production = {
+            "status": "aligned_and_healthy",
+            "observed_at": "2026-10-07T13:50:00+00:00",
+            "revision": "abc",
+        }
+        view = coordinator.production_health_view(
+            production,
+            max_age_minutes=30,
+            now=coordinator.datetime.fromisoformat("2026-10-07T14:00:00+00:00"),
+        )
+        self.assertEqual(view["status"], "aligned_and_healthy")
+        self.assertEqual(view["freshness"], "fresh")
+
+    def test_production_health_view_missing_timestamp_fails_closed(self):
+        production = {
+            "status": "aligned_and_healthy",
+            "revision": "abc",
+        }
+        view = coordinator.production_health_view(
+            production,
+            max_age_minutes=30,
+            now=coordinator.datetime.fromisoformat("2026-10-07T14:00:00+00:00"),
+        )
+        self.assertEqual(view["status"], "revalidation_required")
+        self.assertEqual(view["freshness"], "missing_timestamp")
+
     def test_sensitive_overlap_paths(self):
         self.assertTrue(coordinator.sensitive("implementation/runtime/app.py"))
         self.assertTrue(coordinator.sensitive("tools/example.py"))
