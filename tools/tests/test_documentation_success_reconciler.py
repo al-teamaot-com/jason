@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 
+from tools import documentation_success_reconciler as reconciler
 from tools.documentation_success_reconciler import render_markdown, update_source, write_state
 from tools.documentation_impact_gate import DocumentationImpactError, validate_pull_request_body
 
@@ -68,3 +69,19 @@ def test_rendered_production_state_keeps_source_and_production_distinct():
 def test_rendered_markdown_has_no_trailing_whitespace():
     markdown = render_markdown({"schema_version": "1.0"})
     assert all(line == line.rstrip() for line in markdown.splitlines())
+
+
+def test_production_alignment_wait_retries_transient_runtime_restart(monkeypatch):
+    attempts = {"count": 0}
+
+    def probe(revision: str):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RuntimeError("runtime is not healthy on requested revision")
+        return {"runtime_revision": revision, "runtime_health": "healthy"}
+
+    monkeypatch.setattr(reconciler, "production_alignment_probe", probe)
+    monkeypatch.setattr(reconciler.time, "sleep", lambda _: None)
+    result = reconciler.wait_for_production_alignment("abc123", attempts=2, interval_seconds=0)
+    assert result["runtime_health"] == "healthy"
+    assert attempts["count"] == 2
