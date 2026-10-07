@@ -93,6 +93,9 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'installed self-heal watchdog differs from production source' in text
     assert 'jason-support-repair-worker.timer' in text
     assert 'jason-self-heal-watchdog.timer' in text
+    assert 'install_release_host_reconciler.py' in text
+    assert 'installed root host reconciler differs from production source' in text
+    assert 'JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS' in text
 
 
 def test_reconciliation_fails_closed_without_root() -> None:

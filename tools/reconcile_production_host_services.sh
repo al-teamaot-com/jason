@@ -306,6 +306,20 @@ done
 echo "JASON_USER_WORKER_RECONCILIATION=PASS"
 echo "ENGINEERING_SOURCE_REPO=$ENGINEERING_SOURCE_REPO"
 echo "DOCUMENTATION_SOURCE_REPO=$DOCUMENTATION_SOURCE_REPO"
+
+# Keep the privileged host-reconciliation boundary on the exact production
+# implementation after this successful reconciliation. The worker validates
+# only local refs from the managed engineering Git source.
+/usr/bin/python3 "$RELEASE_DIR/tools/install_release_host_reconciler.py"
+cmp -s "$RELEASE_DIR/tools/release_host_reconcile_worker.py" /usr/local/lib/jason/release_host_reconcile_worker.py || {
+  echo "ERROR: installed root host reconciler differs from production source" >&2
+  exit 9
+}
+if [ "$(systemctl is-active jason-release-host-reconcile.path 2>/dev/null || true)" != "active" ]; then
+  echo "ERROR: root host-reconcile path is not active after production install" >&2
+  exit 9
+fi
+echo "JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS"
 echo "JASON_HOST_SERVICE_RECONCILIATION=PASS"
 echo "SOURCE_REVISION=$SOURCE_REVISION"
 echo "RELEASE_DIR=$RELEASE_DIR"
