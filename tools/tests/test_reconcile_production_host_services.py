@@ -203,3 +203,11 @@ def test_observability_reconciliation_is_conditional_and_managed() -> None:
     assert 'JASON_OBSERVABILITY_RECONCILIATION=PASS' in text
     assert 'JASON_OBSERVABILITY_RECONCILIATION=UNCHANGED' in text
     assert 'observability release did not converge to production revision' in text
+
+
+def test_unmanaged_toner_exporter_is_removed_during_production_reconciliation() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    assert "jason-toner-exporter.service" in text
+    assert "systemctl --user disable --now" in text
+    assert "JASON_OBSOLETE_USER_UNIT_CLEANUP=PASS" in text
+    assert "/home/al/.config/systemd/user/default.target.wants/$unit" in text
