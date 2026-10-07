@@ -10,17 +10,17 @@
   "panels": [
     {
       "gridPos": {
-        "h": 4,
+        "h": 5,
         "w": 24,
         "x": 0,
         "y": 0
       },
       "id": 1,
       "options": {
-        "content": "## Jason Operations & Configuration\nA curated operator view of **Jason-owned scheduled work and important production configuration**. This intentionally excludes host housekeeping timers, secret values, raw environment variables, and low-value implementation settings. Grafana is observational only and grants no execution authority.",
+        "content": "## Jason Control Panel \u2014 Operations & Configuration\nOne operator view for **scheduled work, important configuration, production contracts, and migration/upgrade state**. Migration stages come from Release Manager records; configuration values come from the live runtime and governed policy files. Grafana remains a control surface rather than an authority source. Changes must flow through Jason's governed controls.\n\n**Governed controls:** [Component Control](/d/jason-component-control) \u00b7 [Playbook Control](/d/jason-playbook-control-center) \u00b7 [Credential Management](/d/jason-credential-management) \u00b7 [Production Health](/d/jason-production-health) \u00b7 [Support & TODO](/d/jason-support-todo)",
         "mode": "markdown"
       },
-      "title": "Operator View",
+      "title": "Jason Control Panel",
       "type": "text"
     },
     {
@@ -33,7 +33,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 4
+        "y": 5
       },
       "id": 2,
       "options": {
@@ -97,7 +97,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 12
+        "y": 13
       },
       "id": 3,
       "options": {
@@ -105,7 +105,7 @@
       },
       "targets": [
         {
-          "expr": "jason_scheduled_task_next_run_timestamp_seconds",
+          "expr": "jason_scheduled_task_next_run_timestamp_seconds * 1000",
           "format": "table",
           "instant": true,
           "refId": "A"
@@ -158,7 +158,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 19
+        "y": 20
       },
       "id": 4,
       "options": {
@@ -166,7 +166,7 @@
       },
       "targets": [
         {
-          "expr": "jason_scheduled_task_last_run_timestamp_seconds",
+          "expr": "jason_scheduled_task_last_run_timestamp_seconds * 1000",
           "format": "table",
           "instant": true,
           "refId": "A"
@@ -202,7 +202,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 26
+        "y": 27
       },
       "id": 5,
       "options": {
@@ -241,12 +241,12 @@
         "type": "prometheus",
         "uid": "jason-prometheus"
       },
-      "description": "Curated secret-safe configuration that an operator may need to verify quickly. This is deliberately not every setting.",
+      "description": "Curated secret-safe configuration from the live runtime and governed policy files. Source and change mode make clear how each setting must be changed.",
       "gridPos": {
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 33
+        "y": 34
       },
       "id": 6,
       "options": {
@@ -274,7 +274,9 @@
             },
             "renameByName": {
               "setting": "Setting",
-              "value": "Current / Expected Value"
+              "value": "Current / Expected Value",
+              "source": "Source",
+              "change_mode": "Change Path"
             }
           }
         }
@@ -291,7 +293,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 41
+        "y": 42
       },
       "id": 7,
       "options": {
@@ -335,7 +337,7 @@
         "h": 7,
         "w": 24,
         "x": 0,
-        "y": 49
+        "y": 50
       },
       "id": 8,
       "options": {
@@ -368,15 +370,215 @@
         }
       ],
       "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "description": "Recent Release Manager records. Stage is deterministic; blocker is a bounded classification, not free-form error text. No synthetic completion percentage is used.",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 57
+      },
+      "id": 9,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "expr": "jason_release_migration_info",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Migration & Upgrade Status \u2014 Recent Releases",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "Value": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            },
+            "renameByName": {
+              "release_id": "Release",
+              "source_revision": "Target SHA",
+              "rollback_revision": "From / Rollback SHA",
+              "state": "Stage",
+              "blocker_class": "Blocker"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "description": "1 means the release has authoritative production alignment/verification evidence; 0 means it has not completed that proof.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 67
+      },
+      "id": 10,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "expr": "jason_release_migration_verified",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Production Verification",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            },
+            "renameByName": {
+              "release_id": "Release",
+              "Value": "Verified"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "description": "Rollback verification state: 1 verified, 0 failed, -1 not applicable/not attempted.",
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 67
+      },
+      "id": 11,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "expr": "jason_release_migration_rollback_verified",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Rollback Verification",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            },
+            "renameByName": {
+              "release_id": "Release",
+              "Value": "Rollback Proof"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "jason-prometheus"
+      },
+      "description": "Last durable Release Manager record update for each recent migration/upgrade.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 74
+      },
+      "id": 12,
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "expr": "jason_release_migration_updated_timestamp_seconds * 1000",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Migration / Upgrade Last Update",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "instance": true,
+              "job": true
+            },
+            "renameByName": {
+              "release_id": "Release",
+              "Value": "Last Update"
+            }
+          }
+        }
+      ],
+      "type": "table"
     }
   ],
   "refresh": "30s",
   "schemaVersion": 41,
   "tags": [
-    "jason",
-    "operations",
     "configuration",
-    "scheduled-work"
+    "control-panel",
+    "jason",
+    "migration",
+    "operations",
+    "scheduled-work",
+    "upgrade"
   ],
   "templating": {
     "list": []
@@ -387,8 +589,8 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Jason Operations & Configuration",
+  "title": "Jason Control Panel \u2014 Operations & Configuration",
   "uid": "jason-operations-configuration",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }

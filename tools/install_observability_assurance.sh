@@ -6,7 +6,7 @@ if [ "$#" -ne 1 ]; then
   exit 64
 fi
 SOURCE_REVISION="$1"
-REPO_ROOT="/home/al/projects/jason"
+REPO_ROOT="${JASON_REPO_ROOT:-/home/al/.local/lib/jason/engineering-source-repo}"
 OBS_ROOT="/opt/jason/observability"
 RELEASE_DIR="$OBS_ROOT/releases/$SOURCE_REVISION"
 CURRENT_LINK="$OBS_ROOT/current"
@@ -19,8 +19,17 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 77
 fi
 
-git -C "$REPO_ROOT" cat-file -e "$SOURCE_REVISION^{commit}" 2>/dev/null || git -C "$REPO_ROOT" fetch origin "$SOURCE_REVISION"
-git -C "$REPO_ROOT" cat-file -e "$SOURCE_REVISION^{commit}"
+if [ "$REPO_ROOT" = "/home/al/projects/jason" ] || [[ "$REPO_ROOT" == /home/al/jason-worktrees/* ]]; then
+  echo "ERROR: observability install may not depend on a developer checkout" >&2
+  exit 9
+fi
+
+git_repo() {
+  git -c "safe.directory=$REPO_ROOT" -C "$REPO_ROOT" "$@"
+}
+
+git_repo cat-file -e "$SOURCE_REVISION^{commit}" 2>/dev/null || git_repo fetch origin "$SOURCE_REVISION"
+git_repo cat-file -e "$SOURCE_REVISION^{commit}"
 mkdir -p "$OBS_ROOT/releases" "$STATE_DIR" "$BACKUP_DIR"
 chown al:al "$STATE_DIR"
 chmod 0700 "$STATE_DIR"
@@ -28,7 +37,7 @@ chmod 0700 "$STATE_DIR"
 if [ ! -d "$RELEASE_DIR" ]; then
   TMP="$OBS_ROOT/releases/.${SOURCE_REVISION}.tmp.$$"
   rm -rf "$TMP"; mkdir -p "$TMP"
-  git -C "$REPO_ROOT" archive "$SOURCE_REVISION" | tar -x -C "$TMP"
+  git_repo archive "$SOURCE_REVISION" | tar -x -C "$TMP"
   printf '%s\n' "$SOURCE_REVISION" > "$TMP/SOURCE_REVISION"
   chown -R root:root "$TMP"
   mv "$TMP" "$RELEASE_DIR"

@@ -80,8 +80,8 @@
     },
     {
       "path": "infrastructure/showcase/grafana/dashboards/jason-operations-configuration.json",
-      "sha256": "0c5523f286c3a9fbfd900eb1f9873636c5f5006e150fd195d64d00e34ffd69a9",
-      "title": "Jason Operations & Configuration",
+      "sha256": "0d4ceb4e9573c4705b30a5e5c47cd41439dcfa9a962024090ceb7fda3fb66a89",
+      "title": "Jason Control Panel \u2014 Operations & Configuration",
       "uid": "jason-operations-configuration"
     },
     {
@@ -138,6 +138,14 @@
     }
   ],
   "required_metrics": [
+    {
+      "id": "operations-configuration-up",
+      "query": "up{job=\"jason-operations-configuration\"} == 1"
+    },
+    {
+      "id": "control-panel-migration-source",
+      "query": "count(jason_release_migration_info) > 0"
+    },
     {
       "id": "usage-attribution-up",
       "query": "up{job=\"jason-usage-attribution\"} == 1"

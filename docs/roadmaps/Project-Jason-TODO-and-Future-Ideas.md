@@ -1059,6 +1059,22 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** Jason Governance Authority / AOT Owner
 - **Review trigger:** Run one controlled production handoff when the owner is available for the bounded acceptance window or when an equivalent pre-approved non-disruptive test ticket is designated.
 
+
+### TODO-OPS-010 — Jason Operator Control Panel / Command Center v2
+
+- **Priority:** P1
+- **Status:** Blocked — owner-directed source implementation in progress; production deployment and automatic integration intentionally held pending completion of the current root-reconciler sudo bootstrap.
+- **Autonomous engineering readiness:** Not eligible while the explicit Owner production hold is active.
+- **Risk level:** Moderate
+- **Idea:** Consolidate Jason's operator-facing control and observability surfaces into one Grafana-first Control Panel that shows scheduled work, curated configuration, production contracts, migrations/upgrades, support/TODO state, provider health, playbook/component controls, and links to governed write surfaces without making Grafana an authority source.
+- **Why it matters:** Jason has accumulated multiple useful dashboards and control services, but an owner should be able to answer “what is Jason doing, what is changing, what is blocked, what can I configure, and does Jason need me?” from one coherent surface. Migration state is especially important because source merge, pre-production, production eligibility, host convergence, rollback, and final verification are distinct operational stages.
+- **Initial implementation:** Keep the existing `jason-operations-configuration` UID for durable bookmarks/provisioning; rename the surface to `Jason Control Panel — Operations & Configuration`; back Scheduled Work from actual systemd timer state; back curated configuration from live runtime plus governed policy files; expose recent migration/upgrade state from Release Manager records with deterministic stages and bounded blocker classes; provide navigation to Component Control, Playbook Control, Credential Management, Production Health, and Support/TODO.
+- **Configuration principle:** Grafana may initiate changes only through narrowly scoped Jason control services. Source-controlled or runtime-impacting configuration changes must still pass Jason authority, validation, audit, protected CI, Release Manager, and production verification. Direct browser-to-provider writes and arbitrary file/environment edits are prohibited.
+- **Migration principle:** Do not publish synthetic completion percentages. Show actual Release Manager stage, target/source revision, rollback revision, bounded blocker class, verification state, rollback proof, and durable last-update time.
+- **Production hold:** Do not merge/promote this Control Panel v2 change until the Owner completes the pending one-time root-reconciler sudo bootstrap and Jason verifies the release path is healthy.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Complete source implementation and protected CI now; remove the production hold only after the root-reconciler bootstrap is confirmed and a normal guarded release can close successfully.
+
 ### TODO-COMMS-004 — Microsoft Teams voice-call conversation with Jason
 
 - **Priority:** P2

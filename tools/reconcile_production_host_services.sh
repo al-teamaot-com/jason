@@ -15,6 +15,7 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP_DIR="/var/backups/jason-systemd-$STAMP"
 ENGINEERING_SOURCE_REPO="/home/al/.local/lib/jason/engineering-source-repo"
 DOCUMENTATION_SOURCE_REPO="/home/al/.local/lib/jason/documentation-source-repo"
+OBSERVABILITY_CURRENT_LINK="/opt/jason/observability/current"
 USER_XDG_RUNTIME_DIR="/run/user/1000"
 USER_DBUS_ADDRESS="unix:path=/run/user/1000/bus"
 
@@ -23,6 +24,7 @@ EXPORTER_UNITS=(
   jason-client-posture-exporter.service
   jason-playbook-exporter.service
   jason-production-health-exporter.service
+  jason-operations-configuration-exporter.service
   jason-resolution-memory-exporter.service
   jason-reflection-exporter.service
   jason-security-control-exporter.service
@@ -52,6 +54,7 @@ EXPORTER_SCRIPTS=(
   client_posture_exporter.py
   playbook_exporter.py
   production_health_exporter.py
+  operations_configuration_exporter.py
   resolution_memory_exporter.py
   reflection_exporter.py
   security_control_exporter.py
@@ -59,7 +62,7 @@ EXPORTER_SCRIPTS=(
   usage_attribution_exporter_runtime.py
   usage_exporter.py
 )
-VERIFY_PORTS=(9464 9465 9466 9467 9468 9470 9471 9472 9476)
+VERIFY_PORTS=(9464 9465 9466 9467 9468 9470 9471 9472 9476 9477)
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "ERROR: root privileges are required for systemd reconciliation." >&2
@@ -347,6 +350,36 @@ echo "DEVELOPER_CHECKOUT_DEPENDENCY=ABSENT"
 echo "SOURCE_REVISION=$SOURCE_REVISION"
 echo "RELEASE_DIR=$RELEASE_DIR"
 echo "BACKUP_DIR=$BACKUP_DIR"
+
+OBSERVABILITY_INSTALLER="$RELEASE_DIR/tools/install_observability_assurance.sh"
+OBSERVABILITY_PREVIOUS_REVISION=""
+if [ -f "$OBSERVABILITY_CURRENT_LINK/SOURCE_REVISION" ]; then
+  OBSERVABILITY_PREVIOUS_REVISION="$(tr -d '\r\n' < "$OBSERVABILITY_CURRENT_LINK/SOURCE_REVISION")"
+fi
+OBSERVABILITY_CHANGED=1
+if [ -n "$OBSERVABILITY_PREVIOUS_REVISION" ] \
+  && git -C "$REPO_ROOT" cat-file -e "$OBSERVABILITY_PREVIOUS_REVISION^{commit}" 2>/dev/null; then
+  if git -C "$REPO_ROOT" diff --quiet \
+    "$OBSERVABILITY_PREVIOUS_REVISION" "$SOURCE_REVISION" -- \
+    config/observability/grafana-dashboard-manifest.json \
+    infrastructure/showcase \
+    tools/grafana_assurance.py \
+    tools/update_grafana_manifest.py \
+    tools/install_observability_assurance.sh; then
+    OBSERVABILITY_CHANGED=0
+  fi
+fi
+if [ "$OBSERVABILITY_CHANGED" -eq 1 ]; then
+  test -f "$OBSERVABILITY_INSTALLER" || { echo "ERROR: observability installer is missing" >&2; exit 9; }
+  JASON_REPO_ROOT="$ENGINEERING_SOURCE_REPO" /usr/bin/bash "$OBSERVABILITY_INSTALLER" "$SOURCE_REVISION"
+  if [ "$(readlink -f "$OBSERVABILITY_CURRENT_LINK")" != "/opt/jason/observability/releases/$SOURCE_REVISION" ]; then
+    echo "ERROR: observability release did not converge to production revision" >&2
+    exit 9
+  fi
+  echo "JASON_OBSERVABILITY_RECONCILIATION=PASS"
+else
+  echo "JASON_OBSERVABILITY_RECONCILIATION=UNCHANGED"
+fi
 
 DOC_PUBLISHER="$RELEASE_DIR/tools/publish_documentation_reconciliation.sh"
 if [ ! -x "$DOC_PUBLISHER" ]; then

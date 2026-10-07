@@ -1,0 +1,6 @@
+[
+  {
+    "targets": ["host.docker.internal:9477"],
+    "labels": {"job": "jason-operations-configuration"}
+  }
+]

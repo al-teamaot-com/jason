@@ -26,6 +26,14 @@ scrape_configs:
           - /etc/prometheus/file_sd/jason-production-health.json
         refresh_interval: 30s
 
+  - job_name: jason-operations-configuration
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/file_sd/jason-operations-configuration.json
+        refresh_interval: 30s
+
   - job_name: jason-usage
     file_sd_configs:
       - files:
