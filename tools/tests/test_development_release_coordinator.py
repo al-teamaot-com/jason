@@ -231,6 +231,98 @@ class DevelopmentReleaseCoordinatorTests(unittest.TestCase):
         self.assertEqual(view["status"], "revalidation_required")
         self.assertEqual(view["freshness"], "missing_timestamp")
 
+    def test_release_control_view_surfaces_breaker_lock_queue_and_lkg(self):
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "records").mkdir()
+            (root / "production-control-state.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.0",
+                        "updated_at": "2026-10-07T20:00:00+00:00",
+                        "circuit_breaker": {"state": "open", "reason": "synthetic"},
+                        "last_known_good": {
+                            "release_id": "release-good",
+                            "manifest": {"revision": "a" * 40, "complete": True},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "production-transaction.lock").write_text(
+                json.dumps({"release_id": "release-active", "pid": 123}) + "\n",
+                encoding="utf-8",
+            )
+            (root / "production-drift.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.0",
+                        "status": "drift_detected",
+                        "observed_at": "2026-10-07T20:00:00+00:00",
+                        "problems": [{"kind": "forbidden_execution_path"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (root / "records" / "release-active.json").write_text(
+                json.dumps({"release_id": "release-active", "state": "production"}),
+                encoding="utf-8",
+            )
+            (root / "records" / "release-queued.json").write_text(
+                json.dumps({"release_id": "release-queued", "state": "production_eligible"}),
+                encoding="utf-8",
+            )
+            view = coordinator.release_control_view(root)
+        self.assertEqual(view["circuit_breaker"]["state"], "open")
+        self.assertEqual(view["lock_owner"]["release_id"], "release-active")
+        self.assertEqual(view["active_transactions"], ["release-active"])
+        self.assertEqual(view["queued_candidates"], ["release-queued"])
+        self.assertEqual(view["last_known_good_release"], "release-good")
+        self.assertEqual(view["last_known_good_revision"], "a" * 40)
+        self.assertEqual(view["current_complete_manifest_revision"], "a" * 40)
+        self.assertEqual(view["desired_state_drift_status"], "drift_detected")
+        self.assertEqual(view["desired_state_drift_problem_count"], 1)
+
+    def test_render_surfaces_production_control_state(self):
+        board = {
+            "generated_at": "2026-10-07T20:00:00+00:00",
+            "main_sha": "abc",
+            "production": {},
+            "preproduction": {"configured": True},
+            "release_control": {
+                "circuit_breaker": {"state": "closed"},
+                "lock_owner": {"release_id": "release-active"},
+                "active_transactions": ["release-active"],
+                "queued_candidates": ["release-next"],
+                "last_known_good_release": "release-good",
+                "last_known_good_revision": "a" * 40,
+                "current_complete_manifest_revision": "b" * 40,
+                "desired_state_drift_status": "pass",
+                "desired_state_drift_problem_count": 0,
+            },
+            "release_attention": "none",
+            "development_recommendation": "none",
+            "pr_states": [],
+            "older_open_pr_count": 0,
+            "overlaps": [],
+            "support": [],
+            "todos": [],
+            "production_policy": {},
+            "autonomous_repair_policy": {},
+            "support_autonomy_policy": {},
+            "todo_autonomy_policy": {},
+        }
+        rendered = coordinator.render(board)
+        self.assertIn("Production circuit breaker:** closed", rendered)
+        self.assertIn("Production lock owner:** release-active", rendered)
+        self.assertIn("Queued production candidates:** release-next", rendered)
+        self.assertIn("Last-known-good release:** release-good", rendered)
+        self.assertIn("Current complete production manifest:** " + "b" * 40, rendered)
+        self.assertIn("Desired-state drift:** pass (0 problem(s))", rendered)
+
     def test_sensitive_overlap_paths(self):
         self.assertTrue(coordinator.sensitive("implementation/runtime/app.py"))
         self.assertTrue(coordinator.sensitive("tools/example.py"))

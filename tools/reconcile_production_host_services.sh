@@ -46,6 +46,8 @@ MAINTENANCE_TIMERS=(
 )
 PROVIDER_CANARY_SERVICE=jason-provider-health-canary.service
 PROVIDER_CANARY_TIMER=jason-provider-health-canary.timer
+DRIFT_WATCHDOG_SERVICE=jason-production-drift-watchdog.service
+DRIFT_WATCHDOG_TIMER=jason-production-drift-watchdog.timer
 OBSOLETE_UNITS=(
   jason-communication-template-exporter.service
   jason-completion-gap-exporter.service
@@ -198,7 +200,7 @@ if [ ! -d "$DOCUMENTATION_SOURCE_REPO/.git" ]; then
   exit 9
 fi
 
-for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}" "${DEFERRED_MAINTENANCE_SERVICES[@]}" "${MAINTENANCE_TIMERS[@]}" "$PROVIDER_CANARY_SERVICE" "$PROVIDER_CANARY_TIMER" "${OBSOLETE_UNITS[@]}"; do
+for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}" "${DEFERRED_MAINTENANCE_SERVICES[@]}" "${MAINTENANCE_TIMERS[@]}" "$PROVIDER_CANARY_SERVICE" "$PROVIDER_CANARY_TIMER" "$DRIFT_WATCHDOG_SERVICE" "$DRIFT_WATCHDOG_TIMER" "${OBSOLETE_UNITS[@]}"; do
   if [ -f "/etc/systemd/system/$unit" ]; then
     cp -a "/etc/systemd/system/$unit" "$BACKUP_DIR/$unit.before"
   fi
@@ -220,6 +222,11 @@ done
 for unit in "$PROVIDER_CANARY_SERVICE" "$PROVIDER_CANARY_TIMER"; do
   src="$RELEASE_DIR/infrastructure/showcase/systemd/$unit"
   test -f "$src" || { echo "ERROR: missing canonical provider-canary unit: $src" >&2; exit 2; }
+  install -o root -g root -m 0644 "$src" "/etc/systemd/system/$unit"
+done
+for unit in "$DRIFT_WATCHDOG_SERVICE" "$DRIFT_WATCHDOG_TIMER"; do
+  src="$RELEASE_DIR/infrastructure/openclaw-operations/systemd/$unit"
+  test -f "$src" || { echo "ERROR: missing canonical drift-watchdog unit: $src" >&2; exit 2; }
   install -o root -g root -m 0644 "$src" "/etc/systemd/system/$unit"
 done
 
@@ -362,8 +369,18 @@ for timer in jason-support-repair-worker.timer jason-self-heal-watchdog.timer; d
 done
 
 # Remove unmanaged legacy user units that are not represented in authoritative production source.
+# These are dormant residues superseded by governed production paths and/or
+# canonical system services. Their developer/worktree execution sources are
+# forbidden in production.
 step_start obsolete_user_unit_cleanup
-for unit in jason-toner-exporter.service; do
+for unit in \
+  jason-toner-exporter.service \
+  jason-autonomous-repair-runner.service \
+  jason-autonomous-repair-runner.path \
+  jason-resolution-memory-exporter.service \
+  jason-playbook-exporter.service \
+  jason-pr-integration-reconciler.service \
+  jason-pr-integration-reconciler.timer; do
   run_as_al systemctl --user disable --now "$unit" >/dev/null 2>&1 || true
   rm -f "/home/al/.config/systemd/user/$unit" "/home/al/.config/systemd/user/default.target.wants/$unit"
   run_as_al systemctl --user daemon-reload
@@ -374,8 +391,33 @@ for unit in jason-toner-exporter.service; do
     exit 9
   fi
 done
+run_as_al systemctl --user reset-failed >/dev/null 2>&1 || true
 step_pass obsolete_user_unit_cleanup
 echo "JASON_OBSOLETE_USER_UNIT_CLEANUP=PASS"
+
+# Retain only the newest bounded set of stopped rollback containers. Current
+# rollback capability is image-based; these exited containers are historical
+# deployment residue, not rollback authority.
+step_start rollback_container_retention
+mapfile -t rollback_containers < <(
+  docker ps -a --filter status=exited --format '{{.CreatedAt}}|{{.Names}}' \
+    | awk -F'|' '$2 ~ /^jason-(runtime-rollback-|mcp-pilot-rollback-|mcp-rollback-|teams-gateway-rollback-)/ {print}' \
+    | sort -r \
+    | cut -d'|' -f2-
+)
+ROLLBACK_CONTAINER_RETENTION=20
+if [ "${#rollback_containers[@]}" -gt "$ROLLBACK_CONTAINER_RETENTION" ]; then
+  for name in "${rollback_containers[@]:$ROLLBACK_CONTAINER_RETENTION}"; do
+    docker rm "$name" >/dev/null
+  done
+fi
+remaining_rollback_count="$(( $(docker ps -a --filter status=exited --format '{{.Names}}' | grep -Ec '^jason-(runtime-rollback-|mcp-pilot-rollback-|mcp-rollback-|teams-gateway-rollback-)' || true) ))"
+if [ "$remaining_rollback_count" -gt "$ROLLBACK_CONTAINER_RETENTION" ]; then
+  echo "ERROR: stopped rollback-container retention remains above policy: $remaining_rollback_count" >&2
+  exit 9
+fi
+step_pass rollback_container_retention
+echo "JASON_ROLLBACK_CONTAINER_RETENTION=PASS count=$remaining_rollback_count"
 
 step_pass user_worker_reconciliation
 echo "JASON_USER_WORKER_RECONCILIATION=PASS"
@@ -437,6 +479,31 @@ else
   echo "JASON_OBSERVABILITY_RECONCILIATION=UNCHANGED"
 fi
 step_pass observability_reconciliation
+
+# Prove declared production desired-state convergence before host reconciliation
+# can report success. This catches unknown active units/containers, forbidden
+# developer execution paths, missing required surfaces, and rollback residue.
+step_start production_drift_guard
+systemctl enable --now "$DRIFT_WATCHDOG_TIMER"
+timeout --signal=TERM --kill-after=5s 60s systemctl start "$DRIFT_WATCHDOG_SERVICE" || {
+  systemctl status "$DRIFT_WATCHDOG_SERVICE" --no-pager -l || true
+  echo "ERROR: production drift watchdog initial convergence check failed" >&2
+  exit 9
+}
+if [ "$(systemctl is-active "$DRIFT_WATCHDOG_TIMER" 2>/dev/null || true)" != "active" ]; then
+  echo "ERROR: production drift watchdog timer is not active" >&2
+  exit 9
+fi
+DRIFT_EVIDENCE="/var/lib/jason/openclaw/release-manager/production-drift.json"
+if ! /usr/bin/python3 "$RELEASE_DIR/tools/production_drift_guard.py" \
+  --config "$RELEASE_DIR/config/production-desired-state.json" \
+  --output "$DRIFT_EVIDENCE"; then
+  cat "$DRIFT_EVIDENCE" >&2 || true
+  echo "ERROR: production desired-state drift remains after reconciliation" >&2
+  exit 9
+fi
+step_pass production_drift_guard
+echo "JASON_PRODUCTION_DRIFT_GUARD=PASS evidence=$DRIFT_EVIDENCE"
 
 # Documentation/control-board publication is deliberately outside the privileged
 # host-alignment transaction. Release Manager performs it after runtime, MCP,

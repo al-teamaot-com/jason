@@ -26,7 +26,12 @@
     "protected_core_requires_owner_approval": true,
     "post_deploy_verification_required": true,
     "rollback_on_verification_failure": true,
-    "deployment_script": "infrastructure/jason-runtime/production-deploy.sh"
+    "deployment_script": "infrastructure/jason-runtime/production-deploy.sh",
+    "circuit_breaker_required": true,
+    "last_known_good_manifest_required": true,
+    "controller_identity_pinning_required": true,
+    "functional_smoke_test_required": true,
+    "fresh_pre_mutation_health_required": true
   },
   "protected_core_globs": [
     ".github/workflows/*",
@@ -121,7 +126,13 @@
     "alignment_verified",
     "runtime_revision",
     "mcp_revision",
-    "host_revision"
+    "host_revision",
+    "functional_smoke_tests_passed",
+    "controller_identity_verified",
+    "last_known_good_manifest_captured",
+    "pre_mutation_health_passed",
+    "production_manifest_complete",
+    "desired_state_converged"
   ],
   "support_impact": {
     "required_before_production_eligible": true,
