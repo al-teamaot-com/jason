@@ -672,7 +672,7 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-COMM-004 — Governed Teams interaction and owner operations
 
 - **Priority:** P1
-- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-04
+- **Status:** Implemented — production verified 2026-10-07T19:03:19+00:00; release release-18f9e070c9e674d8; SHA 18f9e070c9e674d88bedc097b88875fd40d082b9
 - **Implementation state at approval:** In progress — approval/information-request paths are production-proven; lifecycle-card source implementation completed 2026-10-04; production acceptance and typed-override acceptance remain
 - **Autonomous engineering readiness:** Approved
 - **Authority basis:** Owner approval on 2026-10-04 authorizes autonomous engineering only within this exact TODO scope; existing Jason governance, client/provider boundaries, protected-core release approval, financial authority, and disruptive-action controls remain unchanged.
@@ -685,7 +685,7 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Dependencies:** TODO-GOV-006 for lifecycle/readiness state; TODO-CONN-004 for residual Teams credential/OpenClaw hardening.
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** Complete typed-override acceptance and then standardize lifecycle cards/delivery evidence.
-
+- **Implementation evidence:** Jason Release Manager release-18f9e070c9e674d8 reached closed; production SHA 18f9e070c9e674d88bedc097b88875fd40d082b9.
 ### TODO-COMM-003 — Secure client portal messaging
 
 - **Priority:** P2
