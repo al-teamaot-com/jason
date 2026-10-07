@@ -86,3 +86,9 @@ def test_host_reconcile_script_explicitly_sets_release_root_mode():
     ).read_text(encoding="utf-8")
     assert 'chown root:root "$RELEASE_DIR"' in text
     assert 'chmod 0755 "$RELEASE_DIR"' in text
+
+
+def test_root_reconciler_uses_managed_engineering_source_not_developer_checkout() -> None:
+    text = (ROOT / "tools" / "release_host_reconcile_worker.py").read_text(encoding="utf-8")
+    assert 'REPO = Path("/home/al/.local/lib/jason/engineering-source-repo")' in text
+    assert '/home/al/projects/jason' not in text
