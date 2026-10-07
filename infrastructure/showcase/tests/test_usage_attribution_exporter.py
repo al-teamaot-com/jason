@@ -363,7 +363,5 @@ def test_attribution_service_prewarms_metrics_before_ready():
     ).read_text(encoding="utf-8")
     assert "JASON_ATTRIBUTION_EVENT_ROWID_SAFETY_MARGIN=250000" in unit
     assert "JASON_ATTRIBUTION_CACHE_TTL_SECONDS=20" in unit
-    assert (
-        "ExecStartPost=/usr/bin/curl -fsS --max-time 20 "
-        "http://127.0.0.1:9466/metrics -o /dev/null"
-    ) in unit
+    assert "ExecStartPost=" not in unit
+    assert "http://127.0.0.1:9466/metrics" not in unit
