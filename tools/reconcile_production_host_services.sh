@@ -361,6 +361,22 @@ for timer in jason-support-repair-worker.timer jason-self-heal-watchdog.timer; d
   fi
 done
 
+# Remove unmanaged legacy user units that are not represented in authoritative production source.
+step_start obsolete_user_unit_cleanup
+for unit in jason-toner-exporter.service; do
+  run_as_al systemctl --user disable --now "$unit" >/dev/null 2>&1 || true
+  rm -f "/home/al/.config/systemd/user/$unit" "/home/al/.config/systemd/user/default.target.wants/$unit"
+  run_as_al systemctl --user daemon-reload
+  state="$(run_as_al systemctl --user is-active "$unit" 2>/dev/null || true)"
+  enabled="$(run_as_al systemctl --user is-enabled "$unit" 2>/dev/null || true)"
+  if [ "$state" = "active" ] || [ "$state" = "activating" ] || [ "$enabled" = "enabled" ]; then
+    echo "ERROR: unmanaged user unit remains active/enabled: $unit" >&2
+    exit 9
+  fi
+done
+step_pass obsolete_user_unit_cleanup
+echo "JASON_OBSOLETE_USER_UNIT_CLEANUP=PASS"
+
 step_pass user_worker_reconciliation
 echo "JASON_USER_WORKER_RECONCILIATION=PASS"
 echo "ENGINEERING_SOURCE_REPO=$ENGINEERING_SOURCE_REPO"
