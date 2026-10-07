@@ -16,6 +16,7 @@ from pathlib import Path
 SPOOL = Path("/var/lib/jason/openclaw/release-manager/host-reconcile")
 REQUESTS = SPOOL / "requests"
 RESULTS = SPOOL / "results"
+CANDIDATE_SCRIPTS = SPOOL / "candidate-scripts"
 CURRENT = Path("/opt/jason/current")
 REPO = Path("/home/al/.local/lib/jason/engineering-source-repo")
 SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -108,6 +109,45 @@ def _verify_main(source_revision: str) -> None:
         raise HostReconcileError("requested host release is not on protected origin/main")
 
 
+
+
+def _candidate_reconcile_script(source_revision: str) -> Path:
+    """Materialize the exact candidate reconciliation script from protected Git evidence."""
+    CANDIDATE_SCRIPTS.mkdir(parents=True, exist_ok=True)
+    try:
+        body = subprocess.check_output(
+            _git("show", f"{source_revision}:tools/reconcile_production_host_services.sh"),
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise HostReconcileError(
+            "candidate host reconciliation script is not materializable from protected source"
+        ) from exc
+    developer_checkout = "/home/al/projects" + "/jason"
+    if developer_checkout in body:
+        raise HostReconcileError(
+            "candidate host reconciliation script depends on developer checkout"
+        )
+    required = (
+        'REPO_ROOT="/home/al/.local/lib/jason/engineering-source-repo"',
+        'DOCUMENTATION_SOURCE_REPO="/home/al/.local/lib/jason/documentation-source-repo"',
+        'DEVELOPER_CHECKOUT_DEPENDENCY=ABSENT',
+        'HOST_RECONCILIATION_SCRIPT_SOURCE_REVISION=',
+    )
+    missing = [item for item in required if item not in body]
+    if missing:
+        raise HostReconcileError(
+            "candidate host reconciliation contract is incomplete: " + ",".join(missing)
+        )
+    target = CANDIDATE_SCRIPTS / f"reconcile-{source_revision}.sh"
+    temp = target.with_suffix(".sh.tmp")
+    temp.write_text(body, encoding="utf-8")
+    os.chown(temp, 0, 0)
+    os.chmod(temp, 0o700)
+    os.replace(temp, target)
+    return target
+
+
 def _write_result(
     request_id: str,
     source_revision: str,
@@ -147,9 +187,9 @@ def _process(path: Path) -> None:
                 "live MCP revision does not match requested host release"
             )
 
-        script = CURRENT / "tools" / "reconcile_production_host_services.sh"
+        script = _candidate_reconcile_script(source_revision)
         if not script.is_file():
-            raise HostReconcileError("immutable host reconciliation script is missing")
+            raise HostReconcileError("candidate host reconciliation script is missing")
 
         release_dir = Path("/opt/jason/releases") / source_revision
         if release_dir.exists():
@@ -186,7 +226,7 @@ def _process(path: Path) -> None:
         except subprocess.CalledProcessError as exc:
             detail = str(exc.stdout or "").strip()
             raise HostReconcileError(
-                "immutable host reconciliation script failed"
+                "candidate host reconciliation script failed"
                 + (": " + detail[-3000:] if detail else "")
             ) from exc
         finally:

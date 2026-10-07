@@ -156,3 +156,12 @@ def test_production_reconciliation_has_no_developer_checkout_dependency() -> Non
     assert 'REPO_ROOT="/home/al/.local/lib/jason/engineering-source-repo"' in text
     assert 'JASON_DOCUMENTATION_REPO_ROOT="$DOCUMENTATION_SOURCE_REPO"' in text
     assert "/home/al/projects/jason" not in text
+
+
+def test_production_reconciliation_emits_candidate_source_boundary_evidence() -> None:
+    text = (REPO_ROOT / "tools" / "reconcile_production_host_services.sh").read_text(encoding="utf-8")
+    assert 'HOST_RECONCILIATION_SCRIPT_SOURCE_REVISION=$SOURCE_REVISION' in text
+    assert 'MANAGED_ENGINEERING_SOURCE=PASS' in text
+    assert 'MANAGED_DOCUMENTATION_SOURCE=PASS' in text
+    assert 'DEVELOPER_CHECKOUT_DEPENDENCY=ABSENT' in text
+    assert 'production reconciliation script contains a developer checkout dependency' in text
