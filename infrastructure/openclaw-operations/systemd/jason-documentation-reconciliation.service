@@ -16,7 +16,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/al/jason-worktrees /home/al/.local/lib/jason/documentation-source-repo
+ReadWritePaths=/home/al/jason-worktrees /home/al/.local/lib/jason
 ReadOnlyPaths=/opt/jason/current
 
 [Install]

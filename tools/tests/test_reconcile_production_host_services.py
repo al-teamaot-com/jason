@@ -83,6 +83,8 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'DOCUMENTATION_SOURCE_REPO="/home/al/.local/lib/jason/documentation-source-repo"' in text
     assert 'prepare_managed_clone "$ENGINEERING_SOURCE_REPO"' in text
     assert 'prepare_managed_clone "$DOCUMENTATION_SOURCE_REPO"' in text
+    assert 'managed documentation Git source was not materialized before unit activation' in text
+    assert text.index('prepare_managed_clone "$DOCUMENTATION_SOURCE_REPO"') < text.index('systemctl daemon-reload')
     assert 'install_support_repair_host_worker.py' in text
     assert 'install_self_heal_watchdog.py' in text
     assert 'JASON_USER_WORKER_RECONCILIATION=PASS' in text
@@ -127,3 +129,17 @@ def test_self_heal_user_unit_has_no_developer_checkout_dependency() -> None:
     assert "ReadOnlyPaths=/opt/jason/current" in text
     assert "ExecStart=/usr/bin/python3 /opt/jason/current/tools/jason_self_heal_watchdog.py" in text
     assert "/home/al/projects/jason" not in text
+
+
+def test_documentation_reconciliation_namespace_uses_stable_parent_path() -> None:
+    path = (
+        REPO_ROOT
+        / "infrastructure"
+        / "openclaw-operations"
+        / "systemd"
+        / "jason-documentation-reconciliation.service"
+    )
+    text = path.read_text(encoding="utf-8")
+    assert "JASON_DOCUMENTATION_REPO_ROOT=/home/al/.local/lib/jason/documentation-source-repo" in text
+    assert "ReadWritePaths=/home/al/jason-worktrees /home/al/.local/lib/jason" in text
+    assert "ReadWritePaths=/home/al/jason-worktrees /home/al/.local/lib/jason/documentation-source-repo" not in text
