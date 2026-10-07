@@ -168,3 +168,51 @@ def test_source_history_is_sticky_across_context_expansion():
         'implementation/kernel/capabilities/service.py',
         'implementation/kernel/system_registry/contracts.py',
     ]
+
+
+def test_owner_approved_pr_body_enables_unattended_source_integration(monkeypatch, tmp_path):
+    monkeypatch.setattr(module, 'integration_coordination', lambda repo, changed: [])
+    monkeypatch.setattr(module.support, 'changed_files', lambda worktree: ['tools/example.py'])
+    monkeypatch.setattr(module.support, 'run', lambda *args, **kwargs: 'a' * 40)
+    body = module.pr_body(
+        tmp_path,
+        {
+            'issue_number': 42,
+            'title': 'Approved thing',
+            'approval_source': 'https://example.invalid/issues/42',
+            'approved_by': 'owner',
+        },
+        tmp_path,
+        ['tools/tests/test_example.py'],
+    )
+    assert '- Integration automation: enabled' in body
+    assert 'exact merged main SHA' in body
+    assert 'Production deployment authority: none' in body
+
+
+def test_self_recoverable_blocker_is_narrow():
+    assert module.self_recoverable_blocker(
+        'The supplied excerpts do not expose enough exact source context.'
+    )
+    assert module.self_recoverable_blocker('development reasoning failed: HTTP transport failed')
+    assert not module.self_recoverable_blocker('Owner approval required for a new provider permission.')
+    assert not module.self_recoverable_blocker('Microsoft admin consent is required.')
+
+
+def test_recycle_self_recoverable_blockers_preserves_real_external_blockers():
+    state = {
+        'items': {
+            'DEV-1': {
+                'phase': 'blocked',
+                'reason': 'The supplied excerpts are insufficient exact source context.',
+            },
+            'DEV-2': {
+                'phase': 'blocked',
+                'reason': 'Microsoft admin consent is required.',
+            },
+        }
+    }
+    module.recycle_self_recoverable_blockers(state, {'DEV-1', 'DEV-2'})
+    assert state['items']['DEV-1']['phase'] == 'diagnosing'
+    assert state['items']['DEV-1']['self_recovery_attempts'] == 1
+    assert state['items']['DEV-2']['phase'] == 'blocked'

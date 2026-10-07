@@ -151,9 +151,9 @@ Implement only the bounded scope approved in #{item['issue_number']}: {item['tit
 - Branch baseline SHA: {baseline}
 - Current-main reconciliation performed: yes
 - Integration coordination: {coordination}
-- Integration automation: disabled
-- Production-impacting change: source only; deployment remains separately governed
-- Intended production release candidate: no automatic production promotion
+- Integration automation: enabled
+- Production-impacting change: yes; merge is unattended only after protected checks pass
+- Intended production release candidate: exact merged main SHA; production promotion remains Release Manager governed
 
 ## Governance and risk
 
@@ -295,6 +295,52 @@ def source_context_blocker(reason: str) -> bool:
     )
 
 
+def self_recoverable_blocker(reason: str) -> bool:
+    """Return True only for bounded worker failures Jason can safely retry itself."""
+    text = str(reason or '').casefold()
+    return (
+        source_context_blocker(reason)
+        or 'http transport failed' in text
+        or 'no j-change-002-eligible source excerpts matched' in text
+        or 'autonomous support repair requires a changed regression test' in text
+        or 'development worker requires a changed regression test' in text
+    )
+
+
+def recycle_self_recoverable_blockers(
+    state: dict[str, Any],
+    eligible_ids: set[str],
+    *,
+    max_recycles: int = 2,
+) -> None:
+    """Resume owner-approved work after bounded internal worker/context failures.
+
+    External/provider/authority/prerequisite blockers remain terminal. Approval is
+    never broadened; only work whose original owner approval is still present is
+    eligible for recycling.
+    """
+    items = state.get('items') if isinstance(state.get('items'), Mapping) else {}
+    for item_id, record in items.items():
+        if item_id not in eligible_ids or not isinstance(record, dict):
+            continue
+        if str(record.get('phase') or '') != 'blocked':
+            continue
+        reason = str(record.get('reason') or '')
+        if not self_recoverable_blocker(reason):
+            continue
+        attempts = int(record.get('self_recovery_attempts', 0) or 0)
+        if attempts >= max_recycles:
+            continue
+        record.update({
+            'phase': 'diagnosing',
+            'reason': 'Automatic bounded self-recovery retry after internal worker/context blocker.',
+            'reasoning_request_id': '',
+            'context_expansion_attempts': 0,
+            'self_recovery_attempts': attempts + 1,
+            'updated_at': now(),
+        })
+
+
 def reconcile_removed_approval(state: dict[str, Any], eligible_ids: set[str]) -> None:
     items = state.get('items') if isinstance(state.get('items'), Mapping) else {}
     for item_id, record in items.items():
@@ -357,6 +403,7 @@ def main() -> int:
     eligible = owner_approved_issues(repo)
     eligible_ids = {item['id'] for item in eligible}
     reconcile_removed_approval(state, eligible_ids)
+    recycle_self_recoverable_blockers(state, eligible_ids)
     state['discovery'] = {
         'observed_at': now(),
         'approved_issue_numbers': [item['issue_number'] for item in eligible],

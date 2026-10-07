@@ -946,6 +946,27 @@ def run_preproduction(repo: Path, state_root: Path, record: dict[str, Any]) -> d
             shutil.rmtree(scratch, ignore_errors=True)
 
 
+def publish_production_closeout(repo: Path, candidate_sha: str) -> dict[str, str]:
+    script = repo / "tools" / "publish_documentation_reconciliation.sh"
+    if not script.is_file():
+        raise ReleaseManagerError("production evidence publisher is missing")
+    env = os.environ.copy()
+    env["JASON_DOCUMENTATION_REPO_ROOT"] = str(repo)
+    publication = run(
+        [str(script), "production", candidate_sha],
+        cwd=repo,
+        env=env,
+    )
+    if "DOCUMENTATION_SUCCESS_RECONCILIATION=PASS mode=production" not in publication:
+        raise ReleaseManagerError("production documentation reconciliation did not pass")
+    if "CONTROL_BOARD_PUBLICATION=PASS" not in publication:
+        raise ReleaseManagerError("production control-board publication did not pass")
+    return {
+        "documentation": "pass",
+        "control_board": "pass",
+    }
+
+
 def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
     if record.get("state") != "production_eligible":
         raise ReleaseManagerError("release is not Production Eligible")
@@ -966,13 +987,10 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
     rollback_sha = str(record["rollback_sha"])
     live_production_alignment(rollback_sha)
 
-    gate_transition(repo, state_root, record, "production")
-    save_record(state_root, record)
-
-    env = os.environ.copy()
-    env["JASON_RUNTIME_PRODUCTION_IMAGE"] = image
-    env["JASON_MCP_PRODUCTION_IMAGE"] = mcp_image
-    env["JASON_SOURCE_REVISION_OVERRIDE"] = candidate_sha
+    # Prove the exact candidate source is materializable before recording that
+    # production deployment has begun. A repository/source failure must leave
+    # the durable release in production_eligible rather than stranding a false
+    # production state with no provider/runtime mutation performed.
     deploy_worktree = worktree(repo, state_root, candidate_sha)
     runtime_script = (
         deploy_worktree / "infrastructure" / "jason-runtime" / "production-deploy.sh"
@@ -980,6 +998,19 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
     mcp_script = (
         deploy_worktree / "infrastructure" / "jason-mcp" / "production-deploy.sh"
     )
+    if not runtime_script.is_file() or not mcp_script.is_file():
+        remove_worktree(repo, deploy_worktree)
+        raise ReleaseManagerError(
+            "exact candidate worktree is missing a required production deploy script"
+        )
+
+    gate_transition(repo, state_root, record, "production")
+    save_record(state_root, record)
+
+    env = os.environ.copy()
+    env["JASON_RUNTIME_PRODUCTION_IMAGE"] = image
+    env["JASON_MCP_PRODUCTION_IMAGE"] = mcp_image
+    env["JASON_SOURCE_REVISION_OVERRIDE"] = candidate_sha
 
     runtime_deployed = False
     mcp_deployed = False
@@ -1025,6 +1056,8 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
                 "production MCP image differs from pre-production artifact"
             )
 
+        closeout = publish_production_closeout(deploy_worktree, candidate_sha)
+
         record["production"] = {
             "live_sha": live["revision"],
             "artifact_digest": live_digest,
@@ -1041,6 +1074,8 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
             "mcp_revision": alignment["mcp_revision"],
             "host_revision": alignment["host_revision"],
             "host_release": alignment["host_release"],
+            "documentation_reconciliation": closeout["documentation"],
+            "control_board_publication": closeout["control_board"],
             "verified_at": now(),
         }
         gate_transition(repo, state_root, record, "production_verified")
