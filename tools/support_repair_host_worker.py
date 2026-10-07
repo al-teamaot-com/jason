@@ -684,8 +684,9 @@ def source_excerpts_for_paths(
     gate,
     policy: Mapping[str, Any],
     *,
+    terms: list[str] | None = None,
     limit: int = 6,
-    content_limit: int = 8000,
+    content_limit: int = 24000,
 ) -> list[dict[str, str]]:
     """Read a bounded, policy-eligible set of previously discovered sources."""
     excerpts: list[dict[str, str]] = []
@@ -703,7 +704,16 @@ def source_excerpts_for_paths(
             text = candidate.read_text(encoding='utf-8')
         except UnicodeDecodeError:
             continue
-        excerpts.append({'path': path, 'content': text[:content_limit]})
+        content = (
+            text
+            if len(text) <= content_limit
+            else bounded_relevant_excerpt(
+                text,
+                [str(value) for value in list(terms or [])],
+                content_limit=content_limit,
+            )
+        )
+        excerpts.append({'path': path, 'content': content})
         seen.add(path)
         if len(excerpts) >= max(0, int(limit)):
             break

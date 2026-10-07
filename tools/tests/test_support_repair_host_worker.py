@@ -559,6 +559,37 @@ def test_source_excerpts_for_paths_is_bounded_and_policy_filtered(tmp_path):
     assert [item['path'] for item in excerpts] == [allowed.relative_to(tmp_path).as_posix()]
 
 
+def test_source_excerpts_for_paths_keeps_full_identified_file_up_to_24k(tmp_path):
+    allowed = tmp_path / 'implementation' / 'decision_memory' / 'resolution_service.py'
+    allowed.parent.mkdir(parents=True, exist_ok=True)
+    body = 'header\n' + ('x' * 12000) + '\nexact-lifecycle-method\n'
+    allowed.write_text(body, encoding='utf-8')
+    excerpts = worker.source_excerpts_for_paths(
+        tmp_path,
+        [allowed.relative_to(tmp_path).as_posix()],
+        Gate(),
+        {'max_changed_lines': 800, 'max_changed_files': 25},
+        terms=['exact-lifecycle-method'],
+    )
+    assert excerpts[0]['content'] == body
+
+
+def test_source_excerpts_for_paths_centers_large_file_on_search_term(tmp_path):
+    allowed = tmp_path / 'implementation' / 'orchestrator' / 'provider_read_capability_catalog.py'
+    allowed.parent.mkdir(parents=True, exist_ok=True)
+    body = 'prefix\n' + ('x' * 28000) + '\nidentity-investigation-read\n' + ('y' * 28000)
+    allowed.write_text(body, encoding='utf-8')
+    excerpts = worker.source_excerpts_for_paths(
+        tmp_path,
+        [allowed.relative_to(tmp_path).as_posix()],
+        Gate(),
+        {'max_changed_lines': 800, 'max_changed_files': 25},
+        terms=['identity-investigation-read'],
+    )
+    assert 'identity-investigation-read' in excerpts[0]['content']
+    assert len(excerpts[0]['content']) <= 24000
+
+
 def test_merge_source_excerpts_keeps_prior_context_and_adds_new():
     prior = [
         {'path': 'implementation/kernel/capabilities/repository.py', 'content': 'repo'},

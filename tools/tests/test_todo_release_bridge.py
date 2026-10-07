@@ -175,19 +175,28 @@ def test_upstream_commitment_state_reports_real_development_blocker():
     assert reason == 'provider consent required'
     phase, _ = module.upstream_commitment_state({'phase': 'pr_ready'})
     assert phase == 'waiting_development_merge'
+    phase, reason = module.upstream_commitment_state(
+        {'phase': 'waiting_external_dependency', 'reason': 'provider consent required'}
+    )
+    assert phase == 'waiting_external_dependency'
+    assert reason == 'provider consent required'
+    phase, _ = module.upstream_commitment_state({'phase': 'waiting_operational_acceptance'})
+    assert phase == 'waiting_operational_acceptance'
+    phase, _ = module.upstream_commitment_state({'phase': 'waiting_sequenced_work'})
+    assert phase == 'waiting_sequenced_work'
 
 
 def test_commitment_summary_flags_empty_release_queue_with_upstream_work():
     summary = module.commitment_summary(
         {
             'TODO-OPS-001': {'phase': 'development_in_progress'},
-            'TODO-OPS-002': {'phase': 'development_blocked'},
+            'TODO-OPS-002': {'phase': 'waiting_external_dependency'},
             'TODO-OPS-003': {'phase': 'complete'},
         }
     )
     assert summary['approved_commitment_count'] == 3
     assert summary['outstanding_count'] == 2
-    assert summary['blocked_count'] == 1
+    assert summary['blocked_count'] == 0
     assert summary['upstream_pending_count'] == 2
     assert summary['release_pending_count'] == 0
     assert summary['release_queue_empty_but_upstream_pending'] is True
