@@ -56,10 +56,12 @@ def test_select_items_respects_capacity_and_terminal_state():
             'DEV-11': {'phase': 'pr_ready'},
         }
     }
+    state['items']['DEV-13'] = {'phase': 'waiting_external_dependency'}
     eligible = [
         {'id': 'DEV-10', 'issue_number': 10},
         {'id': 'DEV-11', 'issue_number': 11},
         {'id': 'DEV-12', 'issue_number': 12},
+        {'id': 'DEV-13', 'issue_number': 13},
     ]
     assert module.select_items(state, eligible, capacity=0) == ['DEV-10']
     assert module.select_items(state, eligible, capacity=1) == ['DEV-10', 'DEV-12']
