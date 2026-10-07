@@ -653,7 +653,7 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-COMM-001 — Governed client communication framework
 
 - **Priority:** P1
-- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-04
+- **Status:** Implemented — production verified 2026-10-07T19:03:19+00:00; release release-18f9e070c9e674d8; SHA 18f9e070c9e674d88bedc097b88875fd40d082b9
 - **Implementation state at approval:** Planned — foundation pieces exist; draft-assist and controlled client-send acceptance remain
 - **Autonomous engineering readiness:** Approved
 - **Authority basis:** Owner approval on 2026-10-04 authorizes autonomous engineering only within this exact TODO scope; existing Jason governance, client/provider boundaries, protected-core release approval, financial authority, and disruptive-action controls remain unchanged.
@@ -668,7 +668,7 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Legacy IDs consolidated here:** TODO-COMM-002, TODO-COMM-005, TODO-COMM-006, and TODO-COMM-007.
 - **Decision owner:** Jason Governance Authority / AOT Owner
 - **Review trigger:** Implement Draft Assist first, then promote delivery classes only from measured production evidence.
-
+- **Implementation evidence:** Jason Release Manager release-18f9e070c9e674d8 reached closed; production SHA 18f9e070c9e674d88bedc097b88875fd40d082b9.
 ### TODO-COMM-004 — Governed Teams interaction and owner operations
 
 - **Priority:** P1
