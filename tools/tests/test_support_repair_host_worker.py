@@ -80,6 +80,46 @@ def test_request_id_binds_context():
     assert worker.request_id(payload) != first
 
 
+def test_gh_json_retries_transient_command_failure(tmp_path, monkeypatch):
+    attempts = []
+
+    def fake_run(args, *, cwd=None, **kwargs):
+        attempts.append(list(args))
+        if len(attempts) == 1:
+            raise worker.WorkerError('HTTP 504')
+        return '[{"number": 1}]'
+
+    monkeypatch.setattr(worker, 'run', fake_run)
+    monkeypatch.setattr(worker.time, 'sleep', lambda _: None)
+    assert worker.gh_json(['pr', 'list'], cwd=tmp_path) == [{'number': 1}]
+    assert len(attempts) == 2
+
+
+def test_gh_json_retries_malformed_json(tmp_path, monkeypatch):
+    responses = iter(['[{', '[]'])
+    monkeypatch.setattr(worker, 'run', lambda *args, **kwargs: next(responses))
+    monkeypatch.setattr(worker.time, 'sleep', lambda _: None)
+    assert worker.gh_json(['pr', 'list'], cwd=tmp_path) == []
+
+
+def test_gh_json_fails_closed_after_three_attempts(tmp_path, monkeypatch):
+    attempts = []
+
+    def fake_run(args, *, cwd=None, **kwargs):
+        attempts.append(list(args))
+        raise worker.WorkerError('provider unavailable')
+
+    monkeypatch.setattr(worker, 'run', fake_run)
+    monkeypatch.setattr(worker.time, 'sleep', lambda _: None)
+    try:
+        worker.gh_json(['pr', 'list'], cwd=tmp_path)
+    except worker.WorkerError as exc:
+        assert 'after 3 bounded attempts' in str(exc)
+    else:
+        raise AssertionError('persistent GitHub failure did not fail closed')
+    assert len(attempts) == 3
+
+
 class Gate:
     @staticmethod
     def path_denial_reason(path, policy):
