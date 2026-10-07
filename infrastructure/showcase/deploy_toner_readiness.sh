@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="${JASON_REPO_ROOT:-/home/al/projects/jason}"
+ROOT="${JASON_REPO_ROOT:-/opt/jason/current}"
 SHOWCASE="$ROOT/infrastructure/showcase"
 SERVICE_SRC="$SHOWCASE/systemd/jason-toner-exporter.service"
 USER_SYSTEMD="$HOME/.config/systemd/user"

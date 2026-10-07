@@ -203,3 +203,22 @@ def test_observability_reconciliation_is_conditional_and_managed() -> None:
     assert 'JASON_OBSERVABILITY_RECONCILIATION=PASS' in text
     assert 'JASON_OBSERVABILITY_RECONCILIATION=UNCHANGED' in text
     assert 'observability release did not converge to production revision' in text
+
+def test_toner_exporter_is_reconciled_from_immutable_release() -> None:
+    unit = (
+        REPO_ROOT
+        / "infrastructure"
+        / "showcase"
+        / "systemd"
+        / "jason-toner-exporter.service"
+    ).read_text(encoding="utf-8")
+    assert "WorkingDirectory=/opt/jason/current/infrastructure/toner-intelligence" in unit
+    assert "ExecStart=/usr/bin/python3 /opt/jason/current/infrastructure/toner-intelligence/toner_exporter.py" in unit
+    assert "ReadOnlyPaths=/opt/jason/current" in unit
+    assert "/home/al/projects/jason" not in unit
+
+    reconcile = RECONCILE.read_text(encoding="utf-8")
+    assert "jason-toner-exporter.service" in reconcile
+    assert "JASON_TONER_EXPORTER_RECONCILIATION=PASS" in reconcile
+    assert "verify_exporter_port 9473" in reconcile
+    assert "toner exporter retains developer checkout dependency" in reconcile

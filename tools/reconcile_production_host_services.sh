@@ -361,6 +361,35 @@ for timer in jason-support-repair-worker.timer jason-self-heal-watchdog.timer; d
   fi
 done
 
+# Reconcile the KFS toner exporter from the exact immutable production release.
+step_start toner_exporter_reconciliation
+TONER_UNIT_SOURCE="$RELEASE_DIR/infrastructure/showcase/systemd/jason-toner-exporter.service"
+TONER_UNIT_DEST="/home/al/.config/systemd/user/jason-toner-exporter.service"
+if [ ! -f "$TONER_UNIT_SOURCE" ]; then
+  echo "ERROR: production toner exporter unit is missing from release" >&2
+  exit 9
+fi
+run_as_al install -d -m 0755 /home/al/.config/systemd/user
+run_as_al install -m 0644 "$TONER_UNIT_SOURCE" "$TONER_UNIT_DEST"
+run_as_al systemctl --user daemon-reload
+run_as_al systemctl --user enable --now jason-toner-exporter.service
+TONER_WD="$(run_as_al systemctl --user show jason-toner-exporter.service -p WorkingDirectory --value)"
+TONER_EXEC="$(run_as_al systemctl --user show jason-toner-exporter.service -p ExecStart --value)"
+if printf '%s %s' "$TONER_WD" "$TONER_EXEC" | grep -qE '/home/al/(projects/jason|jason-worktrees/)'; then
+  echo "ERROR: toner exporter retains developer checkout dependency" >&2
+  exit 9
+fi
+if ! printf '%s %s' "$TONER_WD" "$TONER_EXEC" | grep -q '/opt/jason/current/infrastructure/toner-intelligence'; then
+  echo "ERROR: toner exporter is not bound to immutable production source" >&2
+  exit 9
+fi
+verify_exporter_port 9473 || {
+  echo "ERROR: toner exporter verification failed on port 9473" >&2
+  exit 9
+}
+step_pass toner_exporter_reconciliation
+echo "JASON_TONER_EXPORTER_RECONCILIATION=PASS"
+
 step_pass user_worker_reconciliation
 echo "JASON_USER_WORKER_RECONCILIATION=PASS"
 echo "ENGINEERING_SOURCE_REPO=$ENGINEERING_SOURCE_REPO"
