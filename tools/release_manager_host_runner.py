@@ -1005,6 +1005,49 @@ def create_record(
     return record
 
 
+
+def approve_release(
+    repo: Path,
+    state_root: Path,
+    *,
+    release_id: str,
+    candidate_sha: str,
+    source: str = "explicit_owner_instruction",
+) -> dict[str, Any]:
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    record = load_record(state_root, release_id)
+    if str(record.get("state") or "") != "production_eligible":
+        raise ReleaseManagerError(
+            "owner approval may only be recorded for a production_eligible release"
+        )
+    candidate = record.get("release_candidate")
+    if not isinstance(candidate, dict):
+        raise ReleaseManagerError("release candidate metadata is missing")
+    recorded_sha = exact_sha(str(candidate.get("candidate_sha") or ""), "candidate_sha")
+    if recorded_sha != candidate_sha:
+        raise ReleaseManagerError("owner approval candidate SHA does not match release record")
+    verify_candidate_on_main(repo, candidate_sha)
+    if image_id(str(candidate.get("image") or "")) != str(candidate.get("artifact_digest") or ""):
+        raise ReleaseManagerError("candidate runtime artifact changed before owner approval")
+    if image_id(str(candidate.get("mcp_image") or "")) != str(candidate.get("mcp_artifact_digest") or ""):
+        raise ReleaseManagerError("candidate MCP artifact changed before owner approval")
+    approval = record.get("owner_approval")
+    if isinstance(approval, dict) and approval.get("approved") is True:
+        if str(approval.get("candidate_sha") or "") != candidate_sha:
+            raise ReleaseManagerError("existing owner approval is bound to a different SHA")
+        return record
+    record["owner_approval"] = {
+        "approved": True,
+        "candidate_sha": candidate_sha,
+        "source": str(source or "explicit_owner_instruction"),
+        "recorded_at": now(),
+    }
+    record.setdefault("history", []).append(
+        {"at": now(), "state": "production_eligible", "gate": "owner_approval_recorded"}
+    )
+    save_record(state_root, record)
+    return record
+
 def run_preproduction(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
     gate_transition(repo, state_root, record, "preproduction")
     candidate = record["release_candidate"]
@@ -1404,6 +1447,11 @@ def main() -> int:
     preprod = sub.add_parser("preprod")
     preprod.add_argument("--release-id", required=True)
 
+    approve = sub.add_parser("approve")
+    approve.add_argument("--release-id", required=True)
+    approve.add_argument("--candidate-sha", required=True)
+    approve.add_argument("--source", default="explicit_owner_instruction")
+
     promote = sub.add_parser("promote")
     promote.add_argument("--release-id", required=True)
 
@@ -1439,6 +1487,16 @@ def main() -> int:
         return 0
     if args.command == "preprod":
         record = run_preproduction(repo, state_root, load_record(state_root, args.release_id))
+        print(json.dumps(record, indent=2))
+        return 0
+    if args.command == "approve":
+        record = approve_release(
+            repo,
+            state_root,
+            release_id=args.release_id,
+            candidate_sha=args.candidate_sha,
+            source=args.source,
+        )
         print(json.dumps(record, indent=2))
         return 0
     if args.command == "promote":
