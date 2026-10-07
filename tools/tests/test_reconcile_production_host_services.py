@@ -102,7 +102,10 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS' in text
     assert 'HOST_RECONCILE_STEP_START=' in text
     assert 'HOST_RECONCILE_STEP_PASS=' in text
-    assert 'curl --connect-timeout 2 --max-time 5 -fsS' in text
+    assert 'verify_exporter_port()' in text
+    assert 'for attempt in 1 2 3' in text
+    assert 'curl --connect-timeout 2 --max-time 15 -fsS' in text
+    assert 'exporter verification failed on port $port after 3 bounded attempts' in text
     assert 'timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"' in text
     assert 'timeout --signal=TERM --kill-after=5s 180s env JASON_REPO_ROOT=' in text
 

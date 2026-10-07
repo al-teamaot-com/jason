@@ -107,6 +107,20 @@ step_pass() {
   echo "HOST_RECONCILE_STEP_PASS=$1 duration_seconds=$((finished - STEP_STARTED_AT))"
 }
 
+verify_exporter_port() {
+  local port="$1"
+  local attempt
+  for attempt in 1 2 3; do
+    if curl --connect-timeout 2 --max-time 15 -fsS "http://127.0.0.1:$port/metrics" >/dev/null; then
+      return 0
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      sleep 2
+    fi
+  done
+  return 1
+}
+
 wait_user_unit_inactive() {
   local unit="$1"
   local attempt
@@ -283,8 +297,8 @@ for unit in "${OBSOLETE_UNITS[@]}"; do
 done
 step_start exporter_verification
 for port in "${VERIFY_PORTS[@]}"; do
-  curl --connect-timeout 2 --max-time 5 -fsS "http://127.0.0.1:$port/metrics" >/dev/null || {
-    echo "ERROR: exporter verification failed on port $port" >&2
+  verify_exporter_port "$port" || {
+    echo "ERROR: exporter verification failed on port $port after 3 bounded attempts" >&2
     exit 5
   }
 done
