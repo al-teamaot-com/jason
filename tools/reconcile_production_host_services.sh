@@ -296,6 +296,10 @@ cmp -s "$ENGINEERING_SOURCE_REPO/tools/jason_self_heal_watchdog.py" /home/al/.lo
   echo "ERROR: installed self-heal watchdog differs from production source" >&2
   exit 9
 }
+cmp -s "$ENGINEERING_SOURCE_REPO/tools/issue_resolution_engine.py" /home/al/.local/lib/jason/issue_resolution_engine.py || {
+  echo "ERROR: installed issue-resolution engine differs from production source" >&2
+  exit 9
+}
 for timer in jason-support-repair-worker.timer jason-self-heal-watchdog.timer; do
   if [ "$(run_as_al systemctl --user is-active "$timer" 2>/dev/null || true)" != "active" ]; then
     echo "ERROR: required user timer is not active after production install: $timer" >&2
@@ -333,7 +337,7 @@ fi
 if ! runuser -u al -- env \
   HOME=/home/al \
   PATH=/usr/local/bin:/usr/bin:/bin \
-  JASON_DOCUMENTATION_REPO_ROOT=/home/al/projects/jason \
+  JASON_DOCUMENTATION_REPO_ROOT="$DOCUMENTATION_SOURCE_REPO" \
   JASON_DOCUMENTATION_WORKTREE_ROOT=/home/al/jason-worktrees \
   bash "$DOC_PUBLISHER" production "$SOURCE_REVISION"; then
   echo "ERROR: production succeeded but documentation reconciliation publication failed" >&2
