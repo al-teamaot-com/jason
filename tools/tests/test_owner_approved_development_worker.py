@@ -27,6 +27,20 @@ def test_owner_approval_marker_is_exact():
     assert not module.APPROVAL.search('- Autonomous development: owner-approved')
 
 
+def test_known_development_pr_merged_reconciles_from_any_phase(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_pr_view(repo, number):
+        calls.append((repo, number))
+        return {'mergedAt': '2026-10-07T17:00:00Z'}
+
+    monkeypatch.setattr(module.support, 'pr_view', fake_pr_view)
+    record = {'phase': 'ci_repair_needed', 'pr_number': 1070}
+    assert module.known_development_pr_is_merged(tmp_path, record)
+    assert calls == [(tmp_path, 1070)]
+    assert not module.known_development_pr_is_merged(tmp_path, {'phase': 'diagnosing'})
+
+
 def test_select_items_respects_capacity_and_terminal_state():
     state = {
         'items': {
