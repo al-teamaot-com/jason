@@ -22,6 +22,7 @@ REPO = Path("/home/al/.local/lib/jason/engineering-source-repo")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 REQUEST_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 MAX_REQUESTS_PER_RUN = 8
+HOST_RECONCILE_TIMEOUT_SECONDS = 360
 
 
 class HostReconcileError(RuntimeError):
@@ -220,9 +221,18 @@ def _process(path: Path) -> None:
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                timeout=240,
+                timeout=HOST_RECONCILE_TIMEOUT_SECONDS,
                 env=script_env,
             )
+        except subprocess.TimeoutExpired as exc:
+            output = exc.stdout or ""
+            if isinstance(output, bytes):
+                output = output.decode("utf-8", errors="replace")
+            detail = str(output).strip()
+            raise HostReconcileError(
+                f"candidate host reconciliation script exceeded {HOST_RECONCILE_TIMEOUT_SECONDS}s"
+                + (": " + detail[-3000:] if detail else "")
+            ) from exc
         except subprocess.CalledProcessError as exc:
             detail = str(exc.stdout or "").strip()
             raise HostReconcileError(

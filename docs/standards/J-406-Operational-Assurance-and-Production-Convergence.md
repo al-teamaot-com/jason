@@ -95,4 +95,6 @@ This standard is operationally satisfied when:
 - exact installed Release Manager artifacts are compared with the immutable live revision;
 - an unresolved convergence defect automatically enters the Support repair lane;
 - production fixes are not marked complete until live verification succeeds;
+- privileged host reconciliation uses bounded sub-step checks and retains phase evidence when a bound is exceeded;
+- documentation/control-board publication occurs after critical runtime, MCP, immutable-host, worker, and observability alignment rather than consuming the privileged host-alignment transaction;
 - assurance itself is covered by regression tests and monitored for failure.

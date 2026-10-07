@@ -77,9 +77,10 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'pgrep -u al -f "$script_name"' in text
     assert 'developer checkout dependency remains in $unit' in text
     assert 'JASON_HOST_SERVICE_RECONCILIATION=PASS' in text
-    assert 'publish_documentation_reconciliation.sh' in text
-    assert 'POST_SUCCESS_DOCUMENTATION_RECONCILIATION=PASS' in text
-    assert 'production succeeded but documentation reconciliation publication failed' in text
+    assert 'DEFERRED_MAINTENANCE_SERVICES' in text
+    assert 'jason-documentation-reconciliation.service' in text
+    assert 'POST_SUCCESS_DOCUMENTATION_RECONCILIATION=DEFERRED_TO_RELEASE_MANAGER' in text
+    assert 'publish_documentation_reconciliation.sh' not in text
     assert 'ENGINEERING_SOURCE_REPO="/home/al/.local/lib/jason/engineering-source-repo"' in text
     assert 'DOCUMENTATION_SOURCE_REPO="/home/al/.local/lib/jason/documentation-source-repo"' in text
     assert 'prepare_managed_clone "$ENGINEERING_SOURCE_REPO"' in text
@@ -93,13 +94,16 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'installed worker differs from production source' in text
     assert 'installed self-heal watchdog differs from production source' in text
     assert 'installed issue-resolution engine differs from production source' in text
-    assert 'JASON_DOCUMENTATION_REPO_ROOT="$DOCUMENTATION_SOURCE_REPO"' in text
     assert 'JASON_DOCUMENTATION_REPO_ROOT=/home/al/projects/jason' not in text
     assert 'jason-support-repair-worker.timer' in text
     assert 'jason-self-heal-watchdog.timer' in text
     assert 'install_release_host_reconciler.py' in text
     assert 'installed root host reconciler differs from production source' in text
     assert 'JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS' in text
+    assert 'HOST_RECONCILE_STEP_START=' in text
+    assert 'HOST_RECONCILE_STEP_PASS=' in text
+    assert 'curl --connect-timeout 2 --max-time 5 -fsS' in text
+    assert 'timeout --signal=TERM --kill-after=5s 180s env JASON_REPO_ROOT=' in text
 
 
 def test_reconciliation_fails_closed_without_root() -> None:
@@ -155,7 +159,6 @@ def test_documentation_reconciliation_namespace_uses_stable_parent_path() -> Non
 def test_production_reconciliation_has_no_developer_checkout_dependency() -> None:
     text = (REPO_ROOT / "tools" / "reconcile_production_host_services.sh").read_text(encoding="utf-8")
     assert 'REPO_ROOT="/home/al/.local/lib/jason/engineering-source-repo"' in text
-    assert 'JASON_DOCUMENTATION_REPO_ROOT="$DOCUMENTATION_SOURCE_REPO"' in text
     assert "/home/al/projects/jason" not in text
 
 
