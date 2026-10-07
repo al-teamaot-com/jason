@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import tempfile
@@ -15,6 +16,7 @@ DEFAULT_CONFIG = Path("/opt/jason/current/config/production-desired-state.json")
 DEFAULT_EVIDENCE = Path("/var/lib/jason/openclaw/release-manager/production-drift.json")
 DEFAULT_CONTROL_STATE = Path("/var/lib/jason/openclaw/release-manager/production-control-state.json")
 DEFAULT_WATCHDOG_STATE = Path("/var/lib/jason/openclaw/release-manager/production-drift-watchdog.json")
+DEFAULT_TRANSACTION_LOCK = Path("/var/lib/jason/openclaw/release-manager/production-transaction.lock")
 
 
 def now() -> str:
@@ -46,6 +48,20 @@ def load_json(path: Path, default: dict | None = None) -> dict:
     if not isinstance(payload, dict):
         raise RuntimeError(f"JSON object required: {path}")
     return payload
+
+
+def production_transaction_active(lock_path: Path = DEFAULT_TRANSACTION_LOCK) -> bool:
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = lock_path.open("a+", encoding="utf-8")
+    try:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        return False
+    finally:
+        handle.close()
 
 
 def apply_result(result: dict, *, control_state: Path, evidence: Path, watchdog_state: Path) -> int:
@@ -100,6 +116,19 @@ def main() -> int:
     parser.add_argument("--control-state", type=Path, default=DEFAULT_CONTROL_STATE)
     parser.add_argument("--watchdog-state", type=Path, default=DEFAULT_WATCHDOG_STATE)
     args = parser.parse_args()
+
+    if production_transaction_active():
+        atomic_json(
+            args.watchdog_state,
+            {
+                "schema_version": "1.0",
+                "status": "deferred",
+                "reason": "production_transaction_active",
+                "circuit_breaker_action": "none",
+                "updated_at": now(),
+            },
+        )
+        return 0
 
     config = load_json(args.config)
     result = drift_guard.evaluate(config)

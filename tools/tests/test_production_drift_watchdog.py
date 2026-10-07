@@ -106,3 +106,19 @@ class ProductionDriftWatchdogTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+def test_watchdog_defers_while_production_transaction_is_active(monkeypatch, tmp_path):
+    monkeypatch.setattr(watchdog, "production_transaction_active", lambda: True)
+    monkeypatch.setattr(sys, "argv", [
+        "production_drift_watchdog.py",
+        "--config", str(tmp_path / "config.json"),
+        "--evidence", str(tmp_path / "evidence.json"),
+        "--control-state", str(tmp_path / "control.json"),
+        "--watchdog-state", str(tmp_path / "watchdog.json"),
+    ])
+    rc = watchdog.main()
+    assert rc == 0
+    data = json.loads((tmp_path / "watchdog.json").read_text())
+    assert data["status"] == "deferred"
+    assert data["reason"] == "production_transaction_active"
+    assert not (tmp_path / "control.json").exists()
