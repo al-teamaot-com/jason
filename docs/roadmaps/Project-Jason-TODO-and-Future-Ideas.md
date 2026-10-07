@@ -1076,6 +1076,27 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Review trigger:** Complete source implementation and protected CI now; remove the production hold only after the root-reconciler bootstrap is confirmed and a normal guarded release can close successfully.
 
 
+
+### TODO-OPS-011 — GPT Insights self-service-before-technician guidance
+
+- **Priority:** P1
+- **Status:** Approved — Owner approved 2026-10-07.
+- **Risk level:** Low to Moderate
+- **Problem:** GPT Insights can currently recommend technician actions such as “confirm printer visibility” even when Jason has, or can discover, safe governed read-only capabilities that could perform the same verification directly. This shifts avoidable work to technicians and conflicts with Jason's operational-proxy model.
+- **Policy:** Before GPT Insights recommends any technician or user diagnostic step, Jason must first determine whether an existing safe governed capability can perform or verify that step. If so, Jason must execute the check itself, capture the evidence, and report the result instead of asking the technician or user to rediscover it.
+- **Examples:** printer/queue visibility, endpoint online state, service status, disk space, patch state, DNS resolution, event-log evidence, installed software, AV/EDR status, basic network reachability, and other deterministic read-only diagnostics already available through governed capabilities or approved diagnostic components.
+- **Fallback wording:** Only when no safe governed path exists, required device association is missing, provider access is unavailable, or the check would require disruptive/per-run approval may GPT Insights hand the step to a technician. The note must state the specific blocker rather than giving a generic instruction.
+- **Implementation intent:** Add a self-service recommendation gate to the GPT Insights generator. For each proposed next step, map the step to discoverable capabilities/components, run eligible read-only checks, merge results into `Current evidence`, and suppress the redundant technician instruction. Preserve existing authority, approval, disruption, and provider-isolation rules.
+- **Acceptance criteria:**
+  1. A GPT Insights note never tells a technician/user to perform a diagnostic that Jason has just verified it can safely perform itself.
+  2. Eligible read-only diagnostics are executed and their results appear as evidence before recommendations are rendered.
+  3. If Jason cannot perform the step, the note states why (for example: no device association, provider unavailable, no approved capability, or approval required).
+  4. Regression coverage includes printer visibility/spooler status plus at least one endpoint-health and one network/DNS example.
+  5. Existing rule remains enforced: when evidence is already known, Jason must not ask the technician or user to rediscover it.
+  6. No new write/disruptive authority is introduced by this change.
+- **Decision owner:** Jason Governance Authority / Technology Steward
+- **Review trigger:** Implement in the next GPT Insights quality pass and validate against existing Autotask tickets containing `GPT Insights` notes before production promotion.
+
 ### TODO-CONN-018 — Internet-accessible Jason Control Panel through the AOT AWS endpoint
 
 - **Priority:** P2
