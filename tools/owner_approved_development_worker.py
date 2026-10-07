@@ -678,8 +678,9 @@ def main() -> int:
                         prior_history,
                         gate,
                         policy,
+                        terms=search_terms,
                         limit=6,
-                        content_limit=8000,
+                        content_limit=24000,
                     )
                     excerpts = support.merge_source_excerpts(
                         prior_excerpts,
