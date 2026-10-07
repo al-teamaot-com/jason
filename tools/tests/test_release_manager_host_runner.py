@@ -361,6 +361,74 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                     candidate_sha=SHA_A,
                 )
 
+    def test_consume_owner_approval_request_calls_exact_release_approval_and_archives(self):
+        import json
+
+        with tempfile.TemporaryDirectory() as td:
+            state_root = Path(td)
+            release_id = runner.record_id(SHA_A)
+            request_root = state_root / "owner-approval-requests"
+            request_root.mkdir(parents=True)
+            request = {
+                "schema_version": "1.0",
+                "release_id": release_id,
+                "candidate_sha": SHA_A,
+                "approved_by": "owner-al",
+                "organization_id": "aot",
+                "reason": "approved in chat",
+                "recorded_at": "2026-10-07T19:00:00+00:00",
+                "source": "authenticated_jason_mcp_owner",
+            }
+            request_path = request_root / f"{release_id}.json"
+            request_path.write_text(json.dumps(request), encoding="utf-8")
+            with patch.object(runner, "approve_release") as approve:
+                count = runner.consume_owner_approval_requests(ROOT, state_root)
+            self.assertEqual(count, 1)
+            approve.assert_called_once_with(
+                ROOT,
+                state_root,
+                release_id=release_id,
+                candidate_sha=SHA_A,
+                source="governed_mcp_owner:owner-al",
+            )
+            self.assertFalse(request_path.exists())
+            archived = (
+                state_root
+                / "owner-approval-requests-processed"
+                / f"{release_id}.json"
+            )
+            self.assertEqual(json.loads(archived.read_text(encoding="utf-8")), request)
+
+    def test_consume_owner_approval_request_rejects_release_sha_mismatch(self):
+        import json
+
+        with tempfile.TemporaryDirectory() as td:
+            state_root = Path(td)
+            release_id = runner.record_id(SHA_A)
+            request_root = state_root / "owner-approval-requests"
+            request_root.mkdir(parents=True)
+            (request_root / f"{release_id}.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.0",
+                        "release_id": release_id,
+                        "candidate_sha": SHA_B,
+                        "approved_by": "owner-al",
+                        "organization_id": "aot",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with (
+                patch.object(runner, "approve_release") as approve,
+                self.assertRaisesRegex(
+                    runner.ReleaseManagerError,
+                    "release ID does not match candidate SHA",
+                ),
+            ):
+                runner.consume_owner_approval_requests(ROOT, state_root)
+            approve.assert_not_called()
+
     def test_production_transaction_lock_blocks_second_promoter(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

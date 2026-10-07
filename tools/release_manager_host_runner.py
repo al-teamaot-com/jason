@@ -1048,6 +1048,44 @@ def approve_release(
     save_record(state_root, record)
     return record
 
+def consume_owner_approval_requests(repo: Path, state_root: Path) -> int:
+    request_root = state_root / "owner-approval-requests"
+    if not request_root.exists():
+        return 0
+    processed_root = state_root / "owner-approval-requests-processed"
+    count = 0
+    for path in sorted(request_root.glob("*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if str(payload.get("schema_version") or "") != "1.0":
+            raise ReleaseManagerError("owner approval request schema is invalid")
+        release_id = str(payload.get("release_id") or "").strip().casefold()
+        candidate_sha = exact_sha(str(payload.get("candidate_sha") or ""), "candidate_sha")
+        approved_by = str(payload.get("approved_by") or "").strip()
+        organization_id = str(payload.get("organization_id") or "").strip()
+        if release_id != record_id(candidate_sha):
+            raise ReleaseManagerError("owner approval request release ID does not match candidate SHA")
+        if not approved_by or not organization_id:
+            raise ReleaseManagerError("owner approval request identity metadata is incomplete")
+        approve_release(
+            repo,
+            state_root,
+            release_id=release_id,
+            candidate_sha=candidate_sha,
+            source="governed_mcp_owner:" + approved_by,
+        )
+        processed_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        destination = processed_root / path.name
+        if destination.exists():
+            existing = json.loads(destination.read_text(encoding="utf-8"))
+            if existing != payload:
+                raise ReleaseManagerError("processed owner approval request conflicts with pending request")
+            path.unlink()
+        else:
+            os.replace(path, destination)
+        count += 1
+    return count
+
+
 def run_preproduction(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
     gate_transition(repo, state_root, record, "preproduction")
     candidate = record["release_candidate"]
@@ -1398,6 +1436,7 @@ def production_gate_result(repo: Path, record: dict[str, Any]) -> dict[str, Any]
 
 
 def promote_eligible(repo: Path, state_root: Path) -> bool:
+    consume_owner_approval_requests(repo, state_root)
     if not production_window_open():
         return False
     records = state_root / "records"
