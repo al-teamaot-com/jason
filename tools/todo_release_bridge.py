@@ -209,6 +209,55 @@ def release_record(state_root: Path, merge_sha: str) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def commit_is_ancestor(repo: Path, ancestor_sha: str, descendant_sha: str) -> bool:
+    if not SHA.fullmatch(ancestor_sha) or not SHA.fullmatch(descendant_sha):
+        return False
+    completed = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor_sha, descendant_sha],
+        cwd=repo,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return completed.returncode == 0
+
+
+def effective_release_record(
+    repo: Path,
+    state_root: Path,
+    merge_sha: str,
+) -> dict[str, Any] | None:
+    exact = release_record(state_root, merge_sha)
+    if exact and str(exact.get("state") or "") == "closed":
+        return exact
+
+    records = state_root / "records"
+    candidates: list[dict[str, Any]] = []
+    if records.is_dir():
+        for path in records.glob("release-*.json"):
+            try:
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(value, dict) or str(value.get("state") or "") != "closed":
+                continue
+            production = value.get("production") if isinstance(value.get("production"), Mapping) else {}
+            live_sha = str(production.get("live_sha") or "").strip().casefold()
+            if commit_is_ancestor(repo, merge_sha, live_sha):
+                candidates.append(value)
+    if candidates:
+        candidates.sort(
+            key=lambda value: str(
+                (value.get("production") or {}).get("verified_at")
+                or value.get("updated_at")
+                or ""
+            ),
+            reverse=True,
+        )
+        return candidates[0]
+    return exact
+
+
 def prepare_release(
     *,
     repo: Path,
@@ -457,7 +506,11 @@ def main() -> int:
             }
         )
 
-        release = release_record(args.release_state.resolve(), merge_sha)
+        release = effective_release_record(
+            repo,
+            args.release_state.resolve(),
+            merge_sha,
+        )
         if release is None:
             try:
                 release = prepare_release(
@@ -477,6 +530,12 @@ def main() -> int:
                 )
                 continue
 
+        selected_release_id = str(release.get("release_id") or record["release_id"])
+        record["release_id"] = selected_release_id
+        if selected_release_id != release_id(merge_sha):
+            record["satisfied_by_cumulative_release"] = True
+        else:
+            record.pop("satisfied_by_cumulative_release", None)
         release_state = str(release.get("state") or "")
         record["release_state"] = release_state
 
