@@ -52,7 +52,18 @@ Healthy checks should remain quiet. Degraded checks must create durable evidence
 
 ## 6. Repair behavior
 
-Jason may perform bounded, deterministic, non-disruptive recovery already within approved authority. Source/design defects and changes requiring normal engineering must automatically enter the autonomous Support repair lane, where they are carried through implementation, regression testing, release, production acceptance, and closure.
+Jason resolves violated operational invariants rather than treating every detector symptom as an independent incident. Symptoms that share an upstream invariant must be correlated into one durable incident with the root invariant, supporting evidence, repair class, and explicit verification contract.
+
+Repair authority is classified before execution:
+
+1. **L1 — deterministic safe repair:** bounded, non-disruptive recovery with deterministic verification; execute automatically.
+2. **L2 — bounded autonomous repair:** source/design/configuration repair within already-approved authority, with regression coverage, rollback, production release, and outcome verification; execute through the Support repair lane automatically.
+3. **L3 — disruptive approval required:** the needed action is otherwise valid but crosses the separately governed disruptive-action boundary; require approval for that exact action only.
+4. **L4 — external or authority blocker:** a real credential, provider-consent, security-boundary, sudo/root, or other external authority prerequisite is proven; escalate the specific prerequisite.
+
+Exhausting an L1 or L2 bounded repair attempt does **not** convert the incident into `owner_action_required`. It remains Jason-owned and enters or continues the autonomous Support repair lane. Owner escalation is valid only when an L3/L4 boundary is evidenced.
+
+After any repair Jason must rerun the original detector, prove the original symptom family is absent, and prove related invariants remain healthy. Command success, service restart, merge success, or deployment completion alone is not repair acceptance.
 
 Jason must not broaden its own authority merely because a convergence defect exists.
 
@@ -67,6 +78,12 @@ The normal successful terminal state is **PRODUCTION_VERIFIED / CLOSED** with ev
 Operational assurance findings are inputs to Jason's improvement loop. Repeated or systemic failure patterns should produce durable architecture, support, playbook, test, or observability improvements rather than repeated point fixes.
 
 Jason should prefer controls that make a failure class mechanically difficult to reproduce over relying on human memory or conversational reminders.
+
+### Issue-resolution assurance requirements
+
+Jason persists recurrence memory by invariant family. A defect that clears and later reappears is a recurrence; repeated watchdog cycles while the same incident remains active are not separate recurrences. On the second occurrence, the incident becomes a P0 architectural-correction requirement rather than another point repair.
+
+Durable incidents must record the correlated symptom set, root invariant, repair level, recurrence count, and verification contract. Support repair receives that context so diagnosis starts from the upstream invariant and closure requires detector recheck evidence.
 
 ## 9. Acceptance criteria
 

@@ -91,6 +91,9 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'engineering-worker-source does not match managed production Git source' in text
     assert 'installed worker differs from production source' in text
     assert 'installed self-heal watchdog differs from production source' in text
+    assert 'installed issue-resolution engine differs from production source' in text
+    assert 'JASON_DOCUMENTATION_REPO_ROOT="$DOCUMENTATION_SOURCE_REPO"' in text
+    assert 'JASON_DOCUMENTATION_REPO_ROOT=/home/al/projects/jason' not in text
     assert 'jason-support-repair-worker.timer' in text
     assert 'jason-self-heal-watchdog.timer' in text
     assert 'install_release_host_reconciler.py' in text

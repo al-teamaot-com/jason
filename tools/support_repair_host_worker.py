@@ -212,16 +212,84 @@ def load_self_heal_incidents(root: Path = Path('/var/lib/jason/openclaw/self-hea
         item_id = str(value.get('support_item') or '').strip().upper()
         if not re.fullmatch(r'SUPPORT-AUTO-[A-F0-9]{12}', item_id):
             continue
+        root_invariant = str(value.get('root_invariant') or '').strip()
+        occurrence_count = int(value.get('occurrence_count') or 1)
+        repair_level = int(value.get('repair_level') or 2)
+        repair_class = str(value.get('repair_class') or 'bounded_autonomous_repair').strip()
+        verification = value.get('verification_contract') if isinstance(value.get('verification_contract'), Mapping) else {}
+        required_checks = verification.get('required_checks') if isinstance(verification.get('required_checks'), list) else []
+        evidence = str(value.get('evidence') or '').strip()
+        if root_invariant:
+            evidence = (evidence + '; root invariant: ' + root_invariant).strip('; ')
+        evidence += f'; repair level: L{repair_level} {repair_class}; occurrence: {occurrence_count}'
+        acceptance = str(value.get('acceptance') or '').strip()
+        if required_checks:
+            acceptance += ' Verification contract: ' + '; '.join(str(item) for item in required_checks[:5]) + '.'
         incidents.append({
             'id': item_id,
             'priority': str(value.get('priority') or 'P1').upper(),
             'status': 'Open - self-heal incident',
             'title': str(value.get('title') or 'Jason self-heal incident')[:240],
-            'evidence': str(value.get('evidence') or '')[:1600],
-            'acceptance': str(value.get('acceptance') or '')[:1600],
+            'evidence': evidence[:1600],
+            'acceptance': acceptance[:1600],
         })
     incidents.sort(key=lambda item: (PRIORITY.get(item['priority'], 99), item['id']))
     return incidents
+
+
+def self_heal_post_production_verification(
+    repo: Path,
+    item_id: str,
+    root: Path = Path('/var/lib/jason/openclaw/self-heal'),
+) -> tuple[bool, str, dict[str, Any]]:
+    if not item_id.startswith('SUPPORT-AUTO-'):
+        return True, 'not a self-heal incident', {}
+
+    incident: dict[str, Any] | None = None
+    for path in sorted((root / 'incidents').glob('*.json')):
+        try:
+            value = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(value, Mapping) and str(value.get('support_item') or '').upper() == item_id:
+            incident = dict(value)
+            break
+    if incident is None:
+        return False, 'self-heal incident evidence is missing', {}
+
+    family = str(incident.get('family') or '').strip()
+    if not family:
+        return True, 'legacy self-heal incident has no family verification contract', {'legacy': True}
+    verification = incident.get('verification_contract') if isinstance(incident.get('verification_contract'), Mapping) else {}
+    related = verification.get('related_families_must_be_healthy') if isinstance(verification.get('related_families_must_be_healthy'), list) else [family]
+
+    code = (
+        "import json; from pathlib import Path; "
+        "import jason_self_heal_watchdog as w; "
+        "from issue_resolution_engine import failure_family; "
+        f"failures,_=w.detect(Path({str(root)!r})); "
+        "print(json.dumps({'failures':failures,'families':sorted(set(failure_family(x) for x in failures))}))"
+    )
+    try:
+        raw = run(
+            [
+                '/usr/bin/env',
+                f'PYTHONPATH={repo / "tools"}',
+                '/usr/bin/python3',
+                '-c',
+                code,
+            ],
+            cwd=repo,
+        )
+        observed = json.loads(raw)
+    except (WorkerError, ValueError, json.JSONDecodeError) as exc:
+        return False, f'post-production detector execution failed: {type(exc).__name__}', {}
+
+    families = {str(value) for value in observed.get('families', [])}
+    still_degraded = sorted(families.intersection(str(value) for value in related))
+    if still_degraded:
+        return False, 'related invariant families remain degraded: ' + ', '.join(still_degraded), dict(observed)
+    return True, 'original detector family and related invariants are healthy', dict(observed)
 
 
 def ensure_support_issue(repo: Path, item: Mapping[str, str]) -> None:
@@ -1161,6 +1229,17 @@ def main() -> int:
                     str(production.get('status') or '') == 'aligned_and_healthy'
                     and str(production.get('revision') or '') == merge_sha
                 ):
+                    detector_verified, detector_reason, detector_evidence = self_heal_post_production_verification(repo, item_id)
+                    record['detector_verification'] = detector_evidence
+                    if not detector_verified:
+                        record.update({
+                            'phase': 'diagnosing',
+                            'reason': 'post-production detector verification failed: ' + detector_reason,
+                            'reasoning_request_id': '',
+                            'acceptance_request_id': '',
+                            'updated_at': now(),
+                        })
+                        continue
                     rid = record.get('acceptance_request_id')
                     if not rid:
                         rid = queue_reasoning(
@@ -1172,6 +1251,9 @@ def main() -> int:
                                 'production': dict(production),
                                 'repair_pr_number': record.get('pr_number'),
                                 'ci_required_checks_passed': True,
+                                'self_heal_detector_verified': True,
+                                'self_heal_detector_reason': detector_reason,
+                                'self_heal_detector_evidence': detector_evidence,
                             },
                         )
                         record.update({

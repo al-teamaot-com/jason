@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 
 MODULE = Path(__file__).resolve().parents[1] / 'support_repair_host_worker.py'
@@ -499,3 +500,92 @@ def test_merge_source_excerpts_keeps_prior_context_and_adds_new():
         'implementation/kernel/system_registry/contracts.py',
     ]
     assert merged[1]['content'] == 'service'
+
+
+def test_load_correlated_self_heal_incident_includes_root_invariant_and_verification(tmp_path):
+    root = tmp_path / 'self-heal'
+    incidents = root / 'incidents'
+    incidents.mkdir(parents=True)
+    payload = {
+        'state': 'repair_required',
+        'support_item': 'SUPPORT-AUTO-123456ABCDEF',
+        'priority': 'P0',
+        'title': 'Production convergence incomplete',
+        'evidence': 'artifact drift',
+        'acceptance': 'restore and verify',
+        'root_invariant': 'runtime = mcp = host = workers',
+        'repair_level': 2,
+        'repair_class': 'bounded_autonomous_repair',
+        'occurrence_count': 2,
+        'verification_contract': {'required_checks': ['rerun production convergence detector']},
+    }
+    (incidents / 'correlated.json').write_text(json.dumps(payload), encoding='utf-8')
+    items = worker.load_self_heal_incidents(root)
+    assert len(items) == 1
+    assert items[0]['priority'] == 'P0'
+    assert 'root invariant: runtime = mcp = host = workers' in items[0]['evidence']
+    assert 'repair level: L2 bounded_autonomous_repair' in items[0]['evidence']
+    assert 'occurrence: 2' in items[0]['evidence']
+    assert 'rerun production convergence detector' in items[0]['acceptance']
+
+
+def test_self_heal_post_production_verification_requires_related_family_clear(tmp_path, monkeypatch):
+    root = tmp_path / 'self-heal'
+    incidents = root / 'incidents'
+    incidents.mkdir(parents=True)
+    payload = {
+        'state': 'repair_required',
+        'support_item': 'SUPPORT-AUTO-AAAABBBBCCCC',
+        'family': 'production_convergence',
+        'verification_contract': {
+            'related_families_must_be_healthy': [
+                'production_convergence', 'runtime_health', 'service_health'
+            ]
+        },
+    }
+    (incidents / 'incident.json').write_text(json.dumps(payload), encoding='utf-8')
+    monkeypatch.setattr(
+        worker,
+        'run',
+        lambda *args, **kwargs: json.dumps({
+            'failures': ['production_convergence_current_release_drift'],
+            'families': ['production_convergence'],
+        }),
+    )
+    verified, reason, evidence = worker.self_heal_post_production_verification(
+        tmp_path, 'SUPPORT-AUTO-AAAABBBBCCCC', root
+    )
+    assert verified is False
+    assert 'production_convergence' in reason
+    assert evidence['families'] == ['production_convergence']
+
+
+def test_self_heal_post_production_verification_allows_unrelated_degradation(tmp_path, monkeypatch):
+    root = tmp_path / 'self-heal'
+    incidents = root / 'incidents'
+    incidents.mkdir(parents=True)
+    payload = {
+        'state': 'repair_required',
+        'support_item': 'SUPPORT-AUTO-DDDDEEEEFFFF',
+        'family': 'production_convergence',
+        'verification_contract': {
+            'related_families_must_be_healthy': [
+                'production_convergence', 'runtime_health', 'service_health'
+            ]
+        },
+    }
+    (incidents / 'incident.json').write_text(json.dumps(payload), encoding='utf-8')
+    monkeypatch.setattr(
+        worker,
+        'run',
+        lambda *args, **kwargs: json.dumps({
+            'failures': ['provider_canary_report_stale'],
+            'families': ['provider_health'],
+        }),
+    )
+    verified, reason, evidence = worker.self_heal_post_production_verification(
+        tmp_path, 'SUPPORT-AUTO-DDDDEEEEFFFF', root
+    )
+    assert verified is True
+    assert 'healthy' in reason
+    assert evidence['families'] == ['provider_health']

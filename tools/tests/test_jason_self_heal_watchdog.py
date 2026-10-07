@@ -545,3 +545,153 @@ def test_health_metrics_uses_headroom_for_slow_local_exporter(monkeypatch):
     assert error is None
     assert calls == [(module.HEALTH_URL, 10)]
     assert metrics
+
+
+def test_correlated_incident_persists_verification_and_recurrence_metadata(tmp_path, monkeypatch):
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(module, "run", fake_run)
+    incident = {
+        "fingerprint": "1234567890abcdef12345678",
+        "family": "production_convergence",
+        "title": "Production convergence incomplete",
+        "root_invariant": "all production surfaces agree",
+        "symptoms": ["production_convergence_scheduled_artifact_drift:self_heal_watchdog"],
+        "priority": "P0",
+        "occurrence_count": 2,
+        "recurring": True,
+        "architectural_correction_required": True,
+        "repair": {
+            "level": 2,
+            "name": "bounded_autonomous_repair",
+            "requires_owner_action": False,
+        },
+        "verification_contract": {
+            "required_checks": ["rerun detector"],
+            "closure_requires_detector_recheck": True,
+        },
+    }
+    path = module.queue_resolution_incident(tmp_path, incident, {"sample": True})
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["priority"] == "P0"
+    assert payload["occurrence_count"] == 2
+    assert payload["architectural_correction_required"] is True
+    assert payload["requires_owner_action"] is False
+    assert payload["verification_contract"]["closure_requires_detector_recheck"] is True
+    assert calls[-1] == ["systemctl", "--user", "start", "--no-block", "jason-support-repair-worker.service"]
+
+
+def test_level2_repair_exhaustion_does_not_escalate_to_owner(tmp_path, monkeypatch):
+    import sys
+
+    failure = "production_convergence_scheduled_artifact_drift:self_heal_watchdog"
+    monkeypatch.setattr(module, "detect", lambda root: ([failure], {"sample": True}))
+    monkeypatch.setattr(module, "bounded_recovery", lambda failures: [])
+    monkeypatch.setattr(
+        module,
+        "queue_resolution_incident",
+        lambda root, incident, evidence: root / "incidents" / f"{incident['fingerprint']}.json",
+    )
+    monkeypatch.setattr(
+        module,
+        "write_incident_escalation",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not escalate Level 2")),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["watchdog", "--root", str(tmp_path), "--max-attempts", "1"],
+    )
+
+    assert module.main() == 0
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert state["state"] == "repair_required"
+    assert state["owner_escalations"] == []
+    assert state["incidents"][0]["repair"]["level"] == 2
+
+
+def test_real_authority_boundary_can_escalate_after_bounded_attempts(tmp_path, monkeypatch):
+    import sys
+
+    failure = "provider_authority_required:microsoft_graph:admin_consent_required"
+    monkeypatch.setattr(module, "detect", lambda root: ([failure], {"sample": True}))
+    monkeypatch.setattr(module, "bounded_recovery", lambda failures: [])
+    monkeypatch.setattr(
+        module,
+        "queue_resolution_incident",
+        lambda root, incident, evidence: root / "incidents" / f"{incident['fingerprint']}.json",
+    )
+    monkeypatch.setattr(
+        module,
+        "write_incident_escalation",
+        lambda root, **kwargs: root / "escalations" / "real-boundary.json",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["watchdog", "--root", str(tmp_path), "--max-attempts", "1"],
+    )
+
+    assert module.main() == 0
+    state = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert state["state"] == "owner_action_required"
+    assert len(state["owner_escalations"]) == 1
+    assert state["incidents"][0]["repair"]["level"] == 4
+
+
+def test_production_convergence_detects_scheduled_worker_drift(tmp_path, monkeypatch):
+    revision = "c" * 40
+    releases = tmp_path / "releases"
+    release = _write_release_manager_fixture(releases, revision)
+    desired_watchdog = release / "tools" / "jason_self_heal_watchdog.py"
+    desired_watchdog.write_text("current-watchdog\n", encoding="utf-8")
+
+    installed = tmp_path / "installed"
+    installed.mkdir()
+    source_link = installed / "release-manager-source"
+    source_link.symlink_to(release, target_is_directory=True)
+    current_link = installed / "current"
+    current_link.symlink_to(release, target_is_directory=True)
+    engineering = installed / "engineering-source"
+    engineering.mkdir()
+    runner = installed / "release_manager_host_runner.py"
+    timer = installed / "jason-release-manager.timer"
+    runner.write_bytes((release / "tools/release_manager_host_runner.py").read_bytes())
+    timer.write_bytes(
+        (release / "infrastructure/openclaw-operations/systemd/user/jason-release-manager.timer").read_bytes()
+    )
+    stale_watchdog = installed / "jason_self_heal_watchdog.py"
+    stale_watchdog.write_text("old-watchdog\n", encoding="utf-8")
+
+    monkeypatch.setattr(module, "_container_source_revision", lambda name: revision)
+    monkeypatch.setattr(module, "CURRENT_RELEASE_LINK", current_link)
+    monkeypatch.setattr(module, "ENGINEERING_SOURCE_LINK", engineering)
+    monkeypatch.setattr(
+        module,
+        "SCHEDULED_ARTIFACTS",
+        (("self_heal_watchdog", "tools/jason_self_heal_watchdog.py", stale_watchdog),),
+    )
+    monkeypatch.setattr(module, "REQUIRED_USER_TIMERS", ("jason-release-manager.timer",))
+
+    def fake_run(args, **kwargs):
+        if args and args[0] == "git":
+            return SimpleNamespace(returncode=0, stdout=revision + "\n", stderr="")
+        return SimpleNamespace(returncode=0, stdout="active\n", stderr="")
+
+    monkeypatch.setattr(module, "run", fake_run)
+
+    failures, evidence = module.production_convergence_failures(
+        release_manager_source_link=source_link,
+        installed_runner=runner,
+        installed_timer=timer,
+        releases_root=releases,
+        verify_scheduled_surfaces=True,
+    )
+
+    assert "production_convergence_scheduled_artifact_drift:self_heal_watchdog" in failures
+    assert evidence["engineering_source_revision"] == revision
+    assert evidence["current_release"] == str(release.resolve())
