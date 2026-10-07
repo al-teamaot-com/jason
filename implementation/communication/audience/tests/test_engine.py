@@ -67,3 +67,21 @@ def test_disallowed_channel_is_blocked() -> None:
         _draft("Vendor request", _recipient(AudienceType.VENDOR), channel="sms")
     )
     assert review.decision is ReviewDecision.BLOCK
+
+
+def test_duplicate_recipient_is_blocked() -> None:
+    recipient = _recipient(AudienceType.CLIENT_END_USER)
+    draft = CommunicationDraft(
+        communication_id="comm-dup",
+        correlation_id="corr-1",
+        organization_id="aot",
+        client_id="client-1",
+        sender_identity="aot.support",
+        channel="email",
+        purpose=MessagePurpose.TICKET_UPDATE,
+        subject="Ticket update",
+        body="Status update",
+        recipients=(recipient, recipient),
+    )
+    review = AudiencePolicyEngine().review(draft)
+    assert review.decision is ReviewDecision.BLOCK
