@@ -85,6 +85,39 @@ def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def production_health_view(
+    production: dict[str, Any],
+    *,
+    max_age_minutes: int,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Return a fail-closed board view of persisted production-health evidence."""
+    view = dict(production or {})
+    observed = str(view.get("observed_at") or "")
+    status = str(view.get("status") or "")
+    if status != "aligned_and_healthy":
+        return view
+    if not observed:
+        view["status"] = "revalidation_required"
+        view["freshness"] = "missing_timestamp"
+        return view
+    try:
+        observed_at = datetime.fromisoformat(observed.replace("Z", "+00:00"))
+    except ValueError:
+        view["status"] = "revalidation_required"
+        view["freshness"] = "invalid_timestamp"
+        return view
+    now = now or datetime.now(timezone.utc)
+    age_minutes = max(0.0, (now - observed_at).total_seconds() / 60.0)
+    view["evidence_age_minutes"] = round(age_minutes, 1)
+    if age_minutes > max_age_minutes:
+        view["status"] = "revalidation_required"
+        view["freshness"] = "stale"
+    else:
+        view["freshness"] = "fresh"
+    return view
+
+
 def latest_checks(check_runs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     latest: dict[str, dict[str, Any]] = {}
     for check in check_runs:
@@ -316,6 +349,13 @@ def collect(api: Api, config: dict[str, Any]) -> dict[str, Any]:
                 overlaps.append({"left": left, "right": right, "files": shared})
 
     production = load_json(AUTOMATED_CHANGE_STATE)
+    production_view = production_health_view(
+        production.get("production", {}),
+        max_age_minutes=int(
+            config.get("production", {}).get("health_evidence_max_age_minutes", 30)
+        ),
+        now=now,
+    )
     roadmap = load_json(ROADMAP_STATUS)
     support = parse_support(SUPPORT.read_text(encoding="utf-8"))
     repair_prs = support_repair_prs(pulls)
@@ -332,7 +372,7 @@ def collect(api: Api, config: dict[str, Any]) -> dict[str, Any]:
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "main_sha": main_sha,
-        "production": production.get("production", {}),
+        "production": production_view,
         "validated_source": production.get("validated_source", {}),
         "pr_states": pr_states,
         "overlaps": overlaps,
@@ -363,6 +403,12 @@ def render(board: dict[str, Any]) -> str:
         f"**Production revision:** `{prod.get('revision', 'unknown')}`  ",
         f"**Production health:** {prod.get('status', 'unknown')}  ",
         f"**Production evidence observed:** {prod.get('observed_at', 'unknown')}  ",
+        f"**Production evidence freshness:** {prod.get('freshness', 'unknown')}"
+        + (
+            f" ({prod.get('evidence_age_minutes')} minutes old)  "
+            if prod.get("evidence_age_minutes") is not None
+            else "  "
+        ),
         f"**Pre-production environment:** {'configured' if preprod.get('configured') else 'not configured'}  ",
         "",
         "## Release attention",
