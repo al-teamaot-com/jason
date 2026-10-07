@@ -24,10 +24,15 @@ META = re.compile(r'(?im)^\s*-\s*Development issue\s*:\s*#([1-9][0-9]*)\s*$')
 ACTIVE_PHASES = {'identified', 'diagnosing', 'implementing', 'ci_repair_needed', 'ci_repairing'}
 SUPPORT_ACTIVE_PHASES = ACTIVE_PHASES - {'identified'}
 TERMINAL_PHASES = {'pr_ready', 'blocked', 'complete'}
+APPROVED_BODY_LIMIT = 30000
 
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def approved_scope(item: Mapping[str, Any]) -> str:
+    return str(item.get('body') or '')[:APPROVED_BODY_LIMIT]
 
 
 def _section(body: str, heading: str) -> str:
@@ -71,7 +76,7 @@ def owner_approved_issues(repo: Path) -> list[dict[str, Any]]:
             'issue_number': number,
             'title': str(issue.get('title') or '')[:240],
             'url': str(issue.get('url') or ''),
-            'body': body[:12000],
+            'body': body[:APPROVED_BODY_LIMIT],
             'evidence': body[:5000],
             'acceptance': (
                 _section(body, 'Acceptance test')
@@ -474,7 +479,7 @@ def main() -> int:
                         item=item,
                         context={
                             'mode': 'development_ci_repair',
-                            'approved_scope': item['body'][:5000],
+                            'approved_scope': approved_scope(item),
                             'ci_failure': support.failed_ci_context(
                                 repo,
                                 str(record['branch']),
@@ -607,7 +612,7 @@ def main() -> int:
                         item=item,
                         context={
                             'work_class': 'owner_approved_development',
-                            'approved_scope': item['body'][:5000],
+                            'approved_scope': approved_scope(item),
                             'approval_source': item['approval_source'],
                         },
                     )
@@ -697,7 +702,7 @@ def main() -> int:
                     item=item,
                     context={
                         'work_class': 'owner_approved_development',
-                        'approved_scope': item['body'][:5000],
+                        'approved_scope': approved_scope(item),
                         'diagnosis': result.get('diagnosis'),
                         'source_excerpts': excerpts,
                     },
@@ -747,7 +752,7 @@ def main() -> int:
                             item=item,
                             context={
                                 'work_class': 'owner_approved_development_context_expansion',
-                                'approved_scope': item['body'][:5000],
+                                'approved_scope': approved_scope(item),
                                 'prior_context_blocker': blocked_reason[:1800],
                                 'previous_source_paths': list(record.get('source_paths') or [])[:20],
                                 'instruction': (
