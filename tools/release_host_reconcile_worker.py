@@ -17,7 +17,7 @@ SPOOL = Path("/var/lib/jason/openclaw/release-manager/host-reconcile")
 REQUESTS = SPOOL / "requests"
 RESULTS = SPOOL / "results"
 CURRENT = Path("/opt/jason/current")
-REPO = Path("/home/al/projects/jason")
+REPO = Path("/home/al/.local/lib/jason/engineering-source-repo")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 REQUEST_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 MAX_REQUESTS_PER_RUN = 8
@@ -83,9 +83,10 @@ def _git(*args: str) -> list[str]:
 
 
 def _verify_main(source_revision: str) -> None:
-    # Network/source freshness belongs to the unprivileged Release Manager,
-    # which verifies protected main immediately before issuing a request.
-    # The root boundary deliberately performs only local immutable/ref checks.
+    # Network/source freshness belongs to the unprivileged Release Manager.
+    # The root boundary deliberately performs only local immutable/ref checks
+    # against the same managed Git source used by Release Manager, never a
+    # mutable developer checkout.
     subprocess.run(
         _git("cat-file", "-e", f"{source_revision}^{{commit}}"),
         check=True,
