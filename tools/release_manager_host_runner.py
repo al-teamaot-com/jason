@@ -52,6 +52,7 @@ USER_CONTROL_TIMERS = (
 SYSTEM_CONTROL_TIMERS = (
     "jason-delegation-maintenance.timer",
     "jason-openclaw-authority-health.timer",
+    "jason-production-drift-watchdog.timer",
 )
 
 
@@ -315,6 +316,10 @@ def capture_production_manifest(expected_sha: str) -> dict[str, Any]:
         "host_release": alignment["host_release"],
         "release_manager_source_revision": manager_revision,
         "scheduled_control_units": timers,
+        "desired_state_policy_digest": file_digest(
+            Path("/opt/jason/current/config/production-desired-state.json")
+        ) if Path("/opt/jason/current/config/production-desired-state.json").is_file() else None,
+        "drift_evidence_path": "/var/lib/jason/openclaw/release-manager/production-drift.json",
         "complete": True,
         "observed_at": now(),
     }
@@ -386,6 +391,21 @@ def revalidate_circuit_breaker(state_root: Path) -> dict[str, Any]:
     state["last_revalidation"] = verified
     save_control_state(state_root, state)
     return state
+
+
+def production_drift_evidence(state_root: Path) -> dict[str, Any]:
+    path = state_root / "production-drift.json"
+    if not path.is_file():
+        raise ReleaseManagerError("production drift evidence is missing")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if str(payload.get("schema_version") or "") != "1.0":
+        raise ReleaseManagerError("production drift evidence schema is invalid")
+    if str(payload.get("status") or "") != "pass":
+        problems = list(payload.get("problems") or [])
+        raise ReleaseManagerError(
+            f"production desired-state drift remains: {len(problems)} problem(s)"
+        )
+    return payload
 
 
 def run_functional_smoke_tests(candidate_sha: str) -> dict[str, Any]:
@@ -778,6 +798,8 @@ def verify_host_reconciliation_evidence(
         "MANAGED_DOCUMENTATION_SOURCE=PASS",
         "DEVELOPER_CHECKOUT_DEPENDENCY=ABSENT",
         "JASON_HOST_SERVICE_RECONCILIATION=PASS",
+        "JASON_PRODUCTION_DRIFT_GUARD=PASS",
+        "JASON_ROLLBACK_CONTAINER_RETENTION=PASS",
     )
     missing = [item for item in required if item not in detail]
     if missing:
@@ -1242,6 +1264,9 @@ def create_record(
             "runtime_artifact_digest": digest,
             "mcp_artifact_digest": mcp_digest,
             "policy_digest": file_digest(repo / "config" / "release-manager-policy.json"),
+            "desired_state_policy_digest": file_digest(
+                repo / "config" / "production-desired-state.json"
+            ),
         },
     }
     record["release_manifest"] = {
@@ -1262,6 +1287,9 @@ def create_record(
         "runtime_artifact_digest": digest,
         "mcp_artifact_digest": mcp_digest,
         "policy_digest": file_digest(repo / "config" / "release-manager-policy.json"),
+        "desired_state_policy_digest": file_digest(
+            repo / "config" / "production-desired-state.json"
+        ),
     }
     gate_transition(repo, state_root, record, "release_candidate")
     save_record(state_root, record)
@@ -1545,6 +1573,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
 
         controller_verified = verify_controller_identity(controller_pin, deploy_worktree)
         smoke = run_functional_smoke_tests(candidate_sha)
+        drift_evidence = production_drift_evidence(state_root)
         production_manifest = capture_production_manifest(candidate_sha)
 
         closeout = publish_production_closeout(deploy_worktree, candidate_sha)
@@ -1562,6 +1591,9 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "pre_mutation_health_passed": bool(record["pre_mutation_health"].get("passed")),
             "production_manifest_complete": bool(production_manifest.get("complete")),
             "production_manifest": production_manifest,
+            "desired_state_converged": True,
+            "desired_state_drift_problem_count": len(drift_evidence.get("problems") or []),
+            "desired_state_drift_observed_at": drift_evidence.get("observed_at"),
             "deployment_script_passed": "DEPLOYMENT=PASS" in runtime_output,
             "mcp_deployment_script_passed": "DEPLOYMENT=PASS" in mcp_output,
             "host_reconciliation_passed": bool(host_result.get("success")),
@@ -1594,6 +1626,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "pre_mutation_health": record.get("pre_mutation_health"),
             "functional_smoke_tests": smoke,
             "production_manifest": production_manifest,
+            "desired_state_drift_evidence": drift_evidence,
             "rollback_target": baseline_manifest,
             "final_state": "closed",
             "closed_at": now(),
@@ -1720,6 +1753,25 @@ def prepare_release(
             return record
         if state == "release_candidate":
             return run_preproduction(repo, state_root, record)
+        if state == "development" and record.get("revalidation_required"):
+            previous = {
+                "rollback_sha": record.get("rollback_sha"),
+                "revalidation_required": record.get("revalidation_required"),
+                "history": list(record.get("history") or []),
+            }
+            live = live_runtime()
+            rollback_sha = exact_sha(str(live["revision"]), "rollback_sha")
+            rebuilt = create_record(
+                repo=repo,
+                state_root=state_root,
+                candidate_sha=candidate_sha,
+                rollback_sha=rollback_sha,
+                change_class=str(record.get("change_class") or change_class),
+                owner_approved=bool((record.get("owner_approval") or {}).get("approved")),
+            )
+            rebuilt["prior_revalidation"] = previous
+            save_record(state_root, rebuilt)
+            return run_preproduction(repo, state_root, rebuilt)
         raise ReleaseManagerError(
             f"existing release {release_id} is not safely resumable from state {state}"
         )
@@ -1765,6 +1817,33 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
         record = json.loads(path.read_text(encoding="utf-8"))
         if record.get("state") != "production_eligible":
             continue
+
+        # A queued release is tied to the production baseline against which it
+        # passed pre-production. If production has advanced, do not repeatedly
+        # attempt promotion with an obsolete rollback target. Demote it to a
+        # clean revalidation state and let the normal preparation path rebuild
+        # evidence against the current production baseline.
+        current_sha = exact_sha(str(live_runtime()["revision"]), "current_production_sha")
+        live_production_alignment(current_sha)
+        recorded_rollback = exact_sha(str(record.get("rollback_sha") or ""), "rollback_sha")
+        if recorded_rollback != current_sha:
+            record["state"] = "development"
+            record["revalidation_required"] = {
+                "reason": "production_baseline_advanced",
+                "previous_rollback_sha": recorded_rollback,
+                "current_production_sha": current_sha,
+                "detected_at": now(),
+            }
+            record.setdefault("history", []).append(
+                {
+                    "at": now(),
+                    "state": "development",
+                    "gate": "queued_release_baseline_stale",
+                }
+            )
+            save_record(state_root, record)
+            continue
+
         result = production_gate_result(repo, record)
         if result.get("allowed") is True:
             try:

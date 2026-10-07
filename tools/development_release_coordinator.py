@@ -165,6 +165,13 @@ def release_control_view(state_root: Path | None = None) -> dict[str, Any]:
                 latest_complete_manifest = manifest
 
     breaker = dict(control.get("circuit_breaker") or {})
+    drift: dict[str, Any] = {}
+    drift_path = root / "production-drift.json"
+    if drift_path.is_file():
+        try:
+            drift = load_json(drift_path)
+        except Exception:
+            drift = {"status": "unknown", "problems": [{"kind": "unreadable_drift_evidence"}]}
     lkg = dict(control.get("last_known_good") or {})
     lkg_manifest = dict(lkg.get("manifest") or {})
     if latest_complete_manifest is None and lkg_manifest.get("complete") is True:
@@ -180,6 +187,9 @@ def release_control_view(state_root: Path | None = None) -> dict[str, Any]:
             latest_complete_manifest.get("revision") if latest_complete_manifest else None
         ),
         "control_state_updated_at": control.get("updated_at"),
+        "desired_state_drift_status": drift.get("status", "unknown"),
+        "desired_state_drift_problem_count": len(drift.get("problems") or []) if drift else None,
+        "desired_state_drift_observed_at": drift.get("observed_at"),
     }
 
 
@@ -488,6 +498,12 @@ def render(board: dict[str, Any]) -> str:
         f"**Last-known-good release:** {release_control.get('last_known_good_release') or 'unknown'}  ",
         f"**Last-known-good revision:** {release_control.get('last_known_good_revision') or 'unknown'}  ",
         f"**Current complete production manifest:** {release_control.get('current_complete_manifest_revision') or 'unknown'}  ",
+        f"**Desired-state drift:** {release_control.get('desired_state_drift_status') or 'unknown'}"
+        + (
+            f" ({release_control.get('desired_state_drift_problem_count')} problem(s))  "
+            if release_control.get("desired_state_drift_problem_count") is not None
+            else "  "
+        ),
         "",
         "## Release attention",
         "",

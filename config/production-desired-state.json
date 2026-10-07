@@ -1,0 +1,83 @@
+{
+  "schema_version": "1.0",
+  "forbidden_execution_prefixes": [
+    "/home/al/projects/jason",
+    "/home/al/jason-worktrees/",
+    "/tmp/"
+  ],
+  "required_containers": [
+    "jason-runtime",
+    "jason-mcp-pilot"
+  ],
+  "allowed_running_containers": [
+    "jason-runtime",
+    "jason-mcp-pilot",
+    "jason-teams-gateway",
+    "jason-teams-gateway-pilot",
+    "jason-grafana",
+    "jason-prometheus",
+    "jason-node-exporter",
+    "jason-ollama",
+    "jason-autonomy-flight-recorder",
+    "jason-work-item-exporter",
+    "jason-kfs-postgres"
+  ],
+  "required_system_units": [
+    "jason-core.service",
+    "jason-client-posture-exporter.service",
+    "jason-playbook-exporter.service",
+    "jason-production-health-exporter.service",
+    "jason-operations-configuration-exporter.service",
+    "jason-resolution-memory-exporter.service",
+    "jason-reflection-exporter.service",
+    "jason-security-control-exporter.service",
+    "jason-status-exporter.service",
+    "jason-usage-attribution-exporter.service",
+    "jason-usage-exporter.service",
+    "jason-delegation-maintenance.timer",
+    "jason-documentation-reconciliation.timer",
+    "jason-openclaw-authority-health.timer",
+    "jason-provider-health-canary.timer",
+    "jason-release-host-reconcile.path",
+    "jason-production-drift-watchdog.timer"
+  ],
+  "allowed_system_units": [
+    "jason-boot-recovery.service",
+    "jason-boot-recovery.timer",
+    "jason-ccc.service",
+    "jason-ccc.timer",
+    "jason-delegation-maintenance.service",
+    "jason-documentation-reconciliation.service",
+    "jason-grafana-assurance-exporter.service",
+    "jason-grafana-assurance.service",
+    "jason-grafana-assurance.timer",
+    "jason-openbao-backup.service",
+    "jason-openbao-backup.timer",
+    "jason-openclaw-authority-health.service",
+    "jason-provider-health-canary.service",
+    "jason-release-host-reconcile.service",
+    "jason-runtime.service",
+    "jason-production-drift-watchdog.service"
+  ],
+  "required_user_units": [
+    "jason-release-manager.timer",
+    "jason-support-repair-worker.timer",
+    "jason-self-heal-watchdog.timer",
+    "jason-dnsfilter-boundary-reconcile.timer",
+    "jason-kfs-collector.timer"
+  ],
+  "allowed_user_units": [
+    "jason-release-manager.service",
+    "jason-support-repair-worker.service",
+    "jason-self-heal-watchdog.service",
+    "jason-dnsfilter-boundary-reconcile.service",
+    "jason-kfs-collector.service"
+  ],
+  "rollback_container_prefixes": [
+    "jason-runtime-rollback-",
+    "jason-mcp-pilot-rollback-",
+    "jason-mcp-rollback-",
+    "jason-teams-gateway-rollback-"
+  ],
+  "max_stopped_rollback_containers": 20
+}

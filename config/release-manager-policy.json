@@ -131,7 +131,8 @@
     "controller_identity_verified",
     "last_known_good_manifest_captured",
     "pre_mutation_health_passed",
-    "production_manifest_complete"
+    "production_manifest_complete",
+    "desired_state_converged"
   ],
   "support_impact": {
     "required_before_production_eligible": true,

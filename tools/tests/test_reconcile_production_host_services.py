@@ -211,3 +211,28 @@ def test_unmanaged_toner_exporter_is_removed_during_production_reconciliation() 
     assert "systemctl --user disable --now" in text
     assert "JASON_OBSOLETE_USER_UNIT_CLEANUP=PASS" in text
     assert "/home/al/.config/systemd/user/default.target.wants/$unit" in text
+
+
+def test_forbidden_developer_path_user_units_are_removed() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    for unit in (
+        "jason-autonomous-repair-runner.service",
+        "jason-autonomous-repair-runner.path",
+        "jason-resolution-memory-exporter.service",
+        "jason-playbook-exporter.service",
+        "jason-pr-integration-reconciler.service",
+        "jason-pr-integration-reconciler.timer",
+    ):
+        assert unit in text
+    assert "systemctl --user disable --now" in text
+    assert "JASON_OBSOLETE_USER_UNIT_CLEANUP=PASS" in text
+
+
+def test_production_drift_watchdog_is_installed_after_cleanup() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    assert "jason-production-drift-watchdog.service" in text
+    assert "jason-production-drift-watchdog.timer" in text
+    assert "production_drift_guard.py" in text
+    assert "JASON_PRODUCTION_DRIFT_GUARD=PASS" in text
+    assert "JASON_ROLLBACK_CONTAINER_RETENTION=PASS" in text
+    assert "systemctl --user reset-failed" in text

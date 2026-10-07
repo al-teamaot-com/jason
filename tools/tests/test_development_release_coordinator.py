@@ -256,6 +256,17 @@ class DevelopmentReleaseCoordinatorTests(unittest.TestCase):
                 json.dumps({"release_id": "release-active", "pid": 123}) + "\n",
                 encoding="utf-8",
             )
+            (root / "production-drift.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.0",
+                        "status": "drift_detected",
+                        "observed_at": "2026-10-07T20:00:00+00:00",
+                        "problems": [{"kind": "forbidden_execution_path"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
             (root / "records" / "release-active.json").write_text(
                 json.dumps({"release_id": "release-active", "state": "production"}),
                 encoding="utf-8",
@@ -272,6 +283,8 @@ class DevelopmentReleaseCoordinatorTests(unittest.TestCase):
         self.assertEqual(view["last_known_good_release"], "release-good")
         self.assertEqual(view["last_known_good_revision"], "a" * 40)
         self.assertEqual(view["current_complete_manifest_revision"], "a" * 40)
+        self.assertEqual(view["desired_state_drift_status"], "drift_detected")
+        self.assertEqual(view["desired_state_drift_problem_count"], 1)
 
     def test_render_surfaces_production_control_state(self):
         board = {
@@ -287,6 +300,8 @@ class DevelopmentReleaseCoordinatorTests(unittest.TestCase):
                 "last_known_good_release": "release-good",
                 "last_known_good_revision": "a" * 40,
                 "current_complete_manifest_revision": "b" * 40,
+                "desired_state_drift_status": "pass",
+                "desired_state_drift_problem_count": 0,
             },
             "release_attention": "none",
             "development_recommendation": "none",
@@ -306,6 +321,7 @@ class DevelopmentReleaseCoordinatorTests(unittest.TestCase):
         self.assertIn("Queued production candidates:** release-next", rendered)
         self.assertIn("Last-known-good release:** release-good", rendered)
         self.assertIn("Current complete production manifest:** " + "b" * 40, rendered)
+        self.assertIn("Desired-state drift:** pass (0 problem(s))", rendered)
 
     def test_sensitive_overlap_paths(self):
         self.assertTrue(coordinator.sensitive("implementation/runtime/app.py"))

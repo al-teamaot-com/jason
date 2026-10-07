@@ -494,10 +494,13 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 "release_id": runner.record_id(SHA_A),
                 "state": "production_eligible",
                 "created_at": "2026-10-07T17:00:00+00:00",
+                "rollback_sha": SHA_B,
             }
             runner.atomic_json(records / f"{payload['release_id']}.json", payload)
             with (
                 patch.object(runner, "production_window_open", return_value=True),
+                patch.object(runner, "live_runtime", return_value={"revision": SHA_B}),
+                patch.object(runner, "live_production_alignment", return_value={}),
                 patch.object(
                     runner,
                     "production_gate_result",
@@ -521,6 +524,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                     "release_id": runner.record_id(sha),
                     "state": "production_eligible",
                     "created_at": f"2026-10-02T0{index}:00:00+00:00",
+                    "rollback_sha": SHA_B,
                 }
                 runner.atomic_json(records / f"{payload['release_id']}.json", payload)
 
@@ -531,6 +535,8 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
 
             with (
                 patch.object(runner, "production_window_open", return_value=True),
+                patch.object(runner, "live_runtime", return_value={"revision": SHA_B}),
+                patch.object(runner, "live_production_alignment", return_value={}),
                 patch.object(
                     runner,
                     "production_gate_result",
@@ -540,6 +546,92 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             ):
                 self.assertTrue(runner.promote_eligible(ROOT, root))
             self.assertEqual(len(promoted), 1)
+
+    def test_promote_eligible_demotes_stale_baseline_without_deploying(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            records = root / "records"
+            records.mkdir()
+            release_id = runner.record_id(SHA_A)
+            runner.atomic_json(
+                records / f"{release_id}.json",
+                {
+                    "release_id": release_id,
+                    "state": "production_eligible",
+                    "rollback_sha": SHA_B,
+                    "release_candidate": {"candidate_sha": SHA_A},
+                    "history": [],
+                },
+            )
+            with (
+                patch.object(runner, "production_window_open", return_value=True),
+                patch.object(runner, "live_runtime", return_value={"revision": "c" * 40}),
+                patch.object(runner, "live_production_alignment", return_value={}),
+                patch.object(runner, "deploy_production") as deploy,
+            ):
+                result = runner.promote_eligible(ROOT, root)
+            self.assertFalse(result)
+            deploy.assert_not_called()
+            record = runner.load_record(root, release_id)
+            self.assertEqual(record["state"], "development")
+            self.assertEqual(
+                record["revalidation_required"]["reason"],
+                "production_baseline_advanced",
+            )
+            self.assertEqual(
+                record["revalidation_required"]["previous_rollback_sha"],
+                SHA_B,
+            )
+            self.assertEqual(
+                record["revalidation_required"]["current_production_sha"],
+                "c" * 40,
+            )
+
+    def test_prepare_release_rebuilds_stale_demoted_candidate(self):
+        with tempfile.TemporaryDirectory() as td:
+            state_root = Path(td)
+            release_id = runner.record_id(SHA_A)
+            runner.atomic_json(
+                state_root / "records" / f"{release_id}.json",
+                {
+                    "release_id": release_id,
+                    "state": "development",
+                    "change_class": "release_blocker",
+                    "rollback_sha": SHA_B,
+                    "owner_approval": {"approved": True},
+                    "release_candidate": {"candidate_sha": SHA_A},
+                    "revalidation_required": {
+                        "reason": "production_baseline_advanced",
+                    },
+                    "history": [],
+                },
+            )
+            rebuilt = {
+                "release_id": release_id,
+                "state": "release_candidate",
+                "release_candidate": {"candidate_sha": SHA_A},
+            }
+            with (
+                patch.object(runner, "revalidate_circuit_breaker"),
+                patch.object(runner, "live_runtime", return_value={"revision": "c" * 40}),
+                patch.object(runner, "create_record", return_value=rebuilt) as create,
+                patch.object(
+                    runner,
+                    "run_preproduction",
+                    return_value={**rebuilt, "state": "production_eligible"},
+                ) as preprod,
+            ):
+                result = runner.prepare_release(
+                    ROOT,
+                    state_root,
+                    SHA_A,
+                    "release_blocker",
+                    owner_approved=True,
+                )
+            self.assertEqual(result["state"], "production_eligible")
+            self.assertEqual(create.call_args.kwargs["rollback_sha"], "c" * 40)
+            self.assertTrue(create.call_args.kwargs["owner_approved"])
+            preprod.assert_called_once()
 
     def test_promote_eligible_skips_unapproved_protected_core_and_continues(self):
         with tempfile.TemporaryDirectory() as td:
@@ -553,6 +645,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                     "release_id": runner.record_id(sha),
                     "state": "production_eligible",
                     "created_at": f"2026-10-02T0{index}:00:00+00:00",
+                    "rollback_sha": SHA_B,
                 }
                 runner.atomic_json(records / f"{payload['release_id']}.json", payload)
 
@@ -571,6 +664,8 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             promoted = []
             with (
                 patch.object(runner, "production_window_open", return_value=True),
+                patch.object(runner, "live_runtime", return_value={"revision": SHA_B}),
+                patch.object(runner, "live_production_alignment", return_value={}),
                 patch.object(runner, "production_gate_result", side_effect=gate_result),
                 patch.object(
                     runner,
@@ -972,6 +1067,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 "last_known_good_manifest_captured",
                 "pre_mutation_health_passed",
                 "production_manifest_complete",
+                "desired_state_converged",
             }.issubset(required)
         )
 

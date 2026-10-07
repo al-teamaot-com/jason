@@ -1,0 +1,108 @@
+import importlib.util
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+GUARD_PATH = ROOT / "tools" / "production_drift_guard.py"
+WATCHDOG_PATH = ROOT / "tools" / "production_drift_watchdog.py"
+
+guard_spec = importlib.util.spec_from_file_location("production_drift_guard", GUARD_PATH)
+guard = importlib.util.module_from_spec(guard_spec)
+assert guard_spec.loader is not None
+sys.modules[guard_spec.name] = guard
+guard_spec.loader.exec_module(guard)
+
+watchdog_spec = importlib.util.spec_from_file_location("production_drift_watchdog", WATCHDOG_PATH)
+watchdog = importlib.util.module_from_spec(watchdog_spec)
+assert watchdog_spec.loader is not None
+sys.modules[watchdog_spec.name] = watchdog
+watchdog_spec.loader.exec_module(watchdog)
+
+
+class ProductionDriftWatchdogTests(unittest.TestCase):
+    def test_drift_opens_breaker_and_preserves_last_known_good(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            control = root / "control.json"
+            evidence = root / "evidence.json"
+            state = root / "watchdog.json"
+            control.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.0",
+                        "last_known_good": {
+                            "release_id": "release-good",
+                            "manifest": {"revision": "a" * 40, "complete": True},
+                        },
+                        "circuit_breaker": {"state": "closed"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = {
+                "schema_version": "1.0",
+                "status": "drift_detected",
+                "observed_at": "2026-10-07T20:30:00+00:00",
+                "problems": [
+                    {"kind": "forbidden_execution_path"},
+                    {"kind": "undeclared_running_container"},
+                ],
+            }
+            rc = watchdog.apply_result(
+                result,
+                control_state=control,
+                evidence=evidence,
+                watchdog_state=state,
+            )
+            self.assertEqual(rc, 2)
+            payload = json.loads(control.read_text(encoding="utf-8"))
+            self.assertEqual(payload["circuit_breaker"]["state"], "open")
+            self.assertEqual(
+                payload["circuit_breaker"]["source"],
+                "production_drift_watchdog",
+            )
+            self.assertEqual(
+                payload["last_known_good"]["release_id"],
+                "release-good",
+            )
+            self.assertEqual(json.loads(state.read_text())["circuit_breaker_action"], "opened")
+
+    def test_clean_result_never_auto_closes_open_breaker(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            control = root / "control.json"
+            evidence = root / "evidence.json"
+            state = root / "watchdog.json"
+            control.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "1.0",
+                        "last_known_good": None,
+                        "circuit_breaker": {"state": "open", "reason": "prior drift"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result = {
+                "schema_version": "1.0",
+                "status": "pass",
+                "observed_at": "2026-10-07T20:31:00+00:00",
+                "problems": [],
+            }
+            rc = watchdog.apply_result(
+                result,
+                control_state=control,
+                evidence=evidence,
+                watchdog_state=state,
+            )
+            self.assertEqual(rc, 0)
+            payload = json.loads(control.read_text(encoding="utf-8"))
+            self.assertEqual(payload["circuit_breaker"]["state"], "open")
+            self.assertEqual(json.loads(state.read_text())["circuit_breaker_action"], "none")
+
+
+if __name__ == "__main__":
+    unittest.main()
