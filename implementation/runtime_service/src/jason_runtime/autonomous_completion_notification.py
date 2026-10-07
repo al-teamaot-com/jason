@@ -372,6 +372,34 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str, dict[str, Any]]:
         )
         return event, text, card
 
+    if event == "self_heal_escalation":
+        degraded_function = _bounded(arguments.get("degraded_function"), "degraded_function", 120)
+        evidence_summary = _bounded(arguments.get("evidence_summary"), "evidence_summary", 400)
+        attempt_summary = _bounded(arguments.get("attempt_summary"), "attempt_summary", 400)
+        owner_action = str(arguments.get("owner_action") or "").strip()
+        if owner_action:
+            owner_action = _bounded(owner_action, "owner_action", 300)
+        text = (
+            f"Jason self-heal escalation for {degraded_function}. "
+            f"Evidence: {evidence_summary}. Attempts: {attempt_summary}."
+        )
+        if owner_action:
+            text += f" Owner action: {owner_action}."
+        facts = [
+            ("Degraded function", degraded_function),
+            ("Evidence", evidence_summary),
+            ("Attempts", attempt_summary),
+        ]
+        if owner_action:
+            facts.append(("Owner action", owner_action))
+        card = _adaptive_card(
+            title="Jason self-heal escalation",
+            summary=evidence_summary,
+            color="Attention",
+            facts=tuple(facts),
+        )
+        return event, text, card
+
     if event == "deployment_completed":
         candidate = _bounded(arguments.get("candidate_sha"), "candidate_sha", 40)
         support = _bounded(arguments.get("support_item"), "support_item", 80)
