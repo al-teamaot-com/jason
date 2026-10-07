@@ -116,6 +116,14 @@ def development_pr_for(issue_number: int, prs: list[dict[str, Any]]) -> dict[str
     return None
 
 
+def known_development_pr_is_merged(repo: Path, record: Mapping[str, Any]) -> bool:
+    value = record.get('pr_number')
+    if value in (None, ''):
+        return False
+    fresh = support.pr_view(repo, int(value))
+    return bool(fresh.get('mergedAt'))
+
+
 def integration_coordination(repo: Path, changed: set[str]) -> list[int]:
     overlaps: list[int] = []
     for pr in support.open_prs(repo):
@@ -441,6 +449,13 @@ def main() -> int:
         })
         phase = str(record.get('phase') or 'identified')
         try:
+            if known_development_pr_is_merged(repo, record):
+                record.update({
+                    'phase': 'complete',
+                    'reason': 'PR merged through separate governed integration.',
+                    'updated_at': now(),
+                })
+                continue
             pr = development_pr_for(item['issue_number'], prs)
             if pr is not None:
                 record['pr_number'] = int(pr['number'])
