@@ -28,6 +28,39 @@ def config():
 
 
 class ProductionDriftGuardTests(unittest.TestCase):
+
+    def test_root_user_systemd_queries_switch_to_al_context(self):
+        outputs = [
+            "jason-release-manager.timer loaded active waiting\n",
+            "jason-release-manager.timer enabled enabled\n",
+        ]
+        with (
+            patch.object(guard.os, "geteuid", return_value=0),
+            patch.object(guard, "run", side_effect=outputs) as run_call,
+        ):
+            names = guard.unit_names(user=True)
+        self.assertIn("jason-release-manager.timer", names)
+        self.assertEqual(run_call.call_count, 2)
+        for call in run_call.call_args_list:
+            args = call.args[0]
+            self.assertEqual(args[:4], ["runuser", "-u", "al", "--"])
+            self.assertIn("systemctl", args)
+            self.assertIn("--user", args)
+            self.assertIsNone(call.kwargs.get("env"))
+
+    def test_nonroot_user_systemd_queries_use_user_bus_environment(self):
+        with (
+            patch.object(guard.os, "geteuid", return_value=1000),
+            patch.object(guard, "run", return_value="active") as run_call,
+        ):
+            state = guard.active_state("jason-release-manager.timer", user=True)
+        self.assertEqual(state, "active")
+        args = run_call.call_args.args[0]
+        self.assertEqual(args[:2], ["systemctl", "--user"])
+        env = run_call.call_args.kwargs["env"]
+        self.assertEqual(env["HOME"], "/home/al")
+        self.assertEqual(env["XDG_RUNTIME_DIR"], "/run/user/1000")
+
     def test_clean_declared_state_passes(self):
         with (
             patch.object(guard, "unit_names", side_effect=[{"jason-core.service"}, {"jason-release-manager.timer", "jason-release-manager.service"}]),

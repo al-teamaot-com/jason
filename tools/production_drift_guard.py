@@ -36,18 +36,38 @@ def user_env() -> dict[str, str]:
     return env
 
 
+def systemctl_command(arguments: list[str], *, user: bool) -> tuple[list[str], dict[str, str] | None]:
+    if not user:
+        return ["systemctl", *arguments], None
+    if os.geteuid() == 0:
+        return (
+            [
+                "runuser",
+                "-u",
+                "al",
+                "--",
+                "env",
+                "HOME=/home/al",
+                "XDG_RUNTIME_DIR=/run/user/1000",
+                "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
+                "PATH=/usr/local/bin:/usr/bin:/bin",
+                "systemctl",
+                "--user",
+                *arguments,
+            ],
+            None,
+        )
+    return ["systemctl", "--user", *arguments], user_env()
+
+
 def unit_names(*, user: bool) -> set[str]:
-    prefix = ["systemctl"]
-    env = None
-    if user:
-        prefix.append("--user")
-        env = user_env()
     names: set[str] = set()
     queries = (
-        prefix + ["list-units", "--all", "--type=service", "--type=timer", "--type=path", "--no-legend", "--plain"],
-        prefix + ["list-unit-files", "--type=service", "--type=timer", "--type=path", "--no-legend", "--plain"],
+        ["list-units", "--all", "--type=service", "--type=timer", "--type=path", "--no-legend", "--plain"],
+        ["list-unit-files", "--type=service", "--type=timer", "--type=path", "--no-legend", "--plain"],
     )
-    for args in queries:
+    for query in queries:
+        args, env = systemctl_command(query, user=user)
         for line in run(args, env=env).splitlines():
             if not line.strip():
                 continue
@@ -58,22 +78,15 @@ def unit_names(*, user: bool) -> set[str]:
 
 
 def active_state(unit: str, *, user: bool) -> str:
-    args = ["systemctl"]
-    env = None
-    if user:
-        args.append("--user")
-        env = user_env()
-    args.extend(["is-active", unit])
+    args, env = systemctl_command(["is-active", unit], user=user)
     return run(args, env=env).strip()
 
 
 def unit_properties(unit: str, *, user: bool) -> dict[str, str]:
-    args = ["systemctl"]
-    env = None
-    if user:
-        args.append("--user")
-        env = user_env()
-    args.extend(["show", unit, "-p", "ExecStart", "-p", "WorkingDirectory", "-p", "FragmentPath", "--no-pager"])
+    args, env = systemctl_command(
+        ["show", unit, "-p", "ExecStart", "-p", "WorkingDirectory", "-p", "FragmentPath", "--no-pager"],
+        user=user,
+    )
     props: dict[str, str] = {}
     for line in run(args, env=env).splitlines():
         if "=" in line:
