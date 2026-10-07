@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from issue_resolution_engine import acceptance_text, correlate_failures, update_recurrence_memory
+
 DEFAULT_ROOT = Path("/var/lib/jason/openclaw/self-heal")
 HEALTH_URL = "http://127.0.0.1:9467/metrics"
 LOCAL_RECOVERY_CONTAINERS = ("jason-runtime", "jason-mcp-pilot")
@@ -34,6 +36,23 @@ SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 RELEASE_MANAGER_SOURCE_LINK = Path.home() / ".local/lib/jason/release-manager-source"
 RELEASE_MANAGER_RUNNER = Path.home() / ".local/lib/jason/release_manager_host_runner.py"
 RELEASE_MANAGER_TIMER = Path.home() / ".config/systemd/user/jason-release-manager.timer"
+ENGINEERING_SOURCE_LINK = Path.home() / ".local/lib/jason/engineering-worker-source"
+CURRENT_RELEASE_LINK = Path("/opt/jason/current")
+ROOT_HOST_RECONCILER = Path("/usr/local/lib/jason/release_host_reconcile_worker.py")
+SCHEDULED_ARTIFACTS = (
+    ("support_repair_worker", "tools/support_repair_host_worker.py", Path.home() / ".local/lib/jason/support_repair_host_worker.py"),
+    ("owner_approved_development_worker", "tools/owner_approved_development_worker.py", Path.home() / ".local/lib/jason/owner_approved_development_worker.py"),
+    ("todo_engineering_intake", "tools/todo_engineering_intake.py", Path.home() / ".local/lib/jason/todo_engineering_intake.py"),
+    ("todo_release_bridge", "tools/todo_release_bridge.py", Path.home() / ".local/lib/jason/todo_release_bridge.py"),
+    ("self_heal_watchdog", "tools/jason_self_heal_watchdog.py", Path.home() / ".local/lib/jason/jason_self_heal_watchdog.py"),
+    ("issue_resolution_engine", "tools/issue_resolution_engine.py", Path.home() / ".local/lib/jason/issue_resolution_engine.py"),
+    ("root_host_reconciler", "tools/release_host_reconcile_worker.py", ROOT_HOST_RECONCILER),
+)
+REQUIRED_USER_TIMERS = (
+    "jason-release-manager.timer",
+    "jason-support-repair-worker.timer",
+    "jason-self-heal-watchdog.timer",
+)
 PROVIDER_CANARY_REPORT = Path("/var/lib/jason/provider-health-canaries.json")
 PROVIDER_CANARY_MAX_AGE_SECONDS = 30 * 60
 EXPECTED_RELEASE_TIMER = "OnCalendar=*-*-* *:00/5:00 America/New_York"
@@ -127,6 +146,7 @@ def production_convergence_failures(
     installed_runner: Path = RELEASE_MANAGER_RUNNER,
     installed_timer: Path = RELEASE_MANAGER_TIMER,
     releases_root: Path | None = None,
+    verify_scheduled_surfaces: bool | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     """Verify canonical production intent, installed host state, and live runtime agree.
 
@@ -150,6 +170,8 @@ def production_convergence_failures(
         return failures, evidence
 
     desired_revision = runtime_revision
+    if verify_scheduled_surfaces is None:
+        verify_scheduled_surfaces = releases_root is None
     release_root = releases_root or Path("/opt/jason/releases")
     release_dir = release_root / desired_revision
     evidence["desired_revision"] = desired_revision
@@ -190,6 +212,48 @@ def production_convergence_failures(
             failures.append(f"production_convergence_installed_artifact_drift:{name}")
     evidence["release_manager_artifacts"] = artifact_evidence
 
+    if verify_scheduled_surfaces:
+        # Completion means every scheduled implementation and the active host source
+        # converge on the same production SHA, not merely runtime/MCP health.
+        try:
+            current_release = CURRENT_RELEASE_LINK.resolve(strict=True)
+        except (FileNotFoundError, OSError):
+            current_release = None
+        evidence["current_release"] = str(current_release) if current_release else None
+        if current_release != release_dir.resolve():
+            failures.append("production_convergence_current_release_drift")
+
+        try:
+            engineering_source = ENGINEERING_SOURCE_LINK.resolve(strict=True)
+        except (FileNotFoundError, OSError):
+            engineering_source = None
+        evidence["engineering_source"] = str(engineering_source) if engineering_source else None
+        engineering_revision = None
+        if engineering_source is not None:
+            result = run(["git", "-C", str(engineering_source), "rev-parse", "HEAD"], timeout=10)
+            candidate = result.stdout.strip().casefold() if result.returncode == 0 else ""
+            engineering_revision = candidate if SHA_RE.fullmatch(candidate) else None
+        evidence["engineering_source_revision"] = engineering_revision
+        if engineering_revision != desired_revision:
+            failures.append("production_convergence_engineering_source_drift")
+
+        scheduled_artifacts: dict[str, Any] = {}
+        for name, relative, installed in SCHEDULED_ARTIFACTS:
+            desired = release_dir / relative
+            desired_hash = _sha256(desired)
+            installed_hash = _sha256(installed)
+            scheduled_artifacts[name] = {
+                "desired": str(desired),
+                "installed": str(installed),
+                "desired_sha256": desired_hash,
+                "installed_sha256": installed_hash,
+            }
+            if desired_hash is None:
+                failures.append(f"production_convergence_desired_artifact_missing:{name}")
+            elif installed_hash != desired_hash:
+                failures.append(f"production_convergence_scheduled_artifact_drift:{name}")
+        evidence["scheduled_artifacts"] = scheduled_artifacts
+
     desired_timer = pairs[1][1]
     timer_text = desired_timer.read_text(encoding="utf-8") if desired_timer.is_file() else ""
     evidence["release_manager_24x7_timer_declared"] = EXPECTED_RELEASE_TIMER in timer_text
@@ -213,22 +277,32 @@ def production_convergence_failures(
         failures.append("production_convergence_intent_contradiction:legacy_coordinator_time_present")
 
     uid = os.getuid()
-    timer_state = run(
-        [
-            "/usr/bin/env",
-            f"XDG_RUNTIME_DIR=/run/user/{uid}",
-            f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus",
-            "systemctl",
-            "--user",
-            "is-active",
-            "jason-release-manager.timer",
-        ],
-        timeout=10,
-    )
-    active = timer_state.returncode == 0 and timer_state.stdout.strip() == "active"
-    evidence["release_manager_timer_active"] = active
-    if not active:
-        failures.append("production_convergence_release_manager_timer_inactive")
+    timer_evidence: dict[str, bool] = {}
+    for timer_name in REQUIRED_USER_TIMERS:
+        timer_state = run(
+            [
+                "/usr/bin/env",
+                f"XDG_RUNTIME_DIR=/run/user/{uid}",
+                f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus",
+                "systemctl",
+                "--user",
+                "is-active",
+                timer_name,
+            ],
+            timeout=10,
+        )
+        active = timer_state.returncode == 0 and timer_state.stdout.strip() == "active"
+        timer_evidence[timer_name] = active
+        if not active:
+            failures.append(f"production_convergence_required_timer_inactive:{timer_name}")
+    evidence["required_user_timers"] = timer_evidence
+    evidence["release_manager_timer_active"] = timer_evidence.get("jason-release-manager.timer", False)
+
+    root_path = run(["systemctl", "is-active", "jason-release-host-reconcile.path"], timeout=10)
+    root_path_active = root_path.returncode == 0 and root_path.stdout.strip() == "active"
+    evidence["root_host_reconcile_path_active"] = root_path_active
+    if not root_path_active:
+        failures.append("production_convergence_root_host_reconcile_path_inactive")
 
     return sorted(set(failures)), evidence
 
@@ -670,6 +744,63 @@ def queue_support_repair(root: Path, fp: str, failures: list[str], evidence: Map
     return path
 
 
+def queue_resolution_incident(root: Path, incident: Mapping[str, Any], evidence: Mapping[str, Any]) -> Path:
+    fp = str(incident.get("fingerprint") or "")
+    symptoms = [str(value) for value in incident.get("symptoms", [])]
+    repair = incident.get("repair") if isinstance(incident.get("repair"), Mapping) else {}
+    verification = incident.get("verification_contract") if isinstance(incident.get("verification_contract"), Mapping) else {}
+    payload = {
+        "schema_version": "2.0",
+        "fingerprint": fp,
+        "support_item": "SUPPORT-AUTO-" + fp[:12].upper(),
+        "priority": str(incident.get("priority") or "P1"),
+        "title": str(incident.get("title") or "Jason operational invariant degraded")[:240],
+        "family": str(incident.get("family") or "unknown"),
+        "root_invariant": str(incident.get("root_invariant") or "")[:1200],
+        "symptoms": symptoms,
+        "evidence": "; ".join(symptoms)[:1600],
+        "acceptance": acceptance_text(incident),
+        "repair_level": int(repair.get("level") or 2),
+        "repair_class": str(repair.get("name") or "bounded_autonomous_repair"),
+        "requires_owner_action": bool(repair.get("requires_owner_action")),
+        "occurrence_count": int(incident.get("occurrence_count") or 1),
+        "recurring": bool(incident.get("recurring")),
+        "architectural_correction_required": bool(incident.get("architectural_correction_required")),
+        "verification_contract": dict(verification),
+        "context": dict(evidence),
+        "detected_at": now(),
+        "state": "repair_required",
+    }
+    path = root / "incidents" / f"{fp}.json"
+    atomic_json(path, payload)
+    run(["systemctl", "--user", "start", "--no-block", "jason-support-repair-worker.service"], timeout=10)
+    return path
+
+
+def write_incident_escalation(root: Path, *, incident: Mapping[str, Any], attempts: int, actions: list[str]) -> Path:
+    fp = str(incident.get("fingerprint") or "")
+    symptoms = [str(value) for value in incident.get("symptoms", [])]
+    repair = incident.get("repair") if isinstance(incident.get("repair"), Mapping) else {}
+    payload = {
+        "schema_version": "2.0",
+        "fingerprint": fp,
+        "state": "owner_action_required",
+        "family": str(incident.get("family") or "unknown"),
+        "root_invariant": str(incident.get("root_invariant") or "")[:1200],
+        "degraded_function": str(incident.get("title") or ", ".join(symptoms))[:240],
+        "evidence_summary": "; ".join(symptoms)[:600],
+        "attempt_summary": ("; ".join(actions) or "bounded automatic recovery produced no safe action")[:600],
+        "owner_action": "A genuine authority or disruptive-action boundary remains; review only that specific blocked action.",
+        "repair_level": int(repair.get("level") or 4),
+        "repair_class": str(repair.get("name") or "external_or_authority_blocker"),
+        "attempts": attempts,
+        "created_at": now(),
+    }
+    path = root / "escalations" / f"{fp}.json"
+    atomic_json(path, payload)
+    return path
+
+
 def write_escalation(
     root: Path,
     *,
@@ -704,19 +835,19 @@ def main() -> int:
     args = parser.parse_args()
     root = args.root.resolve()
     state_path = root / "state.json"
+    memory_path = root / "issue-memory.json"
     state = read_json(state_path)
 
     failures, evidence = detect(root)
     if not failures:
-        atomic_json(
-            state_path,
-            {
-                "schema_version": "1.0",
-                "state": "healthy",
-                "last_verified_at": now(),
-                "previous_fingerprint": state.get("fingerprint"),
-            },
-        )
+        update_recurrence_memory(memory_path, [])
+        atomic_json(state_path, {
+            "schema_version": "2.0",
+            "state": "healthy",
+            "last_verified_at": now(),
+            "previous_fingerprint": state.get("fingerprint"),
+            "incidents": [],
+        })
         return 0
 
     fp = fingerprint(failures)
@@ -728,47 +859,47 @@ def main() -> int:
         attempts += 1
         failures_after, evidence_after = detect(root)
         if not failures_after:
-            atomic_json(
-                state_path,
-                {
-                    "schema_version": "1.0",
-                    "state": "recovered",
-                    "fingerprint": fp,
-                    "attempts": attempts,
-                    "recovery_actions": actions,
-                    "verified_at": now(),
-                },
-            )
+            update_recurrence_memory(memory_path, [])
+            atomic_json(state_path, {
+                "schema_version": "2.0",
+                "state": "recovered",
+                "fingerprint": fp,
+                "attempts": attempts,
+                "recovery_actions": actions,
+                "verified_at": now(),
+                "verification": "original detector rerun passed with no remaining failures",
+                "incidents": [],
+            })
             return 0
         failures = failures_after
         evidence = evidence_after
         fp = fingerprint(failures)
 
-    incident_path = queue_support_repair(root, fp, failures, evidence)
-    state_payload = {
-        "schema_version": "1.0",
-        "state": "repair_required",
+    incidents = update_recurrence_memory(memory_path, correlate_failures(failures))
+    incident_paths: list[str] = []
+    owner_escalations: list[str] = []
+    for incident in incidents:
+        incident_path = queue_resolution_incident(root, incident, evidence)
+        incident_paths.append(str(incident_path))
+        repair = incident.get("repair") if isinstance(incident.get("repair"), Mapping) else {}
+        if attempts >= max(1, int(args.max_attempts)) and bool(repair.get("requires_owner_action")):
+            escalation = write_incident_escalation(
+                root, incident=incident, attempts=attempts, actions=actions
+            )
+            owner_escalations.append(str(escalation))
+
+    atomic_json(state_path, {
+        "schema_version": "2.0",
+        "state": "owner_action_required" if owner_escalations else "repair_required",
         "fingerprint": fp,
         "attempts": attempts,
         "failures": failures,
         "last_recovery_actions": actions,
-        "incident_path": str(incident_path),
+        "incident_paths": incident_paths,
+        "incidents": incidents,
+        "owner_escalations": owner_escalations,
         "updated_at": now(),
-    }
-    if attempts >= max(1, int(args.max_attempts)):
-        escalation_path = write_escalation(
-            root,
-            fp=fp,
-            failures=failures,
-            attempts=attempts,
-            actions=actions,
-        )
-        state_payload["state"] = "owner_action_required"
-        state_payload["escalation_path"] = str(escalation_path)
-    atomic_json(state_path, state_payload)
-    # Degradation is persisted state, not watchdog process failure. Keeping the
-    # oneshot unit successful prevents the watchdog from creating a secondary
-    # failed-systemd-unit condition while it is already handling the primary fault.
+    })
     return 0
 
 

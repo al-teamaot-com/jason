@@ -27,10 +27,13 @@ def main() -> int:
     root = args.root.expanduser().resolve()
     home = Path.home()
     source = repo / "tools" / "jason_self_heal_watchdog.py"
+    engine_source = repo / "tools" / "issue_resolution_engine.py"
     unit_root = repo / "infrastructure" / "openclaw-operations" / "systemd" / "user"
     units = ("jason-self-heal-watchdog.service", "jason-self-heal-watchdog.timer")
     if not source.is_file():
         raise SystemExit("self-heal watchdog source is missing")
+    if not engine_source.is_file():
+        raise SystemExit("issue-resolution engine source is missing")
     for unit in units:
         if not (unit_root / unit).is_file():
             raise SystemExit(f"systemd source unit is missing: {unit}")
@@ -38,6 +41,7 @@ def main() -> int:
     install_root = home / ".local" / "lib" / "jason"
     user_units = home / ".config" / "systemd" / "user"
     copy(source, install_root / "jason_self_heal_watchdog.py", 0o700)
+    copy(engine_source, install_root / "issue_resolution_engine.py", 0o600)
     for unit in units:
         copy(unit_root / unit, user_units / unit, 0o600)
 
