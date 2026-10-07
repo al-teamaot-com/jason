@@ -611,3 +611,14 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_release_manager_preflights_managed_host_reconciliation_contract():
+    text = (ROOT / "tools" / "release_manager_host_runner.py").read_text(encoding="utf-8")
+    assert "verify_candidate_host_reconciliation_contract" in text
+    assert "verify_host_reconciliation_evidence" in text
+    assert "host_reconciliation_candidate_script_verified" in text
+    assert "managed_engineering_source_verified" in text
+    assert "managed_documentation_source_verified" in text
+    assert "developer_checkout_dependency_absent" in text
+    assert "host_reconciliation_preflight_passed" in text

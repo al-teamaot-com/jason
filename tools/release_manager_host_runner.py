@@ -438,6 +438,65 @@ def request_host_reconcile(
     raise ReleaseManagerError("host reconciliation result timed out")
 
 
+
+
+def verify_candidate_host_reconciliation_contract(
+    deploy_worktree: Path, candidate_sha: str
+) -> dict[str, bool]:
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    script = deploy_worktree / "tools" / "reconcile_production_host_services.sh"
+    if not script.is_file():
+        raise ReleaseManagerError("candidate host reconciliation script is missing")
+    text = script.read_text(encoding="utf-8")
+    developer_checkout = "/home/al/projects" + "/jason"
+    if developer_checkout in text:
+        raise ReleaseManagerError(
+            "candidate host reconciliation script depends on developer checkout"
+        )
+    required = (
+        'REPO_ROOT="/home/al/.local/lib/jason/engineering-source-repo"',
+        'DOCUMENTATION_SOURCE_REPO="/home/al/.local/lib/jason/documentation-source-repo"',
+        'DEVELOPER_CHECKOUT_DEPENDENCY=ABSENT',
+        'HOST_RECONCILIATION_SCRIPT_SOURCE_REVISION=',
+    )
+    missing = [item for item in required if item not in text]
+    if missing:
+        raise ReleaseManagerError(
+            "candidate host reconciliation contract is incomplete: " + ",".join(missing)
+        )
+    return {
+        "candidate_script_verified": True,
+        "managed_engineering_source_verified": True,
+        "managed_documentation_source_verified": True,
+        "developer_checkout_absent": True,
+    }
+
+
+def verify_host_reconciliation_evidence(
+    host_result: dict[str, Any], candidate_sha: str
+) -> dict[str, bool]:
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    detail = str(host_result.get("detail") or "")
+    required = (
+        f"HOST_RECONCILIATION_SCRIPT_SOURCE_REVISION={candidate_sha}",
+        "MANAGED_ENGINEERING_SOURCE=PASS",
+        "MANAGED_DOCUMENTATION_SOURCE=PASS",
+        "DEVELOPER_CHECKOUT_DEPENDENCY=ABSENT",
+        "JASON_HOST_SERVICE_RECONCILIATION=PASS",
+    )
+    missing = [item for item in required if item not in detail]
+    if missing:
+        raise ReleaseManagerError(
+            "host reconciliation evidence is incomplete: " + ",".join(missing)
+        )
+    return {
+        "candidate_script_verified": True,
+        "managed_engineering_source_verified": True,
+        "managed_documentation_source_verified": True,
+        "developer_checkout_absent": True,
+    }
+
+
 def install_release_manager_from_current(expected_sha: str) -> dict[str, Any]:
     expected_sha = exact_sha(expected_sha, "expected_sha")
     current = Path("/opt/jason/current").resolve()
@@ -1003,6 +1062,9 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
         raise ReleaseManagerError(
             "exact candidate worktree is missing a required production deploy script"
         )
+    host_contract = verify_candidate_host_reconciliation_contract(
+        deploy_worktree, candidate_sha
+    )
 
     gate_transition(repo, state_root, record, "production")
     save_record(state_root, record)
@@ -1039,6 +1101,9 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
 
         host_attempted = True
         host_result = request_host_reconcile(state_root, candidate_sha)
+        host_evidence = verify_host_reconciliation_evidence(
+            host_result, candidate_sha
+        )
 
         manager_result = install_release_manager_from_current(candidate_sha)
         release_manager_installed = True
@@ -1066,6 +1131,11 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
             "deployment_script_passed": "DEPLOYMENT=PASS" in runtime_output,
             "mcp_deployment_script_passed": "DEPLOYMENT=PASS" in mcp_output,
             "host_reconciliation_passed": bool(host_result.get("success")),
+            "host_reconciliation_candidate_script_verified": host_evidence["candidate_script_verified"],
+            "managed_engineering_source_verified": host_evidence["managed_engineering_source_verified"],
+            "managed_documentation_source_verified": host_evidence["managed_documentation_source_verified"],
+            "developer_checkout_dependency_absent": host_evidence["developer_checkout_absent"],
+            "host_reconciliation_preflight_passed": all(host_contract.values()),
             "release_manager_install_passed": True,
             "release_manager_source_revision": manager_result["source_revision"],
             "release_manager_timer_active": manager_result["timer_active"],

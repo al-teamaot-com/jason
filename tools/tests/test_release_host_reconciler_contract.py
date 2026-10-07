@@ -10,7 +10,10 @@ def test_root_worker_is_bounded_to_exact_sha_and_live_mcp():
     assert 'r"^[0-9a-f]{40}$"' in text
     assert "live MCP revision does not match requested host release" in text
     assert 'Path("/opt/jason/current")' in text
-    assert '"reconcile_production_host_services.sh"' in text
+    assert '_candidate_reconcile_script(source_revision)' in text
+    assert 'git' in text and 'show' in text
+    assert 'candidate host reconciliation script depends on developer checkout' in text
+    assert "reconcile_production_host_services.sh" in text
     assert "safe.directory={REPO}" in text
     assert '"fetch", "--no-tags", "origin", "main"' not in text
     assert "Network/source freshness belongs to the unprivileged Release Manager" in text
@@ -92,3 +95,11 @@ def test_root_reconciler_uses_managed_engineering_source_not_developer_checkout(
     text = (ROOT / "tools" / "release_host_reconcile_worker.py").read_text(encoding="utf-8")
     assert 'REPO = Path("/home/al/.local/lib/jason/engineering-source-repo")' in text
     assert '/home/al/projects/jason' not in text
+
+
+def test_root_worker_materializes_candidate_reconcile_script_and_requires_contract_markers():
+    text = (ROOT / "tools" / "release_host_reconcile_worker.py").read_text(encoding="utf-8")
+    assert 'CANDIDATE_SCRIPTS = SPOOL / "candidate-scripts"' in text
+    assert 'DEVELOPER_CHECKOUT_DEPENDENCY=ABSENT' in text
+    assert 'HOST_RECONCILIATION_SCRIPT_SOURCE_REVISION=' in text
+    assert 'candidate host reconciliation contract is incomplete' in text

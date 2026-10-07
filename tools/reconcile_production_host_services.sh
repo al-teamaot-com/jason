@@ -18,6 +18,7 @@ DOCUMENTATION_SOURCE_REPO="/home/al/.local/lib/jason/documentation-source-repo"
 USER_XDG_RUNTIME_DIR="/run/user/1000"
 USER_DBUS_ADDRESS="unix:path=/run/user/1000/bus"
 
+
 EXPORTER_UNITS=(
   jason-client-posture-exporter.service
   jason-playbook-exporter.service
@@ -63,6 +64,20 @@ VERIFY_PORTS=(9464 9465 9466 9467 9468 9470 9471 9472 9476)
 if [ "$(id -u)" -ne 0 ]; then
   echo "ERROR: root privileges are required for systemd reconciliation." >&2
   exit 77
+fi
+
+DEVELOPER_CHECKOUT_PATH="/home/al/projects""/jason"
+if grep -Fq "$DEVELOPER_CHECKOUT_PATH" "$0"; then
+  echo "ERROR: production reconciliation script contains a developer checkout dependency" >&2
+  exit 9
+fi
+if [ "$REPO_ROOT" != "/home/al/.local/lib/jason/engineering-source-repo" ]; then
+  echo "ERROR: production reconciliation is not using the managed engineering source" >&2
+  exit 9
+fi
+if [ "$DOCUMENTATION_SOURCE_REPO" != "/home/al/.local/lib/jason/documentation-source-repo" ]; then
+  echo "ERROR: production reconciliation is not using the managed documentation source" >&2
+  exit 9
 fi
 
 run_as_al() {
@@ -325,6 +340,10 @@ if [ "$(systemctl is-active jason-release-host-reconcile.path 2>/dev/null || tru
 fi
 echo "JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS"
 echo "JASON_HOST_SERVICE_RECONCILIATION=PASS"
+echo "HOST_RECONCILIATION_SCRIPT_SOURCE_REVISION=$SOURCE_REVISION"
+echo "MANAGED_ENGINEERING_SOURCE=PASS"
+echo "MANAGED_DOCUMENTATION_SOURCE=PASS"
+echo "DEVELOPER_CHECKOUT_DEPENDENCY=ABSENT"
 echo "SOURCE_REVISION=$SOURCE_REVISION"
 echo "RELEASE_DIR=$RELEASE_DIR"
 echo "BACKUP_DIR=$BACKUP_DIR"
