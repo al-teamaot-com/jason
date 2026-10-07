@@ -27,6 +27,14 @@ def test_owner_approval_marker_is_exact():
     assert not module.APPROVAL.search('- Autonomous development: owner-approved')
 
 
+def test_approved_scope_preserves_late_issue_requirements_and_stays_bounded():
+    marker = 'BACKUPIQ_ACCEPTANCE_REQUIREMENT'
+    body = ('a' * 7000) + marker + ('b' * 30000)
+    scope = module.approved_scope({'body': body})
+    assert marker in scope
+    assert len(scope) == module.APPROVED_BODY_LIMIT
+
+
 def test_known_development_pr_merged_reconciles_from_any_phase(tmp_path, monkeypatch):
     calls = []
 
