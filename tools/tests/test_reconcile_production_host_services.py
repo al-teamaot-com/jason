@@ -11,6 +11,7 @@ EXPORTER_UNITS = (
     "jason-client-posture-exporter.service",
     "jason-playbook-exporter.service",
     "jason-production-health-exporter.service",
+    "jason-operations-configuration-exporter.service",
     "jason-resolution-memory-exporter.service",
     "jason-reflection-exporter.service",
     "jason-security-control-exporter.service",
@@ -165,3 +166,33 @@ def test_production_reconciliation_emits_candidate_source_boundary_evidence() ->
     assert 'MANAGED_DOCUMENTATION_SOURCE=PASS' in text
     assert 'DEVELOPER_CHECKOUT_DEPENDENCY=ABSENT' in text
     assert 'production reconciliation script contains a developer checkout dependency' in text
+
+
+def test_control_panel_exporter_is_reconciled_on_dedicated_port() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    assert "jason-operations-configuration-exporter.service" in text
+    assert "operations_configuration_exporter.py" in text
+    assert "9477" in text
+    unit = (
+        REPO_ROOT
+        / "infrastructure"
+        / "showcase"
+        / "systemd"
+        / "jason-operations-configuration-exporter.service"
+    ).read_text(encoding="utf-8")
+    assert "JASON_OPERATIONS_CONFIGURATION_PORT=9477" in unit
+    assert "WorkingDirectory=/opt/jason/current" in unit
+    assert "/home/al/projects/jason" not in unit
+
+
+def test_observability_reconciliation_is_conditional_and_managed() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    assert 'OBSERVABILITY_CURRENT_LINK="/opt/jason/observability/current"' in text
+    assert 'OBSERVABILITY_PREVIOUS_REVISION' in text
+    assert 'git -C "$REPO_ROOT" diff --quiet' in text
+    assert 'infrastructure/showcase' in text
+    assert 'config/observability/grafana-dashboard-manifest.json' in text
+    assert 'JASON_REPO_ROOT="$ENGINEERING_SOURCE_REPO" /usr/bin/bash "$OBSERVABILITY_INSTALLER" "$SOURCE_REVISION"' in text
+    assert 'JASON_OBSERVABILITY_RECONCILIATION=PASS' in text
+    assert 'JASON_OBSERVABILITY_RECONCILIATION=UNCHANGED' in text
+    assert 'observability release did not converge to production revision' in text
