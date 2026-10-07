@@ -538,7 +538,7 @@ def mcp_status_probe() -> tuple[bool, str]:
 
 def health_metrics() -> tuple[dict[str, float], str | None]:
     try:
-        with urllib.request.urlopen(HEALTH_URL, timeout=5) as response:
+        with urllib.request.urlopen(HEALTH_URL, timeout=10) as response:
             text = response.read().decode("utf-8", errors="replace")
     except Exception as exc:
         return {}, f"production health exporter unavailable: {type(exc).__name__}"

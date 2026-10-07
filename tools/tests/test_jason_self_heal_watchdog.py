@@ -523,3 +523,25 @@ def test_provider_canary_monitoring_accepts_fresh_report(tmp_path, monkeypatch):
     assert failures == []
     assert evidence["fresh"] is True
     assert evidence["timer_active"] is True
+
+
+def test_health_metrics_uses_headroom_for_slow_local_exporter(monkeypatch):
+    calls = []
+
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return False
+        def read(self):
+            return b"jason_production_component_health{component=\"runtime\"} 1\n"
+
+    def fake_urlopen(url, timeout):
+        calls.append((url, timeout))
+        return Response()
+
+    monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen)
+    metrics, error = module.health_metrics()
+    assert error is None
+    assert calls == [(module.HEALTH_URL, 10)]
+    assert metrics

@@ -13,6 +13,10 @@ RELEASE_DIR="$RELEASE_ROOT/$SOURCE_REVISION"
 CURRENT_LINK="/opt/jason/current"
 STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 BACKUP_DIR="/var/backups/jason-systemd-$STAMP"
+ENGINEERING_SOURCE_REPO="/home/al/.local/lib/jason/engineering-source-repo"
+DOCUMENTATION_SOURCE_REPO="/home/al/.local/lib/jason/documentation-source-repo"
+USER_XDG_RUNTIME_DIR="/run/user/1000"
+USER_DBUS_ADDRESS="unix:path=/run/user/1000/bus"
 
 EXPORTER_UNITS=(
   jason-client-posture-exporter.service
@@ -61,6 +65,29 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 77
 fi
 
+run_as_al() {
+  runuser -u al -- env \
+    HOME=/home/al \
+    XDG_RUNTIME_DIR="$USER_XDG_RUNTIME_DIR" \
+    DBUS_SESSION_BUS_ADDRESS="$USER_DBUS_ADDRESS" \
+    PATH=/usr/local/bin:/usr/bin:/bin \
+    "$@"
+}
+
+wait_user_unit_inactive() {
+  local unit="$1"
+  local attempt
+  for attempt in $(seq 1 90); do
+    state="$(run_as_al systemctl --user is-active "$unit" 2>/dev/null || true)"
+    if [ "$state" != "active" ] && [ "$state" != "activating" ]; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo "ERROR: user unit did not become inactive before production install: $unit" >&2
+  return 1
+}
+
 if ! git -C "$REPO_ROOT" cat-file -e "$SOURCE_REVISION^{commit}" 2>/dev/null; then
   git -C "$REPO_ROOT" fetch origin "$SOURCE_REVISION"
 fi
@@ -88,6 +115,35 @@ if [ ! -d "$RELEASE_DIR" ]; then
 fi
 chown root:root "$RELEASE_DIR"
 chmod 0755 "$RELEASE_DIR"
+
+# User-level engineering/release and documentation automation need writable Git
+# metadata, while runtime artifacts need the immutable /opt release. Maintain
+# dedicated managed clones rather than depending on a developer checkout.
+REMOTE_URL="$(git -C "$REPO_ROOT" remote get-url origin)"
+prepare_managed_clone() {
+  local destination="$1"
+  install -d -o al -g al -m 0755 "$(dirname "$destination")"
+  if [ ! -d "$destination/.git" ]; then
+    if [ -e "$destination" ]; then
+      echo "ERROR: managed Git source exists but is not a repository: $destination" >&2
+      exit 9
+    fi
+    run_as_al git clone --no-hardlinks "$REPO_ROOT" "$destination"
+  fi
+  if [ -n "$(run_as_al git -C "$destination" status --porcelain)" ]; then
+    echo "ERROR: managed Git source is dirty: $destination" >&2
+    exit 9
+  fi
+  run_as_al git -C "$destination" remote set-url origin "$REMOTE_URL"
+  run_as_al git -C "$destination" fetch --no-tags origin main
+  run_as_al git -C "$destination" checkout --detach "$SOURCE_REVISION"
+  if [ "$(run_as_al git -C "$destination" rev-parse HEAD)" != "$SOURCE_REVISION" ]; then
+    echo "ERROR: managed Git source revision does not match production: $destination" >&2
+    exit 9
+  fi
+}
+prepare_managed_clone "$ENGINEERING_SOURCE_REPO"
+prepare_managed_clone "$DOCUMENTATION_SOURCE_REPO"
 
 for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}" "${MAINTENANCE_TIMERS[@]}" "$PROVIDER_CANARY_SERVICE" "$PROVIDER_CANARY_TIMER" "${OBSOLETE_UNITS[@]}"; do
   if [ -f "/etc/systemd/system/$unit" ]; then
@@ -199,6 +255,53 @@ for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}" "$PROVIDER_CANAR
   fi
 done
 
+# A production release is not complete until scheduled user-level workers and the
+# self-heal watchdog are installed from the exact same SHA and their timers are live.
+wait_user_unit_inactive jason-support-repair-worker.service
+wait_user_unit_inactive jason-self-heal-watchdog.service
+run_as_al /usr/bin/python3 "$ENGINEERING_SOURCE_REPO/tools/install_support_repair_host_worker.py" \
+  --repo "$ENGINEERING_SOURCE_REPO" \
+  --spool /var/lib/jason/openclaw/support-repair \
+  --activate
+run_as_al /usr/bin/python3 "$ENGINEERING_SOURCE_REPO/tools/install_self_heal_watchdog.py" \
+  --repo "$ENGINEERING_SOURCE_REPO" \
+  --root /var/lib/jason/openclaw/self-heal \
+  --activate
+
+ENGINEERING_SOURCE="$(readlink -f /home/al/.local/lib/jason/engineering-worker-source)"
+if [ "$ENGINEERING_SOURCE" != "$ENGINEERING_SOURCE_REPO" ]; then
+  echo "ERROR: engineering-worker-source does not match managed production Git source." >&2
+  exit 9
+fi
+if [ "$(run_as_al git -C "$ENGINEERING_SOURCE" rev-parse HEAD)" != "$SOURCE_REVISION" ]; then
+  echo "ERROR: engineering-worker-source revision does not match production." >&2
+  exit 9
+fi
+for worker in \
+  support_repair_host_worker.py \
+  owner_approved_development_worker.py \
+  todo_engineering_intake.py \
+  todo_release_bridge.py \
+  release_manager_gate.py; do
+  cmp -s "$ENGINEERING_SOURCE_REPO/tools/$worker" "/home/al/.local/lib/jason/$worker" || {
+    echo "ERROR: installed worker differs from production source: $worker" >&2
+    exit 9
+  }
+done
+cmp -s "$ENGINEERING_SOURCE_REPO/tools/jason_self_heal_watchdog.py" /home/al/.local/lib/jason/jason_self_heal_watchdog.py || {
+  echo "ERROR: installed self-heal watchdog differs from production source" >&2
+  exit 9
+}
+for timer in jason-support-repair-worker.timer jason-self-heal-watchdog.timer; do
+  if [ "$(run_as_al systemctl --user is-active "$timer" 2>/dev/null || true)" != "active" ]; then
+    echo "ERROR: required user timer is not active after production install: $timer" >&2
+    exit 9
+  fi
+done
+
+echo "JASON_USER_WORKER_RECONCILIATION=PASS"
+echo "ENGINEERING_SOURCE_REPO=$ENGINEERING_SOURCE_REPO"
+echo "DOCUMENTATION_SOURCE_REPO=$DOCUMENTATION_SOURCE_REPO"
 echo "JASON_HOST_SERVICE_RECONCILIATION=PASS"
 echo "SOURCE_REVISION=$SOURCE_REVISION"
 echo "RELEASE_DIR=$RELEASE_DIR"

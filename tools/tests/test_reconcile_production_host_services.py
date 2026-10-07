@@ -79,6 +79,18 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'publish_documentation_reconciliation.sh' in text
     assert 'POST_SUCCESS_DOCUMENTATION_RECONCILIATION=PASS' in text
     assert 'production succeeded but documentation reconciliation publication failed' in text
+    assert 'ENGINEERING_SOURCE_REPO="/home/al/.local/lib/jason/engineering-source-repo"' in text
+    assert 'DOCUMENTATION_SOURCE_REPO="/home/al/.local/lib/jason/documentation-source-repo"' in text
+    assert 'prepare_managed_clone "$ENGINEERING_SOURCE_REPO"' in text
+    assert 'prepare_managed_clone "$DOCUMENTATION_SOURCE_REPO"' in text
+    assert 'install_support_repair_host_worker.py' in text
+    assert 'install_self_heal_watchdog.py' in text
+    assert 'JASON_USER_WORKER_RECONCILIATION=PASS' in text
+    assert 'engineering-worker-source does not match managed production Git source' in text
+    assert 'installed worker differs from production source' in text
+    assert 'installed self-heal watchdog differs from production source' in text
+    assert 'jason-support-repair-worker.timer' in text
+    assert 'jason-self-heal-watchdog.timer' in text
 
 
 def test_reconciliation_fails_closed_without_root() -> None:
@@ -99,3 +111,19 @@ def test_reconciliation_fails_closed_without_root() -> None:
 
     assert result.returncode == 77
     assert "root privileges are required" in result.stderr
+
+
+def test_self_heal_user_unit_has_no_developer_checkout_dependency() -> None:
+    path = (
+        REPO_ROOT
+        / "infrastructure"
+        / "openclaw-operations"
+        / "systemd"
+        / "user"
+        / "jason-self-heal-watchdog.service"
+    )
+    text = path.read_text(encoding="utf-8")
+    assert "WorkingDirectory=/opt/jason/current" in text
+    assert "ReadOnlyPaths=/opt/jason/current" in text
+    assert "ExecStart=/usr/bin/python3 /opt/jason/current/tools/jason_self_heal_watchdog.py" in text
+    assert "/home/al/projects/jason" not in text

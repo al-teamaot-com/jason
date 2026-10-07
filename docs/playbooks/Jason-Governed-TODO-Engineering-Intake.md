@@ -138,6 +138,8 @@ Before Release Manager handoff:
 - the release bridge and Release Manager scheduler use the managed repository-backed engineering source for Git ancestry/check evidence and exact candidate worktree creation; immutable installed Release Manager runner/policy artifacts remain the execution implementation;
 - a release cannot enter `production` until the exact candidate worktree and required deploy scripts are materialized successfully;
 - a release cannot reach `production_verified` / `closed` until fresh production documentation reconciliation and Development & Release Control Board publication both pass;
+- production host closeout must install the support-repair/development/TODO workers and self-heal watchdog from the exact production SHA, verify installed file equality and active timers, and preserve a Git-backed managed engineering source;
+- scheduled production services must not depend on a mutable developer checkout such as `/home/al/projects/jason`;
 - owner-approved development PR carries `Integration automation: enabled`;
 - protected integration checks are green and current-main reconciliation is complete;
 - development PR merged through the governed source-integration path;
@@ -271,7 +273,8 @@ The TODO may complete only when:
 4. exact merge SHA entered Release Manager;
 5. isolated pre-production passed;
 6. exact artifact was production verified;
-7. Release Manager reached closed;
+7. scheduled user-level worker/watchdog artifacts were reconciled to the exact production SHA and their timers were verified active;
+8. Release Manager reached closed;
 8. TODO markdown says Implemented with release evidence;
 9. documentation closure PR merged;
 10. engineering issue closed.
