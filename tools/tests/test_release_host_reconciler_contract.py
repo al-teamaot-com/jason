@@ -103,3 +103,11 @@ def test_root_worker_materializes_candidate_reconcile_script_and_requires_contra
     assert 'DEVELOPER_CHECKOUT_DEPENDENCY=ABSENT' in text
     assert 'HOST_RECONCILIATION_SCRIPT_SOURCE_REVISION=' in text
     assert 'candidate host reconciliation contract is incomplete' in text
+
+
+def test_root_worker_has_bounded_outer_timeout_and_preserves_timeout_evidence():
+    text = (ROOT / "tools" / "release_host_reconcile_worker.py").read_text(encoding="utf-8")
+    assert "HOST_RECONCILE_TIMEOUT_SECONDS = 360" in text
+    assert "except subprocess.TimeoutExpired as exc" in text
+    assert "candidate host reconciliation script exceeded" in text
+    assert "detail[-3000:]" in text

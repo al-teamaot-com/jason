@@ -35,6 +35,8 @@ EXPORTER_UNITS=(
 MAINTENANCE_SERVICES=(
   jason-delegation-maintenance.service
   jason-openclaw-authority-health.service
+)
+DEFERRED_MAINTENANCE_SERVICES=(
   jason-documentation-reconciliation.service
 )
 MAINTENANCE_TIMERS=(
@@ -90,6 +92,19 @@ run_as_al() {
     DBUS_SESSION_BUS_ADDRESS="$USER_DBUS_ADDRESS" \
     PATH=/usr/local/bin:/usr/bin:/bin \
     "$@"
+}
+
+STEP_NAME=""
+STEP_STARTED_AT=0
+step_start() {
+  STEP_NAME="$1"
+  STEP_STARTED_AT="$(date +%s)"
+  echo "HOST_RECONCILE_STEP_START=$STEP_NAME"
+}
+step_pass() {
+  local finished
+  finished="$(date +%s)"
+  echo "HOST_RECONCILE_STEP_PASS=$1 duration_seconds=$((finished - STEP_STARTED_AT))"
 }
 
 wait_user_unit_inactive() {
@@ -160,14 +175,16 @@ prepare_managed_clone() {
     exit 9
   fi
 }
+step_start managed_source_reconciliation
 prepare_managed_clone "$ENGINEERING_SOURCE_REPO"
 prepare_managed_clone "$DOCUMENTATION_SOURCE_REPO"
+step_pass managed_source_reconciliation
 if [ ! -d "$DOCUMENTATION_SOURCE_REPO/.git" ]; then
   echo "ERROR: managed documentation Git source was not materialized before unit activation." >&2
   exit 9
 fi
 
-for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}" "${MAINTENANCE_TIMERS[@]}" "$PROVIDER_CANARY_SERVICE" "$PROVIDER_CANARY_TIMER" "${OBSOLETE_UNITS[@]}"; do
+for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}" "${DEFERRED_MAINTENANCE_SERVICES[@]}" "${MAINTENANCE_TIMERS[@]}" "$PROVIDER_CANARY_SERVICE" "$PROVIDER_CANARY_TIMER" "${OBSOLETE_UNITS[@]}"; do
   if [ -f "/etc/systemd/system/$unit" ]; then
     cp -a "/etc/systemd/system/$unit" "$BACKUP_DIR/$unit.before"
   fi
@@ -181,7 +198,7 @@ for unit in "${EXPORTER_UNITS[@]}"; do
   install -o root -g root -m 0644 "$src" "/etc/systemd/system/$unit"
 done
 
-for unit in "${MAINTENANCE_SERVICES[@]}" "${MAINTENANCE_TIMERS[@]}"; do
+for unit in "${MAINTENANCE_SERVICES[@]}" "${DEFERRED_MAINTENANCE_SERVICES[@]}" "${MAINTENANCE_TIMERS[@]}"; do
   src="$RELEASE_DIR/infrastructure/openclaw-operations/systemd/$unit"
   test -f "$src" || { echo "ERROR: missing canonical maintenance unit: $src" >&2; exit 2; }
   install -o root -g root -m 0644 "$src" "/etc/systemd/system/$unit"
@@ -197,6 +214,7 @@ for unit in "${OBSOLETE_UNITS[@]}"; do
   rm -f "/etc/systemd/system/$unit"
 done
 
+step_start system_service_activation
 systemctl daemon-reload
 for unit in "${EXPORTER_UNITS[@]}"; do
   systemctl stop "$unit" >/dev/null 2>&1 || true
@@ -218,11 +236,12 @@ for timer in "${MAINTENANCE_TIMERS[@]}"; do
   systemctl enable --now "$timer"
 done
 systemctl enable --now "$PROVIDER_CANARY_TIMER"
-systemctl start "$PROVIDER_CANARY_SERVICE"
+timeout --signal=TERM --kill-after=5s 45s systemctl start "$PROVIDER_CANARY_SERVICE"
 for unit in "${MAINTENANCE_SERVICES[@]}"; do
-  systemctl start "$unit"
+  timeout --signal=TERM --kill-after=5s 45s systemctl start "$unit"
 done
 systemctl reset-failed
+step_pass system_service_activation
 
 for unit in "${EXPORTER_UNITS[@]}"; do
   if [ "$(systemctl is-active "$unit")" != "active" ]; then
@@ -262,13 +281,15 @@ for unit in "${OBSOLETE_UNITS[@]}"; do
     exit 4
   fi
 done
+step_start exporter_verification
 for port in "${VERIFY_PORTS[@]}"; do
-  curl -fsS "http://127.0.0.1:$port/metrics" >/dev/null || {
+  curl --connect-timeout 2 --max-time 5 -fsS "http://127.0.0.1:$port/metrics" >/dev/null || {
     echo "ERROR: exporter verification failed on port $port" >&2
     exit 5
   }
 done
-for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}" "$PROVIDER_CANARY_SERVICE"; do
+step_pass exporter_verification
+for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}" "${DEFERRED_MAINTENANCE_SERVICES[@]}" "$PROVIDER_CANARY_SERVICE"; do
   wd="$(systemctl show "$unit" -p WorkingDirectory --value)"
   ex="$(systemctl show "$unit" -p ExecStart --value)"
   if printf '%s %s' "$wd" "$ex" | grep -qE '/home/al/(projects/jason|jason-worktrees/)'; then
@@ -279,6 +300,7 @@ done
 
 # A production release is not complete until scheduled user-level workers and the
 # self-heal watchdog are installed from the exact same SHA and their timers are live.
+step_start user_worker_reconciliation
 wait_user_unit_inactive jason-support-repair-worker.service
 wait_user_unit_inactive jason-self-heal-watchdog.service
 run_as_al /usr/bin/python3 "$ENGINEERING_SOURCE_REPO/tools/install_support_repair_host_worker.py" \
@@ -325,6 +347,7 @@ for timer in jason-support-repair-worker.timer jason-self-heal-watchdog.timer; d
   fi
 done
 
+step_pass user_worker_reconciliation
 echo "JASON_USER_WORKER_RECONCILIATION=PASS"
 echo "ENGINEERING_SOURCE_REPO=$ENGINEERING_SOURCE_REPO"
 echo "DOCUMENTATION_SOURCE_REPO=$DOCUMENTATION_SOURCE_REPO"
@@ -332,6 +355,7 @@ echo "DOCUMENTATION_SOURCE_REPO=$DOCUMENTATION_SOURCE_REPO"
 # Keep the privileged host-reconciliation boundary on the exact production
 # implementation after this successful reconciliation. The worker validates
 # only local refs from the managed engineering Git source.
+step_start root_reconciler_install
 /usr/bin/python3 "$RELEASE_DIR/tools/install_release_host_reconciler.py"
 cmp -s "$RELEASE_DIR/tools/release_host_reconcile_worker.py" /usr/local/lib/jason/release_host_reconcile_worker.py || {
   echo "ERROR: installed root host reconciler differs from production source" >&2
@@ -341,6 +365,7 @@ if [ "$(systemctl is-active jason-release-host-reconcile.path 2>/dev/null || tru
   echo "ERROR: root host-reconcile path is not active after production install" >&2
   exit 9
 fi
+step_pass root_reconciler_install
 echo "JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS"
 echo "JASON_HOST_SERVICE_RECONCILIATION=PASS"
 echo "HOST_RECONCILIATION_SCRIPT_SOURCE_REVISION=$SOURCE_REVISION"
@@ -369,9 +394,10 @@ if [ -n "$OBSERVABILITY_PREVIOUS_REVISION" ] \
     OBSERVABILITY_CHANGED=0
   fi
 fi
+step_start observability_reconciliation
 if [ "$OBSERVABILITY_CHANGED" -eq 1 ]; then
   test -f "$OBSERVABILITY_INSTALLER" || { echo "ERROR: observability installer is missing" >&2; exit 9; }
-  JASON_REPO_ROOT="$ENGINEERING_SOURCE_REPO" /usr/bin/bash "$OBSERVABILITY_INSTALLER" "$SOURCE_REVISION"
+  timeout --signal=TERM --kill-after=5s 180s env JASON_REPO_ROOT="$ENGINEERING_SOURCE_REPO" /usr/bin/bash "$OBSERVABILITY_INSTALLER" "$SOURCE_REVISION"
   if [ "$(readlink -f "$OBSERVABILITY_CURRENT_LINK")" != "/opt/jason/observability/releases/$SOURCE_REVISION" ]; then
     echo "ERROR: observability release did not converge to production revision" >&2
     exit 9
@@ -380,19 +406,9 @@ if [ "$OBSERVABILITY_CHANGED" -eq 1 ]; then
 else
   echo "JASON_OBSERVABILITY_RECONCILIATION=UNCHANGED"
 fi
+step_pass observability_reconciliation
 
-DOC_PUBLISHER="$RELEASE_DIR/tools/publish_documentation_reconciliation.sh"
-if [ ! -x "$DOC_PUBLISHER" ]; then
-  echo "ERROR: post-success documentation publisher is missing: $DOC_PUBLISHER" >&2
-  exit 8
-fi
-if ! runuser -u al -- env \
-  HOME=/home/al \
-  PATH=/usr/local/bin:/usr/bin:/bin \
-  JASON_DOCUMENTATION_REPO_ROOT="$DOCUMENTATION_SOURCE_REPO" \
-  JASON_DOCUMENTATION_WORKTREE_ROOT=/home/al/jason-worktrees \
-  bash "$DOC_PUBLISHER" production "$SOURCE_REVISION"; then
-  echo "ERROR: production succeeded but documentation reconciliation publication failed" >&2
-  exit 8
-fi
-echo "POST_SUCCESS_DOCUMENTATION_RECONCILIATION=PASS"
+# Documentation/control-board publication is deliberately outside the privileged
+# host-alignment transaction. Release Manager performs it after runtime, MCP,
+# immutable host, workers, and observability have aligned to the exact SHA.
+echo "POST_SUCCESS_DOCUMENTATION_RECONCILIATION=DEFERRED_TO_RELEASE_MANAGER"
