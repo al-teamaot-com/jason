@@ -123,6 +123,12 @@ def upstream_commitment_state(record: Mapping[str, Any] | None) -> tuple[str, st
     reason = str(record.get('reason') or '').strip()
     if phase == 'blocked':
         return 'development_blocked', reason or 'Development worker is blocked.'
+    if phase in {
+        'waiting_operational_acceptance',
+        'waiting_external_dependency',
+        'waiting_sequenced_work',
+    }:
+        return phase, reason
     if phase == 'complete':
         return (
             'development_complete_unmerged',
@@ -154,6 +160,9 @@ def commitment_summary(items: Mapping[str, Any]) -> dict[str, Any]:
             'development_blocked',
             'development_complete_unmerged',
             'waiting_development_merge',
+            'waiting_operational_acceptance',
+            'waiting_external_dependency',
+            'waiting_sequenced_work',
         }:
             upstream += 1
         if phase in {'waiting_release', 'release_prepare_blocked', 'release_blocked'}:

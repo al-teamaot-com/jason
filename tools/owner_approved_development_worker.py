@@ -23,7 +23,14 @@ BLOCKED = re.compile(
 META = re.compile(r'(?im)^\s*-\s*Development issue\s*:\s*#([1-9][0-9]*)\s*$')
 ACTIVE_PHASES = {'identified', 'diagnosing', 'implementing', 'ci_repair_needed', 'ci_repairing'}
 SUPPORT_ACTIVE_PHASES = ACTIVE_PHASES - {'identified'}
-TERMINAL_PHASES = {'pr_ready', 'blocked', 'complete'}
+TERMINAL_PHASES = {
+    'pr_ready',
+    'blocked',
+    'complete',
+    'waiting_operational_acceptance',
+    'waiting_external_dependency',
+    'waiting_sequenced_work',
+}
 APPROVED_BODY_LIMIT = 30000
 
 
