@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -41,6 +42,9 @@ IDENTITY_BINDINGS_DB = Path(
 )
 MAX_RECENT_EVENT_SERIES = int(os.environ.get("JASON_ATTRIBUTION_MAX_RECENT_EVENTS", "250"))
 ORCHESTRATION_EVENT_WINDOW_HOURS = 25
+EVENT_ROWID_SAFETY_MARGIN = max(0, int(os.environ.get("JASON_ATTRIBUTION_EVENT_ROWID_SAFETY_MARGIN", "250000")))
+CACHE_TTL_SECONDS = max(0.0, float(os.environ.get("JASON_ATTRIBUTION_CACHE_TTL_SECONDS", "20")))
+_cached_metrics: tuple[float, str] | None = None
 ORCHESTRATION_EVENT_TYPES = (
     "orchestration.request.received",
     "connector.requested",
@@ -173,40 +177,98 @@ def _model_entries() -> list[dict]:
     return result
 
 
+def _recent_rowid_floor(connection: sqlite3.Connection, cutoff_iso: str) -> int:
+    bounds = connection.execute(
+        "SELECT COALESCE(MIN(rowid), 0), COALESCE(MAX(rowid), 0) FROM orchestration_events"
+    ).fetchone()
+    if bounds is None:
+        return 1
+    low = int(bounds[0] or 0)
+    high = int(bounds[1] or 0)
+    if low <= 0 or high <= 0:
+        return 1
+    while low < high:
+        midpoint = (low + high) // 2
+        row = connection.execute(
+            "SELECT rowid, occurred_at FROM orchestration_events "
+            "WHERE rowid >= ? ORDER BY rowid LIMIT 1",
+            (midpoint,),
+        ).fetchone()
+        if row is None:
+            high = midpoint
+            continue
+        rowid = int(row[0])
+        occurred_at = str(row[1] or "")
+        if occurred_at < cutoff_iso:
+            low = rowid + 1
+        else:
+            high = rowid
+    return max(1, low - EVENT_ROWID_SAFETY_MARGIN)
+
+
 def _orchestration_events(now: datetime | None = None) -> list[dict]:
     resolved = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     cutoff = (resolved - timedelta(hours=ORCHESTRATION_EVENT_WINDOW_HOURS)).isoformat()
     placeholders = ",".join("?" for _ in ORCHESTRATION_EVENT_TYPES)
     connection = _connect_readonly(ORCHESTRATION_EVENTS_DB)
     try:
+        rowid_floor = _recent_rowid_floor(connection, cutoff)
         rows = connection.execute(
             f"""
             SELECT event_id, event_type, execution_id, correlation_id,
-                   principal_id, capability_name, payload, occurred_at
+                   principal_id, capability_name, occurred_at,
+                   json_extract(payload, '$.requester_kind') AS requester_kind,
+                   json_extract(payload, '$.provider') AS root_provider,
+                   json_extract(payload, '$.details.provider') AS details_provider,
+                   json_extract(payload, '$.details.operation') AS details_operation,
+                   json_extract(payload, '$.details.source_channel') AS details_source_channel,
+                   json_extract(payload, '$.details.purpose') AS details_purpose,
+                   json_extract(payload, '$.details.email_address') AS details_email_address
             FROM orchestration_events
-            WHERE organization_id = ?
+            WHERE rowid >= ?
+              AND organization_id = ?
               AND occurred_at >= ?
               AND event_type IN ({placeholders})
-            ORDER BY occurred_at, event_id
+            ORDER BY rowid
             """,
-            (ORGANIZATION_ID, cutoff, *ORCHESTRATION_EVENT_TYPES),
+            (rowid_floor, ORGANIZATION_ID, cutoff, *ORCHESTRATION_EVENT_TYPES),
         ).fetchall()
     finally:
         connection.close()
 
-    return [
-        {
-            "event_id": str(row["event_id"]),
-            "event_type": str(row["event_type"]),
-            "execution_id": str(row["execution_id"]),
-            "correlation_id": str(row["correlation_id"]),
-            "principal_id": str(row["principal_id"] or "").strip(),
-            "capability": str(row["capability_name"] or "").strip(),
-            "payload": _safe_json(row["payload"]),
-            "occurred_at": _timestamp(row["occurred_at"]),
+    events: list[dict] = []
+    for row in rows:
+        event_type = str(row["event_type"])
+        requester_kind = str(row["requester_kind"] or "").strip()
+        details = {
+            "provider": str(row["details_provider"] or "").strip(),
+            "operation": str(row["details_operation"] or "").strip(),
+            "source_channel": str(row["details_source_channel"] or "").strip(),
+            "purpose": str(row["details_purpose"] or "").strip(),
+            "email_address": str(row["details_email_address"] or "").strip(),
         }
-        for row in rows
-    ]
+        details = {key: value for key, value in details.items() if value}
+        payload = {}
+        if requester_kind:
+            payload["requester_kind"] = requester_kind
+        root_provider = str(row["root_provider"] or "").strip()
+        if root_provider:
+            payload["provider"] = root_provider
+        if details:
+            payload["details"] = details
+        events.append(
+            {
+                "event_id": str(row["event_id"]),
+                "event_type": event_type,
+                "execution_id": str(row["execution_id"]),
+                "correlation_id": str(row["correlation_id"]),
+                "principal_id": str(row["principal_id"] or "").strip(),
+                "capability": str(row["capability_name"] or "").strip(),
+                "payload": payload,
+                "occurred_at": _timestamp(row["occurred_at"]),
+            }
+        )
+    return events
 
 
 def _provider_product(provider: str) -> str:
@@ -642,13 +704,24 @@ def render_metrics(now: datetime | None = None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_cached_metrics() -> str:
+    global _cached_metrics
+    now = time.monotonic()
+    cached = _cached_metrics
+    if cached is not None and CACHE_TTL_SECONDS > 0 and now - cached[0] < CACHE_TTL_SECONDS:
+        return cached[1]
+    payload = render_metrics()
+    _cached_metrics = (time.monotonic(), payload)
+    return payload
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         if self.path not in ("/", "/metrics"):
             self.send_response(404)
             self.end_headers()
             return
-        payload = render_metrics().encode("utf-8")
+        payload = render_cached_metrics().encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))

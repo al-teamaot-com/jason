@@ -4,7 +4,7 @@
 playbook:
   id: system_self_heal
   name: Jason System Self-Heal
-  version: 1.1.0
+  version: 1.2.0
   owner: AOT IT Operations
   target_type: service
   trigger:
@@ -74,12 +74,13 @@ Detection layers are:
 3. **Workflow health** — stuck active/verification states, work that exceeds its expected state deadline, queue/worker state contradictions, and admission stalls where the latest scan reports eligible work plus available active slots but selects zero tickets.
 4. **Semantic outcome health** — an action is not healthy until the promised result is independently verified (for example, a client notification requires NotificationHistory evidence; ticket completion requires PSA readback; cleanup requires current free-space improvement and monitor reconciliation).
 5. **Outcome/anomaly health** — enforce generic structural invariants and compare recent operational behavior against Jason's own prior healthy-looking baseline. Material deviations such as contradictory counts, impossible state transitions, repeated no-progress cycles, or a collapse in normal work-selection efficiency should generate a reviewable health signal even when no named failure signature exists.
+6. **Production convergence health** — prove live runtime/MCP revision alignment, exact immutable Release Manager source alignment, installed runner/timer identity, 24x7 schedule intent, provider-canary freshness/timer activity, and absence of contradictory legacy production-window declarations. Stale canary evidence is a monitoring-substrate failure and must not be presented as a current provider outage. Source, installed state, scheduler/policy state, and observed production behavior must not silently diverge.
 
 ## 8. Decision Gates
 Recovery must remain within existing approved authority; must target an exact Jason component; must not broaden provider/client scope; must not expose secrets; and must not require host reboot/shutdown.
 
 ## 9. Remediation
-Allowed bounded recovery includes starting a stopped existing Jason container/service and one bounded restart of `jason-mcp-pilot` when its functional status surface fails. Unresolved defects are persisted to the self-heal incident spool and immediately wake the native autonomous SUPPORT repair worker.
+Allowed bounded recovery includes starting a stopped existing Jason container/service and one bounded restart of `jason-mcp-pilot` when its functional status surface fails. Production-convergence defects are treated as production defects even when processes remain alive. Deterministic safe runtime recovery remains bounded; source/design/install contradictions are persisted to the self-heal incident spool and immediately wake the native autonomous SUPPORT repair worker for governed repair through production verification.
 
 ## 10. Retry Policy
 Maximum two bounded recovery attempts for one unchanged failure fingerprint. Do not repeat identical recovery indefinitely.
@@ -115,7 +116,7 @@ Record degraded function, fingerprint, root cause when known, actions attempted,
 Host health reads, Docker service state/start/restart for exact Jason containers, Jason user-systemd failure reads, production health metrics, operational outcome-contract spool, persisted autonomy-work health reads, self-heal persisted spool, support-repair wake/integration, GitHub support repair lane, governed Teams owner notification, and production verification.
 
 ## 21. Acceptance Test
-Prove: a synthetic recoverable MCP functional failure is detected, bounded recovery occurs, exact function verification succeeds, no owner notification is sent; prove a failed Jason systemd unit is detected; prove an overdue generic outcome contract is detected; prove a stalled VulScan client-notification verification state becomes a health incident; prove a verified outcome is not flagged; then prove an unrecoverable synthetic condition enters SUPPORT repair and, after bounded exhaustion, produces exactly one governed Teams escalation containing evidence, attempts, blocker, and required owner action.
+Prove: a synthetic recoverable MCP functional failure is detected, bounded recovery occurs, exact function verification succeeds, no owner notification is sent; prove a failed Jason systemd unit is detected; prove an overdue generic outcome contract is detected; prove a stalled VulScan client-notification verification state becomes a health incident; prove a verified outcome is not flagged; prove exact live Release Manager convergence passes; prove a stale installed Release Manager revision is detected; prove contradictory legacy 02:30 policy declarations are detected; then prove an unrecoverable synthetic condition enters SUPPORT repair and, after bounded exhaustion, produces exactly one governed Teams escalation containing evidence, attempts, blocker, and required owner action.
 
 ## 22. Section Goal Closure
 Close only after the watchdog is production-installed, its five-minute timer is active, the bounded MCP status response is production-proven through the exposed tool path, infrastructure/capability/workflow/semantic detection is production-proven, client-notification semantic verification is monitored for staleness, auto-generated self-heal incidents are accepted by the native SUPPORT repair worker, and governed Teams escalation is verified.

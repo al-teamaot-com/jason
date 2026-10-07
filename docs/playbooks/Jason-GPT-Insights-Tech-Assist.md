@@ -1,44 +1,190 @@
-# Jason GPT Insights - Help Desk Tech Assist
+# Jason Playbook: GPT Insights - Help Desk Tech Assist
 
-**Version:** 0.1.0  
-**Status:** Production scope; durable owner promotion required  
+**Version:** 0.2.1
+**Status:** Production scope; exact durable owner promotion required
 **Mode:** Advisory, internal-note only
 
-## Section Goal
-Give an AOT technician useful, evidence-grounded help on legitimate Help Desk tickets that Jason cannot autonomously resolve, without moving the ticket, claiming it, performing remediation, or asking a human for facts Jason can obtain itself.
+## 1. Section Goal
 
-## Trigger
-A ticket is in Help Desk I or Help Desk II and no promoted autonomous remediation playbook applies.
+**Goal:** Give an AOT technician useful, evidence-grounded help on every eligible Help Desk I New ticket, independently of whether a separate remediation playbook also applies, without claiming the ticket, changing ticket state, performing remediation, or asking a human for facts Jason can obtain itself.
 
-## Core standard
-Jason must not ask a technician or client for information it can reasonably obtain through authorized evidence sources. Before identifying a human question, Jason must exhaust relevant ticket evidence, authoritative provider reads, approved read-only diagnostics, and bounded same-client correlation.
+**Success means:**
+- every eligible non-recurring Help Desk I ticket in status `New` receives one internal `GPT Insights` note;
+- material evidence changes refresh that same Jason-owned note rather than creating update-note clutter;
+- recurring tickets never reach this playbook;
+- no client notification, ticket update, or disruptive action is performed.
 
-## Note contract
-- Create at most one base internal note titled `GPT Insights`.
-- Do not create duplicate base notes after restart or local-state loss.
-- Add a new note only when material evidence changes, titled `GPT Insights - Update <date/time>`.
-- Do not add updates for cosmetic changes, repeated evidence, or merely newer timestamps that do not change guidance.
-- GPT Insights notes are machine-generated advisory evidence and never count as technician-authored work.
+## 2. Trigger
 
-## Useful evidence
-Collect only information that helps reduce technician effort. Examples include associated device, online/offline state, last-seen evidence when available, OS, active wired/Wi-Fi evidence for network complaints, bounded related-ticket history, and correlation evidence that may indicate a broader issue.
+- Queue: **Help Desk I**
+- Status: **New**
+- Autotask ticket source is not **Recurring**
 
-## Unknown requests
-If Jason cannot confidently classify or process the reported request, the note must say so. It must not invent a root cause or fill the note with generic troubleshooting. Human follow-up is requested only for information Jason cannot retrieve.
+## 3. Scope and Boundaries
 
-## Recommendations
-Recommendations must be evidence-grounded and concise. PowerShell guidance must default to read-only diagnostic one-liners. Disruptive or modifying actions remain outside this scope.
+### In Scope
+- read-only ticket, configuration, endpoint, and bounded same-client evidence;
+- one internal `GPT Insights` note;
+- governed update of that same Jason-owned internal note when material evidence changes.
 
-## Governance boundary
-Allowed mutation: `service.ticket.note.create` only. No ticket status/queue updates, no client communication, no component execution, no remediation, no reboot/logoff/service restart, and no generic modifying PowerShell.
+### Out of Scope
+- Help Desk II;
+- any status other than New;
+- Autotask source **Recurring**;
+- ticket queue/status/assignment mutation;
+- client-facing communication;
+- component execution or remediation;
+- disruptive actions.
 
-## Learning / API conservation
-Validated recurring patterns may be reused locally when their evidence requirements and exceptions are satisfied. Cached guidance must never substitute for current facts: online state, last seen, active connection type, alerts, and other time-sensitive evidence must be refreshed before the note is produced.
+Preserve Central Orchestrator authority, `direct_provider_access=false`, exact requester grants, provider/client isolation, and auditability.
 
-## Acceptance tests
-1. Unsupported Help Desk ticket receives one base GPT Insights note after exact durable promotion.
-2. Same ticket does not receive duplicate base notes.
-3. Materially changed evidence can generate a timestamped update.
-4. Network ticket resolves wired/Wi-Fi from endpoint evidence when available rather than asking the tech.
-5. Unknown request documents uncertainty without fabricating a cause.
-6. No ticket update or disruptive action occurs from this playbook.
+## 4. Initial Identification
+
+1. Identify the exact Autotask ticket.
+2. Confirm queue = Help Desk I and status = New.
+3. Confirm the queue source already excluded source label Recurring.
+4. Resolve the associated configuration item only when an exact same-company active association is available.
+5. If identity is uncertain, record the limitation in the insight rather than guessing.
+6. Do not claim or move the ticket.
+
+## 5. Expected State
+
+The ticket has exactly one current `GPT Insights` internal note containing the best available evidence and recommendations. If evidence has not materially changed, no note mutation occurs.
+
+## 6. State Model
+
+`eligible -> evidence_collected -> insight_created | insight_current | insight_updated | blocked`
+
+Persist the material-evidence fingerprint in the operational augmentation store. A restart or local-state loss must not create a duplicate base note when Autotask already contains `GPT Insights`.
+
+## 7. Diagnostic Workflow
+
+### Step 1: Ticket classification
+Classify as network, printing, performance, login, application, or unknown from ticket evidence without inventing a cause.
+
+### Step 2: Device evidence
+When an exact associated device exists, collect authoritative online state, last-seen evidence, OS, and category-specific read-only facts.
+
+### Step 3: Correlation
+Use bounded same-company ticket evidence where it materially reduces technician effort.
+
+### Decision
+- material evidence available -> render/update insight;
+- evidence unchanged -> no write;
+- evidence unavailable -> state the limitation and avoid unsupported claims.
+
+## 8. Decision Gates
+
+Before note creation/update:
+- exact Help Desk I queue;
+- exact New status;
+- recurring source exclusion already applied;
+- exact durable v0.2.1 owner promotion exists;
+- update target, if present, is uniquely identified as the Jason-owned `GPT Insights` internal note.
+
+## 9. Remediation
+
+Not applicable. This playbook is advisory only.
+
+Allowed mutations:
+- `service.ticket.note.create`
+- `service.ticket.note.update`
+
+The update capability may touch only an existing Jason-owned internal note after exact creator, visibility, title, and note-ID verification.
+
+## 10. Retry Policy
+
+No provider mutation retries. One governed attempt per execution plan. Failed note writes fail closed and are retried only by a later normal worker cycle after state is re-read.
+
+## 11. Periodic Rechecks
+
+The normal worker cadence may reassess eligible New tickets. A recheck with the same material fingerprint performs no note mutation.
+
+## 12. Aging / Stale Condition
+
+When the ticket leaves New status, GPT Insights stops. The playbook does not continue refreshing tickets already being actively handled.
+
+## 13. Dependency Handling
+
+Missing device association or unavailable read-only evidence is recorded as a limitation; Jason does not fabricate identity or configuration.
+
+## 14. Documentation Requirements
+
+Maintain one internal note titled **GPT Insights**. The living note contains current evidence, assessment, limitations, and recommended next steps.
+
+Every successful note revision is also recorded in Jason's mutation audit with:
+- ticket ID;
+- note ID;
+- prior and revised body;
+- prior and revised SHA-256;
+- provider readback result.
+
+## 15. Failure Handling
+
+Fail closed if:
+- note identity is ambiguous;
+- target note is not internal;
+- creator identity is not Jason's exact execution identity;
+- provider update permission is unavailable;
+- post-mutation readback does not match.
+
+## 16. Escalation Criteria
+
+GPT Insights itself does not escalate operational tickets. Failures are surfaced to Jason support/audit while leaving the ticket untouched.
+
+## 17. Verification
+
+Success requires authoritative Autotask readback showing:
+- the intended note ID;
+- title `GPT Insights`;
+- noteType=3;
+- publish=2;
+- exact intended description;
+- exact Jason creator attribution.
+
+## 18. Completion Criteria
+
+For each eligible scan, the playbook is complete when the current material fingerprint is represented by the one verified internal note or no write is needed because the note is already current.
+
+## 19. Final Resolution Note
+
+Not applicable. GPT Insights is an advisory augmentation, not the incident-resolution playbook.
+
+## 20. Required Capabilities
+
+- `service.ticket.notes.search`
+- `service.ticket.search`
+- `service.configuration.read`
+- `endpoint.device.read`
+- approved read-only diagnostic capabilities where category-specific evidence warrants them
+- `service.ticket.note.create`
+- `service.ticket.note.update`
+
+## 21. Acceptance Test
+
+Prove:
+1. eligible Help Desk I New non-recurring ticket receives one base note;
+2. same evidence creates no duplicate or update;
+3. material evidence change updates that same note ID;
+4. technician/client/workflow notes cannot be updated;
+5. Help Desk II does not receive GPT Insights;
+6. non-New status does not receive GPT Insights;
+7. source Recurring is excluded upstream;
+8. update audit preserves before/after bodies and hashes;
+9. post-write readback verifies internal visibility and Jason ownership;
+10. no ticket-field/client/disruptive mutation occurs.
+
+## 22. Section Goal Closure
+
+Close only after source tests, protected CI, exact durable owner promotion, production deployment, and controlled live Help Desk I verification are complete.
+
+## 23. Autonomous Execution Eligibility and Owner Review
+
+Production nomination: `autonomy.activation=autonomous`.
+
+Exact promoted scope:
+- playbook: `gpt_insights_tech_assist@0.2.1`
+- policy: `playbook-autonomy:gpt_insights_tech_assist`
+- capabilities: `service.ticket.note.create`, `service.ticket.note.update`
+
+Any material version, capability, trigger, ownership rule, or notification-boundary change requires new owner review.

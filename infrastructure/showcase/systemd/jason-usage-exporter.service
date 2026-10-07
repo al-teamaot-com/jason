@@ -12,6 +12,8 @@ Environment=JASON_USAGE_HOST=0.0.0.0
 Environment=JASON_USAGE_PORT=9465
 Environment=JASON_USAGE_ORGANIZATION_ID=aot
 Environment=JASON_USAGE_TIMEZONE=America/New_York
+Environment=JASON_USAGE_EVENT_ROWID_SAFETY_MARGIN=250000
+Environment=JASON_USAGE_CACHE_TTL_SECONDS=20
 Environment=JASON_MODEL_USAGE_DB=/var/lib/jason/openclaw/model-usage.sqlite3
 Environment=JASON_ORCHESTRATION_EVENTS_DB=/var/lib/jason/openclaw/orchestration-events.sqlite3
 Environment=JASON_TEAMS_IDENTITY_BINDINGS_DB=/var/lib/jason/openclaw/teams-identity-bindings.sqlite3

@@ -10,6 +10,8 @@ Group=al
 WorkingDirectory=/opt/jason/current/infrastructure/showcase
 Environment=JASON_ATTRIBUTION_HOST=0.0.0.0
 Environment=JASON_ATTRIBUTION_PORT=9466
+Environment=JASON_ATTRIBUTION_EVENT_ROWID_SAFETY_MARGIN=250000
+Environment=JASON_ATTRIBUTION_CACHE_TTL_SECONDS=20
 Environment=JASON_USAGE_ORGANIZATION_ID=aot
 Environment=JASON_ATTRIBUTION_MAX_RECENT_EVENTS=250
 Environment=JASON_MODEL_USAGE_DB=/var/lib/jason/openclaw/model-usage.sqlite3

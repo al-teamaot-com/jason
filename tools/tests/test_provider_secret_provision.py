@@ -230,6 +230,48 @@ def test_vulscan_contract_uses_canonical_readonly_path_and_fields() -> None:
     assert spec["credential_file_mode"] == 0o640
 
 
+
+def test_quickbooks_development_contract_is_isolated_from_production() -> None:
+    spec = PROVIDERS["quickbooks_development"]
+    assert spec["logical_name"] == "quickbooks.oauth_client"
+    assert spec["secret_path"] == (
+        "secret/data/connectors/quickbooks/development/oauth-client"
+    )
+    assert spec["fields"] == ("client_id", "client_secret")
+    assert spec["required_fields"] == ("client_id", "client_secret")
+    assert spec["policy_name"] == "jason-quickbooks-development-oauth-client-read"
+    assert spec["role_name"] == "jason-quickbooks-development-oauth-client-read"
+    assert spec["connector_identity"] == "quickbooks-development-oauth-client"
+    assert spec["environment"] == "development"
+    assert "production" not in str(spec["secret_path"])
+    assert Path(spec["credential_dir"]) == Path(
+        "/var/lib/jason/runtime-secrets/openbao/"
+        "quickbooks-development-oauth-client-approle"
+    )
+
+
+def test_quickbooks_production_contract_is_isolated_from_development() -> None:
+    dev = PROVIDERS["quickbooks_development"]
+    prod = PROVIDERS["quickbooks_production"]
+    assert prod["logical_name"] == "quickbooks.production.oauth_client"
+    assert prod["secret_path"] == (
+        "secret/data/connectors/quickbooks/production/oauth-client"
+    )
+    assert prod["fields"] == ("client_id", "client_secret", "token_key_b64")
+    assert prod["required_fields"] == ("client_id", "client_secret", "token_key_b64")
+    assert prod["policy_name"] == "jason-quickbooks-production-oauth-client-read"
+    assert prod["role_name"] == "jason-quickbooks-production-oauth-client-read"
+    assert prod["connector_identity"] == "quickbooks-production-oauth-client"
+    assert prod["environment"] == "production"
+    assert Path(prod["credential_dir"]) == Path(
+        "/var/lib/jason/runtime-secrets/openbao/"
+        "quickbooks-production-oauth-client-approle"
+    )
+    assert prod["secret_path"] != dev["secret_path"]
+    assert prod["role_name"] != dev["role_name"]
+    assert prod["credential_dir"] != dev["credential_dir"]
+
+
 def test_provider_policies_are_read_only_except_self_revoke() -> None:
     for provider, spec in PROVIDERS.items():
         policy = provider_policy_text(provider)

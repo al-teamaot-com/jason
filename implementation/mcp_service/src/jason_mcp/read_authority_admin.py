@@ -24,8 +24,8 @@ class ReadAuthorityAdminError(RuntimeError):
     pass
 
 
-def _grant_id(*, subject: str, capability: str, organization: str) -> str:
-    material = "|".join((subject, capability, organization, "", "observe", "no-approval"))
+def _grant_id(*, subject: str, capability: str, organization: str, client_id: str | None = None) -> str:
+    material = "|".join((subject, capability, organization, client_id or "", "observe", "no-approval"))
     digest = hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
     return f"grant_exact_{digest}"
 
@@ -35,6 +35,7 @@ def grant_exact_read_authority(
     subject_id: str,
     capability: str,
     approved_by: str,
+    client_id: str | None = None,
 ) -> tuple[AuthorityGrant, bool]:
     actor = str(approved_by or "").strip()
     owners = approval_owner_identities()
@@ -63,17 +64,21 @@ def grant_exact_read_authority(
         raise ReadAuthorityAdminError("AUTHORITY_GRANT_READ_ONLY_REQUIRED")
 
     organization = identity.organization_id
+    normalized_client = None if client_id is None or not str(client_id).strip() else str(client_id).strip()
+    if normalized_client is not None and any(token in normalized_client for token in ("*", "?", "[", "]")):
+        raise ReadAuthorityAdminError("AUTHORITY_GRANT_EXACT_CLIENT_REQUIRED")
     grant_id = _grant_id(
         subject=subject,
         capability=exact,
         organization=organization,
+        client_id=normalized_client,
     )
     candidate = AuthorityGrant(
         grant_id=grant_id,
         subject_id=subject,
         capability=exact,
         organization_id=organization,
-        client_id=None,
+        client_id=normalized_client,
         permission=PermissionMode.OBSERVE,
         approval_required=False,
         status="active",
@@ -115,11 +120,13 @@ def _main() -> int:
     parser.add_argument("capability")
     parser.add_argument("--subject", required=True)
     parser.add_argument("--approved-by", required=True)
+    parser.add_argument("--client-id")
     args = parser.parse_args()
     grant, created = grant_exact_read_authority(
         subject_id=args.subject,
         capability=args.capability,
         approved_by=args.approved_by,
+        client_id=args.client_id,
     )
     print(json.dumps({
         "status": "succeeded",
@@ -128,6 +135,7 @@ def _main() -> int:
         "subject_id": grant.subject_id,
         "capability": grant.capability,
         "organization_id": grant.organization_id,
+        "client_id": grant.client_id,
         "permission": grant.permission.value,
         "approval_required": grant.approval_required,
         "timestamp": datetime.now(timezone.utc).isoformat(),

@@ -47,6 +47,34 @@ class ReleaseManagerGateTests(unittest.TestCase):
         self.assertFalse(plan["todo_start_allowed"])
         self.assertEqual(plan["support_to_start"], ["SUPPORT-OPS-002"])
 
+    def test_blocked_support_does_not_starve_feature_release(self):
+        result = self.evaluate(
+            {
+                "state": "requested",
+                "change_class": "feature",
+                "active_support_repairs": [],
+                "blocked_support_repairs": [
+                    "SUPPORT-OPS-001",
+                    "SUPPORT-OPS-002",
+                ],
+            },
+            "development",
+        )
+        self.assertTrue(result["allowed"])
+
+    def test_actionable_support_still_preempts_feature_release(self):
+        result = self.evaluate(
+            {
+                "state": "requested",
+                "change_class": "feature",
+                "active_support_repairs": [],
+                "blocked_support_repairs": ["SUPPORT-OPS-001"],
+            },
+            "development",
+        )
+        self.assertFalse(result["allowed"])
+        self.assertTrue(any("Support-first scheduling" in item for item in result["reasons"]))
+
     def test_release_blocker_can_start_while_support_work_remains(self):
         result = self.evaluate(
             {"state": "requested", "change_class": "release_blocker"},

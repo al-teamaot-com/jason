@@ -166,6 +166,61 @@ def test_generic_execution_dispatches_explicit_action(monkeypatch):
     assert captured["explicit_approval"] is False
 
 
+def test_generic_execution_strips_reserved_explicit_approval_for_non_datto(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_discoverable_capability",
+        lambda name: {"capability": name, "read_only": False, "action_enabled": True},
+    )
+    captured = {}
+
+    def governed_execute(*, capability_name, arguments, explicit_approval=False):
+        captured.update(
+            capability_name=capability_name,
+            arguments=arguments,
+            explicit_approval=explicit_approval,
+        )
+        return {"status": "succeeded"}
+
+    monkeypatch.setattr(server, "_governed_execute", governed_execute)
+    result = server.execute_governed_capability(
+        capability="communication.teams.message.send",
+        arguments={
+            "aad_object_id": "aad-1",
+            "tenant_id": "tenant-1",
+            "text": "test",
+            "explicit_approval": True,
+        },
+    )
+
+    assert result["status"] == "succeeded"
+    assert captured["arguments"] == {
+        "aad_object_id": "aad-1",
+        "tenant_id": "tenant-1",
+        "text": "test",
+    }
+    assert captured["explicit_approval"] is True
+
+
+def test_procurement_updates_accept_flat_mcp_arguments():
+    po = server._canonicalize_governed_action_arguments(
+        server.SERVICE_PURCHASE_ORDER_UPDATE,
+        {"resource_id": 1066, "status": 5},
+    )
+    poi = server._canonicalize_governed_action_arguments(
+        server.SERVICE_PURCHASE_ORDER_ITEM_UPDATE,
+        {"resource_id": 83, "ticketID": 134783, "chargeID": 1424},
+    )
+    charge = server._canonicalize_governed_action_arguments(
+        server.SERVICE_TICKET_CHARGE_UPDATE,
+        {"resource_id": 1424, "ticket_id": 134783, "status": 5},
+    )
+
+    assert po == {"payload": {"id": 1066, "status": 5}}
+    assert poi == {"payload": {"id": 83, "ticketID": 134783, "chargeID": 1424}}
+    assert charge == {"ticketID": 134783, "payload": {"id": 1424, "status": 5}}
+
+
 def test_generic_execution_rejects_unexposed_capability(monkeypatch):
     monkeypatch.setattr(
         server,
@@ -1205,3 +1260,49 @@ def test_ticket_activity_report_rejects_unbounded_or_naive_windows():
         "2026-09-29T03:00:00+00:00",
     )
     assert too_large["status"] == "rejected"
+
+
+def test_status_surfaces_upstream_approved_production_commitments(monkeypatch, tmp_path):
+    state = tmp_path / 'todo-release-state.json'
+    state.write_text(
+        json.dumps(
+            {
+                'updated_at': '2026-10-06T19:00:00+00:00',
+                'items': {
+                    'TODO-OPS-001': {
+                        'issue_number': 951,
+                        'phase': 'development_blocked',
+                        'reason': 'source context blocker',
+                    },
+                    'TODO-OPS-007': {
+                        'issue_number': 954,
+                        'phase': 'waiting_development_merge',
+                        'reason': '',
+                    },
+                },
+                'summary': {
+                    'approved_commitment_count': 2,
+                    'outstanding_count': 2,
+                    'blocked_count': 1,
+                    'upstream_pending_count': 2,
+                    'release_pending_count': 0,
+                    'release_queue_empty_but_upstream_pending': True,
+                    'phases': {
+                        'development_blocked': 1,
+                        'waiting_development_merge': 1,
+                    },
+                },
+            }
+        ),
+        encoding='utf-8',
+    )
+    monkeypatch.setenv('JASON_TODO_RELEASE_STATE', str(state))
+    monkeypatch.setattr(server, '_active_action_capabilities', lambda: [])
+    monkeypatch.setattr(server, '_autonomous_ticket_work_snapshot', lambda: {'status': 'succeeded'})
+
+    result = server.jason_mcp_status()
+    commitments = result['production_commitments']
+    assert commitments['outstanding_count'] == 2
+    assert commitments['blocked_count'] == 1
+    assert commitments['release_queue_empty_but_upstream_pending'] is True
+    assert [item['todo_id'] for item in commitments['items']] == ['TODO-OPS-001', 'TODO-OPS-007']

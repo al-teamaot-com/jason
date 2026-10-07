@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import subprocess
+import time
 from typing import Any
 
 
@@ -59,27 +60,59 @@ def docker_field(container: str, template: str) -> str:
     return run("docker", "inspect", container, "--format", template)
 
 
-def collect_production(revision: str) -> dict[str, Any]:
+def production_alignment_probe(revision: str) -> dict[str, str]:
     runtime_revision = docker_field(
         "jason-runtime", '{{index .Config.Labels "com.teamaot.jason.source_revision"}}'
     )
     runtime_health = docker_field(
         "jason-runtime", "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}"
     )
-    runtime_restarts = docker_field("jason-runtime", "{{.RestartCount}}")
     mcp_revision = docker_field(
         "jason-mcp-pilot", '{{index .Config.Labels "com.teamaot.jason.source_revision"}}'
     )
     mcp_state = docker_field("jason-mcp-pilot", "{{.State.Status}}")
-    mcp_restart_policy = docker_field("jason-mcp-pilot", "{{.HostConfig.RestartPolicy.Name}}")
     current_release = str(Path("/opt/jason/current").resolve())
-
     if runtime_revision != revision or runtime_health != "healthy":
         raise RuntimeError("runtime is not healthy on requested revision")
     if mcp_revision != revision or mcp_state != "running":
         raise RuntimeError("MCP is not running on requested revision")
     if Path(current_release).name != revision:
         raise RuntimeError("/opt/jason/current is not aligned to requested revision")
+    return {
+        "runtime_revision": runtime_revision,
+        "runtime_health": runtime_health,
+        "mcp_revision": mcp_revision,
+        "mcp_state": mcp_state,
+        "current_release": current_release,
+    }
+
+
+def wait_for_production_alignment(
+    revision: str,
+    *,
+    attempts: int = 15,
+    interval_seconds: float = 2.0,
+) -> dict[str, str]:
+    last_error = "production alignment unavailable"
+    for attempt in range(max(1, attempts)):
+        try:
+            return production_alignment_probe(revision)
+        except (RuntimeError, subprocess.CalledProcessError) as exc:
+            last_error = str(exc)
+            if attempt + 1 < max(1, attempts):
+                time.sleep(interval_seconds)
+    raise RuntimeError("production alignment did not stabilize: " + last_error)
+
+
+def collect_production(revision: str) -> dict[str, Any]:
+    alignment = wait_for_production_alignment(revision)
+    runtime_revision = alignment["runtime_revision"]
+    runtime_health = alignment["runtime_health"]
+    mcp_revision = alignment["mcp_revision"]
+    mcp_state = alignment["mcp_state"]
+    current_release = alignment["current_release"]
+    runtime_restarts = docker_field("jason-runtime", "{{.RestartCount}}")
+    mcp_restart_policy = docker_field("jason-mcp-pilot", "{{.HostConfig.RestartPolicy.Name}}")
 
     units: dict[str, str] = {}
     for unit in HOST_UNITS:

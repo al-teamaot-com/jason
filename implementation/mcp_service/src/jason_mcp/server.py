@@ -70,11 +70,24 @@ from jason_runtime.autonomy_execution_pilot import (
 )
 from orchestrator.teams_identity_binding import MicrosoftIdentityBinding
 from connectors.datto_rmm.site_variables import sanitize_site_variables_for_principal
+from connectors.core.contracts import ConnectorContext
+from connectors.core.openbao_secrets import OpenBaoSecretResolver
 from connectors.dnsfilter.mcp_oauth import (
     DNSFILTER_MCP_OAUTH_DB_DEFAULT,
     DnsFilterMcpOAuthError,
     DnsFilterMcpOAuthStore,
     complete_dnsfilter_oauth,
+)
+from connectors.quickbooks.connector import (
+    QUICKBOOKS_LOGICAL_SECRET,
+    QUICKBOOKS_PRODUCTION_LOGICAL_SECRET,
+)
+from connectors.quickbooks.oauth import (
+    QUICKBOOKS_OAUTH_DB_DEFAULT,
+    QUICKBOOKS_PRODUCTION_OAUTH_DB_DEFAULT,
+    QuickBooksOAuthError,
+    QuickBooksOAuthStore,
+    complete_quickbooks_oauth,
 )
 from connectors.datto_edr.threat_correlation import (
     AmbiguousThreatCorrelationError,
@@ -92,6 +105,7 @@ from orchestrator.provider_health_canary_policy import (
     PROVIDER_HEALTH_CANARY_CAPABILITIES,
     PROVIDER_HEALTH_CANARY_POLICY_ID,
     PROVIDER_HEALTH_CANARY_PRINCIPAL,
+    expected_canary_client_id,
 )
 from orchestrator.provider_read_capability_catalog import (
     SERVICE_COMPANY_READ,
@@ -106,7 +120,10 @@ from jason_runtime.autotask_internal_note import (
     autotask_internal_note_mcp_surface_enabled,
 )
 from orchestrator.provider_mutation_capability_catalog import (
+    SERVICE_PURCHASE_ORDER_ITEM_UPDATE,
+    SERVICE_PURCHASE_ORDER_UPDATE,
     SERVICE_TICKET_ATTACHMENT_CREATE,
+    SERVICE_TICKET_CHARGE_UPDATE,
 )
 from jason_runtime.composition import RuntimeSettings, build_runtime_application
 from jason_runtime.resolution_memory_runtime import (
@@ -167,6 +184,45 @@ JASON_DNSFILTER_MCP_OAUTH_DB = Path(
     os.environ.get(
         "JASON_DNSFILTER_MCP_OAUTH_DB",
         str(DNSFILTER_MCP_OAUTH_DB_DEFAULT),
+    )
+)
+JASON_QUICKBOOKS_DEVELOPMENT_OAUTH_DB = Path(
+    os.environ.get(
+        "JASON_QUICKBOOKS_DEVELOPMENT_OAUTH_DB",
+        os.environ.get(
+            "JASON_QUICKBOOKS_OAUTH_DB",
+            str(QUICKBOOKS_OAUTH_DB_DEFAULT),
+        ),
+    )
+)
+JASON_QUICKBOOKS_PRODUCTION_OAUTH_DB = Path(
+    os.environ.get(
+        "JASON_QUICKBOOKS_PRODUCTION_OAUTH_DB",
+        str(QUICKBOOKS_PRODUCTION_OAUTH_DB_DEFAULT),
+    )
+)
+JASON_QUICKBOOKS_DEVELOPMENT_OPENBAO_ROLE_ID_PATH = Path(
+    os.environ.get(
+        "JASON_QUICKBOOKS_DEVELOPMENT_OPENBAO_ROLE_ID_PATH",
+        "/run/jason-secrets/openbao/quickbooks-development/role_id",
+    )
+)
+JASON_QUICKBOOKS_DEVELOPMENT_OPENBAO_SECRET_ID_PATH = Path(
+    os.environ.get(
+        "JASON_QUICKBOOKS_DEVELOPMENT_OPENBAO_SECRET_ID_PATH",
+        "/run/jason-secrets/openbao/quickbooks-development/secret_id",
+    )
+)
+JASON_QUICKBOOKS_PRODUCTION_OPENBAO_ROLE_ID_PATH = Path(
+    os.environ.get(
+        "JASON_QUICKBOOKS_PRODUCTION_OPENBAO_ROLE_ID_PATH",
+        "/run/jason-secrets/openbao/quickbooks-production/role_id",
+    )
+)
+JASON_QUICKBOOKS_PRODUCTION_OPENBAO_SECRET_ID_PATH = Path(
+    os.environ.get(
+        "JASON_QUICKBOOKS_PRODUCTION_OPENBAO_SECRET_ID_PATH",
+        "/run/jason-secrets/openbao/quickbooks-production/secret_id",
     )
 )
 
@@ -423,6 +479,7 @@ _AUTONOMOUS_TICKET_WORKER_READ_GRANTS = (
 _AUTONOMOUS_TICKET_WORKER_ACTION_GRANTS = (
     "automation.component.execute",
     "service.ticket.note.create",
+    "service.ticket.note.update",
     "service.ticket.update",
 )
 _AUTONOMOUS_TICKET_WORKER_REQUIRED_GRANTS = (
@@ -1139,7 +1196,7 @@ def _internal_note_arguments(
         "ticketID": durable_ticket_id,
         "description": description,
         "noteType": 3,
-        "publish": 1,
+        "publish": 2,
     }
 
     payload["title"] = normalized_title
@@ -1853,7 +1910,10 @@ def _project_action_result(
             result["verified_fields"] = [str(value) for value in fields[:20]]
         return result
 
-    if capability_name == "service.ticket.note.create":
+    if capability_name in {
+        "service.ticket.note.create",
+        "service.ticket.note.update",
+    }:
         verification = data.get("jasonVerification")
 
         if not isinstance(verification, Mapping):
@@ -3265,6 +3325,21 @@ def _canonicalize_governed_action_arguments(
             "data_base64": _base64.b64encode(decoded).decode("ascii"),
         }
 
+    if capability_name in {
+        SERVICE_PURCHASE_ORDER_UPDATE,
+        SERVICE_PURCHASE_ORDER_ITEM_UPDATE,
+        SERVICE_TICKET_CHARGE_UPDATE,
+    } and "payload" not in raw:
+        payload = dict(raw)
+        route = {}
+        if "resource_id" in payload and "id" not in payload:
+            payload["id"] = payload.pop("resource_id")
+        if capability_name == SERVICE_TICKET_CHARGE_UPDATE:
+            ticket_id = payload.pop("ticket_id", payload.pop("ticketID", None))
+            if ticket_id is not None:
+                route["ticketID"] = ticket_id
+        return {**route, "payload": payload}
+
     if capability_name == SERVICE_TICKET_NOTE_CREATE:
         if "payload" in raw:
             return raw
@@ -4081,7 +4156,7 @@ def _provider_health_canary_grant_ids(
             subject=PROVIDER_HEALTH_CANARY_PRINCIPAL,
             capability=capability,
             organization=organization,
-            client_id=None,
+            client_id=expected_canary_client_id(capability),
             permission=PermissionMode.OBSERVE,
             approval_required=False,
         )
@@ -4105,6 +4180,7 @@ def provider_health_canary_status() -> dict[str, Any]:
         grants = {
             grant.capability: {
                 "grant_id": grant.grant_id,
+                "client_id": grant.client_id,
                 "permission": grant.permission.value,
                 "approval_required": grant.approval_required,
                 "status": grant.status,
@@ -4155,11 +4231,12 @@ def approve_provider_health_canaries() -> dict[str, Any]:
         created = []
         for capability in sorted(PROVIDER_HEALTH_CANARY_CAPABILITIES):
             exact_capability = _exact_authority_capability(app, capability)
+            client_id = expected_canary_client_id(exact_capability)
             grant_id = _authority_grant_id(
                 subject=PROVIDER_HEALTH_CANARY_PRINCIPAL,
                 capability=exact_capability,
                 organization=organization,
-                client_id=None,
+                client_id=client_id,
                 permission=PermissionMode.OBSERVE,
                 approval_required=False,
             )
@@ -4168,7 +4245,7 @@ def approve_provider_health_canaries() -> dict[str, Any]:
                 subject_id=PROVIDER_HEALTH_CANARY_PRINCIPAL,
                 capability=exact_capability,
                 organization_id=organization,
-                client_id=None,
+                client_id=client_id,
                 permission=PermissionMode.OBSERVE,
                 approval_required=False,
                 status="active",
@@ -5612,6 +5689,78 @@ def retire_json_playbook(playbook_id: str) -> dict[str, Any]:
             registry.close()
 
 
+def _production_commitment_snapshot() -> dict[str, object]:
+    path = Path(
+        os.environ.get(
+            "JASON_TODO_RELEASE_STATE",
+            "/var/lib/jason/openclaw/support-repair/todo-release-state.json",
+        )
+    )
+    if not path.exists():
+        return {
+            "status": "unavailable",
+            "reason": "todo_release_state_missing",
+            "outstanding_count": 0,
+            "blocked_count": 0,
+            "upstream_pending_count": 0,
+            "release_pending_count": 0,
+            "release_queue_empty_but_upstream_pending": False,
+            "items": [],
+        }
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "status": "unavailable",
+            "reason": f"todo_release_state_invalid:{type(exc).__name__}",
+            "outstanding_count": 0,
+            "blocked_count": 0,
+            "upstream_pending_count": 0,
+            "release_pending_count": 0,
+            "release_queue_empty_but_upstream_pending": False,
+            "items": [],
+        }
+    items = payload.get("items") if isinstance(payload, Mapping) else {}
+    items = items if isinstance(items, Mapping) else {}
+    summary = payload.get("summary") if isinstance(payload, Mapping) else {}
+    summary = summary if isinstance(summary, Mapping) else {}
+    visible: list[dict[str, object]] = []
+    for todo_id, record in sorted(items.items()):
+        if not isinstance(record, Mapping):
+            continue
+        phase = str(record.get("phase") or "unknown")
+        if phase == "complete":
+            continue
+        visible.append({
+            "todo_id": str(todo_id),
+            "issue_number": record.get("issue_number"),
+            "phase": phase,
+            "reason": str(record.get("reason") or "")[:500],
+            "development_pr": record.get("development_pr"),
+            "release_id": record.get("release_id"),
+        })
+        if len(visible) >= 12:
+            break
+    return {
+        "status": "succeeded",
+        "updated_at": str(payload.get("updated_at") or ""),
+        "approved_commitment_count": int(summary.get("approved_commitment_count", len(items)) or 0),
+        "outstanding_count": int(summary.get("outstanding_count", len(visible)) or 0),
+        "blocked_count": int(summary.get("blocked_count", 0) or 0),
+        "upstream_pending_count": int(summary.get("upstream_pending_count", 0) or 0),
+        "release_pending_count": int(summary.get("release_pending_count", 0) or 0),
+        "release_queue_empty_but_upstream_pending": bool(
+            summary.get("release_queue_empty_but_upstream_pending", False)
+        ),
+        "phases": dict(summary.get("phases") or {}),
+        "items": visible,
+        "items_bounded": len(visible) < len([
+            value for value in items.values()
+            if isinstance(value, Mapping) and str(value.get("phase") or "") != "complete"
+        ]),
+    }
+
+
 @mcp.tool()
 def jason_mcp_status() -> dict[str, object]:
     """Return Jason MCP governed capability state."""
@@ -5648,6 +5797,7 @@ def jason_mcp_status() -> dict[str, object]:
             else None
         ),
         "autonomy_work": _autonomous_ticket_work_snapshot(),
+        "production_commitments": _production_commitment_snapshot(),
     }
 
 
@@ -6649,17 +6799,12 @@ def execute_governed_capability(
     # Carry current conversational approval inside the governed argument
     # envelope so approval does not depend on an out-of-band tool parameter.
     #
-    # This reserved value is consumed here and is never forwarded to Datto.
-    datto_explicit_approval = False
-
-    if capability_name == "automation.component.execute":
-        datto_explicit_approval = (
-            execution_arguments.pop(
-                "explicit_approval",
-                False,
-            )
-            is True
-        )
+    # This reserved control value is consumed by the MCP boundary and is never
+    # forwarded to providers. Keeping it out of provider arguments prevents
+    # otherwise-valid governed actions from failing schema/allowlist checks.
+    explicit_approval = (
+        execution_arguments.pop("explicit_approval", False) is True
+    )
 
     projected = _discoverable_capability(
         capability_name
@@ -6688,7 +6833,7 @@ def execute_governed_capability(
     return _governed_execute(
         capability_name=capability_name,
         arguments=execution_arguments,
-        explicit_approval=datto_explicit_approval,
+        explicit_approval=explicit_approval,
     )
 
 
@@ -7042,6 +7187,138 @@ transport_security = TransportSecuritySettings(
 )
 
 
+def _quickbooks_oauth_credentials(environment: str) -> Mapping[str, str]:
+    is_production = str(environment).strip().casefold() == "production"
+    resolver = OpenBaoSecretResolver(
+        base_url=os.environ.get("JASON_OPENBAO_URL", "http://openbao:8200"),
+        role_id_path=(
+            JASON_QUICKBOOKS_PRODUCTION_OPENBAO_ROLE_ID_PATH
+            if is_production
+            else JASON_QUICKBOOKS_DEVELOPMENT_OPENBAO_ROLE_ID_PATH
+        ),
+        secret_id_path=(
+            JASON_QUICKBOOKS_PRODUCTION_OPENBAO_SECRET_ID_PATH
+            if is_production
+            else JASON_QUICKBOOKS_DEVELOPMENT_OPENBAO_SECRET_ID_PATH
+        ),
+    )
+    logical_secret = (
+        QUICKBOOKS_PRODUCTION_LOGICAL_SECRET
+        if is_production
+        else QUICKBOOKS_LOGICAL_SECRET
+    )
+    return resolver.resolve(
+        logical_secret,
+        ConnectorContext(
+            correlation_id=f"quickbooks-{environment}-oauth-callback",
+            principal_id="svc-jason-mcp-oauth",
+            organization_id="aot",
+            client_id=None,
+            capability="quickbooks.oauth.complete",
+            mode="execute",
+        ),
+    )
+
+
+async def _complete_quickbooks_oauth_callback(
+    request: StarletteRequest,
+    *,
+    environment: str,
+):
+    """Complete one environment-bound Intuit OAuth callback without exposing tokens."""
+
+    error = str(request.query_params.get("error") or "").strip()
+    if error:
+        return JSONResponse(
+            {
+                "status": "error",
+                "message": "QuickBooks authorization was not completed.",
+            },
+            status_code=400,
+        )
+    code = str(request.query_params.get("code") or "").strip()
+    state = str(request.query_params.get("state") or "").strip()
+    realm_id = str(request.query_params.get("realmId") or "").strip()
+    if not code or not state or not realm_id:
+        return JSONResponse(
+            {
+                "status": "error",
+                "message": "QuickBooks OAuth callback is missing required parameters.",
+            },
+            status_code=400,
+        )
+    store_path = (
+        JASON_QUICKBOOKS_PRODUCTION_OAUTH_DB
+        if environment == "production"
+        else JASON_QUICKBOOKS_DEVELOPMENT_OAUTH_DB
+    )
+    try:
+        status = await asyncio.to_thread(
+            complete_quickbooks_oauth,
+            QuickBooksOAuthStore(
+                store_path,
+                require_encryption=(environment == "production"),
+            ),
+            credentials=_quickbooks_oauth_credentials(environment),
+            code=code,
+            state=state,
+            realm_id=realm_id,
+        )
+    except Exception as exc:
+        if isinstance(exc, QuickBooksOAuthError):
+            logger.warning(
+                "QuickBooks %s OAuth callback failed without token disclosure",
+                environment,
+            )
+        else:
+            logger.exception(
+                "QuickBooks %s OAuth callback failed without token disclosure",
+                environment,
+            )
+        return JSONResponse(
+            {
+                "status": "error",
+                "message": (
+                    "QuickBooks authorization could not be completed. "
+                    "Restart the governed connection flow."
+                ),
+            },
+            status_code=400,
+        )
+    if status.environment != environment:
+        logger.error(
+            "QuickBooks OAuth environment mismatch; refusing connection status"
+        )
+        return JSONResponse(
+            {
+                "status": "error",
+                "message": "QuickBooks OAuth environment mismatch.",
+            },
+            status_code=400,
+        )
+    return JSONResponse(
+        {
+            "status": "connected",
+            "provider": "quickbooks",
+            "connected": status.connected,
+            "environment": status.environment,
+            "realm_bound": bool(status.realm_id),
+        }
+    )
+
+
+async def quickbooks_oauth_callback(request: StarletteRequest):
+    return await _complete_quickbooks_oauth_callback(
+        request, environment="sandbox"
+    )
+
+
+async def quickbooks_production_oauth_callback(request: StarletteRequest):
+    return await _complete_quickbooks_oauth_callback(
+        request, environment="production"
+    )
+
+
 async def dnsfilter_oauth_callback(request: StarletteRequest):
     """Complete DNSFilter OAuth authorization-code + PKCE callback."""
 
@@ -7182,6 +7459,16 @@ app.add_route(
 app.add_route(
     "/oauth/dnsfilter/callback",
     dnsfilter_oauth_callback,
+    methods=["GET"],
+)
+app.add_route(
+    "/oauth/quickbooks/callback",
+    quickbooks_oauth_callback,
+    methods=["GET"],
+)
+app.add_route(
+    "/oauth/quickbooks/production/callback",
+    quickbooks_production_oauth_callback,
     methods=["GET"],
 )
 

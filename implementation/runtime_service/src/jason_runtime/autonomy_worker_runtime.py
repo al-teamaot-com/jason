@@ -103,8 +103,13 @@ from .gpt_insights import (
     classify_ticket as classify_gpt_insights_ticket,
     connection_summary as gpt_insights_connection_summary,
     material_fingerprint as gpt_insights_fingerprint,
-    note_title as gpt_insights_note_title,
     render_insight as render_gpt_insight,
+)
+from .managed_ticket_notes import (
+    GPT_INSIGHTS_TITLE,
+    exact_named_note,
+    managed_note_mutation,
+    render_activity_chunks,
 )
 
 
@@ -241,9 +246,21 @@ OFFLINE_AUGMENTATION_SCOPE = PlaybookScope(
 )
 GPT_INSIGHTS_SCOPE = PlaybookScope(
     playbook_id="gpt_insights_tech_assist",
-    playbook_version="0.1.0",
+    playbook_version="0.2.1",
     policy_id="playbook-autonomy:gpt_insights_tech_assist",
-    required_action_capabilities=("service.ticket.note.create",),
+    required_action_capabilities=(
+        "service.ticket.note.create",
+        "service.ticket.note.update",
+    ),
+)
+JASON_ACTIVITY_SCOPE = PlaybookScope(
+    playbook_id="jason_activity_log",
+    playbook_version="1.0.0",
+    policy_id="playbook-autonomy:jason_activity_log",
+    required_action_capabilities=(
+        "service.ticket.note.create",
+        "service.ticket.note.update",
+    ),
 )
 PLAYBOOK_SCOPES = {
     EDR_SCOPE.playbook_id: EDR_SCOPE,
@@ -258,6 +275,7 @@ PLAYBOOK_SCOPES = {
     IDLE_LOG_OFF_SCOPE.playbook_id: IDLE_LOG_OFF_SCOPE,
     OFFLINE_AUGMENTATION_SCOPE.playbook_id: OFFLINE_AUGMENTATION_SCOPE,
     GPT_INSIGHTS_SCOPE.playbook_id: GPT_INSIGHTS_SCOPE,
+    JASON_ACTIVITY_SCOPE.playbook_id: JASON_ACTIVITY_SCOPE,
 }
 
 HEALTH_COMPONENT_NAME = "Check Datto EDR/AV Status AOT Ver 12122025-1"
@@ -670,6 +688,15 @@ class SQLiteOperationalWorkStore:
             (int(ticket_id),),
         ).fetchone()
         return None if row is None else str(row["state"])
+
+    def ticket_activity(self, ticket_id: int) -> tuple[Mapping[str, Any], ...]:
+        rows = self._connection.execute(
+            "SELECT activity_id,phase,reason,occurred_at "
+            "FROM autonomy_ticket_activity WHERE ticket_id=? "
+            "ORDER BY activity_id",
+            (int(ticket_id),),
+        ).fetchall()
+        return tuple(dict(row) for row in rows)
 
     def last_note_fingerprint(
         self, ticket_id: int, playbook_id: str, note_title: str
@@ -1506,6 +1533,20 @@ class OperationalAutonomyMaintenance:
         by_id = {int(item.resource_id): item for item in candidates}
         self._reconcile_orphaned_waiting_device_rows(by_id)
 
+        # GPT Insights is a technician-assist augmentation for every eligible
+        # Help Desk I / New ticket. It is independent of remediation matching and
+        # never claims, moves, or otherwise changes the ticket. Recurring-source
+        # tickets are already excluded by the queue source before this point.
+        if self._scope_is_promoted(GPT_INSIGHTS_SCOPE):
+            for item in candidates[: self.max_candidate_evaluations_per_scan]:
+                try:
+                    self._maybe_write_gpt_insights(item)
+                except Exception as exc:
+                    self._audit_diagnostic(
+                        "gpt_insights.review.failed",
+                        {"ticket_id": int(item.resource_id), "error_type": type(exc).__name__},
+                    )
+
         # Ticket augmentation is deliberately independent of queue ownership and
         # active-work capacity. It may add read-only context to a technician-owned
         # offline ticket, but it never claims, requeues, or changes ticket status.
@@ -1999,13 +2040,6 @@ class OperationalAutonomyMaintenance:
                 continue
             scope = self._match_scope(item.context)
             if scope is None:
-                try:
-                    self._maybe_write_gpt_insights(item)
-                except Exception as exc:
-                    self._audit_diagnostic(
-                        "gpt_insights.review.failed",
-                        {"ticket_id": ticket_id, "error_type": type(exc).__name__},
-                    )
                 unsupported += 1
                 classifications[ticket_id] = (
                     "unsupported_capability", "no_applicable_promoted_playbook",
@@ -2147,6 +2181,26 @@ class OperationalAutonomyMaintenance:
                 candidate.source_version,
                 True,
             )
+
+        # Keep one readable Jason Activity work log per ticket. The durable
+        # local activity ledger is authoritative; unchanged consecutive state is
+        # suppressed and Autotask notes are updated only through the Jason-owned
+        # managed-note boundary.
+        if self._scope_is_promoted(JASON_ACTIVITY_SCOPE):
+            for item in candidates:
+                work = self.store.get(int(item.resource_id))
+                if work is None:
+                    continue
+                try:
+                    self._maybe_sync_jason_activity(work)
+                except Exception as exc:
+                    self._audit_diagnostic(
+                        "jason_activity.sync.failed",
+                        {
+                            "ticket_id": work.ticket_id,
+                            "error_type": type(exc).__name__,
+                        },
+                    )
 
         # Derive coverage counts from the final current classifications so
         # telemetry includes existing active/waiting/handoff rows as well as new
@@ -6796,9 +6850,48 @@ class OperationalAutonomyMaintenance:
                 "human-review handoff readback did not verify queue and status"
             )
 
+    def _maybe_sync_jason_activity(self, work: OperationalWork) -> None:
+        rows = self.store.ticket_activity(work.ticket_id)
+        chunks = render_activity_chunks(rows)
+        if not chunks:
+            return
+        notes = self._read_data(
+            "service.ticket.notes.search",
+            {"ticket_id": work.ticket_id},
+        ).get("items")
+        notes = notes if isinstance(notes, list) else []
+        for title, body in chunks:
+            existing = exact_named_note(notes, title=title)
+            if existing is not None and str(existing.get("description") or "") == body:
+                continue
+            mutation = managed_note_mutation(
+                ticket_id=work.ticket_id,
+                title=title,
+                body=body,
+                notes=notes,
+            )
+            self.actions.execute(
+                JASON_ACTIVITY_SCOPE,
+                mutation.capability,
+                {"payload": dict(mutation.payload)},
+            )
+            if existing is None:
+                notes.append(
+                    {
+                        "id": -1,
+                        "title": title,
+                        "description": body,
+                    }
+                )
+
     def _maybe_write_gpt_insights(self, candidate) -> None:
-        """Add one evidence-first technician-assist note for unsupported Help Desk work."""
+        """Maintain one evidence-first technician-assist note for eligible Help Desk I/New work."""
         if str(candidate.source_queue).strip().casefold() != "help desk i":
+            return
+        source_status = str(
+            candidate.context.get("_jason_source_status_label") or ""
+        ).strip().casefold()
+        if source_status != "new":
             return
         if not self._scope_is_promoted(GPT_INSIGHTS_SCOPE):
             return
@@ -6811,10 +6904,8 @@ class OperationalAutonomyMaintenance:
 
         notes = self._read_data("service.ticket.notes.search", {"ticket_id": ticket_id}).get("items")
         notes = notes if isinstance(notes, list) else []
-        has_base = any(
-            isinstance(note, Mapping) and str(note.get("title") or "").strip().casefold() == "gpt insights"
-            for note in notes
-        )
+        base_note = exact_named_note(notes, title=GPT_INSIGHTS_TITLE)
+        has_base = base_note is not None
 
         company_id = self._company_id(context.get("companyID"))
         device_name = None
@@ -6909,18 +7000,17 @@ class OperationalAutonomyMaintenance:
         if prior_fingerprint == fingerprint:
             return
 
-        update = has_base
         body = render_gpt_insight(evidence)
+        mutation = managed_note_mutation(
+            ticket_id=ticket_id,
+            title=GPT_INSIGHTS_TITLE,
+            body=body,
+            notes=notes,
+        )
         self.actions.execute(
             GPT_INSIGHTS_SCOPE,
-            "service.ticket.note.create",
-            {"payload": {
-                "ticketID": ticket_id,
-                "title": gpt_insights_note_title(update=update),
-                "description": body,
-                "noteType": 3,
-                "publish": 2,
-            }},
+            mutation.capability,
+            {"payload": dict(mutation.payload)},
         )
         self.store.remember_augmentation_state(
             ticket_id=ticket_id, augmentation_id=GPT_INSIGHTS_AUGMENTATION_ID,
@@ -6929,7 +7019,11 @@ class OperationalAutonomyMaintenance:
         )
         self._audit_diagnostic(
             "gpt_insights.note.created",
-            {"ticket_id": ticket_id, "update": update, "category": category},
+            {
+                "ticket_id": ticket_id,
+                "update": has_base,
+                "category": category,
+            },
         )
 
     def _assigned_new_ticket_is_unworked(self, candidate) -> bool:

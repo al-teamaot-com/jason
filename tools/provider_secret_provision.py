@@ -240,6 +240,42 @@ PROVIDERS: dict[str, dict[str, object]] = {
         "credential_dir_mode": 0o750,
         "credential_file_mode": 0o640,
     },
+    "quickbooks_development": {
+        "logical_name": "quickbooks.oauth_client",
+        "secret_path": "secret/data/connectors/quickbooks/development/oauth-client",
+        "fields": ("client_id", "client_secret"),
+        "required_fields": ("client_id", "client_secret"),
+        "policy_name": "jason-quickbooks-development-oauth-client-read",
+        "role_name": "jason-quickbooks-development-oauth-client-read",
+        "connector_identity": "quickbooks-development-oauth-client",
+        "environment": "development",
+        "credential_dir": Path(
+            "/var/lib/jason/runtime-secrets/openbao/"
+            "quickbooks-development-oauth-client-approle"
+        ),
+        "credential_uid": 0,
+        "credential_gid": 1000,
+        "credential_dir_mode": 0o750,
+        "credential_file_mode": 0o640,
+    },
+    "quickbooks_production": {
+        "logical_name": "quickbooks.production.oauth_client",
+        "secret_path": "secret/data/connectors/quickbooks/production/oauth-client",
+        "fields": ("client_id", "client_secret", "token_key_b64"),
+        "required_fields": ("client_id", "client_secret", "token_key_b64"),
+        "policy_name": "jason-quickbooks-production-oauth-client-read",
+        "role_name": "jason-quickbooks-production-oauth-client-read",
+        "connector_identity": "quickbooks-production-oauth-client",
+        "environment": "production",
+        "credential_dir": Path(
+            "/var/lib/jason/runtime-secrets/openbao/"
+            "quickbooks-production-oauth-client-approle"
+        ),
+        "credential_uid": 0,
+        "credential_gid": 1000,
+        "credential_dir_mode": 0o750,
+        "credential_file_mode": 0o640,
+    },
 }
 
 DEFAULT_ADDRESS = "http://127.0.0.1:8200"
@@ -417,6 +453,7 @@ def configure_read_approle(
     policy_name = str(spec["policy_name"])
     role_name = str(spec["role_name"])
     credential_dir = Path(spec["credential_dir"])
+    environment = str(spec.get("environment", "production"))
 
     api_request(
         address,
@@ -478,7 +515,7 @@ def configure_read_approle(
             "metadata": json.dumps(
                 {
                     "connector": str(spec["connector_identity"]),
-                    "environment": "production",
+                    "environment": environment,
                 }
             ),
             "ttl": "2160h",
@@ -521,7 +558,7 @@ def configure_read_approle(
         "policy": policy_name,
         "role_name": role_name,
         "connector_identity": str(spec["connector_identity"]),
-        "environment": "production",
+        "environment": environment,
         "rotation_required": True,
         "secret_id_accessor": accessor,
         "secret_id_ttl_seconds": 7776000,

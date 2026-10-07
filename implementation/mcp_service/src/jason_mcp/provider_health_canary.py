@@ -59,6 +59,7 @@ def _run_one(spec: Mapping[str, Any]) -> dict[str, Any]:
     capability_name = str(spec["capability_name"])
     expected_provider = str(spec["provider_id"])
     arguments = dict(spec["arguments"])
+    client_id = str(spec.get("client_id") or "").strip() or None
     execution_id = f"exec_provider_canary_{uuid4().hex}"
     correlation_id = f"corr_provider_canary_{uuid4().hex}"
 
@@ -69,7 +70,7 @@ def _run_one(spec: Mapping[str, Any]) -> dict[str, Any]:
             correlation_id=correlation_id,
             principal_id=PROVIDER_HEALTH_CANARY_PRINCIPAL,
             organization_id="aot",
-            client_id=None,
+            client_id=client_id,
             capability=capability_name,
             requested_mode=PermissionMode.OBSERVE,
             authentication_assurance="workload_identity",
@@ -100,7 +101,7 @@ def _run_one(spec: Mapping[str, Any]) -> dict[str, Any]:
         correlation_id=correlation_id,
         principal_id=PROVIDER_HEALTH_CANARY_PRINCIPAL,
         organization_id="aot",
-        client_id=None,
+        client_id=client_id,
         capability_name=capability_name,
         capability_version=capability.version,
         requested_mode="deterministic",

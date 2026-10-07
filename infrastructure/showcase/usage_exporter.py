@@ -37,6 +37,9 @@ IDENTITY_BINDINGS_DB = Path(
 )
 
 WINDOWS = ("24h", "today", "month_to_date")
+EVENT_ROWID_SAFETY_MARGIN = max(0, int(os.environ.get("JASON_USAGE_EVENT_ROWID_SAFETY_MARGIN", "250000")))
+CACHE_TTL_SECONDS = max(0.0, float(os.environ.get("JASON_USAGE_CACHE_TTL_SECONDS", "20")))
+_cached_metrics: tuple[float, str] | None = None
 
 
 def _metric_escape(value: str) -> str:
@@ -192,41 +195,81 @@ def _load_binding_emails(path: Path) -> dict[str, str]:
     return result
 
 
-def _load_request_events(path: Path, organization_id: str) -> list[dict]:
+def _recent_rowid_floor(connection: sqlite3.Connection, cutoff_iso: str) -> int:
+    """Find a bounded rowid floor for the append-only orchestration ledger.
+
+    Normal production writes stamp occurred_at at insertion time. Binary-searching the
+    rowid space avoids a full scan of a multi-gigabyte ledger. A generous rowid safety
+    margin is retained and the final SQL still applies occurred_at >= cutoff, so the
+    optimization does not replace the timestamp correctness filter.
+    """
+    bounds = connection.execute(
+        "SELECT COALESCE(MIN(rowid), 0), COALESCE(MAX(rowid), 0) FROM orchestration_events"
+    ).fetchone()
+    if bounds is None:
+        return 1
+    low = int(bounds[0] or 0)
+    high = int(bounds[1] or 0)
+    if low <= 0 or high <= 0:
+        return 1
+
+    while low < high:
+        midpoint = (low + high) // 2
+        row = connection.execute(
+            "SELECT rowid, occurred_at FROM orchestration_events "
+            "WHERE rowid >= ? ORDER BY rowid LIMIT 1",
+            (midpoint,),
+        ).fetchone()
+        if row is None:
+            high = midpoint
+            continue
+        rowid = int(row[0])
+        occurred_at = str(row[1] or "")
+        if occurred_at < cutoff_iso:
+            low = rowid + 1
+        else:
+            high = rowid
+
+    return max(1, low - EVENT_ROWID_SAFETY_MARGIN)
+
+
+def _load_request_events(
+    path: Path,
+    organization_id: str,
+    cutoff: datetime,
+) -> list[dict]:
+    cutoff_utc = cutoff.astimezone(timezone.utc)
+    cutoff_iso = cutoff_utc.isoformat()
     connection = _connect_readonly(path)
     try:
+        rowid_floor = _recent_rowid_floor(connection, cutoff_iso)
         rows = connection.execute(
             """
-            SELECT execution_id, principal_id, capability_name, payload, occurred_at
+            SELECT execution_id, principal_id, capability_name,
+                   json_extract(payload, '$.requester_kind') AS requester_kind,
+                   occurred_at
             FROM orchestration_events
-            WHERE organization_id = ?
+            WHERE rowid >= ?
+              AND organization_id = ?
               AND event_type = 'orchestration.request.received'
-            ORDER BY occurred_at
+              AND occurred_at >= ?
+            ORDER BY rowid
             """,
-            (organization_id,),
+            (rowid_floor, organization_id, cutoff_iso),
         ).fetchall()
     finally:
         connection.close()
 
-    events: list[dict] = []
-    for row in rows:
-        requester_kind = ""
-        try:
-            payload = json.loads(str(row["payload"]))
-            if isinstance(payload, dict):
-                requester_kind = str(payload.get("requester_kind") or "").strip()
-        except (TypeError, ValueError, json.JSONDecodeError):
-            pass
-        events.append(
-            {
-                "execution_id": str(row["execution_id"] or ""),
-                "principal_id": str(row["principal_id"] or "").strip(),
-                "capability": str(row["capability_name"] or "").strip(),
-                "occurred_at": _parse_timestamp(row["occurred_at"]),
-                "requester_kind": requester_kind,
-            }
-        )
-    return events
+    return [
+        {
+            "execution_id": str(row["execution_id"] or ""),
+            "principal_id": str(row["principal_id"] or "").strip(),
+            "capability": str(row["capability_name"] or "").strip(),
+            "occurred_at": _parse_timestamp(row["occurred_at"]),
+            "requester_kind": str(row["requester_kind"] or "").strip(),
+        }
+        for row in rows
+    ]
 
 
 def render_metrics(now: datetime | None = None) -> str:
@@ -266,7 +309,11 @@ def render_metrics(now: datetime | None = None) -> str:
     request_events: list[dict] = []
     events_available = 0
     try:
-        request_events = _load_request_events(ORCHESTRATION_EVENTS_DB, ORGANIZATION_ID)
+        request_events = _load_request_events(
+            ORCHESTRATION_EVENTS_DB,
+            ORGANIZATION_ID,
+            starts["24h"],
+        )
         events_available = 1
     except (OSError, sqlite3.Error, ValueError):
         pass
@@ -488,13 +535,24 @@ def render_metrics(now: datetime | None = None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_cached_metrics() -> str:
+    global _cached_metrics
+    now = time.monotonic()
+    cached = _cached_metrics
+    if cached is not None and CACHE_TTL_SECONDS > 0 and now - cached[0] < CACHE_TTL_SECONDS:
+        return cached[1]
+    payload = render_metrics()
+    _cached_metrics = (time.monotonic(), payload)
+    return payload
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         if self.path not in ("/", "/metrics"):
             self.send_response(404)
             self.end_headers()
             return
-        payload = render_metrics().encode("utf-8")
+        payload = render_cached_metrics().encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
         self.send_header("Content-Length", str(len(payload)))

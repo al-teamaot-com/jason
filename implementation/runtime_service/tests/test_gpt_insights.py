@@ -34,3 +34,15 @@ def test_material_fingerprint_changes_when_new_device_evidence_arrives():
 def test_update_title_is_timestamped():
     title = note_title(update=True, now=datetime(2026, 10, 1, 13, 5, tzinfo=timezone.utc))
     assert title == "GPT Insights - Update 2026-10-01 13:05 UTC"
+
+
+def test_material_fingerprint_ignores_last_seen_timestamp_only_changes():
+    a = InsightEvidence(
+        category="network", ticket_number="T1", ticket_title="x",
+        device_name="PC-1", device_online=True, last_seen="2026-10-06T10:00:00Z"
+    )
+    b = InsightEvidence(
+        category="network", ticket_number="T1", ticket_title="x",
+        device_name="PC-1", device_online=True, last_seen="2026-10-06T10:05:00Z"
+    )
+    assert material_fingerprint(a) == material_fingerprint(b)

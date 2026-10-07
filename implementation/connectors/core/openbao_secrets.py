@@ -99,6 +99,12 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     "vulscan.readonly": (
         "secret/data/connectors/vulscan/production/read-only"
     ),
+    "quickbooks.oauth_client": (
+        "secret/data/connectors/quickbooks/development/oauth-client"
+    ),
+    "quickbooks.production.oauth_client": (
+        "secret/data/connectors/quickbooks/production/oauth-client"
+    ),
 }
 
 DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
@@ -143,6 +149,8 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
     "darkwebid.runtime": frozenset({"username", "password"}),
     "saas_alerts.readonly": frozenset({"api_key", "partner_id"}),
     "vulscan.readonly": frozenset({"api_key"}),
+    "quickbooks.oauth_client": frozenset({"client_id", "client_secret"}),
+    "quickbooks.production.oauth_client": frozenset({"client_id", "client_secret", "token_key_b64"}),
 }
 
 

@@ -8,22 +8,22 @@ This record is updated by Jason's post-success documentation reconciliation proc
 
 ## Latest validated source
 
-- Revision: `c4a0c71ed618ac974a3ad04aef3a5a688c421d2e`
+- Revision: `b8cf77f75b95ec9d62c399ac9f1f8a85f7221f16`
 - Status: `ci_passed`
 - Workflow: `Validate Jason`
-- Workflow run: `37007509371`
-- Observed: `2026-10-02T12:38:01+00:00`
+- Workflow run: `37646099902`
+- Observed: `2026-10-07T15:49:07+00:00`
 
 ## Latest production alignment
 
-- Revision: `d266912382e65e3061c43c87c88f254738ccb4ac`
+- Revision: `7e8f97cf1a69ce1ce2b1339c27f858a6a06c3ba9`
 - Status: `aligned_and_healthy`
 - Runtime: `healthy`; restarts `0`
 - MCP: `running`; restart policy `unless-stopped`
-- Host release: `/opt/jason/releases/d266912382e65e3061c43c87c88f254738ccb4ac`
+- Host release: `/opt/jason/releases/7e8f97cf1a69ce1ce2b1339c27f858a6a06c3ba9`
 - Required host units active: `10`
 - Failed systemd units: `0`
-- Observed: `2026-09-30T15:53:44+00:00`
+- Observed: `2026-10-07T13:53:48+00:00`
 
 ## Interpretation
 

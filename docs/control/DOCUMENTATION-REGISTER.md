@@ -51,6 +51,7 @@ Historical numbered documentation roots, the former top-level engineering `archi
 | Fundamentals discovery/reconstruction index | `docs/control/JASON-FUNDAMENTALS.md` | Discovery index only; it points to higher-authority owners and must not become competing authority. |
 | Reusable extension/construction discovery | `docs/control/EXTENSION-CONSTRUCTION-MAP.md` plus owning engineering/component guidance | Maps component classes to their governed construction path. |
 | Platform integrity and boundary enforcement | `docs/standards/J-405-Platform-Integrity-and-Boundary-Enforcement.md` subject to the Constitution | Governs prohibited bypasses, approved platform boundaries, provider/policy separation, exception handling, and production-readiness enforcement. |
+| Operational assurance and production convergence | `docs/standards/J-406-Operational-Assurance-and-Production-Convergence.md` subject to the Constitution | Governs objective-level proceed semantics, proactive architecture review, production convergence, drift detection, self-policing, and production-verified completion. |
 | Platform architecture | Canonical J-series records under `docs/architecture/` plus approved project ADRs | `docs/architecture/README.md` classifies supporting foundational architecture records. |
 | Detailed implementation-engineering architecture / reusable construction guidance | `docs/engineering/` | Subordinate to Constitution, project ADRs, canonical platform architecture. |
 | Canonical organizational models | `docs/models/` | Provider-neutral concepts. |

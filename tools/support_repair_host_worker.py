@@ -212,16 +212,84 @@ def load_self_heal_incidents(root: Path = Path('/var/lib/jason/openclaw/self-hea
         item_id = str(value.get('support_item') or '').strip().upper()
         if not re.fullmatch(r'SUPPORT-AUTO-[A-F0-9]{12}', item_id):
             continue
+        root_invariant = str(value.get('root_invariant') or '').strip()
+        occurrence_count = int(value.get('occurrence_count') or 1)
+        repair_level = int(value.get('repair_level') or 2)
+        repair_class = str(value.get('repair_class') or 'bounded_autonomous_repair').strip()
+        verification = value.get('verification_contract') if isinstance(value.get('verification_contract'), Mapping) else {}
+        required_checks = verification.get('required_checks') if isinstance(verification.get('required_checks'), list) else []
+        evidence = str(value.get('evidence') or '').strip()
+        if root_invariant:
+            evidence = (evidence + '; root invariant: ' + root_invariant).strip('; ')
+        evidence += f'; repair level: L{repair_level} {repair_class}; occurrence: {occurrence_count}'
+        acceptance = str(value.get('acceptance') or '').strip()
+        if required_checks:
+            acceptance += ' Verification contract: ' + '; '.join(str(item) for item in required_checks[:5]) + '.'
         incidents.append({
             'id': item_id,
             'priority': str(value.get('priority') or 'P1').upper(),
             'status': 'Open - self-heal incident',
             'title': str(value.get('title') or 'Jason self-heal incident')[:240],
-            'evidence': str(value.get('evidence') or '')[:1600],
-            'acceptance': str(value.get('acceptance') or '')[:1600],
+            'evidence': evidence[:1600],
+            'acceptance': acceptance[:1600],
         })
     incidents.sort(key=lambda item: (PRIORITY.get(item['priority'], 99), item['id']))
     return incidents
+
+
+def self_heal_post_production_verification(
+    repo: Path,
+    item_id: str,
+    root: Path = Path('/var/lib/jason/openclaw/self-heal'),
+) -> tuple[bool, str, dict[str, Any]]:
+    if not item_id.startswith('SUPPORT-AUTO-'):
+        return True, 'not a self-heal incident', {}
+
+    incident: dict[str, Any] | None = None
+    for path in sorted((root / 'incidents').glob('*.json')):
+        try:
+            value = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if isinstance(value, Mapping) and str(value.get('support_item') or '').upper() == item_id:
+            incident = dict(value)
+            break
+    if incident is None:
+        return False, 'self-heal incident evidence is missing', {}
+
+    family = str(incident.get('family') or '').strip()
+    if not family:
+        return True, 'legacy self-heal incident has no family verification contract', {'legacy': True}
+    verification = incident.get('verification_contract') if isinstance(incident.get('verification_contract'), Mapping) else {}
+    related = verification.get('related_families_must_be_healthy') if isinstance(verification.get('related_families_must_be_healthy'), list) else [family]
+
+    code = (
+        "import json; from pathlib import Path; "
+        "import jason_self_heal_watchdog as w; "
+        "from issue_resolution_engine import failure_family; "
+        f"failures,_=w.detect(Path({str(root)!r})); "
+        "print(json.dumps({'failures':failures,'families':sorted(set(failure_family(x) for x in failures))}))"
+    )
+    try:
+        raw = run(
+            [
+                '/usr/bin/env',
+                f'PYTHONPATH={repo / "tools"}',
+                '/usr/bin/python3',
+                '-c',
+                code,
+            ],
+            cwd=repo,
+        )
+        observed = json.loads(raw)
+    except (WorkerError, ValueError, json.JSONDecodeError) as exc:
+        return False, f'post-production detector execution failed: {type(exc).__name__}', {}
+
+    families = {str(value) for value in observed.get('families', [])}
+    still_degraded = sorted(families.intersection(str(value) for value in related))
+    if still_degraded:
+        return False, 'related invariant families remain degraded: ' + ', '.join(still_degraded), dict(observed)
+    return True, 'original detector family and related invariants are healthy', dict(observed)
 
 
 def ensure_support_issue(repo: Path, item: Mapping[str, str]) -> None:
@@ -535,14 +603,67 @@ def safe_search(worktree: Path, terms: list[str], gate, policy: Mapping[str, Any
             break
 
     excerpts = []
+    expanded_terms = expanded_search_terms(terms)
     for path in paths:
         candidate = worktree / path
         try:
             text = candidate.read_text(encoding='utf-8')
         except UnicodeDecodeError:
             continue
-        excerpts.append({'path': path, 'content': text[:14000]})
+        excerpts.append({
+            'path': path,
+            'content': bounded_relevant_excerpt(text, expanded_terms, content_limit=14000),
+        })
     return excerpts
+
+
+def bounded_relevant_excerpt(
+    text: str,
+    terms: list[str],
+    *,
+    content_limit: int = 14000,
+) -> str:
+    """Return bounded file context that includes literal match neighborhoods.
+
+    Long implementation files previously contributed only their prefix, which could
+    omit the exact function a search term matched. Keep a small prefix for imports
+    and definitions, then add bounded windows around literal matches.
+    """
+    limit = max(1000, int(content_limit))
+    if len(text) <= limit:
+        return text
+
+    prefix_limit = min(2000, limit // 4)
+    chunks = [text[:prefix_limit]]
+    remaining = limit - len(chunks[0])
+    seen_ranges: list[tuple[int, int]] = []
+    lowered = text.casefold()
+
+    for raw in terms[:40]:
+        term = str(raw or '').strip()
+        if len(term) < 2:
+            continue
+        pos = lowered.find(term.casefold())
+        if pos < 0:
+            continue
+        half = min(3000, max(800, remaining // 2))
+        start = max(0, pos - half)
+        end = min(len(text), pos + len(term) + half)
+        if any(not (end <= a or start >= b) for a, b in seen_ranges):
+            continue
+        chunk = text[start:end]
+        if len(chunk) > remaining:
+            chunk = chunk[:remaining]
+            end = start + len(chunk)
+        if not chunk:
+            break
+        chunks.append(f'\n... excerpt near match {term!r} ...\n' + chunk)
+        seen_ranges.append((start, end))
+        remaining = limit - sum(len(value) for value in chunks)
+        if remaining < 800:
+            break
+
+    return ''.join(chunks)[:limit]
 
 
 def source_excerpts_for_paths(
@@ -635,6 +756,25 @@ def apply_edits(worktree: Path, edits: list[Mapping[str, Any]], gate, policy: Ma
     if len(touched) > int(policy.get('max_changed_files', 25)):
         raise WorkerError('proposed repair exceeds changed-file boundary')
     return touched
+
+
+def proposed_test_edits(
+    edits: list[Mapping[str, Any]],
+    test_paths: list[str],
+    gate,
+    policy: Mapping[str, Any],
+) -> list[str]:
+    declared = {str(path).strip() for path in test_paths if str(path).strip()}
+    changed_tests: list[str] = []
+    for edit in edits:
+        path = str(edit.get('path') or '').strip()
+        if not path or gate.path_denial_reason(path, dict(policy)):
+            continue
+        if gate.is_test_path(path, dict(policy)):
+            changed_tests.append(path)
+    if declared:
+        return [path for path in changed_tests if path in declared]
+    return changed_tests
 
 
 def validate_patch(worktree: Path, test_paths: list[str], gate, policy: Mapping[str, Any]) -> list[str]:
@@ -1161,6 +1301,17 @@ def main() -> int:
                     str(production.get('status') or '') == 'aligned_and_healthy'
                     and str(production.get('revision') or '') == merge_sha
                 ):
+                    detector_verified, detector_reason, detector_evidence = self_heal_post_production_verification(repo, item_id)
+                    record['detector_verification'] = detector_evidence
+                    if not detector_verified:
+                        record.update({
+                            'phase': 'diagnosing',
+                            'reason': 'post-production detector verification failed: ' + detector_reason,
+                            'reasoning_request_id': '',
+                            'acceptance_request_id': '',
+                            'updated_at': now(),
+                        })
+                        continue
                     rid = record.get('acceptance_request_id')
                     if not rid:
                         rid = queue_reasoning(
@@ -1172,6 +1323,9 @@ def main() -> int:
                                 'production': dict(production),
                                 'repair_pr_number': record.get('pr_number'),
                                 'ci_required_checks_passed': True,
+                                'self_heal_detector_verified': True,
+                                'self_heal_detector_reason': detector_reason,
+                                'self_heal_detector_evidence': detector_evidence,
                             },
                         )
                         record.update({
@@ -1261,8 +1415,49 @@ def main() -> int:
                 if result.get('blocked_reason'):
                     record.update({'phase': 'blocked', 'reason': str(result['blocked_reason']), 'updated_at': now()})
                     continue
-                apply_edits(worktree, list(result.get('edits') or []), gate, policy)
-                tests = validate_patch(worktree, list(result.get('test_paths') or []), gate, policy)
+                edits = list(result.get('edits') or [])
+                test_paths = list(result.get('test_paths') or [])
+                changed_tests = proposed_test_edits(edits, test_paths, gate, policy)
+                if not changed_tests:
+                    retries = int(record.get('proposal_retries', 0))
+                    if retries >= 2:
+                        record.update({
+                            'phase': 'blocked',
+                            'reason': 'repair proposal retry boundary exhausted without a changed regression test',
+                            'updated_at': now(),
+                        })
+                        continue
+                    context_paths = [
+                        str(edit.get('path') or '').strip()
+                        for edit in edits
+                        if str(edit.get('path') or '').strip()
+                    ] + [str(path) for path in test_paths]
+                    retry_excerpts = source_excerpts_for_paths(
+                        worktree, context_paths, gate, policy, limit=8, content_limit=14000
+                    )
+                    retry_rid = queue_reasoning(
+                        spool,
+                        kind='edit_plan',
+                        item=item,
+                        context={
+                            'validation_feedback': (
+                                'The previous proposal did not include an actual edit to a regression test. '
+                                'Return the smallest source repair plus at least one exact-text edit to a '
+                                'declared regression test path. Do not omit the test edit.'
+                            ),
+                            'source_excerpts': retry_excerpts,
+                        },
+                    )
+                    record.update({
+                        'phase': 'implementing',
+                        'reasoning_request_id': retry_rid,
+                        'proposal_retries': retries + 1,
+                        'reason': 're-prompted repair proposal for missing changed regression test',
+                        'updated_at': now(),
+                    })
+                    continue
+                apply_edits(worktree, edits, gate, policy)
+                tests = validate_patch(worktree, test_paths, gate, policy)
                 number = commit_and_pr(repo, worktree, item, tests[0])
                 record.update({
                     'phase': 'pr_validating',

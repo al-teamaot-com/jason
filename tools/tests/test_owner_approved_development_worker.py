@@ -98,8 +98,18 @@ def test_source_context_blocker_detects_missing_excerpt_context():
     assert module.source_context_blocker(
         'The provided excerpts are insufficient to form exact replacements; the incomplete repository context would require inventing unseen API surface.'
     )
+    assert module.source_context_blocker(
+        'Blocked: the repository excerpts do not include the specific implementation needed for an exact change.'
+    )
     assert not module.source_context_blocker('Owner approval is required for production deployment.')
     assert not module.source_context_blocker('Provider credential is unavailable.')
+
+
+def test_self_recoverable_blocker_includes_invalid_internal_repair_path():
+    assert module.self_recoverable_blocker(
+        'WorkerError: repair path does not exist: implementation/kernel/capabilities/retirement.py'
+    )
+    assert not module.self_recoverable_blocker('Provider credential is unavailable.')
 
 
 def test_context_only_search_plan_with_terms_is_actionable():
@@ -168,3 +178,82 @@ def test_source_history_is_sticky_across_context_expansion():
         'implementation/kernel/capabilities/service.py',
         'implementation/kernel/system_registry/contracts.py',
     ]
+
+
+def test_owner_approved_pr_body_enables_unattended_source_integration(monkeypatch, tmp_path):
+    monkeypatch.setattr(module, 'integration_coordination', lambda repo, changed: [])
+    monkeypatch.setattr(module.support, 'changed_files', lambda worktree: ['tools/example.py'])
+    monkeypatch.setattr(module.support, 'run', lambda *args, **kwargs: 'a' * 40)
+    body = module.pr_body(
+        tmp_path,
+        {
+            'issue_number': 42,
+            'title': 'Approved thing',
+            'approval_source': 'https://example.invalid/issues/42',
+            'approved_by': 'owner',
+        },
+        tmp_path,
+        ['tools/tests/test_example.py'],
+    )
+    assert '- Integration automation: enabled' in body
+    assert 'exact merged main SHA' in body
+    assert 'Production deployment authority: none' in body
+
+
+def test_self_recoverable_blocker_is_narrow():
+    assert module.self_recoverable_blocker(
+        'The supplied excerpts do not expose enough exact source context.'
+    )
+    assert module.self_recoverable_blocker('development reasoning failed: HTTP transport failed')
+    assert not module.self_recoverable_blocker('Owner approval required for a new provider permission.')
+    assert not module.self_recoverable_blocker('Microsoft admin consent is required.')
+
+
+def test_recycle_self_recoverable_blockers_preserves_real_external_blockers():
+    state = {
+        'items': {
+            'DEV-1': {
+                'phase': 'blocked',
+                'reason': 'The supplied excerpts are insufficient exact source context.',
+            },
+            'DEV-2': {
+                'phase': 'blocked',
+                'reason': 'Microsoft admin consent is required.',
+            },
+        }
+    }
+    module.recycle_self_recoverable_blockers(state, {'DEV-1', 'DEV-2'})
+    assert state['items']['DEV-1']['phase'] == 'diagnosing'
+    assert state['items']['DEV-1']['self_recovery_attempts'] == 1
+    assert state['items']['DEV-2']['phase'] == 'blocked'
+
+
+def test_owner_approved_issue_discovery_is_not_limited_to_newest_100(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_gh_json(args, *, cwd):
+        calls.append(list(args))
+        if args[:2] == ['repo', 'view']:
+            return {'nameWithOwner': 'example/jason'}
+        if args[:3] == ['issue', 'list', '--state']:
+            return [
+                {
+                    'number': 866,
+                    'title': 'Older approved item',
+                    'body': '- **Autonomous development:** owner-approved',
+                    'url': 'https://example.invalid/issues/866',
+                    'labels': [],
+                    'updatedAt': '2026-10-03T12:13:30Z',
+                }
+            ]
+        if args[:2] == ['api', 'repos/example/jason/issues/866']:
+            return {'author_association': 'OWNER', 'user': {'login': 'owner'}}
+        raise AssertionError(args)
+
+    monkeypatch.setattr(module.support, 'gh_json', fake_gh_json)
+    items = module.owner_approved_issues(tmp_path)
+
+    issue_list_call = next(call for call in calls if call[:2] == ['issue', 'list'])
+    limit_index = issue_list_call.index('--limit') + 1
+    assert int(issue_list_call[limit_index]) >= 1000
+    assert [item['issue_number'] for item in items] == [866]

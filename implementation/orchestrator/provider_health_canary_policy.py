@@ -36,6 +36,7 @@ PROVIDER_HEALTH_CANARY_SPECS = (
     {
         "provider_id": "microsoft_graph",
         "capability_name": "identity.user.search",
+        "client_id": "client-aot-internal",
         "arguments": {
             "display_name": PROVIDER_HEALTH_CANARY_SENTINEL,
             "page_size": 1,
@@ -55,6 +56,13 @@ def expected_canary_arguments(capability_name: str) -> Mapping[str, Any] | None:
     return None
 
 
+def expected_canary_client_id(capability_name: str) -> str | None:
+    for item in PROVIDER_HEALTH_CANARY_SPECS:
+        if item["capability_name"] == capability_name:
+            value = item.get("client_id")
+            return str(value) if value is not None else None
+    return None
+
 def is_provider_health_canary_request(
     *,
     request: OrchestrationRequest,
@@ -65,7 +73,7 @@ def is_provider_health_canary_request(
         expected is not None
         and request.principal_id == PROVIDER_HEALTH_CANARY_PRINCIPAL
         and request.organization_id == "aot"
-        and request.client_id is None
+        and request.client_id == expected_canary_client_id(capability_name)
         and request.requester_kind == "service"
         and request.permission_mode == "observe"
         and request.authority_allowed

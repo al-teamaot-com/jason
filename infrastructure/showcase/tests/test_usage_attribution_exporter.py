@@ -317,3 +317,51 @@ def test_orchestration_event_load_is_bounded_to_recent_required_types(tmp_path):
     assert "recent-unneeded" not in event_ids
     assert {"request-mcp", "connector-mcp", "request-service", "email-attempt"} <= event_ids
     assert {event["event_type"] for event in events} <= set(module.ORCHESTRATION_EVENT_TYPES)
+
+
+def test_recent_rowid_floor_preserves_safety_margin(tmp_path):
+    module = load_exporter()
+    path = tmp_path / "events-floor.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.execute("CREATE TABLE orchestration_events (occurred_at TEXT NOT NULL)")
+    for index in range(1, 101):
+        day = 1 if index <= 80 else 9
+        connection.execute(
+            "INSERT INTO orchestration_events(occurred_at) VALUES (?)",
+            (f"2026-09-{day:02d}T12:00:{index % 60:02d}+00:00",),
+        )
+    connection.commit()
+    module.EVENT_ROWID_SAFETY_MARGIN = 5
+    floor = module._recent_rowid_floor(connection, "2026-09-09T00:00:00+00:00")
+    connection.close()
+    assert floor == 76
+
+
+def test_render_cached_metrics_reuses_short_lived_snapshot(monkeypatch):
+    module = load_exporter()
+    module.CACHE_TTL_SECONDS = 20
+    module._cached_metrics = None
+    calls = []
+    times = iter([100.0, 100.1, 105.0])
+    monkeypatch.setattr(module.time, "monotonic", lambda: next(times))
+    monkeypatch.setattr(
+        module,
+        "render_metrics",
+        lambda: calls.append("render") or "snapshot\n",
+    )
+
+    assert module.render_cached_metrics() == "snapshot\n"
+    assert module.render_cached_metrics() == "snapshot\n"
+    assert calls == ["render"]
+
+
+def test_attribution_service_prewarms_metrics_before_ready():
+    unit = (
+        Path(__file__).resolve().parents[1]
+        / "systemd"
+        / "jason-usage-attribution-exporter.service"
+    ).read_text(encoding="utf-8")
+    assert "JASON_ATTRIBUTION_EVENT_ROWID_SAFETY_MARGIN=250000" in unit
+    assert "JASON_ATTRIBUTION_CACHE_TTL_SECONDS=20" in unit
+    assert "ExecStartPost=" not in unit
+    assert "http://127.0.0.1:9466/metrics" not in unit
