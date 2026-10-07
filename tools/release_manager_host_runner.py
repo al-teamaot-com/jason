@@ -9,6 +9,7 @@ deployment script. Release records are durable and evidence-gated.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -45,6 +46,66 @@ MUTATION_ENV_OVERRIDES = {
 class ReleaseManagerError(RuntimeError):
     pass
 
+
+class ReleaseManagerBusy(ReleaseManagerError):
+    pass
+
+
+def acquire_production_transaction_lock(
+    repo: Path,
+    state_root: Path,
+    record: dict[str, Any],
+):
+    policy = gate.load_json(repo / "config" / "release-manager-policy.json")
+    schedule = policy.get("schedule") if isinstance(policy, dict) else {}
+    schedule = schedule if isinstance(schedule, dict) else {}
+    serialized = bool(schedule.get("serialized_promotion", False))
+    maximum = int(schedule.get("max_concurrent_releases", 1) or 1)
+    if not serialized or maximum != 1:
+        raise ReleaseManagerError(
+            "production transaction lock requires serialized_promotion=true and "
+            "max_concurrent_releases=1"
+        )
+
+    state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = state_root / "production-transaction.lock"
+    handle = path.open("a+", encoding="utf-8")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        handle.seek(0)
+        owner = handle.read().strip()[:500]
+        handle.close()
+        detail = f"; active transaction: {owner}" if owner else ""
+        raise ReleaseManagerBusy(
+            "another production release transaction is already active" + detail
+        ) from exc
+
+    metadata = {
+        "release_id": str(record.get("release_id") or ""),
+        "candidate_sha": str(
+            (record.get("release_candidate") or {}).get("candidate_sha") or ""
+        ),
+        "pid": os.getpid(),
+        "acquired_at": now(),
+    }
+    handle.seek(0)
+    handle.truncate()
+    handle.write(json.dumps(metadata, sort_keys=True) + "\n")
+    handle.flush()
+    os.fsync(handle.fileno())
+    return handle
+
+
+def release_production_transaction_lock(handle) -> None:
+    try:
+        handle.seek(0)
+        handle.truncate()
+        handle.flush()
+        os.fsync(handle.fileno())
+    finally:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
 
 
 def now() -> str:
@@ -1026,7 +1087,7 @@ def publish_production_closeout(repo: Path, candidate_sha: str) -> dict[str, str
     }
 
 
-def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
+def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
     if record.get("state") != "production_eligible":
         raise ReleaseManagerError("release is not Production Eligible")
     candidate = record["release_candidate"]
@@ -1227,6 +1288,14 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
         remove_worktree(repo, deploy_worktree)
 
 
+def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
+    lock = acquire_production_transaction_lock(repo, state_root, record)
+    try:
+        return _deploy_production_locked(repo, state_root, record)
+    finally:
+        release_production_transaction_lock(lock)
+
+
 def prepare_release(
     repo: Path,
     state_root: Path,
@@ -1297,7 +1366,10 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
             continue
         result = production_gate_result(repo, record)
         if result.get("allowed") is True:
-            deploy_production(repo, state_root, record)
+            try:
+                deploy_production(repo, state_root, record)
+            except ReleaseManagerBusy:
+                return False
             return True
         reasons = [str(value) for value in result.get("reasons") or []]
         owner_only = bool(result.get("protected_core")) and reasons and all(
