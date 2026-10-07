@@ -7,7 +7,7 @@ if [ "$#" -ne 1 ]; then
 fi
 
 SOURCE_REVISION="$1"
-REPO_ROOT="/home/al/projects/jason"
+REPO_ROOT="/home/al/.local/lib/jason/engineering-source-repo"
 RELEASE_ROOT="/opt/jason/releases"
 RELEASE_DIR="$RELEASE_ROOT/$SOURCE_REVISION"
 CURRENT_LINK="/opt/jason/current"

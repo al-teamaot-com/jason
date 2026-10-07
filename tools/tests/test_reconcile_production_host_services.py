@@ -149,3 +149,10 @@ def test_documentation_reconciliation_namespace_uses_stable_parent_path() -> Non
     assert "JASON_DOCUMENTATION_REPO_ROOT=/home/al/.local/lib/jason/documentation-source-repo" in text
     assert "ReadWritePaths=/home/al/jason-worktrees /home/al/.local/lib/jason" in text
     assert "ReadWritePaths=/home/al/jason-worktrees /home/al/.local/lib/jason/documentation-source-repo" not in text
+
+
+def test_production_reconciliation_has_no_developer_checkout_dependency() -> None:
+    text = (REPO_ROOT / "tools" / "reconcile_production_host_services.sh").read_text(encoding="utf-8")
+    assert 'REPO_ROOT="/home/al/.local/lib/jason/engineering-source-repo"' in text
+    assert 'JASON_DOCUMENTATION_REPO_ROOT="$DOCUMENTATION_SOURCE_REPO"' in text
+    assert "/home/al/projects/jason" not in text
