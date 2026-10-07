@@ -4,6 +4,8 @@ import argparse, hashlib, json
 from pathlib import Path
 
 REQUIRED_METRICS=[
+ {"id":"operations-configuration-up","query":"up{job=\"jason-operations-configuration\"} == 1"},
+ {"id":"control-panel-migration-source","query":"count(jason_release_migration_info) > 0"},
  {"id":"usage-attribution-up","query":"up{job=\"jason-usage-attribution\"} == 1"},
  {"id":"openai-usage-source","query":"jason_openai_org_usage_source_available == 1"},
  {"id":"openai-cost-source","query":"jason_openai_org_cost_source_available == 1"},
