@@ -17,6 +17,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -166,8 +167,19 @@ def reasoning_response(spool: Path, rid: str) -> Mapping[str, Any] | None:
 
 
 def gh_json(args: list[str], *, cwd: Path) -> Any:
-    raw = run(['gh', *args], cwd=cwd)
-    return json.loads(raw) if raw else None
+    last_error: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            raw = run(['gh', *args], cwd=cwd)
+            return json.loads(raw) if raw else None
+        except (WorkerError, json.JSONDecodeError) as exc:
+            last_error = exc
+            if attempt < 3:
+                time.sleep(1.0)
+    raise WorkerError(
+        'GitHub JSON command failed after 3 bounded attempts: '
+        + str(last_error or 'unknown error')[:500]
+    ) from last_error
 
 
 def open_prs(repo: Path) -> list[dict[str, Any]]:
