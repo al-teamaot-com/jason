@@ -25,6 +25,7 @@
   },
   "production": {
     "serialized_promotion": true,
+    "health_evidence_max_age_minutes": 30,
     "human_approval_required": false,
     "autonomous_repair": {
       "classification_enabled": true,
