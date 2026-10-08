@@ -350,7 +350,17 @@ Typical reasons:
 - pending approval;
 - scheduled retry/recheck.
 
-Approval waiting is a first-class waiting subtype. An approval-pending playbook instance should retain ownership, release its active-work slot, persist the exact proposed action (target, capability/component, bounded arguments, expected verification, and approval identity when granted), and resume only when that exact action receives valid authority. Approval of one target/action must never authorize another.
+Approval waiting is a first-class waiting subtype. An approval-pending playbook instance should retain ownership, release its active-work slot, persist the exact proposed action (playbook/version/policy, ticket/case, client boundary, target, capability/component, bounded arguments, disruption classification, expected verification, and proposal fingerprint), and resume only when that exact action receives valid authority. Approval of one target/action must never authorize another.
+
+The shared approval-resume bridge must:
+- create at most one pending approval request for one unchanged proposal fingerprint;
+- bind the authenticated approver decision to that exact fingerprint, target, action, arguments, and playbook version;
+- reject changed target/arguments, replay, expired approval, or approval for a different proposal;
+- treat denial or requested changes as terminal for the unchanged proposal and route to a clear handoff/review state;
+- resume from the persisted post-diagnosis state without repeating completed diagnostics;
+- execute through the Central Orchestrator using its exact intent and execution-plan binding rather than a provider bypass;
+- preserve exactly-once provider behavior through the governed execution ledger/idempotency contract;
+- persist the resulting execution/correlation identity and continue into authoritative verification.
 
 When entering waiting, persist:
 

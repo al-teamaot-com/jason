@@ -177,16 +177,20 @@ class Actions:
         self.calls = []
         self.jobs = 0
 
-    def execute(self, scope, capability, arguments):
+    def execute(self, scope, capability, arguments, *, per_run_approval=None):
         self.calls.append((scope.playbook_id, capability, arguments))
         if capability == "automation.component.execute":
             self.jobs += 1
-            return {
+            result = {
                 "data": {
                     "job_uid": f"job-{self.jobs}",
                     "job_status": "active",
                 }
             }
+            if per_run_approval is not None:
+                result["_jason_execution_id"] = f"exec-{self.jobs}"
+                result["_jason_correlation_id"] = f"corr-{self.jobs}"
+            return result
         if capability == "service.ticket.update":
             payload = arguments.get("payload") or {}
             verified = [key for key in payload if key != "id"]
@@ -4234,6 +4238,53 @@ def test_idle_logoff_monitor_failure_is_diagnostic_only(tmp_path: Path):
     store.close()
 
 
+class IdleApprovalBridge:
+    def __init__(self):
+        self.proposal = None
+        self.status = "pending"
+        self.consumed = None
+
+    def ensure_pending(self, proposal):
+        self.proposal = proposal
+        return SimpleNamespace(status=self.status, proposal=proposal)
+
+    def state_for_ticket(self, ticket_id):
+        if self.proposal is None or self.proposal.ticket_id != ticket_id:
+            return None
+        return SimpleNamespace(status=self.status, proposal=self.proposal)
+
+    def approve(self):
+        self.status = "approved"
+
+    def authorization_for(
+        self,
+        *,
+        ticket_id,
+        capability,
+        action_id,
+        target_id,
+        arguments,
+    ):
+        assert self.status == "approved"
+        assert self.proposal is not None
+        assert self.proposal.ticket_id == ticket_id
+        assert self.proposal.capability == capability
+        assert self.proposal.action_id == action_id
+        assert self.proposal.target_id == target_id
+        assert dict(self.proposal.arguments) == dict(arguments)
+        return SimpleNamespace(
+            approval_request_id="playaction-test",
+            approved_by="person-al",
+            proposal_fingerprint=self.proposal.fingerprint,
+        )
+
+    def mark_consumed(self, *, ticket_id, execution_id, correlation_id):
+        assert self.status == "approved"
+        self.status = "consumed"
+        self.consumed = (ticket_id, execution_id, correlation_id)
+        return SimpleNamespace(status="consumed", proposal=self.proposal)
+
+
 def test_idle_logoff_true_noncompliance_runs_exact_setter_and_waits_for_monitor_clear(tmp_path: Path):
     class IdleReads(Reads):
         def __init__(self):
@@ -4284,9 +4335,11 @@ def test_idle_logoff_true_noncompliance_runs_exact_setter_and_waits_for_monitor_
             return super().execute(capability, arguments)
 
     actions=Actions()
+    approval_bridge=IdleApprovalBridge()
+    idle_reads=IdleReads()
     store=SQLiteOperationalWorkStore(tmp_path/"worker.sqlite3")
     worker=OperationalAutonomyMaintenance(
-        queue_source=QueueSource(idle_logoff_candidate()),reads=IdleReads(),
+        queue_source=QueueSource(idle_logoff_candidate()),reads=idle_reads,
         actions=actions,store=store,
         promotion_store=PromotionStore(promoted=(
             "datto_edr_av","dns_agent_diagnostic","security_log_self_heal",
@@ -4294,12 +4347,22 @@ def test_idle_logoff_true_noncompliance_runs_exact_setter_and_waits_for_monitor_
             "low_disk_space","vulscan_missing_patch","disk_bad_block_event_7","idle_log_off")),
         max_active_work_items=2,interval_seconds=30,
         monotonic=iter((0.0,31.0,62.0,93.0)).__next__,
+        playbook_action_approvals=approval_bridge,
     )
 
     worker.tick()
-    assert store.get(141066).phase=="idle_log_off_repair_dispatch"
+    assert store.get(141066).phase=="approval_pending"
+    assert store.list_open()==()
+    assert approval_bridge.proposal is not None
+    assert approval_bridge.proposal.action_id=="Set Idle Log Off AOT Ver 02042026-1"
+    assert not [x for x in actions.calls if x[1]=="automation.component.execute"]
+
+    approval_bridge.approve()
     worker.tick()
     assert store.get(141066).phase=="idle_log_off_repair_wait"
+    assert approval_bridge.consumed == (141066, "exec-1", "corr-1")
+    assert idle_reads.current_alert_reads == 1
+
     worker.tick()
     assert store.get(141066).phase=="waiting_recheck:idle_log_off_verify_monitor"
     assert store.list_open()==()

@@ -57,6 +57,30 @@ class StandingPolicyAuthorization:
                 raise ValueError(f"{name} must be non-empty")
 
 
+@dataclass(frozen=True)
+class PerRunApprovalAuthorization:
+    approval_request_id: str
+    approved_by: str
+    proposal_fingerprint: str
+    playbook_id: str
+    playbook_version: str
+    policy_id: str
+
+    def __post_init__(self) -> None:
+        for name, value in {
+            "approval_request_id": self.approval_request_id,
+            "approved_by": self.approved_by,
+            "proposal_fingerprint": self.proposal_fingerprint,
+            "playbook_id": self.playbook_id,
+            "playbook_version": self.playbook_version,
+            "policy_id": self.policy_id,
+        }.items():
+            if not str(value).strip():
+                raise ValueError(f"{name} must be non-empty")
+        if len(self.proposal_fingerprint) != 64:
+            raise ValueError("proposal_fingerprint must be a SHA-256 digest")
+
+
 class AutonomousAuthorityError(PermissionError):
     pass
 
@@ -169,6 +193,7 @@ class AutonomousRequestFactory:
         arguments: Mapping[str, Any],
         client_id: str | None,
         standing_policy: StandingPolicyAuthorization | None = None,
+        per_run_approval: PerRunApprovalAuthorization | None = None,
         correlation_id: str | None = None,
     ) -> OrchestrationRequest:
         capability = self.capabilities.get_current(
@@ -197,20 +222,37 @@ class AutonomousRequestFactory:
         decision = initial
 
         if initial.outcome is AuthorityOutcome.APPROVAL_REQUIRED:
-            if standing_policy is None:
+            if standing_policy is not None and per_run_approval is not None:
                 raise AutonomousAuthorityError(
-                    "approval-required capability has no approved autonomous playbook policy"
+                    "approval-required execution cannot mix standing and per-run authority"
                 )
-            promotion = self.promotion_store.get(standing_policy.promotion_approval_id)
-            if promotion is None or not promotion.authorizes(
-                playbook_id=standing_policy.playbook_id,
-                playbook_version=standing_policy.playbook_version,
-                policy_id=standing_policy.policy_id,
-                capability=capability_name,
-            ):
+            if standing_policy is None and per_run_approval is None:
                 raise AutonomousAuthorityError(
-                    "playbook standing policy lacks exact durable owner promotion authority"
+                    "approval-required capability has no approved standing policy or per-run approval"
                 )
+            if standing_policy is not None:
+                promotion = self.promotion_store.get(standing_policy.promotion_approval_id)
+                if promotion is None or not promotion.authorizes(
+                    playbook_id=standing_policy.playbook_id,
+                    playbook_version=standing_policy.playbook_version,
+                    policy_id=standing_policy.policy_id,
+                    capability=capability_name,
+                ):
+                    raise AutonomousAuthorityError(
+                        "playbook standing policy lacks exact durable owner promotion authority"
+                    )
+                decided_by = (
+                    f"policy:{standing_policy.policy_id}:"
+                    f"{standing_policy.playbook_id}@{standing_policy.playbook_version}"
+                )
+            else:
+                assert per_run_approval is not None
+                decided_by = (
+                    f"per-run:{per_run_approval.approval_request_id}:"
+                    f"{per_run_approval.approved_by}:"
+                    f"{per_run_approval.proposal_fingerprint}"
+                )
+
             reservation = self.execution_ledger.reserve_approval(
                 principal_id=self.principal.principal_id,
                 organization_id=self.principal.organization_id,
@@ -232,10 +274,7 @@ class AutonomousRequestFactory:
                         client_id=client_id,
                         requested_by=self.principal.principal_id,
                         status="approved",
-                        decided_by=(
-                            f"policy:{standing_policy.policy_id}:"
-                            f"{standing_policy.playbook_id}@{standing_policy.playbook_version}"
-                        ),
+                        decided_by=decided_by,
                         decided_at=datetime.now(timezone.utc),
                         expires_at=reservation.expires_at,
                     )
@@ -266,7 +305,7 @@ class AutonomousRequestFactory:
 
         if capability.approval.required and not approval_present:
             raise AutonomousAuthorityError(
-                "capability requires approval and no exact standing-policy approval was created"
+                "capability requires approval and no exact governed approval was created"
             )
 
         policy_ids = ["autonomous-governance-v1"]
@@ -274,6 +313,18 @@ class AutonomousRequestFactory:
             policy_ids.append(standing_policy.policy_id)
             policy_ids.append(
                 f"playbook:{standing_policy.playbook_id}@{standing_policy.playbook_version}"
+            )
+        if per_run_approval is not None:
+            policy_ids.append(per_run_approval.policy_id)
+            policy_ids.append(
+                f"playbook:{per_run_approval.playbook_id}@"
+                f"{per_run_approval.playbook_version}"
+            )
+            policy_ids.append(
+                f"per-run-approval:{per_run_approval.approval_request_id}"
+            )
+            policy_ids.append(
+                f"proposal:{per_run_approval.proposal_fingerprint}"
             )
 
         return OrchestrationRequest(
@@ -302,7 +353,13 @@ class AutonomousRequestFactory:
             requester_kind="service",
             principal_attributes={
                 "workload": "jason-autonomy-worker",
-                "playbook": standing_policy.playbook_id if standing_policy else "none",
+                "playbook": (
+                    standing_policy.playbook_id
+                    if standing_policy is not None
+                    else per_run_approval.playbook_id
+                    if per_run_approval is not None
+                    else "none"
+                ),
             },
             permission_mode="execute",
             policy_ids=tuple(policy_ids),

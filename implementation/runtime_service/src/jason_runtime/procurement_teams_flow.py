@@ -2913,6 +2913,7 @@ class ProcurementApprovalInteractionFlow:
 @dataclass(frozen=True, slots=True)
 class ApprovalInteractionDispatcher:
     procurement: ProcurementApprovalInteractionFlow | None
+    playbook_action: Any | None
     fallback: Any | None
 
     def handle(self, *, approval_id: str, **kwargs):
@@ -2920,6 +2921,10 @@ class ApprovalInteractionDispatcher:
             if self.procurement is None:
                 raise PermissionError("procurement approval flow is not configured")
             return self.procurement.handle(approval_id=approval_id, **kwargs)
+        if approval_id.startswith("playaction-"):
+            if self.playbook_action is None:
+                raise PermissionError("playbook action approval flow is not configured")
+            return self.playbook_action.handle(approval_id=approval_id, **kwargs)
         if self.fallback is None:
             raise PermissionError("approval flow is not configured")
         return self.fallback.handle(approval_id=approval_id, **kwargs)
