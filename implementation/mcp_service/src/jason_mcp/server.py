@@ -6814,6 +6814,155 @@ def view_documentation_attachment(
     return blocks
 
 
+def _runtime_procurement_flow():
+    app = _runtime()
+    outer = getattr(app, "ingress", None)
+    governed = getattr(outer, "ingress", None)
+    flow = getattr(governed, "procurement_flow", None)
+    if flow is None:
+        raise PermissionError("MCP_PROCUREMENT_FLOW_UNAVAILABLE")
+    return flow
+
+
+def _authenticated_microsoft_transport_identity() -> tuple[str, str]:
+    # _authenticated_identity performs tenant validation, JIT binding, and
+    # active Jason identity checks. The Microsoft ids below are then used only
+    # as transport evidence for the already-governed procurement flow.
+    _authenticated_identity()
+    access_token = get_access_token()
+    if access_token is None:
+        raise PermissionError("MCP_AUTHENTICATION_REQUIRED")
+    claims = access_token.claims or {}
+    tenant_id = str(claims.get("tid") or "").strip()
+    object_id = str(claims.get("oid") or "").strip()
+    if tenant_id != JASON_ENTRA_TENANT_ID or not object_id:
+        raise PermissionError("MCP_AUTHENTICATED_IDENTITY_INVALID")
+    return tenant_id, object_id
+
+
+@mcp.tool()
+def create_procurement_invoice_draft(
+    vendor_name: str,
+    invoice_number: str,
+    source_reference: str,
+    lines: list[dict[str, Any]],
+    invoice_total: str = "",
+    vendor_order_reference: str = "",
+    ship_to: str = "",
+    freight: str = "0",
+    tax: str = "0",
+    fees: str = "0",
+    source_capture_sha256: str = "",
+) -> dict[str, Any]:
+    """Create the canonical Jason procurement draft from a parsed vendor invoice.
+
+    Use this for invoice PDFs supplied to ChatGPT Jason. It does not create a PO,
+    quote, charge, or Teams approval by itself. It binds the authenticated
+    Microsoft requester and converges the normalized invoice into the same
+    procurement workflow used by Teams/OpenClaw. Each line must contain a
+    verified unit_cost and enough product identity to review.
+    """
+    tenant_id, object_id = _authenticated_microsoft_transport_identity()
+    reference = str(source_reference or "").strip()
+    vendor = str(vendor_name or "").strip()
+    invoice = str(invoice_number or "").strip()
+    if not reference or not vendor or not invoice:
+        return {
+            "status": "rejected",
+            "error_code": "procurement_invoice_identity_required",
+        }
+    if not isinstance(lines, list) or not lines or not all(isinstance(x, Mapping) for x in lines):
+        return {
+            "status": "rejected",
+            "error_code": "procurement_invoice_lines_required",
+        }
+    normalized: dict[str, Any] = {
+        "source_kind": "vendor_invoice",
+        "source_reference": reference,
+        "source_capture_sha256": str(source_capture_sha256 or "").strip(),
+        "source_captured_at": datetime.now(timezone.utc).isoformat(),
+        "source_acquisition": "document_extraction",
+        "source_confidence": "document_verified",
+        "source_evidence_mode": "chatgpt_attachment_normalized",
+        "vendor": {"name": vendor},
+        "lines": [dict(x) for x in lines],
+        "invoice_number": invoice,
+    }
+    optional = {
+        "invoice_total": invoice_total,
+        "vendor_order_reference": vendor_order_reference,
+        "ship_to": ship_to,
+        "freight": freight,
+        "tax": tax,
+        "fees": fees,
+    }
+    for key, value in optional.items():
+        if str(value or "").strip():
+            normalized[key] = str(value).strip()
+    flow = _runtime_procurement_flow()
+    try:
+        result = flow.handle_vendor_document(
+            normalized=normalized,
+            microsoft_tenant_id=tenant_id,
+            microsoft_object_id=object_id,
+            conversation_id=f"mcp-chatgpt:{object_id}",
+            message_id=f"mcp-invoice-{uuid4().hex}",
+            occurred_at=datetime.now(timezone.utc),
+        )
+    except PermissionError as exc:
+        return {"status": "denied", "error_code": str(exc)[:200]}
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "error_code": "procurement_invoice_draft_failed",
+            "error_type": type(exc).__name__,
+            "detail": str(exc)[:500],
+        }
+    return _safe(dict(result))
+
+
+@mcp.tool()
+def submit_procurement_draft(
+    submission_id: str,
+    selections: dict[str, Any],
+) -> dict[str, Any]:
+    """Submit a Jason procurement draft through canonical spend governance.
+
+    Use only after create_procurement_invoice_draft (or another canonical Jason
+    procurement draft) returns a submission_id and the required review choices
+    are known. This path performs requester Autotask Spending limit lookup. If
+    the purchase exceeds that limit it creates the durable approval request and
+    sends the Teams approval through Jason's existing governed approval sender.
+    Do not replace an approval_required outcome with a claim that permissions are
+    missing.
+    """
+    tenant_id, object_id = _authenticated_microsoft_transport_identity()
+    sid = str(submission_id or "").strip()
+    if not sid:
+        return {"status": "rejected", "error_code": "submission_id_required"}
+    flow = _runtime_procurement_flow()
+    try:
+        result = flow.handle_submit(
+            submission_id=sid,
+            selections={str(k): str(v) for k, v in dict(selections or {}).items()},
+            microsoft_tenant_id=tenant_id,
+            microsoft_object_id=object_id,
+            conversation_id=f"mcp-chatgpt:{object_id}",
+            channel_response_id=f"mcp-submit-{uuid4().hex}",
+            submitted_at=datetime.now(timezone.utc),
+        )
+    except PermissionError as exc:
+        return {"status": "denied", "error_code": str(exc)[:200]}
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "error_code": "procurement_submit_failed",
+            "error_type": type(exc).__name__,
+            "detail": str(exc)[:500],
+        }
+    return _safe(dict(result))
+
+
 @mcp.tool()
 def execute_governed_capability(
     capability: str,
