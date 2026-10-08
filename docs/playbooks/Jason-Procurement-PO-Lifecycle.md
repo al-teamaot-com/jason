@@ -190,6 +190,7 @@ Browser/API/document acquisition must still converge into this same lifecycle.
 For Microsoft Teams document intake, Jason accepts one authenticated PDF quote or invoice per message. The Teams gateway downloads the Microsoft-hosted file through the short-lived authenticated attachment reference, enforces bounded size/type limits, captures a SHA-256 digest, extracts text transiently, and forwards only signed bounded document evidence into the governed runtime. The document is untrusted evidence and cannot grant authority.
 
 Recurring invoice lines must preserve billing cadence when the source states it. Canonical values are `one_time`, `monthly`, `quarterly`, and `annual`; unknown cadence fails to `one_time` rather than being guessed as recurring.
+Production readiness for document intake still requires controlled end-to-end acceptance from Teams attachment through the governed procurement review path; implementation or deployment alone is not completion evidence.
 
 ---
 
