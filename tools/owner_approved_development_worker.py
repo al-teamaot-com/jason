@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import support_repair_host_worker as support
+import change_integration_gate
+import documentation_impact_gate
 
 DEFAULT_REPO = Path('/home/al/projects/jason')
 DEFAULT_SPOOL = Path('/var/lib/jason/openclaw/support-repair')
@@ -197,12 +199,37 @@ No-documentation-impact reason: Documentation remains governed by normal PR vali
 """
 
 
+def validate_pr_preflight(body: str, expected_overlaps: list[int]) -> None:
+    """Fail before PR creation on mechanical governance/integration defects."""
+    documentation_impact_gate.validate_pull_request_body(body)
+    acknowledged = change_integration_gate.parse_acknowledged(body)
+    missing = sorted(set(int(value) for value in expected_overlaps) - acknowledged)
+    if missing:
+        joined = ", ".join(f"#{value}" for value in missing)
+        raise support.WorkerError(
+            "PR preflight missing Integration coordination acknowledgement for " + joined
+        )
+    required = (
+        "- Current-main reconciliation performed: yes",
+        "- Integration automation:",
+        "- Production deployment authority: none",
+    )
+    missing_contract = [line for line in required if line not in body]
+    if missing_contract:
+        raise support.WorkerError(
+            "PR preflight missing required development contract: "
+            + "; ".join(missing_contract)
+        )
+
+
 def commit_and_pr(repo: Path, worktree: Path, item: Mapping[str, Any], tests: list[str]) -> int:
     branch = support.run(['git', 'branch', '--show-current'], cwd=worktree)
     support.run(['git', 'add', '--all'], cwd=worktree)
     support.run(['git', 'commit', '-m', f"Implement owner-approved issue #{item['issue_number']}: {item['title'][:55]}"], cwd=worktree)
     support.run(['git', 'push', '-u', 'origin', branch], cwd=worktree)
     body = pr_body(repo, item, worktree, tests)
+    overlaps = integration_coordination(repo, set(support.changed_files(worktree)))
+    validate_pr_preflight(body, overlaps)
     with tempfile.NamedTemporaryFile('w', encoding='utf-8', delete=False) as handle:
         handle.write(body)
         body_path = Path(handle.name)

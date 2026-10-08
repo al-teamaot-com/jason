@@ -26,6 +26,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install approval test dependencies
+        run: python -m pip install --upgrade pip pytest
       - name: Compile approval boundary
         run: python -m py_compile implementation/connectors/src/jason_connectors/approval_requests.py implementation/connectors/microsoft_graph/teams_approval_channel.py
       - name: Run approval tests

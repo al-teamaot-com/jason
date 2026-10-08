@@ -889,6 +889,29 @@ def diff_excerpts(worktree: Path, gate, policy: Mapping[str, Any]) -> list[dict[
     return excerpts
 
 
+def classify_ci_failure(log: str) -> str:
+    text = str(log or '').casefold()
+    if (
+        'documentationimpacterror' in text
+        or "missing required '## documentation impact' section" in text
+        or 'documentation impact requires' in text
+    ):
+        return 'pr_governance_metadata_defect'
+    if 'change-integration: fail' in text or 'active implementation overlap with pr #' in text:
+        return 'integration_collision'
+    if (
+        "modulenotfounderror: no module named 'pytest'" in text
+        or 'command not found: pytest' in text
+        or 'no module named pytest' in text
+    ):
+        return 'dependency_environment_defect'
+    if 'production_health' in text or 'production health' in text:
+        return 'production_defect'
+    if 'assertionerror' in text or 'failed (' in text or 'failed]' in text:
+        return 'code_or_test_defect'
+    return 'unclassified_ci_failure'
+
+
 def failed_ci_context(repo: Path, branch: str) -> dict[str, Any]:
     runs = gh_json([
         'run', 'list', '--branch', branch, '--limit', '12', '--json',
@@ -901,13 +924,18 @@ def failed_ci_context(repo: Path, branch: str) -> dict[str, Any]:
     logs = []
     for item in failed[:3]:
         text = run(['gh', 'run', 'view', str(item['databaseId']), '--log-failed'], cwd=repo, check=False)
+        log_tail = text[-16000:]
         logs.append({
             'name': str(item.get('name') or ''),
             'run_id': int(item['databaseId']),
             'conclusion': str(item.get('conclusion') or ''),
-            'log': text[-16000:],
+            'classification': classify_ci_failure(log_tail),
+            'log': log_tail,
         })
-    return {'failed_runs': logs}
+    return {
+        'failed_runs': logs,
+        'failure_classes': sorted({str(item['classification']) for item in logs}),
+    }
 
 
 def commit_existing(worktree: Path, item_id: str) -> None:
