@@ -419,14 +419,20 @@ def sync_lifecycle_notification(
                 event_root=event_root,
             )
             record['lifecycle_started_fingerprint'] = fingerprint
-        if str(record.get('phase') or '') == 'blocked':
-            reason = str(record.get('reason') or 'Engineering stopped at a bounded blocker.').strip()
+        if (
+            str(record.get('phase') or '') == 'blocked'
+            and str(record.get('notification_class') or '') == 'owner_action_required'
+        ):
+            reason = str(record.get('reason') or 'Engineering stopped at an owner-action blocker.').strip()
+            owner_action = str(record.get('owner_action') or '').strip()
+            if not owner_action:
+                raise ValueError('owner_action_required blocker must include owner_action')
             fingerprint = support.emit_lifecycle_event(
                 event_type='work_blocked',
                 work_id=str(item['id']),
                 work_title=str(item['title']),
                 summary=reason,
-                owner_action='Review the blocker only if Jason cannot resolve it within existing authority.',
+                owner_action=owner_action,
                 event_root=event_root,
             )
             record['lifecycle_blocked_fingerprint'] = fingerprint

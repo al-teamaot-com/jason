@@ -33,12 +33,27 @@ def test_emit_lifecycle_event_is_deterministic_and_bounded(tmp_path):
     assert payload['event_type'] == 'work_started'
 
 
-def test_sync_support_lifecycle_writes_start_and_blocker(tmp_path):
-    record = {'phase': 'blocked', 'reason': 'controlled blocker'}
+def test_sync_support_lifecycle_keeps_recoverable_blocker_silent(tmp_path):
+    record = {'phase': 'blocked', 'reason': 'controlled recoverable blocker'}
     item = {'id': 'SUPPORT-OPS-100', 'title': 'Example repair'}
     root = tmp_path / 'events'
     worker.sync_support_lifecycle_notification(record, item, event_root=root)
     assert record['lifecycle_started_fingerprint']
+    assert 'lifecycle_blocked_fingerprint' not in record
+    payloads = [worker.json.loads(p.read_text()) for p in root.glob('*.json')]
+    assert {p['event_type'] for p in payloads} == {'work_started'}
+
+
+def test_sync_support_lifecycle_notifies_explicit_owner_action_blocker(tmp_path):
+    record = {
+        'phase': 'blocked',
+        'reason': 'owner input required',
+        'notification_class': 'owner_action_required',
+        'owner_action': 'Provide the missing provider credential.',
+    }
+    item = {'id': 'SUPPORT-OPS-100', 'title': 'Example repair'}
+    root = tmp_path / 'events'
+    worker.sync_support_lifecycle_notification(record, item, event_root=root)
     assert record['lifecycle_blocked_fingerprint']
     payloads = [worker.json.loads(p.read_text()) for p in root.glob('*.json')]
     assert {p['event_type'] for p in payloads} == {'work_started', 'work_blocked'}
