@@ -859,6 +859,68 @@ def test_duplicate_note_is_suppressed_across_terminal_work_reconsideration(tmp_p
     store.close()
 
 
+def test_semantic_cross_origin_note_dedup_ignores_origin_title_and_wording(tmp_path: Path):
+    from jason_runtime.autonomy_worker_runtime import OperationalWork
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(candidate()),
+        reads=Reads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+    work = OperationalWork(
+        ticket_id=140933,
+        ticket_number="T20260925.9999",
+        title="BackupIQ: Backup for asset is not available",
+        playbook_id="backupiq_endpoint_backup",
+        source_queue="Jason",
+        company_id=507,
+        configuration_item_id=1583,
+        device_uid="device-uid-1",
+        hostname="PC-1",
+        phase="backupiq_investigate",
+        last_reason="same evidence",
+    )
+
+    assert worker._write_note(
+        work,
+        "Technician-triggered diagnostic: both sources show the endpoint offline.",
+        "Jason - Technician Backup Diagnostic",
+        semantic_class="true_offline_both_sources",
+        evidence_fingerprint="a" * 64,
+        origin="technician",
+    ) is True
+    assert worker._write_note(
+        work,
+        "Autonomous diagnostic reached the same material conclusion with different wording.",
+        "Jason - BackupIQ - Diagnostic",
+        semantic_class="true_offline_both_sources",
+        evidence_fingerprint="a" * 64,
+        origin="autonomous",
+    ) is False
+    assert worker._write_note(
+        work,
+        "Material evidence changed and should produce one new note.",
+        "Jason - BackupIQ - Diagnostic",
+        semantic_class="true_offline_both_sources",
+        evidence_fingerprint="b" * 64,
+        origin="scheduled",
+    ) is True
+
+    note_calls = [
+        args for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert len(note_calls) == 2
+    store.close()
+
+
 def test_legacy_note_fingerprint_seeds_canonical_key_without_duplicate_write(tmp_path: Path):
     actions = Actions()
     store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
