@@ -1673,6 +1673,9 @@ class ProcurementTeamsFlow:
                 "vendor_order_reference",
                 "payment_status",
                 "invoice_total",
+                "freight",
+                "tax",
+                "fees",
                 "customer",
                 "ship_to",
             )
