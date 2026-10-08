@@ -420,6 +420,21 @@ class SQLiteOperationalWorkStore:
         PRIMARY KEY(ticket_id, playbook_id, note_title)
     );
 
+    CREATE TABLE IF NOT EXISTS autonomy_ticket_semantic_note_state (
+        ticket_id INTEGER NOT NULL,
+        playbook_id TEXT NOT NULL,
+        playbook_version TEXT NOT NULL,
+        target_identity TEXT NOT NULL,
+        semantic_class TEXT NOT NULL,
+        evidence_fingerprint TEXT NOT NULL,
+        origin TEXT NOT NULL DEFAULT '',
+        documented_at TEXT NOT NULL,
+        PRIMARY KEY(
+            ticket_id, playbook_id, playbook_version,
+            target_identity, semantic_class, evidence_fingerprint
+        )
+    );
+
     CREATE TABLE IF NOT EXISTS autonomy_ticket_augmentation_state (
         ticket_id INTEGER NOT NULL,
         augmentation_id TEXT NOT NULL,
@@ -730,6 +745,62 @@ class SQLiteOperationalWorkStore:
                     str(playbook_id),
                     str(note_title),
                     str(fingerprint),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+
+    def semantic_note_documented(
+        self,
+        *,
+        ticket_id: int,
+        playbook_id: str,
+        playbook_version: str,
+        target_identity: str,
+        semantic_class: str,
+        evidence_fingerprint: str,
+    ) -> bool:
+        row = self._connection.execute(
+            "SELECT 1 FROM autonomy_ticket_semantic_note_state "
+            "WHERE ticket_id=? AND playbook_id=? AND playbook_version=? "
+            "AND target_identity=? AND semantic_class=? AND evidence_fingerprint=?",
+            (
+                int(ticket_id),
+                str(playbook_id),
+                str(playbook_version),
+                str(target_identity),
+                str(semantic_class),
+                str(evidence_fingerprint),
+            ),
+        ).fetchone()
+        return row is not None
+
+    def remember_semantic_note(
+        self,
+        *,
+        ticket_id: int,
+        playbook_id: str,
+        playbook_version: str,
+        target_identity: str,
+        semantic_class: str,
+        evidence_fingerprint: str,
+        origin: str,
+    ) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT OR REPLACE INTO autonomy_ticket_semantic_note_state(
+                    ticket_id,playbook_id,playbook_version,target_identity,
+                    semantic_class,evidence_fingerprint,origin,documented_at
+                ) VALUES (?,?,?,?,?,?,?,?)
+                """,
+                (
+                    int(ticket_id),
+                    str(playbook_id),
+                    str(playbook_version),
+                    str(target_identity),
+                    str(semantic_class),
+                    str(evidence_fingerprint),
+                    str(origin),
                     datetime.now(timezone.utc).isoformat(),
                 ),
             )
@@ -5483,6 +5554,22 @@ class OperationalAutonomyMaintenance:
         else:
             classification = "provider_endpoint_state_conflict"
 
+        semantic_evidence_fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "classification": classification,
+                    "endpoint_online": endpoint_online,
+                    "provider_online": provider_online,
+                    "backup_enabled": backup_enabled,
+                    "last_success": last_success.isoformat() if last_success else None,
+                    "last_online": last_online.isoformat() if last_online else None,
+                    "current_alert_count": len(alert_items),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+
         note = (
             "Jason autonomous BackupIQ diagnostic completed using governed DRMM and "
             "Backup.net/UniView evidence. "
@@ -5503,7 +5590,14 @@ class OperationalAutonomyMaintenance:
                 "Jason will retain ownership, release the active-work slot, and resume "
                 "when the exact endpoint is available again."
             )
-            self._write_note(work, note, "Jason - BackupIQ - Diagnostic")
+            self._write_note(
+                work,
+                note,
+                "Jason - BackupIQ - Diagnostic",
+                semantic_class=classification,
+                evidence_fingerprint=semantic_evidence_fingerprint,
+                origin="autonomous",
+            )
             self.actions.execute(
                 self._scope_for_work(work),
                 "service.ticket.update",
@@ -5532,7 +5626,14 @@ class OperationalAutonomyMaintenance:
                 "provider asset online. This is contradictory availability evidence, not "
                 "a true-offline condition. No reinstall was attempted."
             )
-            self._write_note(work, note, "Jason - BackupIQ - Diagnostic")
+            self._write_note(
+                work,
+                note,
+                "Jason - BackupIQ - Diagnostic",
+                semantic_class=classification,
+                evidence_fingerprint=semantic_evidence_fingerprint,
+                origin="autonomous",
+            )
             self._persist_human_review_escalation(
                 work,
                 reason=(
@@ -5547,7 +5648,14 @@ class OperationalAutonomyMaintenance:
                 "Backup is disabled or provider configuration is not in the expected state. "
                 "Policy/configuration changes remain outside autonomous remediation."
             )
-            self._write_note(work, note, "Jason - BackupIQ - Diagnostic")
+            self._write_note(
+                work,
+                note,
+                "Jason - BackupIQ - Diagnostic",
+                semantic_class=classification,
+                evidence_fingerprint=semantic_evidence_fingerprint,
+                origin="autonomous",
+            )
             self._persist_human_review_escalation(
                 work,
                 reason=(
@@ -5562,7 +5670,14 @@ class OperationalAutonomyMaintenance:
                 "after ticket creation, and no current BackupIQ alert remains. The alert "
                 "is recovered/stale and can be completed automatically."
             )
-            self._write_note(work, note, "Jason - BackupIQ - Diagnostic")
+            self._write_note(
+                work,
+                note,
+                "Jason - BackupIQ - Diagnostic",
+                semantic_class=classification,
+                evidence_fingerprint=semantic_evidence_fingerprint,
+                origin="autonomous",
+            )
             self._complete_verified_ticket(
                 work,
                 reason=(
@@ -5583,7 +5698,14 @@ class OperationalAutonomyMaintenance:
                     "been used for this incident cycle. Additional remediation requires "
                     "technician review."
                 )
-                self._write_note(work, note, "Jason - BackupIQ - Diagnostic")
+                self._write_note(
+                work,
+                note,
+                "Jason - BackupIQ - Diagnostic",
+                semantic_class=classification,
+                evidence_fingerprint=semantic_evidence_fingerprint,
+                origin="autonomous",
+            )
                 self._persist_human_review_escalation(
                     work,
                     reason=(
@@ -5600,7 +5722,14 @@ class OperationalAutonomyMaintenance:
                 "owner-approved standing-safe Endpoint Backup reinstall is the bounded "
                 "fallback remediation."
             )
-            self._write_note(work, note, "Jason - BackupIQ - Diagnostic")
+            self._write_note(
+                work,
+                note,
+                "Jason - BackupIQ - Diagnostic",
+                semantic_class=classification,
+                evidence_fingerprint=semantic_evidence_fingerprint,
+                origin="autonomous",
+            )
             self.store.put(
                 self._replace(
                     work,
@@ -5614,7 +5743,14 @@ class OperationalAutonomyMaintenance:
             "Availability/provider evidence does not match an approved autonomous branch. "
             "Technician review is required."
         )
-        self._write_note(work, note, "Jason - BackupIQ - Diagnostic")
+        self._write_note(
+                work,
+                note,
+                "Jason - BackupIQ - Diagnostic",
+                semantic_class=classification,
+                evidence_fingerprint=semantic_evidence_fingerprint,
+                origin="autonomous",
+            )
         self._persist_human_review_escalation(
             work,
             reason=(
@@ -7247,7 +7383,38 @@ class OperationalAutonomyMaintenance:
                     },
                 )
 
-    def _write_note(self, work: OperationalWork, body: str, title: str) -> bool:
+    def _write_note(
+        self,
+        work: OperationalWork,
+        body: str,
+        title: str,
+        *,
+        semantic_class: str | None = None,
+        evidence_fingerprint: str | None = None,
+        origin: str = "autonomous",
+    ) -> bool:
+        scope = self._scope_for_work(work)
+        target_identity = (
+            str(work.device_uid or "").strip()
+            or (f"ci:{int(work.configuration_item_id)}" if work.configuration_item_id else "")
+            or str(work.hostname or "").strip().casefold()
+            or f"ticket:{int(work.ticket_id)}"
+        )
+        semantic_class_normalized = " ".join(str(semantic_class or "").split()).casefold()
+        evidence_fingerprint_normalized = str(evidence_fingerprint or "").strip().casefold()
+        semantic_enabled = bool(
+            semantic_class_normalized and evidence_fingerprint_normalized
+        )
+        if semantic_enabled and self.store.semantic_note_documented(
+            ticket_id=work.ticket_id,
+            playbook_id=work.playbook_id,
+            playbook_version=scope.playbook_version,
+            target_identity=target_identity,
+            semantic_class=semantic_class_normalized,
+            evidence_fingerprint=evidence_fingerprint_normalized,
+        ):
+            return False
+
         legacy_normalized_title = " ".join(str(title).split())
         legacy_normalized_body = " ".join(str(body).split())
         legacy_encoded = json.dumps(
@@ -7303,6 +7470,16 @@ class OperationalAutonomyMaintenance:
                 normalized_title,
                 fingerprint,
             )
+            if semantic_enabled:
+                self.store.remember_semantic_note(
+                    ticket_id=work.ticket_id,
+                    playbook_id=work.playbook_id,
+                    playbook_version=scope.playbook_version,
+                    target_identity=target_identity,
+                    semantic_class=semantic_class_normalized,
+                    evidence_fingerprint=evidence_fingerprint_normalized,
+                    origin=origin,
+                )
             return False
 
         self.actions.execute(
@@ -7321,6 +7498,16 @@ class OperationalAutonomyMaintenance:
         self.store.remember_note_fingerprint(
             work.ticket_id, work.playbook_id, normalized_title, fingerprint
         )
+        if semantic_enabled:
+            self.store.remember_semantic_note(
+                ticket_id=work.ticket_id,
+                playbook_id=work.playbook_id,
+                playbook_version=scope.playbook_version,
+                target_identity=target_identity,
+                semantic_class=semantic_class_normalized,
+                evidence_fingerprint=evidence_fingerprint_normalized,
+                origin=origin,
+            )
         return True
 
     def _read_data(self, capability: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
