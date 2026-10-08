@@ -125,6 +125,55 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def release_description(repo: Path, candidate_sha: str) -> str:
+    try:
+        value = run(["git", "show", "-s", "--format=%s", candidate_sha], cwd=repo)
+    except Exception:
+        value = "Jason production build " + candidate_sha[:12]
+    value = " ".join(str(value or "").split()).strip()
+    return (value or ("Jason production build " + candidate_sha[:12]))[:300]
+
+
+def write_owner_notification_event(
+    state_root: Path,
+    record: dict[str, Any],
+    event_type: str,
+    *,
+    owner_action: str = "",
+) -> None:
+    allowed = {
+        "production_queue_entered",
+        "production_owner_action_required",
+        "production_queue_completed",
+    }
+    if event_type not in allowed:
+        raise ReleaseManagerError("unsupported owner notification event")
+    release_id = str(record.get("release_id") or "").strip()
+    candidate = record.get("release_candidate") or {}
+    candidate_sha = str(candidate.get("candidate_sha") or record.get("development", {}).get("source_sha") or "").strip()
+    if not release_id or len(candidate_sha) != 40:
+        return
+    root = state_root / "owner-notification-events"
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = root / f"{release_id}-{event_type}.json"
+    if path.exists():
+        return
+    payload = {
+        "schema_version": "1.0",
+        "event_type": event_type,
+        "release_id": release_id,
+        "candidate_sha": candidate_sha,
+        "description": str(record.get("description") or "")[:300],
+        "change_class": str(record.get("change_class") or ""),
+        "owner_action": str(owner_action or "")[:400],
+        "created_at": now(),
+    }
+    temp = path.with_suffix(path.suffix + ".tmp")
+    temp.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+    temp.chmod(0o600)
+    temp.replace(path)
+
+
 def production_window_open(at: datetime | None = None) -> bool:
     """Return whether unattended production promotion is currently permitted.
 
@@ -1218,6 +1267,7 @@ def create_record(
         "release_id": release_id,
         "state": "requested",
         "change_class": change_class,
+        "description": release_description(repo, candidate_sha),
         "risk_profile": risk_profile,
         "created_at": now(),
         "updated_at": now(),
@@ -1429,6 +1479,9 @@ def run_preproduction(repo: Path, state_root: Path, record: dict[str, Any]) -> d
         }
         gate_transition(repo, state_root, record, "preprod_verified")
         gate_transition(repo, state_root, record, "production_eligible")
+        write_owner_notification_event(
+            state_root, record, "production_queue_entered"
+        )
         save_record(state_root, record)
         return record
     finally:
@@ -1615,6 +1668,9 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "verified_at": now(),
         }
         gate_transition(repo, state_root, record, "production_verified")
+        write_owner_notification_event(
+            state_root, record, "production_queue_completed"
+        )
         gate_transition(repo, state_root, record, "closed")
         record["evidence_bundle"] = {
             "release_id": record["release_id"],
@@ -1713,6 +1769,16 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             reason=type(error).__name__ + ": " + str(error),
             rollback_verified=rollback_ok,
         )
+        if not rollback_ok:
+            write_owner_notification_event(
+                state_root,
+                record,
+                "production_owner_action_required",
+                owner_action=(
+                    "Production recovery could not be fully verified. Review the "
+                    "release failure and rollback evidence before further promotion."
+                ),
+            )
         save_record(state_root, record)
         raise
     finally:
@@ -1856,6 +1922,12 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
             "owner approval" in reason.casefold() for reason in reasons
         )
         if owner_only:
+            write_owner_notification_event(
+                state_root,
+                record,
+                "production_owner_action_required",
+                owner_action="Owner approval is required to promote this build to Production.",
+            )
             continue
         raise ReleaseManagerError(
             "Production Eligible release failed production gate: "
