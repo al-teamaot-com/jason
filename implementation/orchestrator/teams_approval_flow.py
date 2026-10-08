@@ -35,6 +35,10 @@ class MicrosoftPrincipalVerifier(Protocol):
     def verify(self, token: str) -> VerifiedMicrosoftPrincipal: ...
 
 
+class ApprovalAttentionSink(Protocol):
+    def approval_received(self, resource_id: str, *, now: datetime | None = None) -> tuple[str, ...]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class TeamsApprovalFlowResult:
     accepted_approval: AcceptedApproval
@@ -48,6 +52,7 @@ class TeamsApprovalFlow:
     approval_service: ApprovalRequestService
     resume_bridge: ApprovalResumeBridge
     audit: ApprovalAuditRecorder
+    attention_sink: ApprovalAttentionSink | None = None
     event_id_factory: Callable[[], str] = lambda: str(uuid4())
 
     def handle_response(
@@ -148,6 +153,14 @@ class TeamsApprovalFlow:
                 authority_context_id=resumed.authority_context_id,
                 evidence_references=accepted.evidence_references,
             )
+            if self.attention_sink is not None and accepted.attention_resource_id is not None:
+                try:
+                    self.attention_sink.approval_received(
+                        accepted.attention_resource_id,
+                        now=self._now(now),
+                    )
+                except Exception:
+                    pass
             return TeamsApprovalFlowResult(
                 accepted_approval=accepted,
                 resumed_request=resumed,

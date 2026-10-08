@@ -102,16 +102,24 @@ class QueueAttentionState:
     dirty: bool = False
     reasons: set[str] = field(default_factory=set)
     last_reconciled_at: datetime | None = None
+    quiet_reconciliations: int = 0
 
     def mark_dirty(self, reason: str) -> None:
         self.dirty = True
         self.reasons.add(reason)
+        self.quiet_reconciliations = 0
 
-    def mark_reconciled(self, *, now: datetime | None = None) -> tuple[str, ...]:
+    def mark_reconciled(
+        self,
+        *,
+        now: datetime | None = None,
+        changed: bool = False,
+    ) -> tuple[str, ...]:
         reasons = tuple(sorted(self.reasons))
         self.dirty = False
         self.reasons.clear()
         self.last_reconciled_at = now or datetime.now(timezone.utc)
+        self.quiet_reconciliations = 0 if changed or reasons else self.quiet_reconciliations + 1
         return reasons
 
 
@@ -122,10 +130,29 @@ class ReconcileDecision:
 
 
 class AttentionScheduler:
-    """Event-first queue attention with a staleness safety net."""
+    """Event-first queue attention with adaptive staleness backoff."""
 
-    def __init__(self, *, staleness_budget: timedelta = timedelta(minutes=30)) -> None:
+    def __init__(
+        self,
+        *,
+        staleness_budget: timedelta = timedelta(minutes=30),
+        maximum_staleness_budget: timedelta = timedelta(hours=4),
+        backoff_multiplier: int = 2,
+    ) -> None:
+        if staleness_budget <= timedelta(0):
+            raise ValueError("staleness_budget must be positive")
+        if maximum_staleness_budget < staleness_budget:
+            raise ValueError("maximum_staleness_budget must be >= staleness_budget")
+        if backoff_multiplier < 1:
+            raise ValueError("backoff_multiplier must be at least 1")
         self.staleness_budget = staleness_budget
+        self.maximum_staleness_budget = maximum_staleness_budget
+        self.backoff_multiplier = backoff_multiplier
+
+    def effective_staleness_budget(self, attention: QueueAttentionState) -> timedelta:
+        factor = self.backoff_multiplier ** max(0, attention.quiet_reconciliations)
+        budget = self.staleness_budget * factor
+        return min(budget, self.maximum_staleness_budget)
 
     def should_reconcile(
         self,
@@ -146,7 +173,8 @@ class AttentionScheduler:
             return ReconcileDecision(True, "queue_dirty_capacity_available")
         if attention.last_reconciled_at is None:
             return ReconcileDecision(True, "startup_or_unknown_queue_state")
-        if now - attention.last_reconciled_at >= self.staleness_budget:
+        effective_budget = self.effective_staleness_budget(attention)
+        if now - attention.last_reconciled_at >= effective_budget:
             return ReconcileDecision(True, "staleness_budget_exceeded")
         return ReconcileDecision(False, "no_attention_required")
 
