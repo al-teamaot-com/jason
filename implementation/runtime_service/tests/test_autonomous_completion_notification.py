@@ -11,6 +11,7 @@ from jason_runtime.autonomous_completion_notification import (
     AutonomousCompletionTeamsInvoker,
     AutonomousDeploymentCompletionNotificationMaintenance,
     AutonomousWorkLifecycleNotificationMaintenance,
+    ReleaseManagerOwnerNotificationMaintenance,
     SelfHealEscalationNotificationMaintenance,
     _render,
 )
@@ -169,6 +170,68 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
             maintenance._next_due_at = None
             self.assertFalse(maintenance.tick())
             self.assertEqual(len(notifier.calls), 1)
+
+
+    def test_release_queue_notifications_are_start_owner_action_complete_only(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            events = root / "owner-notification-events"
+            events.mkdir(parents=True)
+            candidate = "c" * 40
+            base = {
+                "release_id": "release-candidate",
+                "candidate_sha": candidate,
+                "description": "Add production queue owner notifications with recovery silence.",
+            }
+            for name, extra in (
+                ("production_queue_entered", {}),
+                (
+                    "production_owner_action_required",
+                    {"owner_action": "Approve protected-core production promotion."},
+                ),
+                ("production_queue_completed", {}),
+            ):
+                payload = dict(base, event_type=name, **extra)
+                (events / f"{name}.json").write_text(json.dumps(payload), encoding="utf-8")
+            # Recoverable/internal events are intentionally ignored even if present.
+            (events / "recoverable.json").write_text(
+                json.dumps(dict(base, event_type="recoverable_error")), encoding="utf-8"
+            )
+            notifier = Notifier()
+            maintenance = ReleaseManagerOwnerNotificationMaintenance(
+                notifier=notifier,
+                state_root=root,
+                interval_seconds=15,
+                now=lambda: datetime(2026, 10, 8, 17, 30, tzinfo=timezone.utc),
+            )
+            self.assertTrue(maintenance.tick())
+            self.assertEqual(
+                {call[0] for call in notifier.calls},
+                {
+                    "production_owner_action_required",
+                    "production_queue_completed",
+                    "production_queue_entered",
+                },
+            )
+            self.assertEqual(len(notifier.calls), 3)
+            maintenance._next_due_at = None
+            self.assertFalse(maintenance.tick())
+            self.assertEqual(len(notifier.calls), 3)
+
+    def test_release_queue_render_includes_description_and_candidate(self):
+        candidate = "d" * 40
+        event, text, card = _render(
+            {
+                "event_type": "production_queue_entered",
+                "work_id": "release-deadbeef",
+                "summary": "Deploy fixed owner lifecycle notifications.",
+                "candidate_sha": candidate,
+            }
+        )
+        self.assertEqual(event, "production_queue_entered")
+        self.assertIn("Deploy fixed owner lifecycle notifications", text)
+        self.assertIn(candidate[:12], text)
+        self.assertEqual(card["body"][0]["color"], "Accent")
 
     def test_self_heal_escalation_render_is_bounded_and_actionable(self):
         event, text, card = _render(
