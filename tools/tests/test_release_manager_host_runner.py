@@ -962,6 +962,40 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             self.assertEqual(result, {"documentation": "pass", "control_board": "pass"})
             self.assertEqual(execute.call_args.args[0][1:], ["production", SHA_A])
 
+    def test_historical_release_does_not_require_future_drift_timer(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sysdir = root / SHA_A / "infrastructure/openclaw-operations/systemd"
+            userdir = sysdir / "user"
+            userdir.mkdir(parents=True)
+            for unit in runner.USER_CONTROL_TIMERS:
+                (userdir / unit).write_text("[Timer]\n", encoding="utf-8")
+            for unit in runner.SYSTEM_CONTROL_TIMERS:
+                if unit != "jason-production-drift-watchdog.timer":
+                    (sysdir / unit).write_text("[Timer]\n", encoding="utf-8")
+            with patch.object(runner, "RELEASE_ROOT", root):
+                user, system = runner.release_scheduled_control_units(SHA_A)
+                self.assertNotIn("jason-production-drift-watchdog.timer", system)
+                with patch.object(runner, "unit_active", return_value=True) as active:
+                    states = runner.scheduled_control_alignment(SHA_A)
+                self.assertNotIn("jason-production-drift-watchdog.timer", states)
+                self.assertEqual(active.call_count, len(user) + len(system))
+
+    def test_new_release_requires_declared_watchdog_and_rejects_inactive(self):
+        import json
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            cfg = root / SHA_B / "config" / "production-desired-state.json"
+            cfg.parent.mkdir(parents=True)
+            cfg.write_text(json.dumps({
+                "required_user_units": list(runner.USER_CONTROL_TIMERS),
+                "required_system_units": list(runner.SYSTEM_CONTROL_TIMERS),
+            }), encoding="utf-8")
+            with patch.object(runner, "RELEASE_ROOT", root):
+                with patch.object(runner, "unit_active", side_effect=lambda u, user: u != "jason-production-drift-watchdog.timer"):
+                    with self.assertRaisesRegex(runner.ReleaseManagerError, "required system control timer is not active"):
+                        runner.scheduled_control_alignment(SHA_B)
+
     def test_control_state_circuit_breaker_revalidates_only_against_last_known_good(self):
         with tempfile.TemporaryDirectory() as td:
             state_root = Path(td)

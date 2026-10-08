@@ -44,6 +44,7 @@ MUTATION_ENV_OVERRIDES = {
 
 CONTROLLER_SOURCE = Path(__file__).resolve()
 CONTROL_STATE_SCHEMA_VERSION = "1.0"
+RELEASE_ROOT = Path("/opt/jason/releases")
 USER_CONTROL_TIMERS = (
     "jason-release-manager.timer",
     "jason-support-repair-worker.timer",
@@ -235,14 +236,50 @@ def unit_active(unit: str, *, user: bool) -> bool:
     return completed.returncode == 0 and completed.stdout.strip() == "active"
 
 
-def scheduled_control_alignment() -> dict[str, str]:
+def release_scheduled_control_units(expected_sha: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Return the control timers declared by the release being validated.
+
+    Newer releases declare required units in production-desired-state.json.
+    Historical releases that predate that contract fall back to the presence
+    of the canonical timer files in that exact immutable release. This keeps a
+    newer controller from imposing future scheduled controls on a legitimate
+    rollback release.
+    """
+    expected_sha = exact_sha(expected_sha, "expected_sha")
+    release_dir = RELEASE_ROOT / expected_sha
+    if not release_dir.is_dir():
+        raise ReleaseManagerError("target immutable release is missing for scheduled-control validation")
+
+    desired_state = release_dir / "config" / "production-desired-state.json"
+    if desired_state.is_file():
+        try:
+            contract = json.loads(desired_state.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ReleaseManagerError("target release desired-state contract is unreadable") from exc
+        required_user = set(contract.get("required_user_units") or [])
+        required_system = set(contract.get("required_system_units") or [])
+        return (
+            tuple(unit for unit in USER_CONTROL_TIMERS if unit in required_user),
+            tuple(unit for unit in SYSTEM_CONTROL_TIMERS if unit in required_system),
+        )
+
+    user_dir = release_dir / "infrastructure" / "openclaw-operations" / "systemd" / "user"
+    system_dir = release_dir / "infrastructure" / "openclaw-operations" / "systemd"
+    return (
+        tuple(unit for unit in USER_CONTROL_TIMERS if (user_dir / unit).is_file()),
+        tuple(unit for unit in SYSTEM_CONTROL_TIMERS if (system_dir / unit).is_file()),
+    )
+
+
+def scheduled_control_alignment(expected_sha: str) -> dict[str, str]:
     states: dict[str, str] = {}
-    for unit in USER_CONTROL_TIMERS:
+    user_units, system_units = release_scheduled_control_units(expected_sha)
+    for unit in user_units:
         active = unit_active(unit, user=True)
         states[unit] = "active" if active else "inactive"
         if not active:
             raise ReleaseManagerError(f"required user control timer is not active: {unit}")
-    for unit in SYSTEM_CONTROL_TIMERS:
+    for unit in system_units:
         active = unit_active(unit, user=False)
         states[unit] = "active" if active else "inactive"
         if not active:
@@ -304,7 +341,7 @@ def capture_production_manifest(expected_sha: str) -> dict[str, Any]:
         manager_revision = manager_source.resolve().name.casefold()
     if manager_revision != expected_sha:
         raise ReleaseManagerError("Release Manager source revision is not aligned with production")
-    timers = scheduled_control_alignment()
+    timers = scheduled_control_alignment(expected_sha)
     return {
         "schema_version": "1.0",
         "revision": expected_sha,
