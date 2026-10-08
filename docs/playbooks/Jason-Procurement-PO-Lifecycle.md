@@ -191,6 +191,7 @@ For Microsoft Teams document intake, Jason accepts one authenticated PDF quote o
 
 Recurring invoice lines must preserve billing cadence when the source states it. Canonical values are `one_time`, `monthly`, `quarterly`, and `annual`; unknown cadence fails to `one_time` rather than being guessed as recurring.
 Production readiness for document intake still requires controlled end-to-end acceptance from Teams attachment through the governed procurement review path; implementation or deployment alone is not completion evidence.
+Concurrent procurement/runtime changes must be reconciled through the repository integration gate before release.
 
 ---
 
