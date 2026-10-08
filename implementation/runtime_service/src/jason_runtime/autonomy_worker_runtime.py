@@ -29,13 +29,14 @@ import re
 import sqlite3
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 from uuid import uuid4
 
 from autonomous_remediation.autonomous_principal import (
     AutonomousRequestFactory,
+    PerRunApprovalAuthorization,
     StandingPolicyAuthorization,
 )
 from autonomous_remediation.autotask_queue_source import (
@@ -96,6 +97,8 @@ from autonomous_remediation.offline_ticket_augmentation import (
     render_site_context_note,
 )
 from .vulscan_client_policy import resolve_vulscan_policy
+from .playbook_action_approval import PlaybookActionApprovalCoordinator
+from .playbook_approval_resume import PlaybookActionProposal
 from .gpt_insights import (
     AUGMENTATION_ID as GPT_INSIGHTS_AUGMENTATION_ID,
     InsightEvidence,
@@ -841,12 +844,19 @@ class GovernedAutonomyActionPort:
         scope: PlaybookScope,
         capability: str,
         arguments: Mapping[str, Any],
+        *,
+        per_run_approval: PerRunApprovalAuthorization | None = None,
     ) -> Mapping[str, Any]:
         request = self.request_factory.build(
             capability_name=capability,
             arguments=dict(arguments),
             client_id=None,
-            standing_policy=self._standing_policy(scope, capability),
+            standing_policy=(
+                None
+                if per_run_approval is not None
+                else self._standing_policy(scope, capability)
+            ),
+            per_run_approval=per_run_approval,
         )
         result = self.orchestrator.execute(request)
         status = getattr(getattr(result, "status", None), "value", "")
@@ -856,7 +866,12 @@ class GovernedAutonomyActionPort:
                 + str(getattr(result, "error_code", None) or getattr(result, "reason_codes", ()))
             )
         output = getattr(result, "output", None)
-        return dict(output) if isinstance(output, Mapping) else {}
+        rendered = dict(output) if isinstance(output, Mapping) else {}
+        if per_run_approval is not None:
+            rendered["_jason_execution_id"] = request.execution_id
+            rendered["_jason_correlation_id"] = request.correlation_id
+            rendered["_jason_governed_approval_id"] = request.approval_id
+        return rendered
 
 
 class OperationalAutonomyMaintenance:
@@ -883,6 +898,7 @@ class OperationalAutonomyMaintenance:
         audit=None,
         completion_notifier=None,
         ticket_splitter=None,
+        playbook_action_approvals: PlaybookActionApprovalCoordinator | None = None,
     ) -> None:
         if not 1 <= int(max_active_work_items) <= 20:
             raise ValueError("max_active_work_items must be between 1 and 20")
@@ -905,6 +921,7 @@ class OperationalAutonomyMaintenance:
         self.audit = audit
         self.completion_notifier = completion_notifier
         self.ticket_splitter = ticket_splitter
+        self.playbook_action_approvals = playbook_action_approvals
         self._next_due = 0.0
         self._resource_automation_cache: dict[int, bool] = {}
         self._ticket_status_cache: dict[int, str] = {}
@@ -923,7 +940,7 @@ class OperationalAutonomyMaintenance:
         if value == "waiting_client_notification_authority":
             return "On Hold"
         if value == "approval_pending":
-            return "Human Review"
+            return "On Hold"
         if value == "escalated":
             return "Human Review"
         if value == "complete":
@@ -2027,7 +2044,90 @@ class OperationalAutonomyMaintenance:
                             "technician_review_required",
                         )
                 elif existing.phase == "approval_pending":
-                    state, reason_code = "waiting_human_review", "approval_required"
+                    if self.playbook_action_approvals is None:
+                        governance_blocked += 1
+                        state, reason_code = (
+                            "governance_blocked",
+                            "approval_resume_bridge_unavailable",
+                        )
+                    else:
+                        proposal_state = self.playbook_action_approvals.state_for_ticket(
+                            existing.ticket_id
+                        )
+                        if proposal_state is None:
+                            governance_blocked += 1
+                            state, reason_code = (
+                                "governance_blocked",
+                                "approval_proposal_missing",
+                            )
+                        elif proposal_state.status == "pending":
+                            state, reason_code = (
+                                "waiting_dependency",
+                                "per_run_approval_pending",
+                            )
+                        elif proposal_state.status in {
+                            "denied",
+                            "changes_requested",
+                            "expired",
+                        }:
+                            human_review += 1
+                            existing = self._replace(
+                                existing,
+                                phase="escalated",
+                                last_reason=(
+                                    "Per-run playbook remediation proposal ended without "
+                                    f"approval; proposal_status={proposal_state.status}."
+                                ),
+                            )
+                            self.store.put(existing)
+                            state, reason_code = (
+                                "waiting_human_review",
+                                f"approval_{proposal_state.status}",
+                            )
+                        elif proposal_state.status == "approved":
+                            if existing.playbook_id != IDLE_LOG_OFF_SCOPE.playbook_id:
+                                governance_blocked += 1
+                                state, reason_code = (
+                                    "governance_blocked",
+                                    "approved_resume_phase_not_implemented",
+                                )
+                            elif len(self.store.list_open()) >= self.max_active_work_items:
+                                state, reason_code = (
+                                    "waiting_dependency",
+                                    "active_capacity_full",
+                                )
+                            else:
+                                self._update_ticket_status_verified(
+                                    existing,
+                                    "In Progress",
+                                )
+                                existing = self._replace(
+                                    existing,
+                                    phase="idle_log_off_repair_dispatch",
+                                    last_reason=(
+                                        "Exact per-run owner approval matched the persisted "
+                                        "Idle Log Off proposal; resuming at remediation dispatch "
+                                        "without repeating diagnosis."
+                                    ),
+                                )
+                                self.store.put(existing)
+                                try:
+                                    self._advance(existing, item.context)
+                                except Exception as exc:
+                                    self._block(
+                                        existing,
+                                        "Execution failed closed after approval resume: "
+                                        f"{type(exc).__name__}: {str(exc)[:350]}",
+                                    )
+                                state, reason_code = self._classify_persisted_work(
+                                    ticket_id
+                                )
+                        else:
+                            governance_blocked += 1
+                            state, reason_code = (
+                                "governance_blocked",
+                                "approval_consumed_without_worker_transition",
+                            )
                 elif existing.phase == "blocked":
                     state, reason_code = "governance_blocked", "worker_blocked"
                 elif existing.phase == "complete":
@@ -2425,7 +2525,7 @@ class OperationalAutonomyMaintenance:
         if current.phase == "escalated":
             return "waiting_human_review", "technician_review_required"
         if current.phase == "approval_pending":
-            return "waiting_human_review", "approval_required"
+            return "waiting_dependency", "per_run_approval_pending"
         if current.phase == "waiting_patch_approval":
             return "waiting_dependency", "patch_approval_pending"
         if current.phase == "waiting_patch_window":
@@ -3574,6 +3674,79 @@ class OperationalAutonomyMaintenance:
         if work.phase in {"health_wait", "repair_wait", "verify_wait"}:
             self._poll_job(work)
 
+    @staticmethod
+    def _component_execution_arguments(
+        work: OperationalWork,
+        scope: PlaybookScope,
+        *,
+        component_uid: str,
+        component_name: str,
+        step: str,
+    ) -> dict[str, Any]:
+        return {
+            "device_uid": work.device_uid,
+            "component_uid": component_uid,
+            "component_name": component_name,
+            "variables": {},
+            "job_name": f"Jason autonomous {scope.playbook_id} {step} T{work.ticket_id}",
+            "idempotency_key": (
+                f"autonomy:{scope.playbook_id}:{scope.playbook_version}:"
+                f"{work.ticket_id}:{work.device_uid}:{step}"
+            ),
+        }
+
+    def _idle_log_off_action_proposal(
+        self,
+        work: OperationalWork,
+    ) -> PlaybookActionProposal:
+        scope = self._scope_for_work(work)
+        arguments = self._component_execution_arguments(
+            work,
+            scope,
+            component_uid=IDLE_LOG_OFF_SETTER_UID,
+            component_name=IDLE_LOG_OFF_SETTER_NAME,
+            step="idle_log_off_repair",
+        )
+        current = datetime.now(timezone.utc)
+        provisional = PlaybookActionProposal(
+            proposal_id="pending",
+            playbook_id=scope.playbook_id,
+            playbook_version=scope.playbook_version,
+            policy_id=scope.policy_id,
+            ticket_id=work.ticket_id,
+            client_id=str(work.company_id),
+            target_id=work.device_uid,
+            capability="automation.component.execute",
+            action_id=IDLE_LOG_OFF_SETTER_NAME,
+            arguments=arguments,
+            disruption_classification="modifying_future_user_session",
+            expected_verification=(
+                "Verify the exact component job succeeds, then verify the authoritative "
+                "current Idle Log Off alert clears without reboot or forced logoff."
+            ),
+            created_at=current,
+            expires_at=current + timedelta(hours=24),
+        )
+        return PlaybookActionProposal(
+            proposal_id=(
+                f"playaction-idle-log-off-{work.ticket_id}-"
+                f"{provisional.fingerprint[:16]}"
+            ),
+            playbook_id=provisional.playbook_id,
+            playbook_version=provisional.playbook_version,
+            policy_id=provisional.policy_id,
+            ticket_id=provisional.ticket_id,
+            client_id=provisional.client_id,
+            target_id=provisional.target_id,
+            capability=provisional.capability,
+            action_id=provisional.action_id,
+            arguments=provisional.arguments,
+            disruption_classification=provisional.disruption_classification,
+            expected_verification=provisional.expected_verification,
+            created_at=provisional.created_at,
+            expires_at=provisional.expires_at,
+        )
+
     def _dispatch_component(
         self, work: OperationalWork, component_name: str, next_phase: str
     ) -> None:
@@ -3626,20 +3799,31 @@ class OperationalAutonomyMaintenance:
                 "Low Disk autonomous cleanup limit is one per incident cycle"
             )
 
+        arguments = self._component_execution_arguments(
+            work,
+            scope,
+            component_uid=component_uid,
+            component_name=resolved_component_name,
+            step=step,
+        )
+        per_run_approval = None
+        if step == "idle_log_off_repair":
+            if self.playbook_action_approvals is None:
+                raise OperationalAutonomyError(
+                    "Idle Log Off remediation requires the shared per-run approval bridge"
+                )
+            per_run_approval = self.playbook_action_approvals.authorization_for(
+                ticket_id=work.ticket_id,
+                capability="automation.component.execute",
+                action_id=resolved_component_name,
+                target_id=work.device_uid,
+                arguments=arguments,
+            )
         output = self.actions.execute(
             scope,
             "automation.component.execute",
-            {
-                "device_uid": work.device_uid,
-                "component_uid": component_uid,
-                "component_name": resolved_component_name,
-                "variables": {},
-                "job_name": f"Jason autonomous {scope.playbook_id} {step} T{work.ticket_id}",
-                "idempotency_key": (
-                    f"autonomy:{scope.playbook_id}:{scope.playbook_version}:"
-                    f"{work.ticket_id}:{work.device_uid}:{step}"
-                ),
-            },
+            arguments,
+            per_run_approval=per_run_approval,
         )
         data = self._action_data(output)
         job_uid = str(data.get("job_uid") or "").strip()
@@ -3657,6 +3841,12 @@ class OperationalAutonomyMaintenance:
             else 0
         )
         last_reason = f"Dispatched {resolved_component_name}."
+        execution_id = str(output.get("_jason_execution_id") or "").strip()
+        correlation_id = str(output.get("_jason_correlation_id") or "").strip()
+        if per_run_approval is not None and execution_id and correlation_id:
+            last_reason += (
+                f" execution_id={execution_id}; correlation_id={correlation_id};"
+            )
         if step == "backupiq_reinstall":
             started_at = datetime.now(timezone.utc).isoformat()
             last_reason = (
@@ -3673,6 +3863,27 @@ class OperationalAutonomyMaintenance:
                 last_reason=last_reason,
             )
         )
+        if per_run_approval is not None and self.playbook_action_approvals is not None:
+            try:
+                if not execution_id or not correlation_id:
+                    raise OperationalAutonomyError(
+                        "per-run approval execution metadata is missing"
+                    )
+                self.playbook_action_approvals.mark_consumed(
+                    ticket_id=work.ticket_id,
+                    execution_id=execution_id,
+                    correlation_id=correlation_id,
+                )
+            except Exception as exc:
+                self._audit_diagnostic(
+                    "autonomy.playbook_action_approval.consume_record_failed",
+                    {
+                        "ticket_id": work.ticket_id,
+                        "playbook_id": work.playbook_id,
+                        "job_uid": job_uid,
+                        "error_type": type(exc).__name__,
+                    },
+                )
 
     def _investigate_idle_log_off(self, work: OperationalWork) -> None:
         endpoint = self._read_record(
@@ -3916,13 +4127,36 @@ class OperationalAutonomyMaintenance:
         self._write_note(work, note, "Jason - Idle Log Off - Diagnostic")
 
         if classification == "confirmed_current_noncompliance":
+            if self.playbook_action_approvals is None:
+                self._block(
+                    work,
+                    "Idle Log Off noncompliance is confirmed, but the shared per-run "
+                    "approval bridge is unavailable. No setter was dispatched.",
+                )
+                return
+            proposal = self._idle_log_off_action_proposal(work)
+            state = self.playbook_action_approvals.ensure_pending(proposal)
+            if state.status not in {"pending", "approved"}:
+                self._persist_human_review_escalation(
+                    work,
+                    reason=(
+                        "Idle Log Off per-run proposal is terminal without executable "
+                        f"approval; proposal_status={state.status}."
+                    ),
+                )
+                return
             self.store.put(
                 self._replace(
                     work,
-                    phase="idle_log_off_repair_dispatch",
-                    last_reason=reason,
+                    phase="approval_pending",
+                    last_reason=(
+                        f"proposal_id={proposal.proposal_id}; "
+                        f"proposal_fingerprint={proposal.fingerprint}; "
+                        "Waiting for exact per-run owner approval of the Idle Log Off setter."
+                    ),
                 )
             )
+            self._update_ticket_status_verified(work, "On Hold")
             return
 
         self._persist_human_review_escalation(work, reason=reason)
@@ -3934,6 +4168,36 @@ class OperationalAutonomyMaintenance:
                 "Persisted Idle Log Off remediation job identity is incomplete or changed.",
             )
             return
+
+        if self.playbook_action_approvals is not None:
+            proposal_state = self.playbook_action_approvals.state_for_ticket(
+                work.ticket_id
+            )
+            if proposal_state is not None and proposal_state.status == "approved":
+                execution_match = re.search(
+                    r"execution_id=([^;\s]+)",
+                    str(work.last_reason or ""),
+                )
+                correlation_match = re.search(
+                    r"correlation_id=([^;\s]+)",
+                    str(work.last_reason or ""),
+                )
+                if execution_match and correlation_match:
+                    try:
+                        self.playbook_action_approvals.mark_consumed(
+                            ticket_id=work.ticket_id,
+                            execution_id=execution_match.group(1),
+                            correlation_id=correlation_match.group(1),
+                        )
+                    except Exception as exc:
+                        self._audit_diagnostic(
+                            "autonomy.playbook_action_approval.consume_recovery_failed",
+                            {
+                                "ticket_id": work.ticket_id,
+                                "job_uid": work.job_uid,
+                                "error_type": type(exc).__name__,
+                            },
+                        )
 
         job_data = self._read_data(
             "automation.job.read", {"resource_id": work.job_uid}

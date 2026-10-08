@@ -349,6 +349,12 @@ from .playbook_autonomy_review import (
     PlaybookAutonomyReviewMaintenance,
     TeamsGatewayPlaybookApprovalSender,
 )
+from .playbook_action_approval import (
+    OwnerOnlyPlaybookActionAuthority,
+    PlaybookActionApprovalCoordinator,
+    PlaybookActionApprovalInteractionFlow,
+)
+from .playbook_approval_resume import SQLitePlaybookActionProposalStore
 from autonomous_remediation.playbook_autonomy_approval import SQLitePlaybookAutonomyApprovalStore
 from autonomous_remediation.playbook_autonomy_review import PlaybookAutonomyReviewService
 from .microsoft_directory import build_microsoft_directory_runtime
@@ -2256,6 +2262,42 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             interval_seconds=settings.autonomy_review_interval_seconds,
         )
 
+    playbook_action_approval_flow = None
+    playbook_action_approval_coordinator = None
+    if settings.autonomy_worker_enabled:
+        action_owner_ids = approval_owner_identities()
+        playbook_action_proposal_store = SQLitePlaybookActionProposalStore(
+            settings.autonomy_worker_db.with_name(
+                "playbook-action-proposals.sqlite3"
+            )
+        )
+        playbook_action_approval_repository = SQLiteApprovalRequestRepository(
+            settings.autonomy_worker_db.with_name(
+                "playbook-action-approvals.sqlite3"
+            )
+        )
+        playbook_action_approval_service = ApprovalRequestService(
+            repository=playbook_action_approval_repository,
+            authority=OwnerOnlyPlaybookActionAuthority(action_owner_ids),
+        )
+        playbook_action_approval_sender = TeamsGatewayPlaybookApprovalSender(
+            gateway_url=settings.teams_gateway_internal_url,
+            token_file=settings.teams_proactive_token_file,
+            bindings=bindings,
+            owner_identity_ids=action_owner_ids,
+        )
+        playbook_action_approval_coordinator = PlaybookActionApprovalCoordinator(
+            proposal_store=playbook_action_proposal_store,
+            approval_service=playbook_action_approval_service,
+            sender=playbook_action_approval_sender,
+            owner_identity_ids=action_owner_ids,
+        )
+        playbook_action_approval_flow = PlaybookActionApprovalInteractionFlow(
+            bindings=bindings,
+            approval_service=playbook_action_approval_service,
+            proposal_store=playbook_action_proposal_store,
+        )
+
     procurement_teams_flow = None
     procurement_approval_flow = None
     billing_disposition_flow = None
@@ -2338,6 +2380,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
 
     approval_interaction_flow = ApprovalInteractionDispatcher(
         procurement=procurement_approval_flow,
+        playbook_action=playbook_action_approval_flow,
         fallback=playbook_approval_flow,
     )
 
@@ -2432,6 +2475,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         targeted_wake_retry_seconds=settings.autonomy_targeted_wake_retry_seconds,
         audit=reflection_audit,
         completion_notifier=autonomous_completion_notifier,
+        playbook_action_approvals=playbook_action_approval_coordinator,
     )
     drmm_recent_alert_reconciliation_maintenance = build_daily_drmm_alert_reconciliation_maintenance(
         enabled=settings.drmm_recent_alert_reconciliation_enabled,

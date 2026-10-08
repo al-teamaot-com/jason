@@ -16,6 +16,7 @@ def proposal(**overrides):
         proposal_id="proposal-1",
         playbook_id="idle_log_off",
         playbook_version="1.1.0",
+        policy_id="playbook-autonomy:idle_log_off",
         ticket_id=140001,
         client_id="507",
         target_id="device-1",

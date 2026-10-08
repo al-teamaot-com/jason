@@ -32,6 +32,7 @@ from .autonomous_principal import (
     AutonomousAuthorityError,
     AutonomousPrincipal,
     AutonomousRequestFactory,
+    PerRunApprovalAuthorization,
     StandingPolicyAuthorization,
 )
 
@@ -189,3 +190,52 @@ def test_nonapproval_capability_still_requires_service_grant(tmp_path):
     )
     assert request.approval_id is None
     assert request.approval_present is False
+
+
+def test_per_run_owner_approval_creates_exact_governed_reservation(tmp_path):
+    factory, approvals, ledger, _ = build(tmp_path)
+    per_run = PerRunApprovalAuthorization(
+        approval_request_id="playaction-1",
+        approved_by="person-al",
+        proposal_fingerprint="a" * 64,
+        playbook_id="idle_log_off",
+        playbook_version="1.1.0",
+        policy_id="playbook-autonomy:idle_log_off",
+    )
+    request = factory.build(
+        capability_name="service.ticket.update",
+        arguments={"payload": {"id": 123, "queueID": 1}},
+        client_id=None,
+        per_run_approval=per_run,
+    )
+    assert request.approval_present is True
+    assert request.approval_id
+    assert "playbook-autonomy:idle_log_off" in request.policy_ids
+    assert "playbook:idle_log_off@1.1.0" in request.policy_ids
+    assert "per-run-approval:playaction-1" in request.policy_ids
+    assert "proposal:" + ("a" * 64) in request.policy_ids
+    assert request.principal_attributes["playbook"] == "idle_log_off"
+    record = approvals.get(request.approval_id)
+    assert record is not None
+    assert record.decided_by.startswith("per-run:playaction-1:person-al:")
+    evidence = ledger.evidence(request.approval_id)
+    assert evidence["state"] == "reserved"
+
+
+def test_per_run_and_standing_authority_cannot_be_combined(tmp_path):
+    factory, _, _, promotion = build(tmp_path)
+    with pytest.raises(AutonomousAuthorityError):
+        factory.build(
+            capability_name="service.ticket.update",
+            arguments={"payload": {"id": 123, "queueID": 1}},
+            client_id=None,
+            standing_policy=standing(promotion),
+            per_run_approval=PerRunApprovalAuthorization(
+                approval_request_id="playaction-1",
+                approved_by="person-al",
+                proposal_fingerprint="b" * 64,
+                playbook_id="idle_log_off",
+                playbook_version="1.1.0",
+                policy_id="playbook-autonomy:idle_log_off",
+            ),
+        )

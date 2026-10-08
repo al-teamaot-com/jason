@@ -51,6 +51,7 @@ def build_autonomy_worker_maintenance(
     targeted_wake_retry_seconds: int = 300,
     audit=None,
     completion_notifier=None,
+    playbook_action_approvals=None,
 ):
     """Build the production worker or return None without side effects."""
 
@@ -116,6 +117,7 @@ def build_autonomy_worker_maintenance(
         audit=audit,
         completion_notifier=completion_notifier,
         ticket_splitter=ticket_splitter,
+        playbook_action_approvals=playbook_action_approvals,
     )
     targeted_reads = GovernedAutonomyReadPort(
         request_factory=request_factory,

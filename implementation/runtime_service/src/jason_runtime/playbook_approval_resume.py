@@ -26,6 +26,7 @@ class PlaybookActionProposal:
     proposal_id: str
     playbook_id: str
     playbook_version: str
+    policy_id: str
     ticket_id: int
     client_id: str
     target_id: str
@@ -42,6 +43,7 @@ class PlaybookActionProposal:
             self.proposal_id,
             self.playbook_id,
             self.playbook_version,
+            self.policy_id,
             self.client_id,
             self.target_id,
             self.capability,
@@ -64,6 +66,7 @@ class PlaybookActionProposal:
         material = {
             "playbook_id": self.playbook_id,
             "playbook_version": self.playbook_version,
+            "policy_id": self.policy_id,
             "ticket_id": int(self.ticket_id),
             "client_id": self.client_id,
             "target_id": self.target_id,
@@ -133,16 +136,25 @@ class SQLitePlaybookActionProposalStore:
         ).fetchone()
         return None if row is None else self._decode(str(row["payload"]))
 
-    def find_pending_for_ticket(self, ticket_id: int) -> ProposalState | None:
+    def list_all(self) -> tuple[ProposalState, ...]:
         rows = self._connection.execute(
-            "SELECT payload FROM playbook_action_proposals"
+            "SELECT payload FROM playbook_action_proposals ORDER BY proposal_id"
         ).fetchall()
+        return tuple(self._decode(str(row["payload"])) for row in rows)
+
+    def find_for_ticket(self, ticket_id: int) -> ProposalState | None:
         matches = [
-            self._decode(str(row["payload"]))
-            for row in rows
+            item for item in self.list_all()
+            if item.proposal.ticket_id == int(ticket_id)
         ]
+        if not matches:
+            return None
+        matches.sort(key=lambda item: item.proposal.created_at)
+        return matches[-1]
+
+    def find_pending_for_ticket(self, ticket_id: int) -> ProposalState | None:
         pending = [
-            item for item in matches
+            item for item in self.list_all()
             if item.proposal.ticket_id == int(ticket_id) and item.status == "pending"
         ]
         if len(pending) > 1:
