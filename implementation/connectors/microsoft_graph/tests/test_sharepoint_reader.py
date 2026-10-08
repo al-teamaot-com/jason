@@ -58,3 +58,45 @@ class SharePointReaderTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class SharePointExtendedTests(unittest.TestCase):
+    def setUp(self):
+        self.transport = Transport()
+        self.reader = AOTAdminSharePointReader(Tokens(), self.transport, "trusted-tenant")
+
+    def test_list_files_rejects_unauthorized_drive(self):
+        with self.assertRaises(PermissionError):
+            self.reader.list_files(tenant_id="trusted-tenant", drive_id="other")
+        self.assertEqual(len(self.transport.calls), 1)
+
+    def test_folder_pagination_fails_closed(self):
+        old = self.transport.request
+        def request(**kw):
+            if kw["url"].endswith("/children"):
+                return {"value": [], "@odata.nextLink": "next"}
+            return old(**kw)
+        self.transport.request = request
+        with self.assertRaises(Exception):
+            self.reader.list_files(tenant_id="trusted-tenant", drive_id="allowed-drive")
+
+    def test_file_size_rejects_download(self):
+        old = self.transport.request
+        def request(**kw):
+            data = old(**kw)
+            if kw["url"].endswith("/items/file1"):
+                data["size"] = 2000000
+            return data
+        self.transport.request = request
+        with self.assertRaises(ValueError):
+            self.reader.file_bytes(tenant_id="trusted-tenant", drive_id="allowed-drive", item_id="file1")
+
+    def test_content_read_bounded_and_get_only(self):
+        old = self.transport.request
+        def request(**kw):
+            data = old(**kw)
+            if kw["url"].endswith("/items/file1"):
+                data["size"] = 3
+            return data
+        self.transport.request = request
+        self.transport.request_bytes = lambda **kw: b"abc"
+        self.assertEqual(self.reader.file_bytes(tenant_id="trusted-tenant", drive_id="allowed-drive", item_id="file1"), b"abc")
