@@ -281,3 +281,59 @@ def test_owner_approved_issue_discovery_is_not_limited_to_newest_100(monkeypatch
     limit_index = issue_list_call.index('--limit') + 1
     assert int(issue_list_call[limit_index]) >= 1000
     assert [item['issue_number'] for item in items] == [866]
+
+
+def test_pr_preflight_rejects_missing_coordination_acknowledgement():
+    body = """## Integration coordination
+
+- Current-main reconciliation performed: yes
+- Integration coordination: #123
+- Integration automation: enabled
+- Production deployment authority: none
+
+## Documentation impact
+
+- [ ] Documentation updated
+- [x] No documentation impact
+
+No-documentation-impact reason: No durable documentation contract changed.
+"""
+    try:
+        module.validate_pr_preflight(body, [123, 456])
+    except Exception as exc:
+        assert "#456" in str(exc)
+    else:
+        raise AssertionError("preflight should reject missing overlap acknowledgement")
+
+
+def test_pr_preflight_accepts_required_contract():
+    body = """## Integration coordination
+
+- Current-main reconciliation performed: yes
+- Integration coordination: #123 #456
+- Integration automation: enabled
+- Production deployment authority: none
+
+## Documentation impact
+
+- [ ] Documentation updated
+- [x] No documentation impact
+
+No-documentation-impact reason: No durable documentation contract changed.
+"""
+    module.validate_pr_preflight(body, [123, 456])
+
+
+def test_ci_failure_classifier_separates_process_from_code():
+    assert module.support.classify_ci_failure(
+        "DocumentationImpactError: PR body is missing required '## Documentation impact' section"
+    ) == "pr_governance_metadata_defect"
+    assert module.support.classify_ci_failure(
+        "change-integration: FAIL\n- Active implementation overlap with PR #1022"
+    ) == "integration_collision"
+    assert module.support.classify_ci_failure(
+        "ModuleNotFoundError: No module named 'pytest'"
+    ) == "dependency_environment_defect"
+    assert module.support.classify_ci_failure(
+        "FAILED tests/test_example.py::test_behavior - AssertionError"
+    ) == "code_or_test_defect"
