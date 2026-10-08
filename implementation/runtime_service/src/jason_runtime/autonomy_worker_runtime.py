@@ -96,6 +96,10 @@ from autonomous_remediation.offline_ticket_augmentation import (
     render_site_context_note,
 )
 from .vulscan_client_policy import resolve_vulscan_policy
+from .vulscan_non_kb import (
+    analyze_non_kb_vulscan,
+    render_non_kb_assessment,
+)
 from .gpt_insights import (
     AUGMENTATION_ID as GPT_INSIGHTS_AUGMENTATION_ID,
     InsightEvidence,
@@ -4565,9 +4569,42 @@ class OperationalAutonomyMaintenance:
         )
         kbs = sorted(set(re.findall(r"KB\s*(\d{6,8})", material, flags=re.IGNORECASE)))
         if not kbs:
-            self._escalate(
+            software_items = ()
+            try:
+                software_data = self._read_data(
+                    "endpoint.software.search",
+                    {"resource_id": work.device_uid, "page_size": 250},
+                )
+                raw_software = software_data.get("items")
+                if isinstance(raw_software, Sequence) and not isinstance(
+                    raw_software, (str, bytes)
+                ):
+                    software_items = tuple(
+                        item for item in raw_software if isinstance(item, Mapping)
+                    )
+            except Exception:
+                software_items = ()
+
+            assessment = analyze_non_kb_vulscan(material, software_items)
+            detail = render_non_kb_assessment(assessment)
+            note = (
+                "Jason autonomous VulScan non-KB assessment completed using "
+                "ticket evidence and governed read-only endpoint inventory where available. "
+                f"Device={work.hostname}; Online={'Yes' if endpoint.get('online') is True else 'No'}; "
+                + detail
+            )
+            self._write_note(
                 work,
-                "No exact KB identity could be extracted from the VulScan ticket.",
+                note,
+                "Jason - VulScan - Non-KB Technical Assessment",
+            )
+            self._persist_human_review_escalation(
+                work,
+                reason=(
+                    "VulScan non-KB finding researched and classified read-only; "
+                    f"classification={assessment.classification}; "
+                    "any remediation remains separately approval/capability governed."
+                ),
             )
             return
 
