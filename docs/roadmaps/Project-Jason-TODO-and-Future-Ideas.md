@@ -630,7 +630,8 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-KNOW-001 — AOT-wide IT Glue internal knowledge scope
 
 - **Priority:** P1
-- **Status:** Proposed
+- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-08
+- **Autonomous engineering readiness:** Approved — bounded read-only AOT internal knowledge scope only
 - **Risk level:** Moderate
 - **Idea:** Allow Jason to use AOT's existing IT Glue policies, SOPs, standards, procedures, and operational documentation as governed internal knowledge without requiring AOT to move or reorganize documents into a new folder.
 - **Scope model:** Bind the capability to the exact AOT IT Glue organization ID. Within that organization, Jason may search and read non-restricted documents and approved document attachments for operational reasoning. Existing IT Glue folder/document organization remains unchanged.
