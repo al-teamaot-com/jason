@@ -1,4 +1,6 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import express from "express";
 import JSON5 from "json5";
 import {
@@ -249,6 +251,103 @@ function activityAadObjectId(activity) {
   return nonBlank(activity?.from?.aadObjectId);
 }
 
+const PROCUREMENT_DOCUMENT_MAX_BYTES = 6 * 1024 * 1024;
+const PROCUREMENT_DOCUMENT_MAX_TEXT = 48_000;
+const PROCUREMENT_DOCUMENT_MAX_COUNT = 3;
+
+function teamsFileAttachments(activity) {
+  const attachments = Array.isArray(activity?.attachments) ? activity.attachments : [];
+  return attachments.filter((attachment) => {
+    const contentType = String(attachment?.contentType ?? "").toLowerCase();
+    const content = attachment?.content;
+    const downloadUrl = nonBlank(content?.downloadUrl);
+    const name = nonBlank(attachment?.name) ?? nonBlank(content?.name);
+    const fileType = String(content?.fileType ?? "").toLowerCase();
+    return contentType === "application/vnd.microsoft.teams.file.download.info"
+      && Boolean(downloadUrl)
+      && Boolean(name)
+      && (fileType === "pdf" || String(name).toLowerCase().endsWith(".pdf"));
+  });
+}
+
+async function readBoundedResponse(response, maxBytes) {
+  const declared = Number(response.headers.get("content-length") ?? 0);
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw new Error("procurement document exceeds maximum size");
+  }
+  if (!response.body) throw new Error("procurement document download returned no body");
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      try { await reader.cancel(); } catch {}
+      throw new Error("procurement document exceeds maximum size");
+    }
+    chunks.push(Buffer.from(value));
+  }
+  if (total < 1) throw new Error("procurement document is empty");
+  return Buffer.concat(chunks, total);
+}
+
+function extractPdfText(bytes, ordinal) {
+  const tempPath = `/tmp/jason-procurement-${process.pid}-${Date.now()}-${ordinal}.pdf`;
+  try {
+    writeFileSync(tempPath, bytes, { mode: 0o600 });
+    const result = spawnSync("pdftotext", ["-layout", tempPath, "-"], {
+      encoding: "utf8",
+      maxBuffer: 2 * 1024 * 1024,
+      timeout: 20_000,
+    });
+    if (result.error || result.status !== 0) {
+      throw new Error("procurement PDF text extraction failed");
+    }
+    const text = String(result.stdout ?? "").replace(/\u0000/g, "").trim();
+    if (!text) throw new Error("procurement PDF contains no extractable text");
+    return text.length > PROCUREMENT_DOCUMENT_MAX_TEXT
+      ? text.slice(0, PROCUREMENT_DOCUMENT_MAX_TEXT)
+      : text;
+  } finally {
+    try { unlinkSync(tempPath); } catch {}
+  }
+}
+
+async function acquireProcurementDocuments(activity) {
+  const files = teamsFileAttachments(activity);
+  if (files.length === 0) return [];
+  if (files.length > PROCUREMENT_DOCUMENT_MAX_COUNT) {
+    throw new Error("too many procurement documents in one Teams message");
+  }
+  const documents = [];
+  for (let index = 0; index < files.length; index += 1) {
+    const attachment = files[index];
+    const content = attachment.content ?? {};
+    const downloadUrl = nonBlank(content.downloadUrl);
+    const parsed = new URL(downloadUrl);
+    if (parsed.protocol !== "https:") {
+      throw new Error("procurement document download URL is not HTTPS");
+    }
+    const response = await fetch(downloadUrl, { redirect: "follow" });
+    if (!response.ok) {
+      throw new Error(`procurement document download failed: HTTP ${response.status}`);
+    }
+    const bytes = await readBoundedResponse(response, PROCUREMENT_DOCUMENT_MAX_BYTES);
+    const name = nonBlank(attachment.name) ?? `invoice-${index + 1}.pdf`;
+    documents.push({
+      name,
+      content_type: "application/pdf",
+      size: bytes.length,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      extracted_text: extractPdfText(bytes, index),
+      source_id: nonBlank(content.uniqueId) ?? nonBlank(attachment.id) ?? "",
+    });
+  }
+  return documents;
+}
+
 function logRuntimeFailure(result, { conversationId, messageId }) {
   if (Number(result?.httpStatus ?? 0) < 400) {
     return;
@@ -347,9 +446,10 @@ agent.onActivity("message", async (context) => {
     return;
   }
 
-  if (!text && !submitValue) {
+  const hasProcurementFile = teamsFileAttachments(activity).length > 0;
+  if (!text && !submitValue && !hasProcurementFile) {
     await context.sendActivity(
-      "Jason currently requires text or a governed card response for this conversation path.",
+      "Jason currently requires text, a supported PDF attachment, or a governed card response for this conversation path.",
     );
     return;
   }
@@ -399,13 +499,17 @@ agent.onActivity("message", async (context) => {
         return;
       }
     }
+    const procurementDocuments =
+      approvalSubmit || procurementSubmit || billingDispositionSubmit
+        ? []
+        : await acquireProcurementDocuments(activity);
     const governedText = approvalSubmit
       ? `Jason approval response: ${approvalSubmit.decision} approval ${approvalSubmit.approvalId}`
       : procurementSubmit
         ? `Jason procurement submission ${procurementSubmit.submissionId}`
         : billingDispositionSubmit
           ? `Jason hardware billing disposition ${billingDispositionSubmit.caseKey}`
-          : text;
+          : (text || (procurementDocuments.length ? "Jason procurement document intake" : ""));
     const envelope = buildConversationEnvelope({
       text: governedText,
       microsoftTenantId: auth.tenantId,
@@ -413,6 +517,7 @@ agent.onActivity("message", async (context) => {
       conversationId,
       messageId,
       keyId: KEY_ID,
+      documents: procurementDocuments.length ? procurementDocuments : undefined,
       interaction: approvalSubmit
         ? {
             kind: "approval.submit",

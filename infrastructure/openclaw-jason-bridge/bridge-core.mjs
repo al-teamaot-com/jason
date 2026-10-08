@@ -84,6 +84,7 @@ export function buildConversationEnvelope({
   correlationId = randomUUID(),
   nonce = randomBytes(16).toString("hex"),
   interaction = undefined,
+  documents = undefined,
 }) {
   const cleanText = String(text ?? "").trim();
   const cleanTenant = String(microsoftTenantId ?? "").trim();
@@ -100,6 +101,47 @@ export function buildConversationEnvelope({
   if (!cleanKeyId) throw new Error("transport key id is required");
   if (!(now instanceof Date) || Number.isNaN(now.getTime())) throw new Error("current time is invalid");
   if (!Number.isFinite(ttlMs) || ttlMs <= 0 || ttlMs > 60_000) throw new Error("request ttl is invalid");
+
+  let cleanDocuments;
+  if (documents !== undefined && documents !== null) {
+    if (!Array.isArray(documents) || documents.length < 1 || documents.length > 3) {
+      throw new Error("conversation documents are invalid");
+    }
+    cleanDocuments = documents.map((raw) => {
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        throw new Error("conversation document is invalid");
+      }
+      const allowed = new Set([
+        "name", "content_type", "size", "sha256", "extracted_text", "source_id",
+      ]);
+      assertOnlyKeys(raw, allowed, "document");
+      const name = String(raw.name ?? "").trim();
+      const contentType = String(raw.content_type ?? "").trim().toLowerCase();
+      const sha256 = String(raw.sha256 ?? "").trim().toLowerCase();
+      const extractedText = String(raw.extracted_text ?? "").trim();
+      const sourceId = String(raw.source_id ?? "").trim();
+      const size = Number(raw.size);
+      if (!name || name.length > 255 || !contentType || contentType.length > 120) {
+        throw new Error("conversation document metadata is invalid");
+      }
+      if (!Number.isInteger(size) || size < 1 || size > 6 * 1024 * 1024) {
+        throw new Error("conversation document size is invalid");
+      }
+      if (!/^[0-9a-f]{64}$/.test(sha256)) {
+        throw new Error("conversation document digest is invalid");
+      }
+      if (!extractedText || extractedText.length > 48_000) {
+        throw new Error("conversation document extracted text is invalid");
+      }
+      if (sourceId.length > 256) {
+        throw new Error("conversation document source id is invalid");
+      }
+      return {
+        name, content_type: contentType, size, sha256, extracted_text: extractedText,
+        ...(sourceId ? { source_id: sourceId } : {}),
+      };
+    });
+  }
 
   let cleanInteraction;
   if (interaction !== undefined && interaction !== null) {
@@ -198,6 +240,7 @@ export function buildConversationEnvelope({
     conversation_id: cleanConversation,
     message_id: cleanMessage,
     ...(cleanInteraction ? { interaction: cleanInteraction } : {}),
+    ...(cleanDocuments ? { documents: cleanDocuments } : {}),
     key_id: cleanKeyId,
   };
 }

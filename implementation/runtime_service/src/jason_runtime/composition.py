@@ -2307,6 +2307,7 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             approval_service=procurement_approval_service,
             approval_sender=procurement_approval_sender,
             owner_ids=tuple(procurement_owner_ids),
+            structured_client=hosted_conversation_client or ollama_client,
             inventory_location_id=settings.procurement_inventory_location_id,
         )
         procurement_approval_flow = ProcurementApprovalInteractionFlow(
