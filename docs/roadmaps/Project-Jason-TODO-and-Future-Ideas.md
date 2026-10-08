@@ -948,13 +948,16 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-GOV-001 — Technology Steward review automation
 
 - **Priority:** P2
-- **Status:** Proposed
+- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-08
+- **Autonomous engineering readiness:** Approved — bounded first implementation only
 - **Risk level:** Low
 - **Idea:** Periodically review dependent platforms for new capabilities, API changes, deprecations, and opportunities to retire custom Jason functionality.
 - **Why it matters:** Supports the principle of integrating before innovating and prevents unnecessary custom-code accumulation.
-- **Why not now:** Requires connector inventory, ownership, and review cadence.
-- **Prerequisites:** dependency registry, vendor feed sources, review workflow, retirement criteria.
-- **Decision owner:** Technology Steward
+- **Owner-approved first implementation scope:** Build a read-only/report-only Technology Steward review runner that can inspect defined dependency/platform capability sources and produce a structured findings report. No provider configuration changes, client changes, credential changes, capability retirement, or autonomous remediation are authorized by this approval.
+- **Authority boundary:** Findings are advisory/report-only. Any recommendation to change configuration, retire functionality, add credentials, broaden provider access, or alter client systems requires separate governed authority.
+- **Acceptance criteria:** deterministic bounded source inventory; structured report output; explicit source/evidence references; no provider mutation capability; regression proof of report-only behavior; protected CI; Release Manager promotion; production verification.
+- **Prerequisites:** dependency registry, defined review sources, review workflow, retirement criteria. The first bounded implementation may establish the minimal local registry/reporting primitives needed for read-only review but may not add new external credentials or write authority.
+- **Decision owner:** AOT Owner / Technology Steward
 - **Review trigger:** After the first production connectors are operational.
 
 ### TODO-GOV-002 — Capability retirement and deprecation process
