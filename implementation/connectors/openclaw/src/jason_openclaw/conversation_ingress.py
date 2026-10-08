@@ -49,6 +49,17 @@ class GovernedProcurementInteractionFlow(Protocol):
         ticket_number_hint: str | None = None,
     ) -> Mapping[str, Any]: ...
 
+    def handle_vendor_document_text(
+        self,
+        *,
+        document: Mapping[str, Any],
+        microsoft_tenant_id: str,
+        microsoft_object_id: str,
+        conversation_id: str,
+        message_id: str,
+        occurred_at: datetime,
+    ) -> Mapping[str, Any]: ...
+
     def handle_submit(
         self,
         *,
@@ -206,6 +217,7 @@ class OpenClawTeamsConversationEnvelope:
     authentication_assurance: str
     conversation_id: str
     message_id: str
+    documents: tuple[Mapping[str, Any], ...] = ()
     approval_submit: ApprovalSubmitEvidence | None = None
     procurement_submit: ProcurementSubmitEvidence | None = None
     billing_disposition: HardwareBillingDispositionEvidence | None = None
@@ -287,6 +299,41 @@ class OpenClawTeamsConversationEnvelope:
             raise PermissionError(
                 "Teams conversation requires Bot Framework authenticated identity evidence"
             )
+
+        documents: tuple[Mapping[str, Any], ...] = ()
+        raw_documents = envelope.get("documents")
+        if raw_documents is not None:
+            if not isinstance(raw_documents, list) or not 1 <= len(raw_documents) <= 3:
+                raise ValueError("conversation documents are invalid")
+            parsed_documents = []
+            allowed_document_keys = {
+                "name", "content_type", "size", "sha256", "extracted_text", "source_id"
+            }
+            for raw in raw_documents:
+                if not isinstance(raw, Mapping) or set(raw) - allowed_document_keys:
+                    raise ValueError("conversation document object is invalid")
+                name = str(raw.get("name") or "").strip()
+                content_type = str(raw.get("content_type") or "").strip().casefold()
+                digest = str(raw.get("sha256") or "").strip().casefold()
+                text = str(raw.get("extracted_text") or "").strip()
+                source_id = str(raw.get("source_id") or "").strip()
+                try:
+                    size = int(raw.get("size"))
+                except Exception as exc:
+                    raise ValueError("conversation document size is invalid") from exc
+                if not name or len(name) > 255 or content_type != "application/pdf":
+                    raise ValueError("conversation document metadata is invalid")
+                if not 1 <= size <= 6 * 1024 * 1024:
+                    raise ValueError("conversation document size is invalid")
+                if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
+                    raise ValueError("conversation document digest is invalid")
+                if not text or len(text) > 48_000 or len(source_id) > 256:
+                    raise ValueError("conversation document evidence is invalid")
+                parsed_documents.append({
+                    "name": name, "content_type": content_type, "size": size,
+                    "sha256": digest, "extracted_text": text, "source_id": source_id,
+                })
+            documents = tuple(parsed_documents)
 
         approval_submit = None
         procurement_submit = None
@@ -386,6 +433,7 @@ class OpenClawTeamsConversationEnvelope:
             authentication_assurance=values["authentication_assurance"],
             conversation_id=values["conversation_id"],
             message_id=values["message_id"],
+            documents=documents,
             approval_submit=approval_submit,
             procurement_submit=procurement_submit,
             billing_disposition=billing_disposition,
@@ -626,7 +674,7 @@ class GovernedOpenClawTeamsConversationIngress:
             return billing_result
 
         procurement_url, procurement_ticket = _procurement_url_context(parsed.text)
-        if parsed.procurement_submit is not None or (
+        if parsed.documents or parsed.procurement_submit is not None or (
             procurement_url is not None and self.procurement_flow is not None
         ):
             if self.procurement_flow is None:
@@ -637,7 +685,24 @@ class GovernedOpenClawTeamsConversationIngress:
                     machine_identity=machine_identity,
                 )
             try:
-                if parsed.procurement_submit is not None:
+                if parsed.documents:
+                    if parsed.procurement_submit is not None:
+                        raise ValueError("document intake cannot be combined with procurement card submit")
+                    if len(parsed.documents) != 1:
+                        raise ProcurementFlowError(
+                            "Send one invoice or quote PDF per Teams message for deterministic processing."
+                        )
+                    procurement_result = dict(
+                        self.procurement_flow.handle_vendor_document_text(
+                            document=parsed.documents[0],
+                            microsoft_tenant_id=parsed.microsoft_tenant_id,
+                            microsoft_object_id=parsed.microsoft_object_id,
+                            conversation_id=parsed.conversation_id,
+                            message_id=parsed.message_id,
+                            occurred_at=parsed.issued_at,
+                        )
+                    )
+                elif parsed.procurement_submit is not None:
                     procurement_result = dict(
                         self.procurement_flow.handle_submit(
                             submission_id=parsed.procurement_submit.submission_id,
