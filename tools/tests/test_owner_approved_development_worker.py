@@ -10,12 +10,27 @@ sys.modules[SPEC.name] = module
 SPEC.loader.exec_module(module)
 
 
-def test_lifecycle_sync_writes_start_and_blocker(tmp_path):
-    record = {'phase': 'blocked', 'reason': 'controlled acceptance blocker'}
+def test_lifecycle_sync_keeps_recoverable_blocker_silent(tmp_path):
+    record = {'phase': 'blocked', 'reason': 'controlled recoverable blocker'}
     item = {'id': 'DEV-42', 'title': 'Teams lifecycle cards'}
     root = tmp_path / 'events'
     module.sync_lifecycle_notification(record, item, event_root=root)
     assert record['lifecycle_started_fingerprint']
+    assert 'lifecycle_blocked_fingerprint' not in record
+    payloads = [module.support.json.loads(p.read_text()) for p in root.glob('*.json')]
+    assert {p['event_type'] for p in payloads} == {'work_started'}
+
+
+def test_lifecycle_sync_notifies_explicit_owner_action_blocker(tmp_path):
+    record = {
+        'phase': 'blocked',
+        'reason': 'owner approval is required',
+        'notification_class': 'owner_action_required',
+        'owner_action': 'Approve protected-core production promotion.',
+    }
+    item = {'id': 'DEV-42', 'title': 'Teams lifecycle cards'}
+    root = tmp_path / 'events'
+    module.sync_lifecycle_notification(record, item, event_root=root)
     assert record['lifecycle_blocked_fingerprint']
     payloads = [module.support.json.loads(p.read_text()) for p in root.glob('*.json')]
     assert {p['event_type'] for p in payloads} == {'work_started', 'work_blocked'}
