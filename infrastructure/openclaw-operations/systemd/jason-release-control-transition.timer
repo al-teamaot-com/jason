@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for root-governed release transitions
+
+[Timer]
+OnBootSec=20s
+OnUnitActiveSec=5s
+Unit=jason-release-control-transition.service
+
+[Install]
+WantedBy=timers.target

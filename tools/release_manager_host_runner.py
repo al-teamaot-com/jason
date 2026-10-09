@@ -404,12 +404,46 @@ def capture_production_manifest(expected_sha: str) -> dict[str, Any]:
     }
 
 
+def request_root_control_transition(state_root: Path, *, action: str, revision: str, release_id: str = "", reason: str = "") -> None:
+    """Request a finite root-governed intent rather than write protected JSON."""
+    if action not in {"open", "revalidate", "set_last_known_good"}:
+        raise ReleaseManagerError("unsupported root-controlled release transition")
+    revision = exact_sha(revision, "transition revision")
+    request_id = uuid4().hex
+    request_root = state_root / "protected-transitions"
+    request_file = request_root / "requests" / (request_id + ".json")
+    result_file = request_root / "results" / (request_id + ".json")
+    if not request_file.parent.is_dir() or not result_file.parent.is_dir():
+        raise ReleaseManagerError("governed root release transition worker not installed")
+    atomic_json(request_file, {"request_id": request_id, "action": action, "revision": revision,
+                               "release_id": release_id, "reason": reason[:300]})
+    try:
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            if result_file.is_file():
+                data = json.loads(result_file.read_text(encoding="utf-8"))
+                if data.get("request_id") != request_id or data.get("success") is not True:
+                    raise ReleaseManagerError("governed root release transition rejected: " + str(data.get("detail") or "invalid response")[:350])
+                if data.get("revision") != revision or data.get("action") != action:
+                    raise ReleaseManagerError("governed root transition response identity mismatch")
+                if control_state_path(state_root).stat().st_uid != 0:
+                    raise ReleaseManagerError("governed root transition lost protected file ownership")
+                return
+            time.sleep(0.25)
+        raise ReleaseManagerError("governed root transition result timed out")
+    finally:
+        result_file.unlink(missing_ok=True)
+
+
 def set_last_known_good(
     state_root: Path,
     manifest: dict[str, Any],
     *,
     release_id: str,
 ) -> None:
+    if control_state_path(state_root).exists() and control_state_path(state_root).stat().st_uid == 0 and os.geteuid() != 0:
+        request_root_control_transition(state_root, action="set_last_known_good", revision=exact_sha(str(manifest.get("revision") or ""), "manifest revision"), release_id=release_id)
+        return
     state = load_control_state(state_root)
     state["last_known_good"] = {
         "release_id": release_id,
@@ -431,6 +465,10 @@ def open_circuit_breaker(
     reason: str,
     rollback_verified: bool,
 ) -> None:
+    if control_state_path(state_root).exists() and control_state_path(state_root).stat().st_uid == 0 and os.geteuid() != 0:
+        revision = exact_sha(str((record.get("release_candidate") or {}).get("candidate_sha") or ""), "candidate revision")
+        request_root_control_transition(state_root, action="open", revision=revision, reason=reason)
+        return
     state = load_control_state(state_root)
     state["circuit_breaker"] = {
         "state": "open",
@@ -460,6 +498,9 @@ def revalidate_circuit_breaker(state_root: Path) -> dict[str, Any]:
         raise ReleaseManagerError(
             "production circuit breaker is open; authoritative health revalidation failed: " + str(exc)
         ) from exc
+    if control_state_path(state_root).exists() and control_state_path(state_root).stat().st_uid == 0 and os.geteuid() != 0:
+        request_root_control_transition(state_root, action="revalidate", revision=revision)
+        return load_control_state(state_root)
     state["circuit_breaker"] = {
         "state": "closed",
         "reason": "authoritative_health_revalidated",

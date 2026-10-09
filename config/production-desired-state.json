@@ -35,6 +35,7 @@
     "jason-provider-health-canary.timer",
     "jason-reflection-exporter.service",
     "jason-release-control-readback.timer",
+    "jason-release-control-transition.timer",
     "jason-release-host-reconcile.path",
     "jason-resolution-memory-exporter.service",
     "jason-security-control-exporter.service",
@@ -58,6 +59,7 @@
     "jason-production-drift-watchdog.service",
     "jason-provider-health-canary.service",
     "jason-release-control-readback.service",
+    "jason-release-control-transition.service",
     "jason-release-host-reconcile.service",
     "jason-runtime.service"
   ],
