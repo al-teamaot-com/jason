@@ -23,7 +23,7 @@ def git(repo: Path, *args: str) -> bytes:
 def recover(repo: Path, target: Path, revision: str, *, dry_run: bool = True) -> dict:
     if not SHA.fullmatch(revision):
         raise ValueError('exact candidate revision required')
-    if repo.resolve() != DEFAULT_REPO or target != DEFAULT_TARGET:
+    if repo != DEFAULT_REPO or repo.resolve() != DEFAULT_REPO.resolve() or target != DEFAULT_TARGET:
         raise ValueError('only canonical managed source and controller permitted')
     remote = git(repo, 'rev-parse', 'refs/remotes/origin/main').decode().strip()
     if remote != revision:
