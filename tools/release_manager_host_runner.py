@@ -13,6 +13,7 @@ import fcntl
 import hashlib
 import json
 import os
+import stat
 import re
 import shutil
 import subprocess
@@ -278,9 +279,14 @@ def load_control_state(state_root: Path) -> dict[str, Any]:
 
 
 def save_control_state(state_root: Path, payload: dict[str, Any]) -> None:
+    path = control_state_path(state_root)
+    if path.exists():
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
+            raise ReleaseManagerError("protected production control state requires governed root write; refusing operator-owned replacement")
     payload["schema_version"] = CONTROL_STATE_SCHEMA_VERSION
     payload["updated_at"] = now()
-    atomic_json(control_state_path(state_root), payload)
+    atomic_json(path, payload)
 
 
 def unit_active(unit: str, *, user: bool) -> bool:
