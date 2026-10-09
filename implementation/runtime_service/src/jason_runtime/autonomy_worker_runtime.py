@@ -1007,6 +1007,42 @@ class OperationalAutonomyMaintenance:
             return "On Hold"
         return None
 
+    def _notify_ticket_event(self, work: OperationalWork, event: str, status: str) -> None:
+        """Best-effort owner Teams card only after Autotask readback verification.
+
+        Notification failure must never undo an already-verified ticket change.
+        A fingerprint prevents duplicate cards when a queued work item is resumed.
+        """
+        if self.completion_notifier is None:
+            return
+        fingerprint = hashlib.sha256(
+            f"teams-ticket-v1|{event}|{work.ticket_number}|{status}".encode("utf-8")
+        ).hexdigest()
+        note_title = "Teams - Ticket Activity - " + event
+        if self.store.last_note_fingerprint(work.ticket_id, work.playbook_id, note_title) == fingerprint:
+            return
+        event_type = "work_started" if event == "pickup" else "work_completed" if status == "Complete" else "ticket_status_updated"
+        summary = (
+            f"Ticket: {work.ticket_number} | Device: {work.hostname or 'Not linked'} | "
+            f"Status: {status} | Action: {'Picked up by Jason' if event == 'pickup' else 'Status updated by Jason'}"
+        )
+        try:
+            self.completion_notifier.send(
+                event_type,
+                work_id=work.ticket_number[:80],
+                work_title=work.title[:180],
+                summary=summary[:400],
+            )
+            self.store.remember_note_fingerprint(
+                work.ticket_id, work.playbook_id, note_title, fingerprint,
+            )
+        except Exception as exc:
+            self._audit_diagnostic("ticket_teams_notification_failed", {
+                "ticket_number": work.ticket_number,
+                "event": event,
+                "error_type": type(exc).__name__,
+            })
+
     def _update_ticket_status_verified(self, work: OperationalWork, status: str) -> None:
         normalized = str(status).strip()
         if self._ticket_status_cache.get(work.ticket_id, "").casefold() == normalized.casefold():
@@ -1029,6 +1065,7 @@ class OperationalAutonomyMaintenance:
                 f"ticket status transition to {normalized!r} was not verified by provider readback"
             )
         self._ticket_status_cache[work.ticket_id] = normalized
+        self._notify_ticket_event(work, "status_change", normalized)
 
     def _reconcile_ticket_status_for_phase(
         self,
@@ -3511,6 +3548,7 @@ class OperationalAutonomyMaintenance:
                 )
             work = self._replace(work, phase=next_phase)
             self.store.put(work)
+            self._notify_ticket_event(work, "pickup", "In Progress")
 
         if work.playbook_id == DNS_SCOPE.playbook_id:
             if work.phase == "dns_diagnostic_dispatch":

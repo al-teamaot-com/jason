@@ -129,6 +129,19 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
         self.assertEqual(card["body"][0]["color"], "Accent")
         self.assertNotIn("health_metric:", json.dumps(card))
 
+    def test_ticket_status_updated_uses_readable_adaptive_card(self):
+        event, text, card = _render({
+            "event_type": "ticket_status_updated",
+            "work_id": "T20261009.0006",
+            "work_title": "Datto AV alert for AOT-50282",
+            "summary": "Ticket: T20261009.0006 | Device: AOT-50282 | Status: On Hold",
+        })
+        self.assertEqual(event, "ticket_status_updated")
+        self.assertIn("T20261009.0006", text)
+        self.assertEqual(card["type"], "AdaptiveCard")
+        self.assertEqual(card["body"][0]["color"], "Accent")
+        self.assertIn("ticket updated", json.dumps(card).lower())
+
     def test_work_completed_render_is_green(self):
         event, text, card = _render(
             {

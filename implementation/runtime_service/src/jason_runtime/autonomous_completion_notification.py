@@ -52,6 +52,7 @@ EXECUTE_GRANT_ID = "grant-jason-autonomy-worker-teams-autonomy-completion-v1"
 _ALLOWED_EVENTS = frozenset(
     {
         "work_started",
+        "ticket_status_updated",
         "work_blocked",
         "work_completed",
         "production_queue_entered",
@@ -336,7 +337,7 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str, dict[str, Any]]:
     if event not in _ALLOWED_EVENTS:
         raise ValueError("unsupported autonomous completion event_type")
 
-    if event in {"work_started", "work_blocked", "work_completed"}:
+    if event in {"work_started", "work_blocked", "work_completed", "ticket_status_updated"}:
         work_id = _bounded(arguments.get("work_id"), "work_id", 80)
         title = _bounded(arguments.get("work_title"), "work_title", 180)
         summary = _bounded(arguments.get("summary"), "summary", 400)
@@ -347,6 +348,15 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str, dict[str, Any]]:
                 summary=summary,
                 color="Accent",
                 facts=(("Work item", work_id), ("Scope", title)),
+            )
+            return event, text, card
+        if event == "ticket_status_updated":
+            text = f"Jason updated {work_id}: {title}. {summary}"
+            card = _adaptive_card(
+                title="Jason ticket updated",
+                summary=summary,
+                color="Accent",
+                facts=(("Ticket", work_id), ("Issue", title)),
             )
             return event, text, card
         if event == "work_completed":
