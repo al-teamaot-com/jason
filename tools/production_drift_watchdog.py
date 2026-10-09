@@ -23,7 +23,7 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def atomic_json(path: Path, payload: dict, *, inherit_parent_owner: bool = False) -> None:
+def atomic_json(path: Path, payload: dict, *, inherit_parent_owner: bool = False, owner_from: Path | None = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, temp_name = tempfile.mkstemp(prefix="." + path.name + "-", dir=path.parent)
     temp = Path(temp_name)
@@ -37,6 +37,9 @@ def atomic_json(path: Path, payload: dict, *, inherit_parent_owner: bool = False
         if inherit_parent_owner:
             parent = path.parent.stat()
             os.chown(temp, parent.st_uid, parent.st_gid)
+        if owner_from is not None:
+            source = owner_from.stat()
+            os.chown(temp, source.st_uid, source.st_gid)
         os.replace(temp, path)
         os.chmod(path, 0o600)
     finally:
@@ -68,7 +71,7 @@ def production_transaction_active(lock_path: Path = DEFAULT_TRANSACTION_LOCK) ->
 
 
 def apply_result(result: dict, *, control_state: Path, evidence: Path, watchdog_state: Path) -> int:
-    atomic_json(evidence, result)
+    atomic_json(evidence, result, owner_from=control_state if control_state.is_file() else None)
     status = str(result.get("status") or "unknown")
     problems = list(result.get("problems") or [])
     watchdog = {
