@@ -71,7 +71,7 @@ def production_transaction_active(lock_path: Path = DEFAULT_TRANSACTION_LOCK) ->
 
 
 def apply_result(result: dict, *, control_state: Path, evidence: Path, watchdog_state: Path) -> int:
-    atomic_json(evidence, result, inherit_parent_owner=True)
+    atomic_json(evidence, result, owner_from=evidence if evidence.exists() else None)
     status = str(result.get("status") or "unknown")
     problems = list(result.get("problems") or [])
     watchdog = {
@@ -109,7 +109,7 @@ def apply_result(result: dict, *, control_state: Path, evidence: Path, watchdog_
         "updated_at": now(),
     }
     control["updated_at"] = now()
-    atomic_json(control_state, control, inherit_parent_owner=True)
+    atomic_json(control_state, control, owner_from=control_state if control_state.exists() else None)
     watchdog["circuit_breaker_action"] = "opened"
     atomic_json(watchdog_state, watchdog)
     return 2

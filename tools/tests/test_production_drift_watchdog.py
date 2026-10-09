@@ -70,7 +70,7 @@ class ProductionDriftWatchdogTests(unittest.TestCase):
             )
             self.assertEqual(json.loads(state.read_text())["circuit_breaker_action"], "opened")
 
-    def test_control_state_replacement_inherits_release_directory_owner(self):
+    def test_control_state_replacement_preserves_existing_file_owner(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -78,6 +78,8 @@ class ProductionDriftWatchdogTests(unittest.TestCase):
             evidence = root / "evidence.json"
             state = root / "watchdog.json"
             result = {"status": "drift_detected", "problems": [{"kind": "unexpected_unit"}]}
+            control.write_text(json.dumps({"schema_version": "1.0", "circuit_breaker": {"state": "closed"}}))
+            evidence.write_text(json.dumps({"schema_version": "1.0", "status": "pass"}))
             original_chown = watchdog.os.chown
             calls = []
             def checked_chown(path, uid, gid):
