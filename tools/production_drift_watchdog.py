@@ -71,7 +71,7 @@ def production_transaction_active(lock_path: Path = DEFAULT_TRANSACTION_LOCK) ->
 
 
 def apply_result(result: dict, *, control_state: Path, evidence: Path, watchdog_state: Path) -> int:
-    atomic_json(evidence, result, owner_from=control_state if control_state.is_file() else None)
+    atomic_json(evidence, result, inherit_parent_owner=True)
     status = str(result.get("status") or "unknown")
     problems = list(result.get("problems") or [])
     watchdog = {
