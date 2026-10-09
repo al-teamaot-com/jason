@@ -1679,11 +1679,24 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         "revision": rollback_sha,
         "manifest_complete": bool(baseline_manifest.get("complete")),
     }
-    set_last_known_good(
-        state_root,
-        baseline_manifest,
-        release_id="baseline-" + rollback_sha[:16],
-    )
+    # Protected baseline is already a root-owned, verified last-known-good.
+    # The root transition worker only accepts approved candidate release IDs,
+    # not synthetic baseline IDs. Preserve the existing root baseline when it
+    # matches the independently verified current production revision.
+    protected_path = control_state_path(state_root)
+    if protected_path.exists() and protected_path.stat().st_uid == 0 and os.geteuid() != 0:
+        protected_state = load_control_state(state_root)
+        existing_manifest = dict((protected_state.get("last_known_good") or {}).get("manifest") or {})
+        if existing_manifest.get("revision") != rollback_sha or existing_manifest.get("complete") is not True:
+            raise ReleaseManagerError("root protected rollback baseline differs from verified production")
+        if dict(protected_state.get("circuit_breaker") or {}).get("state") != "closed":
+            raise ReleaseManagerError("root protected circuit breaker is not closed")
+    else:
+        set_last_known_good(
+            state_root,
+            baseline_manifest,
+            release_id="baseline-" + rollback_sha[:16],
+        )
     save_record(state_root, record)
 
     gate_transition(repo, state_root, record, "production")
