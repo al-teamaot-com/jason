@@ -347,7 +347,9 @@ for worker in \
   owner_approved_development_worker.py \
   todo_engineering_intake.py \
   todo_release_bridge.py \
-  release_manager_gate.py; do
+  release_manager_gate.py \
+  change_integration_gate.py \
+  documentation_impact_gate.py; do
   cmp -s "$ENGINEERING_SOURCE_REPO/tools/$worker" "/home/al/.local/lib/jason/$worker" || {
     echo "ERROR: installed worker differs from production source: $worker" >&2
     exit 9

@@ -746,3 +746,16 @@ def test_safe_search_centers_long_file_excerpt_on_match(tmp_path, monkeypatch):
     assert excerpts
     assert 'self_heal_escalation = True' in excerpts[0]['content']
     assert len(excerpts[0]['content']) <= 14000
+
+
+def test_transient_github_pr_listing_deferred_without_mutation(tmp_path, monkeypatch):
+    monkeypatch.setattr(__import__('sys'), 'argv', ['support_repair_host_worker.py', '--repo', str(tmp_path), '--spool', str(tmp_path / 'spool')])
+    monkeypatch.setattr(worker, 'run', lambda *a, **k: '')
+    monkeypatch.setattr(worker, 'parse_support', lambda _: [])
+    monkeypatch.setattr(worker, 'load_self_heal_incidents', lambda: [])
+    monkeypatch.setattr(worker, 'open_support_issue_ids', lambda _: set())
+    monkeypatch.setattr(worker, 'open_prs', lambda _: (_ for _ in ()).throw(worker.WorkerError('HTTP 504: gateway timeout')))
+    assert worker.main() == 0
+    state = worker.load_state(tmp_path / 'spool' / 'state.json')
+    assert state['upstream_deferred']['reason'] == 'transient_gateway_error'
+    assert state['items'] == {}
