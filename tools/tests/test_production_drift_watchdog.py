@@ -70,6 +70,28 @@ class ProductionDriftWatchdogTests(unittest.TestCase):
             )
             self.assertEqual(json.loads(state.read_text())["circuit_breaker_action"], "opened")
 
+    def test_control_state_replacement_inherits_release_directory_owner(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            control = root / "control.json"
+            evidence = root / "evidence.json"
+            state = root / "watchdog.json"
+            result = {"status": "drift_detected", "problems": [{"kind": "unexpected_unit"}]}
+            original_chown = watchdog.os.chown
+            calls = []
+            def checked_chown(path, uid, gid):
+                calls.append((Path(path), uid, gid))
+                original_chown(path, uid, gid)
+            with patch.object(watchdog.os, "chown", side_effect=checked_chown):
+                rc = watchdog.apply_result(result, control_state=control, evidence=evidence, watchdog_state=state)
+            self.assertEqual(rc, 2)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0][1:], (root.stat().st_uid, root.stat().st_gid))
+            self.assertEqual(control.stat().st_uid, root.stat().st_uid)
+            self.assertEqual(control.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(json.loads(control.read_text())["circuit_breaker"]["state"], "open")
+
     def test_clean_result_never_auto_closes_open_breaker(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

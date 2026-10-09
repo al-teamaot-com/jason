@@ -23,7 +23,7 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def atomic_json(path: Path, payload: dict) -> None:
+def atomic_json(path: Path, payload: dict, *, inherit_parent_owner: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd, temp_name = tempfile.mkstemp(prefix="." + path.name + "-", dir=path.parent)
     temp = Path(temp_name)
@@ -34,6 +34,9 @@ def atomic_json(path: Path, payload: dict) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(temp, 0o600)
+        if inherit_parent_owner:
+            parent = path.parent.stat()
+            os.chown(temp, parent.st_uid, parent.st_gid)
         os.replace(temp, path)
         os.chmod(path, 0o600)
     finally:
@@ -103,7 +106,7 @@ def apply_result(result: dict, *, control_state: Path, evidence: Path, watchdog_
         "updated_at": now(),
     }
     control["updated_at"] = now()
-    atomic_json(control_state, control)
+    atomic_json(control_state, control, inherit_parent_owner=True)
     watchdog["circuit_breaker_action"] = "opened"
     atomic_json(watchdog_state, watchdog)
     return 2
