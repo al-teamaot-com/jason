@@ -759,3 +759,18 @@ def test_transient_github_pr_listing_deferred_without_mutation(tmp_path, monkeyp
     state = worker.load_state(tmp_path / 'spool' / 'state.json')
     assert state['upstream_deferred']['reason'] == 'transient_gateway_error'
     assert state['items'] == {}
+
+
+def test_nongateway_github_pr_listing_failure_remains_fatal(tmp_path, monkeypatch):
+    monkeypatch.setattr(__import__('sys'), 'argv', ['support_repair_host_worker.py', '--repo', str(tmp_path), '--spool', str(tmp_path / 'spool')])
+    monkeypatch.setattr(worker, 'run', lambda *a, **k: '')
+    monkeypatch.setattr(worker, 'parse_support', lambda _: [])
+    monkeypatch.setattr(worker, 'load_self_heal_incidents', lambda: [])
+    monkeypatch.setattr(worker, 'open_support_issue_ids', lambda _: set())
+    monkeypatch.setattr(worker, 'open_prs', lambda _: (_ for _ in ()).throw(worker.WorkerError('HTTP 403: forbidden')))
+    try:
+        worker.main()
+    except worker.WorkerError as exc:
+        assert 'HTTP 403' in str(exc)
+    else:
+        raise AssertionError('Authorization failure must not be deferred')
