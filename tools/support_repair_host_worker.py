@@ -1214,7 +1214,22 @@ def main() -> int:
             item_id for item_id in open_issue_ids if item_id not in {item['id'] for item in parsed_support}
         ),
     }
-    prs = open_prs(repo)
+    try:
+        prs = open_prs(repo)
+    except WorkerError as exc:
+        # Preserve existing work and defer the entire reconciliation, not a
+        # partial PR listing, when GitHub has a transient gateway outage.
+        if not any(code in str(exc) for code in ('HTTP 502', 'HTTP 503', 'HTTP 504')):
+            raise
+        state['upstream_deferred'] = {
+            'provider': 'github', 'reason': 'transient_gateway_error',
+            'observed_at': now(),
+        }
+        state['updated_at'] = now()
+        save_state(state_path, state)
+        print('SUPPORT_REPAIR_DEFERRED=github_transient_gateway_error')
+        return 0
+    state.pop('upstream_deferred', None)
     gate = load_gate(repo)
     policy = gate.load_json(repo / 'config' / 'autonomous-repair-release-policy.json')
 

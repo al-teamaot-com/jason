@@ -63,6 +63,8 @@ class InstallSupportRepairHostWorkerTests(unittest.TestCase):
         self.assertNotIn("--repo /home/al/projects/jason", service)
         self.assertNotIn("WorkingDirectory=/home/al/projects/jason", service)
         self.assertIn("engineering-worker-source", installer)
+        self.assertIn("_copy(change_integration_gate, install_root", installer)
+        self.assertIn("_copy(documentation_impact_gate, install_root", installer)
         self.assertIn("source_link.symlink_to(repo, target_is_directory=True)", installer)
 
     def test_installer_copies_todo_release_gate_dependency(self):
