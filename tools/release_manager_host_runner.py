@@ -458,7 +458,15 @@ def recover_missing_last_known_good(state_root: Path, revision: str, *, owner_ap
     if record.get("state") != "closed" or not production.get("verified_at") or production.get("live_sha") != revision:
         raise ReleaseManagerError("no closed production-verified release record matches the baseline")
     # No state mutation before independent current desired-state and manifest checks.
-    production_drift_evidence(state_root)
+    drift = production_drift_evidence(state_root)
+    observed = str(drift.get("observed_at") or "")
+    try:
+        observation = datetime.fromisoformat(observed.replace("Z", "+00:00"))
+        age = (datetime.now(timezone.utc) - observation).total_seconds()
+    except (ValueError, TypeError):
+        raise ReleaseManagerError("drift evidence timestamp missing or invalid")
+    if observation.tzinfo is None or age < -30 or age > 300:
+        raise ReleaseManagerError("drift evidence is not fresh")
     verified = capture_production_manifest(revision)
     if not verified.get("complete") or verified.get("revision") != revision:
         raise ReleaseManagerError("live production manifest is not independently verified")

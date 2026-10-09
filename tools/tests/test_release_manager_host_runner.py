@@ -1118,7 +1118,7 @@ def test_missing_lkg_recovery_requires_approval_and_clean_drift(tmp_path):
             runner.recover_missing_last_known_good(state, sha, owner_approved=True)
         manifest.assert_not_called()
     assert json.loads((state / 'production-control-state.json').read_text()) == control
-    (state / 'production-drift.json').write_text(json.dumps({"schema_version": "1.0", "status": "pass", "problems": []}))
+    (state / 'production-drift.json').write_text(json.dumps({"schema_version": "1.0", "status": "pass", "observed_at": datetime.now(timezone.utc).isoformat(), "problems": []}))
     with patch.object(runner, 'capture_production_manifest', return_value={"complete": True, "revision": sha, "observed_at": "now"}):
         result = runner.recover_missing_last_known_good(state, sha, owner_approved=True)
     assert result['recovered'] is True
