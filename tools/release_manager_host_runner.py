@@ -246,6 +246,20 @@ def control_state_path(state_root: Path) -> Path:
     return state_root / "production-control-state.json"
 
 
+def _read_protected_snapshot(state_root: Path, filename: str) -> dict[str, Any]:
+    """Read a fresh root-published snapshot; never trust stale breaker state."""
+    snapshot = state_root / "protected-readback" / filename
+    if not snapshot.is_file():
+        raise ReleaseManagerError("protected release-state snapshot unavailable: " + filename)
+    metadata = snapshot.stat()
+    if time.time() - metadata.st_mtime > 90 or metadata.st_mtime > time.time() + 10:
+        raise ReleaseManagerError("protected release-state snapshot stale: " + filename)
+    payload = json.loads(snapshot.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("schema_version") != CONTROL_STATE_SCHEMA_VERSION:
+        raise ReleaseManagerError("invalid protected release-state snapshot: " + filename)
+    return payload
+
+
 def load_control_state(state_root: Path) -> dict[str, Any]:
     path = control_state_path(state_root)
     if not path.exists():
@@ -254,7 +268,10 @@ def load_control_state(state_root: Path) -> dict[str, Any]:
             "circuit_breaker": {"state": "closed", "updated_at": now()},
             "last_known_good": None,
         }
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except PermissionError:
+        payload = _read_protected_snapshot(state_root, "production-control-state.json")
     if str(payload.get("schema_version") or "") != CONTROL_STATE_SCHEMA_VERSION:
         raise ReleaseManagerError("production control-state schema is unsupported")
     return payload
@@ -488,7 +505,10 @@ def production_drift_evidence(state_root: Path) -> dict[str, Any]:
     path = state_root / "production-drift.json"
     if not path.is_file():
         raise ReleaseManagerError("production drift evidence is missing")
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except PermissionError:
+        payload = _read_protected_snapshot(state_root, "production-drift.json")
     if str(payload.get("schema_version") or "") != "1.0":
         raise ReleaseManagerError("production drift evidence schema is invalid")
     if str(payload.get("status") or "") != "pass":
