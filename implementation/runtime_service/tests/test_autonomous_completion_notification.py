@@ -244,6 +244,37 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
             self.assertFalse((root / "owner-notification-delivered" / "a.json").exists())
             self.assertTrue((root / "owner-notification-delivered" / "b.json").exists())
 
+    def test_accepted_receipt_is_not_recorded_as_delivered(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            events = root / "owner-notification-events"
+            events.mkdir()
+            (events / "release.json").write_text(json.dumps({
+                "event_type": "production_queue_entered",
+                "release_id": "release-receipt",
+                "candidate_sha": "a" * 40,
+                "description": "controlled uncertain Teams delivery",
+            }), encoding="utf-8")
+
+            class SyntheticNotifier(Notifier):
+                def send(self, event_type, **arguments):
+                    self.calls.append((event_type, arguments))
+                    return {"message_id": "accepted:synthetic", "message_id_synthetic": True}
+
+            notifier = SyntheticNotifier()
+            maintenance = ReleaseManagerOwnerNotificationMaintenance(
+                notifier=notifier, state_root=root, interval_seconds=15,
+                now=lambda: datetime(2026, 10, 9, 18, 30, tzinfo=timezone.utc),
+            )
+            self.assertFalse(maintenance.tick())
+            self.assertFalse((root / "owner-notification-delivered" / "release.json").exists())
+            marker = root / "owner-notification-unverified" / "release.json"
+            self.assertTrue(marker.exists())
+            self.assertEqual(json.loads(marker.read_text())["status"], "provider_accepted_delivery_unverified")
+            maintenance._next_due_at = None
+            self.assertFalse(maintenance.tick())
+            self.assertEqual(len(notifier.calls), 1)
+
     def test_release_queue_render_includes_description_and_candidate(self):
         candidate = "d" * 40
         event, text, card = _render(
