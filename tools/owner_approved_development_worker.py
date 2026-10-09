@@ -410,26 +410,18 @@ def sync_lifecycle_notification(
     event_root: Path,
 ) -> None:
     try:
-        if not record.get('lifecycle_started_fingerprint'):
+        phase = str(record.get('phase') or '').strip().casefold()
+        # Owner policy: routine starts and recoverable blockers are internal-only.
+        # Emit only a verified terminal development milestone once per work item.
+        if phase == 'complete' and record.get('pr_number') and not record.get('lifecycle_completed_fingerprint'):
             fingerprint = support.emit_lifecycle_event(
-                event_type='work_started',
+                event_type='work_completed',
                 work_id=str(item['id']),
                 work_title=str(item['title']),
-                summary='Owner-approved autonomous engineering has started.',
+                summary=f"Development PR #{int(record['pr_number'])} merged and verified; production activation is separate.",
                 event_root=event_root,
             )
-            record['lifecycle_started_fingerprint'] = fingerprint
-        if str(record.get('phase') or '') == 'blocked':
-            reason = str(record.get('reason') or 'Engineering stopped at a bounded blocker.').strip()
-            fingerprint = support.emit_lifecycle_event(
-                event_type='work_blocked',
-                work_id=str(item['id']),
-                work_title=str(item['title']),
-                summary=reason,
-                owner_action='Review the blocker only if Jason cannot resolve it within existing authority.',
-                event_root=event_root,
-            )
-            record['lifecycle_blocked_fingerprint'] = fingerprint
+            record['lifecycle_completed_fingerprint'] = fingerprint
         record.pop('lifecycle_notification_error', None)
     except Exception as exc:
         record['lifecycle_notification_error'] = f'{type(exc).__name__}: {str(exc)[:300]}'
