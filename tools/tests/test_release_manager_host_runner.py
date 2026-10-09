@@ -1012,6 +1012,26 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(runner.ReleaseManagerError, "changed mid-transaction: policy_digest"):
                 runner.verify_controller_identity(pin, repo)
 
+    def test_controller_self_update_accepts_only_exact_candidate_bytes(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            policy = repo / "config" / "release-manager-policy.json"
+            policy.parent.mkdir(parents=True)
+            policy.write_text("{}", encoding="utf-8")
+            candidate = repo / "tools" / "release_manager_host_runner.py"
+            candidate.parent.mkdir(parents=True)
+            candidate.write_bytes(runner.CONTROLLER_SOURCE.read_bytes())
+            pin = runner.controller_identity(repo)
+            verified = runner.verify_controller_identity(pin, repo, installed_candidate=True)
+            self.assertEqual(verified["policy_digest"], pin["policy_digest"])
+            candidate.write_text("modified candidate", encoding="utf-8")
+            with self.assertRaisesRegex(runner.ReleaseManagerError, "differs from candidate source"):
+                runner.verify_controller_identity(pin, repo, installed_candidate=True)
+            candidate.write_bytes(runner.CONTROLLER_SOURCE.read_bytes())
+            policy.write_text("changed", encoding="utf-8")
+            with self.assertRaisesRegex(runner.ReleaseManagerError, "policy_digest"):
+                runner.verify_controller_identity(pin, repo, installed_candidate=True)
+
     def test_change_risk_classifies_release_manager_as_production_control_core(self):
         self.assertEqual(
             runner.classify_change_risk(

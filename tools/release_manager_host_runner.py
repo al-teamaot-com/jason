@@ -313,14 +313,21 @@ def controller_identity(repo: Path) -> dict[str, Any]:
     }
 
 
-def verify_controller_identity(pin: dict[str, Any], repo: Path) -> dict[str, Any]:
+def verify_controller_identity(pin: dict[str, Any], repo: Path, *, installed_candidate: bool = False) -> dict[str, Any]:
     current = controller_identity(repo)
+    # A governed host reconciliation may install the exact reviewed candidate
+    # controller while the old controller process remains in flight. Check
+    # its bytes against the immutable candidate worktree, not an arbitrary
+    # changed on-disk controller. The original pin remains in the record.
+    if installed_candidate:
+        candidate = repo / "tools" / "release_manager_host_runner.py"
+        if not candidate.is_file() or current["executing_controller_digest"] != file_digest(candidate):
+            raise ReleaseManagerError("installed Production Manager controller differs from candidate source")
     for field in (
         "executing_controller_path",
         "executing_controller_revision",
-        "executing_controller_digest",
         "policy_digest",
-    ):
+    ) + (() if installed_candidate else ("executing_controller_digest",)):
         if current.get(field) != pin.get(field):
             raise ReleaseManagerError(f"active Production Manager controller changed mid-transaction: {field}")
     return current
@@ -1660,7 +1667,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
                 "production MCP image differs from pre-production artifact"
             )
 
-        controller_verified = verify_controller_identity(controller_pin, deploy_worktree)
+        controller_verified = verify_controller_identity(controller_pin, deploy_worktree, installed_candidate=True)
         smoke = run_functional_smoke_tests(candidate_sha)
         drift_evidence = production_drift_evidence(state_root)
         production_manifest = capture_production_manifest(candidate_sha)
