@@ -853,10 +853,28 @@ class ReleaseManagerOwnerNotificationMaintenance:
                 if not owner_action:
                     continue
                 arguments["owner_action"] = owner_action
-            result = self.notifier.send(event_type, **arguments)
-            message_id = str(result.get("message_id") or "").strip()
-            if not message_id:
-                raise RuntimeError("release Teams notification missing message id")
+            try:
+                result = self.notifier.send(event_type, **arguments)
+                message_id = str(result.get("message_id") or "").strip()
+                if not message_id:
+                    raise RuntimeError("release Teams notification missing message id")
+            except Exception as exc:
+                # Never let one undelivered release event suppress subsequent alerts.
+                # Keep the original event pending for a later retry and persist
+                # independent failure evidence without leaking provider secrets.
+                failed = self.state_root / "owner-notification-failed"
+                failed.mkdir(parents=True, exist_ok=True, mode=0o700)
+                failure_path = failed / path.name
+                failure_temp = failure_path.with_suffix(failure_path.suffix + ".tmp")
+                failure_temp.write_text(
+                    json.dumps({"event_type": event_type, "release_id": release_id,
+                                "failed_at": current.isoformat(),
+                                "error_type": type(exc).__name__}, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+                os.chmod(failure_temp, 0o600)
+                os.replace(failure_temp, failure_path)
+                continue
             temp = marker.with_suffix(marker.suffix + ".tmp")
             temp.write_text(
                 json.dumps(
