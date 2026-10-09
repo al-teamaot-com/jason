@@ -23,23 +23,24 @@
     "jason-kfs-postgres"
   ],
   "required_system_units": [
-    "jason-core.service",
     "jason-client-posture-exporter.service",
-    "jason-playbook-exporter.service",
-    "jason-production-health-exporter.service",
-    "jason-operations-configuration-exporter.service",
-    "jason-resolution-memory-exporter.service",
-    "jason-reflection-exporter.service",
-    "jason-security-control-exporter.service",
-    "jason-status-exporter.service",
-    "jason-usage-attribution-exporter.service",
-    "jason-usage-exporter.service",
+    "jason-core.service",
     "jason-delegation-maintenance.timer",
     "jason-documentation-reconciliation.timer",
     "jason-openclaw-authority-health.timer",
+    "jason-operations-configuration-exporter.service",
+    "jason-playbook-exporter.service",
+    "jason-production-drift-watchdog.timer",
+    "jason-production-health-exporter.service",
     "jason-provider-health-canary.timer",
+    "jason-reflection-exporter.service",
+    "jason-release-control-readback.timer",
     "jason-release-host-reconcile.path",
-    "jason-production-drift-watchdog.timer"
+    "jason-resolution-memory-exporter.service",
+    "jason-security-control-exporter.service",
+    "jason-status-exporter.service",
+    "jason-usage-attribution-exporter.service",
+    "jason-usage-exporter.service"
   ],
   "allowed_system_units": [
     "jason-boot-recovery.service",
@@ -54,10 +55,11 @@
     "jason-openbao-backup.service",
     "jason-openbao-backup.timer",
     "jason-openclaw-authority-health.service",
+    "jason-production-drift-watchdog.service",
     "jason-provider-health-canary.service",
+    "jason-release-control-readback.service",
     "jason-release-host-reconcile.service",
-    "jason-runtime.service",
-    "jason-production-drift-watchdog.service"
+    "jason-runtime.service"
   ],
   "required_user_units": [
     "jason-release-manager.timer",
