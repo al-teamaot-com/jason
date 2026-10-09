@@ -7386,6 +7386,19 @@ async def healthz(_request):
     )
 
 
+async def oauth_protected_resource_metadata(_request):
+    """RFC 9728 resource-server discovery for clients using Jason MCP."""
+    return JSONResponse(
+        {
+            "resource": JASON_RESOURCE_URL,
+            "authorization_servers": [JASON_OAUTH_ISSUER_URL],
+            "scopes_supported": [JASON_OAUTH_REQUEST_SCOPE],
+            "bearer_methods_supported": ["header"],
+        },
+        headers={"Cache-Control": "public, max-age=300"},
+    )
+
+
 async def oauth_authorization_server_metadata(_request):
     return JSONResponse(
         {
@@ -7771,6 +7784,12 @@ app.add_route(
 app.add_route(
     "/oauth/quickbooks/production/callback",
     quickbooks_production_oauth_callback,
+    methods=["GET"],
+)
+
+app.add_route(
+    "/.well-known/oauth-protected-resource",
+    oauth_protected_resource_metadata,
     methods=["GET"],
 )
 
