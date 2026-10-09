@@ -86,8 +86,9 @@ class ProductionDriftWatchdogTests(unittest.TestCase):
             with patch.object(watchdog.os, "chown", side_effect=checked_chown):
                 rc = watchdog.apply_result(result, control_state=control, evidence=evidence, watchdog_state=state)
             self.assertEqual(rc, 2)
-            self.assertEqual(len(calls), 1)
-            self.assertEqual(calls[0][1:], (root.stat().st_uid, root.stat().st_gid))
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(all(call[1:] == (root.stat().st_uid, root.stat().st_gid) for call in calls))
+            self.assertEqual(evidence.stat().st_uid, root.stat().st_uid)
             self.assertEqual(control.stat().st_uid, root.stat().st_uid)
             self.assertEqual(control.stat().st_mode & 0o777, 0o600)
             self.assertEqual(json.loads(control.read_text())["circuit_breaker"]["state"], "open")
