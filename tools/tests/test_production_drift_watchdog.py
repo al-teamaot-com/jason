@@ -144,3 +144,18 @@ def test_watchdog_defers_while_production_transaction_is_active(monkeypatch, tmp
     assert data["status"] == "deferred"
     assert data["reason"] == "production_transaction_active"
     assert not (tmp_path / "control.json").exists()
+
+
+def test_evidence_inherits_release_controller_owner(tmp_path):
+    import os
+    import stat
+    control = tmp_path / 'control.json'
+    control.write_text(json.dumps({'schema_version':'1.0', 'circuit_breaker':{'state':'open'}}))
+    evidence = tmp_path / 'evidence.json'
+    watchdog_state = tmp_path / 'watchdog.json'
+    result = {'schema_version':'1.0', 'status':'pass', 'observed_at':'2026-10-09T16:32:07+00:00', 'problems':[] }
+    assert watchdog.apply_result(result, control_state=control, evidence=evidence, watchdog_state=watchdog_state) == 0
+    assert evidence.stat().st_uid == control.stat().st_uid
+    assert evidence.stat().st_gid == control.stat().st_gid
+    assert stat.S_IMODE(evidence.stat().st_mode) == 0o600
+    assert json.loads(control.read_text())['circuit_breaker']['state'] == 'open'
