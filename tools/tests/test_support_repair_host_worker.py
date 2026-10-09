@@ -774,3 +774,18 @@ def test_nongateway_github_pr_listing_failure_remains_fatal(tmp_path, monkeypatc
         assert 'HTTP 403' in str(exc)
     else:
         raise AssertionError('Authorization failure must not be deferred')
+
+
+def test_open_support_issue_discovery_does_not_cap_at_first_hundred(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_gh_json(args, *, cwd):
+        calls.append(args)
+        assert args[args.index('--limit') + 1] == '1000'
+        return [{'title': f'SUPPORT-OPS-{n:03d}: Example', 'number': n} for n in range(1, 151)]
+
+    monkeypatch.setattr(worker, 'gh_json', fake_gh_json)
+    found = worker.open_support_issue_ids(tmp_path)
+    assert 'SUPPORT-OPS-052' in found
+    assert 'SUPPORT-OPS-150' in found
+    assert len(found) == 150
