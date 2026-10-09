@@ -1123,3 +1123,19 @@ def test_missing_lkg_recovery_requires_approval_and_clean_drift(tmp_path):
         result = runner.recover_missing_last_known_good(state, sha, owner_approved=True)
     assert result['recovered'] is True
     assert json.loads((state / 'production-control-state.json').read_text())['last_known_good']['manifest']['revision'] == sha
+
+
+def test_missing_lkg_recovery_rejects_stale_clean_drift(tmp_path):
+    import json
+    sha = SHA_A
+    (tmp_path / 'records').mkdir()
+    (tmp_path / 'records' / f'release-{sha[:16]}.json').write_text(json.dumps({'state': 'closed', 'production': {'verified_at': 'now', 'live_sha': sha}}))
+    original = {'schema_version': '1.0', 'circuit_breaker': {'state': 'open'}, 'last_known_good': None}
+    (tmp_path / 'production-control-state.json').write_text(json.dumps(original))
+    (tmp_path / 'production-drift.json').write_text(json.dumps({'schema_version': '1.0', 'status': 'pass', 'observed_at': '2025-01-01T00:00:00+00:00', 'problems': []}))
+    with patch.object(runner, 'capture_production_manifest') as capture:
+        with __import__('pytest').raises(runner.ReleaseManagerError, match='not fresh'):
+            runner.recover_missing_last_known_good(tmp_path, sha, owner_approved=True)
+        capture.assert_not_called()
+    selfcheck = json.loads((tmp_path / 'production-control-state.json').read_text())
+    assert selfcheck == original
