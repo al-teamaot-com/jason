@@ -10,15 +10,30 @@ sys.modules[SPEC.name] = module
 SPEC.loader.exec_module(module)
 
 
-def test_lifecycle_sync_writes_start_and_blocker(tmp_path):
-    record = {'phase': 'blocked', 'reason': 'controlled acceptance blocker'}
+def test_lifecycle_sync_suppresses_start_and_recoverable_blocker(tmp_path):
+    record = {'phase': 'blocked', 'reason': 'worker can self-heal'}
     item = {'id': 'DEV-42', 'title': 'Teams lifecycle cards'}
     root = tmp_path / 'events'
     module.sync_lifecycle_notification(record, item, event_root=root)
-    assert record['lifecycle_started_fingerprint']
-    assert record['lifecycle_blocked_fingerprint']
+    assert not list(root.glob('*.json'))
+
+
+def test_lifecycle_sync_emits_only_one_verified_development_completion(tmp_path):
+    record = {'phase': 'complete', 'pr_number': 1151}
+    item = {'id': 'DEV-1134', 'title': 'NDR evidence pilot'}
+    root = tmp_path / 'events'
+    module.sync_lifecycle_notification(record, item, event_root=root)
+    module.sync_lifecycle_notification(record, item, event_root=root)
     payloads = [module.support.json.loads(p.read_text()) for p in root.glob('*.json')]
-    assert {p['event_type'] for p in payloads} == {'work_started', 'work_blocked'}
+    assert len(payloads) == 1
+    assert payloads[0]['event_type'] == 'work_completed'
+    assert 'production activation is separate' in payloads[0]['summary']
+
+
+def test_lifecycle_sync_does_not_claim_completion_without_pr(tmp_path):
+    record = {'phase': 'complete'}
+    module.sync_lifecycle_notification(record, {'id': 'DEV-42', 'title': 'Work'}, event_root=tmp_path)
+    assert not list(tmp_path.glob('*.json'))
 
 
 def test_owner_approval_marker_is_exact():
