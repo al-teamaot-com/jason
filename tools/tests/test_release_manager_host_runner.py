@@ -75,16 +75,14 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 }
             ]
         }
-        responses = [
-            io.BytesIO(json.dumps(first_page).encode("utf-8")),
-            io.BytesIO(json.dumps(second_page).encode("utf-8")),
-        ]
-        with patch.object(runner.urllib.request, "urlopen", side_effect=responses) as urlopen:
+        responses = [json.dumps(first_page), json.dumps(second_page)]
+        with patch.object(runner, "output", side_effect=responses) as gh_output:
             result = runner.github_checks(SHA_A, ["runtime-service"])
         self.assertTrue(result["passed"])
         self.assertEqual(result["failures"], [])
-        self.assertEqual(urlopen.call_count, 2)
-        self.assertIn("per_page=100&page=2", urlopen.call_args_list[1].args[0].full_url)
+        self.assertEqual(gh_output.call_count, 2)
+        self.assertEqual(gh_output.call_args_list[1].args[0][:2], ["gh", "api"])
+        self.assertIn("per_page=100&page=2", gh_output.call_args_list[1].args[0][-1])
 
     def test_support_repair_state_context_classifies_active_and_blocked(self):
         import json
@@ -1028,10 +1026,6 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         )
 
     def test_functional_smoke_requires_runtime_mcp_host_alignment_and_http_health(self):
-        import io
-
-        response = io.BytesIO(b'{"status":"ok"}')
-        response.status = 200
         with (
             patch.object(
                 runner,
@@ -1043,10 +1037,11 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 },
             ),
             patch.object(runner, "live_mcp", return_value={"revision": SHA_A}),
-            patch.object(runner.urllib.request, "urlopen", return_value=response),
+            patch.object(runner, "output", return_value="200\n") as output,
         ):
             result = runner.run_functional_smoke_tests(SHA_A)
         self.assertTrue(result["passed"])
+        self.assertEqual(output.call_args.args[0][:3], ["docker", "exec", "jason-runtime"])
         self.assertEqual(result["runtime_healthz_http_status"], 200)
         self.assertTrue(result["runtime_mcp_host_alignment"])
 

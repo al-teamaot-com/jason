@@ -495,10 +495,14 @@ def production_drift_evidence(state_root: Path) -> dict[str, Any]:
 def run_functional_smoke_tests(candidate_sha: str) -> dict[str, Any]:
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
     alignment = live_production_alignment(candidate_sha)
-    request = urllib.request.Request("http://127.0.0.1:8080/healthz")
-    with urllib.request.urlopen(request, timeout=5) as response:
-        response.read(4096)
-        status = int(getattr(response, "status", 200) or 200)
+    # Runtime 8080 is container-internal by design; the host does not publish
+    # the port. Exercise the exact live container rather than host loopback.
+    health_check = (
+        "import urllib.request; "
+        "response=urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=5); "
+        "assert response.status == 200; print(response.status)"
+    )
+    status = int(output(["docker", "exec", "jason-runtime", "python", "-c", health_check]).strip())
     if status != 200:
         raise ReleaseManagerError(f"production runtime functional smoke returned HTTP {status}")
     if live_mcp()["revision"] != candidate_sha:
@@ -642,16 +646,13 @@ def github_checks(candidate_sha: str, required: list[str]) -> dict[str, Any]:
             + candidate_sha
             + f"/check-runs?per_page=100&page={page}"
         )
-        request = urllib.request.Request(
-            url,
-            headers={
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-                "User-Agent": "project-jason-release-manager",
-            },
-        )
-        with urllib.request.urlopen(request, timeout=30) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        # Use the host's authenticated, read-only GitHub CLI rather than
+        # anonymous REST requests, which are constrained by shared IP rate limits.
+        endpoint = url.removeprefix("https://api.github.com/")
+        payload = json.loads(output([
+            "gh", "api", "-H", "Accept: application/vnd.github+json",
+            "-H", "X-GitHub-Api-Version: 2022-11-28", endpoint,
+        ]))
         items = payload.get("check_runs") or []
         for item in items:
             name = str(item.get("name") or "")
