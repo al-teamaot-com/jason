@@ -218,6 +218,32 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
             self.assertFalse(maintenance.tick())
             self.assertEqual(len(notifier.calls), 3)
 
+    def test_release_failure_does_not_starve_next_notice_and_remains_retryable(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            events = root / "owner-notification-events"
+            events.mkdir(parents=True)
+            for name in ("a", "b"):
+                (events / f"{name}.json").write_text(json.dumps({
+                    "event_type": "production_queue_entered",
+                    "release_id": name,
+                    "candidate_sha": "a" * 40,
+                    "description": "controlled production lifecycle test",
+                }), encoding="utf-8")
+            class FailFirst(Notifier):
+                def send(self, event_type, **arguments):
+                    if arguments["work_id"] == "a":
+                        raise RuntimeError("simulated delivery failure")
+                    return super().send(event_type, **arguments)
+            maintenance = ReleaseManagerOwnerNotificationMaintenance(
+                notifier=FailFirst(), state_root=root, interval_seconds=15,
+                now=lambda: datetime(2026, 10, 9, 12, 0, tzinfo=timezone.utc),
+            )
+            self.assertTrue(maintenance.tick())
+            self.assertTrue((root / "owner-notification-failed" / "a.json").exists())
+            self.assertFalse((root / "owner-notification-delivered" / "a.json").exists())
+            self.assertTrue((root / "owner-notification-delivered" / "b.json").exists())
+
     def test_release_queue_render_includes_description_and_candidate(self):
         candidate = "d" * 40
         event, text, card = _render(
