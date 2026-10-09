@@ -614,6 +614,7 @@ class AutonomousCompletionTeamsInvoker:
                 "channel": "microsoft_teams",
                 "recipient_identity": RECIPIENT_JASON_IDENTITY,
                 "message_id": str(result["message_id"]),
+                "message_id_synthetic": bool(result.get("message_id_synthetic", False)),
             },
             attempts=1,
         )
@@ -818,6 +819,7 @@ class ReleaseManagerOwnerNotificationMaintenance:
         self._next_due_at = current + timedelta(seconds=self.interval_seconds)
         events = self.state_root / "owner-notification-events"
         notified = self.state_root / "owner-notification-delivered"
+        unverified = self.state_root / "owner-notification-unverified"
         if not events.exists():
             return False
         notified.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -829,7 +831,7 @@ class ReleaseManagerOwnerNotificationMaintenance:
         }
         for path in sorted(events.glob("*.json"), key=lambda item: item.stat().st_mtime):
             marker = notified / path.name
-            if marker.exists():
+            if marker.exists() or (unverified / path.name).exists():
                 continue
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
@@ -858,6 +860,18 @@ class ReleaseManagerOwnerNotificationMaintenance:
                 message_id = str(result.get("message_id") or "").strip()
                 if not message_id:
                     raise RuntimeError("release Teams notification missing message id")
+                if result.get("message_id_synthetic") or message_id.startswith("accepted:"):
+                    # Provider acceptance is not delivery. A blind resend risks
+                    # duplicate cards; retain evidence for explicit reconciliation.
+                    unverified.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    uncertain = unverified / path.name
+                    uncertain.write_text(json.dumps({
+                        "event_type": event_type, "release_id": release_id,
+                        "receipt_id": message_id, "observed_at": current.isoformat(),
+                        "status": "provider_accepted_delivery_unverified",
+                    }, sort_keys=True) + "\n", encoding="utf-8")
+                    os.chmod(uncertain, 0o600)
+                    continue
             except Exception as exc:
                 # Never let one undelivered release event suppress subsequent alerts.
                 # Keep the original event pending for a later retry and persist
