@@ -500,7 +500,14 @@ def revalidate_circuit_breaker(state_root: Path) -> dict[str, Any]:
         ) from exc
     if control_state_path(state_root).exists() and control_state_path(state_root).stat().st_uid == 0 and os.geteuid() != 0:
         request_root_control_transition(state_root, action="revalidate", revision=revision)
-        return load_control_state(state_root)
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline:
+            snapshot = _read_protected_snapshot(state_root, "production-control-state.json")
+            breaker = snapshot.get("circuit_breaker") or {}
+            if breaker.get("state") == "closed" and breaker.get("revalidated_revision") == revision:
+                return snapshot
+            time.sleep(0.5)
+        raise ReleaseManagerError("root-governed breaker transition succeeded but readback did not converge")
     state["circuit_breaker"] = {
         "state": "closed",
         "reason": "authoritative_health_revalidated",
