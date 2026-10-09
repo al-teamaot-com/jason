@@ -442,6 +442,41 @@ def revalidate_circuit_breaker(state_root: Path) -> dict[str, Any]:
     return state
 
 
+def recover_missing_last_known_good(state_root: Path, revision: str, *, owner_approved: bool) -> dict[str, Any]:
+    """Recover a lost baseline only when the live production and watchdog agree."""
+    if not owner_approved:
+        raise ReleaseManagerError("explicit owner approval required for baseline recovery")
+    revision = exact_sha(revision, "revision")
+    state = load_control_state(state_root)
+    if (state.get("circuit_breaker") or {}).get("state") != "open":
+        raise ReleaseManagerError("baseline recovery requires an open circuit breaker")
+    if state.get("last_known_good"):
+        raise ReleaseManagerError("baseline already exists; use normal revalidation")
+    release_id = record_id(revision)
+    record = load_record(state_root, release_id)
+    production = record.get("production") or {}
+    if record.get("state") != "closed" or not production.get("verified_at") or production.get("live_sha") != revision:
+        raise ReleaseManagerError("no closed production-verified release record matches the baseline")
+    # No state mutation before independent current desired-state and manifest checks.
+    drift = production_drift_evidence(state_root)
+    observed = str(drift.get("observed_at") or "")
+    try:
+        observation = datetime.fromisoformat(observed.replace("Z", "+00:00"))
+        age = (datetime.now(timezone.utc) - observation).total_seconds()
+    except (ValueError, TypeError):
+        raise ReleaseManagerError("drift evidence timestamp missing or invalid")
+    if observation.tzinfo is None or age < -30 or age > 300:
+        raise ReleaseManagerError("drift evidence is not fresh")
+    verified = capture_production_manifest(revision)
+    if not verified.get("complete") or verified.get("revision") != revision:
+        raise ReleaseManagerError("live production manifest is not independently verified")
+    state["last_known_good"] = {"release_id": release_id, "manifest": verified, "recorded_at": now(), "recovered": True}
+    state["circuit_breaker"] = {"state": "closed", "reason": "owner_approved_baseline_recovery_verified", "revalidated_revision": revision, "updated_at": now()}
+    state["last_revalidation"] = verified
+    save_control_state(state_root, state)
+    return {"release_id": release_id, "revision": revision, "recovered": True, "verified_at": verified["observed_at"]}
+
+
 def production_drift_evidence(state_root: Path) -> dict[str, Any]:
     path = state_root / "production-drift.json"
     if not path.is_file():
@@ -1964,6 +1999,10 @@ def main() -> int:
     promote = sub.add_parser("promote")
     promote.add_argument("--release-id", required=True)
 
+    recovery = sub.add_parser("recover-baseline")
+    recovery.add_argument("--revision", required=True)
+    recovery.add_argument("--owner-approved", action="store_true")
+
     sub.add_parser("promote-eligible")
     status = sub.add_parser("status")
     status.add_argument("--release-id")
@@ -1983,6 +2022,9 @@ def main() -> int:
             owner_approved=args.owner_approved,
         )
         print(json.dumps(record, indent=2))
+        return 0
+    if args.command == "recover-baseline":
+        print(json.dumps(recover_missing_last_known_good(state_root, args.revision, owner_approved=args.owner_approved), indent=2))
         return 0
     if args.command == "prepare":
         record = prepare_release(
