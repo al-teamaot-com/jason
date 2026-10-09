@@ -495,10 +495,14 @@ def production_drift_evidence(state_root: Path) -> dict[str, Any]:
 def run_functional_smoke_tests(candidate_sha: str) -> dict[str, Any]:
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
     alignment = live_production_alignment(candidate_sha)
-    request = urllib.request.Request("http://127.0.0.1:8080/healthz")
-    with urllib.request.urlopen(request, timeout=5) as response:
-        response.read(4096)
-        status = int(getattr(response, "status", 200) or 200)
+    # Runtime 8080 is container-internal by design; the host does not publish
+    # the port. Exercise the exact live container rather than host loopback.
+    health_check = (
+        "import urllib.request; "
+        "response=urllib.request.urlopen('http://127.0.0.1:8080/healthz',timeout=5); "
+        "assert response.status == 200; print(response.status)"
+    )
+    status = int(output(["docker", "exec", "jason-runtime", "python", "-c", health_check]).strip())
     if status != 200:
         raise ReleaseManagerError(f"production runtime functional smoke returned HTTP {status}")
     if live_mcp()["revision"] != candidate_sha:

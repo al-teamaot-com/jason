@@ -1028,10 +1028,6 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         )
 
     def test_functional_smoke_requires_runtime_mcp_host_alignment_and_http_health(self):
-        import io
-
-        response = io.BytesIO(b'{"status":"ok"}')
-        response.status = 200
         with (
             patch.object(
                 runner,
@@ -1043,10 +1039,11 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 },
             ),
             patch.object(runner, "live_mcp", return_value={"revision": SHA_A}),
-            patch.object(runner.urllib.request, "urlopen", return_value=response),
+            patch.object(runner, "output", return_value="200\n") as output,
         ):
             result = runner.run_functional_smoke_tests(SHA_A)
         self.assertTrue(result["passed"])
+        self.assertEqual(output.call_args.args[0][:3], ["docker", "exec", "jason-runtime"])
         self.assertEqual(result["runtime_healthz_http_status"], 200)
         self.assertTrue(result["runtime_mcp_host_alignment"])
 
