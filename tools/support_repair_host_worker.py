@@ -183,7 +183,7 @@ def gh_json(args: list[str], *, cwd: Path) -> Any:
 
 
 def open_prs(repo: Path) -> list[dict[str, Any]]:
-    data = gh_json(['pr', 'list', '--state', 'open', '--limit', '100', '--json', 'number,title,body,headRefName,url,isDraft,statusCheckRollup'], cwd=repo)
+    data = gh_json(['pr', 'list', '--state', 'open', '--limit', '100', '--json', 'number,title,body,headRefName,url,isDraft'], cwd=repo)
     return list(data or [])
 
 
