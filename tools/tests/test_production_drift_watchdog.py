@@ -70,7 +70,7 @@ class ProductionDriftWatchdogTests(unittest.TestCase):
             )
             self.assertEqual(json.loads(state.read_text())["circuit_breaker_action"], "opened")
 
-    def test_control_state_replacement_preserves_existing_file_owner(self):
+    def test_control_state_replacement_uses_trusted_directory_owner(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -93,6 +93,32 @@ class ProductionDriftWatchdogTests(unittest.TestCase):
             self.assertEqual(evidence.stat().st_uid, root.stat().st_uid)
             self.assertEqual(control.stat().st_uid, root.stat().st_uid)
             self.assertEqual(control.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(json.loads(control.read_text())["circuit_breaker"]["state"], "open")
+
+    def test_preexisting_file_ownership_is_not_reused(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            control = root / "control.json"
+            evidence = root / "evidence.json"
+            state = root / "watchdog.json"
+            control.write_text(json.dumps({"circuit_breaker": {"state": "closed"}}))
+            evidence.write_text(json.dumps({"status": "pass"}))
+            original_write = watchdog.atomic_json
+            calls = []
+            def record_write(path, payload, **kwargs):
+                calls.append((path, dict(kwargs)))
+                return original_write(path, payload, **kwargs)
+            with patch.object(watchdog, "atomic_json", side_effect=record_write):
+                rc = watchdog.apply_result(
+                    {"status": "drift_detected", "problems": [{"kind": "example"}]},
+                    control_state=control, evidence=evidence, watchdog_state=state,
+                )
+            self.assertEqual(rc, 2)
+            for path, kwargs in calls:
+                if path in (control, evidence):
+                    self.assertTrue(kwargs.get("inherit_parent_owner"))
+                    self.assertIsNone(kwargs.get("owner_from"))
             self.assertEqual(json.loads(control.read_text())["circuit_breaker"]["state"], "open")
 
     def test_clean_result_never_auto_closes_open_breaker(self):
