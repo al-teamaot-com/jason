@@ -513,3 +513,30 @@ def test_repair_support_intake_never_bypasses_dependencies(monkeypatch, tmp_path
     module.raise_exhausted_repair_support_issues(state, {'DEV-866'}, tmp_path)
     assert not seen
     assert state['items']['DEV-866']['phase'] == 'blocked'
+
+
+def test_exhaustion_to_support_intake_end_to_end_synthetic(monkeypatch, tmp_path):
+    item = {'id': 'DEV-950', 'issue_number': 950, 'title': 'Read expansion',
+            'evidence': 'missing source', 'acceptance': 'tests prove completeness'}
+    state = {'items': {'DEV-950': {'phase': 'blocked', 'issue_number': 950,
+      'reason': 'supplied excerpts insufficient', 'self_recovery_attempts': 2}}}
+    module.recycle_self_recoverable_blockers(state, {'DEV-950'})
+    module.queue_exhausted_recovery_diagnostics(state, [item], tmp_path)
+    record = state['items']['DEV-950']
+    rid = record['recovery_diagnostic_request_id']
+    response_dir = tmp_path / 'reasoning' / 'responses'
+    response_dir.mkdir(parents=True)
+    (response_dir / f'{rid}.json').write_text(module.support.json.dumps({
+        'request_id': rid, 'status': 'succeeded', 'result': {'diagnosis': 'registry missing'}}))
+    module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-950'}, tmp_path)
+    module.reconcile_recovery_handoff_intake(state, {'DEV-950'}, tmp_path)
+    seen = []
+    monkeypatch.setattr(module.support, 'ensure_support_issue', lambda repo, issue: seen.append(issue))
+    module.raise_exhausted_repair_support_issues(state, {'DEV-950'}, tmp_path)
+    module.raise_exhausted_repair_support_issues(state, {'DEV-950'}, tmp_path)
+    assert len(seen) == 1
+    assert seen[0]['id'] == 'SUPPORT-DEV-950'
+    assert record['phase'] == 'blocked'
+    assert record['self_recovery_attempts'] == 2
+    assert record['recovery_support_issue_raised'] == 'SUPPORT-DEV-950'
+    assert record['recovery_handoff_intake']['status'] == 'awaiting_governed_repair'
