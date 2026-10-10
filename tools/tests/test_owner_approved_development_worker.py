@@ -633,3 +633,15 @@ def test_dependency_hold_replaces_stale_worker_error_and_resumes_when_authoritat
     module.reconcile_issue_dependency_holds(state, [{'id': 'DEV-866', 'body': 'Gate cleared by owner'}], tmp_path)
     assert item['phase'] == 'diagnosing'
     assert item['reasoning_request_id'] == ''
+
+
+def test_exhaustion_diagnostic_uses_supported_reasoning_kind(monkeypatch, tmp_path):
+    observed = []
+    def fake_queue(spool, *, kind, item, context):
+        observed.append(kind)
+        return 'request-id'
+    monkeypatch.setattr(module, 'queue_reasoning', fake_queue)
+    state={'items':{'DEV-950':{'phase':'blocked','blocker_class':'internal_retry_exhausted'}}}
+    module.queue_exhausted_recovery_diagnostics(state,[{'id':'DEV-950','issue_number':950,
+        'title':'Context repair','evidence':'test','acceptance':'test'}],tmp_path)
+    assert observed == ['search_plan']

@@ -465,7 +465,7 @@ def queue_exhausted_recovery_diagnostics(
             continue
         if record.get('recovery_diagnostic_request_id'):
             continue
-        rid = queue_reasoning(spool, kind='diagnosis', item=item, context={
+        rid = queue_reasoning(spool, kind='search_plan', item=item, context={
             'work_class': 'development_retry_exhaustion_diagnostics',
             'issue_number': item['issue_number'],
             'original_blocker': str(record.get('reason') or '')[:1800],
@@ -508,7 +508,7 @@ def reconcile_exhausted_recovery_diagnostics(
             result = response.get('result')
             if isinstance(result, Mapping):
                 record['recovery_diagnostic_summary'] = str(
-                    result.get('diagnosis') or result.get('summary') or result.get('blocked_reason') or ''
+                    result.get('diagnosis') or result.get('summary') or result.get('blocked_reason') or result.get('queries') or result.get('search_terms') or ''
                 )[:1800]
             record['recovery_next_action'] = (
                 'Review diagnostic evidence and open a bounded governed repair; '
