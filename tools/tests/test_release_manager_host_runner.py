@@ -483,6 +483,30 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             )
             runner.release_production_transaction_lock(followup)
 
+    def test_repository_policy_explicitly_sets_manual_release_mode(self):
+        policy = runner.gate.load_json(ROOT / "config" / "release-manager-policy.json")
+        self.assertFalse(policy["schedule"]["automatic_promotion_enabled"])
+        self.assertFalse(policy["production"]["normal_release_auto_promote_when_eligible"])
+        self.assertTrue(policy["production"]["require_owner_approval_for_all"])
+
+    def test_unattended_promotion_is_inert_when_manual_mode_enabled(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            with (
+                patch.object(
+                    runner.gate,
+                    "load_json",
+                    return_value={"schedule": {"automatic_promotion_enabled": False}},
+                ),
+                patch.object(runner, "consume_owner_approval_requests") as approvals,
+                patch.object(runner, "production_window_open") as window,
+                patch.object(runner, "deploy_production") as deploy,
+            ):
+                self.assertFalse(runner.promote_eligible(ROOT, root))
+            approvals.assert_not_called()
+            window.assert_not_called()
+            deploy.assert_not_called()
+
     def test_promote_eligible_treats_busy_transaction_as_queued(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -496,6 +520,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             }
             runner.atomic_json(records / f"{payload['release_id']}.json", payload)
             with (
+                patch.object(runner.gate, "load_json", return_value={"schedule": {"automatic_promotion_enabled": True}}),
                 patch.object(runner, "production_window_open", return_value=True),
                 patch.object(runner, "live_runtime", return_value={"revision": SHA_B}),
                 patch.object(runner, "live_production_alignment", return_value={}),
@@ -532,6 +557,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 return record
 
             with (
+                patch.object(runner.gate, "load_json", return_value={"schedule": {"automatic_promotion_enabled": True}}),
                 patch.object(runner, "production_window_open", return_value=True),
                 patch.object(runner, "live_runtime", return_value={"revision": SHA_B}),
                 patch.object(runner, "live_production_alignment", return_value={}),
@@ -562,6 +588,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 },
             )
             with (
+                patch.object(runner.gate, "load_json", return_value={"schedule": {"automatic_promotion_enabled": True}}),
                 patch.object(runner, "production_window_open", return_value=True),
                 patch.object(runner, "live_runtime", return_value={"revision": "c" * 40}),
                 patch.object(runner, "live_production_alignment", return_value={}),
@@ -661,6 +688,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
 
             promoted = []
             with (
+                patch.object(runner.gate, "load_json", return_value={"schedule": {"automatic_promotion_enabled": True}}),
                 patch.object(runner, "production_window_open", return_value=True),
                 patch.object(runner, "live_runtime", return_value={"revision": SHA_B}),
                 patch.object(runner, "live_production_alignment", return_value={}),
@@ -1012,6 +1040,26 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(runner.ReleaseManagerError, "changed mid-transaction: policy_digest"):
                 runner.verify_controller_identity(pin, repo)
 
+    def test_controller_self_update_accepts_only_exact_candidate_bytes(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            policy = repo / "config" / "release-manager-policy.json"
+            policy.parent.mkdir(parents=True)
+            policy.write_text("{}", encoding="utf-8")
+            candidate = repo / "tools" / "release_manager_host_runner.py"
+            candidate.parent.mkdir(parents=True)
+            candidate.write_bytes(runner.CONTROLLER_SOURCE.read_bytes())
+            pin = runner.controller_identity(repo)
+            verified = runner.verify_controller_identity(pin, repo, installed_candidate=True)
+            self.assertEqual(verified["policy_digest"], pin["policy_digest"])
+            candidate.write_text("modified candidate", encoding="utf-8")
+            with self.assertRaisesRegex(runner.ReleaseManagerError, "differs from candidate source"):
+                runner.verify_controller_identity(pin, repo, installed_candidate=True)
+            candidate.write_bytes(runner.CONTROLLER_SOURCE.read_bytes())
+            policy.write_text("changed", encoding="utf-8")
+            with self.assertRaisesRegex(runner.ReleaseManagerError, "policy_digest"):
+                runner.verify_controller_identity(pin, repo, installed_candidate=True)
+
     def test_change_risk_classifies_release_manager_as_production_control_core(self):
         self.assertEqual(
             runner.classify_change_risk(
@@ -1134,3 +1182,66 @@ def test_missing_lkg_recovery_rejects_stale_clean_drift(tmp_path):
         capture.assert_not_called()
     selfcheck = json.loads((tmp_path / 'production-control-state.json').read_text())
     assert selfcheck == original
+
+class GovernedReleaseReissueTests(unittest.TestCase):
+    def test_verified_rollback_creates_new_attempt_and_preserves_history(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            historical = {'release_id': runner.record_id(SHA_A), 'state': 'rolled_back',
+                'failure': {'rollback_verified': True},
+                'release_candidate': {'candidate_sha': SHA_A}}
+            runner.atomic_json(runner.record_path(root, runner.record_id(SHA_A)), historical)
+            def create(**kw):
+                return {'release_id': kw['release_id_override'], 'state': 'release_candidate'}
+            with patch.object(runner, 'revalidate_circuit_breaker'), \
+                 patch.object(runner, 'live_runtime', return_value={'revision': SHA_B}), \
+                 patch.object(runner, 'create_record', side_effect=create), \
+                 patch.object(runner, 'run_preproduction', side_effect=lambda repo, state_root, record: record):
+                result = runner.prepare_release(ROOT, root, SHA_A, 'release_blocker', reissue_rolled_back=True)
+            self.assertEqual(result['release_id'], runner.record_id(SHA_A) + '-retry-1')
+            self.assertEqual(result['reissued_from'], runner.record_id(SHA_A))
+            self.assertEqual(runner.load_record(root, runner.record_id(SHA_A)), historical)
+
+    def test_unverified_rollback_cannot_reissue(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            runner.atomic_json(runner.record_path(root, runner.record_id(SHA_A)),
+                {'release_id': runner.record_id(SHA_A), 'state': 'rolled_back',
+                 'failure': {'rollback_verified': False},
+                 'release_candidate': {'candidate_sha': SHA_A}})
+            with patch.object(runner, 'revalidate_circuit_breaker'):
+                with self.assertRaisesRegex(runner.ReleaseManagerError, 'verified rolled-back'):
+                    runner.prepare_release(ROOT, root, SHA_A, 'release_blocker', reissue_rolled_back=True)
+
+
+def test_governed_reissue_rejects_concurrent_pending_attempt():
+    import pytest
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        base = runner.record_id(SHA_A)
+        runner.atomic_json(runner.record_path(root, base), {
+            'release_id': base, 'state': 'rolled_back', 'failure': {'rollback_verified': True},
+            'release_candidate': {'candidate_sha': SHA_A}})
+        runner.atomic_json(runner.record_path(root, base + '-retry-1'), {
+            'release_id': base + '-retry-1', 'state': 'production_eligible',
+            'release_candidate': {'candidate_sha': SHA_A}})
+        with patch.object(runner, 'revalidate_circuit_breaker'):
+            with pytest.raises(runner.ReleaseManagerError, match='existing retry attempt'):
+                runner.prepare_release(ROOT, root, SHA_A, 'release_blocker', reissue_rolled_back=True)
+
+
+class HostReconciliationTimeoutContractTests(unittest.TestCase):
+    def test_bound_covers_observed_service_activation_and_exporter(self):
+        import inspect
+        default = inspect.signature(runner.request_host_reconcile).parameters['timeout_seconds'].default
+        self.assertGreater(default, 202 + 17 + 60)
+        self.assertLessEqual(default, 480)
+
+    def test_absent_host_result_still_fails_closed(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / 'host-reconcile' / 'requests').mkdir(parents=True)
+            (root / 'host-reconcile' / 'results').mkdir(parents=True)
+            with patch.object(runner, 'require_host_reconciler_ready'), patch.object(runner.time, 'monotonic', side_effect=[0.0, 2.0]):
+                with self.assertRaisesRegex(runner.ReleaseManagerError, 'host reconciliation result timed out'):
+                    runner.request_host_reconcile(root, SHA_A, timeout_seconds=1.0)

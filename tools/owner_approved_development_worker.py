@@ -356,6 +356,57 @@ def self_recoverable_blocker(reason: str) -> bool:
     )
 
 
+def issue_has_closed_dependency_gate(item: Mapping[str, Any]) -> bool:
+    """Honor an explicit authoritative issue-level development hold."""
+    body = str(item.get('body') or '')
+    return bool(
+        re.search(r'(?im)^##\s+Production-health gate hold\s*$', body)
+        and re.search(r'(?i)blocked by dependency|do not (?:begin|treat).*development', body)
+    )
+
+
+
+def reconcile_issue_dependency_holds(
+    state: dict[str, Any], eligible: list[dict[str, Any]], repo: Path,
+) -> None:
+    """Represent issue-level closed admission gates as dependency holds, not worker errors."""
+    records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
+    by_id = {item['id']: item for item in eligible}
+    for item_id, record in records.items():
+        if item_id not in by_id or not isinstance(record, dict):
+            continue
+        held = issue_has_closed_dependency_gate(by_id[item_id])
+        if held:
+            if record.get('blocker_class') != 'blocked_by_dependency':
+                record.setdefault('prior_worker_error', str(record.get('reason') or '')[:1000])
+            record.update({
+                'phase': 'blocked',
+                'blocker_class': 'blocked_by_dependency',
+                'reason': 'Authoritative issue declares a closed production-health/dependency gate.',
+                'recovery_next_action': 'Verify upstream production acceptance and clear the authoritative issue hold.',
+                'updated_at': now(),
+            })
+        elif record.get('blocker_class') == 'blocked_by_dependency':
+            # An issue edit alone never proves the upstream production gate passed.
+            observed = support.production_state_from_main(repo)
+            production = observed.get('production') if isinstance(observed.get('production'), Mapping) else {}
+            if production.get('status') != 'aligned_and_healthy':
+                continue
+            try:
+                observed_at = datetime.fromisoformat(str(production['observed_at']).replace('Z', '+00:00'))
+                age = (datetime.now(timezone.utc) - observed_at).total_seconds()
+                if observed_at.tzinfo is None or not (0 <= age <= 1800):
+                    continue
+            except (KeyError, TypeError, ValueError):
+                continue
+            record.update({
+                'phase': 'diagnosing', 'blocker_class': '',
+                'reason': 'Authoritative dependency hold lifted; rechecking admission.',
+                'reasoning_request_id': '', 'updated_at': now(),
+            })
+
+
+
 def recycle_self_recoverable_blockers(
     state: dict[str, Any],
     eligible_ids: set[str],
@@ -379,6 +430,13 @@ def recycle_self_recoverable_blockers(
             continue
         attempts = int(record.get('self_recovery_attempts', 0) or 0)
         if attempts >= max_recycles:
+            # Retry exhaustion must remain fail-closed, but must not be silent.
+            # Keep the original error so support can diagnose the failure.
+            record.setdefault('blocker_class', 'internal_retry_exhausted')
+            record.setdefault('recovery_next_action',
+                'Open an engineering repair using the original blocker and source evidence; '
+                're-admit only after the repair is verified and all dependency gates pass.')
+            record.setdefault('recovery_exhausted_at', now())
             continue
         record.update({
             'phase': 'diagnosing',
@@ -388,6 +446,260 @@ def recycle_self_recoverable_blockers(
             'self_recovery_attempts': attempts + 1,
             'updated_at': now(),
         })
+
+
+def queue_exhausted_recovery_diagnostics(
+    state: dict[str, Any], eligible: list[dict[str, Any]], spool: Path,
+) -> None:
+    """Create one evidence-gathering handoff, never a retry or an approval grant.
+
+    The response is advisory only; a separate authorized engineering repair and
+    production acceptance are mandatory before any re-admission.
+    """
+    records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
+    for item in eligible:
+        record = records.get(item['id'])
+        if not isinstance(record, dict):
+            continue
+        if record.get('phase') != 'blocked' or record.get('blocker_class') != 'internal_retry_exhausted':
+            continue
+        prior_id = str(record.get('recovery_diagnostic_request_id') or '')
+        if prior_id:
+            # Migrate only one diagnostic attempt rejected by the historical,
+            # unsupported 'diagnosis' kind. Retain the original failed response.
+            response = support.reasoning_response(spool, prior_id)
+            prior_request = spool / 'reasoning' / 'requests' / f'{prior_id}.json'
+            try:
+                import json
+                previous = json.loads(prior_request.read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                previous = {}
+            if not (record.get('recovery_diagnostic_kind_migrated') is None
+                    and isinstance(response, Mapping)
+                    and response.get('status') == 'failed'
+                    and response.get('error') == 'unsupported support/development reasoning kind'
+                    and previous.get('kind') == 'diagnosis'
+                    and previous.get('request_id') == prior_id):
+                continue
+            record['recovery_diagnostic_kind_migrated'] = prior_id
+            record.pop('recovery_diagnostic_result_status', None)
+            record['recovery_diagnostic_prior_request_id'] = prior_id
+        rid = queue_reasoning(spool, kind='search_plan', item=item, context={
+            'work_class': 'development_retry_exhaustion_diagnostics',
+            'issue_number': item['issue_number'],
+            'original_blocker': str(record.get('reason') or '')[:1800],
+            'retry_count': int(record.get('self_recovery_attempts', 0)),
+            'source_paths': list(record.get('source_paths') or [])[:20],
+            'instruction': (
+                'Diagnose this exhausted development-worker failure and propose a bounded '
+                'engineering repair with evidence, regression tests, and upstream dependency '
+                'gates. Do not resume work, edit source, grant authority, or deploy.'
+            ),
+        })
+        record['recovery_diagnostic_request_id'] = rid
+        record['recovery_diagnostic_queued_at'] = now()
+
+
+def reconcile_exhausted_recovery_diagnostics(
+    state: dict[str, Any], eligible_ids: set[str], spool: Path,
+) -> None:
+    """Record diagnostic output without treating suggestions as execution authority."""
+    records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
+    for item_id, record in records.items():
+        if item_id not in eligible_ids or not isinstance(record, dict):
+            continue
+        if record.get('phase') != 'blocked' or record.get('blocker_class') != 'internal_retry_exhausted':
+            continue
+        rid = str(record.get('recovery_diagnostic_request_id') or '')
+        if not rid or record.get('recovery_diagnostic_result_status'):
+            continue
+        response = support.reasoning_response(spool, rid)
+        if response is None:
+            continue
+        if str(response.get('request_id') or rid) != rid:
+            record['recovery_diagnostic_result_status'] = 'invalid_request_id'
+            record['recovery_next_action'] = 'Inspect mismatched diagnostic response; no automatic re-admission.'
+            continue
+        status = str(response.get('status') or 'unknown')
+        record['recovery_diagnostic_result_status'] = status
+        record['recovery_diagnostic_result_at'] = now()
+        if status == 'succeeded':
+            result = response.get('result')
+            if isinstance(result, Mapping):
+                record['recovery_diagnostic_summary'] = str(
+                    result.get('diagnosis') or result.get('summary') or result.get('blocked_reason') or result.get('queries') or result.get('search_terms') or ''
+                )[:1800]
+            record['recovery_next_action'] = (
+                'Review diagnostic evidence and open a bounded governed repair; '
+                'verify source changes, tests, dependencies, and release approval before re-admission.'
+            )
+            # Durable, idempotent repair intake evidence for the governed support
+            # worker. This is NOT an executable development claim or approval.
+            from hashlib import sha256
+            import json
+            handoff = {
+                'schema': 'jason.development-recovery-handoff.v1',
+                'source_item': item_id,
+                'diagnostic_request_id': rid,
+                'original_blocker': str(record.get('reason') or '')[:1800],
+                'diagnosis': str(record.get('recovery_diagnostic_summary') or ''),
+                'required_gate': 'authorized_repair_and_production_acceptance',
+                'admission_authority': False,
+            }
+            handoff_id = sha256(json.dumps(handoff, sort_keys=True).encode()).hexdigest()
+            handoff_path = spool / 'development-recovery' / 'handoffs' / f'{handoff_id}.json'
+            if not handoff_path.exists():
+                support.atomic_json(handoff_path, handoff)
+            record['recovery_handoff_id'] = handoff_id
+        else:
+            record['recovery_next_action'] = (
+                'Diagnostic reasoning failed; route to support with request ID and original blocker. '
+                'Do not restart retries or bypass dependencies.'
+            )
+
+
+def reconcile_recovery_handoff_intake(
+    state: dict[str, Any], eligible_ids: set[str], spool: Path,
+) -> None:
+    """Consume handoff as an inert review record, never executable authority."""
+    import json
+    import re
+    records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
+    root = spool / 'development-recovery' / 'handoffs'
+    if not root.is_dir():
+        return
+    for path in sorted(root.glob('*.json')):
+        if not re.fullmatch(r'[0-9a-f]{64}\.json', path.name):
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(payload, dict) or payload.get('schema') != 'jason.development-recovery-handoff.v1':
+            continue
+        # The filename is a content-addressed identity, not just a label.
+        # Fail closed on modified or substituted handoff evidence.
+        from hashlib import sha256
+        expected_id = sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        if path.stem != expected_id:
+            continue
+        item_id = payload.get('source_item')
+        if not isinstance(item_id, str) or item_id not in eligible_ids:
+            continue
+        record = records.get(item_id)
+        if not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        if record.get('recovery_handoff_id') != path.stem:
+            continue
+        if record.get('recovery_diagnostic_request_id') != payload.get('diagnostic_request_id'):
+            continue
+        if payload.get('admission_authority') is not False:
+            continue
+        record.setdefault('recovery_handoff_intake', {
+            'status': 'awaiting_governed_repair',
+            'handoff_id': path.stem,
+            'required_gate': 'authorized_repair_and_production_acceptance',
+            'observed_at': now(),
+        })
+
+
+
+def raise_exhausted_repair_support_issues(
+    state: dict[str, Any], eligible_ids: set[str], repo: Path,
+) -> None:
+    """Route governed repair handoffs to existing deduplicated support intake."""
+    records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
+    for item_id, record in records.items():
+        if item_id not in eligible_ids or not isinstance(record, dict):
+            continue
+        intake = record.get('recovery_handoff_intake')
+        if record.get('phase') != 'blocked' or not isinstance(intake, Mapping):
+            continue
+        if intake.get('status') != 'awaiting_governed_repair':
+            continue
+        if record.get('recovery_support_issue_raised'):
+            continue
+        if not isinstance(record.get('issue_number'), int):
+            continue
+        original_issue = int(record['issue_number'])
+        item = {
+            'id': f'SUPPORT-DEV-{original_issue}',
+            'title': f'Development recovery exhausted for issue #{original_issue}',
+            'evidence': (
+                f'Approved development item {item_id}; original issue #{original_issue}; '
+                f'handoff {intake.get("handoff_id")}; original failure: '
+                f'{str(record.get("reason") or "")[:800]}; diagnosis: '
+                f'{str(record.get("recovery_diagnostic_summary") or "")[:800]}'
+            ),
+            'acceptance': (
+                'Repair via authorized source changes and regression tests; verify every upstream '
+                'dependency and production acceptance before re-admitting the blocked item.'
+            ),
+        }
+        support.ensure_support_issue(repo, item)
+        record['recovery_support_issue_raised'] = item['id']
+        record['recovery_support_issue_raised_at'] = now()
+
+
+
+def readmit_verified_development_recoveries(
+    state: dict[str, Any], eligible_ids: set[str], spool: Path, repo: Path,
+) -> None:
+    """Resume only after support closure AND exact healthy production receipt."""
+    import re
+    support_state = support.load_state(spool / 'state.json')
+    support_items = support_state.get('items') if isinstance(support_state.get('items'), Mapping) else {}
+    records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
+    for item_id, record in records.items():
+        if item_id not in eligible_ids or not isinstance(record, dict):
+            continue
+        if record.get('phase') != 'blocked' or not record.get('recovery_support_issue_raised'):
+            continue
+        # TODO-GOV-002 must not bypass explicitly outstanding #1078/#1069 gates.
+        # Other externally constrained work is never classified as internal recovery.
+        if record.get('issue_number') == 866 or record.get('blocker_class') != 'internal_retry_exhausted':
+            continue
+        support_id = str(record['recovery_support_issue_raised'])
+        support_record = support_items.get(support_id)
+        if not isinstance(support_record, Mapping) or support_record.get('phase') != 'complete':
+            continue
+        sha = str(support_record.get('merge_sha') or '')
+        if not re.fullmatch(r'[0-9a-f]{40}', sha):
+            continue
+        if not support_record.get('closure_pr_number') or not support_record.get('acceptance_reason'):
+            continue
+        observed = support.production_state_from_main(repo)
+        production = observed.get('production') if isinstance(observed.get('production'), Mapping) else {}
+        if production.get('status') != 'aligned_and_healthy' or production.get('revision') != sha:
+            continue
+        try:
+            observed_at = datetime.fromisoformat(str(production['observed_at']).replace('Z', '+00:00'))
+            age = (datetime.now(timezone.utc) - observed_at).total_seconds()
+            if observed_at.tzinfo is None or not (0 <= age <= 1800):
+                continue
+        except (KeyError, ValueError, TypeError):
+            continue
+        record.update({
+            'phase': 'diagnosing', 'reasoning_request_id': '',
+            'reason': 'Re-admitted following exact verified governed support repair.',
+            'context_expansion_attempts': 0, 'self_recovery_attempts': 0,
+            'recovery_readmitted_after_sha': sha, 'recovery_readmitted_at': now(),
+            'updated_at': now(),
+        })
+
+
+
+def blocked_work_next_action(reason: str) -> dict[str, str]:
+    text = str(reason or "").casefold()
+    if any(x in text for x in ("approval", "authorization", "credential")):
+        return {"blocker_category": "external_authority", "next_action": "obtain_explicit_authority"}
+    if any(x in text for x in ("prerequisite", "dependency", "until ")):
+        return {"blocker_category": "dependency", "next_action": "recheck_dependency"}
+    if source_context_blocker(reason):
+        return {"blocker_category": "source_context", "next_action": "retrieve_authorized_context"}
+    if "regression test" in text or "ci " in text:
+        return {"blocker_category": "verification", "next_action": "review_test_evidence"}
+    return {"blocker_category": "unclassified", "next_action": "diagnostic_review"}
 
 
 def reconcile_removed_approval(state: dict[str, Any], eligible_ids: set[str]) -> None:
@@ -410,26 +722,32 @@ def sync_lifecycle_notification(
     event_root: Path,
 ) -> None:
     try:
-        if not record.get('lifecycle_started_fingerprint'):
+        phase = str(record.get('phase') or '').strip().casefold()
+        if phase == 'blocked':
+            record.update(blocked_work_next_action(str(record.get('reason') or '')))
+        if (phase == 'blocked'
+                and record.get('notification_class') == 'owner_action_required'
+                and not record.get('lifecycle_blocked_fingerprint')):
+            owner_action = str(record.get('owner_action') or '').strip()
+            if not owner_action:
+                raise ValueError('owner_action_required blocker must include owner_action')
+            record['lifecycle_blocked_fingerprint'] = support.emit_lifecycle_event(
+                event_type='work_blocked', work_id=str(item['id']),
+                work_title=str(item['title']),
+                summary=str(record.get('reason') or 'Owner action required.'),
+                owner_action=owner_action, event_root=event_root,
+            )
+        # Owner policy: routine starts and recoverable blockers are internal-only.
+        # Emit only a verified terminal development milestone once per work item.
+        if phase == 'complete' and record.get('pr_number') and not record.get('lifecycle_completed_fingerprint'):
             fingerprint = support.emit_lifecycle_event(
-                event_type='work_started',
+                event_type='work_completed',
                 work_id=str(item['id']),
                 work_title=str(item['title']),
-                summary='Owner-approved autonomous engineering has started.',
+                summary=f"Development PR #{int(record['pr_number'])} merged and verified; production activation is separate.",
                 event_root=event_root,
             )
-            record['lifecycle_started_fingerprint'] = fingerprint
-        if str(record.get('phase') or '') == 'blocked':
-            reason = str(record.get('reason') or 'Engineering stopped at a bounded blocker.').strip()
-            fingerprint = support.emit_lifecycle_event(
-                event_type='work_blocked',
-                work_id=str(item['id']),
-                work_title=str(item['title']),
-                summary=reason,
-                owner_action='Review the blocker only if Jason cannot resolve it within existing authority.',
-                event_root=event_root,
-            )
-            record['lifecycle_blocked_fingerprint'] = fingerprint
+            record['lifecycle_completed_fingerprint'] = fingerprint
         record.pop('lifecycle_notification_error', None)
     except Exception as exc:
         record['lifecycle_notification_error'] = f'{type(exc).__name__}: {str(exc)[:300]}'
@@ -451,8 +769,16 @@ def main() -> int:
     support.run(['git', 'fetch', '--no-tags', 'origin', 'main'], cwd=repo)
     eligible = owner_approved_issues(repo)
     eligible_ids = {item['id'] for item in eligible}
+    reconcile_issue_dependency_holds(state, eligible, repo)
+    admitted = [item for item in eligible if not issue_has_closed_dependency_gate(item)]
+    admitted_ids = {item['id'] for item in admitted}
     reconcile_removed_approval(state, eligible_ids)
-    recycle_self_recoverable_blockers(state, eligible_ids)
+    recycle_self_recoverable_blockers(state, admitted_ids)
+    queue_exhausted_recovery_diagnostics(state, admitted, spool)
+    reconcile_exhausted_recovery_diagnostics(state, admitted_ids, spool)
+    reconcile_recovery_handoff_intake(state, admitted_ids, spool)
+    raise_exhausted_repair_support_issues(state, admitted_ids, repo)
+    readmit_verified_development_recoveries(state, admitted_ids, spool, repo)
     state['discovery'] = {
         'observed_at': now(),
         'approved_issue_numbers': [item['issue_number'] for item in eligible],
@@ -468,9 +794,25 @@ def main() -> int:
         0,
         max(1, int(args.max_active)) - support_active - development_active,
     )
-    selected = select_items(state, eligible, capacity=capacity)
-    by_id = {item['id']: item for item in eligible}
-    prs = support.open_prs(repo)
+    selected = select_items(state, admitted, capacity=capacity)
+    by_id = {item['id']: item for item in admitted}
+    try:
+        prs = support.open_prs(repo)
+    except support.WorkerError as exc:
+        # No work-item transitions may proceed with a partial PR inventory.
+        # Defer the whole development reconcile on transient GitHub transport
+        # failures, while preserving a hard failure for auth/policy denial.
+        if not support.transient_github_listing_failure(exc):
+            raise
+        state['upstream_deferred'] = {
+            'provider': 'github', 'reason': 'transient_pr_listing_error',
+            'observed_at': now(),
+        }
+        state['updated_at'] = now()
+        support.save_state(state_path, state)
+        print('DEVELOPMENT_DEFERRED=github_transient_pr_listing_error')
+        return 0
+    state.pop('upstream_deferred', None)
     gate = support.load_gate(repo)
     policy = gate.load_json(repo / 'config' / 'autonomous-repair-release-policy.json')
 

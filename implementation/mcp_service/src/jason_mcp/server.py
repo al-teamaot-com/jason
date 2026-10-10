@@ -7799,6 +7799,15 @@ app.add_route(
     methods=["GET"],
 )
 
+# Some MCP clients probe authorization metadata at the resource path before
+# falling back to the authorization server issuer root. Serve the same public
+# metadata at both locations; the canonical issuer remains the root URL.
+app.add_route(
+    "/.well-known/oauth-authorization-server/mcp",
+    oauth_authorization_server_metadata,
+    methods=["GET"],
+)
+
 app.add_middleware(
     JasonMcpOuterTransportGuard,
     settings=transport_security,

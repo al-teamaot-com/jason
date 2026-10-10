@@ -70,7 +70,7 @@ class ProductionDriftWatchdogTests(unittest.TestCase):
             )
             self.assertEqual(json.loads(state.read_text())["circuit_breaker_action"], "opened")
 
-    def test_control_state_replacement_inherits_release_directory_owner(self):
+    def test_control_state_replacement_preserves_existing_file_owner(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -78,6 +78,8 @@ class ProductionDriftWatchdogTests(unittest.TestCase):
             evidence = root / "evidence.json"
             state = root / "watchdog.json"
             result = {"status": "drift_detected", "problems": [{"kind": "unexpected_unit"}]}
+            control.write_text(json.dumps({"schema_version": "1.0", "circuit_breaker": {"state": "closed"}}))
+            evidence.write_text(json.dumps({"schema_version": "1.0", "status": "pass"}))
             original_chown = watchdog.os.chown
             calls = []
             def checked_chown(path, uid, gid):
@@ -86,8 +88,9 @@ class ProductionDriftWatchdogTests(unittest.TestCase):
             with patch.object(watchdog.os, "chown", side_effect=checked_chown):
                 rc = watchdog.apply_result(result, control_state=control, evidence=evidence, watchdog_state=state)
             self.assertEqual(rc, 2)
-            self.assertEqual(len(calls), 1)
-            self.assertEqual(calls[0][1:], (root.stat().st_uid, root.stat().st_gid))
+            self.assertEqual(len(calls), 2)
+            self.assertTrue(all(call[1:] == (root.stat().st_uid, root.stat().st_gid) for call in calls))
+            self.assertEqual(evidence.stat().st_uid, root.stat().st_uid)
             self.assertEqual(control.stat().st_uid, root.stat().st_uid)
             self.assertEqual(control.stat().st_mode & 0o777, 0o600)
             self.assertEqual(json.loads(control.read_text())["circuit_breaker"]["state"], "open")

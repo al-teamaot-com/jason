@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 from jason_mcp import server
@@ -1132,7 +1133,7 @@ def test_generic_internal_note_canonicalizes_technician_friendly_arguments():
             "ticketID": 123,
             "description": "Diagnostic acceptance note",
             "noteType": 3,
-            "publish": 1,
+            "publish": 2,
             "title": "Jason diagnostic",
         }
     }

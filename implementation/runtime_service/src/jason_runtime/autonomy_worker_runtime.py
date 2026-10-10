@@ -295,6 +295,8 @@ SECURITY_LOG_SELF_HEAL_UID = "cdd297b4-378f-4ffc-b272-56833e926c81"
 BACKUPIQ_INSTALLER_NAME = "Datto Endpoint Backup Agent v2 [WIN]"
 BACKUPIQ_INSTALLER_UID = "f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967"
 BACKUPIQ_REINSTALL_VERIFY_SECONDS = 3 * 60 * 60
+BACKUPIQ_INITIAL_BACKUP_MAX_SECONDS = 7 * 24 * 60 * 60
+BACKUPIQ_PROGRESS_STALL_SECONDS = 12 * 60 * 60
 LOW_DISK_SYSMON_CLEANUP_NAME = "Sysmon - Clear C:\\Sysmon Folder - AOT"
 LOW_DISK_SYSMON_CLEANUP_UID = "97ddcdd5-2b74-4a4b-9516-cc872af6a7b6"
 TERMINAL_PHASES = frozenset({"complete", "escalated", "blocked", "approval_pending"})
@@ -1007,6 +1009,42 @@ class OperationalAutonomyMaintenance:
             return "On Hold"
         return None
 
+    def _notify_ticket_event(self, work: OperationalWork, event: str, status: str) -> None:
+        """Best-effort owner Teams card only after Autotask readback verification.
+
+        Notification failure must never undo an already-verified ticket change.
+        A fingerprint prevents duplicate cards when a queued work item is resumed.
+        """
+        if self.completion_notifier is None:
+            return
+        fingerprint = hashlib.sha256(
+            f"teams-ticket-v1|{event}|{work.ticket_number}|{status}".encode("utf-8")
+        ).hexdigest()
+        note_title = "Teams - Ticket Activity - " + event
+        if self.store.last_note_fingerprint(work.ticket_id, work.playbook_id, note_title) == fingerprint:
+            return
+        event_type = "work_started" if event == "pickup" else "work_completed" if status == "Complete" else "ticket_status_updated"
+        summary = (
+            f"Ticket: {work.ticket_number} | Device: {work.hostname or 'Not linked'} | "
+            f"Status: {status} | Action: {'Picked up by Jason' if event == 'pickup' else 'Status updated by Jason'}"
+        )
+        try:
+            self.completion_notifier.send(
+                event_type,
+                work_id=work.ticket_number[:80],
+                work_title=work.title[:180],
+                summary=summary[:400],
+            )
+            self.store.remember_note_fingerprint(
+                work.ticket_id, work.playbook_id, note_title, fingerprint,
+            )
+        except Exception as exc:
+            self._audit_diagnostic("ticket_teams_notification_failed", {
+                "ticket_number": work.ticket_number,
+                "event": event,
+                "error_type": type(exc).__name__,
+            })
+
     def _update_ticket_status_verified(self, work: OperationalWork, status: str) -> None:
         normalized = str(status).strip()
         if self._ticket_status_cache.get(work.ticket_id, "").casefold() == normalized.casefold():
@@ -1029,6 +1067,7 @@ class OperationalAutonomyMaintenance:
                 f"ticket status transition to {normalized!r} was not verified by provider readback"
             )
         self._ticket_status_cache[work.ticket_id] = normalized
+        self._notify_ticket_event(work, "status_change", normalized)
 
     def _reconcile_ticket_status_for_phase(
         self,
@@ -2113,25 +2152,9 @@ class OperationalAutonomyMaintenance:
                     state, reason_code, item.source_version, state == "eligible_now"
                 )
                 continue
-            scope = self._match_scope(item.context)
-            if scope is None:
-                unsupported += 1
-                classifications[ticket_id] = (
-                    "unsupported_capability", "no_applicable_promoted_playbook",
-                    item.source_version, False,
-                )
-                continue
-            if not self._scope_is_promoted(scope):
-                governance_blocked += 1
-                classifications[ticket_id] = (
-                    "governance_blocked", "playbook_not_promoted",
-                    item.source_version, False,
-                )
-                continue
-            # Broad open-status discovery is useful for read-only assessment, but
-            # autonomous admission outside Jason is limited to intake states.
-            # This prevents a matching playbook from claiming work already being
-            # handled by a technician simply because it appears in the open view.
+            # Classify already-active technician tickets before playbook coverage.
+            # These are discovery-only, not actionable admission candidates; a
+            # missing playbook here is not an autonomous coverage failure.
             source_status = str(
                 item.context.get("_jason_source_status_label") or ""
             ).strip().casefold()
@@ -2140,10 +2163,24 @@ class OperationalAutonomyMaintenance:
                 and source_status not in {"new", "emergency"}
             ):
                 classifications[ticket_id] = (
-                    "not_actionable",
-                    "discovery_status_not_admissible",
-                    item.source_version,
-                    False,
+                    "not_actionable", "discovery_status_not_admissible",
+                    item.source_version, False,
+                )
+                continue
+            scope = self._match_scope(item.context)
+            if scope is None:
+                unsupported += 1
+                classifications[ticket_id] = (
+                    "unsupported_capability",
+                    self._unsupported_capability_reason(item.context),
+                    item.source_version, False,
+                )
+                continue
+            if not self._scope_is_promoted(scope):
+                governance_blocked += 1
+                classifications[ticket_id] = (
+                    "governance_blocked", "playbook_not_promoted",
+                    item.source_version, False,
                 )
                 continue
             if item.context.get("_jason_assigned_elsewhere") is True:
@@ -2847,6 +2884,22 @@ class OperationalAutonomyMaintenance:
             and ("compliant: false" in title or "enabled: false" in title)
         )
 
+    @staticmethod
+    def _unsupported_capability_reason(ticket: Mapping[str, Any]) -> str:
+        """Read-only gap telemetry; never qualifies a ticket for admission."""
+        title = str(ticket.get("title") or "").casefold()
+        if "device went offline" in title or "offline for 5 mins" in title:
+            return "site_outage_correlation_candidate"
+        if "security threat detected" in title or "detected threat from datto av" in title:
+            return "edr_threat_requires_security_triage"
+        if "corruption was discovered in the file system" in title:
+            return "filesystem_corruption_diagnostics_candidate"
+        if "unable to ascertain os licence" in title or "os licence status" in title:
+            return "windows_licensing_diagnostics_candidate"
+        if "onedrive" in title:
+            return "m365_onedrive_diagnostics_candidate"
+        return "no_applicable_promoted_playbook"
+
     def _match_scope(self, ticket: Mapping[str, Any]) -> PlaybookScope | None:
         if self._is_health_only_edr_ticket(ticket):
             return EDR_SCOPE
@@ -3511,6 +3564,7 @@ class OperationalAutonomyMaintenance:
                 )
             work = self._replace(work, phase=next_phase)
             self.store.put(work)
+            self._notify_ticket_event(work, "pickup", "In Progress")
 
         if work.playbook_id == DNS_SCOPE.playbook_id:
             if work.phase == "dns_diagnostic_dispatch":
@@ -5891,6 +5945,21 @@ class OperationalAutonomyMaintenance:
             )
         )
 
+    @staticmethod
+    def _backupiq_progress_percent(asset: Mapping[str, Any]) -> float | None:
+        """Only accept a documented numeric percentage; status alone is not progress."""
+        for key in ("progressPercent", "progressPercentage", "percentComplete"):
+            value = asset.get(key)
+            if isinstance(value, bool) or value is None:
+                continue
+            try:
+                percent = float(value)
+            except (ValueError, TypeError):
+                continue
+            if 0 <= percent <= 100:
+                return percent
+        return None
+
     def _verify_backupiq_reinstall(self, work: OperationalWork) -> None:
         started_at = self._backupiq_timestamp_from_reason(
             work, "backupiq_reinstall_started_at"
@@ -6016,7 +6085,45 @@ class OperationalAutonomyMaintenance:
             )
             return
 
-        if datetime.now(timezone.utc) >= deadline_at:
+        # An initial full backup may legitimately take days. Extend the short
+        # reinstall window ONLY with numeric progress evidence for this exact
+        # asset. Persist observations so restarts cannot refresh the deadline
+        # or mistake an unchanged in-progress label for ongoing progress.
+        now = datetime.now(timezone.utc)
+        progress = self._backupiq_progress_percent(asset)
+        in_progress = provider_status in {"inprogress", "in_progress", "running"}
+        baseline_match = re.search(
+            r"(?:^|;)\s*backupiq_progress_percent=([0-9.]+)",
+            str(work.last_reason or ""),
+        )
+        prior_progress = float(baseline_match.group(1)) if baseline_match else None
+        last_advance = self._backupiq_timestamp_from_reason(
+            work, "backupiq_progress_seen_at"
+        )
+        if endpoint_online and in_progress and progress is not None:
+            advanced = prior_progress is None or progress > prior_progress
+            if advanced:
+                last_advance = now
+            if last_advance is not None and progress >= (prior_progress or 0):
+                max_deadline = started_at.timestamp() + BACKUPIQ_INITIAL_BACKUP_MAX_SECONDS
+                stalled = (now - last_advance).total_seconds() >= BACKUPIQ_PROGRESS_STALL_SECONDS
+                if not stalled and now.timestamp() < max_deadline:
+                    self.store.put(self._replace(
+                        work,
+                        phase="waiting_recheck:backupiq_verify_reinstall",
+                        last_reason=(
+                            f"backupiq_reinstall_started_at={started_at.isoformat()}; "
+                            f"backupiq_verify_deadline_at={deadline_at.isoformat()}; "
+                            f"backupiq_progress_percent={progress}; "
+                            f"backupiq_progress_seen_at={last_advance.isoformat()}; "
+                            "Initial full backup underway; awaiting verified completion."
+                        ),
+                    ))
+                    return
+                # Progress stalled or seven-day ceiling reached. Fall through
+                # to technician review, never silently mute a genuine failure.
+                deadline_at = now
+        if now >= deadline_at:
             self._write_note(
                 work,
                 (

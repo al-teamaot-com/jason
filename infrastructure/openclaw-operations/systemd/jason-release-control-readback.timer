@@ -1,0 +1,10 @@
+[Unit]
+Description=Publish protected Jason release-control readback
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=30s
+Unit=jason-release-control-readback.service
+
+[Install]
+WantedBy=timers.target

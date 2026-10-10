@@ -33,3 +33,24 @@ def test_discovery_declares_authorization_and_resource_scopes():
     literal_fields = {k.value for n in ast.walk(handler) if isinstance(n, ast.Dict)
                       for k in n.keys if isinstance(k, ast.Constant) and isinstance(k.value, str)}
     assert {"resource", "authorization_servers", "scopes_supported", "bearer_methods_supported"} <= literal_fields
+
+
+def test_authorization_server_discovery_resource_path_alias():
+    """Resource-path probes must return canonical issuer metadata, not 404."""
+    tree = ast.parse(SOURCE.read_text(encoding="utf-8"))
+    routes = [
+        item for item in ast.walk(tree)
+        if isinstance(item, ast.Call)
+        and isinstance(item.func, ast.Attribute)
+        and item.func.attr == "add_route"
+        and item.args
+        and isinstance(item.args[0], ast.Constant)
+        and item.args[0].value in {
+            "/.well-known/oauth-authorization-server",
+            "/.well-known/oauth-authorization-server/mcp",
+        }
+    ]
+    assert len(routes) == 2
+    assert all(isinstance(call.args[1], ast.Name) and
+               call.args[1].id == "oauth_authorization_server_metadata"
+               for call in routes)

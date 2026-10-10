@@ -278,10 +278,17 @@ def evaluate_transition(
             reasons.append("production requires an exact candidate SHA")
         if not _exact_sha(record.get("rollback_sha")):
             reasons.append("production requires an exact rollback SHA")
-        if is_protected_core(record, policy):
+        # AOT temporary manual release mode (Owner, 2026-10-10).
+        # Keep the existing exact-SHA approval gate; extend it to all releases
+        # rather than adding an alternate/manual deployment mechanism.
+        approval_required = (
+            is_protected_core(record, policy)
+            or (policy.get("production") or {}).get("require_owner_approval_for_all") is True
+        )
+        if approval_required:
             approval = dict(record.get("owner_approval") or {})
             if approval.get("approved") is not True:
-                reasons.append("protected-core release requires explicit owner approval")
+                reasons.append("production release requires explicit owner approval")
             if approval.get("candidate_sha") != candidate.get("candidate_sha"):
                 reasons.append("owner approval is not bound to the exact candidate SHA")
 

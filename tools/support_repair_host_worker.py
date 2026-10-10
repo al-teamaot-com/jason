@@ -182,9 +182,29 @@ def gh_json(args: list[str], *, cwd: Path) -> Any:
     ) from last_error
 
 
+def transient_github_listing_failure(exc: Exception) -> bool:
+    """Defer only transient GitHub transport failures, never permission errors."""
+    detail = str(exc)
+    return any(marker in detail for marker in (
+        'HTTP 502', 'HTTP 503', 'HTTP 504', 'unexpected end of JSON input',
+    ))
+
+
 def open_prs(repo: Path) -> list[dict[str, Any]]:
-    data = gh_json(['pr', 'list', '--state', 'open', '--limit', '100', '--json', 'number,title,body,headRefName,url,isDraft,statusCheckRollup'], cwd=repo)
-    return list(data or [])
+    # Selected PRs get full CI checks through pr_view; bulk discovery needs
+    # only metadata and body. A complete list is mandatory before reconciling.
+    limit = 1000
+    fields = 'number,title,body,headRefName,url,isDraft'
+    data = gh_json(['pr', 'list', '--state', 'open', '--limit', str(limit), '--json', fields], cwd=repo)
+    if not isinstance(data, list) or len(data) >= limit:
+        raise WorkerError('GitHub open PR listing is incomplete or invalid; refusing partial reconciliation')
+    if any(not isinstance(item, dict) or not isinstance(item.get('number'), int)
+           or not isinstance(item.get('headRefName'), str)
+           or not isinstance(item.get('body'), str) for item in data):
+        raise WorkerError('GitHub open PR listing contains an invalid record')
+    if len({item['number'] for item in data}) != len(data):
+        raise WorkerError('GitHub open PR listing contains duplicate identities')
+    return data
 
 
 def support_id_from_title(title: str) -> str | None:
@@ -195,7 +215,7 @@ def support_id_from_title(title: str) -> str | None:
 def open_support_issue_ids(repo: Path) -> set[str]:
     data = gh_json([
         'issue', 'list', '--state', 'open', '--search', 'SUPPORT- in:title',
-        '--limit', '100', '--json', 'number,title'
+        '--limit', '1000', '--json', 'number,title'
     ], cwd=repo) or []
     result = set()
     for issue in data:
@@ -247,6 +267,44 @@ def load_self_heal_incidents(root: Path = Path('/var/lib/jason/openclaw/self-hea
         })
     incidents.sort(key=lambda item: (PRIORITY.get(item['priority'], 99), item['id']))
     return incidents
+
+
+def load_development_recovery_incidents(spool: Path) -> list[dict[str, str]]:
+    """Admit only approved, validated handoffs routed by development worker."""
+    path = spool / 'development-state.json'
+    if not path.is_file():
+        return []
+    state = load_state(path)
+    records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
+    incidents = []
+    for item_id, record in records.items():
+        if not isinstance(record, Mapping) or record.get('phase') != 'blocked':
+            continue
+        intake = record.get('recovery_handoff_intake')
+        if not isinstance(intake, Mapping) or intake.get('status') != 'awaiting_governed_repair':
+            continue
+        issue = record.get('issue_number')
+        if not isinstance(issue, int) or issue < 1:
+            continue
+        identifier = f'SUPPORT-DEV-{issue}'
+        if record.get('recovery_support_issue_raised') != identifier:
+            continue
+        if intake.get('handoff_id') != record.get('recovery_handoff_id'):
+            continue
+        incidents.append({
+            'id': identifier, 'priority': 'P0',
+            'status': 'Open - governed development recovery',
+            'title': f'Repair exhausted development #{issue}',
+            'evidence': (f'Original item {item_id}; handoff {intake["handoff_id"]}; '
+                f'blocker {str(record.get("reason") or "")[:900]}; '
+                f'diagnosis {str(record.get("recovery_diagnostic_summary") or "")[:500]}')[:1600],
+            'acceptance': (
+                'Source regression tests and release evidence must prove the repair; '
+                're-admission requires independent upstream-dependency and production acceptance.'
+            ),
+        })
+    return sorted(incidents, key=lambda item: item['id'])
+
 
 
 def self_heal_post_production_verification(
@@ -987,7 +1045,7 @@ def create_closure_pr(repo: Path, item: Mapping[str, str], merge_sha: str, accep
         lines[index] = '|'.join(parts)
         changed = True
         break
-    if not changed and item['id'].startswith('SUPPORT-AUTO-'):
+    if not changed and item['id'].startswith(('SUPPORT-AUTO-', 'SUPPORT-DEV-')):
         lines.append(
             f"| {item['id']} | {item['priority']} | Closed {date} - production verified | "
             f"{item['title'].replace('|', '/')} | {evidence} | "
@@ -1156,14 +1214,19 @@ def sync_support_lifecycle_notification(
                 event_root=event_root,
             )
         phase = str(record.get('phase') or '')
-        if phase == 'blocked':
-            reason = str(record.get('reason') or 'Support repair stopped at a bounded blocker.').strip()
+        if (phase == 'blocked'
+                and record.get('notification_class') == 'owner_action_required'
+                and not record.get('lifecycle_blocked_fingerprint')):
+            reason = str(record.get('reason') or 'Support repair stopped at an owner-action blocker.').strip()
+            owner_action = str(record.get('owner_action') or '').strip()
+            if not owner_action:
+                raise ValueError('owner_action_required blocker must include owner_action')
             record['lifecycle_blocked_fingerprint'] = emit_lifecycle_event(
                 event_type='work_blocked',
                 work_id=str(item['id']),
                 work_title=str(item['title']),
                 summary=reason,
-                owner_action='Review only if Jason cannot resolve the blocker within existing authority.',
+                owner_action=owner_action,
                 event_root=event_root,
             )
         if phase == 'complete' and not record.get('lifecycle_completed_fingerprint'):
@@ -1196,12 +1259,18 @@ def main() -> int:
     support_text = run(['git', 'show', 'origin/main:SUPPORT.md'], cwd=repo)
     parsed_support = parse_support(support_text)
     auto_incidents = load_self_heal_incidents()
+    development_recovery_incidents = load_development_recovery_incidents(spool)
     for item in auto_incidents:
         ensure_support_issue(repo, item)
     open_issue_ids = open_support_issue_ids(repo)
     support = eligible_support_items(parsed_support, open_issue_ids)
     support.extend(
         item for item in auto_incidents
+        if item['id'] in open_issue_ids
+        and item['id'] not in {existing['id'] for existing in support}
+    )
+    support.extend(
+        item for item in development_recovery_incidents
         if item['id'] in open_issue_ids
         and item['id'] not in {existing['id'] for existing in support}
     )
@@ -1219,7 +1288,7 @@ def main() -> int:
     except WorkerError as exc:
         # Preserve existing work and defer the entire reconciliation, not a
         # partial PR listing, when GitHub has a transient gateway outage.
-        if not any(code in str(exc) for code in ('HTTP 502', 'HTTP 503', 'HTTP 504')):
+        if not transient_github_listing_failure(exc):
             raise
         state['upstream_deferred'] = {
             'provider': 'github', 'reason': 'transient_gateway_error',

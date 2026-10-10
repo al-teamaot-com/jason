@@ -13,6 +13,7 @@ import fcntl
 import hashlib
 import json
 import os
+import stat
 import re
 import shutil
 import subprocess
@@ -246,6 +247,20 @@ def control_state_path(state_root: Path) -> Path:
     return state_root / "production-control-state.json"
 
 
+def _read_protected_snapshot(state_root: Path, filename: str) -> dict[str, Any]:
+    """Read a fresh root-published snapshot; never trust stale breaker state."""
+    snapshot = state_root / "protected-readback" / filename
+    if not snapshot.is_file():
+        raise ReleaseManagerError("protected release-state snapshot unavailable: " + filename)
+    metadata = snapshot.stat()
+    if time.time() - metadata.st_mtime > 90 or metadata.st_mtime > time.time() + 10:
+        raise ReleaseManagerError("protected release-state snapshot stale: " + filename)
+    payload = json.loads(snapshot.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("schema_version") != CONTROL_STATE_SCHEMA_VERSION:
+        raise ReleaseManagerError("invalid protected release-state snapshot: " + filename)
+    return payload
+
+
 def load_control_state(state_root: Path) -> dict[str, Any]:
     path = control_state_path(state_root)
     if not path.exists():
@@ -254,16 +269,24 @@ def load_control_state(state_root: Path) -> dict[str, Any]:
             "circuit_breaker": {"state": "closed", "updated_at": now()},
             "last_known_good": None,
         }
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except PermissionError:
+        payload = _read_protected_snapshot(state_root, "production-control-state.json")
     if str(payload.get("schema_version") or "") != CONTROL_STATE_SCHEMA_VERSION:
         raise ReleaseManagerError("production control-state schema is unsupported")
     return payload
 
 
 def save_control_state(state_root: Path, payload: dict[str, Any]) -> None:
+    path = control_state_path(state_root)
+    if path.exists():
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
+            raise ReleaseManagerError("protected production control state requires governed root write; refusing operator-owned replacement")
     payload["schema_version"] = CONTROL_STATE_SCHEMA_VERSION
     payload["updated_at"] = now()
-    atomic_json(control_state_path(state_root), payload)
+    atomic_json(path, payload)
 
 
 def unit_active(unit: str, *, user: bool) -> bool:
@@ -313,14 +336,21 @@ def controller_identity(repo: Path) -> dict[str, Any]:
     }
 
 
-def verify_controller_identity(pin: dict[str, Any], repo: Path) -> dict[str, Any]:
+def verify_controller_identity(pin: dict[str, Any], repo: Path, *, installed_candidate: bool = False) -> dict[str, Any]:
     current = controller_identity(repo)
+    # A governed host reconciliation may install the exact reviewed candidate
+    # controller while the old controller process remains in flight. Check
+    # its bytes against the immutable candidate worktree, not an arbitrary
+    # changed on-disk controller. The original pin remains in the record.
+    if installed_candidate:
+        candidate = repo / "tools" / "release_manager_host_runner.py"
+        if not candidate.is_file() or current["executing_controller_digest"] != file_digest(candidate):
+            raise ReleaseManagerError("installed Production Manager controller differs from candidate source")
     for field in (
         "executing_controller_path",
         "executing_controller_revision",
-        "executing_controller_digest",
         "policy_digest",
-    ):
+    ) + (() if installed_candidate else ("executing_controller_digest",)):
         if current.get(field) != pin.get(field):
             raise ReleaseManagerError(f"active Production Manager controller changed mid-transaction: {field}")
     return current
@@ -374,12 +404,46 @@ def capture_production_manifest(expected_sha: str) -> dict[str, Any]:
     }
 
 
+def request_root_control_transition(state_root: Path, *, action: str, revision: str, release_id: str = "", reason: str = "") -> None:
+    """Request a finite root-governed intent rather than write protected JSON."""
+    if action not in {"open", "revalidate", "set_last_known_good"}:
+        raise ReleaseManagerError("unsupported root-controlled release transition")
+    revision = exact_sha(revision, "transition revision")
+    request_id = uuid4().hex
+    request_root = state_root / "protected-transitions"
+    request_file = request_root / "requests" / (request_id + ".json")
+    result_file = request_root / "results" / (request_id + ".json")
+    if not request_file.parent.is_dir() or not result_file.parent.is_dir():
+        raise ReleaseManagerError("governed root release transition worker not installed")
+    atomic_json(request_file, {"request_id": request_id, "action": action, "revision": revision,
+                               "release_id": release_id, "reason": reason[:300]})
+    try:
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            if result_file.is_file():
+                data = json.loads(result_file.read_text(encoding="utf-8"))
+                if data.get("request_id") != request_id or data.get("success") is not True:
+                    raise ReleaseManagerError("governed root release transition rejected: " + str(data.get("detail") or "invalid response")[:350])
+                if data.get("revision") != revision or data.get("action") != action:
+                    raise ReleaseManagerError("governed root transition response identity mismatch")
+                if control_state_path(state_root).stat().st_uid != 0:
+                    raise ReleaseManagerError("governed root transition lost protected file ownership")
+                return
+            time.sleep(0.25)
+        raise ReleaseManagerError("governed root transition result timed out")
+    finally:
+        result_file.unlink(missing_ok=True)
+
+
 def set_last_known_good(
     state_root: Path,
     manifest: dict[str, Any],
     *,
     release_id: str,
 ) -> None:
+    if control_state_path(state_root).exists() and control_state_path(state_root).stat().st_uid == 0 and os.geteuid() != 0:
+        request_root_control_transition(state_root, action="set_last_known_good", revision=exact_sha(str(manifest.get("revision") or ""), "manifest revision"), release_id=release_id)
+        return
     state = load_control_state(state_root)
     state["last_known_good"] = {
         "release_id": release_id,
@@ -401,6 +465,10 @@ def open_circuit_breaker(
     reason: str,
     rollback_verified: bool,
 ) -> None:
+    if control_state_path(state_root).exists() and control_state_path(state_root).stat().st_uid == 0 and os.geteuid() != 0:
+        revision = exact_sha(str((record.get("release_candidate") or {}).get("candidate_sha") or ""), "candidate revision")
+        request_root_control_transition(state_root, action="open", revision=revision, reason=reason)
+        return
     state = load_control_state(state_root)
     state["circuit_breaker"] = {
         "state": "open",
@@ -430,6 +498,16 @@ def revalidate_circuit_breaker(state_root: Path) -> dict[str, Any]:
         raise ReleaseManagerError(
             "production circuit breaker is open; authoritative health revalidation failed: " + str(exc)
         ) from exc
+    if control_state_path(state_root).exists() and control_state_path(state_root).stat().st_uid == 0 and os.geteuid() != 0:
+        request_root_control_transition(state_root, action="revalidate", revision=revision)
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline:
+            snapshot = _read_protected_snapshot(state_root, "production-control-state.json")
+            breaker = snapshot.get("circuit_breaker") or {}
+            if breaker.get("state") == "closed" and breaker.get("revalidated_revision") == revision:
+                return snapshot
+            time.sleep(0.5)
+        raise ReleaseManagerError("root-governed breaker transition succeeded but readback did not converge")
     state["circuit_breaker"] = {
         "state": "closed",
         "reason": "authoritative_health_revalidated",
@@ -481,7 +559,10 @@ def production_drift_evidence(state_root: Path) -> dict[str, Any]:
     path = state_root / "production-drift.json"
     if not path.is_file():
         raise ReleaseManagerError("production drift evidence is missing")
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except PermissionError:
+        payload = _read_protected_snapshot(state_root, "production-drift.json")
     if str(payload.get("schema_version") or "") != "1.0":
         raise ReleaseManagerError("production drift evidence schema is invalid")
     if str(payload.get("status") or "") != "pass":
@@ -798,8 +879,11 @@ def request_host_reconcile(
     state_root: Path,
     source_revision: str,
     *,
-    timeout_seconds: float = 240.0,
+    timeout_seconds: float = 420.0,
 ) -> dict[str, Any]:
+    # The root worker may spend 200+ seconds activating system services,
+    # followed by exporter checks and queue scheduling. Keep an absolute
+    # finite deadline; never count a late result as an accepted release.
     source_revision = exact_sha(source_revision, "source_revision")
     require_host_reconciler_ready(state_root)
     request_id = "release-" + source_revision[:12] + "-" + uuid4().hex[:12]
@@ -1280,6 +1364,7 @@ def create_record(
     rollback_sha: str,
     change_class: str,
     owner_approved: bool,
+    release_id_override: str | None = None,
 ) -> dict[str, Any]:
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
     rollback_sha = exact_sha(rollback_sha, "rollback_sha")
@@ -1296,7 +1381,9 @@ def create_record(
             "required protected checks are not green: " + ", ".join(checks["failures"])
         )
 
-    release_id = record_id(candidate_sha)
+    release_id = release_id_override or record_id(candidate_sha)
+    if release_id_override and not re.fullmatch(re.escape(record_id(candidate_sha)) + r"-retry-[1-9][0-9]{0,2}", release_id_override):
+        raise ReleaseManagerError("invalid recovery attempt identity")
     risk_profile = classify_change_risk(change_class, files)
     record = {
         "schema_version": "2.0",
@@ -1598,11 +1685,24 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         "revision": rollback_sha,
         "manifest_complete": bool(baseline_manifest.get("complete")),
     }
-    set_last_known_good(
-        state_root,
-        baseline_manifest,
-        release_id="baseline-" + rollback_sha[:16],
-    )
+    # Protected baseline is already a root-owned, verified last-known-good.
+    # The root transition worker only accepts approved candidate release IDs,
+    # not synthetic baseline IDs. Preserve the existing root baseline when it
+    # matches the independently verified current production revision.
+    protected_path = control_state_path(state_root)
+    if protected_path.exists() and protected_path.stat().st_uid == 0 and os.geteuid() != 0:
+        protected_state = load_control_state(state_root)
+        existing_manifest = dict((protected_state.get("last_known_good") or {}).get("manifest") or {})
+        if existing_manifest.get("revision") != rollback_sha or existing_manifest.get("complete") is not True:
+            raise ReleaseManagerError("root protected rollback baseline differs from verified production")
+        if dict(protected_state.get("circuit_breaker") or {}).get("state") != "closed":
+            raise ReleaseManagerError("root protected circuit breaker is not closed")
+    else:
+        set_last_known_good(
+            state_root,
+            baseline_manifest,
+            release_id="baseline-" + rollback_sha[:16],
+        )
     save_record(state_root, record)
 
     gate_transition(repo, state_root, record, "production")
@@ -1660,7 +1760,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
                 "production MCP image differs from pre-production artifact"
             )
 
-        controller_verified = verify_controller_identity(controller_pin, deploy_worktree)
+        controller_verified = verify_controller_identity(controller_pin, deploy_worktree, installed_candidate=True)
         smoke = run_functional_smoke_tests(candidate_sha)
         drift_evidence = production_drift_evidence(state_root)
         production_manifest = capture_production_manifest(candidate_sha)
@@ -1837,10 +1937,31 @@ def prepare_release(
     change_class: str,
     *,
     owner_approved: bool = False,
+    reissue_rolled_back: bool = False,
 ) -> dict[str, Any]:
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
     revalidate_circuit_breaker(state_root)
     release_id = record_id(candidate_sha)
+    if reissue_rolled_back:
+        original = load_record(state_root, release_id)
+        if original.get("state") != "rolled_back" or (original.get("failure") or {}).get("rollback_verified") is not True:
+            raise ReleaseManagerError("reissue requires a verified rolled-back release")
+        if (original.get("release_candidate") or {}).get("candidate_sha") != candidate_sha:
+            raise ReleaseManagerError("reissue source does not match historical attempt")
+        for attempt in range(1, 1000):
+            next_id = f"{release_id}-retry-{attempt}"
+            if record_path(state_root, next_id).exists():
+                existing = load_record(state_root, next_id)
+                if (existing.get("release_candidate") or {}).get("candidate_sha") != candidate_sha:
+                    raise ReleaseManagerError("existing retry attempt has mismatched source")
+                if existing.get("state") not in {"rolled_back", "failed"}:
+                    raise ReleaseManagerError("an existing retry attempt must be completed or explicitly resolved before reissue")
+                continue
+            if not record_path(state_root, next_id).exists():
+                release_id = next_id
+                break
+        else:
+            raise ReleaseManagerError("reissue attempt limit exceeded")
     path = record_path(state_root, release_id)
 
     if path.exists():
@@ -1887,7 +2008,11 @@ def prepare_release(
         rollback_sha=rollback_sha,
         change_class=change_class,
         owner_approved=owner_approved,
+        release_id_override=release_id if reissue_rolled_back else None,
     )
+    if reissue_rolled_back:
+        record["reissued_from"] = record_id(candidate_sha)
+        save_record(state_root, record)
     return run_preproduction(repo, state_root, record)
 
 
@@ -1909,6 +2034,12 @@ def production_gate_result(repo: Path, record: dict[str, Any]) -> dict[str, Any]
 
 
 def promote_eligible(repo: Path, state_root: Path) -> bool:
+    # Keep the required five-minute timer active, but do not allow it to
+    # execute a production promotion while Owner has selected manual mode.
+    # The normal explicit approve + promote path remains governed and usable.
+    policy = gate.load_json(repo / "config" / "release-manager-policy.json")
+    if (policy.get("schedule") or {}).get("automatic_promotion_enabled") is not True:
+        return False
     consume_owner_approval_requests(repo, state_root)
     if not production_window_open():
         return False
@@ -1988,6 +2119,7 @@ def main() -> int:
     prepare.add_argument("--candidate-sha", required=True)
     prepare.add_argument("--change-class", default="feature")
     prepare.add_argument("--owner-approved", action="store_true")
+    prepare.add_argument("--reissue-rolled-back", action="store_true")
 
     preprod = sub.add_parser("preprod")
     preprod.add_argument("--release-id", required=True)
@@ -2034,6 +2166,7 @@ def main() -> int:
             candidate_sha=args.candidate_sha,
             change_class=args.change_class,
             owner_approved=args.owner_approved,
+            reissue_rolled_back=args.reissue_rolled_back,
         )
         print(json.dumps(record, indent=2))
         return 0
