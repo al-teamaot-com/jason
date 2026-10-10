@@ -139,6 +139,32 @@ def upstream_commitment_state(record: Mapping[str, Any] | None) -> tuple[str, st
     return 'development_in_progress', reason
 
 
+def next_work_gate(phase: str, reason: str) -> dict[str, str]:
+    """Classify a pending commitment without granting execution authority."""
+    reason_lower = reason.casefold()
+    if phase == "complete":
+        return {"blocker_category": "none", "next_action": "none"}
+    if phase == "waiting_operational_acceptance":
+        return {"blocker_category": "acceptance", "next_action": "collect_production_acceptance_evidence"}
+    if phase == "waiting_development_merge":
+        return {"blocker_category": "merge_gate", "next_action": "recheck_pr_checks_and_merge_readiness"}
+    if phase == "closure_validating":
+        return {"blocker_category": "closure_gate", "next_action": "recheck_closure_pr_and_todo_readback"}
+    if phase == "development_blocked":
+        if "dependency" in reason_lower or "prerequisite" in reason_lower:
+            return {"blocker_category": "dependency", "next_action": "recheck_authoritative_dependency_acceptance"}
+        if "credential" in reason_lower or "api details" in reason_lower or "authorization" in reason_lower:
+            return {"blocker_category": "external_authority", "next_action": "request_authorized_provider_access_evidence"}
+        if "excerpt" in reason_lower or "source" in reason_lower:
+            return {"blocker_category": "source_context", "next_action": "retrieve_bounded_authorized_source_context"}
+        if "regression test" in reason_lower:
+            return {"blocker_category": "development_test", "next_action": "verify_development_admission_and_author_test"}
+        return {"blocker_category": "unknown", "next_action": "classify_from_authoritative_evidence"}
+    if phase.startswith("release_") or phase == "waiting_release":
+        return {"blocker_category": "release_gate", "next_action": "recheck_governed_release_state"}
+    return {"blocker_category": "work_gate", "next_action": "recheck_authoritative_work_state"}
+
+
 def commitment_summary(items: Mapping[str, Any]) -> dict[str, Any]:
     phases: dict[str, int] = {}
     outstanding = 0
@@ -603,6 +629,9 @@ def main() -> int:
                 }
             )
 
+    for item in state["items"].values():
+        if isinstance(item, dict):
+            item.update(next_work_gate(str(item.get("phase") or ""), str(item.get("reason") or "")))
     state["summary"] = commitment_summary(state["items"])
     state["updated_at"] = now()
     atomic_json(state_path, state)
