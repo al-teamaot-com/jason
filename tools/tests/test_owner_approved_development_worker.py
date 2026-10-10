@@ -451,3 +451,27 @@ def test_reconcile_exhausted_diagnostic_mismatch_fails_closed(tmp_path):
     module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-950'}, tmp_path)
     assert state['items']['DEV-950']['recovery_diagnostic_result_status'] == 'invalid_request_id'
     assert state['items']['DEV-950']['phase'] == 'blocked'
+
+
+def test_handoff_intake_requires_matching_identity_and_no_authority(tmp_path):
+    root = tmp_path / 'development-recovery' / 'handoffs'
+    root.mkdir(parents=True)
+    ident = 'a' * 64
+    payload = {'schema': 'jason.development-recovery-handoff.v1',
+       'source_item': 'DEV-950', 'diagnostic_request_id': 'req1',
+       'admission_authority': False}
+    (root / f'{ident}.json').write_text(module.support.json.dumps(payload))
+    state = {'items': {'DEV-950': {'phase': 'blocked',
+       'recovery_handoff_id': ident, 'recovery_diagnostic_request_id': 'req1'}}}
+    module.reconcile_recovery_handoff_intake(state, {'DEV-950'}, tmp_path)
+    record = state['items']['DEV-950']
+    assert record['phase'] == 'blocked'
+    assert record['recovery_handoff_intake']['status'] == 'awaiting_governed_repair'
+    first = record['recovery_handoff_intake']['observed_at']
+    module.reconcile_recovery_handoff_intake(state, {'DEV-950'}, tmp_path)
+    assert record['recovery_handoff_intake']['observed_at'] == first
+    del record['recovery_handoff_intake']
+    payload['admission_authority'] = True
+    (root / f'{ident}.json').write_text(module.support.json.dumps(payload))
+    module.reconcile_recovery_handoff_intake(state, {'DEV-950'}, tmp_path)
+    assert 'recovery_handoff_intake' not in record

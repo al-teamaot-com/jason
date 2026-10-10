@@ -488,6 +488,46 @@ def reconcile_exhausted_recovery_diagnostics(
             )
 
 
+def reconcile_recovery_handoff_intake(
+    state: dict[str, Any], eligible_ids: set[str], spool: Path,
+) -> None:
+    """Consume handoff as an inert review record, never executable authority."""
+    import json
+    import re
+    records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
+    root = spool / 'development-recovery' / 'handoffs'
+    if not root.is_dir():
+        return
+    for path in sorted(root.glob('*.json')):
+        if not re.fullmatch(r'[0-9a-f]{64}\.json', path.name):
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(payload, dict) or payload.get('schema') != 'jason.development-recovery-handoff.v1':
+            continue
+        item_id = payload.get('source_item')
+        if not isinstance(item_id, str) or item_id not in eligible_ids:
+            continue
+        record = records.get(item_id)
+        if not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        if record.get('recovery_handoff_id') != path.stem:
+            continue
+        if record.get('recovery_diagnostic_request_id') != payload.get('diagnostic_request_id'):
+            continue
+        if payload.get('admission_authority') is not False:
+            continue
+        record.setdefault('recovery_handoff_intake', {
+            'status': 'awaiting_governed_repair',
+            'handoff_id': path.stem,
+            'required_gate': 'authorized_repair_and_production_acceptance',
+            'observed_at': now(),
+        })
+
+
+
 def reconcile_removed_approval(state: dict[str, Any], eligible_ids: set[str]) -> None:
     items = state.get('items') if isinstance(state.get('items'), Mapping) else {}
     for item_id, record in items.items():
@@ -545,6 +585,7 @@ def main() -> int:
     recycle_self_recoverable_blockers(state, eligible_ids)
     queue_exhausted_recovery_diagnostics(state, eligible, spool)
     reconcile_exhausted_recovery_diagnostics(state, eligible_ids, spool)
+    reconcile_recovery_handoff_intake(state, eligible_ids, spool)
     state['discovery'] = {
         'observed_at': now(),
         'approved_issue_numbers': [item['issue_number'] for item in eligible],
