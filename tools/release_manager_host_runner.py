@@ -2034,6 +2034,12 @@ def production_gate_result(repo: Path, record: dict[str, Any]) -> dict[str, Any]
 
 
 def promote_eligible(repo: Path, state_root: Path) -> bool:
+    # Keep the required five-minute timer active, but do not allow it to
+    # execute a production promotion while Owner has selected manual mode.
+    # The normal explicit approve + promote path remains governed and usable.
+    policy = gate.load_json(repo / "config" / "release-manager-policy.json")
+    if (policy.get("schedule") or {}).get("automatic_promotion_enabled") is not True:
+        return False
     consume_owner_approval_requests(repo, state_root)
     if not production_window_open():
         return False
