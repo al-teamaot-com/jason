@@ -640,6 +640,18 @@ def sync_lifecycle_notification(
 ) -> None:
     try:
         phase = str(record.get('phase') or '').strip().casefold()
+        if (phase == 'blocked'
+                and record.get('notification_class') == 'owner_action_required'
+                and not record.get('lifecycle_blocked_fingerprint')):
+            owner_action = str(record.get('owner_action') or '').strip()
+            if not owner_action:
+                raise ValueError('owner_action_required blocker must include owner_action')
+            record['lifecycle_blocked_fingerprint'] = support.emit_lifecycle_event(
+                event_type='work_blocked', work_id=str(item['id']),
+                work_title=str(item['title']),
+                summary=str(record.get('reason') or 'Owner action required.'),
+                owner_action=owner_action, event_root=event_root,
+            )
         # Owner policy: routine starts and recoverable blockers are internal-only.
         # Emit only a verified terminal development milestone once per work item.
         if phase == 'complete' and record.get('pr_number') and not record.get('lifecycle_completed_fingerprint'):

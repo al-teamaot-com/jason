@@ -588,3 +588,13 @@ def test_recovery_readmission_rejects_stale_production_proof(monkeypatch, tmp_pa
        'observed_at': '2026-01-01T00:00:00+00:00'}})
     module.readmit_verified_development_recoveries(state, {'DEV-950'}, tmp_path, tmp_path)
     assert state['items']['DEV-950']['phase'] == 'blocked'
+
+
+def test_development_owner_action_notifies_once(tmp_path):
+    record = {'phase': 'blocked', 'notification_class': 'owner_action_required',
+              'owner_action': 'Approve protected core promotion', 'reason': 'Approval needed'}
+    item = {'id': 'DEV-950', 'title': 'Test'}
+    module.sync_lifecycle_notification(record, item, event_root=tmp_path)
+    module.sync_lifecycle_notification(record, item, event_root=tmp_path)
+    assert len(list(tmp_path.glob('*.json'))) == 1
+    assert record.get('lifecycle_blocked_fingerprint')

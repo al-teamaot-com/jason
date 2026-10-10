@@ -33,8 +33,10 @@ def test_emit_lifecycle_event_is_deterministic_and_bounded(tmp_path):
     assert payload['event_type'] == 'work_started'
 
 
-def test_sync_support_lifecycle_writes_start_and_blocker(tmp_path):
-    record = {'phase': 'blocked', 'reason': 'controlled blocker'}
+def test_sync_support_lifecycle_writes_start_and_explicit_owner_blocker(tmp_path):
+    record = {'phase': 'blocked', 'reason': 'controlled blocker',
+              'notification_class': 'owner_action_required',
+              'owner_action': 'Approve protected core release'}
     item = {'id': 'SUPPORT-OPS-100', 'title': 'Example repair'}
     root = tmp_path / 'events'
     worker.sync_support_lifecycle_notification(record, item, event_root=root)
@@ -796,3 +798,17 @@ def test_dynamic_development_recovery_closure_is_supported_in_source():
     from pathlib import Path
     source = (Path(__file__).resolve().parents[1] / 'support_repair_host_worker.py').read_text()
     assert "item['id'].startswith(('SUPPORT-AUTO-', 'SUPPORT-DEV-'))" in source
+
+
+def test_support_recoverable_blocker_silent_and_explicit_owner_action(monkeypatch, tmp_path):
+    import support_repair_host_worker as worker
+    seen = []
+    monkeypatch.setattr(worker, 'emit_lifecycle_event', lambda **kw: (seen.append(kw), 'fp')[1])
+    item = {'id': 'SUPPORT-DEV-950', 'title': 'Repair'}
+    record = {'phase': 'blocked', 'reason': 'retryable'}
+    worker.sync_support_lifecycle_notification(record, item, event_root=tmp_path)
+    assert not any(x['event_type'] == 'work_blocked' for x in seen)
+    record.update({'notification_class': 'owner_action_required', 'owner_action': 'Approve release'})
+    worker.sync_support_lifecycle_notification(record, item, event_root=tmp_path)
+    worker.sync_support_lifecycle_notification(record, item, event_root=tmp_path)
+    assert len([x for x in seen if x['event_type'] == 'work_blocked']) == 1

@@ -1194,14 +1194,19 @@ def sync_support_lifecycle_notification(
                 event_root=event_root,
             )
         phase = str(record.get('phase') or '')
-        if phase == 'blocked':
-            reason = str(record.get('reason') or 'Support repair stopped at a bounded blocker.').strip()
+        if (phase == 'blocked'
+                and record.get('notification_class') == 'owner_action_required'
+                and not record.get('lifecycle_blocked_fingerprint')):
+            reason = str(record.get('reason') or 'Support repair stopped at an owner-action blocker.').strip()
+            owner_action = str(record.get('owner_action') or '').strip()
+            if not owner_action:
+                raise ValueError('owner_action_required blocker must include owner_action')
             record['lifecycle_blocked_fingerprint'] = emit_lifecycle_event(
                 event_type='work_blocked',
                 work_id=str(item['id']),
                 work_title=str(item['title']),
                 summary=reason,
-                owner_action='Review only if Jason cannot resolve the blocker within existing authority.',
+                owner_action=owner_action,
                 event_root=event_root,
             )
         if phase == 'complete' and not record.get('lifecycle_completed_fingerprint'):
