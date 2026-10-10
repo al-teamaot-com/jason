@@ -387,3 +387,31 @@ def test_unapproved_blocker_never_recycles():
     module.recycle_self_recoverable_blockers(state, set())
     assert state['items']['DEV-950']['self_recovery_attempts'] == 1
     assert state['items']['DEV-950']['phase'] == 'blocked'
+
+
+def test_exhausted_recovery_queues_one_diagnostic_handoff(tmp_path):
+    state = {'items': {'DEV-950': {
+        'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+        'reason': 'supplied excerpts insufficient', 'self_recovery_attempts': 2,
+    }}}
+    eligible = [{'id': 'DEV-950', 'issue_number': 950, 'title': 'Entra reads',
+                 'evidence': 'missing registry', 'acceptance': 'synthetic regression'}]
+    module.queue_exhausted_recovery_diagnostics(state, eligible, tmp_path)
+    record = state['items']['DEV-950']
+    rid = record['recovery_diagnostic_request_id']
+    payload = module.support.json.loads((tmp_path / 'reasoning' / 'requests' / f'{rid}.json').read_text())
+    assert payload['context']['work_class'] == 'development_retry_exhaustion_diagnostics'
+    assert 'Do not resume' in payload['context']['instruction']
+    module.queue_exhausted_recovery_diagnostics(state, eligible, tmp_path)
+    assert len(list((tmp_path / 'reasoning' / 'requests').glob('*.json'))) == 1
+    assert record['phase'] == 'blocked'
+
+def test_exhausted_recovery_diagnostic_respects_approval_and_external_blockers(tmp_path):
+    state = {'items': {
+        'DEV-950': {'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted'},
+        'DEV-952': {'phase': 'blocked', 'reason': 'external credentials'},
+    }}
+    eligible = [{'id': 'DEV-952', 'issue_number': 952, 'title': 'Backup',
+                 'evidence': '', 'acceptance': ''}]
+    module.queue_exhausted_recovery_diagnostics(state, eligible, tmp_path)
+    assert not (tmp_path / 'reasoning' / 'requests').exists()

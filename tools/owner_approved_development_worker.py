@@ -397,6 +397,39 @@ def recycle_self_recoverable_blockers(
         })
 
 
+def queue_exhausted_recovery_diagnostics(
+    state: dict[str, Any], eligible: list[dict[str, Any]], spool: Path,
+) -> None:
+    """Create one evidence-gathering handoff, never a retry or an approval grant.
+
+    The response is advisory only; a separate authorized engineering repair and
+    production acceptance are mandatory before any re-admission.
+    """
+    records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
+    for item in eligible:
+        record = records.get(item['id'])
+        if not isinstance(record, dict):
+            continue
+        if record.get('phase') != 'blocked' or record.get('blocker_class') != 'internal_retry_exhausted':
+            continue
+        if record.get('recovery_diagnostic_request_id'):
+            continue
+        rid = queue_reasoning(spool, kind='diagnosis', item=item, context={
+            'work_class': 'development_retry_exhaustion_diagnostics',
+            'issue_number': item['issue_number'],
+            'original_blocker': str(record.get('reason') or '')[:1800],
+            'retry_count': int(record.get('self_recovery_attempts', 0)),
+            'source_paths': list(record.get('source_paths') or [])[:20],
+            'instruction': (
+                'Diagnose this exhausted development-worker failure and propose a bounded '
+                'engineering repair with evidence, regression tests, and upstream dependency '
+                'gates. Do not resume work, edit source, grant authority, or deploy.'
+            ),
+        })
+        record['recovery_diagnostic_request_id'] = rid
+        record['recovery_diagnostic_queued_at'] = now()
+
+
 def reconcile_removed_approval(state: dict[str, Any], eligible_ids: set[str]) -> None:
     items = state.get('items') if isinstance(state.get('items'), Mapping) else {}
     for item_id, record in items.items():
@@ -452,6 +485,7 @@ def main() -> int:
     eligible_ids = {item['id'] for item in eligible}
     reconcile_removed_approval(state, eligible_ids)
     recycle_self_recoverable_blockers(state, eligible_ids)
+    queue_exhausted_recovery_diagnostics(state, eligible, spool)
     state['discovery'] = {
         'observed_at': now(),
         'approved_issue_numbers': [item['issue_number'] for item in eligible],
