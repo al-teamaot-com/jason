@@ -645,3 +645,24 @@ def test_exhaustion_diagnostic_uses_supported_reasoning_kind(monkeypatch, tmp_pa
     module.queue_exhausted_recovery_diagnostics(state,[{'id':'DEV-950','issue_number':950,
         'title':'Context repair','evidence':'test','acceptance':'test'}],tmp_path)
     assert observed == ['search_plan']
+
+
+def test_failed_unsupported_diagnostic_is_requeued_once(monkeypatch, tmp_path):
+    import json
+    rid='legacy-request'
+    root=tmp_path/'reasoning'/'requests';root.mkdir(parents=True)
+    (root/(rid+'.json')).write_text(json.dumps({'kind':'diagnosis','request_id':rid}))
+    monkeypatch.setattr(module.support,'reasoning_response',lambda spool, request_id: {
+        'status':'failed','error':'unsupported support/development reasoning kind'})
+    kinds=[]
+    monkeypatch.setattr(module,'queue_reasoning',lambda spool,*,kind,item,context: (kinds.append(kind),'new-request')[1])
+    rec={'phase':'blocked','blocker_class':'internal_retry_exhausted',
+         'recovery_diagnostic_request_id':rid, 'recovery_diagnostic_result_status':'failed'}
+    state={'items':{'DEV-950':rec}}
+    item={'id':'DEV-950','issue_number':950,'title':'Fix','evidence':'data','acceptance':'test'}
+    module.queue_exhausted_recovery_diagnostics(state,[item],tmp_path)
+    assert rec['recovery_diagnostic_request_id']=='new-request'
+    assert rec['recovery_diagnostic_prior_request_id']==rid
+    assert 'recovery_diagnostic_result_status' not in rec
+    module.queue_exhausted_recovery_diagnostics(state,[item],tmp_path)
+    assert kinds==['search_plan']
