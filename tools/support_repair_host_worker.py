@@ -195,7 +195,7 @@ def support_id_from_title(title: str) -> str | None:
 def open_support_issue_ids(repo: Path) -> set[str]:
     data = gh_json([
         'issue', 'list', '--state', 'open', '--search', 'SUPPORT- in:title',
-        '--limit', '100', '--json', 'number,title'
+        '--limit', '1000', '--json', 'number,title'
     ], cwd=repo) or []
     result = set()
     for issue in data:

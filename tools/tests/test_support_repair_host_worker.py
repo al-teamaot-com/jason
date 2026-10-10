@@ -812,3 +812,13 @@ def test_support_recoverable_blocker_silent_and_explicit_owner_action(monkeypatc
     worker.sync_support_lifecycle_notification(record, item, event_root=tmp_path)
     worker.sync_support_lifecycle_notification(record, item, event_root=tmp_path)
     assert len([x for x in seen if x['event_type'] == 'work_blocked']) == 1
+
+
+def test_support_issue_discovery_includes_later_development_recovery(monkeypatch, tmp_path):
+    import support_repair_host_worker as worker
+    def fake_gh(args, *, cwd):
+        assert args[args.index('--limit') + 1] == '1000'
+        return [{'title': f'SUPPORT-OPS-{n:03d}', 'number': n} for n in range(1, 150)] + [
+            {'title': 'SUPPORT-DEV-950: Exhausted recovery', 'number': 150}]
+    monkeypatch.setattr(worker, 'gh_json', fake_gh)
+    assert 'SUPPORT-DEV-950' in worker.open_support_issue_ids(tmp_path)
