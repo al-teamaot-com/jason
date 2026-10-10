@@ -2150,25 +2150,9 @@ class OperationalAutonomyMaintenance:
                     state, reason_code, item.source_version, state == "eligible_now"
                 )
                 continue
-            scope = self._match_scope(item.context)
-            if scope is None:
-                unsupported += 1
-                classifications[ticket_id] = (
-                    "unsupported_capability", "no_applicable_promoted_playbook",
-                    item.source_version, False,
-                )
-                continue
-            if not self._scope_is_promoted(scope):
-                governance_blocked += 1
-                classifications[ticket_id] = (
-                    "governance_blocked", "playbook_not_promoted",
-                    item.source_version, False,
-                )
-                continue
-            # Broad open-status discovery is useful for read-only assessment, but
-            # autonomous admission outside Jason is limited to intake states.
-            # This prevents a matching playbook from claiming work already being
-            # handled by a technician simply because it appears in the open view.
+            # Classify already-active technician tickets before playbook coverage.
+            # These are discovery-only, not actionable admission candidates; a
+            # missing playbook here is not an autonomous coverage failure.
             source_status = str(
                 item.context.get("_jason_source_status_label") or ""
             ).strip().casefold()
@@ -2177,10 +2161,24 @@ class OperationalAutonomyMaintenance:
                 and source_status not in {"new", "emergency"}
             ):
                 classifications[ticket_id] = (
-                    "not_actionable",
-                    "discovery_status_not_admissible",
-                    item.source_version,
-                    False,
+                    "not_actionable", "discovery_status_not_admissible",
+                    item.source_version, False,
+                )
+                continue
+            scope = self._match_scope(item.context)
+            if scope is None:
+                unsupported += 1
+                classifications[ticket_id] = (
+                    "unsupported_capability",
+                    self._unsupported_capability_reason(item.context),
+                    item.source_version, False,
+                )
+                continue
+            if not self._scope_is_promoted(scope):
+                governance_blocked += 1
+                classifications[ticket_id] = (
+                    "governance_blocked", "playbook_not_promoted",
+                    item.source_version, False,
                 )
                 continue
             if item.context.get("_jason_assigned_elsewhere") is True:
@@ -2883,6 +2881,22 @@ class OperationalAutonomyMaintenance:
             "get idle log off status" in title
             and ("compliant: false" in title or "enabled: false" in title)
         )
+
+    @staticmethod
+    def _unsupported_capability_reason(ticket: Mapping[str, Any]) -> str:
+        """Read-only gap telemetry; never qualifies a ticket for admission."""
+        title = str(ticket.get("title") or "").casefold()
+        if "device went offline" in title or "offline for 5 mins" in title:
+            return "site_outage_correlation_candidate"
+        if "security threat detected" in title or "detected threat from datto av" in title:
+            return "edr_threat_requires_security_triage"
+        if "corruption was discovered in the file system" in title:
+            return "filesystem_corruption_diagnostics_candidate"
+        if "unable to ascertain os licence" in title or "os licence status" in title:
+            return "windows_licensing_diagnostics_candidate"
+        if "onedrive" in title:
+            return "m365_onedrive_diagnostics_candidate"
+        return "no_applicable_promoted_playbook"
 
     def _match_scope(self, ticket: Mapping[str, Any]) -> PlaybookScope | None:
         if self._is_health_only_edr_ticket(ticket):
