@@ -426,6 +426,23 @@ echo "JASON_USER_WORKER_RECONCILIATION=PASS"
 echo "ENGINEERING_SOURCE_REPO=$ENGINEERING_SOURCE_REPO"
 echo "DOCUMENTATION_SOURCE_REPO=$DOCUMENTATION_SOURCE_REPO"
 
+# Keep the root-governed release-transition processor aligned with the
+# immutable release before final production baseline verification. A retry
+# identity accepted by the Release Manager must also be accepted by the root
+# processor; otherwise final closeout unnecessarily rolls production back.
+step_start root_release_transition_install
+/usr/bin/python3 "$RELEASE_DIR/tools/install_release_control_transition.py"
+cmp -s "$RELEASE_DIR/tools/release_control_transition_worker.py" /usr/local/lib/jason/release_control_transition_worker.py || {
+  echo "ERROR: installed root release-transition worker differs from production source" >&2
+  exit 9
+}
+if [ "$(systemctl is-active jason-release-control-transition.timer 2>/dev/null || true)" != "active" ]; then
+  echo "ERROR: root release-transition timer is not active after production install" >&2
+  exit 9
+fi
+step_pass root_release_transition_install
+echo "JASON_ROOT_RELEASE_TRANSITION_RECONCILIATION=PASS"
+
 # Keep the privileged host-reconciliation boundary on the exact production
 # implementation after this successful reconciliation. The worker validates
 # only local refs from the managed engineering Git source.
