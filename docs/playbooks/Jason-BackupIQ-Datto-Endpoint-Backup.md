@@ -6,7 +6,7 @@
 playbook:
   id: backupiq_endpoint_backup
   name: BackupIQ / Datto Endpoint Backup
-  version: 1.2.0
+  version: 1.3.0
   owner: AOT
   target_type: endpoint
   trigger:
@@ -253,6 +253,18 @@ When the device becomes online:
 - transition to waiting_backup_cycle
 
 If it goes offline during the window, reset the two-hour qualification.
+
+### Initial full backup grace period (progress-gated)
+
+Initial full backups after installation or reinstallation may take several days. Continue the existing scheduled recheck when the **exact** Backup.net asset explicitly reports `inprogress`/`running`, the DRMM endpoint is online, and the provider supplies a valid numeric progress percentage (0-100). Persist the last percentage and timestamp of the last observed advance across worker restarts. A new higher percentage refreshes the **stall clock only**, not the absolute grace-period ceiling. Suppress materially identical diagnostic notes and repeat notifications within this one incident; never suppress a different asset, a new critical failure, or a genuine worsening condition.
+
+- Investigate or escalate when progress has not advanced for 12 hours. Do not label an unchanged `inprogress` status as proof of progress.
+- End the special grace period after seven days from the original reinstall baseline, even if progress continues; require technician review for an extension.
+- The ordinary three-hour post-reinstall verification deadline still applies when progress evidence is missing, provider access fails, the agent is not actively backing up, or the evidence is contradictory. API authorization errors must remain visible and actionable, not silently treated as progress.
+- One reinstall maximum per incident remains in force. Do not reset the grace period after retries or create duplicate remediation jobs.
+- Only close the ticket with a new successful backup after the remediation timestamp and independently verified provider health.
+
+The runtime must not assume Backup.net returns a particular progress field: absence of a documented numeric provider field means the grace period cannot be automatically granted and a capability/schema enhancement is required. Monitor telemetry and deduplicate *notification events* at their actual source; suppressing repeated notes in Jason does not by itself suppress provider-originated email alerts.
 
 During post-reinstall verification, poll provider state on a reasonable cadence. Completion requires the exact Backup.net asset to be online and a **new successful backup timestamp after the reinstall baseline**. Use a bounded verification window (currently three hours). If the endpoint becomes truly offline (both DRMM and Backup.net offline), transition to Waiting Device Access and resume verification later. DRMM-only offline during verification is a Human Review handoff.
 
