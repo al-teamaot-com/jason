@@ -1200,3 +1200,20 @@ def test_governed_reissue_rejects_concurrent_pending_attempt():
         with patch.object(runner, 'revalidate_circuit_breaker'):
             with pytest.raises(runner.ReleaseManagerError, match='existing retry attempt'):
                 runner.prepare_release(ROOT, root, SHA_A, 'release_blocker', reissue_rolled_back=True)
+
+
+class HostReconciliationTimeoutContractTests(unittest.TestCase):
+    def test_bound_covers_observed_service_activation_and_exporter(self):
+        import inspect
+        default = inspect.signature(runner.request_host_reconcile).parameters['timeout_seconds'].default
+        self.assertGreater(default, 202 + 17 + 60)
+        self.assertLessEqual(default, 480)
+
+    def test_absent_host_result_still_fails_closed(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / 'host-reconcile' / 'requests').mkdir(parents=True)
+            (root / 'host-reconcile' / 'results').mkdir(parents=True)
+            with patch.object(runner, 'require_host_reconciler_ready'), patch.object(runner.time, 'monotonic', side_effect=[0.0, 2.0]):
+                with self.assertRaisesRegex(runner.ReleaseManagerError, 'host reconciliation result timed out'):
+                    runner.request_host_reconcile(root, SHA_A, timeout_seconds=1.0)
