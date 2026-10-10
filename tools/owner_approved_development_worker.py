@@ -572,6 +572,46 @@ def raise_exhausted_repair_support_issues(
 
 
 
+def readmit_verified_development_recoveries(
+    state: dict[str, Any], eligible_ids: set[str], spool: Path, repo: Path,
+) -> None:
+    """Resume only after support closure AND exact healthy production receipt."""
+    import re
+    support_state = support.load_state(spool / 'state.json')
+    support_items = support_state.get('items') if isinstance(support_state.get('items'), Mapping) else {}
+    records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
+    for item_id, record in records.items():
+        if item_id not in eligible_ids or not isinstance(record, dict):
+            continue
+        if record.get('phase') != 'blocked' or not record.get('recovery_support_issue_raised'):
+            continue
+        # TODO-GOV-002 must not bypass explicitly outstanding #1078/#1069 gates.
+        # Other externally constrained work is never classified as internal recovery.
+        if record.get('issue_number') == 866 or record.get('blocker_class') != 'internal_retry_exhausted':
+            continue
+        support_id = str(record['recovery_support_issue_raised'])
+        support_record = support_items.get(support_id)
+        if not isinstance(support_record, Mapping) or support_record.get('phase') != 'complete':
+            continue
+        sha = str(support_record.get('merge_sha') or '')
+        if not re.fullmatch(r'[0-9a-f]{40}', sha):
+            continue
+        if not support_record.get('closure_pr_number') or not support_record.get('acceptance_reason'):
+            continue
+        observed = support.production_state_from_main(repo)
+        production = observed.get('production') if isinstance(observed.get('production'), Mapping) else {}
+        if production.get('status') != 'aligned_and_healthy' or production.get('revision') != sha:
+            continue
+        record.update({
+            'phase': 'diagnosing', 'reasoning_request_id': '',
+            'reason': 'Re-admitted following exact verified governed support repair.',
+            'context_expansion_attempts': 0, 'self_recovery_attempts': 0,
+            'recovery_readmitted_after_sha': sha, 'recovery_readmitted_at': now(),
+            'updated_at': now(),
+        })
+
+
+
 def reconcile_removed_approval(state: dict[str, Any], eligible_ids: set[str]) -> None:
     items = state.get('items') if isinstance(state.get('items'), Mapping) else {}
     for item_id, record in items.items():
@@ -631,6 +671,7 @@ def main() -> int:
     reconcile_exhausted_recovery_diagnostics(state, eligible_ids, spool)
     reconcile_recovery_handoff_intake(state, eligible_ids, spool)
     raise_exhausted_repair_support_issues(state, eligible_ids, repo)
+    readmit_verified_development_recoveries(state, eligible_ids, spool, repo)
     state['discovery'] = {
         'observed_at': now(),
         'approved_issue_numbers': [item['issue_number'] for item in eligible],
