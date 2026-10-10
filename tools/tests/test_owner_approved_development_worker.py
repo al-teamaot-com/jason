@@ -706,3 +706,47 @@ def test_blocked_record_remains_blocked_after_classification(tmp_path):
     module.sync_lifecycle_notification(record, {'id': 'DEV-22', 'title': 'Test'}, event_root=tmp_path)
     assert record['phase'] == 'blocked'
     assert record['next_action'] == 'retrieve_authorized_context'
+
+
+def test_development_defers_transient_pr_listing_without_mutation(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, 'argv',
+        ['owner_approved_development_worker.py', '--repo', str(tmp_path),
+         '--spool', str(tmp_path / 'spool')])
+    monkeypatch.setattr(module.support, 'run', lambda *a, **kw: '')
+    monkeypatch.setattr(module, 'owner_approved_issues', lambda _: [])
+    for fn in (
+        'reconcile_issue_dependency_holds', 'reconcile_removed_approval',
+        'recycle_self_recoverable_blockers', 'queue_exhausted_recovery_diagnostics',
+        'reconcile_exhausted_recovery_diagnostics', 'reconcile_recovery_handoff_intake',
+        'raise_exhausted_repair_support_issues', 'readmit_verified_development_recoveries',
+    ):
+        monkeypatch.setattr(module, fn, lambda *a, **kw: None)
+    monkeypatch.setattr(module, 'active_support_count', lambda _: 0)
+    monkeypatch.setattr(module.support, 'open_prs', lambda _: (_ for _ in ()).throw(
+        module.support.WorkerError('GitHub JSON command failed: unexpected end of JSON input')))
+    assert module.main() == 0
+    state = module.support.load_state(tmp_path / 'spool' / 'development-state.json')
+    assert state['upstream_deferred']['reason'] == 'transient_pr_listing_error'
+    assert state['items'] == {}
+
+
+def test_development_does_not_defer_permission_denial(monkeypatch, tmp_path):
+    import pytest
+
+    monkeypatch.setattr(sys, 'argv',
+        ['owner_approved_development_worker.py', '--repo', str(tmp_path),
+         '--spool', str(tmp_path / 'spool')])
+    monkeypatch.setattr(module.support, 'run', lambda *a, **kw: '')
+    monkeypatch.setattr(module, 'owner_approved_issues', lambda _: [])
+    for fn in (
+        'reconcile_issue_dependency_holds', 'reconcile_removed_approval',
+        'recycle_self_recoverable_blockers', 'queue_exhausted_recovery_diagnostics',
+        'reconcile_exhausted_recovery_diagnostics', 'reconcile_recovery_handoff_intake',
+        'raise_exhausted_repair_support_issues', 'readmit_verified_development_recoveries',
+    ):
+        monkeypatch.setattr(module, fn, lambda *a, **kw: None)
+    monkeypatch.setattr(module, 'active_support_count', lambda _: 0)
+    monkeypatch.setattr(module.support, 'open_prs', lambda _: (_ for _ in ()).throw(
+        module.support.WorkerError('HTTP 403: forbidden')))
+    with pytest.raises(module.support.WorkerError, match='403'):
+        module.main()

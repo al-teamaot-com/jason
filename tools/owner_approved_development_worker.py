@@ -796,7 +796,23 @@ def main() -> int:
     )
     selected = select_items(state, admitted, capacity=capacity)
     by_id = {item['id']: item for item in admitted}
-    prs = support.open_prs(repo)
+    try:
+        prs = support.open_prs(repo)
+    except support.WorkerError as exc:
+        # No work-item transitions may proceed with a partial PR inventory.
+        # Defer the whole development reconcile on transient GitHub transport
+        # failures, while preserving a hard failure for auth/policy denial.
+        if not support.transient_github_listing_failure(exc):
+            raise
+        state['upstream_deferred'] = {
+            'provider': 'github', 'reason': 'transient_pr_listing_error',
+            'observed_at': now(),
+        }
+        state['updated_at'] = now()
+        support.save_state(state_path, state)
+        print('DEVELOPMENT_DEFERRED=github_transient_pr_listing_error')
+        return 0
+    state.pop('upstream_deferred', None)
     gate = support.load_gate(repo)
     policy = gate.load_json(repo / 'config' / 'autonomous-repair-release-policy.json')
 

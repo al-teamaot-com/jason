@@ -182,9 +182,29 @@ def gh_json(args: list[str], *, cwd: Path) -> Any:
     ) from last_error
 
 
+def transient_github_listing_failure(exc: Exception) -> bool:
+    """Defer only transient GitHub transport failures, never permission errors."""
+    detail = str(exc)
+    return any(marker in detail for marker in (
+        'HTTP 502', 'HTTP 503', 'HTTP 504', 'unexpected end of JSON input',
+    ))
+
+
 def open_prs(repo: Path) -> list[dict[str, Any]]:
-    data = gh_json(['pr', 'list', '--state', 'open', '--limit', '100', '--json', 'number,title,body,headRefName,url,isDraft'], cwd=repo)
-    return list(data or [])
+    # Selected PRs get full CI checks through pr_view; bulk discovery needs
+    # only metadata and body. A complete list is mandatory before reconciling.
+    limit = 1000
+    fields = 'number,title,body,headRefName,url,isDraft'
+    data = gh_json(['pr', 'list', '--state', 'open', '--limit', str(limit), '--json', fields], cwd=repo)
+    if not isinstance(data, list) or len(data) >= limit:
+        raise WorkerError('GitHub open PR listing is incomplete or invalid; refusing partial reconciliation')
+    if any(not isinstance(item, dict) or not isinstance(item.get('number'), int)
+           or not isinstance(item.get('headRefName'), str)
+           or not isinstance(item.get('body'), str) for item in data):
+        raise WorkerError('GitHub open PR listing contains an invalid record')
+    if len({item['number'] for item in data}) != len(data):
+        raise WorkerError('GitHub open PR listing contains duplicate identities')
+    return data
 
 
 def support_id_from_title(title: str) -> str | None:
@@ -1268,7 +1288,7 @@ def main() -> int:
     except WorkerError as exc:
         # Preserve existing work and defer the entire reconciliation, not a
         # partial PR listing, when GitHub has a transient gateway outage.
-        if not any(code in str(exc) for code in ('HTTP 502', 'HTTP 503', 'HTTP 504')):
+        if not transient_github_listing_failure(exc):
             raise
         state['upstream_deferred'] = {
             'provider': 'github', 'reason': 'transient_gateway_error',
