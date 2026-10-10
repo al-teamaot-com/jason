@@ -415,3 +415,33 @@ def test_exhausted_recovery_diagnostic_respects_approval_and_external_blockers(t
                  'evidence': '', 'acceptance': ''}]
     module.queue_exhausted_recovery_diagnostics(state, eligible, tmp_path)
     assert not (tmp_path / 'reasoning' / 'requests').exists()
+
+
+def test_reconcile_exhausted_diagnostic_success_does_not_resume(tmp_path):
+    state = {'items': {'DEV-950': {'phase': 'blocked',
+      'blocker_class': 'internal_retry_exhausted', 'recovery_diagnostic_request_id': 'req123'}}}
+    root = tmp_path / 'reasoning' / 'responses'
+    root.mkdir(parents=True)
+    (root / 'req123.json').write_text(module.support.json.dumps({
+        'request_id': 'req123', 'status': 'succeeded',
+        'result': {'diagnosis': 'missing exact registry source'}}))
+    module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-950'}, tmp_path)
+    item = state['items']['DEV-950']
+    assert item['phase'] == 'blocked'
+    assert item['recovery_diagnostic_summary'] == 'missing exact registry source'
+    assert item['recovery_diagnostic_result_status'] == 'succeeded'
+    assert 'governed repair' in item['recovery_next_action']
+    first_time = item['recovery_diagnostic_result_at']
+    module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-950'}, tmp_path)
+    assert item['recovery_diagnostic_result_at'] == first_time
+
+def test_reconcile_exhausted_diagnostic_mismatch_fails_closed(tmp_path):
+    state = {'items': {'DEV-950': {'phase': 'blocked',
+      'blocker_class': 'internal_retry_exhausted', 'recovery_diagnostic_request_id': 'req123'}}}
+    root = tmp_path / 'reasoning' / 'responses'
+    root.mkdir(parents=True)
+    (root / 'req123.json').write_text(module.support.json.dumps({
+        'request_id': 'wrong', 'status': 'succeeded', 'result': {'diagnosis': 'ok'}}))
+    module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-950'}, tmp_path)
+    assert state['items']['DEV-950']['recovery_diagnostic_result_status'] == 'invalid_request_id'
+    assert state['items']['DEV-950']['phase'] == 'blocked'

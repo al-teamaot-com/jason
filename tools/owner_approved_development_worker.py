@@ -430,6 +430,46 @@ def queue_exhausted_recovery_diagnostics(
         record['recovery_diagnostic_queued_at'] = now()
 
 
+def reconcile_exhausted_recovery_diagnostics(
+    state: dict[str, Any], eligible_ids: set[str], spool: Path,
+) -> None:
+    """Record diagnostic output without treating suggestions as execution authority."""
+    records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
+    for item_id, record in records.items():
+        if item_id not in eligible_ids or not isinstance(record, dict):
+            continue
+        if record.get('phase') != 'blocked' or record.get('blocker_class') != 'internal_retry_exhausted':
+            continue
+        rid = str(record.get('recovery_diagnostic_request_id') or '')
+        if not rid or record.get('recovery_diagnostic_result_status'):
+            continue
+        response = support.reasoning_response(spool, rid)
+        if response is None:
+            continue
+        if str(response.get('request_id') or rid) != rid:
+            record['recovery_diagnostic_result_status'] = 'invalid_request_id'
+            record['recovery_next_action'] = 'Inspect mismatched diagnostic response; no automatic re-admission.'
+            continue
+        status = str(response.get('status') or 'unknown')
+        record['recovery_diagnostic_result_status'] = status
+        record['recovery_diagnostic_result_at'] = now()
+        if status == 'succeeded':
+            result = response.get('result')
+            if isinstance(result, Mapping):
+                record['recovery_diagnostic_summary'] = str(
+                    result.get('diagnosis') or result.get('summary') or result.get('blocked_reason') or ''
+                )[:1800]
+            record['recovery_next_action'] = (
+                'Review diagnostic evidence and open a bounded governed repair; '
+                'verify source changes, tests, dependencies, and release approval before re-admission.'
+            )
+        else:
+            record['recovery_next_action'] = (
+                'Diagnostic reasoning failed; route to support with request ID and original blocker. '
+                'Do not restart retries or bypass dependencies.'
+            )
+
+
 def reconcile_removed_approval(state: dict[str, Any], eligible_ids: set[str]) -> None:
     items = state.get('items') if isinstance(state.get('items'), Mapping) else {}
     for item_id, record in items.items():
@@ -486,6 +526,7 @@ def main() -> int:
     reconcile_removed_approval(state, eligible_ids)
     recycle_self_recoverable_blockers(state, eligible_ids)
     queue_exhausted_recovery_diagnostics(state, eligible, spool)
+    reconcile_exhausted_recovery_diagnostics(state, eligible_ids, spool)
     state['discovery'] = {
         'observed_at': now(),
         'approved_issue_numbers': [item['issue_number'] for item in eligible],
