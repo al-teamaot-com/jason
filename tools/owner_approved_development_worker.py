@@ -689,6 +689,19 @@ def readmit_verified_development_recoveries(
 
 
 
+def blocked_work_next_action(reason: str) -> dict[str, str]:
+    text = str(reason or "").casefold()
+    if any(x in text for x in ("approval", "authorization", "credential")):
+        return {"blocker_category": "external_authority", "next_action": "obtain_explicit_authority"}
+    if any(x in text for x in ("prerequisite", "dependency", "until ")):
+        return {"blocker_category": "dependency", "next_action": "recheck_dependency"}
+    if source_context_blocker(reason):
+        return {"blocker_category": "source_context", "next_action": "retrieve_authorized_context"}
+    if "regression test" in text or "ci " in text:
+        return {"blocker_category": "verification", "next_action": "review_test_evidence"}
+    return {"blocker_category": "unclassified", "next_action": "diagnostic_review"}
+
+
 def reconcile_removed_approval(state: dict[str, Any], eligible_ids: set[str]) -> None:
     items = state.get('items') if isinstance(state.get('items'), Mapping) else {}
     for item_id, record in items.items():
@@ -710,6 +723,8 @@ def sync_lifecycle_notification(
 ) -> None:
     try:
         phase = str(record.get('phase') or '').strip().casefold()
+        if phase == 'blocked':
+            record.update(blocked_work_next_action(str(record.get('reason') or '')))
         if (phase == 'blocked'
                 and record.get('notification_class') == 'owner_action_required'
                 and not record.get('lifecycle_blocked_fingerprint')):
