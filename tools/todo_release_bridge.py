@@ -191,6 +191,40 @@ def dependency_recheck_gate(
     return {"dependency_recheck": "verified_for_governed_readmission_check", "retry_eligible": True}
 
 
+def accepted_release_dependencies(release_root: Path, identities: list[str]) -> dict[str, Any]:
+    """Load exact release IDs only; require a closed release with matching SHA.
+
+    No issue closure, free-text inference, or provider-side mutation qualifies.
+    """
+    accepted: dict[str, Any] = {}
+    for identity in sorted(set(identities)):
+        if not re.fullmatch(r"release-[0-9a-f]{16}", identity):
+            continue
+        candidate = release_root / "records" / (identity + ".json")
+        if not candidate.is_file():
+            continue
+        try:
+            record = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        production = record.get("production") or {}
+        sha = production.get("live_sha") if isinstance(production, Mapping) else None
+        if (record.get("release_id") == identity and record.get("state") == "closed"
+                and isinstance(sha, str) and SHA.fullmatch(sha)
+                and sha == (record.get("release_manifest") or {}).get("candidate_sha")
+                and any(h.get("state") == "closed" and h.get("gate") == "pass"
+                        for h in record.get("history", []) if isinstance(h, Mapping))):
+            accepted[identity] = {"state": "production_verified", "release_sha": sha}
+    return accepted
+
+
+def dependency_state_for_item(item: Mapping[str, Any], release_root: Path) -> dict[str, Any]:
+    required = item.get("governing_dependencies")
+    identities = required if isinstance(required, list) else []
+    accepted = accepted_release_dependencies(release_root, [s for s in identities if isinstance(s, str)])
+    return dependency_recheck_gate(item, accepted)
+
+
 def commitment_summary(items: Mapping[str, Any]) -> dict[str, Any]:
     phases: dict[str, int] = {}
     outstanding = 0
@@ -658,11 +692,11 @@ def main() -> int:
     for item in state["items"].values():
         if isinstance(item, dict):
             item.update(next_work_gate(str(item.get("phase") or ""), str(item.get("reason") or "")))
-    # No acceptance evidence is assumed from the existence or closure of an
-    # issue. A later authorized reader must supply validated production proofs.
+    # Read authoritative protected release records, without changing a worker
+    # admission decision, modifying dependencies, or granting new authority.
     for item in state["items"].values():
         if isinstance(item, dict):
-            item.update(dependency_recheck_gate(item, {}))
+            item.update(dependency_state_for_item(item, args.release_state.resolve()))
     state["summary"] = commitment_summary(state["items"])
     state["updated_at"] = now()
     atomic_json(state_path, state)
