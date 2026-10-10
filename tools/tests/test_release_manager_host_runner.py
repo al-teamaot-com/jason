@@ -1154,3 +1154,33 @@ def test_missing_lkg_recovery_rejects_stale_clean_drift(tmp_path):
         capture.assert_not_called()
     selfcheck = json.loads((tmp_path / 'production-control-state.json').read_text())
     assert selfcheck == original
+
+class GovernedReleaseReissueTests(unittest.TestCase):
+    def test_verified_rollback_creates_new_attempt_and_preserves_history(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            historical = {'release_id': runner.record_id(SHA_A), 'state': 'rolled_back',
+                'failure': {'rollback_verified': True},
+                'release_candidate': {'candidate_sha': SHA_A}}
+            runner.atomic_json(runner.record_path(root, runner.record_id(SHA_A)), historical)
+            def create(**kw):
+                return {'release_id': kw['release_id_override'], 'state': 'release_candidate'}
+            with patch.object(runner, 'revalidate_circuit_breaker'), \
+                 patch.object(runner, 'live_runtime', return_value={'revision': SHA_B}), \
+                 patch.object(runner, 'create_record', side_effect=create), \
+                 patch.object(runner, 'run_preproduction', side_effect=lambda repo, state_root, record: record):
+                result = runner.prepare_release(ROOT, root, SHA_A, 'release_blocker', reissue_rolled_back=True)
+            self.assertEqual(result['release_id'], runner.record_id(SHA_A) + '-retry-1')
+            self.assertEqual(result['reissued_from'], runner.record_id(SHA_A))
+            self.assertEqual(runner.load_record(root, runner.record_id(SHA_A)), historical)
+
+    def test_unverified_rollback_cannot_reissue(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            runner.atomic_json(runner.record_path(root, runner.record_id(SHA_A)),
+                {'release_id': runner.record_id(SHA_A), 'state': 'rolled_back',
+                 'failure': {'rollback_verified': False},
+                 'release_candidate': {'candidate_sha': SHA_A}})
+            with patch.object(runner, 'revalidate_circuit_breaker'):
+                with self.assertRaisesRegex(runner.ReleaseManagerError, 'verified rolled-back'):
+                    runner.prepare_release(ROOT, root, SHA_A, 'release_blocker', reissue_rolled_back=True)
