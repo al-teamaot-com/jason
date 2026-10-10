@@ -1025,7 +1025,7 @@ def create_closure_pr(repo: Path, item: Mapping[str, str], merge_sha: str, accep
         lines[index] = '|'.join(parts)
         changed = True
         break
-    if not changed and item['id'].startswith('SUPPORT-AUTO-'):
+    if not changed and item['id'].startswith(('SUPPORT-AUTO-', 'SUPPORT-DEV-')):
         lines.append(
             f"| {item['id']} | {item['priority']} | Closed {date} - production verified | "
             f"{item['title'].replace('|', '/')} | {evidence} | "

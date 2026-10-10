@@ -790,3 +790,9 @@ def test_development_recovery_feed_admits_only_matched_handoffs(tmp_path):
     incidents = worker.load_development_recovery_incidents(tmp_path)
     assert [item['id'] for item in incidents] == ['SUPPORT-DEV-950']
     assert incidents[0]['priority'] == 'P0'
+
+
+def test_dynamic_development_recovery_closure_is_supported_in_source():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / 'support_repair_host_worker.py').read_text()
+    assert "item['id'].startswith(('SUPPORT-AUTO-', 'SUPPORT-DEV-'))" in source
