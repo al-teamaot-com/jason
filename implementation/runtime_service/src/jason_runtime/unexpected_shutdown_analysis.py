@@ -171,3 +171,118 @@ def protected_role(endpoint: Mapping[str, Any]) -> bool:
             "physical host",
         )
     )
+
+
+def extract_authoritative_datto_uid(ticket_evidence: Mapping[str, Any]) -> str | None:
+    """Return the authoritative Datto UID only when the ticket evidence provides one."""
+    for key in (
+        "datto_uid",
+        "dattoUid",
+        "device_uid",
+        "deviceUid",
+        "resource_id",
+        "resourceId",
+        "referenceNumber",
+        "reference_number",
+    ):
+        value = ticket_evidence.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def _unique_active_ci_matches(
+    *,
+    datto_uid: str,
+    cis: Sequence[Mapping[str, Any]],
+) -> tuple[Mapping[str, Any], ...]:
+    matches = tuple(
+        ci
+        for ci in cis
+        if (
+            isinstance(ci, Mapping)
+            and str(
+                ci.get("referenceNumber")
+                or ci.get("resource_id")
+                or ci.get("dattoUid")
+                or ""
+            ).strip() == datto_uid
+            and ci.get("isActive") is True
+        )
+    )
+    return matches
+
+
+def correlate_shutdown_ticket_to_endpoint(
+    *,
+    ticket: Mapping[str, Any],
+    ticket_evidence: Mapping[str, Any],
+    endpoint_readback: Mapping[str, Any],
+    candidate_cis: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Correlate a shutdown ticket to an endpoint without guessing client identity."""
+    company_id = int(_num(ticket.get("companyID")))
+    configuration_item_id = ticket.get("configurationItemID")
+    datto_uid = extract_authoritative_datto_uid(ticket_evidence)
+    endpoint_uid = str(
+        endpoint_readback.get("resource_id")
+        or endpoint_readback.get("device_uid")
+        or endpoint_readback.get("deviceId")
+        or ""
+    ).strip()
+    endpoint_company_id = endpoint_readback.get("companyID")
+
+    if configuration_item_id not in (None, "", 0):
+        return {
+            "status": "blocked",
+            "reason": "ticket_already_has_ci",
+        }
+
+    if company_id != 0:
+        return {
+            "status": "blocked",
+            "reason": "ticket_not_company_zero",
+        }
+
+    if not datto_uid:
+        return {
+            "status": "blocked",
+            "reason": "missing_authoritative_datto_uid",
+        }
+
+    if endpoint_uid != datto_uid:
+        return {
+            "status": "blocked",
+            "reason": "endpoint_readback_uid_mismatch",
+        }
+
+    matches = _unique_active_ci_matches(datto_uid=datto_uid, cis=candidate_cis)
+    if len(matches) != 1:
+        return {
+            "status": "blocked",
+            "reason": "ci_not_unique_or_not_active",
+            "match_count": len(matches),
+        }
+
+    matched_ci = matches[0]
+    matched_company_id = str(matched_ci.get("companyID") or "").strip()
+    if not matched_company_id or endpoint_company_id is None:
+        return {
+            "status": "blocked",
+            "reason": "cross_client_binding_failed",
+        }
+    if str(endpoint_company_id).strip() != matched_company_id:
+        return {
+            "status": "blocked",
+            "reason": "cross_client_binding_failed",
+        }
+
+    return {
+        "status": "correlated",
+        "configurationItemID": matched_ci.get("id"),
+        "companyID": matched_ci.get("companyID"),
+        "datto_uid": datto_uid,
+    }
