@@ -6307,3 +6307,5 @@ def test_backupiq_progress_percent_rejects_unverified_status_and_bad_values():
     assert parse({"progressPercent": 101}) is None
     assert parse({"progressPercent": "24.5"}) == 24.5
     assert parse({"percentComplete": 0}) == 0.0
+    assert parse({"percentComplete": 100}) == 100.0
+    assert parse({"progressPercentage": "NaN"}) is None
