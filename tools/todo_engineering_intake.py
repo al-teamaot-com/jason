@@ -219,9 +219,18 @@ def outstanding_commitment_snapshot(spool: Path) -> dict[str, Any]:
     records = state.get("items") if isinstance(state, dict) else None
     if not isinstance(records, dict):
         return {"status": "unknown", "outstanding_count": None, "items": []}
+    next_gate_by_phase = {
+        "development_blocked": "resolve_documented_development_blocker",
+        "waiting_development_merge": "governed_merge_review",
+        "waiting_operational_acceptance": "production_outcome_verification",
+        "release_prepare_blocked": "release_gate_revalidation",
+        "release_blocked": "release_gate_revalidation",
+        "closure_blocked": "completion_evidence_review",
+    }
     pending = [
         {"id": item_id, "phase": str(record.get("phase") or "unknown"),
-         "reason": str(record.get("reason") or "")[:350]}
+         "reason": str(record.get("reason") or "")[:350],
+         "next_gate": next_gate_by_phase.get(str(record.get("phase") or ""), "manual_classification_required")}
         for item_id, record in sorted(records.items())
         if isinstance(record, dict) and record.get("phase") != "complete"
     ]

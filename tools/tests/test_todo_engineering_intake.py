@@ -167,6 +167,8 @@ class TodoEngineeringIntakeTests(unittest.TestCase):
             snapshot = module.outstanding_commitment_snapshot(spool)
             self.assertEqual(snapshot["status"], "known")
             self.assertEqual(snapshot["outstanding_count"], 2)
+            self.assertEqual(snapshot["items"][0]["next_gate"], "production_outcome_verification")
+            self.assertEqual(snapshot["items"][1]["next_gate"], "resolve_documented_development_blocker")
             self.assertEqual([item["id"] for item in snapshot["items"]], ["TODO-OPS-001", "TODO-OPS-002"])
 
     def test_missing_downstream_report_is_not_treated_as_empty_backlog(self):
