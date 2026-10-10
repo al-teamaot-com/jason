@@ -20,36 +20,38 @@ class InstallSupportRepairHostWorkerTests(unittest.TestCase):
                 / "infrastructure/openclaw-operations/systemd/user/jason-support-repair-worker.timer"
             ).is_file()
         )
+        self.assertTrue((root / "tools/engineering_pipeline.py").is_file())
         self.assertTrue((root / "tools/support_repair_host_worker.py").is_file())
         self.assertTrue((root / "tools/owner_approved_development_worker.py").is_file())
         self.assertTrue((root / "tools/todo_engineering_intake.py").is_file())
         self.assertTrue((root / "tools/todo_release_bridge.py").is_file())
         self.assertTrue((root / "tools/release_manager_gate.py").is_file())
 
-    def test_engineering_service_runs_support_before_owner_approved_development(self):
+    def test_engineering_service_invokes_single_fault_isolating_coordinator(self):
         service = (
             self.root
             / "infrastructure/openclaw-operations/systemd/user/jason-support-repair-worker.service"
         ).read_text(encoding="utf-8")
-        support_index = service.index("support_repair_host_worker.py")
-        development_index = service.index("owner_approved_development_worker.py")
-        self.assertLess(support_index, development_index)
+        self.assertEqual(service.count("ExecStart="), 1)
+        self.assertIn("TimeoutStartSec=65min", service)
+        self.assertIn("engineering_pipeline.py", service)
         self.assertIn("/home/al/jason-worktrees/owner-approved-development", service)
         self.assertIn("/home/al/jason-worktrees/todo-closure", service)
         self.assertIn("/var/lib/jason/openclaw/release-manager", service)
 
-    def test_engineering_service_orders_support_todo_development_and_release_bridge(self):
-        service = (
-            self.root
-            / "infrastructure/openclaw-operations/systemd/user/jason-support-repair-worker.service"
-        ).read_text(encoding="utf-8")
-        support_index = service.index("support_repair_host_worker.py")
-        todo_index = service.index("todo_engineering_intake.py")
-        development_index = service.index("owner_approved_development_worker.py")
-        bridge_index = service.index("todo_release_bridge.py")
-        self.assertLess(support_index, todo_index)
-        self.assertLess(todo_index, development_index)
-        self.assertLess(development_index, bridge_index)
+    def test_pipeline_order_and_admission_gates(self):
+        import importlib.util
+        import sys
+        spec = importlib.util.spec_from_file_location("jason_pipeline_test", self.root / "tools/engineering_pipeline.py")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        self.assertEqual([stage.name for stage in module.STAGES], [
+            "support_repair", "todo_intake", "development", "release_bridge"
+        ])
+        self.assertEqual(module.STAGES[1].requires, ("support_repair",))
+        self.assertEqual(module.STAGES[2].requires, ("support_repair",))
+        self.assertEqual(module.STAGES[3].requires, ())
 
     def test_engineering_service_uses_immutable_installed_source(self):
         service = (
@@ -63,6 +65,7 @@ class InstallSupportRepairHostWorkerTests(unittest.TestCase):
         self.assertNotIn("--repo /home/al/projects/jason", service)
         self.assertNotIn("WorkingDirectory=/home/al/projects/jason", service)
         self.assertIn("engineering-worker-source", installer)
+        self.assertIn("_copy(pipeline_runner, install_root", installer)
         self.assertIn("_copy(change_integration_gate, install_root", installer)
         self.assertIn("_copy(documentation_impact_gate, install_root", installer)
         self.assertIn("source_link.symlink_to(repo, target_is_directory=True)", installer)

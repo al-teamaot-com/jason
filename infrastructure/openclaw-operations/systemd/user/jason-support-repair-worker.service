@@ -5,13 +5,12 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# Give the bounded 15-minute per-stage timeout room to log/advance all four stages.
+TimeoutStartSec=65min
 WorkingDirectory=/home/al/.local/lib/jason/engineering-worker-source
 Environment=HOME=/home/al
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/support_repair_host_worker.py --repo /home/al/.local/lib/jason/engineering-worker-source --spool /var/lib/jason/openclaw/support-repair --max-active 2
-ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/todo_engineering_intake.py --repo /home/al/.local/lib/jason/engineering-worker-source --spool /var/lib/jason/openclaw/support-repair --max-support-repairs 2
-ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/owner_approved_development_worker.py --repo /home/al/.local/lib/jason/engineering-worker-source --spool /var/lib/jason/openclaw/support-repair --max-active 2
-ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/todo_release_bridge.py --repo /home/al/.local/lib/jason/engineering-worker-source --spool /var/lib/jason/openclaw/support-repair --release-state /var/lib/jason/openclaw/release-manager
+ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/engineering_pipeline.py --repo /home/al/.local/lib/jason/engineering-worker-source --spool /var/lib/jason/openclaw/support-repair --release-state /var/lib/jason/openclaw/release-manager
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
