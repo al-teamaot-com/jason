@@ -352,3 +352,38 @@ def test_ci_failure_classifier_separates_process_from_code():
     assert module.support.classify_ci_failure(
         "FAILED tests/test_example.py::test_behavior - AssertionError"
     ) == "code_or_test_defect"
+
+
+def test_exhausted_self_recovery_records_action_without_restarting():
+    state = {'items': {'DEV-950': {
+        'phase': 'blocked',
+        'reason': 'The supplied excerpts are insufficient',
+        'self_recovery_attempts': 2,
+    }}}
+    module.recycle_self_recoverable_blockers(state, {'DEV-950'})
+    record = state['items']['DEV-950']
+    assert record['phase'] == 'blocked'
+    assert record['self_recovery_attempts'] == 2
+    assert record['blocker_class'] == 'internal_retry_exhausted'
+    assert 'engineering repair' in record['recovery_next_action']
+    timestamp = record['recovery_exhausted_at']
+    module.recycle_self_recoverable_blockers(state, {'DEV-950'})
+    assert record['recovery_exhausted_at'] == timestamp
+
+def test_external_blocker_never_recycles_or_claims_exhaustion():
+    state = {'items': {'DEV-952': {
+        'phase': 'blocked', 'reason': 'Datto API credentials not available',
+        'self_recovery_attempts': 2,
+    }}}
+    module.recycle_self_recoverable_blockers(state, {'DEV-952'})
+    assert state['items']['DEV-952']['phase'] == 'blocked'
+    assert 'blocker_class' not in state['items']['DEV-952']
+
+def test_unapproved_blocker_never_recycles():
+    state = {'items': {'DEV-950': {
+        'phase': 'blocked', 'reason': 'The supplied excerpts are insufficient',
+        'self_recovery_attempts': 1,
+    }}}
+    module.recycle_self_recoverable_blockers(state, set())
+    assert state['items']['DEV-950']['self_recovery_attempts'] == 1
+    assert state['items']['DEV-950']['phase'] == 'blocked'

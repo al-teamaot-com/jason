@@ -379,6 +379,13 @@ def recycle_self_recoverable_blockers(
             continue
         attempts = int(record.get('self_recovery_attempts', 0) or 0)
         if attempts >= max_recycles:
+            # Retry exhaustion must remain fail-closed, but must not be silent.
+            # Keep the original error so support can diagnose the failure.
+            record.setdefault('blocker_class', 'internal_retry_exhausted')
+            record.setdefault('recovery_next_action',
+                'Open an engineering repair using the original blocker and source evidence; '
+                're-admit only after the repair is verified and all dependency gates pass.')
+            record.setdefault('recovery_exhausted_at', now())
             continue
         record.update({
             'phase': 'diagnosing',
