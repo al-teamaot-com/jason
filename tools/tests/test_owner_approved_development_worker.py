@@ -612,18 +612,24 @@ def test_authoritative_issue_hold_blocks_dev_admission():
     assert [item['id'] for item in admitted] == ['DEV-950']
 
 
-def test_dependency_hold_replaces_stale_worker_error_and_resumes_when_authoritatively_lifted():
+def test_dependency_hold_replaces_stale_worker_error_and_resumes_when_authoritatively_lifted(monkeypatch, tmp_path):
     state = {'items': {'DEV-866': {'phase': 'blocked',
        'reason': 'autonomous support repair requires a changed regression test',
        'blocker_class': 'internal_retry_exhausted', 'self_recovery_attempts': 2}}}
     issue = {'id': 'DEV-866', 'body': (
        '## Production-health gate hold\nState: Blocked by Dependency\n')}
-    module.reconcile_issue_dependency_holds(state, [issue])
+    module.reconcile_issue_dependency_holds(state, [issue], tmp_path)
     item = state['items']['DEV-866']
     assert item['blocker_class'] == 'blocked_by_dependency'
     assert 'production-health' in item['reason']
     assert 'changed regression test' in item['prior_worker_error']
     assert item['phase'] == 'blocked'
-    module.reconcile_issue_dependency_holds(state, [{'id': 'DEV-866', 'body': 'Gate cleared by owner'}])
+    monkeypatch.setattr(module.support, 'production_state_from_main', lambda repo: {
+        'production': {'status': 'aligned_and_healthy', 'observed_at': '2026-01-01T00:00:00+00:00'}})
+    module.reconcile_issue_dependency_holds(state, [{'id': 'DEV-866', 'body': 'Gate cleared by owner'}], tmp_path)
+    assert item['phase'] == 'blocked'
+    monkeypatch.setattr(module.support, 'production_state_from_main', lambda repo: {
+        'production': {'status': 'aligned_and_healthy', 'observed_at': module.now()}})
+    module.reconcile_issue_dependency_holds(state, [{'id': 'DEV-866', 'body': 'Gate cleared by owner'}], tmp_path)
     assert item['phase'] == 'diagnosing'
     assert item['reasoning_request_id'] == ''

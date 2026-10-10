@@ -367,7 +367,7 @@ def issue_has_closed_dependency_gate(item: Mapping[str, Any]) -> bool:
 
 
 def reconcile_issue_dependency_holds(
-    state: dict[str, Any], eligible: list[dict[str, Any]],
+    state: dict[str, Any], eligible: list[dict[str, Any]], repo: Path,
 ) -> None:
     """Represent issue-level closed admission gates as dependency holds, not worker errors."""
     records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
@@ -387,8 +387,18 @@ def reconcile_issue_dependency_holds(
                 'updated_at': now(),
             })
         elif record.get('blocker_class') == 'blocked_by_dependency':
-            # The source issue is authoritative for release of its explicit hold.
-            # Fresh production/worker admission checks still apply downstream.
+            # An issue edit alone never proves the upstream production gate passed.
+            observed = support.production_state_from_main(repo)
+            production = observed.get('production') if isinstance(observed.get('production'), Mapping) else {}
+            if production.get('status') != 'aligned_and_healthy':
+                continue
+            try:
+                observed_at = datetime.fromisoformat(str(production['observed_at']).replace('Z', '+00:00'))
+                age = (datetime.now(timezone.utc) - observed_at).total_seconds()
+                if observed_at.tzinfo is None or not (0 <= age <= 1800):
+                    continue
+            except (KeyError, TypeError, ValueError):
+                continue
             record.update({
                 'phase': 'diagnosing', 'blocker_class': '',
                 'reason': 'Authoritative dependency hold lifted; rechecking admission.',
@@ -725,7 +735,7 @@ def main() -> int:
     support.run(['git', 'fetch', '--no-tags', 'origin', 'main'], cwd=repo)
     eligible = owner_approved_issues(repo)
     eligible_ids = {item['id'] for item in eligible}
-    reconcile_issue_dependency_holds(state, eligible)
+    reconcile_issue_dependency_holds(state, eligible, repo)
     admitted = [item for item in eligible if not issue_has_closed_dependency_gate(item)]
     admitted_ids = {item['id'] for item in admitted}
     reconcile_removed_approval(state, eligible_ids)
