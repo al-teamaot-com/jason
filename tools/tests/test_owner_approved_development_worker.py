@@ -610,3 +610,20 @@ def test_authoritative_issue_hold_blocks_dev_admission():
     assert module.issue_has_closed_dependency_gate(clear) is False
     admitted = [item for item in (held, clear) if not module.issue_has_closed_dependency_gate(item)]
     assert [item['id'] for item in admitted] == ['DEV-950']
+
+
+def test_dependency_hold_replaces_stale_worker_error_and_resumes_when_authoritatively_lifted():
+    state = {'items': {'DEV-866': {'phase': 'blocked',
+       'reason': 'autonomous support repair requires a changed regression test',
+       'blocker_class': 'internal_retry_exhausted', 'self_recovery_attempts': 2}}}
+    issue = {'id': 'DEV-866', 'body': (
+       '## Production-health gate hold\nState: Blocked by Dependency\n')}
+    module.reconcile_issue_dependency_holds(state, [issue])
+    item = state['items']['DEV-866']
+    assert item['blocker_class'] == 'blocked_by_dependency'
+    assert 'production-health' in item['reason']
+    assert 'changed regression test' in item['prior_worker_error']
+    assert item['phase'] == 'blocked'
+    module.reconcile_issue_dependency_holds(state, [{'id': 'DEV-866', 'body': 'Gate cleared by owner'}])
+    assert item['phase'] == 'diagnosing'
+    assert item['reasoning_request_id'] == ''
