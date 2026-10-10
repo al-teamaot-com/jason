@@ -507,6 +507,12 @@ def reconcile_recovery_handoff_intake(
             continue
         if not isinstance(payload, dict) or payload.get('schema') != 'jason.development-recovery-handoff.v1':
             continue
+        # The filename is a content-addressed identity, not just a label.
+        # Fail closed on modified or substituted handoff evidence.
+        from hashlib import sha256
+        expected_id = sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        if path.stem != expected_id:
+            continue
         item_id = payload.get('source_item')
         if not isinstance(item_id, str) or item_id not in eligible_ids:
             continue
