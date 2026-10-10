@@ -71,7 +71,7 @@ def production_transaction_active(lock_path: Path = DEFAULT_TRANSACTION_LOCK) ->
 
 
 def apply_result(result: dict, *, control_state: Path, evidence: Path, watchdog_state: Path) -> int:
-    atomic_json(evidence, result, owner_from=evidence if evidence.exists() else None)
+    # The controller directory defines the trusted file owner, not a stale file.\n    atomic_json(evidence, result, inherit_parent_owner=True)
     status = str(result.get("status") or "unknown")
     problems = list(result.get("problems") or [])
     watchdog = {
@@ -109,7 +109,7 @@ def apply_result(result: dict, *, control_state: Path, evidence: Path, watchdog_
         "updated_at": now(),
     }
     control["updated_at"] = now()
-    atomic_json(control_state, control, owner_from=control_state if control_state.exists() else None)
+    atomic_json(control_state, control, inherit_parent_owner=True)
     watchdog["circuit_breaker_action"] = "opened"
     atomic_json(watchdog_state, watchdog)
     return 2
