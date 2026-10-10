@@ -27,6 +27,7 @@ def main() -> int:
     spool = args.spool.expanduser().resolve()
     home = Path.home()
     runner = repo / 'tools' / 'support_repair_host_worker.py'
+    pipeline_runner = repo / 'tools' / 'engineering_pipeline.py'
     development_runner = repo / 'tools' / 'owner_approved_development_worker.py'
     todo_intake_runner = repo / 'tools' / 'todo_engineering_intake.py'
     todo_release_bridge = repo / 'tools' / 'todo_release_bridge.py'
@@ -37,6 +38,8 @@ def main() -> int:
     units = ('jason-support-repair-worker.service', 'jason-support-repair-worker.timer')
     if not runner.is_file():
         raise SystemExit('support repair host worker source is missing')
+    if not pipeline_runner.is_file():
+        raise SystemExit('engineering pipeline coordinator source is missing')
     if not development_runner.is_file():
         raise SystemExit('owner-approved development worker source is missing')
     if not todo_intake_runner.is_file():
@@ -62,6 +65,7 @@ def main() -> int:
     source_link.parent.mkdir(parents=True, exist_ok=True)
     source_link.symlink_to(repo, target_is_directory=True)
     _copy(runner, install_root / 'support_repair_host_worker.py', 0o700)
+    _copy(pipeline_runner, install_root / 'engineering_pipeline.py', 0o700)
     _copy(development_runner, install_root / 'owner_approved_development_worker.py', 0o700)
     _copy(todo_intake_runner, install_root / 'todo_engineering_intake.py', 0o700)
     _copy(todo_release_bridge, install_root / 'todo_release_bridge.py', 0o700)

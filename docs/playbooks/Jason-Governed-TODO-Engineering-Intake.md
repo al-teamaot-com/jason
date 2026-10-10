@@ -192,6 +192,34 @@ Each run:
 
 Unchanged waiting state does not create duplicate issues or closure PRs.
 
+### Continuous engineering pipeline fault isolation
+
+The 24x7 five-minute systemd timer invokes one bounded engineering pipeline coordinator,
+rather than four unconditional sequential systemd ExecStart steps. The coordinator
+persists `engineering-pipeline-state.json` after every stage and records a final
+`healthy` or `degraded` state. It exits nonzero for *any* failed or skipped
+stage so systemd and monitoring do not mistake partial work for full success.
+
+Stage dependencies remain fail-closed:
+
+- Support repair runs first. If it fails, **new TODO intake and development stop**:
+  Support priority/capacity is not safely established.
+- If TODO intake alone fails, the existing owner-approved development worker
+  may still run, with its own previously established approval and Support
+  capacity checks; no failed intake is treated as fresh authorization.
+- Release bridge always runs independently to reconcile approved, existing
+  work. It still applies its exact merge SHA, release approval, and verified
+  production gates, and cannot deploy independently of Release Manager.
+- Failures/timeout are retained in the durable status and journald. The
+  next scheduled run retries within the existing workers' bounded policies.
+  A recurring fault must be repaired through governed Support engineering,
+  not by adding approval, bypassing gates, or fabricating success.
+
+Acceptance tests inject failures in Support, TODO intake, and development
+and verify that the independent release bridge still runs; a failed intake
+cannot stop already-approved development, and a failed Support check never
+admits new TODO work.
+
 ## 12. Aging / Stale Condition
 
 A TODO candidate becomes stale when:
