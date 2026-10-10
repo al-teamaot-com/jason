@@ -717,6 +717,10 @@ def readmit_explicit_verified_dependencies(
             continue
         if record.get('phase') != 'blocked' or candidate.get('phase') != 'development_blocked':
             continue
+        if (record.get('blocker_class') != 'blocked_by_dependency'
+                and not any(term in str(record.get('reason') or '').casefold()
+                            for term in ('dependency', 'prerequisite'))):
+            continue
         if not candidate.get('retry_eligible') or candidate.get('dependency_recheck') != 'verified_for_governed_readmission_check':
             continue
         dependencies = candidate.get('governing_dependencies')
