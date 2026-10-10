@@ -14,6 +14,8 @@ Preserve Central Orchestrator authority, `direct_provider_access=false`, exact g
 ## 4. Initial Identification
 Resolve the exact support ID, GitHub issue, current status, acceptance criteria, related PRs/branches, production revision, and any overlapping active repair. Never create a duplicate repair workstream when one already exists.
 
+**Mandatory prior-decision check (before diagnosing or proposing a fix):** Read the Jason fundamentals and the authoritative standard/ADR/runbook for the affected boundary. Search the support issue and linked historical issues, merged/closed/rejected PRs, prior rollbacks, failed acceptance attempts, and accepted owner decisions. Record: (a) established behavior/invariants, (b) previous failed or rejected approaches and why, (c) current verified production evidence, and (d) the new evidence that makes this attempt different. Mark missing history as a bounded evidence gap; never silently infer or reverse an accepted decision from live symptoms alone. Use existing J-404 documentation and GitHub records; do not create another memory store.
+
 ## 5. Expected State
 Each approved support item is in exactly one durable state and progresses without owner prompting until verified complete or genuinely blocked.
 
@@ -25,8 +27,10 @@ Owner-notification state is durable and duplicate-suppressed: record whether `re
 ## 7. Diagnostic Workflow
 Use authoritative repository, CI, runtime, GitHub issue, and production evidence. Reproduce the defect where safe. Separate symptom, root cause, and acceptance proof. Prefer the smallest shared root cause that resolves multiple support items without broadening scope.
 
+First reconcile the observed symptom against the recorded accepted design and previous repairs. A symptom that matches intentional security behavior is not proof of a defect. If prior accepted and current documents conflict, follow the J-404 authority hierarchy, identify the canonical owner, and correct/supersede stale guidance through the same change process. Identify a genuinely new failure mechanism before changing source. Example historical control: October 9 PR #1162 intentionally preserves root-owned protected release state; October 10 PR #1206 was closed unmerged because it proposed reversing that accepted decision. This example is a precedent reference, not a replacement for checking current source.
+
 ## 8. Decision Gates
-Before implementation: exact support item and acceptance criteria known; no duplicate active repair; no unrelated file overlap that would make the change unsafe; repair remains within existing authority.
+Before implementation: exact support item and acceptance criteria known; historical-precedent findings and links are recorded; proposed change is consistent with authoritative prior decisions (or a deliberate separately approved change to them); no duplicate active repair; no unrelated file overlap that would make the change unsafe; repair remains within existing authority. If authoritative history is contradictory or unavailable, stop the affected proposal and reconcile the evidence before implementation.
 Before merge/deploy: required tests/checks pass; current main is reconciled; release metadata is complete; production parent/revision constraints pass.
 Before closure: explicit production acceptance criteria pass.
 
@@ -46,7 +50,7 @@ Any claimed support item with no meaningful progress across three scheduled reco
 Confirm missing dependencies, avoid duplicate dependency issues, cross-reference them, and mark the support item `waiting_external_dependency`. Continue another independent eligible support item when capacity permits.
 
 ## 14. Documentation Requirements
-Keep `SUPPORT.md`, the GitHub support issue, repair PR, CI evidence, release evidence, and production acceptance synchronized. Record implementation commit/PR, regression proof, deployment revision, rollback target, production verification, and owner-notification correlation/message evidence. Never record secrets.
+Keep `SUPPORT.md`, the GitHub support issue, repair PR, CI evidence, release evidence, and production acceptance synchronized. Every material repair PR must cite the prior-decision/failed-attempt references checked, the approved invariant preserved, and how its cause/evidence differs from failed or rejected fixes; no extra tracking system is created. Record implementation commit/PR, regression proof, deployment revision, rollback target, production verification, and owner-notification correlation/message evidence. Never record secrets.
 
 ## 14A. Owner Teams Lifecycle Notifications
 When an eligible support item is first claimed for repair, send Al one governed Teams **Repair Started** message containing the support ID, concise defect summary, and bounded repair scope. Do not resend it on every reconciliation.
@@ -75,7 +79,7 @@ Record original defect, root cause, files/behavior changed, tests, PR/merge, pro
 Required now: GitHub support/PR/check access; isolated repository worktree/branch operations; test execution; governed release/deployment evidence; production status/acceptance reads; support documentation updates; persisted automation state; and the native support-repair reasoning/host-worker boundary. The runtime model has no shell, GitHub credentials, or deployment authority. The host worker has no model credential and may apply only exact-text edits that pass J-CHANGE-002 path, size, test, and merge gates.
 
 ## 21. Acceptance Test
-Use the current active support repair set as the acceptance case. Prove that an open support item is picked up without a new owner prompt; exactly one Repair Started Teams message is delivered and readback-verified; an active repair PR is continued instead of duplicated; repair-owned CI/documentation failures are corrected; a controlled owner-action blocker produces exactly one Blocked / Owner Action Required message; eligible release proceeds through the existing governed lane; production acceptance is required before closure; exactly one Production-Verified Complete message is delivered and readback-verified only after acceptance succeeds; and a true governance/capability blocker stops safely.
+Use the current active support repair set as the acceptance case. Prove that an open support item is picked up without a new owner prompt; exactly one Repair Started Teams message is delivered and readback-verified; an active repair PR is continued instead of duplicated; prior accepted decisions and rejected fixes are checked before proposal (including the #1162 accepted vs #1206 rejected ownership example); a proposed reversal without explicit new authority is stopped; repair-owned CI/documentation failures are corrected; a controlled owner-action blocker produces exactly one Blocked / Owner Action Required message; eligible release proceeds through the existing governed lane; production acceptance is required before closure; exactly one Production-Verified Complete message is delivered and readback-verified only after acceptance succeeds; and a true governance/capability blocker stops safely.
 
 ## 22. Section Goal Closure
 Close this Section Goal only after one support item completes end-to-end through the native Jason support-repair worker from autonomous pickup through production-verified closure without an owner “proceed” prompt.
