@@ -8,3 +8,8 @@ def test_explicit_pending_gates():
     assert next_work_gate("development_blocked", "Blocked by prerequisite #1078")["blocker_category"] == "dependency"
     assert next_work_gate("development_blocked", "API details and credentials unavailable")["blocker_category"] == "external_authority"
     assert next_work_gate("complete", "") == {"blocker_category": "none", "next_action": "none"}
+
+
+def test_unknown_blocker_remains_advisory():
+    result = next_work_gate("development_blocked", "undocumented failure")
+    assert result == {"blocker_category": "unknown", "next_action": "classify_from_authoritative_evidence"}
