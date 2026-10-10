@@ -876,3 +876,16 @@ def test_transient_github_listing_error_is_deferred_without_permission_bypass(tm
     assert state['upstream_deferred']['provider'] == 'github'
     assert state['items'] == {}
     assert not worker.transient_github_listing_failure(worker.WorkerError('HTTP 403: forbidden'))
+
+
+def test_transient_pr_listing_classifier_preserves_authority_boundary():
+    retryable = (
+        'HTTP 502: bad gateway', 'HTTP 503: unavailable',
+        'HTTP 504: gateway timeout',
+        'GitHub JSON command failed: unexpected end of JSON input',
+    )
+    for error in retryable:
+        assert worker.transient_github_listing_failure(worker.WorkerError(error))
+    for error in ('HTTP 403: forbidden', 'HTTP 401: unauthorized',
+                  'approval required', 'invalid JSON record'):
+        assert not worker.transient_github_listing_failure(worker.WorkerError(error))
