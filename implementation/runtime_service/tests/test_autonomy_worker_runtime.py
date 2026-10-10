@@ -6295,3 +6295,28 @@ def test_gpt_insights_v021_runs_even_when_promoted_remediation_playbook_matches(
         for _, capability, args in actions.calls
     )
     store.close()
+
+
+def test_patch_completion_notification_failure_does_not_change_verified_work(tmp_path: Path):
+    class FailingNotifier:
+        def send(self, *args, **kwargs):
+            raise RuntimeError("CAPABILITY_INVOCATION_FAILED")
+
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    work = OperationalWork(
+        ticket_id=1234, ticket_number="T20261009.1234", title="Verified patch",
+        playbook_id="vulscan_missing_patch", source_queue="Jason", company_id=10,
+        configuration_item_id=20, device_uid="uid-1", hostname="SERVER-1",
+        phase="complete", updated_at="2026-10-09T00:00:00+00:00",
+    )
+    store.put(work)
+    worker = OperationalAutonomyMaintenance.__new__(OperationalAutonomyMaintenance)
+    worker.store = store
+    worker.completion_notifier = FailingNotifier()
+    audited = []
+    worker._audit_diagnostic = lambda event, data: audited.append((event, data))
+    worker._notify_patch_completion(work, patch_summary="KB installed, verified")
+    assert store.get(work.ticket_id).phase == "complete"
+    assert audited[0][0] == "patch_completion_teams_notification_failed"
+    assert store.last_note_fingerprint(work.ticket_id, work.playbook_id, "Teams - Autonomous Patch Completion") is None
+    store.close()

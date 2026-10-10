@@ -6849,12 +6849,21 @@ class OperationalAutonomyMaintenance:
             == fingerprint
         ):
             return
-        self.completion_notifier.send(
-            "patch_completed",
-            ticket_number=work.ticket_number,
-            hostname=work.hostname,
-            patch_summary=patch_summary[:300],
-        )
+        try:
+            self.completion_notifier.send(
+                "patch_completed",
+                ticket_number=work.ticket_number,
+                hostname=work.hostname,
+                patch_summary=patch_summary[:300],
+            )
+        except Exception as exc:
+            # Teams transport is not part of patch verification. Preserve the
+            # independently verified ticket outcome and retry on a later pass.
+            self._audit_diagnostic("patch_completion_teams_notification_failed", {
+                "ticket_number": work.ticket_number,
+                "error_type": type(exc).__name__,
+            })
+            return
         self.store.remember_note_fingerprint(
             work.ticket_id,
             work.playbook_id,
