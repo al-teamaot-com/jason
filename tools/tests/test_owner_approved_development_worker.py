@@ -684,3 +684,25 @@ def test_successful_search_plan_diagnostic_creates_inert_handoff(monkeypatch, tm
     assert len(handoffs)==1
     import json
     assert json.loads(handoffs[0].read_text())['admission_authority'] is False
+
+
+def test_blocked_work_next_action_categorizes_without_authority():
+    cases = [
+        ('Missing supplied source excerpts', 'source_context'),
+        ('Blocked until prerequisite verified', 'dependency'),
+        ('Provider credential unavailable', 'external_authority'),
+        ('requires a changed regression test', 'verification'),
+        ('unclassified error', 'unclassified'),
+    ]
+    for reason, category in cases:
+        result = module.blocked_work_next_action(reason)
+        assert result['blocker_category'] == category
+        assert result['next_action']
+        assert 'admission_authority' not in result
+
+
+def test_blocked_record_remains_blocked_after_classification(tmp_path):
+    record = {'phase': 'blocked', 'reason': 'Missing supplied source excerpts'}
+    module.sync_lifecycle_notification(record, {'id': 'DEV-22', 'title': 'Test'}, event_root=tmp_path)
+    assert record['phase'] == 'blocked'
+    assert record['next_action'] == 'retrieve_authorized_context'
