@@ -1947,6 +1947,13 @@ def prepare_release(
             raise ReleaseManagerError("reissue source does not match historical attempt")
         for attempt in range(1, 1000):
             next_id = f"{release_id}-retry-{attempt}"
+            if record_path(state_root, next_id).exists():
+                existing = load_record(state_root, next_id)
+                if (existing.get("release_candidate") or {}).get("candidate_sha") != candidate_sha:
+                    raise ReleaseManagerError("existing retry attempt has mismatched source")
+                if existing.get("state") not in {"rolled_back", "failed"}:
+                    raise ReleaseManagerError("an existing retry attempt must be completed or explicitly resolved before reissue")
+                continue
             if not record_path(state_root, next_id).exists():
                 release_id = next_id
                 break

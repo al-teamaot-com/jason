@@ -1184,3 +1184,19 @@ class GovernedReleaseReissueTests(unittest.TestCase):
             with patch.object(runner, 'revalidate_circuit_breaker'):
                 with self.assertRaisesRegex(runner.ReleaseManagerError, 'verified rolled-back'):
                     runner.prepare_release(ROOT, root, SHA_A, 'release_blocker', reissue_rolled_back=True)
+
+
+def test_governed_reissue_rejects_concurrent_pending_attempt():
+    import pytest
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        base = runner.record_id(SHA_A)
+        runner.atomic_json(runner.record_path(root, base), {
+            'release_id': base, 'state': 'rolled_back', 'failure': {'rollback_verified': True},
+            'release_candidate': {'candidate_sha': SHA_A}})
+        runner.atomic_json(runner.record_path(root, base + '-retry-1'), {
+            'release_id': base + '-retry-1', 'state': 'production_eligible',
+            'release_candidate': {'candidate_sha': SHA_A}})
+        with patch.object(runner, 'revalidate_circuit_breaker'):
+            with pytest.raises(runner.ReleaseManagerError, match='existing retry attempt'):
+                runner.prepare_release(ROOT, root, SHA_A, 'release_blocker', reissue_rolled_back=True)
