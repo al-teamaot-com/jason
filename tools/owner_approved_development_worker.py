@@ -356,6 +356,16 @@ def self_recoverable_blocker(reason: str) -> bool:
     )
 
 
+def issue_has_closed_dependency_gate(item: Mapping[str, Any]) -> bool:
+    """Honor an explicit authoritative issue-level development hold."""
+    body = str(item.get('body') or '')
+    return bool(
+        re.search(r'(?im)^##\s+Production-health gate hold\s*$', body)
+        and re.search(r'(?i)blocked by dependency|do not (?:begin|treat).*development', body)
+    )
+
+
+
 def recycle_self_recoverable_blockers(
     state: dict[str, Any],
     eligible_ids: set[str],
@@ -684,13 +694,15 @@ def main() -> int:
     support.run(['git', 'fetch', '--no-tags', 'origin', 'main'], cwd=repo)
     eligible = owner_approved_issues(repo)
     eligible_ids = {item['id'] for item in eligible}
+    admitted = [item for item in eligible if not issue_has_closed_dependency_gate(item)]
+    admitted_ids = {item['id'] for item in admitted}
     reconcile_removed_approval(state, eligible_ids)
-    recycle_self_recoverable_blockers(state, eligible_ids)
-    queue_exhausted_recovery_diagnostics(state, eligible, spool)
-    reconcile_exhausted_recovery_diagnostics(state, eligible_ids, spool)
-    reconcile_recovery_handoff_intake(state, eligible_ids, spool)
-    raise_exhausted_repair_support_issues(state, eligible_ids, repo)
-    readmit_verified_development_recoveries(state, eligible_ids, spool, repo)
+    recycle_self_recoverable_blockers(state, admitted_ids)
+    queue_exhausted_recovery_diagnostics(state, admitted, spool)
+    reconcile_exhausted_recovery_diagnostics(state, admitted_ids, spool)
+    reconcile_recovery_handoff_intake(state, admitted_ids, spool)
+    raise_exhausted_repair_support_issues(state, admitted_ids, repo)
+    readmit_verified_development_recoveries(state, admitted_ids, spool, repo)
     state['discovery'] = {
         'observed_at': now(),
         'approved_issue_numbers': [item['issue_number'] for item in eligible],
@@ -706,8 +718,8 @@ def main() -> int:
         0,
         max(1, int(args.max_active)) - support_active - development_active,
     )
-    selected = select_items(state, eligible, capacity=capacity)
-    by_id = {item['id']: item for item in eligible}
+    selected = select_items(state, admitted, capacity=capacity)
+    by_id = {item['id']: item for item in admitted}
     prs = support.open_prs(repo)
     gate = support.load_gate(repo)
     policy = gate.load_json(repo / 'config' / 'autonomous-repair-release-policy.json')

@@ -598,3 +598,15 @@ def test_development_owner_action_notifies_once(tmp_path):
     module.sync_lifecycle_notification(record, item, event_root=tmp_path)
     assert len(list(tmp_path.glob('*.json'))) == 1
     assert record.get('lifecycle_blocked_fingerprint')
+
+
+def test_authoritative_issue_hold_blocks_dev_admission():
+    held = {'id': 'DEV-866', 'body': (
+        '## Production-health gate hold\n\n'
+        '**State: Blocked by Dependency / production-health gate.**\n'
+        'Do not begin development until upstream production verification.')}
+    clear = {'id': 'DEV-950', 'body': 'Approved engineering work.'}
+    assert module.issue_has_closed_dependency_gate(held) is True
+    assert module.issue_has_closed_dependency_gate(clear) is False
+    admitted = [item for item in (held, clear) if not module.issue_has_closed_dependency_gate(item)]
+    assert [item['id'] for item in admitted] == ['DEV-950']
