@@ -463,9 +463,28 @@ def queue_exhausted_recovery_diagnostics(
             continue
         if record.get('phase') != 'blocked' or record.get('blocker_class') != 'internal_retry_exhausted':
             continue
-        if record.get('recovery_diagnostic_request_id'):
-            continue
-        rid = queue_reasoning(spool, kind='diagnosis', item=item, context={
+        prior_id = str(record.get('recovery_diagnostic_request_id') or '')
+        if prior_id:
+            # Migrate only one diagnostic attempt rejected by the historical,
+            # unsupported 'diagnosis' kind. Retain the original failed response.
+            response = support.reasoning_response(spool, prior_id)
+            prior_request = spool / 'reasoning' / 'requests' / f'{prior_id}.json'
+            try:
+                import json
+                previous = json.loads(prior_request.read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                previous = {}
+            if not (record.get('recovery_diagnostic_kind_migrated') is None
+                    and isinstance(response, Mapping)
+                    and response.get('status') == 'failed'
+                    and response.get('error') == 'unsupported support/development reasoning kind'
+                    and previous.get('kind') == 'diagnosis'
+                    and previous.get('request_id') == prior_id):
+                continue
+            record['recovery_diagnostic_kind_migrated'] = prior_id
+            record.pop('recovery_diagnostic_result_status', None)
+            record['recovery_diagnostic_prior_request_id'] = prior_id
+        rid = queue_reasoning(spool, kind='search_plan', item=item, context={
             'work_class': 'development_retry_exhaustion_diagnostics',
             'issue_number': item['issue_number'],
             'original_blocker': str(record.get('reason') or '')[:1800],
@@ -508,7 +527,7 @@ def reconcile_exhausted_recovery_diagnostics(
             result = response.get('result')
             if isinstance(result, Mapping):
                 record['recovery_diagnostic_summary'] = str(
-                    result.get('diagnosis') or result.get('summary') or result.get('blocked_reason') or ''
+                    result.get('diagnosis') or result.get('summary') or result.get('blocked_reason') or result.get('queries') or result.get('search_terms') or ''
                 )[:1800]
             record['recovery_next_action'] = (
                 'Review diagnostic evidence and open a bounded governed repair; '
