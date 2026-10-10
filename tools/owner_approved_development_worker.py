@@ -463,6 +463,24 @@ def reconcile_exhausted_recovery_diagnostics(
                 'Review diagnostic evidence and open a bounded governed repair; '
                 'verify source changes, tests, dependencies, and release approval before re-admission.'
             )
+            # Durable, idempotent repair intake evidence for the governed support
+            # worker. This is NOT an executable development claim or approval.
+            from hashlib import sha256
+            import json
+            handoff = {
+                'schema': 'jason.development-recovery-handoff.v1',
+                'source_item': item_id,
+                'diagnostic_request_id': rid,
+                'original_blocker': str(record.get('reason') or '')[:1800],
+                'diagnosis': str(record.get('recovery_diagnostic_summary') or ''),
+                'required_gate': 'authorized_repair_and_production_acceptance',
+                'admission_authority': False,
+            }
+            handoff_id = sha256(json.dumps(handoff, sort_keys=True).encode()).hexdigest()
+            handoff_path = spool / 'development-recovery' / 'handoffs' / f'{handoff_id}.json'
+            if not handoff_path.exists():
+                support.atomic_json(handoff_path, handoff)
+            record['recovery_handoff_id'] = handoff_id
         else:
             record['recovery_next_action'] = (
                 'Diagnostic reasoning failed; route to support with request ID and original blocker. '

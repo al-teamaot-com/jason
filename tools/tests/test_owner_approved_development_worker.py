@@ -431,9 +431,15 @@ def test_reconcile_exhausted_diagnostic_success_does_not_resume(tmp_path):
     assert item['recovery_diagnostic_summary'] == 'missing exact registry source'
     assert item['recovery_diagnostic_result_status'] == 'succeeded'
     assert 'governed repair' in item['recovery_next_action']
+    handoffs = list((tmp_path / 'development-recovery' / 'handoffs').glob('*.json'))
+    assert len(handoffs) == 1
+    payload = module.support.json.loads(handoffs[0].read_text())
+    assert payload['admission_authority'] is False
+    assert payload['diagnostic_request_id'] == 'req123'
     first_time = item['recovery_diagnostic_result_at']
     module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-950'}, tmp_path)
     assert item['recovery_diagnostic_result_at'] == first_time
+    assert len(list((tmp_path / 'development-recovery' / 'handoffs').glob('*.json'))) == 1
 
 def test_reconcile_exhausted_diagnostic_mismatch_fails_closed(tmp_path):
     state = {'items': {'DEV-950': {'phase': 'blocked',
