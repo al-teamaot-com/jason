@@ -249,6 +249,44 @@ def load_self_heal_incidents(root: Path = Path('/var/lib/jason/openclaw/self-hea
     return incidents
 
 
+def load_development_recovery_incidents(spool: Path) -> list[dict[str, str]]:
+    """Admit only approved, validated handoffs routed by development worker."""
+    path = spool / 'development-state.json'
+    if not path.is_file():
+        return []
+    state = load_state(path)
+    records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
+    incidents = []
+    for item_id, record in records.items():
+        if not isinstance(record, Mapping) or record.get('phase') != 'blocked':
+            continue
+        intake = record.get('recovery_handoff_intake')
+        if not isinstance(intake, Mapping) or intake.get('status') != 'awaiting_governed_repair':
+            continue
+        issue = record.get('issue_number')
+        if not isinstance(issue, int) or issue < 1:
+            continue
+        identifier = f'SUPPORT-DEV-{issue}'
+        if record.get('recovery_support_issue_raised') != identifier:
+            continue
+        if intake.get('handoff_id') != record.get('recovery_handoff_id'):
+            continue
+        incidents.append({
+            'id': identifier, 'priority': 'P0',
+            'status': 'Open - governed development recovery',
+            'title': f'Repair exhausted development #{issue}',
+            'evidence': (f'Original item {item_id}; handoff {intake["handoff_id"]}; '
+                f'blocker {str(record.get("reason") or "")[:900]}; '
+                f'diagnosis {str(record.get("recovery_diagnostic_summary") or "")[:500]}')[:1600],
+            'acceptance': (
+                'Source regression tests and release evidence must prove the repair; '
+                're-admission requires independent upstream-dependency and production acceptance.'
+            ),
+        })
+    return sorted(incidents, key=lambda item: item['id'])
+
+
+
 def self_heal_post_production_verification(
     repo: Path,
     item_id: str,
@@ -1196,12 +1234,18 @@ def main() -> int:
     support_text = run(['git', 'show', 'origin/main:SUPPORT.md'], cwd=repo)
     parsed_support = parse_support(support_text)
     auto_incidents = load_self_heal_incidents()
+    development_recovery_incidents = load_development_recovery_incidents(spool)
     for item in auto_incidents:
         ensure_support_issue(repo, item)
     open_issue_ids = open_support_issue_ids(repo)
     support = eligible_support_items(parsed_support, open_issue_ids)
     support.extend(
         item for item in auto_incidents
+        if item['id'] in open_issue_ids
+        and item['id'] not in {existing['id'] for existing in support}
+    )
+    support.extend(
+        item for item in development_recovery_incidents
         if item['id'] in open_issue_ids
         and item['id'] not in {existing['id'] for existing in support}
     )

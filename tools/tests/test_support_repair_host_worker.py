@@ -774,3 +774,19 @@ def test_nongateway_github_pr_listing_failure_remains_fatal(tmp_path, monkeypatc
         assert 'HTTP 403' in str(exc)
     else:
         raise AssertionError('Authorization failure must not be deferred')
+
+
+def test_development_recovery_feed_admits_only_matched_handoffs(tmp_path):
+    import support_repair_host_worker as worker
+    state = {'items': {
+      'DEV-950': {'phase': 'blocked', 'issue_number': 950,
+       'recovery_handoff_id': 'abc', 'recovery_support_issue_raised': 'SUPPORT-DEV-950',
+       'recovery_handoff_intake': {'status': 'awaiting_governed_repair', 'handoff_id': 'abc'}},
+      'DEV-952': {'phase': 'blocked', 'issue_number': 952,
+       'recovery_support_issue_raised': 'SUPPORT-DEV-952',
+       'recovery_handoff_intake': {'status': 'not_verified', 'handoff_id': 'def'}},
+    }}
+    worker.save_state(tmp_path / 'development-state.json', state)
+    incidents = worker.load_development_recovery_incidents(tmp_path)
+    assert [item['id'] for item in incidents] == ['SUPPORT-DEV-950']
+    assert incidents[0]['priority'] == 'P0'
