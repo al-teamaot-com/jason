@@ -483,6 +483,12 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             )
             runner.release_production_transaction_lock(followup)
 
+    def test_repository_policy_explicitly_sets_manual_release_mode(self):
+        policy = runner.gate.load_json(ROOT / "config" / "release-manager-policy.json")
+        self.assertFalse(policy["schedule"]["automatic_promotion_enabled"])
+        self.assertFalse(policy["production"]["normal_release_auto_promote_when_eligible"])
+        self.assertTrue(policy["production"]["require_owner_approval_for_all"])
+
     def test_unattended_promotion_is_inert_when_manual_mode_enabled(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
