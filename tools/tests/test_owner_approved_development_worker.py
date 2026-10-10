@@ -666,3 +666,21 @@ def test_failed_unsupported_diagnostic_is_requeued_once(monkeypatch, tmp_path):
     assert 'recovery_diagnostic_result_status' not in rec
     module.queue_exhausted_recovery_diagnostics(state,[item],tmp_path)
     assert kinds==['search_plan']
+
+
+def test_successful_search_plan_diagnostic_creates_inert_handoff(monkeypatch, tmp_path):
+    rec={'phase':'blocked','blocker_class':'internal_retry_exhausted',
+         'recovery_diagnostic_request_id':'request-123','reason':'insufficient source'}
+    state={'items':{'DEV-950':rec}}
+    monkeypatch.setattr(module.support, 'reasoning_response',lambda spool, request_id:{
+        'request_id':request_id,'status':'succeeded',
+        'result':{'queries':['specific missing implementation path']}})
+    module.reconcile_exhausted_recovery_diagnostics(state,{'DEV-950'},tmp_path)
+    assert rec['phase']=='blocked'
+    assert rec['recovery_diagnostic_result_status']=='succeeded'
+    assert 'specific missing implementation path' in rec['recovery_diagnostic_summary']
+    assert rec.get('recovery_handoff_id')
+    handoffs=list((tmp_path/'development-recovery'/'handoffs').glob('*.json'))
+    assert len(handoffs)==1
+    import json
+    assert json.loads(handoffs[0].read_text())['admission_authority'] is False
