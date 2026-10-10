@@ -28,6 +28,8 @@ class PipelineTests(unittest.TestCase):
             self.calls.append((stage, list(argv), kwargs))
             if stage == exception:
                 raise subprocess.TimeoutExpired(argv, 900)
+            if exception == "launch_error" and stage == "support_repair_host_worker":
+                raise OSError("simulated interpreter failure")
             return subprocess.CompletedProcess(argv, 1 if stage in failed else 0)
         return pipeline.run_pipeline(
             scripts=self.base / "tools", repo=self.base / "repo",
@@ -77,6 +79,12 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(state["stages"]["support_repair"]["reason"], "stage_timeout")
         self.assertEqual(state["stages"]["release_bridge"]["status"], "succeeded")
         self.assertNotIn("todo_engineering_intake", [c[0] for c in self.calls])
+
+    def test_launch_error_does_not_bypass_support_gate_or_suppress_bridge(self):
+        state = self.execute(exception="launch_error")
+        self.assertEqual(state["stages"]["support_repair"]["reason"], "stage_process_launch_failed")
+        self.assertEqual(state["stages"]["todo_intake"]["status"], "skipped_dependency")
+        self.assertEqual(state["stages"]["release_bridge"]["status"], "succeeded")
 
     def test_release_bridge_receives_authoritative_release_state(self):
         self.execute()
