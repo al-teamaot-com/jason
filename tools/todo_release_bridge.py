@@ -165,6 +165,32 @@ def next_work_gate(phase: str, reason: str) -> dict[str, str]:
     return {"blocker_category": "work_gate", "next_action": "recheck_authoritative_work_state"}
 
 
+def dependency_recheck_gate(
+    item: Mapping[str, Any], accepted_dependencies: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Report dependency eligibility; never claim a retry or change authority.
+
+    The supplied acceptance map must be constructed from authoritative verified
+    releases by a separate governed reader. Missing or partial evidence fails
+    closed. A GitHub issue's closed state alone never satisfies this gate.
+    """
+    if item.get("blocker_category") != "dependency":
+        return {"dependency_recheck": "not_applicable", "retry_eligible": False}
+    required = item.get("governing_dependencies")
+    if not isinstance(required, list) or not required or any(
+        not isinstance(value, str) or not value.strip() for value in required
+    ):
+        return {"dependency_recheck": "missing_dependency_identity", "retry_eligible": False}
+    unique = sorted(set(required))
+    for dependency in unique:
+        proof = accepted_dependencies.get(dependency)
+        if not isinstance(proof, Mapping) or proof.get("state") != "production_verified":
+            return {"dependency_recheck": "awaiting_verified_dependency", "retry_eligible": False}
+        if not isinstance(proof.get("release_sha"), str) or len(proof["release_sha"]) != 40:
+            return {"dependency_recheck": "missing_release_provenance", "retry_eligible": False}
+    return {"dependency_recheck": "verified_for_governed_readmission_check", "retry_eligible": True}
+
+
 def commitment_summary(items: Mapping[str, Any]) -> dict[str, Any]:
     phases: dict[str, int] = {}
     outstanding = 0
@@ -632,6 +658,11 @@ def main() -> int:
     for item in state["items"].values():
         if isinstance(item, dict):
             item.update(next_work_gate(str(item.get("phase") or ""), str(item.get("reason") or "")))
+    # No acceptance evidence is assumed from the existence or closure of an
+    # issue. A later authorized reader must supply validated production proofs.
+    for item in state["items"].values():
+        if isinstance(item, dict):
+            item.update(dependency_recheck_gate(item, {}))
     state["summary"] = commitment_summary(state["items"])
     state["updated_at"] = now()
     atomic_json(state_path, state)
