@@ -33,8 +33,10 @@ def test_emit_lifecycle_event_is_deterministic_and_bounded(tmp_path):
     assert payload['event_type'] == 'work_started'
 
 
-def test_sync_support_lifecycle_writes_start_and_blocker(tmp_path):
-    record = {'phase': 'blocked', 'reason': 'controlled blocker'}
+def test_sync_support_lifecycle_writes_start_and_explicit_owner_blocker(tmp_path):
+    record = {'phase': 'blocked', 'reason': 'controlled blocker',
+              'notification_class': 'owner_action_required',
+              'owner_action': 'Approve protected core release'}
     item = {'id': 'SUPPORT-OPS-100', 'title': 'Example repair'}
     root = tmp_path / 'events'
     worker.sync_support_lifecycle_notification(record, item, event_root=root)
@@ -774,3 +776,49 @@ def test_nongateway_github_pr_listing_failure_remains_fatal(tmp_path, monkeypatc
         assert 'HTTP 403' in str(exc)
     else:
         raise AssertionError('Authorization failure must not be deferred')
+
+
+def test_development_recovery_feed_admits_only_matched_handoffs(tmp_path):
+    import support_repair_host_worker as worker
+    state = {'items': {
+      'DEV-950': {'phase': 'blocked', 'issue_number': 950,
+       'recovery_handoff_id': 'abc', 'recovery_support_issue_raised': 'SUPPORT-DEV-950',
+       'recovery_handoff_intake': {'status': 'awaiting_governed_repair', 'handoff_id': 'abc'}},
+      'DEV-952': {'phase': 'blocked', 'issue_number': 952,
+       'recovery_support_issue_raised': 'SUPPORT-DEV-952',
+       'recovery_handoff_intake': {'status': 'not_verified', 'handoff_id': 'def'}},
+    }}
+    worker.save_state(tmp_path / 'development-state.json', state)
+    incidents = worker.load_development_recovery_incidents(tmp_path)
+    assert [item['id'] for item in incidents] == ['SUPPORT-DEV-950']
+    assert incidents[0]['priority'] == 'P0'
+
+
+def test_dynamic_development_recovery_closure_is_supported_in_source():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / 'support_repair_host_worker.py').read_text()
+    assert "item['id'].startswith(('SUPPORT-AUTO-', 'SUPPORT-DEV-'))" in source
+
+
+def test_support_recoverable_blocker_silent_and_explicit_owner_action(monkeypatch, tmp_path):
+    import support_repair_host_worker as worker
+    seen = []
+    monkeypatch.setattr(worker, 'emit_lifecycle_event', lambda **kw: (seen.append(kw), 'fp')[1])
+    item = {'id': 'SUPPORT-DEV-950', 'title': 'Repair'}
+    record = {'phase': 'blocked', 'reason': 'retryable'}
+    worker.sync_support_lifecycle_notification(record, item, event_root=tmp_path)
+    assert not any(x['event_type'] == 'work_blocked' for x in seen)
+    record.update({'notification_class': 'owner_action_required', 'owner_action': 'Approve release'})
+    worker.sync_support_lifecycle_notification(record, item, event_root=tmp_path)
+    worker.sync_support_lifecycle_notification(record, item, event_root=tmp_path)
+    assert len([x for x in seen if x['event_type'] == 'work_blocked']) == 1
+
+
+def test_support_issue_discovery_includes_later_development_recovery(monkeypatch, tmp_path):
+    import support_repair_host_worker as worker
+    def fake_gh(args, *, cwd):
+        assert args[args.index('--limit') + 1] == '1000'
+        return [{'title': f'SUPPORT-OPS-{n:03d}', 'number': n} for n in range(1, 150)] + [
+            {'title': 'SUPPORT-DEV-950: Exhausted recovery', 'number': 150}]
+    monkeypatch.setattr(worker, 'gh_json', fake_gh)
+    assert 'SUPPORT-DEV-950' in worker.open_support_issue_ids(tmp_path)
