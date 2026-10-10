@@ -1361,6 +1361,7 @@ def create_record(
     rollback_sha: str,
     change_class: str,
     owner_approved: bool,
+    release_id_override: str | None = None,
 ) -> dict[str, Any]:
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
     rollback_sha = exact_sha(rollback_sha, "rollback_sha")
@@ -1377,7 +1378,9 @@ def create_record(
             "required protected checks are not green: " + ", ".join(checks["failures"])
         )
 
-    release_id = record_id(candidate_sha)
+    release_id = release_id_override or record_id(candidate_sha)
+    if release_id_override and not re.fullmatch(re.escape(record_id(candidate_sha)) + r"-retry-[1-9][0-9]{0,2}", release_id_override):
+        raise ReleaseManagerError("invalid recovery attempt identity")
     risk_profile = classify_change_risk(change_class, files)
     record = {
         "schema_version": "2.0",
@@ -1931,10 +1934,31 @@ def prepare_release(
     change_class: str,
     *,
     owner_approved: bool = False,
+    reissue_rolled_back: bool = False,
 ) -> dict[str, Any]:
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
     revalidate_circuit_breaker(state_root)
     release_id = record_id(candidate_sha)
+    if reissue_rolled_back:
+        original = load_record(state_root, release_id)
+        if original.get("state") != "rolled_back" or (original.get("failure") or {}).get("rollback_verified") is not True:
+            raise ReleaseManagerError("reissue requires a verified rolled-back release")
+        if (original.get("release_candidate") or {}).get("candidate_sha") != candidate_sha:
+            raise ReleaseManagerError("reissue source does not match historical attempt")
+        for attempt in range(1, 1000):
+            next_id = f"{release_id}-retry-{attempt}"
+            if record_path(state_root, next_id).exists():
+                existing = load_record(state_root, next_id)
+                if (existing.get("release_candidate") or {}).get("candidate_sha") != candidate_sha:
+                    raise ReleaseManagerError("existing retry attempt has mismatched source")
+                if existing.get("state") not in {"rolled_back", "failed"}:
+                    raise ReleaseManagerError("an existing retry attempt must be completed or explicitly resolved before reissue")
+                continue
+            if not record_path(state_root, next_id).exists():
+                release_id = next_id
+                break
+        else:
+            raise ReleaseManagerError("reissue attempt limit exceeded")
     path = record_path(state_root, release_id)
 
     if path.exists():
@@ -1981,7 +2005,11 @@ def prepare_release(
         rollback_sha=rollback_sha,
         change_class=change_class,
         owner_approved=owner_approved,
+        release_id_override=release_id if reissue_rolled_back else None,
     )
+    if reissue_rolled_back:
+        record["reissued_from"] = record_id(candidate_sha)
+        save_record(state_root, record)
     return run_preproduction(repo, state_root, record)
 
 
@@ -2082,6 +2110,7 @@ def main() -> int:
     prepare.add_argument("--candidate-sha", required=True)
     prepare.add_argument("--change-class", default="feature")
     prepare.add_argument("--owner-approved", action="store_true")
+    prepare.add_argument("--reissue-rolled-back", action="store_true")
 
     preprod = sub.add_parser("preprod")
     preprod.add_argument("--release-id", required=True)
@@ -2128,6 +2157,7 @@ def main() -> int:
             candidate_sha=args.candidate_sha,
             change_class=args.change_class,
             owner_approved=args.owner_approved,
+            reissue_rolled_back=args.reissue_rolled_back,
         )
         print(json.dumps(record, indent=2))
         return 0

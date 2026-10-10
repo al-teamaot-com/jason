@@ -93,10 +93,19 @@ def apply_transition(req: dict, state: dict) -> dict:
         state['last_revalidation']=manifest
     else:
         release_id=str(req.get('release_id') or '')
-        if release_id != 'release-'+revision[:16]:
+        base_id='release-'+revision[:16]
+        if release_id != base_id and not re.fullmatch(re.escape(base_id)+r'-retry-[1-9][0-9]{0,2}',release_id):
             raise ValueError('release identity mismatch')
         path=ROOT/'records'/(release_id+'.json')
         record=json.loads(path.read_text())
+        if release_id != base_id:
+            historical=json.loads((ROOT/'records'/(base_id+'.json')).read_text())
+            if historical.get('state')!='rolled_back' or (historical.get('failure') or {}).get('rollback_verified') is not True:
+                raise ValueError('retry historical rollback is not verified')
+            if (historical.get('release_candidate') or {}).get('candidate_sha')!=revision:
+                raise ValueError('retry historical candidate mismatch')
+            if record.get('reissued_from')!=base_id or (record.get('release_candidate') or {}).get('candidate_sha')!=revision:
+                raise ValueError('retry release candidate linkage mismatch')
         if record.get('state') not in {'production','closed'} or record.get('owner_approval',{}).get('approved') is not True or record['owner_approval'].get('candidate_sha')!=revision:
             raise ValueError('record lacks exact production approval')
         manifest=verify_health(revision)
