@@ -483,6 +483,24 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             )
             runner.release_production_transaction_lock(followup)
 
+    def test_unattended_promotion_is_inert_when_manual_mode_enabled(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            with (
+                patch.object(
+                    runner.gate,
+                    "load_json",
+                    return_value={"schedule": {"automatic_promotion_enabled": False}},
+                ),
+                patch.object(runner, "consume_owner_approval_requests") as approvals,
+                patch.object(runner, "production_window_open") as window,
+                patch.object(runner, "deploy_production") as deploy,
+            ):
+                self.assertFalse(runner.promote_eligible(ROOT, root))
+            approvals.assert_not_called()
+            window.assert_not_called()
+            deploy.assert_not_called()
+
     def test_promote_eligible_treats_busy_transaction_as_queued(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -496,6 +514,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             }
             runner.atomic_json(records / f"{payload['release_id']}.json", payload)
             with (
+                patch.object(runner.gate, "load_json", return_value={"schedule": {"automatic_promotion_enabled": True}}),
                 patch.object(runner, "production_window_open", return_value=True),
                 patch.object(runner, "live_runtime", return_value={"revision": SHA_B}),
                 patch.object(runner, "live_production_alignment", return_value={}),
@@ -532,6 +551,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 return record
 
             with (
+                patch.object(runner.gate, "load_json", return_value={"schedule": {"automatic_promotion_enabled": True}}),
                 patch.object(runner, "production_window_open", return_value=True),
                 patch.object(runner, "live_runtime", return_value={"revision": SHA_B}),
                 patch.object(runner, "live_production_alignment", return_value={}),
@@ -562,6 +582,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 },
             )
             with (
+                patch.object(runner.gate, "load_json", return_value={"schedule": {"automatic_promotion_enabled": True}}),
                 patch.object(runner, "production_window_open", return_value=True),
                 patch.object(runner, "live_runtime", return_value={"revision": "c" * 40}),
                 patch.object(runner, "live_production_alignment", return_value={}),
@@ -661,6 +682,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
 
             promoted = []
             with (
+                patch.object(runner.gate, "load_json", return_value={"schedule": {"automatic_promotion_enabled": True}}),
                 patch.object(runner, "production_window_open", return_value=True),
                 patch.object(runner, "live_runtime", return_value={"revision": SHA_B}),
                 patch.object(runner, "live_production_alignment", return_value={}),
