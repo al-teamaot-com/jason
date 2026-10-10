@@ -154,6 +154,27 @@ class TodoEngineeringIntakeTests(unittest.TestCase):
         self.assertIsNotNone(candidate)
         self.assertEqual(candidate.item_id, "TODO-OPS-010")
 
+    def test_outstanding_work_is_visible_even_if_intake_has_no_candidate(self):
+        with tempfile.TemporaryDirectory() as td:
+            spool = Path(td)
+            (spool / "todo-release-state.json").write_text(json.dumps({
+                "items": {
+                    "TODO-OPS-001": {"phase": "waiting_operational_acceptance", "reason": "live proof required"},
+                    "TODO-OPS-002": {"phase": "development_blocked", "reason": "API prerequisite"},
+                    "TODO-COMM-001": {"phase": "complete"},
+                }
+            }), encoding="utf-8")
+            snapshot = module.outstanding_commitment_snapshot(spool)
+            self.assertEqual(snapshot["status"], "known")
+            self.assertEqual(snapshot["outstanding_count"], 2)
+            self.assertEqual([item["id"] for item in snapshot["items"]], ["TODO-OPS-001", "TODO-OPS-002"])
+
+    def test_missing_downstream_report_is_not_treated_as_empty_backlog(self):
+        with tempfile.TemporaryDirectory() as td:
+            snapshot = module.outstanding_commitment_snapshot(Path(td))
+            self.assertEqual(snapshot["status"], "unknown")
+            self.assertIsNone(snapshot["outstanding_count"])
+
     def test_existing_todo_issue_is_not_duplicated(self):
         todos = module.parse_todo_sections(TODO_TEXT)
         candidate, _ = module.select_candidate(

@@ -203,6 +203,31 @@ def capacity_consuming_todo_issue_count(
     )
 
 
+def outstanding_commitment_snapshot(spool: Path) -> dict[str, Any]:
+    """Report stalled downstream work without granting additional admission authority.
+
+    The release bridge remains authoritative for item phases. An absent or
+    malformed report is unknown, never evidence that all work is complete.
+    """
+    path = spool / "todo-release-state.json"
+    if not path.is_file():
+        return {"status": "unknown", "outstanding_count": None, "items": []}
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"status": "unknown", "outstanding_count": None, "items": []}
+    records = state.get("items") if isinstance(state, dict) else None
+    if not isinstance(records, dict):
+        return {"status": "unknown", "outstanding_count": None, "items": []}
+    pending = [
+        {"id": item_id, "phase": str(record.get("phase") or "unknown"),
+         "reason": str(record.get("reason") or "")[:350]}
+        for item_id, record in sorted(records.items())
+        if isinstance(record, dict) and record.get("phase") != "complete"
+    ]
+    return {"status": "known", "outstanding_count": len(pending), "items": pending}
+
+
 def active_development_count(spool: Path) -> int:
     path = spool / "development-state.json"
     if not path.exists():
@@ -438,6 +463,15 @@ def main() -> int:
         },
         "capacity_consuming_todo_issues": capacity_consuming_todo_issue_count(issues, spool),
     }
+
+    downstream = outstanding_commitment_snapshot(spool)
+    state["downstream_commitments"] = downstream
+    if candidate is None and downstream["outstanding_count"]:
+        state["status"] = "stalled_upstream_or_downstream"
+        state["reason"] = (
+            f"No new candidate; {downstream['outstanding_count']} approved commitments "
+            f"remain in existing engineering/release workflows. Intake alone cannot advance them."
+        )
 
     if candidate is None:
         atomic_json(state_path, state)
