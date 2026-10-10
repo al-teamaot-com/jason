@@ -555,7 +555,8 @@ def test_recovery_readmission_requires_exact_production_sha(monkeypatch, tmp_pat
     module.readmit_verified_development_recoveries(state, {'DEV-950'}, tmp_path, tmp_path)
     assert state['items']['DEV-950']['phase'] == 'blocked'
     monkeypatch.setattr(module.support, 'production_state_from_main', lambda repo: {
-        'production': {'status': 'aligned_and_healthy', 'revision': sha}})
+        'production': {'status': 'aligned_and_healthy', 'revision': sha,
+         'observed_at': module.now()}})
     module.readmit_verified_development_recoveries(state, {'DEV-950'}, tmp_path, tmp_path)
     assert state['items']['DEV-950']['phase'] == 'diagnosing'
     assert state['items']['DEV-950']['recovery_readmitted_after_sha'] == sha
@@ -572,3 +573,18 @@ def test_governance_dependency_still_blocks_recovery_readmission(monkeypatch, tm
         'production': {'status': 'aligned_and_healthy', 'revision': sha}})
     module.readmit_verified_development_recoveries(state, {'DEV-866'}, tmp_path, tmp_path)
     assert state['items']['DEV-866']['phase'] == 'blocked'
+
+
+def test_recovery_readmission_rejects_stale_production_proof(monkeypatch, tmp_path):
+    sha = 'f' * 40
+    state = {'items': {'DEV-950': {'phase': 'blocked', 'issue_number': 950,
+       'blocker_class': 'internal_retry_exhausted',
+       'recovery_support_issue_raised': 'SUPPORT-DEV-950'}}}
+    module.support.save_state(tmp_path / 'state.json', {'items': {
+       'SUPPORT-DEV-950': {'phase': 'complete', 'merge_sha': sha,
+         'closure_pr_number': 42, 'acceptance_reason': 'verified'}}})
+    monkeypatch.setattr(module.support, 'production_state_from_main', lambda repo: {
+       'production': {'status': 'aligned_and_healthy', 'revision': sha,
+       'observed_at': '2026-01-01T00:00:00+00:00'}})
+    module.readmit_verified_development_recoveries(state, {'DEV-950'}, tmp_path, tmp_path)
+    assert state['items']['DEV-950']['phase'] == 'blocked'

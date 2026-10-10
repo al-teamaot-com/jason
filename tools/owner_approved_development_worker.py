@@ -602,6 +602,13 @@ def readmit_verified_development_recoveries(
         production = observed.get('production') if isinstance(observed.get('production'), Mapping) else {}
         if production.get('status') != 'aligned_and_healthy' or production.get('revision') != sha:
             continue
+        try:
+            observed_at = datetime.fromisoformat(str(production['observed_at']).replace('Z', '+00:00'))
+            age = (datetime.now(timezone.utc) - observed_at).total_seconds()
+            if observed_at.tzinfo is None or not (0 <= age <= 1800):
+                continue
+        except (KeyError, ValueError, TypeError):
+            continue
         record.update({
             'phase': 'diagnosing', 'reasoning_request_id': '',
             'reason': 'Re-admitted following exact verified governed support repair.',
