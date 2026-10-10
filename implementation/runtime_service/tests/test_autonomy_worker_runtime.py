@@ -6295,3 +6295,15 @@ def test_gpt_insights_v021_runs_even_when_promoted_remediation_playbook_matches(
         for _, capability, args in actions.calls
     )
     store.close()
+
+
+def test_backupiq_progress_percent_rejects_unverified_status_and_bad_values():
+    from jason_runtime.autonomy_worker_runtime import OperationalAutonomyMaintenance
+    parse = OperationalAutonomyMaintenance._backupiq_progress_percent
+    assert parse({"status": "inprogress"}) is None
+    assert parse({"progressPercent": "unknown"}) is None
+    assert parse({"progressPercent": True}) is None
+    assert parse({"progressPercent": -1}) is None
+    assert parse({"progressPercent": 101}) is None
+    assert parse({"progressPercent": "24.5"}) == 24.5
+    assert parse({"percentComplete": 0}) == 0.0
