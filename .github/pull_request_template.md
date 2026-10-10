@@ -9,6 +9,15 @@ Describe the operational problem and the measurable result this change supports.
 - Maximum operating mode:
 - Provider dependencies:
 
+## Prior decisions and failed attempts (required for material repair)
+
+- Authoritative decision/standard/ADR and invariant preserved:
+- Previous related issues, merged/closed/rejected PRs and failure/rollback evidence reviewed:
+- Current observed evidence and how this approach differs:
+- Conflicts or stale guidance reconciled (or explicit "none found" with sources checked):
+
+A material repair must not contradict an existing accepted decision or repeat a rejected fix without a separately authorized decision change. This is the J-404 / J-CHANGE-001 preflight, not an additional approval lane. Link existing records instead of duplicating them.
+
 ## Governance and risk
 
 - [ ] Human authority remains explicit.
