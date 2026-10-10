@@ -4,10 +4,10 @@
   "mode": "production",
   "production_transition_enabled": true,
   "schedule": {
-    "automatic_promotion_enabled": true,
+    "automatic_promotion_enabled": false,
     "timezone": "America/New_York",
     "serialized_promotion": true,
-    "mode": "continuous_24x7",
+    "mode": "manual_production_approval",
     "reconcile_interval_minutes": 5,
     "max_concurrent_releases": 1
   },
@@ -22,7 +22,7 @@
     "provider_mutations_enabled": false
   },
   "production": {
-    "normal_release_auto_promote_when_eligible": true,
+    "normal_release_auto_promote_when_eligible": false,
     "protected_core_requires_owner_approval": true,
     "post_deploy_verification_required": true,
     "rollback_on_verification_failure": true,
@@ -31,7 +31,8 @@
     "last_known_good_manifest_required": true,
     "controller_identity_pinning_required": true,
     "functional_smoke_test_required": true,
-    "fresh_pre_mutation_health_required": true
+    "fresh_pre_mutation_health_required": true,
+    "require_owner_approval_for_all": true
   },
   "protected_core_globs": [
     ".github/workflows/*",
@@ -77,18 +78,62 @@
     "rolled_back"
   ],
   "transitions": {
-    "requested": ["development", "blocked"],
-    "development": ["dev_verified", "blocked", "failed"],
-    "dev_verified": ["release_candidate", "development", "blocked"],
-    "release_candidate": ["preproduction", "development", "blocked"],
-    "preproduction": ["preprod_verified", "development", "blocked", "failed"],
-    "preprod_verified": ["production_eligible", "development", "blocked"],
-    "production_eligible": ["production", "development", "blocked"],
-    "production": ["production_verified", "rolled_back", "failed"],
-    "production_verified": ["closed", "rolled_back"],
-    "blocked": ["development", "requested"],
-    "failed": ["development", "rolled_back"],
-    "rolled_back": ["development", "closed"],
+    "requested": [
+      "development",
+      "blocked"
+    ],
+    "development": [
+      "dev_verified",
+      "blocked",
+      "failed"
+    ],
+    "dev_verified": [
+      "release_candidate",
+      "development",
+      "blocked"
+    ],
+    "release_candidate": [
+      "preproduction",
+      "development",
+      "blocked"
+    ],
+    "preproduction": [
+      "preprod_verified",
+      "development",
+      "blocked",
+      "failed"
+    ],
+    "preprod_verified": [
+      "production_eligible",
+      "development",
+      "blocked"
+    ],
+    "production_eligible": [
+      "production",
+      "development",
+      "blocked"
+    ],
+    "production": [
+      "production_verified",
+      "rolled_back",
+      "failed"
+    ],
+    "production_verified": [
+      "closed",
+      "rolled_back"
+    ],
+    "blocked": [
+      "development",
+      "requested"
+    ],
+    "failed": [
+      "development",
+      "rolled_back"
+    ],
+    "rolled_back": [
+      "development",
+      "closed"
+    ],
     "closed": []
   },
   "required_development_evidence": [
