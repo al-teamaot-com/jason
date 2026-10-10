@@ -879,8 +879,11 @@ def request_host_reconcile(
     state_root: Path,
     source_revision: str,
     *,
-    timeout_seconds: float = 240.0,
+    timeout_seconds: float = 420.0,
 ) -> dict[str, Any]:
+    # The root worker may spend 200+ seconds activating system services,
+    # followed by exporter checks and queue scheduling. Keep an absolute
+    # finite deadline; never count a late result as an accepted release.
     source_revision = exact_sha(source_revision, "source_revision")
     require_host_reconciler_ready(state_root)
     request_id = "release-" + source_revision[:12] + "-" + uuid4().hex[:12]
