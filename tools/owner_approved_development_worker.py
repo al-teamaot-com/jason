@@ -534,6 +534,44 @@ def reconcile_recovery_handoff_intake(
 
 
 
+def raise_exhausted_repair_support_issues(
+    state: dict[str, Any], eligible_ids: set[str], repo: Path,
+) -> None:
+    """Route governed repair handoffs to existing deduplicated support intake."""
+    records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
+    for item_id, record in records.items():
+        if item_id not in eligible_ids or not isinstance(record, dict):
+            continue
+        intake = record.get('recovery_handoff_intake')
+        if record.get('phase') != 'blocked' or not isinstance(intake, Mapping):
+            continue
+        if intake.get('status') != 'awaiting_governed_repair':
+            continue
+        if record.get('recovery_support_issue_raised'):
+            continue
+        if not isinstance(record.get('issue_number'), int):
+            continue
+        original_issue = int(record['issue_number'])
+        item = {
+            'id': f'SUPPORT-DEV-{original_issue}',
+            'title': f'Development recovery exhausted for issue #{original_issue}',
+            'evidence': (
+                f'Approved development item {item_id}; original issue #{original_issue}; '
+                f'handoff {intake.get("handoff_id")}; original failure: '
+                f'{str(record.get("reason") or "")[:800]}; diagnosis: '
+                f'{str(record.get("recovery_diagnostic_summary") or "")[:800]}'
+            ),
+            'acceptance': (
+                'Repair via authorized source changes and regression tests; verify every upstream '
+                'dependency and production acceptance before re-admitting the blocked item.'
+            ),
+        }
+        support.ensure_support_issue(repo, item)
+        record['recovery_support_issue_raised'] = item['id']
+        record['recovery_support_issue_raised_at'] = now()
+
+
+
 def reconcile_removed_approval(state: dict[str, Any], eligible_ids: set[str]) -> None:
     items = state.get('items') if isinstance(state.get('items'), Mapping) else {}
     for item_id, record in items.items():
@@ -592,6 +630,7 @@ def main() -> int:
     queue_exhausted_recovery_diagnostics(state, eligible, spool)
     reconcile_exhausted_recovery_diagnostics(state, eligible_ids, spool)
     reconcile_recovery_handoff_intake(state, eligible_ids, spool)
+    raise_exhausted_repair_support_issues(state, eligible_ids, repo)
     state['discovery'] = {
         'observed_at': now(),
         'approved_issue_numbers': [item['issue_number'] for item in eligible],

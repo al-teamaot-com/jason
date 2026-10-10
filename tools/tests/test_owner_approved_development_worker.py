@@ -491,3 +491,25 @@ def test_tampered_recovery_handoff_is_rejected(tmp_path):
     module.reconcile_recovery_handoff_intake(state, {'DEV-950'}, tmp_path)
     assert 'recovery_handoff_intake' not in state['items']['DEV-950']
     assert state['items']['DEV-950']['phase'] == 'blocked'
+
+
+def test_exhausted_repair_opens_deduplicated_governed_support_item(monkeypatch, tmp_path):
+    seen = []
+    monkeypatch.setattr(module.support, 'ensure_support_issue', lambda repo, item: seen.append(item))
+    state = {'items': {'DEV-950': {'phase': 'blocked', 'issue_number': 950,
+      'reason': 'source context missing', 'recovery_handoff_intake': {
+        'status': 'awaiting_governed_repair', 'handoff_id': 'a' * 64}}}}
+    module.raise_exhausted_repair_support_issues(state, {'DEV-950'}, tmp_path)
+    module.raise_exhausted_repair_support_issues(state, {'DEV-950'}, tmp_path)
+    assert len(seen) == 1
+    assert seen[0]['id'] == 'SUPPORT-DEV-950'
+    assert state['items']['DEV-950']['phase'] == 'blocked'
+
+def test_repair_support_intake_never_bypasses_dependencies(monkeypatch, tmp_path):
+    seen = []
+    monkeypatch.setattr(module.support, 'ensure_support_issue', lambda repo, item: seen.append(item))
+    state = {'items': {'DEV-866': {'phase': 'blocked', 'issue_number': 866,
+       'recovery_handoff_intake': {'status': 'not_verified', 'handoff_id': 'b' * 64}}}}
+    module.raise_exhausted_repair_support_issues(state, {'DEV-866'}, tmp_path)
+    assert not seen
+    assert state['items']['DEV-866']['phase'] == 'blocked'
