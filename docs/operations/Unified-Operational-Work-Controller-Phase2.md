@@ -35,3 +35,8 @@ Phase 2 is not operationally complete until a genuine issue-scoped
 acceptance receipt and real previously blocked item pass the live
 controller and audit readback. Production deployment requires the
 existing exact-commit owner approval and governed Release Manager.
+
+## Concurrent integration
+PR #1132 changes owner notification functions in the same worker file;
+the Phase 2 admission change is confined to the readmission function.
+Both changes must remain intact when integrated.
