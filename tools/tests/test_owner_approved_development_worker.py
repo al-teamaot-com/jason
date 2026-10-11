@@ -774,3 +774,20 @@ def test_verified_ccc_owner_review_readmits_once(tmp_path):
     state['items']['DEV-1237'].pop('verified_ccc_readmission_sha')
     drift.write_text(json.dumps({'status': 'drift_detected', 'problems': ['failed'], 'observed_at': datetime.now(timezone.utc).isoformat()}))
     assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, **kwargs) == 0
+
+
+def test_ccc_readmission_rejects_empty_certification_checks(tmp_path):
+    import json
+    from datetime import datetime, timezone
+    sha = 'e' * 40
+    review = tmp_path / 'review.json'
+    drift = tmp_path / 'drift.json'
+    reports = tmp_path / 'reports'
+    folder = reports / 'run1'
+    folder.mkdir(parents=True)
+    review.write_text(json.dumps({'status': 'approved', 'source_revision': sha}))
+    drift.write_text(json.dumps({'status': 'pass', 'problems': [], 'observed_at': datetime.now(timezone.utc).isoformat()}))
+    (folder / 'ccc-report.json').write_text(json.dumps({'status': 'PASS', 'source_revision': sha, 'runtime_revision': sha, 'checks': []}))
+    state = {'items': {'DEV-1237': {'phase': 'blocked', 'reason': 'Exact CCC material-change review required.'}}}
+    assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, review_path=review, drift_path=drift, report_root=reports) == 0
+    assert state['items']['DEV-1237']['phase'] == 'blocked'
