@@ -823,7 +823,12 @@ def readmit_source_context_after_verified_worker_upgrade(
         reason = str(record.get('reason') or '').casefold()
         truncated_approved_test = ('test file' in reason and 'truncat' in reason
                                    and 'exact-text' in reason)
-        if not (source_context_blocker(reason) or truncated_approved_test):
+        stale_exact_anchor = (
+            record.get('blocker_class') == 'internal_retry_exhausted'
+            and 'workererror: exact repair anchor must occur once in ' in reason
+            and '; found ' in reason
+        )
+        if not (source_context_blocker(reason) or truncated_approved_test or stale_exact_anchor):
             continue
         if record.get('source_upgrade_readmitted_sha') == sha:
             continue
