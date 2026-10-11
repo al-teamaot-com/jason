@@ -46,5 +46,39 @@ class OperationalReadmission(unittest.TestCase):
     def test_no_dependencies_blocked(self):
         s,i,st,f=self.scenario(fresh={'retry_eligible':True})
         self.assertEqual(self.execute(s,i,st,f),0)
+from tools.tests.test_operational_acceptance_reader import fixture
+
+class SignedReceiptIntegration(unittest.TestCase):
+    def test_signed_receipt_gates_exactly_once_recovery(self):
+        with tempfile.TemporaryDirectory() as name:
+            root=Path(name)
+            spool=root/'spool'
+            spool.mkdir()
+            release_root=root/'release'
+            protected=release_root/'protected-operational-acceptance'
+            (protected/'receipts').mkdir(parents=True)
+            receipt,trust=fixture()
+            (protected/'trust.json').write_text(json.dumps(trust))
+            identity='acceptance-network-posture'
+            candidate={'issue_number':953,'phase':'development_blocked',
+                'blocker_category':'dependency','governing_dependencies':[],
+                'governing_operational_dependencies':[identity]}
+            item={'id':'DEV-953','issue_number':953,'body':'- Governing operational dependencies: '+identity}
+            state={'items':{'DEV-953':{'phase':'blocked','blocker_class':'blocked_by_dependency'}}}
+            self.assertFalse(bridge.dependency_state_for_item(candidate,release_root)['retry_eligible'])
+            (protected/'receipts'/(identity+'.json')).write_text(json.dumps(receipt))
+            valid=bridge.dependency_state_for_item(candidate,release_root)
+            self.assertTrue(valid['retry_eligible'])
+            candidate.update(valid)
+            (spool/'todo-release-state.json').write_text(json.dumps({'items':{'TODO-OPS-003':candidate}}))
+            with patch.object(worker,'active_support_count',return_value=0),patch.object(worker.todo_bridge,'DEFAULT_RELEASE_STATE',release_root):
+                self.assertEqual(worker.readmit_explicit_verified_dependencies(state,[item],spool,max_active=2),1)
+                state['items']['DEV-953']['phase']='blocked'
+                self.assertEqual(worker.readmit_explicit_verified_dependencies(state,[item],spool,max_active=2),0)
+                trust['revoked_receipts']=[receipt['payload']['receipt_id']]
+                (protected/'trust.json').write_text(json.dumps(trust))
+                state['items']['DEV-953'].pop('verified_dependency_readmission_key',None)
+                self.assertEqual(worker.readmit_explicit_verified_dependencies(state,[item],spool,max_active=2),0)
+
 if __name__=='__main__':
     unittest.main(verbosity=2)
