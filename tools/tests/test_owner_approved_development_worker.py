@@ -841,3 +841,27 @@ def test_verified_worker_upgrade_fails_closed_without_release(tmp_path):
     assert module.readmit_source_context_after_verified_worker_upgrade(
         state, {'DEV-1245'}, spool, current_link=link) == 0
     assert record['phase'] == 'blocked'
+
+
+def test_production_identity_api_context_keeps_complete_contract(tmp_path):
+    from pathlib import Path
+    import types
+    worktree = tmp_path
+    path = worktree / 'tools/release_manager_host_runner.py'
+    path.parent.mkdir()
+    path.write_text('import json\n' + ('padding=1\n' * 8000)
+                    + 'def live_runtime():\n    return {"revision": "sha"}\n'
+                    + 'def live_mcp():\n    return {"revision": "sha"}\n'
+                    + 'def live_production_alignment(candidate_sha):\n'
+                    + '    return {"runtime_revision": candidate_sha}\n')
+    gate = types.SimpleNamespace(path_denial_reason=lambda path, policy: '')
+    result = module.support.source_excerpts_for_paths(
+        worktree, ['tools/release_manager_host_runner.py'], gate, {},
+        terms=['live_runtime', 'live_mcp', 'live_production_alignment'],
+        content_limit=18000)
+    assert len(result) == 1
+    assert 'return {"revision": "sha"}' in result[0]['content']
+    assert 'return {"runtime_revision": candidate_sha}' in result[0]['content']
+    chosen = module.support.merge_source_excerpts(result, [
+        {'path': 'implementation/unrelated.py', 'content': 'other'}], max_total=1)
+    assert chosen[0]['path'] == 'tools/release_manager_host_runner.py'

@@ -1239,6 +1239,20 @@ def main() -> int:
                     excerpts = support.merge_source_excerpts(
                         targeted, excerpts, max_total=14,
                     )
+                # Discover the existing *read-only* production identity contract,
+                # including complete definitions and return shape. This is only
+                # source context; the issue's permitted edit paths remain unchanged.
+                if any(word in (approved_scope(item) + ' ' + ' '.join(search_terms)).casefold()
+                       for word in ('production sha', 'production identity', 'live production', 'read-only production')):
+                    api_context = support.source_excerpts_for_paths(
+                        worktree, ['tools/release_manager_host_runner.py'], gate, policy,
+                        terms=['live_runtime', 'live_mcp', 'live_production_alignment'],
+                        limit=1, content_limit=18000,
+                    )
+                    excerpts = support.merge_source_excerpts(
+                        targeted if explicit_paths else [], api_context + excerpts,
+                        max_total=14,
+                    )
                 prior_history = [
                     str(value).strip()
                     for value in list(record.get('source_history') or record.get('source_paths') or [])
@@ -1255,9 +1269,7 @@ def main() -> int:
                         content_limit=24000,
                     )
                     excerpts = support.merge_source_excerpts(
-                        prior_excerpts,
-                        excerpts[:8],
-                        max_total=14,
+                        excerpts[:8], prior_excerpts, max_total=14,
                     )
                 if not excerpts:
                     record.update({
