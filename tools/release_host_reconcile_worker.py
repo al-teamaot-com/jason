@@ -25,6 +25,12 @@ MAX_REQUESTS_PER_RUN = 8
 HOST_RECONCILE_TIMEOUT_SECONDS = 360
 
 
+ROLLBACK_MANAGED_SYSTEM_UNITS = {
+    "jason-production-drift-watchdog.service": "infrastructure/openclaw-operations/systemd/jason-production-drift-watchdog.service",
+    "jason-production-drift-watchdog.timer": "infrastructure/openclaw-operations/systemd/jason-production-drift-watchdog.timer",
+}
+
+
 class HostReconcileError(RuntimeError):
     pass
 
@@ -151,6 +157,44 @@ def _candidate_reconcile_script(source_revision: str) -> Path:
 
 
 
+def _target_contains_path(source_revision: str, relative_path: str) -> bool:
+    completed = subprocess.run(
+        _git("cat-file", "-e", f"{source_revision}:{relative_path}"),
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return completed.returncode == 0
+
+
+def _reconcile_release_specific_system_units(source_revision: str) -> list[str]:
+    """Remove newer release-owned units that do not exist in the rollback release."""
+    removed: list[str] = []
+    for unit, relative_path in ROLLBACK_MANAGED_SYSTEM_UNITS.items():
+        if _target_contains_path(source_revision, relative_path):
+            continue
+        subprocess.run(
+            ["systemctl", "disable", "--now", unit],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        for path in (
+            Path("/etc/systemd/system") / unit,
+            Path("/etc/systemd/system/timers.target.wants") / unit,
+            Path("/etc/systemd/system/multi-user.target.wants") / unit,
+        ):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+        removed.append(unit)
+    if removed:
+        subprocess.run(["systemctl", "daemon-reload"], check=True)
+        subprocess.run(["systemctl", "reset-failed"], check=False)
+    return removed
+
+
 def _historical_post_success_documentation_failure(detail: str, source_revision: str) -> bool:
     """Accept only an old-script documentation-publication failure after critical alignment."""
     required = (
@@ -266,6 +310,18 @@ def _process(path: Path) -> None:
                 ) from exc
         finally:
             os.umask(previous_umask)
+
+        removed_units = _reconcile_release_specific_system_units(source_revision)
+        if removed_units:
+            completed = subprocess.CompletedProcess(
+                args=completed.args,
+                returncode=completed.returncode,
+                stdout=(
+                    str(completed.stdout or "")
+                    + "\nJASON_RELEASE_SPECIFIC_UNIT_CLEANUP=PASS removed="
+                    + ",".join(sorted(removed_units))
+                ),
+            )
 
         release_meta = release_dir.stat()
         if release_meta.st_uid != 0 or (release_meta.st_mode & 0o055) != 0o055:
