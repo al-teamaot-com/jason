@@ -961,3 +961,29 @@ def test_validate_patch_runs_isolated_worktree_tests_with_local_tools_import(mon
         repo, ['tools/tests/test_local_validation_module.py'], gate, {}
     )
     assert selected == ['tools/tests/test_local_validation_module.py']
+
+
+
+def test_safe_search_discovers_named_provider_source_not_just_tests(tmp_path):
+    import subprocess
+    import types
+    repo = tmp_path / 'repo'
+    base = repo / 'implementation/connectors/it_glue'
+    base.mkdir(parents=True)
+    (base / 'live_read.py').write_text('class DocumentReader:\n    pass\n')
+    (base / 'operations.py').write_text('class Operations:\n    pass\n')
+    other = repo / 'implementation/connectors/tests/test_it_glue_live_read.py'
+    other.parent.mkdir(parents=True)
+    other.write_text('def test_it_glue_document_search_read():\n    assert True\n')
+    subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+    subprocess.run(['git', 'add', '.'], cwd=repo, check=True)
+    gate = types.SimpleNamespace(path_denial_reason=lambda path, policy: '')
+    excerpts = worker.safe_search(
+        repo, ['IT Glue document search read implementation',
+               'IT Glue provider adapter search read attachment'],
+        gate, {}
+    )
+    result = {entry['path'] for entry in excerpts}
+    assert 'implementation/connectors/it_glue/live_read.py' in result
+    assert 'implementation/connectors/it_glue/operations.py' in result
+    assert all(entry['content'] for entry in excerpts)
