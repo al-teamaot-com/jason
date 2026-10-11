@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -90,6 +91,7 @@ def todo_issues(repo: Path) -> list[dict[str, Any]]:
                 "todo_id": match.group(1).upper(),
                 "issue_number": int(issue["number"]),
                 "title": str(issue.get("title") or ""),
+                "source_fingerprint": hashlib.sha256(body.encode("utf-8")).hexdigest(),
                 "url": str(issue.get("url") or ""),
                 "governing_dependencies": explicit_release_dependencies(body),
                 "governing_operational_dependencies": explicit_operational_dependencies(body),
@@ -661,6 +663,21 @@ def main() -> int:
         if record.get("governing_operational_dependencies") != declared_operational:
             record["governing_operational_dependencies"] = declared_operational
             record.pop("retry_eligible", None)
+        # A changed authoritative issue invalidates the explanatory decision's
+        # freshness, never its governance. Keep the original worker result for
+        # audit and demand explicit re-evaluation before eligible readmission.
+        fingerprint = issue.get("source_fingerprint")
+        if fingerprint and record.get("source_fingerprint") != fingerprint:
+            prior = record.get("source_fingerprint")
+            if prior is not None:
+                record["source_revision_review"] = {
+                    "previous_fingerprint": prior,
+                    "current_fingerprint": fingerprint,
+                    "previous_reason": str(record.get("reason") or ""),
+                    "state": "requires_governed_development_re_evaluation",
+                    "detected_at": now(),
+                }
+            record["source_fingerprint"] = fingerprint
         merged = prs.get(issue["issue_number"])
         if not merged:
             phase, reason = upstream_commitment_state(
@@ -779,6 +796,14 @@ def main() -> int:
     for item in state["items"].values():
         if isinstance(item, dict):
             item.update(dependency_state_for_item(item, args.release_state.resolve()))
+    for item in state["items"].values():
+        if not isinstance(item, dict):
+            continue
+        review = item.get("source_revision_review")
+        if isinstance(review, dict) and review.get("state") == "requires_governed_development_re_evaluation":
+            item["retry_eligible"] = False
+            item["source_decision_stale"] = True
+            item["next_action"] = "request_governed_development_re_evaluation"
     state["summary"] = commitment_summary(state["items"])
     state["updated_at"] = now()
     atomic_json(state_path, state)
