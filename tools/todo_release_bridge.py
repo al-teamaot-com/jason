@@ -89,9 +89,21 @@ def todo_issues(repo: Path) -> list[dict[str, Any]]:
                 "issue_number": int(issue["number"]),
                 "title": str(issue.get("title") or ""),
                 "url": str(issue.get("url") or ""),
+                "governing_dependencies": explicit_release_dependencies(body),
             }
         )
     return result
+
+
+def explicit_release_dependencies(issue_body: str) -> list[str]:
+    """Read only machine-explicit release prerequisites, never infer from prose."""
+    match = re.search(r"(?im)^\s*-\s*Governing release dependencies\s*:\s*(.+?)\s*$", issue_body)
+    if not match:
+        return []
+    raw = [value.strip() for value in match.group(1).split(",")]
+    if not raw or len(raw) > 12 or any(not re.fullmatch(r"release-[0-9a-f]{16}", x) for x in raw):
+        return []
+    return sorted(set(raw))
 
 
 def development_records_by_issue(spool: Path) -> dict[int, dict[str, Any]]:
@@ -579,6 +591,13 @@ def main() -> int:
                 "updated_at": now(),
             },
         )
+        # Only declared exact release IDs can change the governing dependency
+        # set. A changed declaration invalidates the old eligibility result.
+        declared = issue["governing_dependencies"]
+        if record.get("governing_dependencies") != declared:
+            record["governing_dependencies"] = declared
+            record.pop("dependency_recheck", None)
+            record.pop("retry_eligible", None)
         merged = prs.get(issue["issue_number"])
         if not merged:
             phase, reason = upstream_commitment_state(

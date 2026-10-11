@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import tempfile
 from datetime import datetime, timezone
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import support_repair_host_worker as support
+import todo_release_bridge as todo_bridge
 import change_integration_gate
 import documentation_impact_gate
 
@@ -689,6 +691,57 @@ def readmit_verified_development_recoveries(
 
 
 
+def readmit_explicit_verified_dependencies(
+    state: dict[str, Any], eligible: list[dict[str, Any]], spool: Path,
+    *, max_active: int,
+) -> int:
+    """At most one bounded development readmission with fresh release evidence.
+
+    The controller's evidence is advisory; a closed issue-level hold still wins.
+    Idempotency is persisted on the development worker record.
+    """
+    ledger = support.load_state(spool / 'todo-release-state.json')
+    ledger_items = ledger.get('items') if isinstance(ledger.get('items'), Mapping) else {}
+    records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
+    active = sum(1 for r in records.values() if isinstance(r, Mapping) and r.get('phase') in ACTIVE_PHASES)
+    if active_support_count(spool) + active >= max_active:
+        return 0
+    for item in eligible:
+        if issue_has_closed_dependency_gate(item):
+            continue
+        issue = item['issue_number']
+        candidate = next((v for v in ledger_items.values() if isinstance(v, Mapping)
+                          and v.get('issue_number') == issue), None)
+        record = records.get(item['id'])
+        if not isinstance(candidate, Mapping) or not isinstance(record, dict):
+            continue
+        if record.get('phase') != 'blocked' or candidate.get('phase') != 'development_blocked':
+            continue
+        if (record.get('blocker_class') != 'blocked_by_dependency'
+                and not any(term in str(record.get('reason') or '').casefold()
+                            for term in ('dependency', 'prerequisite'))):
+            continue
+        if not candidate.get('retry_eligible') or candidate.get('dependency_recheck') != 'verified_for_governed_readmission_check':
+            continue
+        dependencies = candidate.get('governing_dependencies')
+        if not isinstance(dependencies, list) or not dependencies:
+            continue
+        if dependencies != todo_bridge.explicit_release_dependencies(str(item.get("body") or "")):
+            continue
+        fresh = todo_bridge.dependency_state_for_item(candidate, todo_bridge.DEFAULT_RELEASE_STATE)
+        if not fresh.get("retry_eligible"):
+            continue
+        import hashlib
+        fingerprint = hashlib.sha256(json.dumps(sorted(set(dependencies))).encode()).hexdigest()
+        if record.get('verified_dependency_readmission_key') == fingerprint:
+            continue
+        record.update({'phase': 'diagnosing', 'reason': 'Re-admitted after verified release prerequisites.',
+                       'verified_dependency_readmission_key': fingerprint,
+                       'reasoning_request_id': '', 'updated_at': now()})
+        return 1
+    return 0
+
+
 def blocked_work_next_action(reason: str) -> dict[str, str]:
     text = str(reason or "").casefold()
     if any(x in text for x in ("approval", "authorization", "credential")):
@@ -779,6 +832,7 @@ def main() -> int:
     reconcile_recovery_handoff_intake(state, admitted_ids, spool)
     raise_exhausted_repair_support_issues(state, admitted_ids, repo)
     readmit_verified_development_recoveries(state, admitted_ids, spool, repo)
+    readmit_explicit_verified_dependencies(state, admitted, spool, max_active=max(1, int(args.max_active)))
     state['discovery'] = {
         'observed_at': now(),
         'approved_issue_numbers': [item['issue_number'] for item in eligible],
