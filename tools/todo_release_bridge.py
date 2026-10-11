@@ -279,8 +279,21 @@ def dependency_state_for_item(item: Mapping[str, Any], release_root: Path, accep
         int(item.get('issue_number') or 0),
     ) if operational_ids else {}
     operational_gate = operational_evidence_gate(item, operational_proofs)
+    release_required = isinstance(identities, list) and bool(identities)
+    operational_required = isinstance(operational_ids, list) and bool(operational_ids)
+    # No implicit eligibility for work lacking explicit governing dependencies.
+    release_ok = release_gate["retry_eligible"] if release_required else required == []
+    operational_ok = operational_gate["operational_eligible"]
+    verified_operational = {
+        key: proof["evidence_ref"] for key, proof in operational_proofs.items()
+        if isinstance(proof, Mapping) and proof.get("authority_verified") is True
+        and isinstance(proof.get("evidence_ref"), str)
+    } if operational_required and operational_ok else {}
     return {**release_gate, **operational_gate,
-            "retry_eligible": release_gate["retry_eligible"] and operational_gate["operational_eligible"]}
+            "verified_operational_evidence": verified_operational,
+            "retry_eligible": (release_required or operational_required)
+                and release_ok and operational_ok
+                and item.get("blocker_category") == "dependency"}
 
 
 def commitment_summary(items: Mapping[str, Any]) -> dict[str, Any]:
