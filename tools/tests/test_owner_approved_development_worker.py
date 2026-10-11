@@ -1371,3 +1371,66 @@ def test_production_identity_contract_obeys_policy_denial():
     gate = types.SimpleNamespace(
         path_denial_reason=lambda path, policy: 'denied source')
     assert module.bounded_production_identity_contract(repo, gate, {}) == []
+
+
+
+def test_exact_repository_source_shortage_is_recoverable_not_authority():
+    reason = (
+        'Additional exact repository source is still needed to make a safe '
+        'exact-text replacement for readmit_verified_ccc_owner_review '
+        'without inventing unseen API surface.'
+    )
+    assert module.source_context_blocker(reason)
+    assert module.self_recoverable_blocker(reason)
+    assert not module.source_context_blocker(
+        'Additional provider permission is still needed for writes.'
+    )
+    assert not module.source_context_blocker(
+        'Additional owner approval is needed for production deployment.'
+    )
+
+
+def test_verified_upgrade_readmits_real_1245_shortage_once(tmp_path):
+    import json
+    from datetime import datetime, timezone
+    spool = tmp_path / 'support-repair'
+    spool.mkdir()
+    root = tmp_path / 'release-manager'
+    (root / 'protected-readback').mkdir(parents=True)
+    (root / 'records').mkdir()
+    sha = 'e' * 40
+    live = tmp_path / sha
+    live.mkdir()
+    (root / 'protected-readback/production-control-state.json').write_text(json.dumps(
+        {'last_known_good': {'manifest': {'revision': sha}}}))
+    (root / 'protected-readback/production-drift.json').write_text(json.dumps(
+        {'status': 'pass', 'problems': [],
+         'observed_at': datetime.now(timezone.utc).isoformat()}))
+    (root / 'records/release-test.json').write_text(json.dumps({
+        'state': 'closed', 'release_candidate': {'candidate_sha': sha},
+        'changed_files': ['tools/owner_approved_development_worker.py']}))
+    original_reason = (
+        'Additional exact repository source is still needed to make a safe '
+        'exact-text replacement for `readmit_verified_ccc_owner_review` that '
+        'compares against the authoritative live production SHA using the '
+        'existing read-only production identity helper without inventing '
+        'unseen API surface.'
+    )
+    record = {
+        'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+        'reason': original_reason, 'context_expansion_attempts': 3,
+        'source_upgrade_readmitted_sha': 'f' * 40
+    }
+    state = {'items': {'DEV-1245': record}}
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, set(), spool, current_link=live) == 0
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, {'DEV-1245'}, spool, current_link=live) == 1
+    assert record['phase'] == 'diagnosing'
+    assert record['context_expansion_attempts'] == 0
+    assert record['source_upgrade_readmitted_sha'] == sha
+    assert record['recovery_worktree_revision'] == sha
+    record['phase'] = 'blocked'
+    record['reason'] = original_reason
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, {'DEV-1245'}, spool, current_link=live) == 0

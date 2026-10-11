@@ -378,6 +378,15 @@ def source_context_blocker(reason: str) -> bool:
     )
     if any(marker in text for marker in explicit_markers):
         return True
+    # Exact-repository-source shortages may be reported without the words
+    # "excerpt" or "context". They are still internal discovery failures,
+    # not authority to skip approval or provider restrictions.
+    if re.search(
+        r'\b(?:additional|more|missing)\s+(?:exact\s+)?repository\s+'
+        r'(?:source|code)\b.{0,100}\b(?:needed|required|missing)\b',
+        text,
+    ):
+        return True
     # Negated excerpt availability is a source-context failure.
     if re.search(r'\b(?:no|without)\s+(?:[\w-]+\s+){0,5}excerpts?\b', text):
         return True
