@@ -728,6 +728,8 @@ def readmit_explicit_verified_dependencies(
             continue
         if dependencies != todo_bridge.explicit_release_dependencies(str(item.get("body") or "")):
             continue
+        if candidate.get('governing_operational_dependencies', []) != todo_bridge.explicit_operational_dependencies(str(item.get('body') or '')):
+            continue
         fresh = todo_bridge.dependency_state_for_item(candidate, todo_bridge.DEFAULT_RELEASE_STATE)
         if not fresh.get("retry_eligible"):
             continue

@@ -90,6 +90,7 @@ def todo_issues(repo: Path) -> list[dict[str, Any]]:
                 "title": str(issue.get("title") or ""),
                 "url": str(issue.get("url") or ""),
                 "governing_dependencies": explicit_release_dependencies(body),
+                "governing_operational_dependencies": explicit_operational_dependencies(body),
             }
         )
     return result
@@ -104,6 +105,40 @@ def explicit_release_dependencies(issue_body: str) -> list[str]:
     if not raw or len(raw) > 12 or any(not re.fullmatch(r"release-[0-9a-f]{16}", x) for x in raw):
         return []
     return sorted(set(raw))
+
+
+def explicit_operational_dependencies(issue_body: str) -> list[str]:
+    """Parse declared operational gate IDs, without treating issue closure as proof."""
+    match = re.search(r"(?im)^\s*-\s*Governing operational dependencies\s*:\s*(.+?)\s*$", issue_body)
+    if not match:
+        return []
+    values = [value.strip() for value in match.group(1).split(",")]
+    if not values or len(values) > 12 or any(not re.fullmatch(r"acceptance-[a-z0-9][a-z0-9-]{2,63}", x) for x in values):
+        return []
+    return sorted(set(values))
+
+
+def operational_evidence_gate(item: Mapping[str, Any], accepted: Mapping[str, Any]) -> dict[str, Any]:
+    """Fail closed until every declared operational receipt has verified provenance.
+
+    The caller must authenticate the independent acceptance source; no GitHub
+    issue status or free-form filesystem receipt can stand in for authority.
+    """
+    required = item.get("governing_operational_dependencies")
+    if required is None or required == []:
+        return {"operational_recheck": "not_applicable", "operational_eligible": True}
+    if not isinstance(required, list) or len(required) > 12 or any(
+            not isinstance(v, str) or not re.fullmatch(r"acceptance-[a-z0-9][a-z0-9-]{2,63}", v) for v in required):
+        return {"operational_recheck": "invalid_identity", "operational_eligible": False}
+    for identity in sorted(set(required)):
+        proof = accepted.get(identity)
+        if not isinstance(proof, Mapping) or proof.get("state") != "operationally_accepted":
+            return {"operational_recheck": "awaiting_authoritative_acceptance", "operational_eligible": False}
+        if proof.get("identity") != identity or proof.get("authority_verified") is not True:
+            return {"operational_recheck": "unverified_acceptance_authority", "operational_eligible": False}
+        if not isinstance(proof.get("evidence_ref"), str) or not proof["evidence_ref"].strip():
+            return {"operational_recheck": "missing_acceptance_provenance", "operational_eligible": False}
+    return {"operational_recheck": "verified", "operational_eligible": True}
 
 
 def development_records_by_issue(spool: Path) -> dict[int, dict[str, Any]]:
@@ -234,7 +269,10 @@ def dependency_state_for_item(item: Mapping[str, Any], release_root: Path) -> di
     required = item.get("governing_dependencies")
     identities = required if isinstance(required, list) else []
     accepted = accepted_release_dependencies(release_root, [s for s in identities if isinstance(s, str)])
-    return dependency_recheck_gate(item, accepted)
+    release_gate = dependency_recheck_gate(item, accepted)
+    operational_gate = operational_evidence_gate(item, {})
+    return {**release_gate, **operational_gate,
+            "retry_eligible": release_gate["retry_eligible"] and operational_gate["operational_eligible"]}
 
 
 def commitment_summary(items: Mapping[str, Any]) -> dict[str, Any]:
@@ -597,6 +635,10 @@ def main() -> int:
         if record.get("governing_dependencies") != declared:
             record["governing_dependencies"] = declared
             record.pop("dependency_recheck", None)
+            record.pop("retry_eligible", None)
+        declared_operational = issue["governing_operational_dependencies"]
+        if record.get("governing_operational_dependencies") != declared_operational:
+            record["governing_operational_dependencies"] = declared_operational
             record.pop("retry_eligible", None)
         merged = prs.get(issue["issue_number"])
         if not merged:
