@@ -752,7 +752,17 @@ def bounded_symbol_excerpt(text: str, symbols: list[str], *, content_limit: int)
                and node.name in wanted]
     if not matches:
         return None
-    chunks = [text[:min(1300, content_limit // 6)]]
+    # A raw character prefix can end inside an unrelated function, making an
+    # otherwise complete symbol excerpt appear truncated to the edit planner.
+    # Admit only complete top-level syntax nodes within the bounded preamble.
+    preamble_limit = min(1300, content_limit // 6)
+    preamble_end = 0
+    for node in tree.body:
+        ending = sum(len(line) for line in lines[:node.end_lineno])
+        if ending > preamble_limit:
+            break
+        preamble_end = ending
+    chunks = [text[:preamble_end]]
     for node in sorted(matches, key=lambda n: n.lineno):
         start = min([node.lineno, *[d.lineno for d in getattr(node, 'decorator_list', [])]]) - 1
         snippet = ''.join(lines[start:node.end_lineno])

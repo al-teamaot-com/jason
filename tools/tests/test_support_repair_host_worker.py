@@ -905,3 +905,31 @@ def test_bounded_full_approved_test_source(tmp_path):
         worker.source_excerpts_for_paths(tmp_path,[p],g,{},terms=['test_large'],content_limit=56000,full_file_paths=[p])
     denied=types.SimpleNamespace(path_denial_reason=lambda path,policy:'denied')
     assert worker.source_excerpts_for_paths(tmp_path,[p],denied,{},content_limit=96000,full_file_paths=[p])==[]
+
+
+
+def test_symbol_context_preamble_does_not_truncate_unrelated_function():
+    import ast
+    preamble = 'import json\n' + ''.join(
+        f'CONFIG_{i} = {i}\n' for i in range(82)
+    )
+    text = (preamble
+            + 'def unrelated():\n'
+            + '    one = 1\n'
+            + '    two = 2\n'
+            + '    return one + two\n'
+            + 'def requested_target():\n'
+            + '    return json.dumps({"ok": True})\n')
+    # The former raw 1,300-character prefix ends within a Python definition.
+    import pytest
+    with pytest.raises(SyntaxError):
+        ast.parse(text[:1300])
+    excerpt = worker.bounded_symbol_excerpt(
+        text, ['requested_target'], content_limit=9000
+    )
+    assert excerpt is not None
+    prefix, _, definition = excerpt.partition('\n# Complete definition')
+    ast.parse(prefix)
+    assert 'def requested_target' in definition
+    assert 'return json.dumps' in definition
+    assert 'def unrelated():\n    one = 1\n    two = 2\n    return one + two' in prefix or 'def unrelated' not in prefix
