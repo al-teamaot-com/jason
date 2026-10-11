@@ -347,6 +347,7 @@ for worker in \
   owner_approved_development_worker.py \
   todo_engineering_intake.py \
   todo_release_bridge.py \
+  operational_acceptance_reader.py \
   release_manager_gate.py \
   change_integration_gate.py \
   documentation_impact_gate.py; do
