@@ -4,10 +4,10 @@
   "mode": "production",
   "production_transition_enabled": true,
   "schedule": {
-    "automatic_promotion_enabled": false,
+    "automatic_promotion_enabled": true,
     "timezone": "America/New_York",
     "serialized_promotion": true,
-    "mode": "manual_production_approval",
+    "mode": "continuous_24x7_owner_approved",
     "reconcile_interval_minutes": 5,
     "max_concurrent_releases": 1
   },
@@ -22,7 +22,7 @@
     "provider_mutations_enabled": false
   },
   "production": {
-    "normal_release_auto_promote_when_eligible": false,
+    "normal_release_auto_promote_when_eligible": true,
     "protected_core_requires_owner_approval": true,
     "post_deploy_verification_required": true,
     "rollback_on_verification_failure": true,
