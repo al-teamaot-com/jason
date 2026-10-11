@@ -36,6 +36,14 @@ def test_lifecycle_sync_does_not_claim_completion_without_pr(tmp_path):
     assert not list(tmp_path.glob('*.json'))
 
 
+def test_exact_approved_symbols_are_deduplicated_and_bounded():
+    scope = ('Use `bounded_symbol_excerpt` and `source_excerpts_for_paths` ' * 3) + '`tools/not_a_symbol.py`'
+    assert module.exact_approved_symbols(scope) == [
+        'bounded_symbol_excerpt', 'source_excerpts_for_paths'
+    ]
+    assert len(module.exact_approved_symbols(' '.join(f'`func_{i}`' for i in range(50)))) == 24
+
+
 def test_owner_approval_marker_is_exact():
     assert module.APPROVAL.search('- **Autonomous development:** owner-approved')
     assert not module.APPROVAL.search('- **Autonomous development:** approved')
