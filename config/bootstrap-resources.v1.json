@@ -1,0 +1,107 @@
+{
+  "schema_version": "1.0",
+  "networks": [
+    {"name": "jason-core", "required": true},
+    {"name": "jason-observability", "required": true},
+    {"name": "openclaw_default", "required": false}
+  ],
+  "state_stores": [
+    {
+      "id": "identity-authority",
+      "relative_path": "var/lib/jason/authority/authority.sqlite3",
+      "owner": "kernel.identity_authority",
+      "initialization": "bootstrap_explicit"
+    },
+    {
+      "id": "client-boundaries",
+      "relative_path": "var/lib/jason/authority/client-boundaries.sqlite3",
+      "owner": "kernel.client_boundaries",
+      "initialization": "bootstrap_explicit"
+    },
+    {
+      "id": "orchestration-events",
+      "relative_path": "var/lib/jason/openclaw/orchestration-events.sqlite3",
+      "owner": "orchestrator.event_store",
+      "initialization": "bootstrap_explicit"
+    },
+    {
+      "id": "approval-continuations",
+      "relative_path": "var/lib/jason/openclaw/approval-continuations.sqlite3",
+      "owner": "orchestrator.approval_continuation_guard",
+      "initialization": "bootstrap_explicit"
+    },
+    {
+      "id": "teams-identity-bindings",
+      "relative_path": "var/lib/jason/openclaw/teams-identity-bindings.sqlite3",
+      "owner": "runtime",
+      "initialization": "runtime_owned"
+    },
+    {
+      "id": "security-audit",
+      "relative_path": "var/lib/jason/openclaw/security-audit.sqlite3",
+      "owner": "runtime",
+      "initialization": "runtime_owned"
+    },
+    {
+      "id": "model-usage",
+      "relative_path": "var/lib/jason/openclaw/model-usage.sqlite3",
+      "owner": "runtime",
+      "initialization": "runtime_owned"
+    },
+    {
+      "id": "procurement-submissions",
+      "relative_path": "var/lib/jason/openclaw/procurement/submissions.sqlite3",
+      "owner": "runtime.procurement",
+      "initialization": "runtime_owned"
+    },
+    {
+      "id": "autonomy-operational-work",
+      "relative_path": "var/lib/jason/openclaw/autonomy-operational-work.sqlite3",
+      "owner": "runtime.autonomy",
+      "initialization": "runtime_owned"
+    },
+    {
+      "id": "kfs-history",
+      "relative_path": "var/lib/jason/kfs/postgresql",
+      "owner": "kfs-postgres",
+      "initialization": "external_database"
+    }
+  ],
+  "systemd_units": [
+    {
+      "source": "infrastructure/openclaw-operations/systemd/jason-delegation-maintenance.service",
+      "portable": true,
+      "reason": "uses /opt/jason/current and /var/lib/jason only"
+    },
+    {
+      "source": "infrastructure/openclaw-operations/systemd/jason-delegation-maintenance.timer",
+      "portable": true,
+      "reason": "portable timer"
+    },
+    {
+      "source": "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-health.service",
+      "portable": true,
+      "reason": "uses /opt/jason/current and /var/lib/jason only"
+    },
+    {
+      "source": "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-health.timer",
+      "portable": true,
+      "reason": "portable timer"
+    },
+    {
+      "source": "infrastructure/kfs-collector/systemd/jason-kfs-collector.service",
+      "portable": false,
+      "reason": "hard-coded /home/al operator path"
+    },
+    {
+      "source": "infrastructure/openclaw-operations/systemd/jason-documentation-reconciliation.service",
+      "portable": false,
+      "reason": "hard-coded /home/al repository/worktree paths"
+    },
+    {
+      "source": "infrastructure/ccc/systemd/jason-ccc.service",
+      "portable": false,
+      "reason": "contains AOT/operator-home evidence and git paths"
+    }
+  ]
+}
