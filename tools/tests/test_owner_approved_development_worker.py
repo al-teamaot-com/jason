@@ -939,7 +939,7 @@ def test_verified_upgrade_readmits_exact_anchor_failure_once(tmp_path):
     reason = ('WorkerError: exact repair anchor must occur once in '
               'tools/owner_approved_development_worker.py; found 0')
     record = {'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
-              'reason': reason, 'self_recovery_attempts': 2}
+              'reason': reason, 'self_recovery_attempts': 2, 'anchor_refresh_attempts': 2}
     state = {'items': {'DEV-1245': record}}
     assert module.readmit_source_context_after_verified_worker_upgrade(
         state, set(), spool, current_link=live) == 0
@@ -948,6 +948,7 @@ def test_verified_upgrade_readmits_exact_anchor_failure_once(tmp_path):
         state, {'DEV-1245'}, spool, current_link=live) == 1
     assert record['phase'] == 'diagnosing'
     assert record['self_recovery_attempts'] == 0
+    assert record['anchor_refresh_attempts'] == 0
     record['phase'] = 'blocked'
     assert module.readmit_source_context_after_verified_worker_upgrade(
         state, {'DEV-1245'}, spool, current_link=live) == 0
@@ -1031,3 +1032,162 @@ def test_both_worker_branches_invoke_shared_anchor_preflight():
     import inspect
     source = inspect.getsource(module.main)
     assert source.count('if preflight_or_refresh_exact_anchors(') == 2
+
+
+def test_anchor_regeneration_carries_full_approved_test_context(monkeypatch, tmp_path):
+    import types
+    worker = tmp_path / 'tools/worker.py'
+    test = tmp_path / 'tools/tests/test_worker.py'
+    test.parent.mkdir(parents=True)
+    worker.write_text('value = 1\n')
+    test.write_text('def test_value():\n    assert True\n')
+    gate = types.SimpleNamespace(path_denial_reason=lambda path, policy: '')
+    scope = 'Only edit `tools/worker.py` and `tools/tests/test_worker.py`.'
+    monkeypatch.setattr(module, 'approved_scope', lambda item: scope)
+    observed = []
+    def excerpts(root, paths, gate_arg, policy, **kwargs):
+        observed.extend(paths)
+        return [{'path': path, 'content': (root / path).read_text()}
+                for path in paths if (root / path).is_file()]
+    monkeypatch.setattr(module.support, 'source_excerpts_for_paths', excerpts)
+    queued = []
+    monkeypatch.setattr(module, 'queue_reasoning',
+                        lambda spool, **kwargs: queued.append(kwargs) or 'fresh-plan')
+    record = {'phase': 'implementing'}
+    stale = [{'path': 'tools/worker.py', 'old_text': 'value = 0', 'new_text': 'value = 2'}]
+    assert module.preflight_or_refresh_exact_anchors(
+        tmp_path, stale, gate, {}, record, {'issue_number': 42}, tmp_path)
+    assert observed == ['tools/worker.py', 'tools/tests/test_worker.py']
+    context = queued[0]['context']
+    assert context['required_test_paths'] == ['tools/tests/test_worker.py']
+    assert [part['path'] for part in context['source_excerpts']] == observed
+    assert context['source_excerpts'][1]['content'] == test.read_text()
+    assert record['reasoning_request_id'] == 'fresh-plan'
+    assert record['anchor_refresh_attempts'] == 1
+    assert worker.read_text() == 'value = 1\n'
+    assert test.read_text() == 'def test_value():\n    assert True\n'
+
+
+def test_anchor_regeneration_fails_closed_when_approved_tests_unavailable(monkeypatch, tmp_path):
+    import types
+    worker = tmp_path / 'tools/worker.py'
+    worker.parent.mkdir(parents=True)
+    worker.write_text('value = 1\n')
+    gate = types.SimpleNamespace(path_denial_reason=lambda path, policy: '')
+    monkeypatch.setattr(module, 'approved_scope',
+                        lambda item: '`tools/worker.py` `tools/tests/test_worker.py`')
+    monkeypatch.setattr(module.support, 'source_excerpts_for_paths',
+                        lambda root, paths, *args, **kwargs: [
+                            {'path': 'tools/worker.py', 'content': worker.read_text()}])
+    queued = []
+    monkeypatch.setattr(module, 'queue_reasoning',
+                        lambda *args, **kwargs: queued.append(kwargs))
+    import pytest
+    with pytest.raises(module.support.WorkerError, match='approved tests unavailable'):
+        module.preflight_or_refresh_exact_anchors(
+            tmp_path, [{'path': 'tools/worker.py', 'old_text': 'absent',
+                        'new_text': 'value = 2'}],
+            gate, {}, {'phase': 'implementing'}, {'issue_number': 42}, tmp_path)
+    assert not queued
+    assert worker.read_text() == 'value = 1\n'
+
+
+def test_real_implementing_worker_regenerates_full_patch_and_reaches_pr(monkeypatch, tmp_path):
+    """Drive two ordinary main() cycles, not just the anchor helper."""
+    import types
+    source = tmp_path / 'tools/worker.py'
+    regression = tmp_path / 'tools/tests/test_worker.py'
+    regression.parent.mkdir(parents=True)
+    source.write_text('value = 1\n')
+    regression.write_text('def test_value():\n    assert True\n')
+    item = {'id': 'DEV-42', 'issue_number': 42, 'title': 'Canary',
+            'approval_source': 'owner-approved', 'approved_by': 'owner',
+            'body': 'Only edit `tools/worker.py` and `tools/tests/test_worker.py`.'}
+    record = {'phase': 'implementing', 'reasoning_request_id': 'stale-rid',
+              'issue_number': 42, 'branch': 'develop/42'}
+    state = {'items': {'DEV-42': record}}
+    gate = types.SimpleNamespace(load_json=lambda path: {},
+                                 path_denial_reason=lambda path, policy: '')
+    monkeypatch.setattr(sys, 'argv',
+                        ['owner_approved_development_worker.py', '--repo', str(tmp_path),
+                         '--spool', str(tmp_path / 'spool')])
+    monkeypatch.setattr(module.support, 'load_state', lambda path: state)
+    monkeypatch.setattr(module.support, 'save_state', lambda path, obj: None)
+    monkeypatch.setattr(module.support, 'run', lambda args, **kw: 'develop/42')
+    monkeypatch.setattr(module, 'owner_approved_issues', lambda repo: [item])
+    monkeypatch.setattr(module, 'issue_has_closed_dependency_gate', lambda item: False)
+    for name in ('reconcile_issue_dependency_holds', 'reconcile_removed_approval',
+                 'readmit_verified_ccc_owner_review', 'recycle_self_recoverable_blockers',
+                 'queue_exhausted_recovery_diagnostics',
+                 'reconcile_exhausted_recovery_diagnostics',
+                 'reconcile_recovery_handoff_intake',
+                 'raise_exhausted_repair_support_issues',
+                 'readmit_verified_development_recoveries',
+                 'readmit_source_context_after_verified_worker_upgrade',
+                 'readmit_explicit_verified_dependencies'):
+        monkeypatch.setattr(module, name, lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, 'active_support_count', lambda spool: 0)
+    monkeypatch.setattr(module, 'select_items', lambda state, admitted, capacity: ['DEV-42'])
+    monkeypatch.setattr(module.support, 'open_prs', lambda repo: [])
+    monkeypatch.setattr(module.support, 'load_gate', lambda repo: gate)
+    monkeypatch.setattr(module, 'development_pr_for', lambda issue_number, prs: None)
+    monkeypatch.setattr(module, 'known_development_pr_is_merged', lambda repo, rec: False)
+    monkeypatch.setattr(module, 'ensure_worktree', lambda *args: tmp_path)
+    monkeypatch.setattr(module, 'sync_lifecycle_notification', lambda *args, **kw: None)
+    monkeypatch.setattr(module.support, 'source_excerpts_for_paths',
+                        lambda root, paths, *args, **kw: [
+                            {'path': p, 'content': (root / p).read_text()} for p in paths])
+    queued = []
+    monkeypatch.setattr(module, 'queue_reasoning',
+                        lambda spool, **kw: queued.append(kw) or 'fresh-rid')
+    def response(spool, rid):
+        if rid == 'stale-rid':
+            return {'status': 'succeeded', 'result': {
+                'edits': [{'path': 'tools/worker.py', 'old_text': 'not present',
+                           'new_text': 'value = 2'}]}}
+        assert rid == 'fresh-rid'
+        return {'status': 'succeeded', 'result': {
+            'edits': [
+                {'path': 'tools/worker.py', 'old_text': 'value = 1',
+                 'new_text': 'value = 2'},
+                {'path': 'tools/tests/test_worker.py', 'old_text': 'assert True',
+                 'new_text': 'assert 2 == 2'},
+            ],
+            'test_paths': ['tools/tests/test_worker.py'],
+        }}
+    monkeypatch.setattr(module.support, 'reasoning_response', response)
+    applied = []
+    def apply_edits(root, edits, gate, policy):
+        applied.append(list(edits))
+        for edit in edits:
+            path = root / edit['path']
+            old = path.read_text()
+            assert old.count(edit['old_text']) == 1
+            path.write_text(old.replace(edit['old_text'], edit['new_text'], 1))
+    monkeypatch.setattr(module.support, 'apply_edits', apply_edits)
+    monkeypatch.setattr(module.support, 'validate_patch',
+                        lambda root, paths, gate, policy: {'passed': True, 'paths': paths})
+    def fake_pr(repo, worktree, item, tests):
+        assert source.read_text() == 'value = 2\n'
+        assert 'assert 2 == 2' in regression.read_text()
+        assert tests['passed']
+        return 4242
+    monkeypatch.setattr(module, 'commit_and_pr', fake_pr)
+    assert module.main() == 0
+    assert record['phase'] == 'implementing'
+    assert record['reasoning_request_id'] == 'fresh-rid'
+    assert record['anchor_refresh_attempts'] == 1
+    assert not applied
+    assert [x['path'] for x in queued[0]['context']['source_excerpts']] == [
+        'tools/worker.py', 'tools/tests/test_worker.py']
+    assert module.main() == 0
+    assert record['phase'] == 'pr_validating'
+    assert record['pr_number'] == 4242
+    assert len(applied) == 1
+
+
+def test_negated_test_excerpt_is_source_context():
+    reason = 'No dedicated test excerpt was supplied to safely patch regression tests.'
+    assert module.source_context_blocker(reason)
+    assert module.self_recoverable_blocker(reason)
+    assert not module.source_context_blocker('All regression tests passed.')
