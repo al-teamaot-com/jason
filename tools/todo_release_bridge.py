@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+import operational_acceptance_reader as acceptance_reader
+
 DEFAULT_REPO = Path("/home/al/projects/jason")
 DEFAULT_SPOOL = Path("/var/lib/jason/openclaw/support-repair")
 DEFAULT_RELEASE_STATE = Path("/var/lib/jason/openclaw/release-manager")
@@ -89,9 +91,56 @@ def todo_issues(repo: Path) -> list[dict[str, Any]]:
                 "issue_number": int(issue["number"]),
                 "title": str(issue.get("title") or ""),
                 "url": str(issue.get("url") or ""),
+                "governing_dependencies": explicit_release_dependencies(body),
+                "governing_operational_dependencies": explicit_operational_dependencies(body),
             }
         )
     return result
+
+
+def explicit_release_dependencies(issue_body: str) -> list[str]:
+    """Read only machine-explicit release prerequisites, never infer from prose."""
+    match = re.search(r"(?im)^\s*-\s*Governing release dependencies\s*:\s*(.+?)\s*$", issue_body)
+    if not match:
+        return []
+    raw = [value.strip() for value in match.group(1).split(",")]
+    if not raw or len(raw) > 12 or any(not re.fullmatch(r"release-[0-9a-f]{16}", x) for x in raw):
+        return []
+    return sorted(set(raw))
+
+
+def explicit_operational_dependencies(issue_body: str) -> list[str]:
+    """Parse declared operational gate IDs, without treating issue closure as proof."""
+    match = re.search(r"(?im)^\s*-\s*Governing operational dependencies\s*:\s*(.+?)\s*$", issue_body)
+    if not match:
+        return []
+    values = [value.strip() for value in match.group(1).split(",")]
+    if not values or len(values) > 12 or any(not re.fullmatch(r"acceptance-[a-z0-9][a-z0-9-]{2,63}", x) for x in values):
+        return []
+    return sorted(set(values))
+
+
+def operational_evidence_gate(item: Mapping[str, Any], accepted: Mapping[str, Any]) -> dict[str, Any]:
+    """Fail closed until every declared operational receipt has verified provenance.
+
+    The caller must authenticate the independent acceptance source; no GitHub
+    issue status or free-form filesystem receipt can stand in for authority.
+    """
+    required = item.get("governing_operational_dependencies")
+    if required is None or required == []:
+        return {"operational_recheck": "not_applicable", "operational_eligible": True}
+    if not isinstance(required, list) or len(required) > 12 or any(
+            not isinstance(v, str) or not re.fullmatch(r"acceptance-[a-z0-9][a-z0-9-]{2,63}", v) for v in required):
+        return {"operational_recheck": "invalid_identity", "operational_eligible": False}
+    for identity in sorted(set(required)):
+        proof = accepted.get(identity)
+        if not isinstance(proof, Mapping) or proof.get("state") != "operationally_accepted":
+            return {"operational_recheck": "awaiting_authoritative_acceptance", "operational_eligible": False}
+        if proof.get("identity") != identity or proof.get("authority_verified") is not True:
+            return {"operational_recheck": "unverified_acceptance_authority", "operational_eligible": False}
+        if not isinstance(proof.get("evidence_ref"), str) or not proof["evidence_ref"].strip():
+            return {"operational_recheck": "missing_acceptance_provenance", "operational_eligible": False}
+    return {"operational_recheck": "verified", "operational_eligible": True}
 
 
 def development_records_by_issue(spool: Path) -> dict[int, dict[str, Any]]:
@@ -137,6 +186,114 @@ def upstream_commitment_state(record: Mapping[str, Any] | None) -> tuple[str, st
     if phase in {'pr_ready', 'pr_validating', 'ci_repair_needed', 'ci_repairing'}:
         return 'waiting_development_merge', reason
     return 'development_in_progress', reason
+
+
+def next_work_gate(phase: str, reason: str) -> dict[str, str]:
+    """Classify a pending commitment without granting execution authority."""
+    reason_lower = reason.casefold()
+    if phase == "complete":
+        return {"blocker_category": "none", "next_action": "none"}
+    if phase == "waiting_operational_acceptance":
+        return {"blocker_category": "acceptance", "next_action": "collect_production_acceptance_evidence"}
+    if phase == "waiting_development_merge":
+        return {"blocker_category": "merge_gate", "next_action": "recheck_pr_checks_and_merge_readiness"}
+    if phase == "closure_validating":
+        return {"blocker_category": "closure_gate", "next_action": "recheck_closure_pr_and_todo_readback"}
+    if phase == "development_blocked":
+        if "dependency" in reason_lower or "prerequisite" in reason_lower:
+            return {"blocker_category": "dependency", "next_action": "recheck_authoritative_dependency_acceptance"}
+        if "credential" in reason_lower or "api details" in reason_lower or "authorization" in reason_lower:
+            return {"blocker_category": "external_authority", "next_action": "request_authorized_provider_access_evidence"}
+        if "excerpt" in reason_lower or "source" in reason_lower:
+            return {"blocker_category": "source_context", "next_action": "retrieve_bounded_authorized_source_context"}
+        if "regression test" in reason_lower:
+            return {"blocker_category": "development_test", "next_action": "verify_development_admission_and_author_test"}
+        return {"blocker_category": "unknown", "next_action": "classify_from_authoritative_evidence"}
+    if phase.startswith("release_") or phase == "waiting_release":
+        return {"blocker_category": "release_gate", "next_action": "recheck_governed_release_state"}
+    return {"blocker_category": "work_gate", "next_action": "recheck_authoritative_work_state"}
+
+
+def dependency_recheck_gate(
+    item: Mapping[str, Any], accepted_dependencies: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Report dependency eligibility; never claim a retry or change authority.
+
+    The supplied acceptance map must be constructed from authoritative verified
+    releases by a separate governed reader. Missing or partial evidence fails
+    closed. A GitHub issue's closed state alone never satisfies this gate.
+    """
+    if item.get("blocker_category") != "dependency":
+        return {"dependency_recheck": "not_applicable", "retry_eligible": False}
+    required = item.get("governing_dependencies")
+    if not isinstance(required, list) or not required or any(
+        not isinstance(value, str) or not value.strip() for value in required
+    ):
+        return {"dependency_recheck": "missing_dependency_identity", "retry_eligible": False}
+    unique = sorted(set(required))
+    for dependency in unique:
+        proof = accepted_dependencies.get(dependency)
+        if not isinstance(proof, Mapping) or proof.get("state") != "production_verified":
+            return {"dependency_recheck": "awaiting_verified_dependency", "retry_eligible": False}
+        if not isinstance(proof.get("release_sha"), str) or len(proof["release_sha"]) != 40:
+            return {"dependency_recheck": "missing_release_provenance", "retry_eligible": False}
+    return {"dependency_recheck": "verified_for_governed_readmission_check", "retry_eligible": True}
+
+
+def accepted_release_dependencies(release_root: Path, identities: list[str]) -> dict[str, Any]:
+    """Load exact release IDs only; require a closed release with matching SHA.
+
+    No issue closure, free-text inference, or provider-side mutation qualifies.
+    """
+    accepted: dict[str, Any] = {}
+    for identity in sorted(set(identities)):
+        if not re.fullmatch(r"release-[0-9a-f]{16}", identity):
+            continue
+        candidate = release_root / "records" / (identity + ".json")
+        if not candidate.is_file():
+            continue
+        try:
+            record = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        production = record.get("production") or {}
+        sha = production.get("live_sha") if isinstance(production, Mapping) else None
+        if (record.get("release_id") == identity and record.get("state") == "closed"
+                and isinstance(sha, str) and SHA.fullmatch(sha)
+                and sha == (record.get("release_manifest") or {}).get("candidate_sha")
+                and any(h.get("state") == "closed" and h.get("gate") == "pass"
+                        for h in record.get("history", []) if isinstance(h, Mapping))):
+            accepted[identity] = {"state": "production_verified", "release_sha": sha}
+    return accepted
+
+
+def dependency_state_for_item(item: Mapping[str, Any], release_root: Path, acceptance_root: Path | None = None) -> dict[str, Any]:
+    required = item.get("governing_dependencies")
+    identities = required if isinstance(required, list) else []
+    accepted = accepted_release_dependencies(release_root, [s for s in identities if isinstance(s, str)])
+    release_gate = dependency_recheck_gate(item, accepted)
+    operational_ids = item.get('governing_operational_dependencies')
+    operational_proofs = acceptance_reader.accepted_operational_dependencies(
+        acceptance_root or release_root / 'protected-operational-acceptance',
+        [v for v in operational_ids if isinstance(v, str)] if isinstance(operational_ids, list) else [],
+        int(item.get('issue_number') or 0),
+    ) if operational_ids else {}
+    operational_gate = operational_evidence_gate(item, operational_proofs)
+    release_required = isinstance(identities, list) and bool(identities)
+    operational_required = isinstance(operational_ids, list) and bool(operational_ids)
+    # No implicit eligibility for work lacking explicit governing dependencies.
+    release_ok = release_gate["retry_eligible"] if release_required else required == []
+    operational_ok = operational_gate["operational_eligible"]
+    verified_operational = {
+        key: proof["evidence_ref"] for key, proof in operational_proofs.items()
+        if isinstance(proof, Mapping) and proof.get("authority_verified") is True
+        and isinstance(proof.get("evidence_ref"), str)
+    } if operational_required and operational_ok else {}
+    return {**release_gate, **operational_gate,
+            "verified_operational_evidence": verified_operational,
+            "retry_eligible": (release_required or operational_required)
+                and release_ok and operational_ok
+                and item.get("blocker_category") == "dependency"}
 
 
 def commitment_summary(items: Mapping[str, Any]) -> dict[str, Any]:
@@ -493,6 +650,17 @@ def main() -> int:
                 "updated_at": now(),
             },
         )
+        # Only declared exact release IDs can change the governing dependency
+        # set. A changed declaration invalidates the old eligibility result.
+        declared = issue["governing_dependencies"]
+        if record.get("governing_dependencies") != declared:
+            record["governing_dependencies"] = declared
+            record.pop("dependency_recheck", None)
+            record.pop("retry_eligible", None)
+        declared_operational = issue["governing_operational_dependencies"]
+        if record.get("governing_operational_dependencies") != declared_operational:
+            record["governing_operational_dependencies"] = declared_operational
+            record.pop("retry_eligible", None)
         merged = prs.get(issue["issue_number"])
         if not merged:
             phase, reason = upstream_commitment_state(
@@ -603,6 +771,14 @@ def main() -> int:
                 }
             )
 
+    for item in state["items"].values():
+        if isinstance(item, dict):
+            item.update(next_work_gate(str(item.get("phase") or ""), str(item.get("reason") or "")))
+    # Read authoritative protected release records, without changing a worker
+    # admission decision, modifying dependencies, or granting new authority.
+    for item in state["items"].values():
+        if isinstance(item, dict):
+            item.update(dependency_state_for_item(item, args.release_state.resolve()))
     state["summary"] = commitment_summary(state["items"])
     state["updated_at"] = now()
     atomic_json(state_path, state)

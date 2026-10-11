@@ -31,6 +31,7 @@ def main() -> int:
     development_runner = repo / 'tools' / 'owner_approved_development_worker.py'
     todo_intake_runner = repo / 'tools' / 'todo_engineering_intake.py'
     todo_release_bridge = repo / 'tools' / 'todo_release_bridge.py'
+    operational_acceptance_reader = repo / 'tools' / 'operational_acceptance_reader.py'
     release_manager_gate = repo / 'tools' / 'release_manager_gate.py'
     change_integration_gate = repo / 'tools' / 'change_integration_gate.py'
     documentation_impact_gate = repo / 'tools' / 'documentation_impact_gate.py'
@@ -46,6 +47,8 @@ def main() -> int:
         raise SystemExit('TODO engineering intake worker source is missing')
     if not todo_release_bridge.is_file():
         raise SystemExit('TODO release bridge source is missing')
+    if not operational_acceptance_reader.is_file():
+        raise SystemExit('operational acceptance reader source is missing')
     for dependency in (change_integration_gate, documentation_impact_gate):
         if not dependency.is_file():
             raise SystemExit('owner-approved worker dependency is missing: ' + dependency.name)
@@ -69,6 +72,7 @@ def main() -> int:
     _copy(development_runner, install_root / 'owner_approved_development_worker.py', 0o700)
     _copy(todo_intake_runner, install_root / 'todo_engineering_intake.py', 0o700)
     _copy(todo_release_bridge, install_root / 'todo_release_bridge.py', 0o700)
+    _copy(operational_acceptance_reader, install_root / 'operational_acceptance_reader.py', 0o700)
     _copy(release_manager_gate, install_root / 'release_manager_gate.py', 0o700)
     _copy(change_integration_gate, install_root / 'change_integration_gate.py', 0o600)
     _copy(documentation_impact_gate, install_root / 'documentation_impact_gate.py', 0o600)
