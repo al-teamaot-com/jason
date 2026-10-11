@@ -42,6 +42,11 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def normalize_priority(value: str) -> str:
+    match = re.match(r"^(P[0-3])(?:\b|\s|\u2014|[-:])", str(value or "").strip(), re.IGNORECASE)
+    return match.group(1).upper() if match else str(value or "").strip()
+
+
 def run(args: list[str], *, cwd: Path, check: bool = True) -> str:
     completed = subprocess.run(
         args,
@@ -103,7 +108,7 @@ def parse_todo_sections(text: str) -> list[TodoItem]:
             TodoItem(
                 item_id=match.group(1),
                 title=match.group(2).strip(),
-                priority=fields.get("priority", ""),
+                priority=normalize_priority(fields.get("priority", "")),
                 status=fields.get("status", ""),
                 readiness=fields.get("autonomous engineering readiness", ""),
                 section="\n".join(section_lines).strip(),
