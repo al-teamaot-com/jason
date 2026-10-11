@@ -76,6 +76,11 @@ def explicit_approved_source_paths(scope: str) -> list[str]:
     return result
 
 
+def exact_approved_symbols(scope: str) -> list[str]:
+    """Extract explicit function identifiers, not every word of an issue body."""
+    return list(dict.fromkeys(re.findall(r'`([A-Za-z_][A-Za-z0-9_]*)`', scope)))[:24]
+
+
 def owner_approved_issues(repo: Path) -> list[dict[str, Any]]:
     slug = repository_name(repo)
     issues = support.gh_json([
@@ -1379,7 +1384,8 @@ def main() -> int:
                 if explicit_paths:
                     targeted = support.source_excerpts_for_paths(
                         worktree, explicit_paths, gate, policy,
-                        terms=[approved_scope(item), *search_terms], limit=6, content_limit=24000,
+                        terms=[*exact_approved_symbols(approved_scope(item)), *search_terms],
+                        limit=6, content_limit=24000,
                     )
                     excerpts = support.merge_source_excerpts(
                         targeted, excerpts, max_total=14,
