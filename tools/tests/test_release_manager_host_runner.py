@@ -1268,3 +1268,33 @@ def test_rollback_retention_only_removes_old_exited_named_containers():
     removed = [args[2] for args in calls if args[1] == 'rm']
     assert removed == list(reversed(names[:6]))
     assert not any('prune' in args for args in calls)
+
+
+def test_explicit_prepare_reconciles_retention_before_breaker_revalidation():
+    """Both automatic and owner-triggered releases reserve rollback headroom."""
+    from unittest.mock import patch
+    order = []
+    def cleanup():
+        order.append('retention')
+        return 16
+    def breaker(state_root):
+        order.append('breaker')
+        raise runner.ReleaseManagerError('controlled stop before release mutation')
+    with patch.object(runner, 'reconcile_stopped_rollback_retention', side_effect=cleanup), \
+         patch.object(runner, 'revalidate_circuit_breaker', side_effect=breaker):
+        with __import__('pytest').raises(runner.ReleaseManagerError,
+                                         match='controlled stop before release mutation'):
+            runner.prepare_release(Path('/tmp/nonexistent'), Path('/tmp/nonexistent'),
+                                   SHA_A, 'release_blocker', owner_approved=True)
+    assert order == ['retention', 'breaker']
+
+
+def test_retention_failure_prevents_breaker_revalidation_and_mutation():
+    from unittest.mock import patch
+    with patch.object(runner, 'reconcile_stopped_rollback_retention',
+                      side_effect=runner.ReleaseManagerError('docker unavailable')), \
+         patch.object(runner, 'revalidate_circuit_breaker') as breaker:
+        with __import__('pytest').raises(runner.ReleaseManagerError, match='docker unavailable'):
+            runner.prepare_release(Path('/tmp/nonexistent'), Path('/tmp/nonexistent'),
+                                   SHA_A, 'release_blocker', owner_approved=True)
+        breaker.assert_not_called()

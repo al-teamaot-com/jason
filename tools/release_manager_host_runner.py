@@ -1940,6 +1940,11 @@ def prepare_release(
     reissue_rolled_back: bool = False,
 ) -> dict[str, Any]:
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    # Routine promotion and explicit owner-authorized preparation must share the
+    # same bounded, stopped-container-only retention hygiene. It must run
+    # before breaker revalidation (which checks drift including retention).
+    # Any Docker failure fails closed rather than masking real drift.
+    reconcile_stopped_rollback_retention()
     revalidate_circuit_breaker(state_root)
     release_id = record_id(candidate_sha)
     if reissue_rolled_back:
