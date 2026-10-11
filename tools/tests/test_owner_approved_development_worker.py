@@ -992,3 +992,42 @@ def test_stale_anchor_preflight_is_read_only_and_detects_later_edit_conflict(tmp
     assert module.mismatched_exact_anchors(tmp_path, edits, gate, {}) == ['tools/owner_approved_development_worker.py']
     assert path.read_text() == 'value = 1\n'
     assert module.mismatched_exact_anchors(tmp_path, edits[:1], gate, {}) == []
+
+
+
+def test_shared_anchor_preflight_queues_fresh_edit_plan_without_mutation(monkeypatch, tmp_path):
+    import types
+    source = tmp_path / 'tools/example.py'
+    source.parent.mkdir()
+    source.write_text('value = 1\n')
+    gate = types.SimpleNamespace(path_denial_reason=lambda path, policy: '')
+    monkeypatch.setattr(module.support, 'source_excerpts_for_paths',
+                        lambda *args, **kwargs: [{'path': 'tools/example.py', 'content': source.read_text()}])
+    requests = []
+    monkeypatch.setattr(module, 'queue_reasoning', lambda *args, **kwargs: requests.append(kwargs) or 'refreshed-id')
+    monkeypatch.setattr(module, 'approved_scope', lambda item: 'tools/example.py')
+    record = {'phase': 'implementing'}
+    edits = [{'path': 'tools/example.py', 'old_text': 'value = 0', 'new_text': 'value = 2'}]
+    assert module.preflight_or_refresh_exact_anchors(
+        tmp_path, edits, gate, {}, record, {'issue_number': 42}, tmp_path)
+    assert record['phase'] == 'implementing'
+    assert record['reasoning_request_id'] == 'refreshed-id'
+    assert record['anchor_refresh_attempts'] == 1
+    assert requests[0]['context']['prior_anchor_failures'] == ['tools/example.py']
+    assert source.read_text() == 'value = 1\n'
+    assert not module.preflight_or_refresh_exact_anchors(
+        tmp_path, [{'path': 'tools/example.py', 'old_text': 'value = 1',
+                    'new_text': 'value = 2'}], gate, {}, record, {'issue_number': 42}, tmp_path)
+    record['anchor_refresh_attempts'] = 2
+    import pytest
+    with pytest.raises(module.support.WorkerError, match='exact anchor refresh exhausted'):
+        module.preflight_or_refresh_exact_anchors(
+            tmp_path, edits, gate, {}, record, {'issue_number': 42}, tmp_path)
+    assert len(requests) == 1
+    assert source.read_text() == 'value = 1\n'
+
+
+def test_both_worker_branches_invoke_shared_anchor_preflight():
+    import inspect
+    source = inspect.getsource(module.main)
+    assert source.count('if preflight_or_refresh_exact_anchors(') == 2
