@@ -548,6 +548,13 @@ def recycle_self_recoverable_blockers(
             continue
         if str(record.get('phase') or '') != 'blocked':
             continue
+        # Retry budgets are independent. An already-exhausted engineering item
+        # must never fall back to the generic recycler just because a verified
+        # upgrade previously reset its ordinary retry counter to zero.
+        # Only the separately governed, release-verified readmission path may
+        # resume an internal_retry_exhausted record.
+        if record.get('blocker_class') == 'internal_retry_exhausted':
+            continue
         reason = str(record.get('reason') or '')
         if not self_recoverable_blocker(reason):
             continue

@@ -1434,3 +1434,40 @@ def test_verified_upgrade_readmits_real_1245_shortage_once(tmp_path):
     record['reason'] = original_reason
     assert module.readmit_source_context_after_verified_worker_upgrade(
         state, {'DEV-1245'}, spool, current_link=live) == 0
+
+
+
+def test_exhausted_blocker_with_reset_recycle_counter_never_uses_generic_retry():
+    original = (
+        'Additional exact repository source is still needed to make a safe '
+        'exact-text replacement for readmit_verified_ccc_owner_review.'
+    )
+    record = {
+        'phase': 'blocked',
+        'blocker_class': 'internal_retry_exhausted',
+        'reason': original,
+        'self_recovery_attempts': 0,
+        'source_upgrade_readmitted_sha': 'a' * 40,
+        'recovery_worktree_revision': 'a' * 40,
+        'context_expansion_attempts': 3,
+    }
+    state = {'items': {'DEV-1245': record}}
+    module.recycle_self_recoverable_blockers(state, {'DEV-1245'})
+    assert record['phase'] == 'blocked'
+    assert record['reason'] == original
+    assert record['self_recovery_attempts'] == 0
+    assert record['recovery_worktree_revision'] == 'a' * 40
+    # Approval presence alone cannot reset a genuinely exhausted attempt.
+    module.recycle_self_recoverable_blockers(state, {'DEV-1245'})
+    assert record['phase'] == 'blocked'
+
+
+def test_ordinary_nonexhausted_internal_recovery_still_works():
+    state = {'items': {'DEV-77': {
+        'phase': 'blocked',
+        'reason': 'The supplied excerpts are insufficient',
+        'self_recovery_attempts': 0,
+    }}}
+    module.recycle_self_recoverable_blockers(state, {'DEV-77'})
+    assert state['items']['DEV-77']['phase'] == 'diagnosing'
+    assert state['items']['DEV-77']['self_recovery_attempts'] == 1
