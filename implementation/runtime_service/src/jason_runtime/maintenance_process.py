@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import logging
 import time
 
 from .composition import RuntimeSettings, build_runtime_application
+
+
+logger = logging.getLogger(__name__)
 
 
 def autonomy_maintenance_enabled(settings: RuntimeSettings) -> bool:
@@ -45,5 +49,5 @@ def run_autonomy_maintenance_process(
         except Exception:
             # Match the runtime server's existing fail-closed maintenance behavior:
             # one failed cycle must not terminate the long-lived maintenance process.
-            pass
+            logger.exception("Autonomy maintenance cycle failed; retrying on next tick")
         time.sleep(max(0.05, float(idle_sleep_seconds)))
