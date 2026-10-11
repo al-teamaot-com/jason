@@ -813,3 +813,19 @@ def test_explicit_approved_paths_prioritize_exact_targets(monkeypatch, tmp_path)
     merged = module.support.merge_source_excerpts(targets, [
         {'path': 'implementation/unrelated.py', 'content': 'unrelated'}], max_total=14)
     assert [x['path'] for x in merged[:2]] == module.explicit_approved_source_paths(scope)
+
+
+def test_long_file_target_symbol_is_complete_and_prioritized():
+    source = 'import json\n' + ('x = 1\n' * 6000) + (
+        'def readmit_verified_ccc_owner_review(state):\n'
+        '    check = True\n'
+        '    return check\n') + ('y = 2\n' * 6000)
+    result = module.support.bounded_symbol_excerpt(
+        source, ['readmit_verified_ccc_owner_review'], content_limit=4000)
+    assert 'def readmit_verified_ccc_owner_review(state):' in result
+    assert '    return check' in result
+    assert len(result) <= 4000
+
+
+def test_symbol_extraction_fails_closed_on_incomplete_definition():
+    assert module.support.bounded_symbol_excerpt('def unfinished(:', ['unfinished'], content_limit=3000) is None

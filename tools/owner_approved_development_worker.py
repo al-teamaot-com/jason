@@ -1182,7 +1182,7 @@ def main() -> int:
                 if explicit_paths:
                     targeted = support.source_excerpts_for_paths(
                         worktree, explicit_paths, gate, policy,
-                        terms=search_terms, limit=6, content_limit=24000,
+                        terms=[approved_scope(item), *search_terms], limit=6, content_limit=24000,
                     )
                     excerpts = support.merge_source_excerpts(
                         targeted, excerpts, max_total=14,
