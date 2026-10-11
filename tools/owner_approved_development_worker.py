@@ -796,7 +796,8 @@ def preflight_or_refresh_exact_anchors(
     approved_paths = explicit_approved_source_paths(scope)
     approved_tests = [path for path in approved_paths
                       if path.startswith('tools/tests/') and path.endswith('.py')]
-    test_edits = [edit for edit in edits if str(edit.get('path') or '') in approved_tests] if approved_tests else [edit for edit in edits if '/tests/' in str(edit.get('path') or '')]
+    test_edits = [edit for edit in edits
+                  if str(edit.get('path') or '') in approved_tests]
     missing_test_change = bool(approved_tests) and not test_edits
     if not mismatched and not missing_test_change:
         return False
