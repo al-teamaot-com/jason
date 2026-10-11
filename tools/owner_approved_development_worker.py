@@ -754,6 +754,57 @@ def readmit_verified_development_recoveries(
 
 
 
+def readmit_source_context_after_verified_worker_upgrade(
+    state: dict[str, Any], eligible_ids: set[str], spool: Path,
+    *, current_link: Path = Path('/opt/jason/current'),
+) -> int:
+    """One bounded readmission per closed, healthy production worker revision.
+
+    A live symlink alone is insufficient: require matching last-known-good and
+    a closed release that demonstrably changed the source retrieval worker.
+    """
+    try:
+        sha = current_link.resolve().name
+        if not re.fullmatch(r'[0-9a-f]{40}', sha):
+            return 0
+        state_root = spool.parent / 'release-manager'
+        control = json.loads((state_root / 'protected-readback/production-control-state.json').read_text())
+        manifest = control['last_known_good']['manifest']
+        drift = json.loads((state_root / 'protected-readback/production-drift.json').read_text())
+        if manifest.get('revision') != sha or drift.get('status') != 'pass' or drift.get('problems'):
+            return 0
+        timestamp = datetime.fromisoformat(str(drift['observed_at']).replace('Z', '+00:00'))
+        if timestamp.tzinfo is None or not 0 <= (datetime.now(timezone.utc)-timestamp).total_seconds() <= 180:
+            return 0
+        releases = list((state_root / 'records').glob('release-*.json'))
+        verified = any(
+            (r := json.loads(path.read_text())).get('state') == 'closed'
+            and (r.get('release_candidate') or {}).get('candidate_sha') == sha
+            and set(r.get('changed_files') or []).intersection({
+                'tools/support_repair_host_worker.py', 'tools/owner_approved_development_worker.py'})
+            for path in releases
+        )
+        if not verified:
+            return 0
+    except (OSError, ValueError, KeyError, TypeError):
+        return 0
+    resumed = 0
+    for item_id, record in state.get('items', {}).items():
+        if item_id not in eligible_ids or not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        if record.get('blocker_class') not in ('source_context', 'internal_retry_exhausted'):
+            continue
+        if not source_context_blocker(record.get('reason', '')) or record.get('source_upgrade_readmitted_sha') == sha:
+            continue
+        record.update({'phase': 'diagnosing', 'reasoning_request_id': '',
+                       'context_expansion_attempts': 0, 'self_recovery_attempts': 0,
+                       'source_upgrade_readmitted_sha': sha, 'source_upgrade_readmitted_at': now(),
+                       'reason': 'Re-admitted after independently verified production source-retrieval upgrade.',
+                       'updated_at': now()})
+        resumed += 1
+    return resumed
+
+
 def readmit_explicit_verified_dependencies(
     state: dict[str, Any], eligible: list[dict[str, Any]], spool: Path,
     *, max_active: int,
@@ -913,6 +964,7 @@ def main() -> int:
     reconcile_recovery_handoff_intake(state, admitted_ids, spool)
     raise_exhausted_repair_support_issues(state, admitted_ids, repo)
     readmit_verified_development_recoveries(state, admitted_ids, spool, repo)
+    readmit_source_context_after_verified_worker_upgrade(state, admitted_ids, spool)
     readmit_explicit_verified_dependencies(state, admitted, spool, max_active=max(1, int(args.max_active)))
     state['discovery'] = {
         'observed_at': now(),

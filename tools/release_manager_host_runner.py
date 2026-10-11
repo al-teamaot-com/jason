@@ -2033,6 +2033,25 @@ def production_gate_result(repo: Path, record: dict[str, Any]) -> dict[str, Any]
     )
 
 
+def reconcile_stopped_rollback_retention(*, keep: int = 16) -> int:
+    """Reserve room for rollback containers created during a promotion.
+
+    Only historical exited rollback containers qualify. Image-based rollback
+    authority, live containers, and durable release records are never touched.
+    """
+    output = run(['docker', 'ps', '-a', '--filter', 'status=exited',
+                  '--format', '{{.CreatedAt}}|{{.Names}}'])
+    eligible = []
+    for line in output.splitlines():
+        created, sep, name = line.partition('|')
+        if sep and re.fullmatch(r'jason-(?:runtime|mcp-pilot|mcp|teams-gateway)-rollback-[0-9T]+Z', name):
+            eligible.append((created, name))
+    eligible.sort(reverse=True)
+    for _, name in eligible[keep:]:
+        run(['docker', 'rm', name])
+    return len(eligible[:keep])
+
+
 def promote_eligible(repo: Path, state_root: Path) -> bool:
     # Keep the required five-minute timer active, but do not allow it to
     # execute a production promotion while Owner has selected manual mode.
@@ -2077,6 +2096,9 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
             save_record(state_root, record)
             continue
 
+        # Preserve retention headroom for two runtime/MCP rollback containers.
+        # Any Docker failure aborts promotion rather than weakening the drift gate.
+        reconcile_stopped_rollback_retention()
         result = production_gate_result(repo, record)
         if result.get("allowed") is True:
             try:
