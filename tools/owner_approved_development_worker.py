@@ -721,23 +721,38 @@ def readmit_explicit_verified_dependencies(
                 and not any(term in str(record.get('reason') or '').casefold()
                             for term in ('dependency', 'prerequisite'))):
             continue
-        if not candidate.get('retry_eligible') or candidate.get('dependency_recheck') != 'verified_for_governed_readmission_check':
+        if not candidate.get('retry_eligible'):
             continue
         dependencies = candidate.get('governing_dependencies')
-        if not isinstance(dependencies, list) or not dependencies:
+        operational = candidate.get('governing_operational_dependencies', [])
+        if not isinstance(dependencies, list) or not isinstance(operational, list):
+            continue
+        if not dependencies and not operational:
             continue
         if dependencies != todo_bridge.explicit_release_dependencies(str(item.get("body") or "")):
             continue
-        if candidate.get('governing_operational_dependencies', []) != todo_bridge.explicit_operational_dependencies(str(item.get('body') or '')):
+        if operational != todo_bridge.explicit_operational_dependencies(str(item.get("body") or "")):
             continue
         fresh = todo_bridge.dependency_state_for_item(candidate, todo_bridge.DEFAULT_RELEASE_STATE)
         if not fresh.get("retry_eligible"):
             continue
+        if dependencies and fresh.get('dependency_recheck') != 'verified_for_governed_readmission_check':
+            continue
+        if operational and fresh.get('operational_recheck') != 'verified':
+            continue
+        verified_evidence = fresh.get('verified_operational_evidence', {})
+        if operational and (not isinstance(verified_evidence, Mapping)
+                            or set(verified_evidence) != set(operational)):
+            continue
         import hashlib
-        fingerprint = hashlib.sha256(json.dumps(sorted(set(dependencies))).encode()).hexdigest()
+        fingerprint_body = {'releases': sorted(set(dependencies)),
+                            'operational_receipts': {
+                                key: verified_evidence[key] for key in sorted(set(operational))}}
+        fingerprint = hashlib.sha256(json.dumps(
+            fingerprint_body, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
         if record.get('verified_dependency_readmission_key') == fingerprint:
             continue
-        record.update({'phase': 'diagnosing', 'reason': 'Re-admitted after verified release prerequisites.',
+        record.update({'phase': 'diagnosing', 'reason': 'Re-admitted after verified governed prerequisites.',
                        'verified_dependency_readmission_key': fingerprint,
                        'reasoning_request_id': '', 'updated_at': now()})
         return 1
