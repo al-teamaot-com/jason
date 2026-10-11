@@ -1253,6 +1253,19 @@ def main() -> int:
                         targeted if explicit_paths else [], api_context + excerpts,
                         max_total=14,
                     )
+                # Full dedicated regression test files are often larger than the
+                # ordinary excerpt cap. Admit a single complete, bounded test
+                # file only when its exact path is in the owner-approved scope.
+                test_paths = [path for path in explicit_paths
+                              if path.startswith('tools/tests/') and path.endswith('.py')]
+                if test_paths:
+                    full_tests = support.source_excerpts_for_paths(
+                        worktree, test_paths[:1], gate, policy,
+                        terms=search_terms, limit=1, content_limit=56000,
+                    )
+                    excerpts = support.merge_source_excerpts(
+                        full_tests, excerpts, max_total=14,
+                    )
                 prior_history = [
                     str(value).strip()
                     for value in list(record.get('source_history') or record.get('source_paths') or [])
