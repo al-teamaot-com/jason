@@ -791,3 +791,25 @@ def test_ccc_readmission_rejects_empty_certification_checks(tmp_path):
     state = {'items': {'DEV-1237': {'phase': 'blocked', 'reason': 'Exact CCC material-change review required.'}}}
     assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, review_path=review, drift_path=drift, report_root=reports) == 0
     assert state['items']['DEV-1237']['phase'] == 'blocked'
+
+
+def test_explicit_approved_paths_prioritize_exact_targets(monkeypatch, tmp_path):
+    scope = ('Only edit `tools/owner_approved_development_worker.py` and '
+             '`tools/tests/test_owner_approved_development_worker.py`; '
+             'ignore `tools/../secret.py`.')
+    assert module.explicit_approved_source_paths(scope) == [
+        'tools/owner_approved_development_worker.py',
+        'tools/tests/test_owner_approved_development_worker.py',
+    ]
+    (tmp_path / 'tools/tests').mkdir(parents=True)
+    (tmp_path / 'tools/owner_approved_development_worker.py').write_text('def target(): pass')
+    (tmp_path / 'tools/tests/test_owner_approved_development_worker.py').write_text('def test_target(): pass')
+    monkeypatch.setattr(module.support, 'source_excerpts_for_paths',
+                        lambda tree, paths, gate, policy, **kw: [
+                            {'path': p, 'content': (tree / p).read_text()} for p in paths
+                            if (tree / p).is_file()])
+    targets = module.support.source_excerpts_for_paths(
+        tmp_path, module.explicit_approved_source_paths(scope), None, {}, limit=6)
+    merged = module.support.merge_source_excerpts(targets, [
+        {'path': 'implementation/unrelated.py', 'content': 'unrelated'}], max_total=14)
+    assert [x['path'] for x in merged[:2]] == module.explicit_approved_source_paths(scope)

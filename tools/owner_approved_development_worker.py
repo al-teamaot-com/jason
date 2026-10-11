@@ -60,6 +60,22 @@ def repository_name(repo: Path) -> str:
     return name
 
 
+def explicit_approved_source_paths(scope: str) -> list[str]:
+    """Prioritize exact repository paths quoted in the owner-approved issue.
+
+    Paths are merely discovery hints; J-CHANGE-002 still authorizes each read.
+    """
+    result: list[str] = []
+    for match in re.finditer(r"`((?:tools|implementation|config|infrastructure|docs)/[A-Za-z0-9_./-]+\.[A-Za-z0-9]+)`", scope):
+        path = match.group(1)
+        if '..' in Path(path).parts or path in result:
+            continue
+        result.append(path)
+        if len(result) >= 6:
+            break
+    return result
+
+
 def owner_approved_issues(repo: Path) -> list[dict[str, Any]]:
     slug = repository_name(repo)
     issues = support.gh_json([
@@ -1162,6 +1178,15 @@ def main() -> int:
                     gate,
                     policy,
                 )
+                explicit_paths = explicit_approved_source_paths(approved_scope(item))
+                if explicit_paths:
+                    targeted = support.source_excerpts_for_paths(
+                        worktree, explicit_paths, gate, policy,
+                        terms=search_terms, limit=6, content_limit=24000,
+                    )
+                    excerpts = support.merge_source_excerpts(
+                        targeted, excerpts, max_total=14,
+                    )
                 prior_history = [
                     str(value).strip()
                     for value in list(record.get('source_history') or record.get('source_paths') or [])
