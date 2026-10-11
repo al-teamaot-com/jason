@@ -922,8 +922,19 @@ def readmit_source_context_after_verified_worker_upgrade(
             record.get('blocker_class') == 'internal_retry_exhausted'
             and reason == 'workererror: autonomous support repair requires a changed regression test'
         )
+        # The shared test runner historically omitted the isolated worktree's
+        # tools/ import path. Such a bounded collection failure is retryable
+        # only AFTER an independently verified worker upgrade; never reset
+        # partial edits in the old worktree or consume unrelated failures.
+        tool_test_import_failure = (
+            record.get('blocker_class') == 'internal_retry_exhausted'
+            and 'error collecting tools/tests/' in reason
+            and 'importerror while importing test module' in reason
+            and 'import support_repair_host_worker as support' in reason
+        )
         if not (source_context_blocker(reason) or truncated_approved_test
-                or stale_exact_anchor or incomplete_regression):
+                or stale_exact_anchor or incomplete_regression
+                or tool_test_import_failure):
             continue
         if record.get('source_upgrade_readmitted_sha') == sha:
             continue

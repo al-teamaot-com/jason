@@ -1286,3 +1286,57 @@ def test_missing_implementation_files_not_provided_in_excerpts_is_recoverable():
     assert not module.source_context_blocker(
         'Owner approval was not provided for protected production deployment.'
     )
+
+
+
+def test_verified_worker_upgrade_readmits_bounded_test_collection_import_failure(tmp_path):
+    import json
+    from datetime import datetime, timezone
+    spool = tmp_path / 'support-repair'
+    spool.mkdir()
+    root = tmp_path / 'release-manager'
+    (root / 'protected-readback').mkdir(parents=True)
+    (root / 'records').mkdir()
+    sha = 'c' * 40
+    live = tmp_path / sha
+    live.mkdir()
+    (root / 'protected-readback/production-control-state.json').write_text(json.dumps(
+        {'last_known_good': {'manifest': {'revision': sha}}}))
+    (root / 'protected-readback/production-drift.json').write_text(json.dumps(
+        {'status': 'pass', 'problems': [],
+         'observed_at': datetime.now(timezone.utc).isoformat()}))
+    (root / 'records/release-test.json').write_text(json.dumps({
+        'state': 'closed', 'release_candidate': {'candidate_sha': sha},
+        'changed_files': ['tools/support_repair_host_worker.py']}))
+    real_reason = (
+        'WorkerError: command failed (/home/al/projects/jason/.venv/bin/python): '
+        'ERROR collecting tools/tests/test_owner_approved_development_worker.py '
+        'ImportError while importing test module '
+        'tools/owner_approved_development_worker.py:13: in <module> '
+        'import support_repair_host_worker as support'
+    )
+    record = {'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+              'reason': real_reason, 'self_recovery_attempts': 2}
+    state = {'items': {'DEV-1245': record}}
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, {'DEV-1245'}, spool, current_link=live) == 1
+    assert record['phase'] == 'diagnosing'
+    assert record['recovery_worktree_revision'] == sha
+    assert record['self_recovery_attempts'] == 0
+    record.update(phase='blocked', reason=real_reason)
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, {'DEV-1245'}, spool, current_link=live) == 0
+
+
+def test_test_collection_import_recovery_cannot_admit_external_authority(tmp_path):
+    spool = tmp_path / 'support-repair'
+    spool.mkdir()
+    live = tmp_path / ('d' * 40)
+    live.mkdir()
+    record = {'phase': 'blocked', 'blocker_class': 'external_authority',
+              'reason': ('ERROR collecting tools/tests/test_worker.py '
+                         'ImportError while importing test module '
+                         'import support_repair_host_worker as support')}
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        {'items': {'DEV-1': record}}, {'DEV-1'}, spool, current_link=live) == 0
+    assert record['phase'] == 'blocked'

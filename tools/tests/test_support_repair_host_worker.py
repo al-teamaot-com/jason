@@ -933,3 +933,31 @@ def test_symbol_context_preamble_does_not_truncate_unrelated_function():
     assert 'def requested_target' in definition
     assert 'return json.dumps' in definition
     assert 'def unrelated():\n    one = 1\n    two = 2\n    return one + two' in prefix or 'def unrelated' not in prefix
+
+
+
+def test_validate_patch_runs_isolated_worktree_tests_with_local_tools_import(monkeypatch, tmp_path):
+    import subprocess
+    import types
+    repo = tmp_path / 'isolated'
+    source = repo / 'tools' / 'local_validation_module.py'
+    test = repo / 'tools' / 'tests' / 'test_local_validation_module.py'
+    test.parent.mkdir(parents=True)
+    source.write_text('VALUE = 1\n')
+    test.write_text('from local_validation_module import VALUE\n\ndef test_value():\n    assert VALUE == 1\n')
+    subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+    subprocess.run(['git', 'config', 'user.email', 'test@example.invalid'], cwd=repo, check=True)
+    subprocess.run(['git', 'config', 'user.name', 'Test'], cwd=repo, check=True)
+    subprocess.run(['git', 'add', '.'], cwd=repo, check=True)
+    subprocess.run(['git', 'commit', '-qm', 'initial'], cwd=repo, check=True)
+    source.write_text('VALUE = 2\n')
+    test.write_text('from local_validation_module import VALUE\n\ndef test_value():\n    assert VALUE == 2\n')
+    monkeypatch.setenv('PYTHONPATH', str(tmp_path / 'unrelated'))
+    gate = types.SimpleNamespace(
+        path_denial_reason=lambda path, policy: '',
+        is_test_path=lambda path, policy: path.startswith('tools/tests/test_')
+    )
+    selected = worker.validate_patch(
+        repo, ['tools/tests/test_local_validation_module.py'], gate, {}
+    )
+    assert selected == ['tools/tests/test_local_validation_module.py']

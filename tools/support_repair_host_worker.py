@@ -91,10 +91,12 @@ def emit_lifecycle_event(
     return fingerprint
 
 
-def run(args: list[str], *, cwd: Path | None = None, check: bool = True) -> str:
+def run(args: list[str], *, cwd: Path | None = None, check: bool = True,
+        env: Mapping[str, str] | None = None) -> str:
     completed = subprocess.run(
         args,
         cwd=str(cwd) if cwd else None,
+        env=dict(env) if env is not None else None,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -933,7 +935,17 @@ def validate_patch(worktree: Path, test_paths: list[str], gate, policy: Mapping[
     py_files = [path for path in files if path.endswith('.py')]
     if py_files:
         run([python_cmd, '-m', 'py_compile', *py_files], cwd=worktree)
-    run([python_cmd, '-m', 'pytest', '-q', *selected], cwd=worktree)
+    # Tools tests import sibling modules (for example support_repair_host_worker).
+    # An isolated issue worktree must resolve its OWN tools tree, not the host's
+    # checkout or a globally installed package. Preserve any caller PYTHONPATH.
+    test_env = dict(os.environ)
+    own_tools = str((worktree / 'tools').resolve())
+    previous_path = test_env.get('PYTHONPATH', '')
+    test_env['PYTHONPATH'] = os.pathsep.join(
+        [own_tools, previous_path] if previous_path else [own_tools]
+    )
+    run([python_cmd, '-m', 'pytest', '-q', *selected],
+        cwd=worktree, env=test_env)
     return selected
 
 
