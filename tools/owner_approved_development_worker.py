@@ -794,7 +794,12 @@ def readmit_source_context_after_verified_worker_upgrade(
             continue
         if record.get('blocker_class') not in ('source_context', 'internal_retry_exhausted'):
             continue
-        if not source_context_blocker(record.get('reason', '')) or record.get('source_upgrade_readmitted_sha') == sha:
+        reason = str(record.get('reason') or '').casefold()
+        truncated_approved_test = ('test file' in reason and 'truncat' in reason
+                                   and 'exact-text' in reason)
+        if not (source_context_blocker(reason) or truncated_approved_test):
+            continue
+        if record.get('source_upgrade_readmitted_sha') == sha:
             continue
         record.update({'phase': 'diagnosing', 'reasoning_request_id': '',
                        'context_expansion_attempts': 0, 'self_recovery_attempts': 0,
