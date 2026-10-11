@@ -2,6 +2,10 @@ FROM node:24-bookworm-slim
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY infrastructure/jason-teams-gateway/package.json ./package.json
 RUN npm install --omit=dev --no-audit --no-fund
 

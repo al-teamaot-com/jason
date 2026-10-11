@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from connectors.src.jason_connectors.approval_requests import ApprovalRequestService
 from orchestrator.approval_audit import ApprovalAuditRecorder
 from orchestrator.approvals import ApprovalResumeBridge
-from orchestrator.teams_approval_flow import TeamsApprovalFlow
+from orchestrator.teams_approval_flow import ApprovalAttentionSink, TeamsApprovalFlow
 
 from .teams_approval_ingress import (
     MicrosoftIdentityBindingResolver,
@@ -37,6 +37,7 @@ class TeamsApprovalResponseRuntimeDependencies:
     approval_service: ApprovalRequestService
     resume_bridge: ApprovalResumeBridge
     audit: ApprovalAuditRecorder
+    attention_sink: ApprovalAttentionSink | None = None
 
 
 def build_teams_approval_response_flow(
@@ -55,4 +56,5 @@ def build_teams_approval_response_flow(
         approval_service=dependencies.approval_service,
         resume_bridge=dependencies.resume_bridge,
         audit=dependencies.audit,
+        attention_sink=dependencies.attention_sink,
     )

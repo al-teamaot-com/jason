@@ -74,6 +74,7 @@ class ApprovalRequest:
     expires_at: datetime
     authorized_approver_ids: tuple[str, ...]
     evidence_references: tuple[ApprovalEvidenceReference, ...] = ()
+    attention_resource_id: str | None = None
     presentation: ApprovalPresentation | None = None
     metadata: dict[str, str] = field(default_factory=dict)
     status: ApprovalRequestStatus = ApprovalRequestStatus.PENDING
@@ -99,6 +100,12 @@ class ApprovalRequest:
             raise ValueError("at least one authorized approver identity is required")
         if len(set(self.authorized_approver_ids)) != len(self.authorized_approver_ids):
             raise ValueError("authorized approver identities must be unique")
+        if self.attention_resource_id is not None:
+            resource = str(self.attention_resource_id).strip()
+            if not resource:
+                raise ValueError("attention_resource_id must be non-empty when provided")
+            if any(token in resource for token in ("*", "?", "[", "]")):
+                raise ValueError("attention_resource_id must be exact")
         for reference in self.evidence_references:
             reference.validate()
             if reference.organization_id != self.organization_id:
@@ -149,6 +156,7 @@ class AcceptedApproval:
     channel: str
     channel_response_id: str
     evidence_references: tuple[ApprovalEvidenceReference, ...]
+    attention_resource_id: str | None = None
 
 
 class ApprovalAuthorityChecker(Protocol):
@@ -271,6 +279,7 @@ class SQLiteApprovalRequestRepository:
             request.expires_at,
             tuple(request.authorized_approver_ids),
             evidence,
+            request.attention_resource_id,
             presentation,
             metadata,
         )
@@ -391,6 +400,7 @@ class ApprovalRequestService:
             channel=response.channel,
             channel_response_id=response.channel_response_id,
             evidence_references=request.evidence_references,
+            attention_resource_id=request.attention_resource_id,
         )
 
     @staticmethod

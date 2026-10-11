@@ -38,6 +38,7 @@ class TargetedWake:
     kind: WakeKind
     due_at: datetime | None = None
     wake_on: str | None = None
+    event_subject_id: str | None = None
     capability_name: str | None = None
     arguments: Mapping[str, Any] = field(default_factory=dict)
     queue_reconciliation_required: bool = False
@@ -52,6 +53,14 @@ class TargetedWake:
             raise ValueError("reason must be non-empty")
         if (self.due_at is None) == (not self.wake_on):
             raise ValueError("exactly one of due_at or wake_on is required")
+        if self.event_subject_id is not None:
+            subject = str(self.event_subject_id).strip()
+            if not subject:
+                raise ValueError("event_subject_id must be non-empty when provided")
+            if self.wake_on is None:
+                raise ValueError("event_subject_id requires wake_on")
+            if any(token in subject for token in ("*", "?", "[", "]")):
+                raise ValueError("event_subject_id must be exact")
         if self.due_at is not None and self.due_at.tzinfo is None:
             raise ValueError("due_at must be timezone-aware")
         if not 1 <= self.max_attempts <= 10:
@@ -79,6 +88,7 @@ class SQLiteTargetedWakeStore:
         state TEXT NOT NULL,
         due_at TEXT,
         wake_on TEXT,
+        event_subject_id TEXT,
         attempt_count INTEGER NOT NULL,
         max_attempts INTEGER NOT NULL,
         payload TEXT NOT NULL,
@@ -99,6 +109,20 @@ class SQLiteTargetedWakeStore:
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._connection.execute("PRAGMA synchronous=FULL")
         self._connection.executescript(self._SCHEMA)
+        columns = {
+            str(row["name"])
+            for row in self._connection.execute(
+                "PRAGMA table_info(autonomy_targeted_wakes)"
+            )
+        }
+        if "event_subject_id" not in columns:
+            self._connection.execute(
+                "ALTER TABLE autonomy_targeted_wakes ADD COLUMN event_subject_id TEXT"
+            )
+        self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS ix_autonomy_targeted_wakes_event_subject "
+            "ON autonomy_targeted_wakes(state, wake_on, event_subject_id)"
+        )
         os.chmod(self.path, 0o600)
 
     def schedule(self, wake: TargetedWake) -> None:
@@ -118,9 +142,9 @@ class SQLiteTargetedWakeStore:
             self._connection.execute(
                 """
                 INSERT INTO autonomy_targeted_wakes(
-                    wake_id,resource_id,kind,state,due_at,wake_on,
+                    wake_id,resource_id,kind,state,due_at,wake_on,event_subject_id,
                     attempt_count,max_attempts,payload,last_error,updated_at
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (
                     wake.wake_id,
@@ -129,6 +153,7 @@ class SQLiteTargetedWakeStore:
                     state.value,
                     due_at,
                     wake.wake_on,
+                    wake.event_subject_id,
                     0,
                     wake.max_attempts,
                     payload,
@@ -176,6 +201,46 @@ class SQLiteTargetedWakeStore:
                         WakeState.ARMED.value,
                     ),
                 )
+        return ids
+
+    def signal_subject(
+        self,
+        wake_on: str,
+        *,
+        event_subject_id: str,
+        now: datetime | None = None,
+    ) -> tuple[str, ...]:
+        event = str(wake_on or "").strip()
+        subject = str(event_subject_id or "").strip()
+        if not event:
+            raise ValueError("wake_on must be non-empty")
+        if not subject:
+            raise ValueError("event_subject_id must be non-empty")
+        if any(token in subject for token in ("*", "?", "[", "]")):
+            raise ValueError("event_subject_id must be exact")
+        now = now or datetime.now(timezone.utc)
+        rows = self._connection.execute(
+            "SELECT wake_id FROM autonomy_targeted_wakes "
+            "WHERE state=? AND wake_on=? AND event_subject_id=?",
+            (WakeState.ARMED.value, event, subject),
+        ).fetchall()
+        ids = tuple(str(row["wake_id"]) for row in rows)
+        if len(ids) > 1:
+            raise RuntimeError("event subject matched multiple armed wakes")
+        if not ids:
+            return ()
+        with self._connection:
+            self._connection.execute(
+                "UPDATE autonomy_targeted_wakes SET state=?,due_at=?,updated_at=? "
+                "WHERE wake_id=? AND state=?",
+                (
+                    WakeState.PENDING.value,
+                    now.isoformat(),
+                    now.isoformat(),
+                    ids[0],
+                    WakeState.ARMED.value,
+                ),
+            )
         return ids
 
     def due(
@@ -290,6 +355,7 @@ class SQLiteTargetedWakeStore:
             "kind": wake.kind.value,
             "due_at": wake.due_at.isoformat() if wake.due_at else None,
             "wake_on": wake.wake_on,
+            "event_subject_id": wake.event_subject_id,
             "capability_name": wake.capability_name,
             "arguments": dict(wake.arguments),
             "queue_reconciliation_required": wake.queue_reconciliation_required,

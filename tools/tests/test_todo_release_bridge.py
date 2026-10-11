@@ -18,6 +18,7 @@ sys.modules[SPEC.name] = module
 SPEC.loader.exec_module(module)
 
 SHA = "a" * 40
+SHA_B = "b" * 40
 
 
 def release_record(state="closed"):
@@ -81,6 +82,50 @@ class TodoReleaseBridgeTests(unittest.TestCase):
             self.assertIsNotNone(observed)
             self.assertEqual(observed["state"], "closed")
 
+    def test_effective_release_prefers_exact_closed_record(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            records = root / "records"
+            records.mkdir(parents=True)
+            exact = release_record()
+            (records / f"{module.release_id(SHA)}.json").write_text(
+                json.dumps(exact), encoding="utf-8"
+            )
+            with patch.object(module, "commit_is_ancestor") as ancestor:
+                observed = module.effective_release_record(Path(td), root, SHA)
+            self.assertEqual(observed["release_id"], exact["release_id"])
+            ancestor.assert_not_called()
+
+    def test_effective_release_accepts_closed_verified_descendant(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            records = root / "records"
+            records.mkdir(parents=True)
+            exact = release_record("failed")
+            (records / f"{module.release_id(SHA)}.json").write_text(
+                json.dumps(exact), encoding="utf-8"
+            )
+            descendant = {
+                "release_id": "release-" + "b" * 16,
+                "state": "closed",
+                "updated_at": "2026-10-07T18:40:00+00:00",
+                "production": {
+                    "live_sha": SHA_B,
+                    "verified_at": "2026-10-07T18:39:00+00:00",
+                },
+            }
+            (records / f"{module.release_id(SHA_B)}.json").write_text(
+                json.dumps(descendant), encoding="utf-8"
+            )
+            with patch.object(
+                module,
+                "commit_is_ancestor",
+                side_effect=lambda repo, ancestor, child: ancestor == SHA and child == SHA_B,
+            ):
+                observed = module.effective_release_record(Path(td), root, SHA)
+            self.assertEqual(observed["release_id"], descendant["release_id"])
+            self.assertEqual(observed["production"]["live_sha"], SHA_B)
+
     def test_prepare_release_delegates_to_release_manager(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -130,19 +175,28 @@ def test_upstream_commitment_state_reports_real_development_blocker():
     assert reason == 'provider consent required'
     phase, _ = module.upstream_commitment_state({'phase': 'pr_ready'})
     assert phase == 'waiting_development_merge'
+    phase, reason = module.upstream_commitment_state(
+        {'phase': 'waiting_external_dependency', 'reason': 'provider consent required'}
+    )
+    assert phase == 'waiting_external_dependency'
+    assert reason == 'provider consent required'
+    phase, _ = module.upstream_commitment_state({'phase': 'waiting_operational_acceptance'})
+    assert phase == 'waiting_operational_acceptance'
+    phase, _ = module.upstream_commitment_state({'phase': 'waiting_sequenced_work'})
+    assert phase == 'waiting_sequenced_work'
 
 
 def test_commitment_summary_flags_empty_release_queue_with_upstream_work():
     summary = module.commitment_summary(
         {
             'TODO-OPS-001': {'phase': 'development_in_progress'},
-            'TODO-OPS-002': {'phase': 'development_blocked'},
+            'TODO-OPS-002': {'phase': 'waiting_external_dependency'},
             'TODO-OPS-003': {'phase': 'complete'},
         }
     )
     assert summary['approved_commitment_count'] == 3
     assert summary['outstanding_count'] == 2
-    assert summary['blocked_count'] == 1
+    assert summary['blocked_count'] == 0
     assert summary['upstream_pending_count'] == 2
     assert summary['release_pending_count'] == 0
     assert summary['release_queue_empty_but_upstream_pending'] is True

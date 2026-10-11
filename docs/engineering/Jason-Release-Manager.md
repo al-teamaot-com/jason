@@ -15,8 +15,8 @@
 - the exact image tested in pre-production is the image promoted to production;
 - pre-production cannot write production state or activate provider mutations;
 - Support List impact is checked before Production Eligible;
-- unattended promotion runs every five minutes, 24x7;
-- protected-core releases require owner approval bound to the exact candidate SHA;
+- the five-minute timer remains active but unattended production promotion is suspended during the Owner-approved manual release period;
+- every production release requires explicit owner approval bound to the exact candidate SHA during manual mode;
 - production success requires live SHA, image identity, and health verification;
 - failed verification rolls back to the recorded known-good revision.
 
@@ -24,7 +24,7 @@
 
 The Release Manager applies when a protected-main software revision is nominated for production promotion.
 
-The automatic production window is continuous 24x7. The Release Manager reconciles eligible releases every five minutes. The schedule is only a promotion trigger; it never creates Production Eligible status.
+The release timer remains installed and active every five minutes to preserve monitored service topology. During the temporary Owner-approved manual mode (2026-10-10), the timer must never promote a release. Candidate preparation and pre-production remain automated; after explicit approval bound to a single candidate SHA, Production Manager's existing `promote` command performs the governed deployment, verification and rollback.
 
 ## 3. Scope and Boundaries
 
@@ -117,7 +117,7 @@ Release Manager remediation is limited to release mechanics.
 **Approval classification:** modifying/disruptive production operation.  
 **Verification:** runtime SHA/digest + MCP SHA/digest + immutable host SHA + Release Manager SHA/timer + health/alignment.
 
-Protected-core releases remain approval-bound. Ordinary releases may auto-promote only after all evidence gates classify them Production Eligible.
+During the temporary manual mode, every release (including normal and formerly autonomous repair classes) requires exact-SHA Owner approval. The existing production release path, health verification and fail-safe rollback are unchanged.
 
 ## 10. Retry Policy
 
@@ -131,7 +131,7 @@ No blind deployment retries.
 
 ## 11. Periodic Rechecks
 
-The production timer invokes `promote-eligible` every five minutes, 24x7. The host runner retains the centralized production-window policy gate, which is currently continuously open under owner-approved policy.
+The production timer invokes `promote-eligible` every five minutes, 24x7 but returns without consuming approvals, selecting candidates or promoting any release while `schedule.automatic_promotion_enabled` is false. The timer remains installed to avoid introducing desired-state drift.
 
 It:
 - scans durable release records;
@@ -261,7 +261,7 @@ Any uncovered defect becomes a Support List item and is handled before ordinary 
 
 ## 23. Autonomous Execution Eligibility and Owner Review
 
-Normal non-protected releases may automatically promote after reaching Production Eligible.
+Normal non-protected releases are **not** authorized to auto-promote during the temporary manual mode approved 2026-10-10. Every release requires explicit Owner approval for the exact SHA and an intentional invocation of the existing governed Production Manager `promote` command. Reinstating automatic promotion requires a separately approved policy change and verified deployment/rollback acceptance.
 
 Protected-core paths are defined in `config/release-manager-policy.json` and require explicit owner approval bound to the exact candidate SHA. The Release Manager itself is protected-core.
 

@@ -575,7 +575,7 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Risk level:** Moderate
 - **Idea:** Give Jason a governed, evidence-backed workflow for answering client cyber-insurance, PII/security, compliance, and vendor-security questionnaires using authoritative client-specific data instead of assumptions or generic AOT standards.
 - **Why it matters:** AOT is regularly asked to complete technical portions of insurance/security forms. Jason should be able to collect current evidence across managed endpoints, Microsoft 365/Entra, email security, backup systems, DNS/security services, network/security appliances, security-awareness training, Autotask, and IT Glue; distinguish confirmed facts from client-owned business/legal questions; identify exceptions; and produce a traceable answer package.
-- **Why not now:** The current catalog can verify some endpoint facts but lacks several read surfaces required for complete evidence-backed answers. Active blockers are tracked in SUPPORT-CAP-006 through SUPPORT-CAP-011.
+- **Why not now:** The current catalog can verify some endpoint facts but lacks several read surfaces required for complete evidence-backed answers. Current connector prerequisites are tracked by TODO-CONN-005 through TODO-CONN-009 (formerly SUPPORT-CAP-007 through SUPPORT-CAP-011). SUPPORT-CAP-006 was resolved on 2026-09-18. Connector readiness varies: TODO-CONN-008 DNSFilter governed reads are production-active, TODO-CONN-006 backup reads have a production foundation, and the remaining required client-specific read surfaces must be verified independently before acceptance.
 - **Prerequisites:**
   - standing-safe diagnostic execution for non-destructive endpoint checks;
   - governed Microsoft 365 / Entra security-posture reads;
@@ -590,7 +590,7 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Expected behavior:** Jason should parse a questionnaire, map each technical question to available governed evidence, perform only approved read-only verification, report exceptions rather than hiding them, identify questions that belong to the client/legal/insurance representative, and generate a draft answer key with evidence references and unresolved items. Jason must not sign, certify, or make business/legal representations on behalf of the insured.
 - **Learning behavior:** Any questionnaire item that cannot be verified because of a missing capability, provider read, or governance restriction should create or reference a Support List blocker rather than being guessed. Repeated questionnaire gaps should inform connector and documentation priorities.
 - **Decision owner:** Jason Governance Authority / Technology Steward
-- **Review trigger:** Begin implementation after SUPPORT-CAP-006 through SUPPORT-CAP-011 have defined owners and the first required read surfaces are available.
+- **Review trigger:** Begin bounded implementation only after the relevant TODO-CONN-005 through TODO-CONN-009 owners and required client-specific read surfaces are verified; do not treat the resolved SUPPORT-CAP-006 or a single AOT-scoped DNSFilter read as blanket acceptance. Retain separate, independently signed issue-scoped operational acceptance for any controller readmission.
 
 
 ### TODO-OPS-004 — Governed DRMM monitor suppression for known accepted conditions
@@ -630,7 +630,8 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-KNOW-001 — AOT-wide IT Glue internal knowledge scope
 
 - **Priority:** P1
-- **Status:** Proposed
+- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-08
+- **Autonomous engineering readiness:** Approved — bounded read-only AOT internal knowledge scope only
 - **Risk level:** Moderate
 - **Idea:** Allow Jason to use AOT's existing IT Glue policies, SOPs, standards, procedures, and operational documentation as governed internal knowledge without requiring AOT to move or reorganize documents into a new folder.
 - **Scope model:** Bind the capability to the exact AOT IT Glue organization ID. Within that organization, Jason may search and read non-restricted documents and approved document attachments for operational reasoning. Existing IT Glue folder/document organization remains unchanged.
@@ -653,7 +654,7 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-COMM-001 — Governed client communication framework
 
 - **Priority:** P1
-- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-04
+- **Status:** Implemented — production verified 2026-10-07T19:03:19+00:00; release release-18f9e070c9e674d8; SHA 18f9e070c9e674d88bedc097b88875fd40d082b9
 - **Implementation state at approval:** Planned — foundation pieces exist; draft-assist and controlled client-send acceptance remain
 - **Autonomous engineering readiness:** Approved
 - **Authority basis:** Owner approval on 2026-10-04 authorizes autonomous engineering only within this exact TODO scope; existing Jason governance, client/provider boundaries, protected-core release approval, financial authority, and disruptive-action controls remain unchanged.
@@ -668,11 +669,11 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Legacy IDs consolidated here:** TODO-COMM-002, TODO-COMM-005, TODO-COMM-006, and TODO-COMM-007.
 - **Decision owner:** Jason Governance Authority / AOT Owner
 - **Review trigger:** Implement Draft Assist first, then promote delivery classes only from measured production evidence.
-
+- **Implementation evidence:** Jason Release Manager release-18f9e070c9e674d8 reached closed; production SHA 18f9e070c9e674d88bedc097b88875fd40d082b9.
 ### TODO-COMM-004 — Governed Teams interaction and owner operations
 
 - **Priority:** P1
-- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-04
+- **Status:** Implemented — production verified 2026-10-07T19:03:19+00:00; release release-18f9e070c9e674d8; SHA 18f9e070c9e674d88bedc097b88875fd40d082b9
 - **Implementation state at approval:** In progress — approval/information-request paths are production-proven; lifecycle-card source implementation completed 2026-10-04; production acceptance and typed-override acceptance remain
 - **Autonomous engineering readiness:** Approved
 - **Authority basis:** Owner approval on 2026-10-04 authorizes autonomous engineering only within this exact TODO scope; existing Jason governance, client/provider boundaries, protected-core release approval, financial authority, and disruptive-action controls remain unchanged.
@@ -685,7 +686,7 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Dependencies:** TODO-GOV-006 for lifecycle/readiness state; TODO-CONN-004 for residual Teams credential/OpenClaw hardening.
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** Complete typed-override acceptance and then standardize lifecycle cards/delivery evidence.
-
+- **Implementation evidence:** Jason Release Manager release-18f9e070c9e674d8 reached closed; production SHA 18f9e070c9e674d88bedc097b88875fd40d082b9.
 ### TODO-COMM-003 — Secure client portal messaging
 
 - **Priority:** P2
@@ -948,15 +949,18 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-GOV-001 — Technology Steward review automation
 
 - **Priority:** P2
-- **Status:** Proposed
+- **Status:** Implemented — production verified 2026-10-10T20:46:36+00:00; release release-566c39a7fcbcc4e3; SHA 566c39a7fcbcc4e3211857b6c276d3bf292e98a0
+- **Autonomous engineering readiness:** Approved — bounded first implementation only
 - **Risk level:** Low
 - **Idea:** Periodically review dependent platforms for new capabilities, API changes, deprecations, and opportunities to retire custom Jason functionality.
 - **Why it matters:** Supports the principle of integrating before innovating and prevents unnecessary custom-code accumulation.
-- **Why not now:** Requires connector inventory, ownership, and review cadence.
-- **Prerequisites:** dependency registry, vendor feed sources, review workflow, retirement criteria.
-- **Decision owner:** Technology Steward
+- **Owner-approved first implementation scope:** Build a read-only/report-only Technology Steward review runner that can inspect defined dependency/platform capability sources and produce a structured findings report. No provider configuration changes, client changes, credential changes, capability retirement, or autonomous remediation are authorized by this approval.
+- **Authority boundary:** Findings are advisory/report-only. Any recommendation to change configuration, retire functionality, add credentials, broaden provider access, or alter client systems requires separate governed authority.
+- **Acceptance criteria:** deterministic bounded source inventory; structured report output; explicit source/evidence references; no provider mutation capability; regression proof of report-only behavior; protected CI; Release Manager promotion; production verification.
+- **Prerequisites:** dependency registry, defined review sources, review workflow, retirement criteria. The first bounded implementation may establish the minimal local registry/reporting primitives needed for read-only review but may not add new external credentials or write authority.
+- **Decision owner:** AOT Owner / Technology Steward
 - **Review trigger:** After the first production connectors are operational.
-
+- **Implementation evidence:** Jason Release Manager release-566c39a7fcbcc4e3 reached closed; production SHA 566c39a7fcbcc4e3211857b6c276d3bf292e98a0.
 ### TODO-GOV-002 — Capability retirement and deprecation process
 
 - **Priority:** P2

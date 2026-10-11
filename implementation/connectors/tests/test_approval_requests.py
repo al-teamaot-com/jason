@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 
+import pytest
+
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
@@ -161,3 +163,21 @@ def test_sqlite_repository_rejects_changed_scope_for_same_approval_id(tmp_path):
     else:
         raise AssertionError("changed immutable scope was accepted")
     repo.close()
+
+
+def test_attention_resource_binding_is_immutable_request_scope():
+    scoped = replace(request(), attention_resource_id="T123")
+    repo = InMemoryApprovalRequestRepository()
+    service = ApprovalRequestService(repo, Authority(True))
+    service.create(scoped, now=NOW)
+    accepted = service.accept_response(ApprovalResponse(
+        approval_id="apr-1", organization_id="org-a", approver_identity_id="user-approver",
+        decision=ApprovalDecision.APPROVE, decided_at=NOW + timedelta(minutes=1),
+        channel="microsoft_teams", channel_response_id="teams-1",
+    ), now=NOW + timedelta(minutes=1))
+    assert accepted.attention_resource_id == "T123"
+
+
+def test_attention_resource_binding_rejects_wildcards():
+    with pytest.raises(ValueError):
+        replace(request(), attention_resource_id="T*").validate()

@@ -33,8 +33,10 @@ def test_emit_lifecycle_event_is_deterministic_and_bounded(tmp_path):
     assert payload['event_type'] == 'work_started'
 
 
-def test_sync_support_lifecycle_writes_start_and_blocker(tmp_path):
-    record = {'phase': 'blocked', 'reason': 'controlled blocker'}
+def test_sync_support_lifecycle_writes_start_and_explicit_owner_blocker(tmp_path):
+    record = {'phase': 'blocked', 'reason': 'controlled blocker',
+              'notification_class': 'owner_action_required',
+              'owner_action': 'Approve protected core release'}
     item = {'id': 'SUPPORT-OPS-100', 'title': 'Example repair'}
     root = tmp_path / 'events'
     worker.sync_support_lifecycle_notification(record, item, event_root=root)
@@ -78,6 +80,46 @@ def test_request_id_binds_context():
     first = worker.request_id(payload)
     payload['context'] = {'changed': True}
     assert worker.request_id(payload) != first
+
+
+def test_gh_json_retries_transient_command_failure(tmp_path, monkeypatch):
+    attempts = []
+
+    def fake_run(args, *, cwd=None, **kwargs):
+        attempts.append(list(args))
+        if len(attempts) == 1:
+            raise worker.WorkerError('HTTP 504')
+        return '[{"number": 1}]'
+
+    monkeypatch.setattr(worker, 'run', fake_run)
+    monkeypatch.setattr(worker.time, 'sleep', lambda _: None)
+    assert worker.gh_json(['pr', 'list'], cwd=tmp_path) == [{'number': 1}]
+    assert len(attempts) == 2
+
+
+def test_gh_json_retries_malformed_json(tmp_path, monkeypatch):
+    responses = iter(['[{', '[]'])
+    monkeypatch.setattr(worker, 'run', lambda *args, **kwargs: next(responses))
+    monkeypatch.setattr(worker.time, 'sleep', lambda _: None)
+    assert worker.gh_json(['pr', 'list'], cwd=tmp_path) == []
+
+
+def test_gh_json_fails_closed_after_three_attempts(tmp_path, monkeypatch):
+    attempts = []
+
+    def fake_run(args, *, cwd=None, **kwargs):
+        attempts.append(list(args))
+        raise worker.WorkerError('provider unavailable')
+
+    monkeypatch.setattr(worker, 'run', fake_run)
+    monkeypatch.setattr(worker.time, 'sleep', lambda _: None)
+    try:
+        worker.gh_json(['pr', 'list'], cwd=tmp_path)
+    except worker.WorkerError as exc:
+        assert 'after 3 bounded attempts' in str(exc)
+    else:
+        raise AssertionError('persistent GitHub failure did not fail closed')
+    assert len(attempts) == 3
 
 
 class Gate:
@@ -519,6 +561,37 @@ def test_source_excerpts_for_paths_is_bounded_and_policy_filtered(tmp_path):
     assert [item['path'] for item in excerpts] == [allowed.relative_to(tmp_path).as_posix()]
 
 
+def test_source_excerpts_for_paths_keeps_full_identified_file_up_to_24k(tmp_path):
+    allowed = tmp_path / 'implementation' / 'decision_memory' / 'resolution_service.py'
+    allowed.parent.mkdir(parents=True, exist_ok=True)
+    body = 'header\n' + ('x' * 12000) + '\nexact-lifecycle-method\n'
+    allowed.write_text(body, encoding='utf-8')
+    excerpts = worker.source_excerpts_for_paths(
+        tmp_path,
+        [allowed.relative_to(tmp_path).as_posix()],
+        Gate(),
+        {'max_changed_lines': 800, 'max_changed_files': 25},
+        terms=['exact-lifecycle-method'],
+    )
+    assert excerpts[0]['content'] == body
+
+
+def test_source_excerpts_for_paths_centers_large_file_on_search_term(tmp_path):
+    allowed = tmp_path / 'implementation' / 'orchestrator' / 'provider_read_capability_catalog.py'
+    allowed.parent.mkdir(parents=True, exist_ok=True)
+    body = 'prefix\n' + ('x' * 28000) + '\nidentity-investigation-read\n' + ('y' * 28000)
+    allowed.write_text(body, encoding='utf-8')
+    excerpts = worker.source_excerpts_for_paths(
+        tmp_path,
+        [allowed.relative_to(tmp_path).as_posix()],
+        Gate(),
+        {'max_changed_lines': 800, 'max_changed_files': 25},
+        terms=['identity-investigation-read'],
+    )
+    assert 'identity-investigation-read' in excerpts[0]['content']
+    assert len(excerpts[0]['content']) <= 24000
+
+
 def test_merge_source_excerpts_keeps_prior_context_and_adds_new():
     prior = [
         {'path': 'implementation/kernel/capabilities/repository.py', 'content': 'repo'},
@@ -675,3 +748,144 @@ def test_safe_search_centers_long_file_excerpt_on_match(tmp_path, monkeypatch):
     assert excerpts
     assert 'self_heal_escalation = True' in excerpts[0]['content']
     assert len(excerpts[0]['content']) <= 14000
+
+
+def test_transient_github_pr_listing_deferred_without_mutation(tmp_path, monkeypatch):
+    monkeypatch.setattr(__import__('sys'), 'argv', ['support_repair_host_worker.py', '--repo', str(tmp_path), '--spool', str(tmp_path / 'spool')])
+    monkeypatch.setattr(worker, 'run', lambda *a, **k: '')
+    monkeypatch.setattr(worker, 'parse_support', lambda _: [])
+    monkeypatch.setattr(worker, 'load_self_heal_incidents', lambda: [])
+    monkeypatch.setattr(worker, 'open_support_issue_ids', lambda _: set())
+    monkeypatch.setattr(worker, 'open_prs', lambda _: (_ for _ in ()).throw(worker.WorkerError('HTTP 504: gateway timeout')))
+    assert worker.main() == 0
+    state = worker.load_state(tmp_path / 'spool' / 'state.json')
+    assert state['upstream_deferred']['reason'] == 'transient_gateway_error'
+    assert state['items'] == {}
+
+
+def test_nongateway_github_pr_listing_failure_remains_fatal(tmp_path, monkeypatch):
+    monkeypatch.setattr(__import__('sys'), 'argv', ['support_repair_host_worker.py', '--repo', str(tmp_path), '--spool', str(tmp_path / 'spool')])
+    monkeypatch.setattr(worker, 'run', lambda *a, **k: '')
+    monkeypatch.setattr(worker, 'parse_support', lambda _: [])
+    monkeypatch.setattr(worker, 'load_self_heal_incidents', lambda: [])
+    monkeypatch.setattr(worker, 'open_support_issue_ids', lambda _: set())
+    monkeypatch.setattr(worker, 'open_prs', lambda _: (_ for _ in ()).throw(worker.WorkerError('HTTP 403: forbidden')))
+    try:
+        worker.main()
+    except worker.WorkerError as exc:
+        assert 'HTTP 403' in str(exc)
+    else:
+        raise AssertionError('Authorization failure must not be deferred')
+
+
+def test_development_recovery_feed_admits_only_matched_handoffs(tmp_path):
+    import support_repair_host_worker as worker
+    state = {'items': {
+      'DEV-950': {'phase': 'blocked', 'issue_number': 950,
+       'recovery_handoff_id': 'abc', 'recovery_support_issue_raised': 'SUPPORT-DEV-950',
+       'recovery_handoff_intake': {'status': 'awaiting_governed_repair', 'handoff_id': 'abc'}},
+      'DEV-952': {'phase': 'blocked', 'issue_number': 952,
+       'recovery_support_issue_raised': 'SUPPORT-DEV-952',
+       'recovery_handoff_intake': {'status': 'not_verified', 'handoff_id': 'def'}},
+    }}
+    worker.save_state(tmp_path / 'development-state.json', state)
+    incidents = worker.load_development_recovery_incidents(tmp_path)
+    assert [item['id'] for item in incidents] == ['SUPPORT-DEV-950']
+    assert incidents[0]['priority'] == 'P0'
+
+
+def test_dynamic_development_recovery_closure_is_supported_in_source():
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / 'support_repair_host_worker.py').read_text()
+    assert "item['id'].startswith(('SUPPORT-AUTO-', 'SUPPORT-DEV-'))" in source
+
+
+def test_support_recoverable_blocker_silent_and_explicit_owner_action(monkeypatch, tmp_path):
+    import support_repair_host_worker as worker
+    seen = []
+    monkeypatch.setattr(worker, 'emit_lifecycle_event', lambda **kw: (seen.append(kw), 'fp')[1])
+    item = {'id': 'SUPPORT-DEV-950', 'title': 'Repair'}
+    record = {'phase': 'blocked', 'reason': 'retryable'}
+    worker.sync_support_lifecycle_notification(record, item, event_root=tmp_path)
+    assert not any(x['event_type'] == 'work_blocked' for x in seen)
+    record.update({'notification_class': 'owner_action_required', 'owner_action': 'Approve release'})
+    worker.sync_support_lifecycle_notification(record, item, event_root=tmp_path)
+    worker.sync_support_lifecycle_notification(record, item, event_root=tmp_path)
+    assert len([x for x in seen if x['event_type'] == 'work_blocked']) == 1
+
+
+def test_support_issue_discovery_includes_later_development_recovery(monkeypatch, tmp_path):
+    import support_repair_host_worker as worker
+    def fake_gh(args, *, cwd):
+        assert args[args.index('--limit') + 1] == '1000'
+        return [{'title': f'SUPPORT-OPS-{n:03d}', 'number': n} for n in range(1, 150)] + [
+            {'title': 'SUPPORT-DEV-950: Exhausted recovery', 'number': 150}]
+    monkeypatch.setattr(worker, 'gh_json', fake_gh)
+    assert 'SUPPORT-DEV-950' in worker.open_support_issue_ids(tmp_path)
+
+
+def test_open_prs_discovers_all_101_without_loading_bulk_ci(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_gh_json(args, *, cwd):
+        calls.append(list(args))
+        return [
+            {'number': i, 'title': f'PR {i}', 'body': '',
+             'headRefName': f'branch-{i}', 'url': f'https://example.test/{i}', 'isDraft': False}
+            for i in range(1, 102)
+        ]
+
+    monkeypatch.setattr(worker, 'gh_json', fake_gh_json)
+    prs = worker.open_prs(tmp_path)
+    assert len(prs) == 101
+    assert prs[-1]['number'] == 101
+    assert calls[0][calls[0].index('--limit') + 1] == '1000'
+    fields = calls[0][calls[0].index('--json') + 1]
+    assert 'body' in fields
+    assert 'statusCheckRollup' not in fields
+    assert worker.check_state({'statusCheckRollup': [
+        {'name': 'validation', 'status': 'COMPLETED', 'conclusion': 'FAILURE'}
+    ]})[0] == 'failed'
+
+
+def test_open_prs_rejects_incomplete_and_invalid_listing(monkeypatch, tmp_path):
+    import pytest
+
+    for result in (None, {'number': 1}, [
+        {'number': i, 'headRefName': f'b{i}', 'body': ''} for i in range(1000)
+    ], [
+        {'number': 1, 'headRefName': 'a', 'body': ''},
+        {'number': 1, 'headRefName': 'a', 'body': ''},
+    ]):
+        monkeypatch.setattr(worker, 'gh_json', lambda *a, **kw: result)
+        with pytest.raises(worker.WorkerError):
+            worker.open_prs(tmp_path)
+
+
+def test_transient_github_listing_error_is_deferred_without_permission_bypass(tmp_path, monkeypatch):
+    monkeypatch.setattr(__import__('sys'), 'argv',
+        ['support_repair_host_worker.py', '--repo', str(tmp_path), '--spool', str(tmp_path / 'spool')])
+    monkeypatch.setattr(worker, 'run', lambda *a, **k: '')
+    monkeypatch.setattr(worker, 'parse_support', lambda _: [])
+    monkeypatch.setattr(worker, 'load_self_heal_incidents', lambda: [])
+    monkeypatch.setattr(worker, 'open_support_issue_ids', lambda _: set())
+    monkeypatch.setattr(worker, 'open_prs', lambda _: (_ for _ in ()).throw(
+        worker.WorkerError('GitHub JSON command failed after 3 bounded attempts: command failed (gh): unexpected end of JSON input')))
+    assert worker.main() == 0
+    state = worker.load_state(tmp_path / 'spool' / 'state.json')
+    assert state['upstream_deferred']['provider'] == 'github'
+    assert state['items'] == {}
+    assert not worker.transient_github_listing_failure(worker.WorkerError('HTTP 403: forbidden'))
+
+
+def test_transient_pr_listing_classifier_preserves_authority_boundary():
+    retryable = (
+        'HTTP 502: bad gateway', 'HTTP 503: unavailable',
+        'HTTP 504: gateway timeout',
+        'GitHub JSON command failed: unexpected end of JSON input',
+    )
+    for error in retryable:
+        assert worker.transient_github_listing_failure(worker.WorkerError(error))
+    for error in ('HTTP 403: forbidden', 'HTTP 401: unauthorized',
+                  'approval required', 'invalid JSON record'):
+        assert not worker.transient_github_listing_failure(worker.WorkerError(error))

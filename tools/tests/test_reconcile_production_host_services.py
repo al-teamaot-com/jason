@@ -97,12 +97,21 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'JASON_DOCUMENTATION_REPO_ROOT=/home/al/projects/jason' not in text
     assert 'jason-support-repair-worker.timer' in text
     assert 'jason-self-heal-watchdog.timer' in text
+    assert 'install_release_control_transition.py' in text
+    assert 'installed root release-transition worker differs from production source' in text
+    assert 'jason-release-control-transition.timer' in text
+    assert 'root release-transition timer is not active after production install' in text
+    assert 'JASON_ROOT_RELEASE_TRANSITION_RECONCILIATION=PASS' in text
+    assert text.index('install_release_control_transition.py') < text.index('install_release_host_reconciler.py')
     assert 'install_release_host_reconciler.py' in text
     assert 'installed root host reconciler differs from production source' in text
     assert 'JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS' in text
     assert 'HOST_RECONCILE_STEP_START=' in text
     assert 'HOST_RECONCILE_STEP_PASS=' in text
-    assert 'curl --connect-timeout 2 --max-time 5 -fsS' in text
+    assert 'verify_exporter_port()' in text
+    assert 'for attempt in 1 2 3' in text
+    assert 'curl --connect-timeout 2 --max-time 15 -fsS' in text
+    assert 'exporter verification failed on port $port after 3 bounded attempts' in text
     assert 'timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"' in text
     assert 'timeout --signal=TERM --kill-after=5s 180s env JASON_REPO_ROOT=' in text
 
@@ -200,3 +209,36 @@ def test_observability_reconciliation_is_conditional_and_managed() -> None:
     assert 'JASON_OBSERVABILITY_RECONCILIATION=PASS' in text
     assert 'JASON_OBSERVABILITY_RECONCILIATION=UNCHANGED' in text
     assert 'observability release did not converge to production revision' in text
+
+
+def test_unmanaged_toner_exporter_is_removed_during_production_reconciliation() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    assert "jason-toner-exporter.service" in text
+    assert "systemctl --user disable --now" in text
+    assert "JASON_OBSOLETE_USER_UNIT_CLEANUP=PASS" in text
+    assert "/home/al/.config/systemd/user/default.target.wants/$unit" in text
+
+
+def test_forbidden_developer_path_user_units_are_removed() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    for unit in (
+        "jason-autonomous-repair-runner.service",
+        "jason-autonomous-repair-runner.path",
+        "jason-resolution-memory-exporter.service",
+        "jason-playbook-exporter.service",
+        "jason-pr-integration-reconciler.service",
+        "jason-pr-integration-reconciler.timer",
+    ):
+        assert unit in text
+    assert "systemctl --user disable --now" in text
+    assert "JASON_OBSOLETE_USER_UNIT_CLEANUP=PASS" in text
+
+
+def test_production_drift_watchdog_is_installed_after_cleanup() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    assert "jason-production-drift-watchdog.service" in text
+    assert "jason-production-drift-watchdog.timer" in text
+    assert "production_drift_guard.py" in text
+    assert "JASON_PRODUCTION_DRIFT_GUARD=PASS" in text
+    assert "JASON_ROLLBACK_CONTAINER_RETENTION=PASS" in text
+    assert "systemctl --user reset-failed" in text

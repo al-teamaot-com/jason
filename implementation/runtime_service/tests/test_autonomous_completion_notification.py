@@ -11,6 +11,7 @@ from jason_runtime.autonomous_completion_notification import (
     AutonomousCompletionTeamsInvoker,
     AutonomousDeploymentCompletionNotificationMaintenance,
     AutonomousWorkLifecycleNotificationMaintenance,
+    ReleaseManagerOwnerNotificationMaintenance,
     SelfHealEscalationNotificationMaintenance,
     _render,
 )
@@ -128,6 +129,19 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
         self.assertEqual(card["body"][0]["color"], "Accent")
         self.assertNotIn("health_metric:", json.dumps(card))
 
+    def test_ticket_status_updated_uses_readable_adaptive_card(self):
+        event, text, card = _render({
+            "event_type": "ticket_status_updated",
+            "work_id": "T20261009.0006",
+            "work_title": "Datto AV alert for AOT-50282",
+            "summary": "Ticket: T20261009.0006 | Device: AOT-50282 | Status: On Hold",
+        })
+        self.assertEqual(event, "ticket_status_updated")
+        self.assertIn("T20261009.0006", text)
+        self.assertEqual(card["type"], "AdaptiveCard")
+        self.assertEqual(card["body"][0]["color"], "Accent")
+        self.assertIn("ticket updated", json.dumps(card).lower())
+
     def test_work_completed_render_is_green(self):
         event, text, card = _render(
             {
@@ -170,6 +184,125 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
             self.assertFalse(maintenance.tick())
             self.assertEqual(len(notifier.calls), 1)
 
+
+    def test_release_queue_notifications_are_start_owner_action_complete_only(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            events = root / "owner-notification-events"
+            events.mkdir(parents=True)
+            candidate = "c" * 40
+            base = {
+                "release_id": "release-candidate",
+                "candidate_sha": candidate,
+                "description": "Add production queue owner notifications with recovery silence.",
+            }
+            for name, extra in (
+                ("production_queue_entered", {}),
+                (
+                    "production_owner_action_required",
+                    {"owner_action": "Approve protected-core production promotion."},
+                ),
+                ("production_queue_completed", {}),
+            ):
+                payload = dict(base, event_type=name, **extra)
+                (events / f"{name}.json").write_text(json.dumps(payload), encoding="utf-8")
+            # Recoverable/internal events are intentionally ignored even if present.
+            (events / "recoverable.json").write_text(
+                json.dumps(dict(base, event_type="recoverable_error")), encoding="utf-8"
+            )
+            notifier = Notifier()
+            maintenance = ReleaseManagerOwnerNotificationMaintenance(
+                notifier=notifier,
+                state_root=root,
+                interval_seconds=15,
+                now=lambda: datetime(2026, 10, 8, 17, 30, tzinfo=timezone.utc),
+            )
+            self.assertTrue(maintenance.tick())
+            self.assertEqual(
+                {call[0] for call in notifier.calls},
+                {
+                    "production_owner_action_required",
+                    "production_queue_completed",
+                    "production_queue_entered",
+                },
+            )
+            self.assertEqual(len(notifier.calls), 3)
+            maintenance._next_due_at = None
+            self.assertFalse(maintenance.tick())
+            self.assertEqual(len(notifier.calls), 3)
+
+    def test_release_failure_does_not_starve_next_notice_and_remains_retryable(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            events = root / "owner-notification-events"
+            events.mkdir(parents=True)
+            for name in ("a", "b"):
+                (events / f"{name}.json").write_text(json.dumps({
+                    "event_type": "production_queue_entered",
+                    "release_id": name,
+                    "candidate_sha": "a" * 40,
+                    "description": "controlled production lifecycle test",
+                }), encoding="utf-8")
+            class FailFirst(Notifier):
+                def send(self, event_type, **arguments):
+                    if arguments["work_id"] == "a":
+                        raise RuntimeError("simulated delivery failure")
+                    return super().send(event_type, **arguments)
+            maintenance = ReleaseManagerOwnerNotificationMaintenance(
+                notifier=FailFirst(), state_root=root, interval_seconds=15,
+                now=lambda: datetime(2026, 10, 9, 12, 0, tzinfo=timezone.utc),
+            )
+            self.assertTrue(maintenance.tick())
+            self.assertTrue((root / "owner-notification-failed" / "a.json").exists())
+            self.assertFalse((root / "owner-notification-delivered" / "a.json").exists())
+            self.assertTrue((root / "owner-notification-delivered" / "b.json").exists())
+
+    def test_accepted_receipt_is_not_recorded_as_delivered(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            events = root / "owner-notification-events"
+            events.mkdir()
+            (events / "release.json").write_text(json.dumps({
+                "event_type": "production_queue_entered",
+                "release_id": "release-receipt",
+                "candidate_sha": "a" * 40,
+                "description": "controlled uncertain Teams delivery",
+            }), encoding="utf-8")
+
+            class SyntheticNotifier(Notifier):
+                def send(self, event_type, **arguments):
+                    self.calls.append((event_type, arguments))
+                    return {"message_id": "accepted:synthetic", "message_id_synthetic": True}
+
+            notifier = SyntheticNotifier()
+            maintenance = ReleaseManagerOwnerNotificationMaintenance(
+                notifier=notifier, state_root=root, interval_seconds=15,
+                now=lambda: datetime(2026, 10, 9, 18, 30, tzinfo=timezone.utc),
+            )
+            self.assertFalse(maintenance.tick())
+            self.assertFalse((root / "owner-notification-delivered" / "release.json").exists())
+            marker = root / "owner-notification-unverified" / "release.json"
+            self.assertTrue(marker.exists())
+            self.assertEqual(json.loads(marker.read_text())["status"], "provider_accepted_delivery_unverified")
+            maintenance._next_due_at = None
+            self.assertFalse(maintenance.tick())
+            self.assertEqual(len(notifier.calls), 1)
+
+    def test_release_queue_render_includes_description_and_candidate(self):
+        candidate = "d" * 40
+        event, text, card = _render(
+            {
+                "event_type": "production_queue_entered",
+                "work_id": "release-deadbeef",
+                "summary": "Deploy fixed owner lifecycle notifications.",
+                "candidate_sha": candidate,
+            }
+        )
+        self.assertEqual(event, "production_queue_entered")
+        self.assertIn("Deploy fixed owner lifecycle notifications", text)
+        self.assertIn(candidate[:12], text)
+        self.assertEqual(card["body"][0]["color"], "Accent")
+
     def test_self_heal_escalation_render_is_bounded_and_actionable(self):
         event, text, card = _render(
             {
@@ -183,8 +316,12 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
         self.assertEqual(event, "self_heal_escalation")
         self.assertIn("owner action", text.casefold())
         self.assertIn("jason_mcp_status", text)
+        self.assertIn("status surface failed twice", text)
+        self.assertIn("restarted jason-mcp-pilot and rechecked", text)
         self.assertEqual(card["type"], "AdaptiveCard")
         self.assertEqual(card["body"][0]["color"], "Attention")
+        self.assertEqual(card["body"][2]["facts"][0]["title"], "Degraded function")
+        self.assertEqual(card["body"][2]["facts"][3]["title"], "Owner action")
 
     def test_self_heal_escalation_notifies_once(self):
         with tempfile.TemporaryDirectory() as td:

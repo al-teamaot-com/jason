@@ -29,6 +29,16 @@ class AudiencePolicyEngine:
         if not draft.recipients:
             findings.append(ReviewFinding("recipient.missing", "At least one recipient is required.", "block"))
 
+        recipient_ids = tuple(r.recipient_id for r in draft.recipients)
+        if len(set(recipient_ids)) != len(recipient_ids):
+            findings.append(
+                ReviewFinding(
+                    "recipient.duplicate",
+                    "Duplicate recipients are not allowed.",
+                    "block",
+                )
+            )
+
         audiences = tuple(dict.fromkeys(r.audience_type for r in draft.recipients))
         if len(audiences) > 1:
             findings.append(

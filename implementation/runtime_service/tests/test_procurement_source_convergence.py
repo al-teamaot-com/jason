@@ -348,6 +348,40 @@ def test_structured_file_source_converges_without_parallel_execution_path(tmp_pa
     assert "create_client_quote" not in payload
 
 
+def test_document_source_preserves_invoice_charges_for_reconciliation(tmp_path):
+    flow = _flow(tmp_path)
+    normalized = {
+        "source_kind": "vendor_invoice",
+        "source_reference": "invoice:INV-CHARGES-1",
+        "vendor": {"name": "Staples"},
+        "lines": [
+            {
+                "name": "USB-C Dock",
+                "unit_cost": "100.00",
+                "quantity": 2,
+                "billing_frequency": "one_time",
+            }
+        ],
+        "invoice_total": "230.50",
+        "freight": "15.00",
+        "tax": "10.00",
+        "fees": "5.50",
+    }
+    result = flow.handle_vendor_document(
+        normalized=normalized,
+        microsoft_tenant_id="tenant",
+        microsoft_object_id="object",
+        conversation_id="conv",
+        message_id="msg",
+        occurred_at=NOW,
+    )
+    payload = flow.store.get(result["submission_id"])
+    assert payload["invoice_total"] == "230.50"
+    assert payload["freight"] == "15.00"
+    assert payload["tax"] == "10.00"
+    assert payload["fees"] == "5.50"
+
+
 def test_document_defaults_preserve_existing_quote_invoice_behavior(tmp_path):
     flow = _flow(tmp_path)
     normalized = {

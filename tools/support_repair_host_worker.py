@@ -9,6 +9,7 @@ against J-CHANGE-002 path/size/test controls before any git mutation.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import importlib.util
 import json
@@ -17,6 +18,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -166,13 +168,44 @@ def reasoning_response(spool: Path, rid: str) -> Mapping[str, Any] | None:
 
 
 def gh_json(args: list[str], *, cwd: Path) -> Any:
-    raw = run(['gh', *args], cwd=cwd)
-    return json.loads(raw) if raw else None
+    last_error: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            raw = run(['gh', *args], cwd=cwd)
+            return json.loads(raw) if raw else None
+        except (WorkerError, json.JSONDecodeError) as exc:
+            last_error = exc
+            if attempt < 3:
+                time.sleep(1.0)
+    raise WorkerError(
+        'GitHub JSON command failed after 3 bounded attempts: '
+        + str(last_error or 'unknown error')[:500]
+    ) from last_error
+
+
+def transient_github_listing_failure(exc: Exception) -> bool:
+    """Defer only transient GitHub transport failures, never permission errors."""
+    detail = str(exc)
+    return any(marker in detail for marker in (
+        'HTTP 502', 'HTTP 503', 'HTTP 504', 'unexpected end of JSON input',
+    ))
 
 
 def open_prs(repo: Path) -> list[dict[str, Any]]:
-    data = gh_json(['pr', 'list', '--state', 'open', '--limit', '100', '--json', 'number,title,body,headRefName,url,isDraft,statusCheckRollup'], cwd=repo)
-    return list(data or [])
+    # Selected PRs get full CI checks through pr_view; bulk discovery needs
+    # only metadata and body. A complete list is mandatory before reconciling.
+    limit = 1000
+    fields = 'number,title,body,headRefName,url,isDraft'
+    data = gh_json(['pr', 'list', '--state', 'open', '--limit', str(limit), '--json', fields], cwd=repo)
+    if not isinstance(data, list) or len(data) >= limit:
+        raise WorkerError('GitHub open PR listing is incomplete or invalid; refusing partial reconciliation')
+    if any(not isinstance(item, dict) or not isinstance(item.get('number'), int)
+           or not isinstance(item.get('headRefName'), str)
+           or not isinstance(item.get('body'), str) for item in data):
+        raise WorkerError('GitHub open PR listing contains an invalid record')
+    if len({item['number'] for item in data}) != len(data):
+        raise WorkerError('GitHub open PR listing contains duplicate identities')
+    return data
 
 
 def support_id_from_title(title: str) -> str | None:
@@ -183,7 +216,7 @@ def support_id_from_title(title: str) -> str | None:
 def open_support_issue_ids(repo: Path) -> set[str]:
     data = gh_json([
         'issue', 'list', '--state', 'open', '--search', 'SUPPORT- in:title',
-        '--limit', '100', '--json', 'number,title'
+        '--limit', '1000', '--json', 'number,title'
     ], cwd=repo) or []
     result = set()
     for issue in data:
@@ -235,6 +268,44 @@ def load_self_heal_incidents(root: Path = Path('/var/lib/jason/openclaw/self-hea
         })
     incidents.sort(key=lambda item: (PRIORITY.get(item['priority'], 99), item['id']))
     return incidents
+
+
+def load_development_recovery_incidents(spool: Path) -> list[dict[str, str]]:
+    """Admit only approved, validated handoffs routed by development worker."""
+    path = spool / 'development-state.json'
+    if not path.is_file():
+        return []
+    state = load_state(path)
+    records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
+    incidents = []
+    for item_id, record in records.items():
+        if not isinstance(record, Mapping) or record.get('phase') != 'blocked':
+            continue
+        intake = record.get('recovery_handoff_intake')
+        if not isinstance(intake, Mapping) or intake.get('status') != 'awaiting_governed_repair':
+            continue
+        issue = record.get('issue_number')
+        if not isinstance(issue, int) or issue < 1:
+            continue
+        identifier = f'SUPPORT-DEV-{issue}'
+        if record.get('recovery_support_issue_raised') != identifier:
+            continue
+        if intake.get('handoff_id') != record.get('recovery_handoff_id'):
+            continue
+        incidents.append({
+            'id': identifier, 'priority': 'P0',
+            'status': 'Open - governed development recovery',
+            'title': f'Repair exhausted development #{issue}',
+            'evidence': (f'Original item {item_id}; handoff {intake["handoff_id"]}; '
+                f'blocker {str(record.get("reason") or "")[:900]}; '
+                f'diagnosis {str(record.get("recovery_diagnostic_summary") or "")[:500]}')[:1600],
+            'acceptance': (
+                'Source regression tests and release evidence must prove the repair; '
+                're-admission requires independent upstream-dependency and production acceptance.'
+            ),
+        })
+    return sorted(incidents, key=lambda item: item['id'])
+
 
 
 def self_heal_post_production_verification(
@@ -666,14 +737,40 @@ def bounded_relevant_excerpt(
     return ''.join(chunks)[:limit]
 
 
+def bounded_symbol_excerpt(text: str, symbols: list[str], *, content_limit: int) -> str | None:
+    """Keep complete matching Python definitions, never mid-function fragments."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return None
+    wanted = {value for value in symbols if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', value)}
+    if not wanted:
+        return None
+    lines = text.splitlines(keepends=True)
+    matches = [node for node in ast.walk(tree)
+               if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+               and node.name in wanted]
+    if not matches:
+        return None
+    chunks = [text[:min(1300, content_limit // 6)]]
+    for node in sorted(matches, key=lambda n: n.lineno):
+        start = min([node.lineno, *[d.lineno for d in getattr(node, 'decorator_list', [])]]) - 1
+        snippet = ''.join(lines[start:node.end_lineno])
+        if sum(map(len, chunks)) + len(snippet) + 32 > content_limit:
+            continue
+        chunks.append(f'\n# Complete definition at line {start + 1}\n' + snippet)
+    return ''.join(chunks) if len(chunks) > 1 else None
+
+
 def source_excerpts_for_paths(
     worktree: Path,
     paths: list[str],
     gate,
     policy: Mapping[str, Any],
     *,
+    terms: list[str] | None = None,
     limit: int = 6,
-    content_limit: int = 8000,
+    content_limit: int = 24000,
 ) -> list[dict[str, str]]:
     """Read a bounded, policy-eligible set of previously discovered sources."""
     excerpts: list[dict[str, str]] = []
@@ -691,7 +788,19 @@ def source_excerpts_for_paths(
             text = candidate.read_text(encoding='utf-8')
         except UnicodeDecodeError:
             continue
-        excerpts.append({'path': path, 'content': text[:content_limit]})
+        symbols = [word for term in list(terms or []) for word in re.findall(
+            r'[A-Za-z_][A-Za-z0-9_]*', str(term))]
+        exact = bounded_symbol_excerpt(text, symbols, content_limit=content_limit)
+        content = exact or (
+            text
+            if len(text) <= content_limit
+            else bounded_relevant_excerpt(
+                text,
+                [str(value) for value in list(terms or [])],
+                content_limit=content_limit,
+            )
+        )
+        excerpts.append({'path': path, 'content': content})
         seen.add(path)
         if len(excerpts) >= max(0, int(limit)):
             break
@@ -867,6 +976,29 @@ def diff_excerpts(worktree: Path, gate, policy: Mapping[str, Any]) -> list[dict[
     return excerpts
 
 
+def classify_ci_failure(log: str) -> str:
+    text = str(log or '').casefold()
+    if (
+        'documentationimpacterror' in text
+        or "missing required '## documentation impact' section" in text
+        or 'documentation impact requires' in text
+    ):
+        return 'pr_governance_metadata_defect'
+    if 'change-integration: fail' in text or 'active implementation overlap with pr #' in text:
+        return 'integration_collision'
+    if (
+        "modulenotfounderror: no module named 'pytest'" in text
+        or 'command not found: pytest' in text
+        or 'no module named pytest' in text
+    ):
+        return 'dependency_environment_defect'
+    if 'production_health' in text or 'production health' in text:
+        return 'production_defect'
+    if 'assertionerror' in text or 'failed (' in text or 'failed]' in text:
+        return 'code_or_test_defect'
+    return 'unclassified_ci_failure'
+
+
 def failed_ci_context(repo: Path, branch: str) -> dict[str, Any]:
     runs = gh_json([
         'run', 'list', '--branch', branch, '--limit', '12', '--json',
@@ -879,13 +1011,18 @@ def failed_ci_context(repo: Path, branch: str) -> dict[str, Any]:
     logs = []
     for item in failed[:3]:
         text = run(['gh', 'run', 'view', str(item['databaseId']), '--log-failed'], cwd=repo, check=False)
+        log_tail = text[-16000:]
         logs.append({
             'name': str(item.get('name') or ''),
             'run_id': int(item['databaseId']),
             'conclusion': str(item.get('conclusion') or ''),
-            'log': text[-16000:],
+            'classification': classify_ci_failure(log_tail),
+            'log': log_tail,
         })
-    return {'failed_runs': logs}
+    return {
+        'failed_runs': logs,
+        'failure_classes': sorted({str(item['classification']) for item in logs}),
+    }
 
 
 def commit_existing(worktree: Path, item_id: str) -> None:
@@ -937,7 +1074,7 @@ def create_closure_pr(repo: Path, item: Mapping[str, str], merge_sha: str, accep
         lines[index] = '|'.join(parts)
         changed = True
         break
-    if not changed and item['id'].startswith('SUPPORT-AUTO-'):
+    if not changed and item['id'].startswith(('SUPPORT-AUTO-', 'SUPPORT-DEV-')):
         lines.append(
             f"| {item['id']} | {item['priority']} | Closed {date} - production verified | "
             f"{item['title'].replace('|', '/')} | {evidence} | "
@@ -1106,14 +1243,19 @@ def sync_support_lifecycle_notification(
                 event_root=event_root,
             )
         phase = str(record.get('phase') or '')
-        if phase == 'blocked':
-            reason = str(record.get('reason') or 'Support repair stopped at a bounded blocker.').strip()
+        if (phase == 'blocked'
+                and record.get('notification_class') == 'owner_action_required'
+                and not record.get('lifecycle_blocked_fingerprint')):
+            reason = str(record.get('reason') or 'Support repair stopped at an owner-action blocker.').strip()
+            owner_action = str(record.get('owner_action') or '').strip()
+            if not owner_action:
+                raise ValueError('owner_action_required blocker must include owner_action')
             record['lifecycle_blocked_fingerprint'] = emit_lifecycle_event(
                 event_type='work_blocked',
                 work_id=str(item['id']),
                 work_title=str(item['title']),
                 summary=reason,
-                owner_action='Review only if Jason cannot resolve the blocker within existing authority.',
+                owner_action=owner_action,
                 event_root=event_root,
             )
         if phase == 'complete' and not record.get('lifecycle_completed_fingerprint'):
@@ -1146,12 +1288,18 @@ def main() -> int:
     support_text = run(['git', 'show', 'origin/main:SUPPORT.md'], cwd=repo)
     parsed_support = parse_support(support_text)
     auto_incidents = load_self_heal_incidents()
+    development_recovery_incidents = load_development_recovery_incidents(spool)
     for item in auto_incidents:
         ensure_support_issue(repo, item)
     open_issue_ids = open_support_issue_ids(repo)
     support = eligible_support_items(parsed_support, open_issue_ids)
     support.extend(
         item for item in auto_incidents
+        if item['id'] in open_issue_ids
+        and item['id'] not in {existing['id'] for existing in support}
+    )
+    support.extend(
+        item for item in development_recovery_incidents
         if item['id'] in open_issue_ids
         and item['id'] not in {existing['id'] for existing in support}
     )
@@ -1164,7 +1312,22 @@ def main() -> int:
             item_id for item_id in open_issue_ids if item_id not in {item['id'] for item in parsed_support}
         ),
     }
-    prs = open_prs(repo)
+    try:
+        prs = open_prs(repo)
+    except WorkerError as exc:
+        # Preserve existing work and defer the entire reconciliation, not a
+        # partial PR listing, when GitHub has a transient gateway outage.
+        if not transient_github_listing_failure(exc):
+            raise
+        state['upstream_deferred'] = {
+            'provider': 'github', 'reason': 'transient_gateway_error',
+            'observed_at': now(),
+        }
+        state['updated_at'] = now()
+        save_state(state_path, state)
+        print('SUPPORT_REPAIR_DEFERRED=github_transient_gateway_error')
+        return 0
+    state.pop('upstream_deferred', None)
     gate = load_gate(repo)
     policy = gate.load_json(repo / 'config' / 'autonomous-repair-release-policy.json')
 

@@ -52,8 +52,12 @@ EXECUTE_GRANT_ID = "grant-jason-autonomy-worker-teams-autonomy-completion-v1"
 _ALLOWED_EVENTS = frozenset(
     {
         "work_started",
+        "ticket_status_updated",
         "work_blocked",
         "work_completed",
+        "production_queue_entered",
+        "production_owner_action_required",
+        "production_queue_completed",
         "patch_completed",
         "deployment_completed",
         "support_item_resolved",
@@ -333,7 +337,7 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str, dict[str, Any]]:
     if event not in _ALLOWED_EVENTS:
         raise ValueError("unsupported autonomous completion event_type")
 
-    if event in {"work_started", "work_blocked", "work_completed"}:
+    if event in {"work_started", "work_blocked", "work_completed", "ticket_status_updated"}:
         work_id = _bounded(arguments.get("work_id"), "work_id", 80)
         title = _bounded(arguments.get("work_title"), "work_title", 180)
         summary = _bounded(arguments.get("summary"), "summary", 400)
@@ -344,6 +348,15 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str, dict[str, Any]]:
                 summary=summary,
                 color="Accent",
                 facts=(("Work item", work_id), ("Scope", title)),
+            )
+            return event, text, card
+        if event == "ticket_status_updated":
+            text = f"Jason updated {work_id}: {title}. {summary}"
+            card = _adaptive_card(
+                title="Jason ticket updated",
+                summary=summary,
+                color="Accent",
+                facts=(("Ticket", work_id), ("Issue", title)),
             )
             return event, text, card
         if event == "work_completed":
@@ -369,6 +382,85 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str, dict[str, Any]]:
             summary=summary,
             color="Attention",
             facts=tuple(facts),
+        )
+        return event, text, card
+
+    if event == "self_heal_escalation":
+        degraded_function = _bounded(arguments.get("degraded_function"), "degraded_function", 120)
+        evidence_summary = _bounded(arguments.get("evidence_summary"), "evidence_summary", 400)
+        attempt_summary = _bounded(arguments.get("attempt_summary"), "attempt_summary", 400)
+        owner_action = str(arguments.get("owner_action") or "").strip()
+        if owner_action:
+            owner_action = _bounded(owner_action, "owner_action", 300)
+        text = (
+            f"Jason self-heal escalation for {degraded_function}. "
+            f"Evidence: {evidence_summary}. Attempts: {attempt_summary}."
+        )
+        if owner_action:
+            text += f" Owner action: {owner_action}."
+        facts = [
+            ("Degraded function", degraded_function),
+            ("Evidence", evidence_summary),
+            ("Attempts", attempt_summary),
+        ]
+        if owner_action:
+            facts.append(("Owner action", owner_action))
+        card = _adaptive_card(
+            title="Jason self-heal escalation",
+            summary=evidence_summary,
+            color="Attention",
+            facts=tuple(facts),
+        )
+        return event, text, card
+
+    if event in {
+        "production_queue_entered",
+        "production_owner_action_required",
+        "production_queue_completed",
+    }:
+        work_id = _bounded(arguments.get("work_id"), "work_id", 80)
+        description = _bounded(arguments.get("summary"), "summary", 400)
+        candidate = _bounded(arguments.get("candidate_sha"), "candidate_sha", 40)
+        if len(candidate) != 40:
+            raise ValueError("candidate_sha must be exact")
+        if event == "production_queue_entered":
+            text = (
+                f"Jason queued {work_id} for Production: {description} "
+                f"Candidate {candidate[:12]}."
+            )
+            card = _adaptive_card(
+                title="Jason production queue started",
+                summary=description,
+                color="Accent",
+                facts=(("Build", work_id), ("Candidate", candidate[:12])),
+            )
+            return event, text, card
+        if event == "production_queue_completed":
+            text = (
+                f"Jason completed Production for {work_id}: {description} "
+                f"Deployed revision {candidate[:12]} verified."
+            )
+            card = _adaptive_card(
+                title="Jason production complete",
+                summary=description,
+                color="Good",
+                facts=(("Build", work_id), ("Revision", candidate[:12])),
+            )
+            return event, text, card
+        owner_action = _bounded(arguments.get("owner_action"), "owner_action", 300)
+        text = (
+            f"Jason needs owner action for {work_id}: {description} "
+            f"Owner action: {owner_action}."
+        )
+        card = _adaptive_card(
+            title="Jason owner action required",
+            summary=description,
+            color="Attention",
+            facts=(
+                ("Build", work_id),
+                ("Candidate", candidate[:12]),
+                ("Owner action", owner_action),
+            ),
         )
         return event, text, card
 
@@ -532,6 +624,7 @@ class AutonomousCompletionTeamsInvoker:
                 "channel": "microsoft_teams",
                 "recipient_identity": RECIPIENT_JASON_IDENTITY,
                 "message_id": str(result["message_id"]),
+                "message_id_synthetic": bool(result.get("message_id_synthetic", False)),
             },
             attempts=1,
         )
@@ -711,6 +804,126 @@ def build_work_lifecycle_notification_maintenance(
         notifier=notifier,
         spool_root=spool_root,
     )
+
+
+@dataclass(slots=True)
+class ReleaseManagerOwnerNotificationMaintenance:
+    notifier: GovernedAutonomousCompletionNotifier
+    state_root: Path = Path("/var/lib/jason/openclaw/release-manager")
+    interval_seconds: int = 30
+    now: Any = None
+    _next_due_at: Any = None
+
+    def __post_init__(self) -> None:
+        if self.interval_seconds < 15:
+            raise ValueError("release notification interval must be at least 15 seconds")
+        if self.now is None:
+            from datetime import datetime, timezone
+            self.now = lambda: datetime.now(timezone.utc)
+
+    def tick(self) -> bool:
+        from datetime import timedelta
+        current = self.now()
+        if self._next_due_at is not None and current < self._next_due_at:
+            return False
+        self._next_due_at = current + timedelta(seconds=self.interval_seconds)
+        events = self.state_root / "owner-notification-events"
+        notified = self.state_root / "owner-notification-delivered"
+        unverified = self.state_root / "owner-notification-unverified"
+        if not events.exists():
+            return False
+        notified.mkdir(parents=True, exist_ok=True, mode=0o700)
+        handled = False
+        allowed = {
+            "production_queue_entered",
+            "production_owner_action_required",
+            "production_queue_completed",
+        }
+        for path in sorted(events.glob("*.json"), key=lambda item: item.stat().st_mtime):
+            marker = notified / path.name
+            if marker.exists() or (unverified / path.name).exists():
+                continue
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+            event_type = str(payload.get("event_type") or "").strip().casefold()
+            if event_type not in allowed:
+                continue
+            release_id = str(payload.get("release_id") or "").strip()
+            candidate = str(payload.get("candidate_sha") or "").strip().casefold()
+            description = str(payload.get("description") or "").strip()
+            if not release_id or len(candidate) != 40 or not description:
+                continue
+            arguments = {
+                "work_id": release_id,
+                "summary": description,
+                "candidate_sha": candidate,
+            }
+            if event_type == "production_owner_action_required":
+                owner_action = str(payload.get("owner_action") or "").strip()
+                if not owner_action:
+                    continue
+                arguments["owner_action"] = owner_action
+            try:
+                result = self.notifier.send(event_type, **arguments)
+                message_id = str(result.get("message_id") or "").strip()
+                if not message_id:
+                    raise RuntimeError("release Teams notification missing message id")
+                if result.get("message_id_synthetic") or message_id.startswith("accepted:"):
+                    # Provider acceptance is not delivery. A blind resend risks
+                    # duplicate cards; retain evidence for explicit reconciliation.
+                    unverified.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    uncertain = unverified / path.name
+                    uncertain.write_text(json.dumps({
+                        "event_type": event_type, "release_id": release_id,
+                        "receipt_id": message_id, "observed_at": current.isoformat(),
+                        "status": "provider_accepted_delivery_unverified",
+                    }, sort_keys=True) + "\n", encoding="utf-8")
+                    os.chmod(uncertain, 0o600)
+                    continue
+            except Exception as exc:
+                # Never let one undelivered release event suppress subsequent alerts.
+                # Keep the original event pending for a later retry and persist
+                # independent failure evidence without leaking provider secrets.
+                failed = self.state_root / "owner-notification-failed"
+                failed.mkdir(parents=True, exist_ok=True, mode=0o700)
+                failure_path = failed / path.name
+                failure_temp = failure_path.with_suffix(failure_path.suffix + ".tmp")
+                failure_temp.write_text(
+                    json.dumps({"event_type": event_type, "release_id": release_id,
+                                "failed_at": current.isoformat(),
+                                "error_type": type(exc).__name__}, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+                os.chmod(failure_temp, 0o600)
+                os.replace(failure_temp, failure_path)
+                continue
+            temp = marker.with_suffix(marker.suffix + ".tmp")
+            temp.write_text(
+                json.dumps(
+                    {
+                        "event_type": event_type,
+                        "release_id": release_id,
+                        "message_id": message_id,
+                        "notified_at": current.isoformat(),
+                    },
+                    sort_keys=True,
+                ) + "\n",
+                encoding="utf-8",
+            )
+            os.chmod(temp, 0o600)
+            os.replace(temp, marker)
+            handled = True
+        return handled
+
+
+def build_release_manager_owner_notification_maintenance(
+    *, notifier: GovernedAutonomousCompletionNotifier | None
+):
+    if notifier is None:
+        return None
+    return ReleaseManagerOwnerNotificationMaintenance(notifier=notifier)
 
 
 @dataclass(slots=True)

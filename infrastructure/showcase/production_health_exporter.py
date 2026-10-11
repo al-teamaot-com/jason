@@ -15,6 +15,10 @@ PROVIDER_CANARY_REPORT_PATH = os.environ.get(
     "JASON_PROVIDER_CANARY_REPORT_PATH",
     "/var/lib/jason/provider-health-canaries.json",
 )
+PRODUCTION_DRIFT_REPORT_PATH = os.environ.get(
+    "JASON_PRODUCTION_DRIFT_REPORT_PATH",
+    "/var/lib/jason/openclaw/release-manager/production-drift.json",
+)
 PROVIDER_CANARY_CAPABILITIES = {
     "autotask": "service.company.search",
     "it_glue": "documentation.organization.search",
@@ -270,6 +274,19 @@ def _failed_systemd_units() -> int:
     return _cached_count("failed-units", 60.0, _failed_systemd_units_uncached)
 
 
+def _production_drift_report() -> dict:
+    try:
+        raw = open(PRODUCTION_DRIFT_REPORT_PATH, encoding="utf-8").read()
+        payload = json.loads(raw)
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+    if not isinstance(payload, dict) or payload.get("schema_version") != "1.0":
+        return {}
+    if not isinstance(payload.get("problems"), list):
+        return {}
+    return payload
+
+
 def _provider_canary_report() -> dict:
     try:
         raw = open(PROVIDER_CANARY_REPORT_PATH, encoding="utf-8").read()
@@ -408,6 +425,10 @@ def render_metrics() -> str:
     failed_units = _failed_systemd_units()
     root_writable = _root_writable()
     provider_canaries = _provider_canary_report()
+    drift_report = _production_drift_report()
+    drift_status = str(drift_report.get("status") or "unknown")
+    drift_converged = 1 if drift_status == "pass" else 0
+    drift_problem_count = len(drift_report.get("problems") or []) if drift_report else -1
     rollback_available = 1 if any(
         name.startswith("jason-mcp-pilot-rollback-")
         or name.startswith("jason-mcp-pilot-pre-v4-")
@@ -480,6 +501,12 @@ def render_metrics() -> str:
         "# HELP jason_mcp_rollback_available Whether a preserved MCP rollback container is present.",
         "# TYPE jason_mcp_rollback_available gauge",
         f"jason_mcp_rollback_available {rollback_available}",
+        "# HELP jason_production_desired_state_converged Whether the latest production drift watchdog evidence reports full desired-state convergence.",
+        "# TYPE jason_production_desired_state_converged gauge",
+        f"jason_production_desired_state_converged {drift_converged}",
+        "# HELP jason_production_drift_problem_count Number of desired-state drift problems in the latest watchdog evidence; -1 means unavailable.",
+        "# TYPE jason_production_drift_problem_count gauge",
+        f"jason_production_drift_problem_count {drift_problem_count}",
         "# HELP jason_production_expected_info Expected production MCP release metadata. No credentials or provider records are exposed.",
         "# TYPE jason_production_expected_info gauge",
         (
@@ -493,7 +520,7 @@ def render_metrics() -> str:
         ),
         "# HELP jason_production_health_exporter_build_info Production health exporter metadata.",
         "# TYPE jason_production_health_exporter_build_info gauge",
-        'jason_production_health_exporter_build_info{version="4"} 1',
+        'jason_production_health_exporter_build_info{version="5"} 1',
     ])
 
     generated_at = provider_canaries.get("generated_at_epoch")

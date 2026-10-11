@@ -1,0 +1,12 @@
+[Unit]
+Description=Jason root-governed release control transitions
+After=docker.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 /usr/local/lib/jason/release_control_transition_worker.py
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/jason/openclaw/release-manager
+ProtectHome=read-only

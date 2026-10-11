@@ -78,6 +78,7 @@ def test_render_metrics_is_secret_safe_and_reports_current_governed_datto_contra
     monkeypatch.setattr(module, "_failed_systemd_units", lambda: 0)
     monkeypatch.setattr(module, "_root_writable", lambda: 1)
     monkeypatch.setattr(module, "_docker_names", lambda: ("jason-mcp-pilot-rollback-20260916T131914Z",))
+    monkeypatch.setattr(module, "_production_drift_report", lambda: {"schema_version": "1.0", "status": "pass", "problems": []})
 
     metrics = module.render_metrics()
 
@@ -98,7 +99,9 @@ def test_render_metrics_is_secret_safe_and_reports_current_governed_datto_contra
     assert "jason_host_kernel_error_count 0" in metrics
     assert "jason_root_filesystem_writable 1" in metrics
     assert "jason_mcp_rollback_available 1" in metrics
-    assert 'jason_production_health_exporter_build_info{version="4"} 1' in metrics
+    assert "jason_production_desired_state_converged 1" in metrics
+    assert "jason_production_drift_problem_count 0" in metrics
+    assert 'jason_production_health_exporter_build_info{version="5"} 1' in metrics
 
     for forbidden in ("password", "secret_id=", "role_id=", "access_token", "refresh_token"):
         assert forbidden not in metrics.casefold()
@@ -144,10 +147,13 @@ def test_datto_contract_fails_closed_when_scope_does_not_match(monkeypatch):
     monkeypatch.setattr(module, "_failed_systemd_units", lambda: 0)
     monkeypatch.setattr(module, "_root_writable", lambda: 1)
     monkeypatch.setattr(module, "_docker_names", lambda: ("jason-mcp-pilot-rollback-test",))
+    monkeypatch.setattr(module, "_production_drift_report", lambda: {"schema_version": "1.0", "status": "drift_detected", "problems": [{"kind": "test"}]})
 
     metrics = module.render_metrics()
     assert 'jason_mcp_contract{check="datto_execution_scope"} 0' in metrics
     assert "jason_datto_governed_execution_contract 0" in metrics
+    assert "jason_production_desired_state_converged 0" in metrics
+    assert "jason_production_drift_problem_count 1" in metrics
 
 
 
@@ -235,6 +241,7 @@ def test_missing_components_fail_closed(monkeypatch):
     monkeypatch.setattr(module, "_failed_systemd_units", lambda: -1)
     monkeypatch.setattr(module, "_root_writable", lambda: -1)
     monkeypatch.setattr(module, "_docker_names", lambda: ())
+    monkeypatch.setattr(module, "_production_drift_report", lambda: {})
 
     metrics = module.render_metrics()
 
@@ -245,6 +252,8 @@ def test_missing_components_fail_closed(monkeypatch):
     assert "jason_datto_governed_execution_contract 0" in metrics
     assert "jason_root_filesystem_writable -1" in metrics
     assert "jason_mcp_rollback_available 0" in metrics
+    assert "jason_production_desired_state_converged 0" in metrics
+    assert "jason_production_drift_problem_count -1" in metrics
 
 
 def test_datto_contract_allows_additional_governed_components() -> None:

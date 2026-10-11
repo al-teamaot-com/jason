@@ -7,7 +7,7 @@
     "automatic_promotion_enabled": true,
     "timezone": "America/New_York",
     "serialized_promotion": true,
-    "mode": "continuous_24x7",
+    "mode": "continuous_24x7_owner_approved",
     "reconcile_interval_minutes": 5,
     "max_concurrent_releases": 1
   },
@@ -26,7 +26,13 @@
     "protected_core_requires_owner_approval": true,
     "post_deploy_verification_required": true,
     "rollback_on_verification_failure": true,
-    "deployment_script": "infrastructure/jason-runtime/production-deploy.sh"
+    "deployment_script": "infrastructure/jason-runtime/production-deploy.sh",
+    "circuit_breaker_required": true,
+    "last_known_good_manifest_required": true,
+    "controller_identity_pinning_required": true,
+    "functional_smoke_test_required": true,
+    "fresh_pre_mutation_health_required": true,
+    "require_owner_approval_for_all": true
   },
   "protected_core_globs": [
     ".github/workflows/*",
@@ -72,18 +78,62 @@
     "rolled_back"
   ],
   "transitions": {
-    "requested": ["development", "blocked"],
-    "development": ["dev_verified", "blocked", "failed"],
-    "dev_verified": ["release_candidate", "development", "blocked"],
-    "release_candidate": ["preproduction", "development", "blocked"],
-    "preproduction": ["preprod_verified", "development", "blocked", "failed"],
-    "preprod_verified": ["production_eligible", "development", "blocked"],
-    "production_eligible": ["production", "development", "blocked"],
-    "production": ["production_verified", "rolled_back", "failed"],
-    "production_verified": ["closed", "rolled_back"],
-    "blocked": ["development", "requested"],
-    "failed": ["development", "rolled_back"],
-    "rolled_back": ["development", "closed"],
+    "requested": [
+      "development",
+      "blocked"
+    ],
+    "development": [
+      "dev_verified",
+      "blocked",
+      "failed"
+    ],
+    "dev_verified": [
+      "release_candidate",
+      "development",
+      "blocked"
+    ],
+    "release_candidate": [
+      "preproduction",
+      "development",
+      "blocked"
+    ],
+    "preproduction": [
+      "preprod_verified",
+      "development",
+      "blocked",
+      "failed"
+    ],
+    "preprod_verified": [
+      "production_eligible",
+      "development",
+      "blocked"
+    ],
+    "production_eligible": [
+      "production",
+      "development",
+      "blocked"
+    ],
+    "production": [
+      "production_verified",
+      "rolled_back",
+      "failed"
+    ],
+    "production_verified": [
+      "closed",
+      "rolled_back"
+    ],
+    "blocked": [
+      "development",
+      "requested"
+    ],
+    "failed": [
+      "development",
+      "rolled_back"
+    ],
+    "rolled_back": [
+      "development",
+      "closed"
+    ],
     "closed": []
   },
   "required_development_evidence": [
@@ -121,7 +171,13 @@
     "alignment_verified",
     "runtime_revision",
     "mcp_revision",
-    "host_revision"
+    "host_revision",
+    "functional_smoke_tests_passed",
+    "controller_identity_verified",
+    "last_known_good_manifest_captured",
+    "pre_mutation_health_passed",
+    "production_manifest_complete",
+    "desired_state_converged"
   ],
   "support_impact": {
     "required_before_production_eligible": true,

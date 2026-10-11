@@ -95,6 +95,7 @@ from connectors.datto_edr.threat_correlation import (
     correlate_drmm_threat_to_edr_detection,
 )
 from pydantic import AnyHttpUrl
+from jason_mcp.release_approval_request import queue_release_approval_request
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse
 
@@ -4966,6 +4967,56 @@ def _component_approval_owner() -> tuple[str, str]:
     return principal, organization
 
 
+def _release_approval_owner() -> tuple[str, str]:
+    principal, organization, _, _ = _authenticated_write_identity()
+    owners = approval_owner_identities()
+    if not owners or principal not in owners:
+        raise PermissionError("RELEASE_APPROVAL_OWNER_REQUIRED")
+    return principal, organization
+
+
+@mcp.tool()
+def approve_release_candidate(
+    release_id: str,
+    candidate_sha: str,
+    reason: str = "",
+) -> dict[str, Any]:
+    """Owner-only: approve one exact production-eligible Jason release candidate.
+
+    This records an exact-SHA approval request in shared governed state. It does
+    not promote production directly; the host Release Manager independently
+    validates and consumes the request before its normal promotion transaction.
+    """
+
+    try:
+        principal, organization = _release_approval_owner()
+        state_root = Path(
+            os.getenv(
+                "JASON_RELEASE_MANAGER_STATE_ROOT",
+                "/var/lib/jason/openclaw/release-manager",
+            )
+        )
+        request = queue_release_approval_request(
+            state_root=state_root,
+            release_id=release_id,
+            candidate_sha=candidate_sha,
+            approved_by=principal,
+            organization_id=organization,
+            reason=reason,
+        )
+    except (PermissionError, ValueError, OSError, json.JSONDecodeError) as exc:
+        return {"status": "rejected", "error_code": str(exc)}
+
+    return {
+        "status": "succeeded",
+        "release_id": request["release_id"],
+        "candidate_sha": request["candidate_sha"],
+        "approved_by": request["approved_by"],
+        "approval_source": request.get("source", "authenticated_jason_mcp_owner"),
+        "promotion": "separate_release_manager_transaction",
+    }
+
+
 def _component_unsupervised_block_reason(
     record: Mapping[str, Any],
 ) -> str | None:
@@ -6763,6 +6814,225 @@ def view_documentation_attachment(
     return blocks
 
 
+def _runtime_procurement_flow():
+    app = _runtime()
+    outer = getattr(app, "ingress", None)
+    governed = getattr(outer, "ingress", None)
+    flow = getattr(governed, "procurement_flow", None)
+    if flow is None:
+        raise PermissionError("MCP_PROCUREMENT_FLOW_UNAVAILABLE")
+    return flow
+
+
+def _authenticated_microsoft_transport_identity() -> tuple[str, str]:
+    # _authenticated_identity performs tenant validation, JIT binding, and
+    # active Jason identity checks. The Microsoft ids below are then used only
+    # as transport evidence for the already-governed procurement flow.
+    _authenticated_identity()
+    access_token = get_access_token()
+    if access_token is None:
+        raise PermissionError("MCP_AUTHENTICATION_REQUIRED")
+    claims = access_token.claims or {}
+    tenant_id = str(claims.get("tid") or "").strip()
+    object_id = str(claims.get("oid") or "").strip()
+    if tenant_id != JASON_ENTRA_TENANT_ID or not object_id:
+        raise PermissionError("MCP_AUTHENTICATED_IDENTITY_INVALID")
+    return tenant_id, object_id
+
+
+def _send_procurement_review_to_teams(
+    *,
+    tenant_id: str,
+    object_id: str,
+    result: Mapping[str, Any],
+) -> tuple[str, ...]:
+    reply = result.get("reply")
+    if not isinstance(reply, Mapping):
+        raise RuntimeError("procurement review reply missing")
+    text = str(reply.get("text") or "Jason procurement review").strip()
+    cards = reply.get("cards")
+    if not isinstance(cards, list) or not cards:
+        card = reply.get("card")
+        cards = [card] if isinstance(card, Mapping) else []
+    if not cards:
+        raise RuntimeError("procurement review card missing")
+    settings = RuntimeSettings.from_env()
+    token = Path(settings.teams_proactive_token_file).read_text(encoding="utf-8").strip()
+    if not token:
+        raise PermissionError("Teams proactive token unavailable")
+    message_ids: list[str] = []
+    for raw_card in cards:
+        if not isinstance(raw_card, Mapping) or raw_card.get("type") != "AdaptiveCard":
+            raise RuntimeError("invalid procurement review card")
+        payload = {
+            "aadObjectId": object_id,
+            "tenantId": tenant_id,
+            "text": text,
+            "card": dict(raw_card),
+        }
+        request = Request(
+            str(settings.teams_gateway_internal_url).rstrip("/") + "/internal/proactive/send",
+            data=json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8"),
+            method="POST",
+            headers={
+                "Authorization": "Bearer " + token,
+                "Content-Type": "application/json",
+            },
+        )
+        with urlopen(request, timeout=20) as response:
+            sent = json.loads(response.read().decode("utf-8"))
+        if sent.get("status") != "succeeded" or not sent.get("message_id"):
+            raise RuntimeError("Teams procurement review delivery failed")
+        message_ids.append(str(sent["message_id"]))
+    return tuple(message_ids)
+
+
+@mcp.tool()
+def process_procurement_invoice(
+    vendor_name: str,
+    invoice_number: str,
+    source_reference: str,
+    lines: list[dict[str, Any]],
+    invoice_total: str = "",
+    vendor_order_reference: str = "",
+    ship_to: str = "",
+    freight: str = "0",
+    tax: str = "0",
+    fees: str = "0",
+    source_capture_sha256: str = "",
+) -> dict[str, Any]:
+    """Process a vendor invoice through AOT's fixed Jason procurement workflow.
+
+    This is the only ChatGPT-Jason invoice intake path. Do not ask the requester
+    which workflow, approval channel, or next step they want. Jason creates the
+    canonical governed procurement draft and automatically sends the standard
+    procurement review card to the authenticated requester's Microsoft Teams.
+    Spending-limit and owner-approval policy are enforced later by that fixed
+    workflow. Each line must contain a verified unit_cost and enough product
+    identity to review.
+    """
+    tenant_id, object_id = _authenticated_microsoft_transport_identity()
+    reference = str(source_reference or "").strip()
+    vendor = str(vendor_name or "").strip()
+    invoice = str(invoice_number or "").strip()
+    if not reference or not vendor or not invoice:
+        return {
+            "status": "rejected",
+            "error_code": "procurement_invoice_identity_required",
+        }
+    if not isinstance(lines, list) or not lines or not all(isinstance(x, Mapping) for x in lines):
+        return {
+            "status": "rejected",
+            "error_code": "procurement_invoice_lines_required",
+        }
+    normalized: dict[str, Any] = {
+        "source_kind": "vendor_invoice",
+        "source_reference": reference,
+        "source_capture_sha256": str(source_capture_sha256 or "").strip(),
+        "source_captured_at": datetime.now(timezone.utc).isoformat(),
+        "source_acquisition": "document_extraction",
+        "source_confidence": "document_verified",
+        "source_evidence_mode": "chatgpt_attachment_normalized",
+        "vendor": {"name": vendor},
+        "lines": [dict(x) for x in lines],
+        "invoice_number": invoice,
+    }
+    optional = {
+        "invoice_total": invoice_total,
+        "vendor_order_reference": vendor_order_reference,
+        "ship_to": ship_to,
+        "freight": freight,
+        "tax": tax,
+        "fees": fees,
+    }
+    for key, value in optional.items():
+        if str(value or "").strip():
+            normalized[key] = str(value).strip()
+    flow = _runtime_procurement_flow()
+    try:
+        result = flow.handle_vendor_document(
+            normalized=normalized,
+            microsoft_tenant_id=tenant_id,
+            microsoft_object_id=object_id,
+            conversation_id=f"mcp-chatgpt:{object_id}",
+            message_id=f"mcp-invoice-{uuid4().hex}",
+            occurred_at=datetime.now(timezone.utc),
+        )
+    except PermissionError as exc:
+        return {"status": "denied", "error_code": str(exc)[:200]}
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "error_code": "procurement_invoice_draft_failed",
+            "error_type": type(exc).__name__,
+            "detail": str(exc)[:500],
+        }
+    try:
+        message_ids = _send_procurement_review_to_teams(
+            tenant_id=tenant_id,
+            object_id=object_id,
+            result=result,
+        )
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "error_code": "procurement_review_delivery_failed",
+            "error_type": type(exc).__name__,
+            "detail": str(exc)[:500],
+            "submission_id": result.get("submission_id"),
+        }
+    return {
+        "status": "completed",
+        "submission_id": result.get("submission_id"),
+        "review_delivery": "jason_teams",
+        "review_message_ids": list(message_ids),
+        "reply": {
+            "text": (
+                "Invoice received. Jason sent the standard procurement review "
+                "card to Microsoft Teams. Follow the card; the workflow and "
+                "approval path are fixed by AOT policy."
+            )
+        },
+    }
+
+
+def submit_procurement_draft(
+    submission_id: str,
+    selections: dict[str, Any],
+) -> dict[str, Any]:
+    """Internal test/helper for canonical procurement submission.
+
+    This function is intentionally not exposed as an MCP tool. ChatGPT users do
+    not choose or submit procurement workflow paths in free-form chat; Teams
+    Adaptive Cards own the approved interaction.
+    """
+    tenant_id, object_id = _authenticated_microsoft_transport_identity()
+    sid = str(submission_id or "").strip()
+    if not sid:
+        return {"status": "rejected", "error_code": "submission_id_required"}
+    flow = _runtime_procurement_flow()
+    try:
+        result = flow.handle_submit(
+            submission_id=sid,
+            selections={str(k): str(v) for k, v in dict(selections or {}).items()},
+            microsoft_tenant_id=tenant_id,
+            microsoft_object_id=object_id,
+            conversation_id=f"mcp-chatgpt:{object_id}",
+            channel_response_id=f"mcp-submit-{uuid4().hex}",
+            submitted_at=datetime.now(timezone.utc),
+        )
+    except PermissionError as exc:
+        return {"status": "denied", "error_code": str(exc)[:200]}
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "error_code": "procurement_submit_failed",
+            "error_type": type(exc).__name__,
+            "detail": str(exc)[:500],
+        }
+    return _safe(dict(result))
+
+
 @mcp.tool()
 def execute_governed_capability(
     capability: str,
@@ -6794,6 +7064,38 @@ def execute_governed_capability(
         }
 
     execution_arguments = dict(arguments or {})
+
+    procurement_raw_mutations = {
+        "service.vendor.create",
+        "service.product.create",
+        "service.product.update",
+        "service.product.vendor.create",
+        "service.product.vendor.update",
+        "service.purchase.order.create",
+        "service.purchase.order.update",
+        "service.purchase.order.item.create",
+        "service.purchase.order.item.update",
+        "service.purchase.order.receive",
+        "service.quote.create",
+        "service.quote.item.create",
+        "service.quote.location.create",
+        "service.opportunity.create",
+        "service.ticket.charge.create",
+        "service.ticket.charge.update",
+    }
+    if capability_name in procurement_raw_mutations:
+        principal, _, _, _ = _authenticated_write_identity()
+        if principal not in approval_owner_identities():
+            return {
+                "status": "rejected",
+                "capability": capability_name,
+                "error_code": "procurement_canonical_workflow_required",
+                "instruction": (
+                    "AOT staff invoice/procurement requests must use "
+                    "process_procurement_invoice and the fixed Jason Teams workflow. "
+                    "Only an AOT owner may authorize an exception."
+                ),
+            }
 
     # The live MCP contract intentionally exposes only capability + arguments.
     # Carry current conversational approval inside the governed argument
@@ -7081,6 +7383,19 @@ async def healthz(_request):
             "write_capabilities": actions,
             "mcp_path": "/mcp",
         }
+    )
+
+
+async def oauth_protected_resource_metadata(_request):
+    """RFC 9728 resource-server discovery for clients using Jason MCP."""
+    return JSONResponse(
+        {
+            "resource": JASON_RESOURCE_URL,
+            "authorization_servers": [JASON_OAUTH_ISSUER_URL],
+            "scopes_supported": [JASON_OAUTH_REQUEST_SCOPE],
+            "bearer_methods_supported": ["header"],
+        },
+        headers={"Cache-Control": "public, max-age=300"},
     )
 
 
@@ -7473,7 +7788,22 @@ app.add_route(
 )
 
 app.add_route(
+    "/.well-known/oauth-protected-resource",
+    oauth_protected_resource_metadata,
+    methods=["GET"],
+)
+
+app.add_route(
     "/.well-known/oauth-authorization-server",
+    oauth_authorization_server_metadata,
+    methods=["GET"],
+)
+
+# Some MCP clients probe authorization metadata at the resource path before
+# falling back to the authorization server issuer root. Serve the same public
+# metadata at both locations; the canonical issuer remains the root URL.
+app.add_route(
+    "/.well-known/oauth-authorization-server/mcp",
     oauth_authorization_server_metadata,
     methods=["GET"],
 )

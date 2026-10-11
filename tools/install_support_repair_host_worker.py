@@ -27,20 +27,31 @@ def main() -> int:
     spool = args.spool.expanduser().resolve()
     home = Path.home()
     runner = repo / 'tools' / 'support_repair_host_worker.py'
+    pipeline_runner = repo / 'tools' / 'engineering_pipeline.py'
     development_runner = repo / 'tools' / 'owner_approved_development_worker.py'
     todo_intake_runner = repo / 'tools' / 'todo_engineering_intake.py'
     todo_release_bridge = repo / 'tools' / 'todo_release_bridge.py'
+    operational_acceptance_reader = repo / 'tools' / 'operational_acceptance_reader.py'
     release_manager_gate = repo / 'tools' / 'release_manager_gate.py'
+    change_integration_gate = repo / 'tools' / 'change_integration_gate.py'
+    documentation_impact_gate = repo / 'tools' / 'documentation_impact_gate.py'
     unit_root = repo / 'infrastructure' / 'openclaw-operations' / 'systemd' / 'user'
     units = ('jason-support-repair-worker.service', 'jason-support-repair-worker.timer')
     if not runner.is_file():
         raise SystemExit('support repair host worker source is missing')
+    if not pipeline_runner.is_file():
+        raise SystemExit('engineering pipeline coordinator source is missing')
     if not development_runner.is_file():
         raise SystemExit('owner-approved development worker source is missing')
     if not todo_intake_runner.is_file():
         raise SystemExit('TODO engineering intake worker source is missing')
     if not todo_release_bridge.is_file():
         raise SystemExit('TODO release bridge source is missing')
+    if not operational_acceptance_reader.is_file():
+        raise SystemExit('operational acceptance reader source is missing')
+    for dependency in (change_integration_gate, documentation_impact_gate):
+        if not dependency.is_file():
+            raise SystemExit('owner-approved worker dependency is missing: ' + dependency.name)
     if not release_manager_gate.is_file():
         raise SystemExit('release manager gate source is missing')
     for unit in units:
@@ -57,10 +68,14 @@ def main() -> int:
     source_link.parent.mkdir(parents=True, exist_ok=True)
     source_link.symlink_to(repo, target_is_directory=True)
     _copy(runner, install_root / 'support_repair_host_worker.py', 0o700)
+    _copy(pipeline_runner, install_root / 'engineering_pipeline.py', 0o700)
     _copy(development_runner, install_root / 'owner_approved_development_worker.py', 0o700)
     _copy(todo_intake_runner, install_root / 'todo_engineering_intake.py', 0o700)
     _copy(todo_release_bridge, install_root / 'todo_release_bridge.py', 0o700)
+    _copy(operational_acceptance_reader, install_root / 'operational_acceptance_reader.py', 0o700)
     _copy(release_manager_gate, install_root / 'release_manager_gate.py', 0o700)
+    _copy(change_integration_gate, install_root / 'change_integration_gate.py', 0o600)
+    _copy(documentation_impact_gate, install_root / 'documentation_impact_gate.py', 0o600)
     for unit in units:
         _copy(unit_root / unit, user_units / unit, 0o600)
 
