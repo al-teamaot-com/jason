@@ -633,7 +633,36 @@ def safe_search(worktree: Path, terms: list[str], gate, policy: Mapping[str, Any
             normalized,
         )
 
-    paths: list[str] = []
+    # Content-only grep can select tests mentioning a provider while missing
+    # short implementation modules whose names (not bodies) identify it.
+    # Admit a bounded set of real, policy-eligible implementation filenames,
+    # weighted toward uncommon query tokens. No document text or provider data
+    # is consulted; these are paths from the checked-out repository only.
+    tracked_paths = [
+        path for raw in run(['git', 'ls-files', '--', '*.py'], cwd=worktree,
+                            check=False).splitlines()
+        if (path := eligible_path(raw)) is not None
+        and path.startswith('implementation/')
+        and '/tests/' not in path
+        and not path.endswith('/__init__.py')
+    ]
+    names = {path: normalized_tokens(path) for path in tracked_paths}
+    frequencies: dict[str, int] = {}
+    for tokens in names.values():
+        for token in tokens:
+            frequencies[token] = frequencies.get(token, 0) + 1
+
+    ranked_names: list[tuple[float, int, str]] = []
+    for path, tokens in names.items():
+        matching = tokens & query_tokens
+        if not matching or not any(frequencies[t] <= 32 for t in matching):
+            continue
+        specificity = sum(1.0 / frequencies[t] for t in matching)
+        ranked_names.append((-specificity, -len(matching), path))
+
+    paths: list[str] = [
+        path for _, _, path in sorted(ranked_names)[:5]
+    ]
 
     # First pass: one best source candidate per reasoning concept.
     for group, concept_tokens, subject in concept_scores:
