@@ -429,10 +429,11 @@ def readmit_verified_ccc_owner_review(state: dict[str, Any], eligible_ids: set[s
         sha = str(review.get('source_revision') or '')
         observed = datetime.fromisoformat(str(drift.get('observed_at', '')).replace('Z', '+00:00'))
         age = (datetime.now(timezone.utc) - observed).total_seconds()
-        if (review.get('status') != 'approved' or len(sha) != 40
+        if (review.get('status') != 'approved' or len(sha) != 40 or any(c not in '0123456789abcdef' for c in sha)
                 or report.get('status') != 'PASS'
                 or report.get('source_revision') != sha
                 or report.get('runtime_revision') != sha
+                or not report.get('checks')
                 or any(x.get('status') != 'PASS' for x in report.get('checks', []))
                 or drift.get('status') != 'pass' or drift.get('problems')
                 or not 0 <= age <= 120):
