@@ -379,6 +379,11 @@ def source_context_blocker(reason: str) -> bool:
         'does not expose',
         'do not expose',
         'missing',
+        'not provided',
+        'not supplied',
+        'not included',
+        'was not provided',
+        'were not provided',
         'would require inventing',
         'require inventing',
     )
