@@ -67,3 +67,4 @@ def test_maintenance_failure_is_logged_and_process_retries(monkeypatch, caplog):
     assert len(attempts) == 2
     assert "Autonomy maintenance cycle failed" in caplog.text
     assert "controlled tick failure" in caplog.text
+    assert "RuntimeError: controlled tick failure" in caplog.text
