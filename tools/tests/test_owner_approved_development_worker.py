@@ -1471,3 +1471,132 @@ def test_ordinary_nonexhausted_internal_recovery_still_works():
     module.recycle_self_recoverable_blockers(state, {'DEV-77'})
     assert state['items']['DEV-77']['phase'] == 'diagnosing'
     assert state['items']['DEV-77']['self_recovery_attempts'] == 1
+
+
+def test_ancestral_worker_upgrade_readmits_after_later_watchdog_only_release(tmp_path):
+    import json
+    import subprocess
+    from datetime import datetime, timezone
+
+    repo = tmp_path / 'git-source'
+    repo.mkdir()
+    def git(*args):
+        return subprocess.check_output(['git', *args], cwd=repo, text=True).strip()
+    git('init', '-b', 'main')
+    git('config', 'user.email', 'test@example.invalid')
+    git('config', 'user.name', 'Test')
+    (repo / 'tools').mkdir()
+    source = repo / 'tools/owner_approved_development_worker.py'
+    source.write_text('CONTRACT = "old source context"\n')
+    watchdog = repo / 'tools/jason_self_heal_watchdog.py'
+    watchdog.write_text('PROBE = 0\n')
+    git('add', '.')
+    git('commit', '-m', 'prior baseline')
+    old = git('rev-parse', 'HEAD')
+    source.write_text('CONTRACT = "complete source context"\n')
+    git('add', '.')
+    git('commit', '-m', 'verified source retrieval upgrade')
+    worker_rev = git('rev-parse', 'HEAD')
+    watchdog.write_text('PROBE = 1\n')
+    git('add', '.')
+    git('commit', '-m', 'subsequent watchdog fix')
+    live_sha = git('rev-parse', 'HEAD')
+
+    spool = tmp_path / 'support-repair'
+    spool.mkdir()
+    state_root = tmp_path / 'release-manager'
+    (state_root / 'protected-readback').mkdir(parents=True)
+    (state_root / 'records').mkdir()
+    live = tmp_path / live_sha
+    live.mkdir()
+    (state_root / 'protected-readback/production-control-state.json').write_text(
+        json.dumps({'last_known_good': {'manifest': {'revision': live_sha}}})
+    )
+    drift_path = state_root / 'protected-readback/production-drift.json'
+    drift_path.write_text(json.dumps({
+        'status': 'pass', 'problems': [],
+        'observed_at': datetime.now(timezone.utc).isoformat(),
+    }))
+    worker_record = {
+        'state': 'closed', 'release_candidate': {'candidate_sha': worker_rev},
+        'changed_files': ['tools/owner_approved_development_worker.py'],
+    }
+    (state_root / 'records/release-worker.json').write_text(json.dumps(worker_record))
+    (state_root / 'records/release-live.json').write_text(json.dumps({
+        'state': 'closed', 'release_candidate': {'candidate_sha': live_sha},
+        'changed_files': ['tools/jason_self_heal_watchdog.py'],
+    }))
+    reason = (
+        'The repository excerpts are insufficient to form a guaranteed exact '
+        'replacement for readmit_verified_ccc_owner_review while preserving '
+        'its surrounding call conventions and helper availability.'
+    )
+    record = {
+        'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+        'reason': reason, 'source_upgrade_readmitted_sha': old,
+        'context_expansion_attempts': 3,
+        'self_recovery_attempts': 1,
+    }
+    state = {'items': {'DEV-1245': record}}
+    def admit():
+        return module.readmit_source_context_after_verified_worker_upgrade(
+            state, {'DEV-1245'}, spool, current_link=live, source_repo=repo,
+        )
+
+    # Missing confirmed live release cannot readmit, even when git ancestry matches.
+    live_record_path = state_root / 'records/release-live.json'
+    live_record_path.write_text(json.dumps({
+        'state': 'production', 'release_candidate': {'candidate_sha': live_sha},
+        'changed_files': ['tools/jason_self_heal_watchdog.py'],
+    }))
+    assert admit() == 0
+    assert record['phase'] == 'blocked'
+    live_record_path.write_text(json.dumps({
+        'state': 'closed', 'release_candidate': {'candidate_sha': live_sha},
+        'changed_files': ['tools/jason_self_heal_watchdog.py'],
+    }))
+    drift_path.write_text(json.dumps({
+        'status': 'drift_detected', 'problems': ['missing proof'],
+        'observed_at': datetime.now(timezone.utc).isoformat(),
+    }))
+    assert admit() == 0
+    drift_path.write_text(json.dumps({
+        'status': 'pass', 'problems': [],
+        'observed_at': datetime.now(timezone.utc).isoformat(),
+    }))
+
+    # A closed intermediate release without worker code changes is insufficient.
+    worker_path = state_root / 'records/release-worker.json'
+    worker_path.write_text(json.dumps({
+        'state': 'closed', 'release_candidate': {'candidate_sha': worker_rev},
+        'changed_files': ['tools/jason_self_heal_watchdog.py'],
+    }))
+    assert admit() == 0
+    worker_path.write_text(json.dumps(worker_record))
+    assert admit() == 1
+    assert record['phase'] == 'diagnosing'
+    assert record['source_upgrade_readmitted_sha'] == live_sha
+    assert record['recovery_worktree_revision'] == live_sha
+    assert record['self_recovery_attempts'] == 0
+    assert record['context_expansion_attempts'] == 0
+    record['phase'] = 'blocked'
+    record['reason'] = reason
+    assert admit() == 0
+
+    # Unchanged worker bytes between previous admission and live cannot re-admit.
+    record['source_upgrade_readmitted_sha'] = worker_rev
+    assert admit() == 0
+    assert record['phase'] == 'blocked'
+
+
+def test_intervening_upgrade_rejects_untrusted_or_missing_git_history(tmp_path):
+    import subprocess
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+    assert not module.verified_intervening_worker_upgrade(
+        [{'state':'closed', 'release_candidate':{'candidate_sha':'b'*40},
+          'changed_files':['tools/owner_approved_development_worker.py']}],
+        'a'*40, 'c'*40, repo,
+    )
+    assert not module.verified_intervening_worker_upgrade([], 'a'*40, 'a'*40, repo)

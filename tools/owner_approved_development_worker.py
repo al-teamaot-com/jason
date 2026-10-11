@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -903,9 +904,71 @@ def preflight_or_refresh_exact_anchors(
     return True
 
 
+WORKER_SOURCE_PATHS = (
+    'tools/support_repair_host_worker.py',
+    'tools/owner_approved_development_worker.py',
+)
+
+
+def verified_intervening_worker_upgrade(
+    releases: list[dict[str, Any]], previous_sha: str, live_sha: str,
+    source_repo: Path,
+) -> bool:
+    """Prove that a released worker fix was inherited by healthy live production.
+
+    A later watchdog-only release must not hide an earlier worker correction.
+    This is read-only git ancestry/blob evidence, not inferred from chronology.
+    Reject missing history, unchanged worker blobs and unclosed releases.
+    """
+    if not (re.fullmatch(r'[0-9a-f]{40}', previous_sha)
+            and re.fullmatch(r'[0-9a-f]{40}', live_sha)
+            and previous_sha != live_sha):
+        return False
+
+    def git_ok(*args: str) -> bool:
+        try:
+            result = subprocess.run(
+                ['git', '-C', str(source_repo), *args],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=10, check=False,
+            )
+            return result.returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+
+    if not git_ok('merge-base', '--is-ancestor', previous_sha, live_sha):
+        return False
+    # Git diff --quiet returns 1 only if these exact worker files changed.
+    try:
+        diff = subprocess.run(
+            ['git', '-C', str(source_repo), 'diff', '--quiet', previous_sha,
+             live_sha, '--', *WORKER_SOURCE_PATHS],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=10, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if diff.returncode != 1:
+        return False
+    for release in releases:
+        if release.get('state') != 'closed':
+            continue
+        revision = str((release.get('release_candidate') or {}).get('candidate_sha') or '')
+        if not re.fullmatch(r'[0-9a-f]{40}', revision):
+            continue
+        if not set(release.get('changed_files') or []).intersection(WORKER_SOURCE_PATHS):
+            continue
+        if (git_ok('merge-base', '--is-ancestor', previous_sha, revision)
+                and revision != previous_sha
+                and git_ok('merge-base', '--is-ancestor', revision, live_sha)):
+            return True
+    return False
+
+
 def readmit_source_context_after_verified_worker_upgrade(
     state: dict[str, Any], eligible_ids: set[str], spool: Path,
     *, current_link: Path = Path('/opt/jason/current'),
+    source_repo: Path = DEFAULT_REPO,
 ) -> int:
     """One bounded readmission per closed, healthy production worker revision.
 
@@ -925,16 +988,20 @@ def readmit_source_context_after_verified_worker_upgrade(
         timestamp = datetime.fromisoformat(str(drift['observed_at']).replace('Z', '+00:00'))
         if timestamp.tzinfo is None or not 0 <= (datetime.now(timezone.utc)-timestamp).total_seconds() <= 180:
             return 0
-        releases = list((state_root / 'records').glob('release-*.json'))
-        verified = any(
-            (r := json.loads(path.read_text())).get('state') == 'closed'
+        releases = [
+            json.loads(path.read_text())
+            for path in (state_root / 'records').glob('release-*.json')
+        ]
+        live_releases = [
+            r for r in releases if r.get('state') == 'closed'
             and (r.get('release_candidate') or {}).get('candidate_sha') == sha
-            and set(r.get('changed_files') or []).intersection({
-                'tools/support_repair_host_worker.py', 'tools/owner_approved_development_worker.py'})
-            for path in releases
-        )
-        if not verified:
+        ]
+        if not live_releases:
             return 0
+        direct_worker_upgrade = any(
+            set(r.get('changed_files') or []).intersection(WORKER_SOURCE_PATHS)
+            for r in live_releases
+        )
     except (OSError, ValueError, KeyError, TypeError):
         return 0
     resumed = 0
@@ -969,7 +1036,12 @@ def readmit_source_context_after_verified_worker_upgrade(
                 or stale_exact_anchor or incomplete_regression
                 or tool_test_import_failure):
             continue
-        if record.get('source_upgrade_readmitted_sha') == sha:
+        previous_sha = str(record.get('source_upgrade_readmitted_sha') or '')
+        if previous_sha == sha:
+            continue
+        if not direct_worker_upgrade and not verified_intervening_worker_upgrade(
+            releases, previous_sha, sha, source_repo,
+        ):
             continue
         record.update({'phase': 'diagnosing', 'reasoning_request_id': '',
                        'context_expansion_attempts': 0, 'self_recovery_attempts': 0,
@@ -1141,7 +1213,9 @@ def main() -> int:
     reconcile_recovery_handoff_intake(state, admitted_ids, spool)
     raise_exhausted_repair_support_issues(state, admitted_ids, repo)
     readmit_verified_development_recoveries(state, admitted_ids, spool, repo)
-    readmit_source_context_after_verified_worker_upgrade(state, admitted_ids, spool)
+    readmit_source_context_after_verified_worker_upgrade(
+        state, admitted_ids, spool, source_repo=repo,
+    )
     readmit_explicit_verified_dependencies(state, admitted, spool, max_active=max(1, int(args.max_active)))
     state['discovery'] = {
         'observed_at': now(),
