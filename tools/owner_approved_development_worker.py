@@ -409,6 +409,52 @@ def reconcile_issue_dependency_holds(
 
 
 
+def readmit_verified_ccc_owner_review(state: dict[str, Any], eligible_ids: set[str], *,
+                                    review_path: Path = Path('/var/lib/jason/ccc/material-review.json'),
+                                    report_root: Path = Path('/home/al/Jason-Evidence/CCC/runs'),
+                                    drift_path: Path = Path('/var/lib/jason/openclaw/release-manager/protected-readback/production-drift.json')) -> int:
+    """Readmit an exact CCC-owner-review blocker only after current live proof.
+
+    Fail closed on missing/stale/mismatched files. A previously consumed evidence
+    fingerprint is never replayed, preventing repeated autonomous retries.
+    """
+    from datetime import datetime, timezone
+    try:
+        review = json.loads(review_path.read_text())
+        drift = json.loads(drift_path.read_text())
+        reports = list(report_root.glob('*/ccc-report.json'))
+        if not reports:
+            return 0
+        report = json.loads(max(reports, key=lambda x: x.stat().st_mtime).read_text())
+        sha = str(review.get('source_revision') or '')
+        observed = datetime.fromisoformat(str(drift.get('observed_at', '')).replace('Z', '+00:00'))
+        age = (datetime.now(timezone.utc) - observed).total_seconds()
+        if (review.get('status') != 'approved' or len(sha) != 40
+                or report.get('status') != 'PASS'
+                or report.get('source_revision') != sha
+                or report.get('runtime_revision') != sha
+                or any(x.get('status') != 'PASS' for x in report.get('checks', []))
+                or drift.get('status') != 'pass' or drift.get('problems')
+                or not 0 <= age <= 120):
+            return 0
+    except (OSError, ValueError, TypeError, KeyError):
+        return 0
+    items = state.get('items', {})
+    for item_id, record in items.items():
+        if item_id not in eligible_ids or not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        reason = str(record.get('reason') or '').casefold()
+        if not ('ccc' in reason and 'material-change review' in reason and
+                ('required' in reason or 'not yet authorized' in reason)):
+            continue
+        if record.get('verified_ccc_readmission_sha') == sha:
+            continue
+        record.update({'phase': 'diagnosing', 'reason': 'Exact CCC owner review and live certification verified; autonomous readmission.',
+                       'verified_ccc_readmission_sha': sha, 'reasoning_request_id': '', 'updated_at': now()})
+        return 1
+    return 0
+
+
 def recycle_self_recoverable_blockers(
     state: dict[str, Any],
     eligible_ids: set[str],
@@ -843,6 +889,7 @@ def main() -> int:
     admitted = [item for item in eligible if not issue_has_closed_dependency_gate(item)]
     admitted_ids = {item['id'] for item in admitted}
     reconcile_removed_approval(state, eligible_ids)
+    readmit_verified_ccc_owner_review(state, admitted_ids)
     recycle_self_recoverable_blockers(state, admitted_ids)
     queue_exhausted_recovery_diagnostics(state, admitted, spool)
     reconcile_exhausted_recovery_diagnostics(state, admitted_ids, spool)
