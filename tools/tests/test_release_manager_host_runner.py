@@ -489,6 +489,14 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         self.assertTrue(policy["production"]["normal_release_auto_promote_when_eligible"])
         self.assertTrue(policy["production"]["require_owner_approval_for_all"])
 
+    def test_production_drift_timer_is_faster_than_release_evaluation(self):
+        timer = (ROOT / "infrastructure/openclaw-operations/systemd/jason-production-drift-watchdog.timer").read_text(encoding="utf-8")
+        policy = runner.gate.load_json(ROOT / "config/release-manager-policy.json")
+        self.assertIn("OnUnitActiveSec=1min", timer)
+        self.assertIn("AccuracySec=10s", timer)
+        self.assertEqual(policy["schedule"]["reconcile_interval_minutes"], 5)
+        self.assertTrue(policy["production"]["fresh_pre_mutation_health_required"])
+
     def test_unattended_promotion_is_inert_when_manual_mode_enabled(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
