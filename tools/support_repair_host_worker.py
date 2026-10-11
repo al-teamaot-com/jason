@@ -771,10 +771,12 @@ def source_excerpts_for_paths(
     terms: list[str] | None = None,
     limit: int = 6,
     content_limit: int = 24000,
+    full_file_paths: list[str] | None = None,
 ) -> list[dict[str, str]]:
-    """Read a bounded, policy-eligible set of previously discovered sources."""
+    """Read policy-eligible source, requiring complete bytes for requested files."""
     excerpts: list[dict[str, str]] = []
     seen: set[str] = set()
+    required_full = set(full_file_paths or [])
     for raw in paths:
         path = str(raw or '').strip()
         if not path or path in seen or path.startswith('.git'):
@@ -788,8 +790,11 @@ def source_excerpts_for_paths(
             text = candidate.read_text(encoding='utf-8')
         except UnicodeDecodeError:
             continue
-        symbols = [word for term in list(terms or []) for word in re.findall(
-            r'[A-Za-z_][A-Za-z0-9_]*', str(term))]
+        if path in required_full and len(text) > content_limit:
+            raise WorkerError('required complete source exceeds bounded limit: ' + path)
+        symbols = [] if path in required_full else [
+            word for term in list(terms or []) for word in re.findall(
+                r'[A-Za-z_][A-Za-z0-9_]*', str(term))]
         exact = bounded_symbol_excerpt(text, symbols, content_limit=content_limit)
         content = exact or (
             text
