@@ -575,7 +575,7 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Risk level:** Moderate
 - **Idea:** Give Jason a governed, evidence-backed workflow for answering client cyber-insurance, PII/security, compliance, and vendor-security questionnaires using authoritative client-specific data instead of assumptions or generic AOT standards.
 - **Why it matters:** AOT is regularly asked to complete technical portions of insurance/security forms. Jason should be able to collect current evidence across managed endpoints, Microsoft 365/Entra, email security, backup systems, DNS/security services, network/security appliances, security-awareness training, Autotask, and IT Glue; distinguish confirmed facts from client-owned business/legal questions; identify exceptions; and produce a traceable answer package.
-- **Why not now:** The current catalog can verify some endpoint facts but lacks several read surfaces required for complete evidence-backed answers. Active blockers are tracked in SUPPORT-CAP-006 through SUPPORT-CAP-011.
+- **Why not now:** The current catalog can verify some endpoint facts but lacks several read surfaces required for complete evidence-backed answers. Current connector prerequisites are tracked by TODO-CONN-005 through TODO-CONN-009 (formerly SUPPORT-CAP-007 through SUPPORT-CAP-011). SUPPORT-CAP-006 was resolved on 2026-09-18. Connector readiness varies: TODO-CONN-008 DNSFilter governed reads are production-active, TODO-CONN-006 backup reads have a production foundation, and the remaining required client-specific read surfaces must be verified independently before acceptance.
 - **Prerequisites:**
   - standing-safe diagnostic execution for non-destructive endpoint checks;
   - governed Microsoft 365 / Entra security-posture reads;
@@ -590,7 +590,7 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Expected behavior:** Jason should parse a questionnaire, map each technical question to available governed evidence, perform only approved read-only verification, report exceptions rather than hiding them, identify questions that belong to the client/legal/insurance representative, and generate a draft answer key with evidence references and unresolved items. Jason must not sign, certify, or make business/legal representations on behalf of the insured.
 - **Learning behavior:** Any questionnaire item that cannot be verified because of a missing capability, provider read, or governance restriction should create or reference a Support List blocker rather than being guessed. Repeated questionnaire gaps should inform connector and documentation priorities.
 - **Decision owner:** Jason Governance Authority / Technology Steward
-- **Review trigger:** Begin implementation after SUPPORT-CAP-006 through SUPPORT-CAP-011 have defined owners and the first required read surfaces are available.
+- **Review trigger:** Begin bounded implementation only after the relevant TODO-CONN-005 through TODO-CONN-009 owners and required client-specific read surfaces are verified; do not treat the resolved SUPPORT-CAP-006 or a single AOT-scoped DNSFilter read as blanket acceptance. Retain separate, independently signed issue-scoped operational acceptance for any controller readmission.
 
 
 ### TODO-OPS-004 — Governed DRMM monitor suppression for known accepted conditions
