@@ -881,3 +881,37 @@ def test_approved_test_file_full_context_with_bounded_56k_limit(tmp_path):
         gate, {}, terms=['CCC production SHA'], content_limit=56000, limit=1)
     assert context[0]['content'] == body
     assert expected in context[0]['content']
+
+
+def test_verified_upgrade_readmits_truncated_approved_test_once(tmp_path):
+    import json
+    from datetime import datetime, timezone
+    spool = tmp_path / 'support-repair'
+    spool.mkdir()
+    root = tmp_path / 'release-manager'
+    (root / 'protected-readback').mkdir(parents=True)
+    (root / 'records').mkdir()
+    sha = 'a' * 40
+    live = tmp_path / sha
+    live.mkdir()
+    (root / 'protected-readback/production-control-state.json').write_text(json.dumps(
+        {'last_known_good': {'manifest': {'revision': sha}}}))
+    (root / 'protected-readback/production-drift.json').write_text(json.dumps(
+        {'status': 'pass', 'problems': [], 'observed_at': datetime.now(timezone.utc).isoformat()}))
+    (root / 'records/release-test.json').write_text(json.dumps({
+        'state': 'closed', 'release_candidate': {'candidate_sha': sha},
+        'changed_files': ['tools/owner_approved_development_worker.py']}))
+    reason = ('The required test file excerpt is truncated, so I cannot safely produce '
+              'an exact-text regression test patch without inventing unseen surrounding code.')
+    record = {'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+              'reason': reason, 'self_recovery_attempts': 2}
+    state = {'items': {'DEV-1245': record}}
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, {'DEV-1245'}, spool, current_link=live) == 1
+    assert record['phase'] == 'diagnosing'
+    assert record['self_recovery_attempts'] == 0
+    record['phase'] = 'blocked'
+    record['reason'] = reason
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, {'DEV-1245'}, spool, current_link=live) == 0
+    assert record['phase'] == 'blocked'
