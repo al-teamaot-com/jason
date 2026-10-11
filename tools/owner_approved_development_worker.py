@@ -1086,12 +1086,45 @@ def main() -> int:
                         'updated_at': now(),
                     })
                     continue
-                support.apply_edits(
-                    worktree,
-                    list(result.get('edits') or []),
-                    gate,
-                    policy,
-                )
+                # Preflight every exact anchor before mutating any file. A stale
+                # reasoning excerpt must never cause a partial multi-file edit.
+                edits = list(result.get('edits') or [])
+                mismatched = []
+                for edit in edits:
+                    path = str(edit.get('path') or '').strip()
+                    old = str(edit.get('old_text') or '')
+                    if (not path or path.startswith('/') or '..' in Path(path).parts
+                            or gate.path_denial_reason(path, dict(policy))):
+                        continue  # apply_edits remains the authority gate.
+                    target = worktree / path
+                    if target.is_file() and old and target.read_text(encoding='utf-8').count(old) != 1:
+                        mismatched.append(path)
+                if mismatched:
+                    retries = int(record.get('anchor_refresh_attempts', 0))
+                    if retries >= 2:
+                        raise support.WorkerError('exact anchor refresh exhausted: ' + ', '.join(mismatched[:3]))
+                    refreshed = support.source_excerpts_for_paths(
+                        worktree, list(dict.fromkeys(mismatched))[:3], gate, policy,
+                        terms=[approved_scope(item)], limit=3, content_limit=56000,
+                    )
+                    if not refreshed:
+                        raise support.WorkerError('exact anchor refresh source unavailable')
+                    edit_rid = queue_reasoning(
+                        spool, kind='edit_plan', item=item,
+                        context={
+                            'work_class': 'owner_approved_development',
+                            'approved_scope': approved_scope(item),
+                            'diagnosis': 'Regenerate exact-text replacements from fresh current source; prior anchors did not match exactly once.',
+                            'source_excerpts': refreshed,
+                            'prior_anchor_failures': mismatched[:3],
+                        },
+                    )
+                    record.update({'phase': 'implementing', 'reasoning_request_id': edit_rid,
+                                   'anchor_refresh_attempts': retries + 1,
+                                   'reason': 'Bounded automatic refresh of stale exact repair anchors.',
+                                   'updated_at': now()})
+                    continue
+                support.apply_edits(worktree, edits, gate, policy)
                 tests = support.validate_patch(
                     worktree,
                     list(result.get('test_paths') or []),
