@@ -10,6 +10,8 @@ IMAGE="${IMAGE:-jason-teams-gateway:production}"
 SERVICE_DIR="${JASON_TEAMS_SERVICE_DIR:-/opt/jason/services/jason-teams-gateway}"
 HOST_PORT="${JASON_TEAMS_HOST_PORT:-3978}"
 CONTAINER_PORT="${JASON_TEAMS_CONTAINER_PORT:-3979}"
+PROACTIVE_TOKEN_HOST_PATH="${JASON_TEAMS_PROACTIVE_TOKEN_HOST_PATH:-/var/lib/jason/runtime-secrets/teams-proactive/token}"
+PROACTIVE_TOKEN_CONTAINER_PATH="/run/jason-secrets/teams-proactive/token"
 RUN_UID="$(id -u)"
 RUN_GID="$(id -g)"
 STATE_FILE="$SERVICE_DIR/cutover-state.env"
@@ -31,6 +33,9 @@ if [ ! -s "$SERVICE_DIR/msteams.env" ]; then
 fi
 if [ ! -s "$SERVICE_DIR/secrets/ingress.pem" ]; then
   fail "Jason governed ingress signing key is missing"
+fi
+if [ ! -s "$PROACTIVE_TOKEN_HOST_PATH" ]; then
+  fail "Teams proactive token file is missing: $PROACTIVE_TOKEN_HOST_PATH"
 fi
 if ! docker inspect "$OPENCLAW_CONTAINER" >/dev/null 2>&1; then
   fail "OpenClaw container not found: $OPENCLAW_CONTAINER"
@@ -317,8 +322,10 @@ if ! docker run -d \
   -e JASON_RUNTIME_URL=http://jason-runtime:8080/v1/openclaw/teams/conversation \
   -e JASON_INGRESS_KEY_ID=openclaw-gateway-2 \
   -e JASON_INGRESS_PRIVATE_KEY_PATH=/run/jason/ingress.pem \
+  -e JASON_TEAMS_PROACTIVE_TOKEN_FILE="$PROACTIVE_TOKEN_CONTAINER_PATH" \
   -p "0.0.0.0:${HOST_PORT}:${CONTAINER_PORT}" \
   -v "$SERVICE_DIR/secrets/ingress.pem:/run/jason/ingress.pem:ro" \
+  -v "$PROACTIVE_TOKEN_HOST_PATH:$PROACTIVE_TOKEN_CONTAINER_PATH:ro" \
   "$IMAGE" >/dev/null
 then
   rollback_now
