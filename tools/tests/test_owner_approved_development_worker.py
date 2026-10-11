@@ -915,3 +915,18 @@ def test_verified_upgrade_readmits_truncated_approved_test_once(tmp_path):
     assert module.readmit_source_context_after_verified_worker_upgrade(
         state, {'DEV-1245'}, spool, current_link=live) == 0
     assert record['phase'] == 'blocked'
+
+
+def test_stale_anchor_preflight_is_read_only_and_detects_later_edit_conflict(tmp_path):
+    import types
+    path = tmp_path / 'tools/owner_approved_development_worker.py'
+    path.parent.mkdir()
+    path.write_text('value = 1\n')
+    gate = types.SimpleNamespace(path_denial_reason=lambda path, policy: '')
+    edits = [
+        {'path': 'tools/owner_approved_development_worker.py', 'old_text': 'value = 1', 'new_text': 'value = 2'},
+        {'path': 'tools/owner_approved_development_worker.py', 'old_text': 'value = 1', 'new_text': 'value = 3'},
+    ]
+    assert module.mismatched_exact_anchors(tmp_path, edits, gate, {}) == ['tools/owner_approved_development_worker.py']
+    assert path.read_text() == 'value = 1\n'
+    assert module.mismatched_exact_anchors(tmp_path, edits[:1], gate, {}) == []
