@@ -951,6 +951,19 @@ def test_verified_upgrade_readmits_exact_anchor_failure_once(tmp_path):
     assert record['phase'] == 'blocked'
 
 
+
+def test_exact_anchor_readmission_requires_verified_release(tmp_path):
+    spool = tmp_path / 'support-repair'
+    spool.mkdir()
+    live = tmp_path / ('d' * 40)
+    live.mkdir()
+    record = {'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+              'reason': 'WorkerError: exact repair anchor must occur once in tools/a.py; found 0'}
+    state = {'items': {'DEV-1245': record}}
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, {'DEV-1245'}, spool, current_link=live) == 0
+    assert record['phase'] == 'blocked'
+
 def test_exact_anchor_readmission_rejects_unrelated_error(tmp_path):
     spool = tmp_path / 'support-repair'
     spool.mkdir()
