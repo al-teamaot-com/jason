@@ -140,6 +140,30 @@ def ensure_worktree(repo: Path, issue_number: int, branch: str | None = None) ->
     return path
 
 
+def ensure_recovery_worktree(repo: Path, issue_number: int, revision: str) -> Path:
+    """Use a new isolated worktree, retaining failed partial edits as evidence.
+
+    Never reset, clean, stash or overwrite the original engineering worktree.
+    """
+    if not re.fullmatch(r'[0-9a-f]{40}', revision):
+        raise support.WorkerError('invalid recovery production revision')
+    path = WORKTREE_ROOT / f'issue-{issue_number}-recovery-{revision[:12]}'
+    if path.exists():
+        actual = support.run(['git', 'rev-parse', '--show-toplevel'], cwd=path)
+        if Path(actual).resolve() != path.resolve():
+            raise support.WorkerError('recovery worktree identity mismatch')
+        if support.run(['git', 'status', '--porcelain'], cwd=path):
+            raise support.WorkerError('recovery worktree has uncommitted changes')
+        return path
+    WORKTREE_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
+    support.run(['git', 'fetch', '--no-tags', 'origin', 'main'], cwd=repo)
+    branch = f'develop/owner-approved-issue-{issue_number}-recovery-{revision[:12]}'
+    support.run(['git', 'worktree', 'add', '-b', branch, str(path), 'origin/main'], cwd=repo)
+    if support.run(['git', 'status', '--porcelain'], cwd=path):
+        raise support.WorkerError('new recovery worktree is not clean')
+    return path
+
+
 def development_pr_for(issue_number: int, prs: list[dict[str, Any]]) -> dict[str, Any] | None:
     for pr in prs:
         match = META.search(str(pr.get('body') or ''))
@@ -889,7 +913,12 @@ def readmit_source_context_after_verified_worker_upgrade(
             and 'workererror: exact repair anchor must occur once in ' in reason
             and '; found ' in reason
         )
-        if not (source_context_blocker(reason) or truncated_approved_test or stale_exact_anchor):
+        incomplete_regression = (
+            record.get('blocker_class') == 'internal_retry_exhausted'
+            and reason == 'workererror: autonomous support repair requires a changed regression test'
+        )
+        if not (source_context_blocker(reason) or truncated_approved_test
+                or stale_exact_anchor or incomplete_regression):
             continue
         if record.get('source_upgrade_readmitted_sha') == sha:
             continue
@@ -897,6 +926,7 @@ def readmit_source_context_after_verified_worker_upgrade(
                        'context_expansion_attempts': 0, 'self_recovery_attempts': 0,
                        'anchor_refresh_attempts': 0,
                        'source_upgrade_readmitted_sha': sha, 'source_upgrade_readmitted_at': now(),
+                       'recovery_worktree_revision': sha,
                        'reason': 'Re-admitted after independently verified production source-retrieval upgrade.',
                        'updated_at': now()})
         resumed += 1
@@ -1254,11 +1284,12 @@ def main() -> int:
                     })
                 continue
 
-            worktree = ensure_worktree(
-                repo,
-                item['issue_number'],
-                str(record.get('branch') or '') or None,
-            )
+            recovery_revision = str(record.get('recovery_worktree_revision') or '')
+            worktree = (ensure_recovery_worktree(repo, item['issue_number'], recovery_revision)
+                        if recovery_revision else ensure_worktree(
+                            repo, item['issue_number'],
+                            str(record.get('branch') or '') or None,
+                        ))
             record['branch'] = support.run(
                 ['git', 'branch', '--show-current'],
                 cwd=worktree,

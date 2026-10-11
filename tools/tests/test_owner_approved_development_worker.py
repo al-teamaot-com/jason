@@ -1224,3 +1224,45 @@ def test_matching_source_without_required_regression_test_refreshes_before_mutat
         'tools/worker.py', 'tools/tests/test_worker.py'}
     assert source.read_text() == 'value = 1\n'
     assert regression.read_text() == 'def test_value():\n    assert True\n'
+
+
+def test_recovery_worktree_preserves_failed_edits_and_is_clean(tmp_path, monkeypatch):
+    import subprocess
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    def git(*args, cwd=repo):
+        return subprocess.check_output(['git', *args], cwd=cwd, text=True).strip()
+    git('init', '-b', 'main')
+    git('config', 'user.email', 'test@example.invalid')
+    git('config', 'user.name', 'Worker Test')
+    (repo / 'worker.py').write_text('original\n')
+    git('add', 'worker.py')
+    git('commit', '-m', 'base')
+    git('remote', 'add', 'origin', str(repo))
+    git('fetch', 'origin', 'main')
+    root = tmp_path / 'worktrees'
+    root.mkdir()
+    monkeypatch.setattr(module, 'WORKTREE_ROOT', root)
+    failed = root / 'issue-42'
+    git('worktree', 'add', '-b', 'failed-42', str(failed), 'main')
+    (failed / 'worker.py').write_text('partial failed patch\n')
+    fresh = module.ensure_recovery_worktree(repo, 42, 'a' * 40)
+    assert fresh != failed
+    assert (failed / 'worker.py').read_text() == 'partial failed patch\n'
+    assert (fresh / 'worker.py').read_text() == 'original\n'
+    assert git('status', '--porcelain', cwd=fresh) == ''
+    assert module.ensure_recovery_worktree(repo, 42, 'a' * 40) == fresh
+    (fresh / 'worker.py').write_text('dirty new worktree\n')
+    import pytest
+    with pytest.raises(module.support.WorkerError, match='uncommitted changes'):
+        module.ensure_recovery_worktree(repo, 42, 'a' * 40)
+
+
+def test_regression_test_blocker_is_not_accepted_without_verified_upgrade(tmp_path):
+    state = {'items': {'DEV-42': {
+        'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+        'reason': 'WorkerError: autonomous support repair requires a changed regression test'
+    }}}
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, {'DEV-42'}, tmp_path, current_link=tmp_path / 'missing') == 0
+    assert state['items']['DEV-42']['phase'] == 'blocked'
