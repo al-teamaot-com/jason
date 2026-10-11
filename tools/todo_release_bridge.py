@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+import operational_acceptance_reader as acceptance_reader
+
 DEFAULT_REPO = Path("/home/al/projects/jason")
 DEFAULT_SPOOL = Path("/var/lib/jason/openclaw/support-repair")
 DEFAULT_RELEASE_STATE = Path("/var/lib/jason/openclaw/release-manager")
@@ -265,12 +267,18 @@ def accepted_release_dependencies(release_root: Path, identities: list[str]) -> 
     return accepted
 
 
-def dependency_state_for_item(item: Mapping[str, Any], release_root: Path) -> dict[str, Any]:
+def dependency_state_for_item(item: Mapping[str, Any], release_root: Path, acceptance_root: Path | None = None) -> dict[str, Any]:
     required = item.get("governing_dependencies")
     identities = required if isinstance(required, list) else []
     accepted = accepted_release_dependencies(release_root, [s for s in identities if isinstance(s, str)])
     release_gate = dependency_recheck_gate(item, accepted)
-    operational_gate = operational_evidence_gate(item, {})
+    operational_ids = item.get('governing_operational_dependencies')
+    operational_proofs = acceptance_reader.accepted_operational_dependencies(
+        acceptance_root or release_root / 'protected-operational-acceptance',
+        [v for v in operational_ids if isinstance(v, str)] if isinstance(operational_ids, list) else [],
+        int(item.get('issue_number') or 0),
+    ) if operational_ids else {}
+    operational_gate = operational_evidence_gate(item, operational_proofs)
     return {**release_gate, **operational_gate,
             "retry_eligible": release_gate["retry_eligible"] and operational_gate["operational_eligible"]}
 
