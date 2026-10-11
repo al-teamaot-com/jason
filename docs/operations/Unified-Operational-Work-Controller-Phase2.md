@@ -19,7 +19,7 @@ acceptance location. For combined gates, every declared release and
 operational prerequisite must pass.
 
 The worker re-reads protected evidence immediately before a bounded
-readmission. Existing issue-level holds, support-first capacity limits,
+readmission. A stale or caller-supplied eligibility flag by itself is not sufficient. Existing issue-level holds, support-first capacity limits,
 source pinning and owner-approved development boundaries still apply.
 The persistent exactly-once fingerprint includes declared release IDs
 and verified operational evidence references. Re-running the same proof
