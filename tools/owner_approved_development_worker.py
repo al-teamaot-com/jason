@@ -337,6 +337,9 @@ def source_context_blocker(reason: str) -> bool:
     )
     if any(marker in text for marker in explicit_markers):
         return True
+    # Negated excerpt availability is a source-context failure.
+    if re.search(r'\b(?:no|without)\s+(?:[\w-]+\s+){0,5}excerpts?\b', text):
+        return True
     context_terms = (
         'excerpt',
         'context',
@@ -794,12 +797,20 @@ def preflight_or_refresh_exact_anchors(
     retries = int(record.get('anchor_refresh_attempts', 0))
     if retries >= 2:
         raise support.WorkerError('exact anchor refresh exhausted: ' + ', '.join(mismatched[:3]))
+    scope = approved_scope(item)
+    approved_paths = explicit_approved_source_paths(scope)
+    approved_tests = [path for path in approved_paths
+                      if path.startswith('tools/tests/') and path.endswith('.py')]
+    # Regeneration needs the owner-approved test context as well as the stale
+    # implementation file; otherwise the model cannot safely patch both.
+    required_paths = list(dict.fromkeys([*mismatched[:3], *approved_tests[:2]]))
     refreshed = support.source_excerpts_for_paths(
-        worktree, list(dict.fromkeys(mismatched))[:3], gate, policy,
-        terms=[approved_scope(item)], limit=3, content_limit=56000,
+        worktree, required_paths, gate, policy,
+        terms=[scope], limit=len(required_paths), content_limit=56000,
     )
-    if not refreshed:
-        raise support.WorkerError('exact anchor refresh source unavailable')
+    returned_paths = {str(part.get('path') or '') for part in refreshed}
+    if not refreshed or any(path not in returned_paths for path in required_paths):
+        raise support.WorkerError('exact anchor refresh required source or approved tests unavailable')
     edit_rid = queue_reasoning(
         spool, kind='edit_plan', item=item,
         context={
@@ -807,6 +818,7 @@ def preflight_or_refresh_exact_anchors(
             'approved_scope': approved_scope(item),
             'diagnosis': 'Regenerate exact-text replacements from fresh current source; prior anchors did not match exactly once.',
             'source_excerpts': refreshed,
+            'required_test_paths': approved_tests[:2],
             'prior_anchor_failures': mismatched[:3],
         },
     )
@@ -871,6 +883,7 @@ def readmit_source_context_after_verified_worker_upgrade(
             continue
         record.update({'phase': 'diagnosing', 'reasoning_request_id': '',
                        'context_expansion_attempts': 0, 'self_recovery_attempts': 0,
+                       'anchor_refresh_attempts': 0,
                        'source_upgrade_readmitted_sha': sha, 'source_upgrade_readmitted_at': now(),
                        'reason': 'Re-admitted after independently verified production source-retrieval upgrade.',
                        'updated_at': now()})
