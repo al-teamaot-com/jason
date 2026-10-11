@@ -3564,6 +3564,106 @@ def test_vulscan_core_scope_remains_eligible_without_client_disposition_promotio
     store.close()
 
 
+
+
+class VulscanAmbiguousPatchReads(VulscanBranchReads):
+    def __init__(self):
+        super().__init__("NOT_APPROVED")
+
+    def execute(self, capability, arguments):
+        if capability == "endpoint.patch.search":
+            return {
+                "status": "succeeded",
+                "evidence": {
+                    "data": {
+                        "patches": [],
+                        "match_count": 0,
+                        "exact_selector_match": False,
+                        "ambiguous": False,
+                    }
+                },
+            }
+        return super().execute(capability, arguments)
+
+
+def test_vulscan_missing_or_superseded_patch_stays_jason_owned(tmp_path: Path):
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()),
+        reads=VulscanAmbiguousPatchReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("vulscan_missing_patch",)),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0,)).__next__,
+    )
+
+    worker.tick()
+
+    current = store.get(141183)
+    assert current is not None
+    assert current.phase == "waiting_patch_identity_review"
+    assert current.last_reason.startswith("VulScan patch identity/supersedence investigation remains Jason-owned")
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert {"id": 141183, "status": "On Hold"} in updates
+    assert not any(payload.get("queueID") == "Help Desk I" for payload in updates)
+    notes = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert notes
+    assert any("JASON INVESTIGATION - PATCH IDENTITY/SUPERSEDENCE" in note["description"] for note in notes)
+    assert store.list_open() == ()
+    store.close()
+
+
+def test_vulscan_patch_identity_waiting_state_rechecks_daily(tmp_path: Path):
+    reads = VulscanAmbiguousPatchReads()
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()),
+        reads=reads,
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("vulscan_missing_patch",)),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0, 31.0)).__next__,
+    )
+
+    worker.tick()
+    waiting = store.get(141183)
+    assert waiting is not None
+    store.put(
+        replace(
+            waiting,
+            updated_at=(datetime.now(timezone.utc) - timedelta(days=2)).isoformat(),
+        )
+    )
+
+    worker.tick()
+
+    current = store.get(141183)
+    assert current is not None
+    assert current.phase == "waiting_patch_identity_review"
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert {"id": 141183, "status": "In Progress"} in updates
+    assert not any(payload.get("queueID") == "Help Desk I" for payload in updates)
+    store.close()
+
+
 def test_vulscan_client_disposition_waits_then_resumes_on_exact_v11_promotion(
     tmp_path: Path,
 ):
@@ -5686,6 +5786,7 @@ def test_owned_retryable_provider_block_leaves_new_status_and_retries_under_jaso
 def test_phase_status_mapping_is_semantic_and_not_numeric() -> None:
     assert OperationalAutonomyMaintenance._status_for_phase("waiting_patch_approval") == "Waiting Patch Approval"
     assert OperationalAutonomyMaintenance._status_for_phase("waiting_patch_window") == "On Hold"
+    assert OperationalAutonomyMaintenance._status_for_phase("waiting_patch_identity_review") == "On Hold"
     assert OperationalAutonomyMaintenance._status_for_phase("waiting_device_access:claim") == "Waiting Device Access"
     assert OperationalAutonomyMaintenance._status_for_phase("waiting_recheck:verify") == "On Hold"
     assert OperationalAutonomyMaintenance._status_for_phase("escalated") == "Human Review"

@@ -540,7 +540,7 @@ class SQLiteOperationalWorkStore:
             "WHERE phase NOT IN ("
             "'complete','escalated','blocked','approval_pending',"
             "'waiting_patch_approval','waiting_patch_window',"
-            "'waiting_client_notification_authority'"
+            "'waiting_patch_identity_review','waiting_client_notification_authority'"
             ") "
             "AND phase NOT LIKE 'waiting_device_access:%' "
             "AND phase NOT LIKE 'waiting_recheck:%' "
@@ -992,6 +992,8 @@ class OperationalAutonomyMaintenance:
         if value == "waiting_patch_approval":
             return "Waiting Patch Approval"
         if value == "waiting_patch_window":
+            return "On Hold"
+        if value == "waiting_patch_identity_review":
             return "On Hold"
         if value.startswith("waiting_device_access:"):
             return "Waiting Device Access"
@@ -1905,14 +1907,21 @@ class OperationalAutonomyMaintenance:
                             False,
                         )
                     continue
-                if existing.phase in {"waiting_patch_approval", "waiting_patch_window"}:
+                if existing.phase in {
+                    "waiting_patch_approval",
+                    "waiting_patch_window",
+                    "waiting_patch_identity_review",
+                }:
                     self._reconcile_ticket_status_for_phase(
                         existing,
                         item.context.get("_jason_source_status_label"),
                     )
                     interval = (
                         VULSCAN_APPROVAL_RECHECK_SECONDS
-                        if existing.phase == "waiting_patch_approval"
+                        if existing.phase in {
+                            "waiting_patch_approval",
+                            "waiting_patch_identity_review",
+                        }
                         else VULSCAN_PATCH_WINDOW_RECHECK_SECONDS
                     )
                     updated = self._parse_iso_timestamp(existing.updated_at)
@@ -2542,6 +2551,8 @@ class OperationalAutonomyMaintenance:
             return "waiting_dependency", "patch_approval_pending"
         if current.phase == "waiting_patch_window":
             return "waiting_dependency", "patch_window_pending"
+        if current.phase == "waiting_patch_identity_review":
+            return "waiting_dependency", "patch_identity_research_pending"
         if current.phase == "waiting_client_notification_authority":
             return "waiting_dependency", "client_notification_authority_pending"
         if current.phase == "blocked":
@@ -4814,6 +4825,19 @@ class OperationalAutonomyMaintenance:
                     "Jason - VulScan - Waiting Patch Window",
                 )
                 return
+        elif classification == "patch_identity_or_supersedence_review":
+            note += (
+                "STATUS: JASON INVESTIGATION - PATCH IDENTITY/SUPERSEDENCE. "
+                "One or more ticket KBs are absent or ambiguous in the current DRMM patch "
+                "inventory. This does not by itself require technician review. Jason will retain "
+                "ownership, recheck daily, and continue evaluating whether the finding is stale, "
+                "superseded, replaced, or otherwise no longer represented as an exact current patch. "
+                "No forced installation, approval, or reboot is authorized by this state."
+            )
+            reason = (
+                "VulScan patch identity/supersedence investigation remains Jason-owned; "
+                "one or more exact ticket KBs are absent or ambiguous in current DRMM evidence."
+            )
         else:
             note += (
                 "Technician review or a separately accepted Windows Update remediation branch "
@@ -4847,6 +4871,21 @@ class OperationalAutonomyMaintenance:
                 self._replace(
                     work,
                     phase="waiting_patch_window",
+                    last_reason=reason,
+                )
+            )
+            return
+        if classification == "patch_identity_or_supersedence_review":
+            self._write_note(
+                work,
+                note,
+                "Jason - VulScan - Patch Identity/Supersedence Investigation",
+            )
+            self._update_ticket_status_verified(work, "On Hold")
+            self.store.put(
+                self._replace(
+                    work,
+                    phase="waiting_patch_identity_review",
                     last_reason=reason,
                 )
             )
