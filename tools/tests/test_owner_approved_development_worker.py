@@ -865,3 +865,19 @@ def test_production_identity_api_context_keeps_complete_contract(tmp_path):
     chosen = module.support.merge_source_excerpts(result, [
         {'path': 'implementation/unrelated.py', 'content': 'other'}], max_total=1)
     assert chosen[0]['path'] == 'tools/release_manager_host_runner.py'
+
+
+def test_approved_test_file_full_context_with_bounded_56k_limit(tmp_path):
+    import types
+    test_path = tmp_path / 'tools/tests/test_owner_approved_development_worker.py'
+    test_path.parent.mkdir(parents=True)
+    expected = 'def test_reject_missing_production_identity():\n    assert True\n'
+    body = '# preexisting regression context\n' * 1100 + expected
+    assert 24000 < len(body) < 56000
+    test_path.write_text(body)
+    gate = types.SimpleNamespace(path_denial_reason=lambda path, policy: '')
+    context = module.support.source_excerpts_for_paths(
+        tmp_path, ['tools/tests/test_owner_approved_development_worker.py'],
+        gate, {}, terms=['CCC production SHA'], content_limit=56000, limit=1)
+    assert context[0]['content'] == body
+    assert expected in context[0]['content']
