@@ -917,6 +917,68 @@ def test_verified_upgrade_readmits_truncated_approved_test_once(tmp_path):
     assert record['phase'] == 'blocked'
 
 
+
+def test_verified_upgrade_readmits_exact_anchor_failure_once(tmp_path):
+    import json
+    from datetime import datetime, timezone
+    spool = tmp_path / 'support-repair'
+    spool.mkdir()
+    root = tmp_path / 'release-manager'
+    (root / 'protected-readback').mkdir(parents=True)
+    (root / 'records').mkdir()
+    sha = 'b' * 40
+    live = tmp_path / sha
+    live.mkdir()
+    (root / 'protected-readback/production-control-state.json').write_text(json.dumps(
+        {'last_known_good': {'manifest': {'revision': sha}}}))
+    (root / 'protected-readback/production-drift.json').write_text(json.dumps(
+        {'status': 'pass', 'problems': [], 'observed_at': datetime.now(timezone.utc).isoformat()}))
+    (root / 'records/release-test.json').write_text(json.dumps({
+        'state': 'closed', 'release_candidate': {'candidate_sha': sha},
+        'changed_files': ['tools/owner_approved_development_worker.py']}))
+    reason = ('WorkerError: exact repair anchor must occur once in '
+              'tools/owner_approved_development_worker.py; found 0')
+    record = {'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+              'reason': reason, 'self_recovery_attempts': 2}
+    state = {'items': {'DEV-1245': record}}
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, set(), spool, current_link=live) == 0
+    assert record['phase'] == 'blocked'
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, {'DEV-1245'}, spool, current_link=live) == 1
+    assert record['phase'] == 'diagnosing'
+    assert record['self_recovery_attempts'] == 0
+    record['phase'] = 'blocked'
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, {'DEV-1245'}, spool, current_link=live) == 0
+    assert record['phase'] == 'blocked'
+
+
+
+def test_exact_anchor_readmission_requires_verified_release(tmp_path):
+    spool = tmp_path / 'support-repair'
+    spool.mkdir()
+    live = tmp_path / ('d' * 40)
+    live.mkdir()
+    record = {'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+              'reason': 'WorkerError: exact repair anchor must occur once in tools/a.py; found 0'}
+    state = {'items': {'DEV-1245': record}}
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, {'DEV-1245'}, spool, current_link=live) == 0
+    assert record['phase'] == 'blocked'
+
+def test_exact_anchor_readmission_rejects_unrelated_error(tmp_path):
+    spool = tmp_path / 'support-repair'
+    spool.mkdir()
+    live = tmp_path / ('c' * 40)
+    live.mkdir()
+    record = {'phase': 'blocked', 'blocker_class': 'external_authority',
+              'reason': 'WorkerError: exact repair anchor must occur once in file; found 0'}
+    state = {'items': {'DEV-1245': record}}
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, {'DEV-1245'}, spool, current_link=live) == 0
+    assert record['phase'] == 'blocked'
+
 def test_stale_anchor_preflight_is_read_only_and_detects_later_edit_conflict(tmp_path):
     import types
     path = tmp_path / 'tools/owner_approved_development_worker.py'
