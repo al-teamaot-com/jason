@@ -1193,3 +1193,34 @@ def test_negated_test_excerpt_is_source_context():
     assert module.source_context_blocker(reason)
     assert module.self_recoverable_blocker(reason)
     assert not module.source_context_blocker('All regression tests passed.')
+
+
+def test_matching_source_without_required_regression_test_refreshes_before_mutation(monkeypatch, tmp_path):
+    import types
+    source = tmp_path / 'tools/worker.py'
+    regression = tmp_path / 'tools/tests/test_worker.py'
+    regression.parent.mkdir(parents=True)
+    source.write_text('value = 1\n')
+    regression.write_text('def test_value():\n    assert True\n')
+    gate = types.SimpleNamespace(path_denial_reason=lambda path, policy: '')
+    scope = 'Only edit `tools/worker.py` and `tools/tests/test_worker.py`.'
+    monkeypatch.setattr(module, 'approved_scope', lambda item: scope)
+    monkeypatch.setattr(module.support, 'source_excerpts_for_paths',
+                        lambda root, paths, *a, **kw: [
+                            {'path': path, 'content': (root / path).read_text()}
+                            for path in paths])
+    calls = []
+    monkeypatch.setattr(module, 'queue_reasoning',
+                        lambda spool, **kw: calls.append(kw) or 'new-edit-plan')
+    record = {'phase': 'implementing'}
+    edits = [{'path': 'tools/worker.py', 'old_text': 'value = 1',
+              'new_text': 'value = 2'}]
+    assert module.preflight_or_refresh_exact_anchors(
+        tmp_path, edits, gate, {}, record, {'issue_number': 42}, tmp_path)
+    assert record['reasoning_request_id'] == 'new-edit-plan'
+    assert record['anchor_refresh_attempts'] == 1
+    assert calls[0]['context']['missing_regression_test_edits'] is True
+    assert {entry['path'] for entry in calls[0]['context']['source_excerpts']} == {
+        'tools/worker.py', 'tools/tests/test_worker.py'}
+    assert source.read_text() == 'value = 1\n'
+    assert regression.read_text() == 'def test_value():\n    assert True\n'

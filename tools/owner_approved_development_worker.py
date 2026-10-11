@@ -792,18 +792,27 @@ def preflight_or_refresh_exact_anchors(
     Return True if a new edit plan was queued; callers must not mutate files.
     """
     mismatched = mismatched_exact_anchors(worktree, edits, gate, policy)
-    if not mismatched:
-        return False
-    retries = int(record.get('anchor_refresh_attempts', 0))
-    if retries >= 2:
-        raise support.WorkerError('exact anchor refresh exhausted: ' + ', '.join(mismatched[:3]))
     scope = approved_scope(item)
     approved_paths = explicit_approved_source_paths(scope)
     approved_tests = [path for path in approved_paths
                       if path.startswith('tools/tests/') and path.endswith('.py')]
+    test_edits = [edit for edit in edits
+                  if str(edit.get('path') or '') in approved_tests]
+    missing_test_change = bool(approved_tests) and not test_edits
+    if not mismatched and not missing_test_change:
+        return False
+    retries = int(record.get('anchor_refresh_attempts', 0))
+    if retries >= 2:
+        raise support.WorkerError('exact anchor refresh exhausted: ' + ', '.join(mismatched[:3]))
     # Regeneration needs the owner-approved test context as well as the stale
     # implementation file; otherwise the model cannot safely patch both.
-    required_paths = list(dict.fromkeys([*mismatched[:3], *approved_tests[:2]]))
+    # Missing-test proposals must be repaired before any source edit is applied.
+    # Include the original implementation files and their authorized tests.
+    implementation_paths = [str(edit.get('path') or '') for edit in edits
+                            if str(edit.get('path') or '') and
+                            str(edit.get('path') or '') not in approved_tests]
+    required_paths = list(dict.fromkeys([*mismatched[:3], *implementation_paths[:3],
+                                         *approved_tests[:2]]))
     refreshed = support.source_excerpts_for_paths(
         worktree, required_paths, gate, policy,
         terms=[scope], limit=len(required_paths), content_limit=96000,
@@ -817,10 +826,12 @@ def preflight_or_refresh_exact_anchors(
         context={
             'work_class': 'owner_approved_development',
             'approved_scope': approved_scope(item),
-            'diagnosis': 'Regenerate exact-text replacements from fresh current source; prior anchors did not match exactly once.',
+            'diagnosis': ('Regenerate a complete atomic implementation AND changed regression-test plan from fresh current source; '
+                          'prior anchors were stale or required test edits were missing. Never return implementation-only edits.'),
             'source_excerpts': refreshed,
             'required_test_paths': approved_tests[:2],
             'prior_anchor_failures': mismatched[:3],
+            'missing_regression_test_edits': missing_test_change,
         },
     )
     record.update({'phase': 'implementing', 'reasoning_request_id': edit_rid,
