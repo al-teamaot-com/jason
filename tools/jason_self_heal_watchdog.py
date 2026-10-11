@@ -828,6 +828,28 @@ def write_escalation(
     return path
 
 
+def bounded_detect(root: Path) -> tuple[list[str], dict[str, Any]]:
+    """Represent a timed-out read-only probe as unknown, never as healthy/down.
+
+    The ordinary bounded verification pass may retry once, but no restart or
+    container start is authorized from timing uncertainty alone. Persist
+    uncertainty if it remains unresolved rather than failing the systemd unit
+    with an uncaught subprocess exception.
+    """
+    try:
+        return detect(root)
+    except subprocess.TimeoutExpired as exc:
+        command = list(exc.cmd) if isinstance(exc.cmd, (list, tuple)) else [str(exc.cmd)]
+        if len(command) < 2 or command[0] != 'docker' or command[1] not in ('inspect', 'exec'):
+            raise
+        return ['docker_probe_timeout'], {
+            'probe_status': 'inconclusive',
+            'probe_command': command[:3],
+            'timeout_seconds': exc.timeout,
+            'observed_at': now(),
+        }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
@@ -838,7 +860,7 @@ def main() -> int:
     memory_path = root / "issue-memory.json"
     state = read_json(state_path)
 
-    failures, evidence = detect(root)
+    failures, evidence = bounded_detect(root)
     if not failures:
         update_recurrence_memory(memory_path, [])
         atomic_json(state_path, {
@@ -857,7 +879,7 @@ def main() -> int:
     if attempts < max(1, int(args.max_attempts)):
         actions = bounded_recovery(failures)
         attempts += 1
-        failures_after, evidence_after = detect(root)
+        failures_after, evidence_after = bounded_detect(root)
         if not failures_after:
             update_recurrence_memory(memory_path, [])
             atomic_json(state_path, {

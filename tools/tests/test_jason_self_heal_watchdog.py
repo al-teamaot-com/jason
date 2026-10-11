@@ -695,3 +695,77 @@ def test_production_convergence_detects_scheduled_worker_drift(tmp_path, monkeyp
     assert "production_convergence_scheduled_artifact_drift:self_heal_watchdog" in failures
     assert evidence["engineering_source_revision"] == revision
     assert evidence["current_release"] == str(release.resolve())
+
+
+
+def test_docker_probe_timeout_is_inconclusive_and_never_triggers_restart(monkeypatch, tmp_path):
+    import subprocess
+    def timeout_probe(root):
+        raise subprocess.TimeoutExpired(['docker', 'exec', 'jason-mcp-pilot'], 20)
+    monkeypatch.setattr(module, 'detect', timeout_probe)
+    failures, evidence = module.bounded_detect(tmp_path)
+    assert failures == ['docker_probe_timeout']
+    assert evidence['probe_status'] == 'inconclusive'
+    assert evidence['probe_command'] == ['docker', 'exec', 'jason-mcp-pilot']
+    assert evidence['timeout_seconds'] == 20
+    monkeypatch.setattr(module, 'run', lambda *a, **kw: (
+        (_ for _ in ()).throw(AssertionError('unexpected disruptive action'))))
+    assert module.bounded_recovery(failures) == []
+
+
+def test_watchdog_transient_probe_timeout_recovers_on_second_read(monkeypatch, tmp_path):
+    import subprocess
+    import sys
+    sequence = iter([
+        subprocess.TimeoutExpired(['docker', 'inspect', 'jason-runtime'], 10),
+        ([], {'verified': True}),
+    ])
+    def probe(root):
+        observation = next(sequence)
+        if isinstance(observation, Exception):
+            raise observation
+        return observation
+    monkeypatch.setattr(module, 'detect', probe)
+    monkeypatch.setattr(module, 'run', lambda *a, **kw: (
+        (_ for _ in ()).throw(AssertionError('unexpected provider or container action'))))
+    monkeypatch.setattr(sys, 'argv', ['watchdog', '--root', str(tmp_path)])
+    assert module.main() == 0
+    data = json.loads((tmp_path / 'state.json').read_text())
+    assert data['state'] == 'recovered'
+    assert data['verification'] == 'original detector rerun passed with no remaining failures'
+    assert data['recovery_actions'] == []
+
+
+
+def test_non_docker_or_mutating_timeout_is_not_misclassified(monkeypatch, tmp_path):
+    import pytest
+    import subprocess
+    for command in (['git', 'fetch'], ['docker', 'restart', 'jason-runtime']):
+        def timeout_probe(root):
+            raise subprocess.TimeoutExpired(command, 20)
+        monkeypatch.setattr(module, 'detect', timeout_probe)
+        with pytest.raises(subprocess.TimeoutExpired):
+            module.bounded_detect(tmp_path)
+
+
+def test_repeated_docker_probe_timeout_persists_inconclusive_failure(monkeypatch, tmp_path):
+    import subprocess
+    import sys
+    def timeout_probe(root):
+        raise subprocess.TimeoutExpired(['docker', 'exec', 'jason-mcp-pilot'], 20)
+    monkeypatch.setattr(module, 'detect', timeout_probe)
+    support_notifications = []
+    def permitted_run(args, **kwargs):
+        assert args == ['systemctl', '--user', 'start', '--no-block',
+                        'jason-support-repair-worker.service']
+        support_notifications.append(args)
+        return SimpleNamespace(returncode=0, stdout='', stderr='')
+    monkeypatch.setattr(module, 'run', permitted_run)
+    monkeypatch.setattr(sys, 'argv', ['watchdog', '--root', str(tmp_path)])
+    assert module.main() == 0
+    assert support_notifications
+    data = json.loads((tmp_path / 'state.json').read_text())
+    assert data['state'] != 'healthy'
+    assert data['state'] != 'recovered'
+    assert data['failures'] == ['docker_probe_timeout']
+    assert data['last_recovery_actions'] == []
