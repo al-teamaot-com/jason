@@ -1287,6 +1287,7 @@ def test_explicit_prepare_reconciles_retention_before_breaker_revalidation():
             runner.prepare_release(Path('/tmp/nonexistent'), Path('/tmp/nonexistent'),
                                    SHA_A, 'release_blocker', owner_approved=True)
     assert order == ['retention', 'breaker']
+    # No release record or production mutation was reached.
 
 
 def test_retention_failure_prevents_breaker_revalidation_and_mutation():
