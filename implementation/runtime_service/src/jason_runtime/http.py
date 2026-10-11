@@ -4,6 +4,8 @@ import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
+from .deployment_identity import DeploymentManifestError
+
 
 class TeamsConversationIngress(Protocol):
     def handle(self, envelope: Mapping[str, Any]) -> Mapping[str, Any]: ...
@@ -47,6 +49,7 @@ class RuntimeHttpApplication:
     # Same-thread bounded maintenance hook. The HTTP layer never invokes it from
     # request dispatch; JasonRuntimeHttpServer.service_actions() owns maintenance.
     maintenance: Any | None = None
+    deployment_manifest_provider: Any | None = None
 
     max_body_bytes: int = 64 * 1024
     conversation_path: str = "/v1/openclaw/teams/conversation"
@@ -63,14 +66,41 @@ class RuntimeHttpApplication:
         request_path = path.split("?", 1)[0]
 
         if verb == "GET" and request_path == "/healthz":
-            return HttpResponse(
-                200,
-                {
-                    "status": "ok",
-                    "component": "jason-runtime",
-                    "authority": "central-orchestrator",
-                },
-            )
+            body: dict[str, Any] = {
+                "status": "ok",
+                "component": "jason-runtime",
+                "authority": "central-orchestrator",
+            }
+            if self.deployment_manifest_provider is not None:
+                try:
+                    manifest = self.deployment_manifest_provider.read()
+                except DeploymentManifestError:
+                    body["deployment_manifest"] = "invalid"
+                else:
+                    body["deployment_manifest"] = "available"
+                    body["deployment_identity_sha256"] = manifest["identity_sha256"]
+            return HttpResponse(200, body)
+
+        if verb == "GET" and request_path == "/v1/system/deployment-manifest":
+            if self.deployment_manifest_provider is None:
+                return HttpResponse(
+                    503,
+                    {
+                        "status": "unavailable",
+                        "error_code": "deployment_manifest_not_configured",
+                    },
+                )
+            try:
+                manifest = self.deployment_manifest_provider.read()
+            except DeploymentManifestError:
+                return HttpResponse(
+                    503,
+                    {
+                        "status": "unavailable",
+                        "error_code": "deployment_manifest_invalid",
+                    },
+                )
+            return HttpResponse(200, manifest)
 
         if request_path != self.conversation_path:
             return HttpResponse(404, {"status": "rejected", "error_code": "not_found"})
