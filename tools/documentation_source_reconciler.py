@@ -263,10 +263,40 @@ def required_checks_green(pr_number: str) -> bool:
     return all(str(item.get("bucket") or "") == "pass" for item in checks)
 
 
+def superseded_generated_prs(items: list[dict[str, Any]]) -> list[str]:
+    """Conservatively select older generated snapshots, never arbitrary PRs."""
+    numbered = sorted((int(v["number"]), v) for v in items
+                      if str(v.get("number", "")).isdigit()
+                      and str(v.get("headRefName", "")).startswith("automation/documentation-reconcile-"))
+    if len(numbered) < 2:
+        return []
+    return [str(number) for number, _ in numbered[:-1]]
+
+
+def prune_superseded_generated_prs(items: list[dict[str, Any]]) -> bool:
+    """Close at most one superseded PR per cycle after exact file validation."""
+    stale = superseded_generated_prs(items)
+    if not stale:
+        return False
+    number = stale[0]
+    files = gh_json("pr", "view", number, "--repo", REPO, "--json", "files") or {}
+    paths = {f.get("path") for f in files.get("files", []) if isinstance(f, dict)}
+    if not paths or not paths.issubset({"docs/control/AUTOMATED-CHANGE-STATE.json",
+                                        "docs/control/AUTOMATED-CHANGE-STATE.md"}):
+        print(f"DOCUMENTATION_PR_PRUNE_SKIPPED_UNVERIFIED={number}")
+        return False
+    run("gh", "pr", "close", number, "--repo", REPO,
+        "--comment", "Superseded derived-state snapshot; newer generated PR retained. Audit history preserved.")
+    print(f"DOCUMENTATION_PR_SUPERSEDED_CLOSED={number}")
+    return True
+
+
 def merge_ready_automation_prs() -> str:
     items = automation_prs()
     if not items:
         return "none"
+    if prune_superseded_generated_prs(items):
+        return "waiting"
     for item in items:
         number = str(item["number"])
         mergeable = str(item.get("mergeable") or "")
