@@ -889,3 +889,19 @@ def test_transient_pr_listing_classifier_preserves_authority_boundary():
     for error in ('HTTP 403: forbidden', 'HTTP 401: unauthorized',
                   'approval required', 'invalid JSON record'):
         assert not worker.transient_github_listing_failure(worker.WorkerError(error))
+
+
+def test_bounded_full_approved_test_source(tmp_path):
+    import types, pytest
+    f=tmp_path/'tools/tests/test_large.py'
+    f.parent.mkdir(parents=True)
+    body='def test_large():\n    assert True\n'+'# source\n'*7000
+    f.write_text(body)
+    g=types.SimpleNamespace(path_denial_reason=lambda path,policy:'')
+    p='tools/tests/test_large.py'
+    v=worker.source_excerpts_for_paths(tmp_path,[p],g,{},terms=['test_large'],content_limit=96000,full_file_paths=[p])
+    assert v[0]['content']==body
+    with pytest.raises(worker.WorkerError,match='required complete source exceeds'):
+        worker.source_excerpts_for_paths(tmp_path,[p],g,{},terms=['test_large'],content_limit=56000,full_file_paths=[p])
+    denied=types.SimpleNamespace(path_denial_reason=lambda path,policy:'denied')
+    assert worker.source_excerpts_for_paths(tmp_path,[p],denied,{},content_limit=96000,full_file_paths=[p])==[]

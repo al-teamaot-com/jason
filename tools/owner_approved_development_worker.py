@@ -806,7 +806,8 @@ def preflight_or_refresh_exact_anchors(
     required_paths = list(dict.fromkeys([*mismatched[:3], *approved_tests[:2]]))
     refreshed = support.source_excerpts_for_paths(
         worktree, required_paths, gate, policy,
-        terms=[scope], limit=len(required_paths), content_limit=56000,
+        terms=[scope], limit=len(required_paths), content_limit=96000,
+        full_file_paths=approved_tests[:2],
     )
     returned_paths = {str(part.get('path') or '') for part in refreshed}
     if not refreshed or any(path not in returned_paths for path in required_paths):
