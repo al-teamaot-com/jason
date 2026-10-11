@@ -942,6 +942,9 @@ def test_verified_upgrade_readmits_exact_anchor_failure_once(tmp_path):
               'reason': reason, 'self_recovery_attempts': 2}
     state = {'items': {'DEV-1245': record}}
     assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, set(), spool, current_link=live) == 0
+    assert record['phase'] == 'blocked'
+    assert module.readmit_source_context_after_verified_worker_upgrade(
         state, {'DEV-1245'}, spool, current_link=live) == 1
     assert record['phase'] == 'diagnosing'
     assert record['self_recovery_attempts'] == 0
