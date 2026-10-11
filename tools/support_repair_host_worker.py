@@ -9,6 +9,7 @@ against J-CHANGE-002 path/size/test controls before any git mutation.
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import importlib.util
 import json
@@ -736,6 +737,31 @@ def bounded_relevant_excerpt(
     return ''.join(chunks)[:limit]
 
 
+def bounded_symbol_excerpt(text: str, symbols: list[str], *, content_limit: int) -> str | None:
+    """Keep complete matching Python definitions, never mid-function fragments."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return None
+    wanted = {value for value in symbols if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*', value)}
+    if not wanted:
+        return None
+    lines = text.splitlines(keepends=True)
+    matches = [node for node in ast.walk(tree)
+               if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+               and node.name in wanted]
+    if not matches:
+        return None
+    chunks = [text[:min(1300, content_limit // 6)]]
+    for node in sorted(matches, key=lambda n: n.lineno):
+        start = min([node.lineno, *[d.lineno for d in getattr(node, 'decorator_list', [])]]) - 1
+        snippet = ''.join(lines[start:node.end_lineno])
+        if sum(map(len, chunks)) + len(snippet) + 32 > content_limit:
+            continue
+        chunks.append(f'\n# Complete definition at line {start + 1}\n' + snippet)
+    return ''.join(chunks) if len(chunks) > 1 else None
+
+
 def source_excerpts_for_paths(
     worktree: Path,
     paths: list[str],
@@ -762,7 +788,10 @@ def source_excerpts_for_paths(
             text = candidate.read_text(encoding='utf-8')
         except UnicodeDecodeError:
             continue
-        content = (
+        symbols = [word for term in list(terms or []) for word in re.findall(
+            r'[A-Za-z_][A-Za-z0-9_]*', str(term))]
+        exact = bounded_symbol_excerpt(text, symbols, content_limit=content_limit)
+        content = exact or (
             text
             if len(text) <= content_limit
             else bounded_relevant_excerpt(
