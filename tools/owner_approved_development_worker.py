@@ -76,6 +76,18 @@ def explicit_approved_source_paths(scope: str) -> list[str]:
     return result
 
 
+def bounded_production_identity_contract(worktree: Path, gate, policy: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Read complete existing production identity helper from an authorized source path.
+
+    Only adds read-only edit-plan evidence. Never changes approved edit paths,
+    provider capabilities, or production state.
+    """
+    return support.source_excerpts_for_paths(
+        worktree, ['tools/support_repair_host_worker.py'], gate, policy,
+        terms=['production_state_from_main'], limit=1, content_limit=14000,
+    )
+
+
 def exact_approved_symbols(scope: str) -> list[str]:
     """Extract explicit function identifiers, not every word of an issue body."""
     return list(dict.fromkeys(re.findall(r'`([A-Za-z_][A-Za-z0-9_]*)`', scope)))[:24]
@@ -1395,7 +1407,9 @@ def main() -> int:
                 # source context; the issue's permitted edit paths remain unchanged.
                 if any(word in (approved_scope(item) + ' ' + ' '.join(search_terms)).casefold()
                        for word in ('production sha', 'production identity', 'live production', 'read-only production')):
-                    api_context = support.source_excerpts_for_paths(
+                    api_context = bounded_production_identity_contract(
+                        worktree, gate, policy,
+                    ) + support.source_excerpts_for_paths(
                         worktree, ['tools/release_manager_host_runner.py'], gate, policy,
                         terms=['live_runtime', 'live_mcp', 'live_production_alignment'],
                         limit=1, content_limit=18000,
