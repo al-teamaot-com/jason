@@ -1348,3 +1348,26 @@ def test_test_collection_import_recovery_cannot_admit_external_authority(tmp_pat
     assert module.readmit_source_context_after_verified_worker_upgrade(
         {'items': {'DEV-1': record}}, {'DEV-1'}, spool, current_link=live) == 0
     assert record['phase'] == 'blocked'
+
+
+
+def test_production_identity_contract_includes_complete_read_only_helper():
+    import types
+    repo = Path(__file__).resolve().parents[2]
+    gate = types.SimpleNamespace(path_denial_reason=lambda path, policy: '')
+    excerpts = module.bounded_production_identity_contract(repo, gate, {})
+    assert len(excerpts) == 1
+    assert excerpts[0]['path'] == 'tools/support_repair_host_worker.py'
+    content = excerpts[0]['content']
+    assert 'def production_state_from_main(repo: Path)' in content
+    assert "run(['git', 'fetch', '--no-tags', 'origin', 'main']" in content
+    assert 'return dict(value) if isinstance(value, Mapping) else {}' in content
+    assert len(content) <= 14500
+
+
+def test_production_identity_contract_obeys_policy_denial():
+    import types
+    repo = Path(__file__).resolve().parents[2]
+    gate = types.SimpleNamespace(
+        path_denial_reason=lambda path, policy: 'denied source')
+    assert module.bounded_production_identity_contract(repo, gate, {}) == []
