@@ -1348,7 +1348,8 @@ def main() -> int:
                 if test_paths:
                     full_tests = support.source_excerpts_for_paths(
                         worktree, test_paths[:1], gate, policy,
-                        terms=search_terms, limit=1, content_limit=56000,
+                        terms=search_terms, limit=1, content_limit=96000,
+                        full_file_paths=test_paths[:1],
                     )
                     excerpts = support.merge_source_excerpts(
                         full_tests, excerpts, max_total=14,
