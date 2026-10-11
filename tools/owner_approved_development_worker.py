@@ -513,7 +513,14 @@ def readmit_verified_ccc_owner_review(state: dict[str, Any], eligible_ids: set[s
                 or drift.get('status') != 'pass' or drift.get('problems')
                 or not 0 <= age <= 120):
             return 0
-    except (OSError, ValueError, TypeError, KeyError):
+        production_state = support.production_state_from_main(Path(__file__).resolve().parents[1])
+        production = production_state.get('production') if isinstance(production_state, dict) else None
+        live_sha = str((production or {}).get('revision') or '')
+        if len(live_sha) != 40 or any(c not in '0123456789abcdef' for c in live_sha):
+            return 0
+        if live_sha != sha:
+            return 0
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
         return 0
     items = state.get('items', {})
     for item_id, record in items.items():
