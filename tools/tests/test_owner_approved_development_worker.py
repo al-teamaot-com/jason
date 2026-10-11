@@ -829,3 +829,15 @@ def test_long_file_target_symbol_is_complete_and_prioritized():
 
 def test_symbol_extraction_fails_closed_on_incomplete_definition():
     assert module.support.bounded_symbol_excerpt('def unfinished(:', ['unfinished'], content_limit=3000) is None
+
+
+def test_verified_worker_upgrade_fails_closed_without_release(tmp_path):
+    spool = tmp_path / 'support-repair'
+    spool.mkdir()
+    link = tmp_path / ('a' * 40)
+    link.mkdir()
+    record = {'phase': 'blocked', 'blocker_class': 'source_context', 'reason': 'missing source excerpts'}
+    state = {'items': {'DEV-1245': record}}
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, {'DEV-1245'}, spool, current_link=link) == 0
+    assert record['phase'] == 'blocked'

@@ -1253,3 +1253,18 @@ class HostReconciliationTimeoutContractTests(unittest.TestCase):
             with patch.object(runner, 'require_host_reconciler_ready'), patch.object(runner.time, 'monotonic', side_effect=[0.0, 2.0]):
                 with self.assertRaisesRegex(runner.ReleaseManagerError, 'host reconciliation result timed out'):
                     runner.request_host_reconcile(root, SHA_A, timeout_seconds=1.0)
+
+
+def test_rollback_retention_only_removes_old_exited_named_containers():
+    from unittest.mock import patch
+    names = [f'jason-runtime-rollback-20261011T{i:06d}Z' for i in range(22)]
+    rows = '\n'.join(f'2026-10-11 {i:06d}|{name}' for i, name in enumerate(names))
+    calls = []
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return rows if args[1] == 'ps' else ''
+    with patch.object(runner, 'run', side_effect=fake_run):
+        assert runner.reconcile_stopped_rollback_retention() == 16
+    removed = [args[2] for args in calls if args[1] == 'rm']
+    assert removed == list(reversed(names[:6]))
+    assert not any('prune' in args for args in calls)
