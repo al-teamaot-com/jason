@@ -1266,3 +1266,23 @@ def test_regression_test_blocker_is_not_accepted_without_verified_upgrade(tmp_pa
     assert module.readmit_source_context_after_verified_worker_upgrade(
         state, {'DEV-42'}, tmp_path, current_link=tmp_path / 'missing') == 0
     assert state['items']['DEV-42']['phase'] == 'blocked'
+
+
+
+def test_missing_implementation_files_not_provided_in_excerpts_is_recoverable():
+    reason = (
+        'Required implementation files/functions for IT Glue knowledge-scope '
+        'enforcement were not provided in the excerpts, so an exact-text minimal '
+        'patch cannot be formed safely.'
+    )
+    assert module.source_context_blocker(reason)
+    assert module.self_recoverable_blocker(reason)
+    assert module.source_context_blocker(
+        'Necessary helper code was not included in the source context.'
+    )
+    assert not module.source_context_blocker(
+        'Required provider credential was not provided.'
+    )
+    assert not module.source_context_blocker(
+        'Owner approval was not provided for protected production deployment.'
+    )
