@@ -166,6 +166,26 @@ This profile must select:
 
 The deployment must fail closed rather than falling back to development/sandbox state.
 
+## Production deployment AppRole mount isolation
+
+The active Sandbox runtime can already have read-only mounts at
+`/run/jason-secrets/openbao/quickbooks/{role_id,secret_id}`.
+When activating Production, **do not replace those existing mount destinations**
+with a different Production AppRole source: the guarded Docker clone must reject
+conflicting binds.
+
+The Production MCP and runtime deployment scripts must bind the verified
+Production AppRole projection at distinct destinations:
+`/run/jason-secrets/openbao/quickbooks-production/{role_id,secret_id}`.
+Point the active QuickBooks OpenBao environment variables to those destinations
+and set the Production OAuth database separately. Preserve the Sandbox state.
+
+Before any live switch, require both canonical deployment scripts to pass their
+`--preflight` checks with `JASON_QUICKBOOKS_READ_PROFILE=quickbooks-production-read-v1`.
+A preflight failure is a blocker, not grounds to modify a live container manually.
+Production promotion must follow the exact-SHA, guarded Release Manager workflow
+with its applicable approvals, health checks, rollback, and live company readback.
+
 ## Production acceptance
 
 Run `accounting.company.read` first.
