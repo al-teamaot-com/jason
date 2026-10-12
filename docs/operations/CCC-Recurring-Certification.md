@@ -91,6 +91,36 @@ python3 tools/record_ccc_material_review.py \
 
 This preserves the constitutional distinction between deterministic verification and requirements that still need human architectural or governance judgment.
 
+## Runtime-changing release transition (SUPPORT-OPS-057)
+
+The Release Manager must invoke an independent **fresh** CCC full run at the exact
+candidate SHA before starting production mutation. No CCC result is assumed from
+a previous release, and no owner approval overrides an actual CCC denial.
+For an unchanged runtime, every CCC check and the overall result must be `PASS`.
+For a reviewed and immutable runtime-changing candidate, the **only** admissible
+pre-mutation exception is `runtime-source-alignment=NOT_PROVEN` with the overall
+result `NOT_PROVEN`, the current live revision matching the recorded rollback
+baseline, and **all other checks explicitly `PASS`**. This is a bounded
+*transition preflight*, not a certification or Last Known Compliant checkpoint.
+Any missing check, stale report, source/revision mismatch, checker staleness,
+failed canary, owner-review gap, unexpected `NOT_PROVEN`, or `FAIL` blocks
+promotion before provider, runtime or host mutation.
+
+After runtime, MCP, and host are reconciled and functionally verified, the
+Release Manager runs independent CCC again against the exact live candidate.
+Every check and the overall result must be `PASS` **before** recording
+`production_verified`, `closed`, or updating the release manager's Last Known
+Good. A post-mutation CCC failure follows the existing governed rollback path
+and persists the failed release evidence; it must not be reported as a
+successful production release. Both CCC run IDs, exact revisions, and per-check
+statuses are included in the durable release record and final evidence bundle.
+
+This does not authorize production writes. The exact release owner approval,
+material owner review, preproduction artifact digests, locked transaction,
+protected drift/circuit-breaker controls, and verified rollback remain mandatory.
+A source change to this gate creates a **new SHA and new release identity**;
+prior approval for an earlier candidate does not transfer.
+
 ## Checker staleness
 
 A scheduled checker must not certify a materially changed certification mechanism using old rules. If current authoritative source changes a configured checker-sensitive path after the installed CCC release, the runner returns `NOT_PROVEN` until the CCC control release is updated.

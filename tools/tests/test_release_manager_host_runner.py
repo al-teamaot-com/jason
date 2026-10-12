@@ -1398,3 +1398,134 @@ def test_release_contract_rejects_missing_risk_profile_with_manifest_present():
               'release_manifest': {'candidate_sha': SHA_A, 'rollback_sha': SHA_B}}
     with pytest.raises(runner.ReleaseManagerError, match='release_manifest or risk_profile'):
         runner.validate_release_record_contract(record)
+
+
+def _ccc_test_report(candidate=SHA_A, runtime=SHA_B, *, mode='transition'):
+    ids = sorted(runner.CCC_REQUIRED_CHECKS | {'material-change-owner-review'})
+    checks = [
+        {'check_id': key, 'status': 'NOT_PROVEN' if key == 'runtime-source-alignment' and mode == 'transition' else 'PASS'}
+        for key in ids
+    ]
+    return {
+        'schema_version': '1.0', 'source_revision': candidate,
+        'runtime_revision': runtime, 'status': 'NOT_PROVEN' if mode == 'transition' else 'PASS',
+        'trigger': 'material_change', 'run_id': 'ccc-test-123',
+        'finished_at': datetime.now(timezone.utc).isoformat(),
+        'material_changes': ['implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py'],
+        'checks': checks,
+    }
+
+
+def test_ccc_preflight_permits_exactly_one_expected_runtime_alignment_gap():
+    report = _ccc_test_report()
+    evidence = runner.verify_release_ccc_report(
+        report, candidate_sha=SHA_A, runtime_sha=SHA_B, before_mutation=True,
+    )
+    assert evidence['status'] == 'NOT_PROVEN'
+    assert evidence['mode'] == 'candidate_transition'
+    assert evidence['source_revision'] == SHA_A
+    report['runtime_revision'] = SHA_A
+    report['status'] = 'PASS'
+    for item in report['checks']:
+        item['status'] = 'PASS'
+    assert runner.verify_release_ccc_report(
+        report, candidate_sha=SHA_A, runtime_sha=SHA_A, before_mutation=True,
+    )['mode'] == 'aligned'
+
+
+def test_ccc_preflight_rejects_any_other_not_proven_or_failure():
+    import pytest
+    for check, status in [
+        ('checker-currentness', 'NOT_PROVEN'),
+        ('material-change-owner-review', 'NOT_PROVEN'),
+        ('j900-release-validation', 'FAIL'),
+        ('systemd-failed-units', 'FAIL'),
+        ('governed-provider-boundary-canaries', 'NOT_PROVEN'),
+    ]:
+        report = _ccc_test_report()
+        for item in report['checks']:
+            if item['check_id'] == check:
+                item['status'] = status
+        with pytest.raises(runner.ReleaseManagerError, match='pre-mutation CCC denied'):
+            runner.verify_release_ccc_report(
+                report, candidate_sha=SHA_A, runtime_sha=SHA_B, before_mutation=True,
+            )
+
+
+def test_ccc_preflight_rejects_unsafe_evidence_shapes():
+    import pytest
+    base = _ccc_test_report()
+    for mutation in ['wrong_source', 'wrong_runtime', 'missing', 'duplicate', 'unknown', 'wrong_status', 'unreviewed_material']:
+        import copy
+        report = copy.deepcopy(base)
+        if mutation == 'wrong_source':
+            report['source_revision'] = SHA_B
+        elif mutation == 'wrong_runtime':
+            report['runtime_revision'] = SHA_A
+        elif mutation == 'missing':
+            report['checks'] = report['checks'][1:]
+        elif mutation == 'duplicate':
+            report['checks'].append(report['checks'][0])
+        elif mutation == 'unknown':
+            report['checks'].append({'check_id': 'unanticipated-required-gate', 'status': 'NOT_PROVEN'})
+        elif mutation == 'wrong_status':
+            report['status'] = 'PASS'
+        elif mutation == 'unreviewed_material':
+            report['checks'] = [v for v in report['checks'] if v['check_id'] != 'material-change-owner-review']
+        with pytest.raises(runner.ReleaseManagerError):
+            runner.verify_release_ccc_report(
+                report, candidate_sha=SHA_A, runtime_sha=SHA_B, before_mutation=True,
+            )
+
+
+def test_ccc_post_deploy_requires_exact_live_revision_and_unanimous_pass():
+    import pytest
+    report = _ccc_test_report(runtime=SHA_A, mode='pass')
+    assert runner.verify_release_ccc_report(
+        report, candidate_sha=SHA_A, runtime_sha=SHA_A, before_mutation=False,
+    )['mode'] == 'live_certified'
+    for field, value in [('status', 'NOT_PROVEN'), ('source_revision', SHA_B), ('runtime_revision', SHA_B)]:
+        altered = dict(report)
+        altered[field] = value
+        with pytest.raises(runner.ReleaseManagerError):
+            runner.verify_release_ccc_report(
+                altered, candidate_sha=SHA_A, runtime_sha=SHA_A, before_mutation=False,
+            )
+    report['checks'][0]['status'] = 'FAIL'
+    with pytest.raises(runner.ReleaseManagerError, match='post-mutation CCC'):
+        runner.verify_release_ccc_report(
+            report, candidate_sha=SHA_A, runtime_sha=SHA_A, before_mutation=False,
+        )
+
+
+def test_ccc_gate_execution_requires_fresh_report_and_matching_process_result(tmp_path):
+    import json
+    import pytest
+    from types import SimpleNamespace
+    ccc = tmp_path / 'run_ccc.py';ccc.write_text('')
+    config = tmp_path / 'ccc.json';config.write_text('{}')
+    latest = tmp_path / 'latest.json'
+    fresh = _ccc_test_report(runtime=SHA_A, mode='pass')
+    with patch.object(runner.subprocess, 'run', return_value=SimpleNamespace(returncode=0)):
+        with pytest.raises(runner.ReleaseManagerError, match='did not persist'):
+            runner.run_release_ccc_gate(SHA_A, SHA_A, before_mutation=False, ccc_runner=ccc, ccc_config=config, latest=latest)
+        latest.write_text(json.dumps(fresh))
+        assert runner.run_release_ccc_gate(SHA_A, SHA_A, before_mutation=False, ccc_runner=ccc, ccc_config=config, latest=latest)['mode'] == 'live_certified'
+        fresh['finished_at'] = '2020-01-01T00:00:00+00:00'
+        latest.write_text(json.dumps(fresh))
+        with pytest.raises(runner.ReleaseManagerError, match='stale'):
+            runner.run_release_ccc_gate(SHA_A, SHA_A, before_mutation=False, ccc_runner=ccc, ccc_config=config, latest=latest)
+    fresh['finished_at'] = datetime.now(timezone.utc).isoformat()
+    latest.write_text(json.dumps(fresh))
+    with patch.object(runner.subprocess, 'run', return_value=SimpleNamespace(returncode=2)):
+        with pytest.raises(runner.ReleaseManagerError, match='process failed'):
+            runner.run_release_ccc_gate(SHA_A, SHA_A, before_mutation=False, ccc_runner=ccc, ccc_config=config, latest=latest)
+
+
+def test_ccc_precedes_mutation_and_postflight_precedes_closed_release():
+    import inspect
+    source = inspect.getsource(runner._deploy_production_locked)
+    assert source.index('ccc_preflight = run_release_ccc_gate(') < source.index('gate_transition(repo, state_root, record, "production")')
+    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('runtime_deployed = True')
+    assert source.index('ccc_postflight = run_release_ccc_gate(') < source.index('gate_transition(repo, state_root, record, "production_verified")')
+    assert source.index('ccc_postflight = run_release_ccc_gate(') < source.index('set_last_known_good(\n            state_root,\n            production_manifest')
