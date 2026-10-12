@@ -170,7 +170,18 @@ class SupportRepairReasoningMaintenance:
                     'You are the bounded Project Jason support-repair diagnostician. '
                     'Return search terms that help a deterministic host worker locate the smallest source area for this defect. '
                     'Do not propose shell commands, credentials, authority changes, security bypasses, or deployment actions. '
-                    'If the defect inherently requires new authority, constitutional change, secret access, or disruptive behavior, set blocked_reason.'
+                    'Diagnosing existing software code and proposing bounded regression-tested fixes does not itself require production, root, or provider-write authority. '
+                    'A defect mentioning root-governed release, rollback, or privileged verification is not by itself grounds to block source-only diagnosis. '
+                    'Do not request new authority, constitutional changes, secrets, service restarts, or production deployment. '
+                    'Set blocked_reason only when the proposed SOURCE-ONLY diagnosis inherently cannot proceed without such an action. '
+                )
+            if context.get('scope_review') == 'source_diagnosis_only' and not is_development:
+                system += (
+                    ' This is one bounded second assessment after an earlier model-only block. '
+                    'Assess whether safe source investigation can begin without executing privileged actions. '
+                    'Do not infer that permission to inspect and propose source patches authorizes deployment. '
+                    'Return a blocked_reason if even source-only work truly needs unapproved authority, or if scope is genuinely ambiguous. '
+                    'Otherwise return specific repository search terms; the host will independently enforce eligibility.'
                 )
             schema = _search_schema()
         elif kind == 'edit_plan':
