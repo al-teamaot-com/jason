@@ -1683,6 +1683,8 @@ def verify_release_ccc_report(
         raise ReleaseManagerError("CCC evidence runtime revision does not match expected live revision")
     if str(report.get("trigger") or "") not in {"material_change", "cadence"}:
         raise ReleaseManagerError("CCC evidence must be a forced material/cadence review")
+    if not str(report.get("run_id") or "").strip():
+        raise ReleaseManagerError("CCC evidence run identifier is missing")
     checks = report.get("checks")
     if not isinstance(checks, list):
         raise ReleaseManagerError("CCC evidence checks are missing")
@@ -1752,8 +1754,10 @@ def run_release_ccc_gate(
         finished = datetime.fromisoformat(str(report.get("finished_at") or ""))
     except (ValueError, TypeError) as exc:
         raise ReleaseManagerError("CCC completion timestamp missing") from exc
-    if finished.tzinfo is None or finished < started - timedelta(seconds=2):
-        raise ReleaseManagerError("CCC report is stale or not independently refreshed")
+    if (finished.tzinfo is None or
+            finished < started - timedelta(seconds=2) or
+            finished > datetime.now(timezone.utc) + timedelta(seconds=15)):
+        raise ReleaseManagerError("CCC report is stale, future-dated or not independently refreshed")
     evidence = verify_release_ccc_report(
         report, candidate_sha=candidate_sha, runtime_sha=runtime_sha,
         before_mutation=before_mutation,

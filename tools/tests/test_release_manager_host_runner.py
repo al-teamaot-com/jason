@@ -1515,6 +1515,10 @@ def test_ccc_gate_execution_requires_fresh_report_and_matching_process_result(tm
         latest.write_text(json.dumps(fresh))
         with pytest.raises(runner.ReleaseManagerError, match='stale'):
             runner.run_release_ccc_gate(SHA_A, SHA_A, before_mutation=False, ccc_runner=ccc, ccc_config=config, latest=latest)
+        fresh['finished_at'] = '2031-01-01T00:00:00+00:00'
+        latest.write_text(json.dumps(fresh))
+        with pytest.raises(runner.ReleaseManagerError, match='future-dated'):
+            runner.run_release_ccc_gate(SHA_A, SHA_A, before_mutation=False, ccc_runner=ccc, ccc_config=config, latest=latest)
     fresh['finished_at'] = datetime.now(timezone.utc).isoformat()
     latest.write_text(json.dumps(fresh))
     with patch.object(runner.subprocess, 'run', return_value=SimpleNamespace(returncode=2)):
