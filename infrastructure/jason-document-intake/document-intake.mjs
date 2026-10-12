@@ -147,10 +147,22 @@ export function inspectPdfBuffer(
       timeoutMs: 20_000,
       maxOutputBytes: Math.max(2 * 1024 * 1024, maxTextChars * 4),
     });
-    const extractedText = rawText.replace(/\u0000/g, "").trim();
+    const cleanRawText = rawText.replace(/\u0000/g, "");
+    const extractedText = cleanRawText.trim();
     if (extractedText.length > maxTextChars) {
       throw new DocumentIntakeError("document_text_limit");
     }
+    // Poppler form-feed separators preserve page order. Only claim per-page
+    // text coverage when split count exactly matches pdfinfo page count.
+    // Otherwise retain unknown (null), never guess from document-wide text.
+    const segments = cleanRawText.split("\f");
+    if (segments.length === pages + 1 && segments[pages].trim() === "") {
+      segments.pop();
+    }
+    const pageTextKnown = segments.length === pages;
+    const pageTextLengths = pageTextKnown
+      ? segments.map(segment => segment.replace(/\s/g, "").length)
+      : null;
     const hasNativeText = Boolean(extractedText);
     const hasImages = imageCounts.some((count) => count > 0);
     if (requireNativeText && !hasNativeText) {
@@ -166,9 +178,8 @@ export function inspectPdfBuffer(
       ? imageCounts.map((count, index) => ({
           page_number: index + 1,
           image_count: count,
-          // Native text per page is intentionally unknown without a
-          // page-specific extraction pass.
-          native_text_present: null,
+          native_text_present: pageTextKnown ? pageTextLengths[index] > 0 : null,
+          native_text_chars: pageTextKnown ? pageTextLengths[index] : null,
         }))
       : [];
     return Object.freeze({
