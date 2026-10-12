@@ -1635,9 +1635,31 @@ def publish_production_closeout(repo: Path, candidate_sha: str) -> dict[str, str
     }
 
 
+def validate_release_record_contract(record: dict[str, Any]) -> None:
+    """Reject legacy/incomplete release evidence before production mutation.
+
+    A historical record produced by an older controller may have passed CI
+    and preproduction without ever constructing final closeout fields.
+    """
+    candidate = record.get('release_candidate') or {}
+    manifest = record.get('release_manifest')
+    risk = record.get('risk_profile')
+    sha = str(candidate.get('candidate_sha') or '')
+    rollback = str(record.get('rollback_sha') or '')
+    if not isinstance(manifest, dict) or not isinstance(risk, dict):
+        raise ReleaseManagerError('release record lacks required release_manifest or risk_profile; reprepare through current controller')
+    if not SHA.fullmatch(sha) or not SHA.fullmatch(rollback):
+        raise ReleaseManagerError('release record has invalid exact revision identities')
+    if manifest.get('candidate_sha') != sha or manifest.get('rollback_sha') != rollback:
+        raise ReleaseManagerError('release manifest identities do not match candidate and rollback baseline')
+    if manifest.get('risk_profile') != risk:
+        raise ReleaseManagerError('release manifest risk classification differs from release record')
+
+
 def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
     if record.get("state") != "production_eligible":
         raise ReleaseManagerError("release is not Production Eligible")
+    validate_release_record_contract(record)
     candidate = record["release_candidate"]
     candidate_sha = str(candidate["candidate_sha"])
     image = str(candidate["image"])
@@ -1803,11 +1825,6 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "control_board_publication": closeout["control_board"],
             "verified_at": now(),
         }
-        gate_transition(repo, state_root, record, "production_verified")
-        write_owner_notification_event(
-            state_root, record, "production_queue_completed"
-        )
-        gate_transition(repo, state_root, record, "closed")
         record["evidence_bundle"] = {
             "release_id": record["release_id"],
             "candidate_sha": candidate_sha,
@@ -1823,6 +1840,11 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "final_state": "closed",
             "closed_at": now(),
         }
+        gate_transition(repo, state_root, record, "production_verified")
+        write_owner_notification_event(
+            state_root, record, "production_queue_completed"
+        )
+        gate_transition(repo, state_root, record, "closed")
         set_last_known_good(
             state_root,
             production_manifest,
@@ -2112,8 +2134,15 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
                 return False
             return True
         reasons = [str(value) for value in result.get("reasons") or []]
-        owner_only = bool(result.get("protected_core")) and reasons and all(
-            "owner approval" in reason.casefold() for reason in reasons
+        # Missing owner approval is a normal waiting state for every release
+        # class, not a production health failure. Other denials still fail closed.
+        owner_only_reasons = {
+            'production release requires explicit owner approval',
+            'protected-core release requires explicit owner approval',
+            'owner approval is not bound to the exact candidate sha',
+        }
+        owner_only = bool(reasons) and all(
+            reason.strip().casefold() in owner_only_reasons for reason in reasons
         )
         if owner_only:
             write_owner_notification_event(
