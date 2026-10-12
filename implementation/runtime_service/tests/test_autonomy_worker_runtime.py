@@ -6357,7 +6357,7 @@ def test_deborah_gittens_backupiq_progress_never_spams_teams():
     work = SimpleNamespace(
         ticket_id=141004, playbook_id="backupiq_endpoint_backup",
         ticket_number="T20261011.0004", hostname="DGV-50859",
-        title="BackupIQ: Backup for asset is not available for Deborah Gittens Virtuol Designs LLC",
+        title="BackupIQ: Backup for asset is not available",
     )
     for status in ("In Progress", "On Hold", "In Progress", "Waiting Device Access", "In Progress"):
         worker._notify_ticket_event(work, "status_change", status)
