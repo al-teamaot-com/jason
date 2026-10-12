@@ -197,3 +197,22 @@ def test_previous_ollama_budget_failure_is_bounded_retry_candidate(tmp_path: Pat
     assert maintenance.tick() is True
     response = json.loads(response_path.read_text(encoding='utf-8'))
     assert response['status'] == 'succeeded'
+
+
+def test_second_scope_review_separates_code_diagnosis_from_deployment(tmp_path: Path):
+    client = Client()
+    request = _request('search_plan')
+    request['context'] = {'scope_review': 'source_diagnosis_only',
+                          'prior_blocked_reason': 'root-governed rollback needs authority'}
+    request['request_id'] = _request_id(request)
+    root = tmp_path / 'reasoning' / 'requests'
+    root.mkdir(parents=True)
+    (root / (request['request_id'] + '.json')).write_text(json.dumps(request))
+    maint = SupportRepairReasoningMaintenance(structured_client=client, spool=tmp_path, interval_seconds=1)
+    assert maint.tick() is True
+    assert len(client.calls) == 1
+    prompt = client.calls[0]['system']
+    assert 'source-only diagnosis' in prompt.lower()
+    assert 'does not itself require production' in prompt
+    assert 'Do not infer that permission' in prompt
+    assert 'root-governed' in prompt

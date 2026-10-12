@@ -721,6 +721,11 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 "release_id": runner.record_id(SHA_A),
                 "state": "production_eligible",
                 "rollback_sha": SHA_B,
+                "risk_profile": {"change_risk": "low"},
+                "release_manifest": {
+                    "candidate_sha": SHA_A, "rollback_sha": SHA_B,
+                    "risk_profile": {"change_risk": "low"},
+                },
                 "release_candidate": {
                     "candidate_sha": SHA_A,
                     "image": "jason-runtime:test",
@@ -1299,3 +1304,97 @@ def test_retention_failure_prevents_breaker_revalidation_and_mutation():
             runner.prepare_release(Path('/tmp/nonexistent'), Path('/tmp/nonexistent'),
                                    SHA_A, 'release_blocker', owner_approved=True)
         breaker.assert_not_called()
+
+
+def test_release_contract_fails_before_mutation_on_legacy_missing_manifest(tmp_path):
+    import pytest
+    record = {'state': 'production_eligible', 'rollback_sha': SHA_B,
+              'release_candidate': {'candidate_sha': SHA_A}}
+    with patch.object(runner, 'require_host_reconciler_ready') as ready:
+        with pytest.raises(runner.ReleaseManagerError, match='release_manifest or risk_profile'):
+            runner._deploy_production_locked(ROOT, tmp_path, record)
+        ready.assert_not_called()
+    assert record['state'] == 'production_eligible'
+    assert not list(tmp_path.glob('records/*.json'))
+
+
+def test_release_contract_rejects_mismatched_release_sha_and_risk():
+    import pytest
+    record = {'state': 'production_eligible', 'rollback_sha': SHA_B,
+              'release_candidate': {'candidate_sha': SHA_A},
+              'risk_profile': {'score': 1},
+              'release_manifest': {'candidate_sha': SHA_B, 'rollback_sha': SHA_B,
+                                   'risk_profile': {'score': 1}}}
+    with pytest.raises(runner.ReleaseManagerError, match='identities do not match'):
+        runner.validate_release_record_contract(record)
+    record['release_manifest']['candidate_sha'] = SHA_A
+    record['release_manifest']['risk_profile'] = {'score': 9}
+    with pytest.raises(runner.ReleaseManagerError, match='risk classification differs'):
+        runner.validate_release_record_contract(record)
+    record['release_manifest']['risk_profile'] = record['risk_profile']
+    runner.validate_release_record_contract(record)
+
+
+def test_nonprotected_release_waits_for_owner_without_failing_systemd(tmp_path):
+    from unittest.mock import patch
+    records = tmp_path / 'records';records.mkdir()
+    record = {'release_id': runner.record_id(SHA_A), 'state': 'production_eligible',
+              'rollback_sha': SHA_B, 'owner_approval': {'approved': False}}
+    runner.atomic_json(records / (record['release_id'] + '.json'), record)
+    with (patch.object(runner.gate, 'load_json', return_value={'schedule': {'automatic_promotion_enabled': True}}),
+          patch.object(runner, 'consume_owner_approval_requests'),
+          patch.object(runner, 'production_window_open', return_value=True),
+          patch.object(runner, 'live_runtime', return_value={'revision': SHA_B}),
+          patch.object(runner, 'live_production_alignment', return_value={}),
+          patch.object(runner, 'reconcile_stopped_rollback_retention'),
+          patch.object(runner, 'production_gate_result', return_value={
+              'allowed': False, 'protected_core': False,
+              'reasons': ['production release requires explicit owner approval',
+                          'owner approval is not bound to the exact candidate SHA']}),
+          patch.object(runner, 'write_owner_notification_event') as notify,
+          patch.object(runner, 'deploy_production') as deploy):
+        assert runner.promote_eligible(ROOT, tmp_path) is False
+        notify.assert_called_once()
+        deploy.assert_not_called()
+    assert runner.load_record(tmp_path, record['release_id'])['state'] == 'production_eligible'
+
+
+def test_unapproved_release_with_other_denials_fails_closed(tmp_path):
+    import pytest
+    records = tmp_path / 'records';records.mkdir()
+    record = {'release_id': runner.record_id(SHA_A), 'state': 'production_eligible',
+              'rollback_sha': SHA_B}
+    runner.atomic_json(records / (record['release_id'] + '.json'), record)
+    with (patch.object(runner.gate, 'load_json', return_value={'schedule': {'automatic_promotion_enabled': True}}),
+          patch.object(runner, 'consume_owner_approval_requests'),
+          patch.object(runner, 'production_window_open', return_value=True),
+          patch.object(runner, 'live_runtime', return_value={'revision': SHA_B}),
+          patch.object(runner, 'live_production_alignment', return_value={}),
+          patch.object(runner, 'reconcile_stopped_rollback_retention'),
+          patch.object(runner, 'production_gate_result', return_value={
+              'allowed': False, 'protected_core': False,
+              'reasons': ['production release requires explicit owner approval',
+                          'candidate policy signature missing']}),
+          patch.object(runner, 'write_owner_notification_event') as notify,
+          patch.object(runner, 'deploy_production') as deploy):
+        with pytest.raises(runner.ReleaseManagerError, match='candidate policy signature missing'):
+            runner.promote_eligible(ROOT, tmp_path)
+        notify.assert_not_called()
+        deploy.assert_not_called()
+
+
+def test_evidence_bundle_is_built_before_reporting_production_verified():
+    import inspect
+    source = inspect.getsource(runner._deploy_production_locked)
+    assert source.index('record["evidence_bundle"] = {') < source.index(
+        'gate_transition(repo, state_root, record, "production_verified")'
+    )
+
+
+def test_release_contract_rejects_missing_risk_profile_with_manifest_present():
+    import pytest
+    record = {'state': 'production_eligible', 'rollback_sha': SHA_B,
+              'release_candidate': {'candidate_sha': SHA_A},
+              'release_manifest': {'candidate_sha': SHA_A, 'rollback_sha': SHA_B}}
+    with pytest.raises(runner.ReleaseManagerError, match='release_manifest or risk_profile'):
+        runner.validate_release_record_contract(record)

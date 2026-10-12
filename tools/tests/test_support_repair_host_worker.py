@@ -987,3 +987,105 @@ def test_safe_search_discovers_named_provider_source_not_just_tests(tmp_path):
     assert 'implementation/connectors/it_glue/live_read.py' in result
     assert 'implementation/connectors/it_glue/operations.py' in result
     assert all(entry['content'] for entry in excerpts)
+
+
+def test_missing_p0_support_issue_is_visible_and_emits_blocker(tmp_path):
+    state = {}
+    issues = {
+        'SUPPORT-OPS-500': {'title': 'P0 SUPPORT-OPS-500: missing row', 'priority': 'P0'},
+        'SUPPORT-OPS-501': {'title': 'P1 SUPPORT-OPS-501: missing row', 'priority': 'unknown'},
+        'SUPPORT-OPS-502': {'title': 'P0 SUPPORT-OPS-502: admitted', 'priority': 'P0'},
+    }
+    known = [{'id': 'SUPPORT-OPS-502'}]
+    missing = worker.audit_support_admission(issues, known, state, event_root=tmp_path)
+    assert missing == ['SUPPORT-OPS-500']
+    assert state['admission_audit']['status'] == 'degraded'
+    assert state['admission_audit']['unadmitted_p0'] == ['SUPPORT-OPS-500']
+    payloads = [worker.json.loads(p.read_text()) for p in tmp_path.glob('*.json')]
+    assert len(payloads) == 1
+    assert payloads[0]['event_type'] == 'work_blocked'
+    assert payloads[0]['work_id'] == 'SUPPORT-OPS-500'
+    assert payloads[0]['owner_action'].startswith('Reconcile issue')
+    worker.audit_support_admission(issues, known, state, event_root=tmp_path)
+    assert len(list(tmp_path.glob('*.json'))) == 1  # duplicate-suppressed
+
+
+def test_open_issue_listing_fails_closed_on_incomplete_page(monkeypatch, tmp_path):
+    monkeypatch.setattr(worker, 'gh_json', lambda args, cwd: [
+        {'number': i, 'title': f'P0 SUPPORT-OPS-{i}: incident'} for i in range(1000)
+    ])
+    import pytest
+    with pytest.raises(worker.WorkerError, match='incomplete'):
+        worker.open_support_issue_records(tmp_path)
+
+
+def test_missing_non_p0_does_not_escalate_owner(tmp_path):
+    state = {}
+    issues = {'SUPPORT-OPS-600': {'title': 'P1 SUPPORT-OPS-600: review', 'priority': 'unknown'}}
+    assert worker.audit_support_admission(issues, [], state, event_root=tmp_path) == []
+    assert state['admission_audit']['status'] == 'healthy'
+    assert not list(tmp_path.glob('*.json'))
+
+
+def test_reassess_model_only_block_once_under_existing_active_cap(tmp_path):
+    item = {'id': 'SUPPORT-OPS-056', 'title': 'Release record defect',
+            'evidence': 'Missing release_manifest', 'acceptance': 'Test pass', 'priority': 'P0'}
+    previous = 'The defect inherently requires new authority because of root-governed rollback.'
+    rid = worker.queue_reasoning(tmp_path, kind='search_plan', item=item, context={})
+    response_path = tmp_path / 'reasoning' / 'responses' / (rid + '.json')
+    response_path.parent.mkdir(parents=True)
+    response_path.write_text(worker.json.dumps({
+        'status': 'succeeded', 'result': {'diagnosis': 'root',
+        'search_terms': ['release_manifest'], 'blocked_reason': previous}}))
+    record = {'phase': 'blocked', 'reason': previous, 'reasoning_request_id': rid}
+    state = {'items': {item['id']: record}}
+    assert worker.reassess_model_scope_blocks(state, [item], tmp_path, 2) == [item['id']]
+    assert record['phase'] == 'diagnosing'
+    assert record['scope_review_attempted'] is True
+    assert record['reasoning_request_id'] != rid
+    request = worker.json.loads((tmp_path / 'reasoning' / 'requests' / (record['reasoning_request_id'] + '.json')).read_text())
+    assert request['context']['scope_review'] == 'source_diagnosis_only'
+    assert request['context']['prior_blocked_reason'] == previous
+    assert worker.reassess_model_scope_blocks(state, [item], tmp_path, 2) == []
+    record.update({'phase': 'blocked', 'reason': 'Actually needs privilege'})
+    assert worker.reassess_model_scope_blocks(state, [item], tmp_path, 2) == []
+
+
+def test_reassess_does_not_override_host_denial_transport_or_capacity(tmp_path):
+    item = {'id': 'SUPPORT-OPS-057', 'title': 'Defect',
+            'evidence': 'e', 'acceptance': 'a', 'priority': 'P0'}
+    rid = worker.queue_reasoning(tmp_path, kind='search_plan', item=item, context={})
+    response_path = tmp_path / 'reasoning' / 'responses' / (rid + '.json')
+    response_path.parent.mkdir(parents=True)
+    response_path.write_text(worker.json.dumps({'status': 'succeeded', 'result': {'blocked_reason': 'model scope denied'}}))
+    record = {'phase': 'blocked', 'reason': 'model scope denied', 'reasoning_request_id': rid}
+    state = {'items': {item['id']: record, 'SUPPORT-OPS-099': {'phase': 'implementing'}}}
+    assert worker.reassess_model_scope_blocks(state, [item], tmp_path, 1) == []
+    assert record['phase'] == 'blocked'
+    state['items'].pop('SUPPORT-OPS-099')
+    record['reason'] = 'repair path denied by J-CHANGE-002'
+    assert worker.reassess_model_scope_blocks(state, [item], tmp_path, 2) == []
+    record['reason'] = 'model scope denied'
+    response_path.write_text(worker.json.dumps({'status': 'failed', 'error': 'HTTP transport failed'}))
+    assert worker.reassess_model_scope_blocks(state, [item], tmp_path, 2) == []
+    assert record['phase'] == 'blocked'
+
+
+def test_scope_review_chooses_one_p0_before_lower_priority(tmp_path):
+    priority = [
+        {'id': 'SUPPORT-OPS-400', 'title': 'P0 control failure', 'evidence': 'e', 'acceptance': 'a', 'priority': 'P0'},
+        {'id': 'SUPPORT-OPS-401', 'title': 'P1 report', 'evidence': 'e', 'acceptance': 'a', 'priority': 'P1'},
+    ]
+    items = {}
+    for item in priority:
+        rid = worker.queue_reasoning(tmp_path, kind='search_plan', item=item, context={})
+        result_dir = tmp_path / 'reasoning' / 'responses'
+        result_dir.mkdir(parents=True, exist_ok=True)
+        (result_dir / (rid + '.json')).write_text(worker.json.dumps({
+            'status': 'succeeded', 'result': {'blocked_reason': 'model scope denied'}}))
+        items[item['id']] = {'phase': 'blocked', 'reason': 'model scope denied', 'reasoning_request_id': rid}
+    state = {'items': items}
+    assert worker.reassess_model_scope_blocks(state, priority, tmp_path, 1) == ['SUPPORT-OPS-400']
+    assert items['SUPPORT-OPS-400']['phase'] == 'diagnosing'
+    assert items['SUPPORT-OPS-401']['phase'] == 'blocked'
+    assert worker.reassess_model_scope_blocks(state, priority, tmp_path, 1) == []

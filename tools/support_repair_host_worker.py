@@ -215,17 +215,51 @@ def support_id_from_title(title: str) -> str | None:
     return match.group(1).upper() if match else None
 
 
-def open_support_issue_ids(repo: Path) -> set[str]:
+def open_support_issue_records(repo: Path) -> dict[str, dict[str, str]]:
+    limit = 1000
     data = gh_json([
         'issue', 'list', '--state', 'open', '--search', 'SUPPORT- in:title',
-        '--limit', '1000', '--json', 'number,title'
+        '--limit', str(limit), '--json', 'number,title'
     ], cwd=repo) or []
-    result = set()
+    if not isinstance(data, list) or len(data) >= limit:
+        raise WorkerError('GitHub open SUPPORT listing incomplete; refusing partial admission')
+    records = {}
     for issue in data:
-        item_id = support_id_from_title(str(issue.get('title') or ''))
+        title = str(issue.get('title') or '')
+        item_id = support_id_from_title(title)
         if item_id:
-            result.add(item_id)
-    return result
+            records[item_id] = {'title': title, 'priority': 'P0' if re.search(r'\bP0\b', title, re.I) else 'unknown'}
+    return records
+
+
+def open_support_issue_ids(repo: Path) -> set[str]:
+    return set(open_support_issue_records(repo))
+
+
+def audit_support_admission(issues: Mapping[str, Mapping[str, str]],
+                            support: list[dict[str, str]],
+                            state: dict[str, Any], *,
+                            event_root: Path | None = None) -> list[str]:
+    known = {item['id'] for item in support}
+    missing = sorted(
+        item_id for item_id, issue in issues.items()
+        if issue.get('priority') == 'P0' and item_id not in known
+    )
+    state['admission_audit'] = {
+        'checked_at': now(),
+        'open_issue_count': len(issues),
+        'unadmitted_p0': missing,
+        'status': 'degraded' if missing else 'healthy',
+    }
+    for item_id in missing:
+        emit_lifecycle_event(
+            event_type='work_blocked', work_id=item_id,
+            work_title=issues[item_id]['title'],
+            summary='Open P0 SUPPORT issue has no canonical support source row; admission is blocked.',
+            owner_action='Reconcile issue with canonical SUPPORT.md through reviewed GitHub PR.',
+            event_root=event_root,
+        )
+    return missing
 
 
 def eligible_support_items(items: list[dict[str, str]], open_issue_ids: set[str]) -> list[dict[str, str]]:
@@ -1272,6 +1306,67 @@ def select_reconcile_ids(state: Mapping[str, Any], support: list[dict[str, str]]
     return selected
 
 
+
+def reassess_model_scope_blocks(
+    state: dict[str, Any], support: list[dict[str, str]], spool: Path,
+    max_active: int,
+) -> list[str]:
+    """Retry a model-only scope judgement once, never a denied host gate.
+
+    The reconsideration only queues a search plan. It grants no filesystem,
+    code-write, provider, deployment, or root authority; all existing host
+    gates still apply. An independently repeated block remains terminal.
+    """
+    items = state.get('items')
+    if not isinstance(items, dict):
+        return []
+    active = {'diagnosing', 'implementing', 'ci_repair_needed', 'ci_repairing'}
+    slots = max(0, max(1, int(max_active)) - sum(
+        1 for value in items.values()
+        if isinstance(value, Mapping) and value.get('phase') in active
+    ))
+    resumed: list[str] = []
+    for item in support:
+        if slots <= 0:
+            break
+        record = items.get(item['id'])
+        if not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        if record.get('scope_review_attempted'):
+            continue
+        reason = str(record.get('reason') or '')
+        prior_id = str(record.get('reasoning_request_id') or '')
+        if not reason or not prior_id:
+            continue
+        response = reasoning_response(spool, prior_id)
+        if not isinstance(response, Mapping) or response.get('status') != 'succeeded':
+            continue
+        result = response.get('result')
+        if not isinstance(result, Mapping) or str(result.get('blocked_reason') or '') != reason:
+            continue
+        review_id = queue_reasoning(
+            spool, kind='search_plan', item=item,
+            context={
+                'scope_review': 'source_diagnosis_only',
+                'prior_blocked_reason': reason[:1000],
+                'boundary': 'No new authority, privileged operation, security change, or production deployment; existing governed approvals remain mandatory.',
+            },
+        )
+        if review_id == prior_id:
+            continue
+        record.update({
+            'phase': 'diagnosing',
+            'reasoning_request_id': review_id,
+            'scope_review_request_id': review_id,
+            'scope_review_attempted': True,
+            'reason': 'bounded source-only scope reassessment; no authorization granted',
+            'updated_at': now(),
+        })
+        resumed.append(item['id'])
+        slots -= 1
+    return resumed
+
+
 def load_state(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {'schema_version': '1.0', 'items': {}}
@@ -1347,7 +1442,11 @@ def main() -> int:
     development_recovery_incidents = load_development_recovery_incidents(spool)
     for item in auto_incidents:
         ensure_support_issue(repo, item)
-    open_issue_ids = open_support_issue_ids(repo)
+    open_issue_records = open_support_issue_records(repo)
+    open_issue_ids = set(open_issue_records)
+    unadmitted_p0 = audit_support_admission(
+        open_issue_records, parsed_support + auto_incidents + development_recovery_incidents, state,
+    )
     support = eligible_support_items(parsed_support, open_issue_ids)
     support.extend(
         item for item in auto_incidents
@@ -1387,6 +1486,7 @@ def main() -> int:
     gate = load_gate(repo)
     policy = gate.load_json(repo / 'config' / 'autonomous-repair-release-policy.json')
 
+    reassess_model_scope_blocks(state, support, spool, args.max_active)
     selected = select_reconcile_ids(state, support, args.max_active)
 
     by_id = {item['id']: item for item in support}
@@ -1715,6 +1815,9 @@ def main() -> int:
 
     state['updated_at'] = now()
     save_state(state_path, state)
+    if unadmitted_p0:
+        print('SUPPORT_ADMISSION_HEALTH=DEGRADED unmatched_p0=' + ','.join(unadmitted_p0))
+        return 3
     return 0
 
 
