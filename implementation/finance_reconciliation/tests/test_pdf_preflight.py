@@ -1,78 +1,85 @@
 from hashlib import sha256
-from io import BytesIO
 
 import pytest
-from pypdf import PdfReader, PdfWriter
-from reportlab.pdfgen import canvas
 
 from finance_reconciliation.contracts import DocumentKind
-from finance_reconciliation.pdf_preflight import PypdfPreflightAdapter
+from finance_reconciliation.pdf_preflight import SharedDocumentIntakeEvidenceAdapter
 
 
-def text_pdf():
-    out = BytesIO()
-    doc = canvas.Canvas(out)
-    doc.drawString(50, 700, "Statement ending balance 100.00")
-    doc.showPage()
-    doc.save()
-    return out.getvalue()
+RAW = b"%PDF-1.4\nsynthetic-for-contract-testing-only"
 
 
-def test_text_document_is_fingerprinted_and_inventoried():
-    raw = text_pdf()
-    result = PypdfPreflightAdapter().inspect(raw)
-    assert result.document_sha256 == sha256(raw).hexdigest()
-    assert result.page_count == 1
-    assert result.document_kind is DocumentKind.NATIVE_TEXT
-    assert result.has_native_text is True
-    assert result.pages[0].native_text_chars > 0
-    assert result.pages[0].page_number == 1
+def evidence(*, native=True, images=False, pages=None):
+    return {
+        "schema": "jason.document_intake.pdf.v1",
+        "source_sha256": sha256(RAW).hexdigest(),
+        "size_bytes": len(RAW),
+        "page_count": 2,
+        "document_kind": "hybrid" if native and images else "native_text" if native else "scanned",
+        "has_native_text": native,
+        "has_images": images,
+        "pages": [] if pages is None else pages,
+        "extracted_text": "Original statement text" if native else "",
+        "extraction_complete": True,
+        "rendered_verified": False,
+        "accounting_validated": False,
+    }
 
 
-def test_non_pdf_and_blank_pdf_fail_closed():
-    with pytest.raises(ValueError, match="not a PDF"):
-        PypdfPreflightAdapter().inspect(b"not a statement")
-    writer = PdfWriter()
-    writer.add_blank_page(width=400, height=500)
-    out = BytesIO()
-    writer.write(out)
-    with pytest.raises(ValueError, match="no detectable text or images"):
-        PypdfPreflightAdapter().inspect(out.getvalue())
+def test_finance_accepts_shared_pdf_evidence_without_reextracting():
+    facts = SharedDocumentIntakeEvidenceAdapter().accept(RAW, evidence())
+    assert facts.page_count == 2
+    assert facts.document_kind is DocumentKind.NATIVE_TEXT
+    assert facts.document_sha256 == sha256(RAW).hexdigest()
+    assert facts.pages == ()  # Do not invent unverified per-page text facts.
 
 
-def test_rejects_encrypted_pdf_without_unlocking():
-    reader = PdfReader(BytesIO(text_pdf()))
-    writer = PdfWriter()
-    writer.append_pages_from_reader(reader)
-    writer.encrypt("test-password")
-    out = BytesIO()
-    writer.write(out)
-    with pytest.raises(ValueError, match="encrypted PDFs"):
-        PypdfPreflightAdapter().inspect(out.getvalue())
+def test_scanned_finance_pdf_preserves_missing_text_for_later_review():
+    facts = SharedDocumentIntakeEvidenceAdapter().accept(RAW, evidence(native=False, images=True))
+    assert facts.document_kind is DocumentKind.SCANNED
+    assert facts.has_native_text is False
 
 
-def test_rejects_over_limit_before_parse():
-    with pytest.raises(ValueError, match="byte limit"):
-        PypdfPreflightAdapter(max_pdf_bytes=10).inspect(text_pdf())
-    with pytest.raises(ValueError, match="page limit"):
-        PypdfPreflightAdapter(max_pages=0 + 1).inspect(two_page_pdf())
+def test_stale_or_mismatched_bytes_fail_closed():
+    bad = evidence()
+    bad["source_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="does not match"):
+        SharedDocumentIntakeEvidenceAdapter().accept(RAW, bad)
+    with pytest.raises(ValueError, match="immutable"):
+        SharedDocumentIntakeEvidenceAdapter().accept(bytearray(RAW), evidence())
 
 
-def two_page_pdf():
-    out = BytesIO()
-    doc = canvas.Canvas(out)
-    for number in (1, 2):
-        doc.drawString(50, 700, "Page " + str(number))
-        doc.showPage()
-    doc.save()
-    return out.getvalue()
+def test_unvalidated_or_mutated_accounting_assertions_fail_closed():
+    bad = evidence()
+    bad["extraction_complete"] = False
+    with pytest.raises(ValueError, match="incomplete"):
+        SharedDocumentIntakeEvidenceAdapter().accept(RAW, bad)
+    bad = evidence()
+    bad["accounting_validated"] = True
+    with pytest.raises(ValueError, match="cannot assert"):
+        SharedDocumentIntakeEvidenceAdapter().accept(RAW, bad)
 
 
-def test_immutable_input_contract():
-    with pytest.raises(TypeError, match="immutable"):
-        PypdfPreflightAdapter().inspect(bytearray(text_pdf()))
+def test_misclassified_and_unverified_pages_fail_closed():
+    bad = evidence(native=False, images=True)
+    bad["document_kind"] = "native_text"
+    with pytest.raises(ValueError, match="inconsistent"):
+        SharedDocumentIntakeEvidenceAdapter().accept(RAW, bad)
+    bad = evidence(pages=[
+        {"page_number": 1, "image_count": 0, "native_text_present": None},
+    ])
+    with pytest.raises(ValueError, match="incomplete page inventory"):
+        SharedDocumentIntakeEvidenceAdapter().accept(RAW, bad)
+    bad = evidence(pages=[
+        {"page_number": 1, "image_count": 0, "native_text_present": True},
+        {"page_number": 2, "image_count": 0, "native_text_present": None},
+    ])
+    with pytest.raises(ValueError, match="cannot assert per-page"):
+        SharedDocumentIntakeEvidenceAdapter().accept(RAW, bad)
 
 
-def test_truncated_pdf_fails_closed():
-    with pytest.raises(ValueError, match="PDF preflight failed"):
-        PypdfPreflightAdapter().inspect(text_pdf()[:60])
+def test_unsupported_shared_contract_rejected():
+    bad = evidence()
+    bad["schema"] = "jason.document_intake.pdf.v2"
+    with pytest.raises(ValueError, match="unsupported"):
+        SharedDocumentIntakeEvidenceAdapter().accept(RAW, bad)
