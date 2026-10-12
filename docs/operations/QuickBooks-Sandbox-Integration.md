@@ -113,7 +113,20 @@ Use governed reads only:
 
 Confirm every call resolves through Central Orchestrator and provider `quickbooks`, and that returned company identity matches the authorized sandbox.
 
-No write API test is authorized by this runbook.
+No general write API test is authorized by this runbook.
+
+### Controlled sandbox mutation probe
+
+A dormant connector-only mutation probe exists for `quickbooks.customer.create`. It is intentionally **not** registered as a live Jason governed capability. The connector enforces all of the following before sending the request:
+
+- organization must be `aot`;
+- invocation mode must be `execute`;
+- active connector environment must be `sandbox`;
+- production profile use is rejected before secret resolution;
+- callers cannot submit raw QuickBooks JSON payloads;
+- only bounded customer fields are accepted and converted server-side.
+
+This probe is for sandbox acceptance evidence only. Promoting any QuickBooks mutation into Jason's live capability registry requires a separate governed action catalog, explicit approval policy, result projection, readback verification, and production activation review.
 
 ## Production gate
 
