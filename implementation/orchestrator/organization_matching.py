@@ -130,7 +130,13 @@ def _score(a: OrganizationRecord, b: OrganizationRecord) -> MatchCandidate:
                          for x in names_a for y in names_b if len(x) >= 8 and len(y) >= 8) if (
                              any(len(x) >= 8 for x in names_a)
                              and any(len(y) >= 8 for y in names_b)) else 0.0
-        if similarity >= 0.88:
+        # A shared generic suffix such as "Office" must not make two
+        # unrelated businesses into plausible identity matches.
+        shared_leading_name = any(
+            x.split()[0] == y.split()[0] and len(x.split()[0]) >= 4
+            for x in names_a for y in names_b if x.split() and y.split()
+        )
+        if similarity >= 0.88 and shared_leading_name:
             score += 30
             signals.append("name_similar")
 
