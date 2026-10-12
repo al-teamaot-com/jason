@@ -18,16 +18,34 @@ from .contracts import (
 
 
 @dataclass(frozen=True, slots=True)
+class PdfPageFacts:
+    page_number: int
+    has_native_text: bool
+    native_text_chars: int
+    image_count: int
+
+    def __post_init__(self) -> None:
+        if self.page_number < 1 or self.native_text_chars < 0 or self.image_count < 0:
+            raise ValueError("invalid PDF page inventory")
+        if self.has_native_text != (self.native_text_chars > 0):
+            raise ValueError("PDF page text flag/count mismatch")
+
+
+@dataclass(frozen=True, slots=True)
 class PdfDocumentFacts:
     document_sha256: str
     page_count: int
     document_kind: DocumentKind
     has_native_text: bool
     has_images: bool
+    pages: tuple[PdfPageFacts, ...] = ()
 
     def __post_init__(self) -> None:
         if self.page_count < 1:
             raise ValueError("page_count must be >= 1")
+        if self.pages and (len(self.pages) != self.page_count or
+                           tuple(page.page_number for page in self.pages) != tuple(range(1, self.page_count + 1))):
+            raise ValueError("PDF page inventory is incomplete")
 
 
 @runtime_checkable
