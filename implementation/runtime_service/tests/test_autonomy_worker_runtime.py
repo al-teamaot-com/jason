@@ -6371,6 +6371,7 @@ def test_deborah_gittens_backupiq_progress_never_spams_teams():
     worker._notify_ticket_event(work, "status_change", "Complete")
     assert [event for event, _ in sends] == ["work_started", "work_completed"]
     assert "DGV-50859" in sends[-1][1]["summary"]
+    assert "Completed by Jason" in sends[-1][1]["summary"]
 
 
 def test_legacy_pickup_fingerprint_does_not_resend_on_upgrade():

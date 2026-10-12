@@ -1038,7 +1038,7 @@ class OperationalAutonomyMaintenance:
         event_type = "work_started" if category == "pickup" else "work_completed"
         summary = (
             f"Ticket: {work.ticket_number} | Device: {work.hostname or 'Not linked'} | "
-            f"Status: {status} | Action: {'Picked up by Jason' if event == 'pickup' else 'Status updated by Jason'}"
+            f"Status: {status} | Action: {'Picked up by Jason' if category == 'pickup' else 'Completed by Jason'}"
         )
         try:
             self.completion_notifier.send(
