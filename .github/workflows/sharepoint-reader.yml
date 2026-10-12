@@ -34,8 +34,9 @@ jobs:
         run: |
           python -m py_compile implementation/connectors/microsoft_graph/sharepoint_reader.py
           python -m py_compile implementation/connectors/microsoft_graph/sharepoint_connector.py
+          python -m py_compile implementation/connectors/microsoft_graph/sharepoint_manifest.py
           python -m py_compile implementation/runtime_service/src/jason_runtime/microsoft_sharepoint.py
-          python -m pytest -q implementation/connectors/microsoft_graph/test_sharepoint_reader.py implementation/connectors/microsoft_graph/test_sharepoint_connector.py implementation/runtime_service/tests/test_microsoft_sharepoint.py tools/tests/test_provider_secret_provision.py
+          python -m pytest -q implementation/connectors/microsoft_graph/test_sharepoint_reader.py implementation/connectors/microsoft_graph/test_sharepoint_connector.py implementation/connectors/microsoft_graph/test_sharepoint_manifest.py implementation/runtime_service/tests/test_microsoft_sharepoint.py tools/tests/test_provider_secret_provision.py
       - name: Verify no-network lifecycle preflight
         run: |
           python tools/provider_secret.py create microsoft_graph_sharepoint --check-only > /tmp/check.json

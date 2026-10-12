@@ -46,3 +46,7 @@ Focused unit tests exercise negative requester/client binding, unauthorized site
 ## Separate runtime composition
 
 The inactive MicrosoftSharePointRuntime builder in implementation/runtime_service/src/jason_runtime/microsoft_sharepoint.py uses the existing MSAL certificate and OpenBao resolvers, but with isolated provider microsoft_graph_sharepoint, secret microsoft_graph.sharepoint_read and profile sharepoint-read. It neither acquires credentials nor contacts Microsoft during construction. Production requires a separately validated boundary record and deployment approval.
+
+## Unregistered provider-neutral capability catalog
+
+The build_sharepoint_read_manifest factory declares the four reusable read-only library/document operations under the canonical Microsoft Graph provider. This manifest is deliberately **not registered into the active orchestrator or MCP catalog** while information-release and complete live provider acceptance remain outstanding.
