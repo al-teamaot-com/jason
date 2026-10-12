@@ -175,3 +175,25 @@ test("real Poppler PDF extraction and inventory smoke test", () => {
   assert.equal(doc.extraction_complete, true);
   assert.equal(doc.accounting_validated, false);
 });
+
+
+test("three-page mixed statement exposes a blank/scanned middle page", () => {
+  const tools = fakeTools({
+    pages: 3,
+    text: "Start of statement\f\fStatement totals\f",
+    imageList: "2 0 image 100 100 rgb\n",
+  });
+  const document = inspectPdfBuffer(raw, { runCommand: tools.run, pageInventory: true });
+  assert.equal(document.document_kind, "hybrid");
+  assert.deepEqual(document.pages.map(p => p.native_text_present), [true, false, true]);
+  assert.equal(document.pages[1].native_text_chars, 0);
+  assert.equal(document.pages[1].image_count, 1);
+  assert.equal(document.rendered_verified, false);
+});
+
+test("unreliable Poppler page delimiters never become made-up page proof", () => {
+  const tools = fakeTools({ pages: 3, text: "No page delimiter here" });
+  const document = inspectPdfBuffer(raw, { runCommand: tools.run, pageInventory: true });
+  assert.deepEqual(document.pages.map(p => p.native_text_present), [null, null, null]);
+  assert.deepEqual(document.pages.map(p => p.native_text_chars), [null, null, null]);
+});
