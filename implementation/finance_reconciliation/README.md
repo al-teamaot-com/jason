@@ -69,3 +69,22 @@ workflow installs `pypdf` and `reportlab` for these tests.
 Per TODO-FIN-003's 2026-10-06 decision, Excel is a temporary comparison source,
 not a required future write target or accounting system of record. QBO remains
 subject to independent governed authorization; no QBO writes are permitted here.
+
+## Shared document intake convergence (2026-10-12)
+
+The earlier standalone Python/Pypdf PDF preflight was retired on this isolated
+branch to prevent a second parser from diverging from the production Teams
+invoice/quote implementation. The finance consumer now validates the canonical
+`jason.document_intake.pdf.v1` evidence output supplied by the separate
+shared Document Intake component (draft PR #1326).
+
+The Python consumer verifies the original source bytes and SHA-256, extracted
+size, page count, document class, completeness flags and any supplied image-page
+inventory. It does **not** create unverified per-page native-text claims. These
+facts do not constitute transaction extraction or statement reconciliation.
+
+Integration with the shared intake runtime is not activated, and this draft
+remains blocked on governed document acquisition, statement rendering/visual
+verification, domain transaction parsing, and historical Lori acceptance. The
+existing workbook contract is legacy pilot scaffolding; under TODO-FIN-003,
+Excel is comparison-only once governed QBO access is usable.
