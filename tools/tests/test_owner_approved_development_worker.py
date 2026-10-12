@@ -1600,3 +1600,13 @@ def test_intervening_upgrade_rejects_untrusted_or_missing_git_history(tmp_path):
         'a'*40, 'c'*40, repo,
     )
     assert not module.verified_intervening_worker_upgrade([], 'a'*40, 'a'*40, repo)
+
+
+def test_existing_pr_preserves_pending_and_inflight_ci_repairs():
+    assert module.phase_for_existing_pr('ci_repair_needed') == 'ci_repair_needed'
+    assert module.phase_for_existing_pr('ci_repairing') == 'ci_repairing'
+
+
+def test_existing_pr_reconciles_other_phases_through_validation():
+    for phase in ('identified', 'diagnosing', 'implementing', 'pr_validating'):
+        assert module.phase_for_existing_pr(phase) == 'pr_validating'

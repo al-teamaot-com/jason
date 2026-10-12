@@ -182,6 +182,17 @@ def ensure_recovery_worktree(repo: Path, issue_number: int, revision: str) -> Pa
     return path
 
 
+def phase_for_existing_pr(phase: str) -> str:
+    """An existing PR must not erase a pending/in-progress CI repair.
+
+    The repair branch has its own bounded reasoning response and worktree;
+    resetting to validation would strand that work on every worker run.
+    """
+    if phase in {'ci_repair_needed', 'ci_repairing'}:
+        return phase
+    return 'pr_validating'
+
+
 def development_pr_for(issue_number: int, prs: list[dict[str, Any]]) -> dict[str, Any] | None:
     for pr in prs:
         match = META.search(str(pr.get('body') or ''))
@@ -1279,7 +1290,7 @@ def main() -> int:
             if pr is not None:
                 record['pr_number'] = int(pr['number'])
                 record['branch'] = str(pr['headRefName'])
-                phase = 'pr_validating'
+                phase = phase_for_existing_pr(phase)
             if phase in {'ci_repair_needed', 'ci_repairing'}:
                 worktree = ensure_worktree(
                     repo,
