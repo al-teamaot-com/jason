@@ -4,6 +4,8 @@ on:
     paths:
       - 'implementation/orchestrator/organization_matching.py'
       - 'implementation/orchestrator/organization_source_adapters.py'
+      - 'implementation/orchestrator/organization_match_service.py'
+      - 'implementation/orchestrator/tests/test_organization_match_service.py'
       - 'implementation/orchestrator/tests/test_organization_matching.py'
       - 'implementation/orchestrator/tests/test_organization_source_adapters.py'
       - '.github/workflows/organization-matching.yml'
@@ -11,6 +13,8 @@ on:
     paths:
       - 'implementation/orchestrator/organization_matching.py'
       - 'implementation/orchestrator/organization_source_adapters.py'
+      - 'implementation/orchestrator/organization_match_service.py'
+      - 'implementation/orchestrator/tests/test_organization_match_service.py'
       - 'implementation/orchestrator/tests/test_organization_matching.py'
       - 'implementation/orchestrator/tests/test_organization_source_adapters.py'
       - '.github/workflows/organization-matching.yml'
@@ -28,8 +32,9 @@ jobs:
         run: |
           python -m py_compile implementation/orchestrator/organization_matching.py
           python -m py_compile implementation/orchestrator/organization_source_adapters.py
+          python -m py_compile implementation/orchestrator/organization_match_service.py
       - name: Run pure read-only matching regression suite
         env:
           PYTHONPATH: implementation
         run: |
-          python -m pytest -q implementation/orchestrator/tests/test_organization_matching.py implementation/orchestrator/tests/test_organization_source_adapters.py
+          python -m pytest -q implementation/orchestrator/tests/test_organization_matching.py implementation/orchestrator/tests/test_organization_source_adapters.py implementation/orchestrator/tests/test_organization_match_service.py
