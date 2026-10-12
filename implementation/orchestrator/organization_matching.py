@@ -57,7 +57,9 @@ def _domain(value: str) -> str:
         return ""
     if not re.fullmatch(r"[a-z0-9-]+(?:\.[a-z0-9-]+)+", host):
         return ""
-    return "" if host in _COMMON_DOMAINS else host
+    if host in _COMMON_DOMAINS or host.endswith((".example.com", ".example.net", ".example.org")):
+        return ""
+    return host
 
 
 def _email(value: str) -> str:
