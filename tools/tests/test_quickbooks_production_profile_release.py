@@ -88,3 +88,8 @@ def test_unknown_rollback_profile_fails_closed():
         runner.quickbooks_rollback_environment(
             {}, rollback_sha="a" * 40, prior_profile="quickbooks-unapproved-write-v1"
         )
+
+
+def test_legacy_candidate_without_profile_declaration_preserves_live_selection(tmp_path):
+    runner = load_runner()
+    assert runner.declared_quickbooks_read_profile(tmp_path) is None
