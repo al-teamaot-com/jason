@@ -97,3 +97,19 @@ same v1 evidence *record*; it does not call the shared Node component directly.
 Actual transport must preserve source bytes and their hash, tenant/account
 scope, and the existing governed finance authorization boundary. A mismatched
 record must fail closed without attempting a second, silent extraction method.
+
+### Cross-implementation synthetic acceptance (2026-10-12)
+
+The isolated Finance Reconciliation Foundation CI now checks out an **exact
+immutable commit** of the shared PDF intake PR (#1326) with no persisted
+GitHub credentials. A synthetic two-page PDF runs through Poppler in the
+shared Node implementation; its versioned evidence JSON passes into the Python
+finance adapter, which verifies the original bytes, hash, page inventory and
+extraction-status flags. Tampered hashes and changed PDF bytes fail closed.
+
+This proves contract compatibility and PDF evidence integrity only. It does
+**not** establish statement financial totals, QuickBooks match completeness,
+OCR/visual rendering coverage, real institution formats, Teams delivery or
+production acceptance. The pinned shared SHA must be advanced under review
+whenever the shared contract changes; once the shared implementation merges,
+replace the cross-branch checkout with the authoritative main source.
