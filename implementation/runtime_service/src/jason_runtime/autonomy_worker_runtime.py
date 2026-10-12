@@ -4382,7 +4382,7 @@ class OperationalAutonomyMaintenance:
 
     @staticmethod
     def _notification_baseline_from_reason(reason: str) -> int:
-        match = re.search(r"notification_baseline_id=(\\d+)", str(reason or ""))
+        match = re.search(r"notification_baseline_id=(\d+)", str(reason or ""))
         if match is None:
             raise OperationalAutonomyError(
                 "client-notification verification has no durable baseline"
