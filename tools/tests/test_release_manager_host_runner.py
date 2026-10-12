@@ -1533,3 +1533,29 @@ def test_ccc_precedes_mutation_and_postflight_precedes_closed_release():
     assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('runtime_deployed = True')
     assert source.index('ccc_postflight = run_release_ccc_gate(') < source.index('gate_transition(repo, state_root, record, "production_verified")')
     assert source.index('ccc_postflight = run_release_ccc_gate(') < source.index('set_last_known_good(\n            state_root,\n            production_manifest')
+
+
+def test_release_contract_accepts_emitted_string_risk_enum_with_exact_manifest():
+    for classification in ('normal', 'production_repair', 'production_control_core', 'schema_or_contract'):
+        record = {'state': 'production_eligible', 'rollback_sha': SHA_B,
+                  'release_candidate': {'candidate_sha': SHA_A},
+                  'risk_profile': classification,
+                  'release_manifest': {'candidate_sha': SHA_A, 'rollback_sha': SHA_B,
+                                       'risk_profile': classification}}
+        runner.validate_release_record_contract(record)
+
+
+def test_release_contract_rejects_missing_unknown_or_mismatched_risk():
+    import pytest
+    record = {'rollback_sha': SHA_B, 'release_candidate': {'candidate_sha': SHA_A},
+              'risk_profile': 'production_control_core',
+              'release_manifest': {'candidate_sha': SHA_A, 'rollback_sha': SHA_B,
+                                   'risk_profile': 'production_control_core'}}
+    for invalid in ('', 'unknown', None, {}, []):
+        record['risk_profile'] = invalid
+        with pytest.raises(runner.ReleaseManagerError, match='risk_profile'):
+            runner.validate_release_record_contract(record)
+    record['risk_profile'] = 'production_control_core'
+    record['release_manifest']['risk_profile'] = 'normal'
+    with pytest.raises(runner.ReleaseManagerError, match='risk classification differs'):
+        runner.validate_release_record_contract(record)
