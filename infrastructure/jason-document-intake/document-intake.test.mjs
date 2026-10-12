@@ -137,3 +137,40 @@ test("shared response reader verifies declared and actual byte limits", async ()
   await assert.rejects(() => readBoundedResponse(responseFor([]), 3),
     error => error.code === "document_download_empty");
 });
+
+
+/** Real text-bearing one-page PDF created without third-party test libraries. */
+function minimalNativeTextPdf() {
+  const stream = "BT /F1 12 Tf 72 720 Td (Invoice 10.00) Tj ET\n";
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    "<< /Length " + Buffer.byteLength(stream) + " >>\nstream\n" + stream + "endstream",
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  for (let i = 0; i < objects.length; i++) {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += (i + 1) + " 0 obj\n" + objects[i] + "\nendobj\n";
+  }
+  const xref = Buffer.byteLength(pdf);
+  pdf += "xref\n0 " + (objects.length + 1) + "\n";
+  pdf += "0000000000 65535 f \n";
+  for (const offset of offsets.slice(1)) {
+    pdf += String(offset).padStart(10, "0") + " 00000 n \n";
+  }
+  pdf += "trailer\n<< /Size " + (objects.length + 1) + " /Root 1 0 R >>\n";
+  pdf += "startxref\n" + xref + "\n%%EOF\n";
+  return Buffer.from(pdf, "utf8");
+}
+
+test("real Poppler PDF extraction and inventory smoke test", () => {
+  const doc = inspectPdfBuffer(minimalNativeTextPdf(), { pageInventory: true });
+  assert.equal(doc.page_count, 1);
+  assert.equal(doc.document_kind, "native_text");
+  assert.match(doc.extracted_text, /Invoice 10\.00/);
+  assert.equal(doc.extraction_complete, true);
+  assert.equal(doc.accounting_validated, false);
+});
