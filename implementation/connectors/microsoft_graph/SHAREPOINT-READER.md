@@ -32,3 +32,13 @@ This increment adds a dedicated `microsoft_graph_sharepoint` OpenBao provider pr
 4. Register and discover read-only capabilities through Jason MCP, with no alternate provider connector bypass.
 5. Read a nonsensitive test document from AOT Accounting Documents, verify identity/version/hash/audit, and deny a forbidden identity/site.
 6. Reuse the same reader from a second approved AOT workflow, without adding another provider-specific implementation.
+
+## October 12 integration update
+
+The branch now includes the reusable GovernedSharePointConnector with four internal operations: knowledge.library.search, knowledge.document.search, knowledge.document.metadata.read and knowledge.document.content.read. This **adapter exists in source but is not yet wired to live identity-boundary, policy, credential or capability registration services**, so no new production read was activated.
+
+Reconciled security checks from draft PR #1120: exact Graph drive membership under each authorized site; item parentReference drive ID; fail-closed unsupported Graph pagination; verified file size before content read; strict GET only; refusal of caller-provided tenant, bearer token or arbitrary endpoint selectors. The injected authorizer must independently approve each caller/client/tenant/site/drive/item operation before Graph access.
+
+Document-content responses are base64 and SHA256 within the bounded internal adapter. Registering a public content-read MCP capability requires separate evidence-release limits and sensitivity classification. Production-wide application Sites.Read.All must not be interpreted as permission for every Jason user to view all AOT documents.
+
+Focused unit tests exercise negative requester/client binding, unauthorized site, path injection, mismatched drive and file identity, oversized content and missing information-release authorization. CI is defined in .github/workflows/sharepoint-reader.yml.
