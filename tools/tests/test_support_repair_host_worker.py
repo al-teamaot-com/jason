@@ -1005,6 +1005,7 @@ def test_missing_p0_support_issue_is_visible_and_emits_blocker(tmp_path):
     assert len(payloads) == 1
     assert payloads[0]['event_type'] == 'work_blocked'
     assert payloads[0]['work_id'] == 'SUPPORT-OPS-500'
+    assert payloads[0]['owner_action'].startswith('Reconcile issue')
     worker.audit_support_admission(issues, known, state, event_root=tmp_path)
     assert len(list(tmp_path.glob('*.json'))) == 1  # duplicate-suppressed
 
