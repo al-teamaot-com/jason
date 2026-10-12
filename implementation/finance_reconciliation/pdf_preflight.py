@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any, Mapping
 
-from .adapters import PdfDocumentFacts
+from .adapters import PdfDocumentFacts, PdfPageFacts
 from .contracts import DocumentKind
 
 
@@ -65,24 +65,47 @@ class SharedDocumentIntakeEvidenceAdapter:
         page_facts = evidence.get("pages", ())
         if not isinstance(page_facts, (list, tuple)):
             raise ValueError("invalid page inventory")
+        verified_pages: list[PdfPageFacts] = []
         if page_facts:
             if len(page_facts) != page_count:
                 raise ValueError("incomplete page inventory")
             for index, record in enumerate(page_facts, 1):
-                if not isinstance(record, Mapping) or record.get("page_number") != index:
+                if not isinstance(record, Mapping) or type(record.get("page_number")) is not int or record["page_number"] != index:
                     raise ValueError("invalid page order")
-                if type(record.get("image_count")) is not int or record["image_count"] < 0:
+                image_count = record.get("image_count")
+                if type(image_count) is not int or image_count < 0:
                     raise ValueError("invalid per-page image count")
-                if record.get("native_text_present") is not None:
-                    raise ValueError("shared intake cannot assert per-page text presence")
+                present = record.get("native_text_present")
+                text_chars = record.get("native_text_chars")
+                if present is None and text_chars is None:
+                    # Unknown per-page text proof is not a false claim.
+                    continue
+                if type(present) is not bool or type(text_chars) is not int or text_chars < 0:
+                    raise ValueError("inconsistent per-page native text facts")
+                if present != (text_chars > 0):
+                    raise ValueError("inconsistent per-page native text facts")
+                verified_pages.append(PdfPageFacts(
+                    page_number=index,
+                    has_native_text=present,
+                    native_text_chars=text_chars,
+                    image_count=image_count,
+                ))
+        # Only expose a *complete* page inventory; partial evidence is not
+        # equivalent to verified page coverage. This is not visual verification.
+        if len(verified_pages) == page_count:
+            if any(page.has_native_text for page in verified_pages) != native:
+                raise ValueError("per-page text evidence contradicts document")
+            if any(page.image_count > 0 for page in verified_pages) != images:
+                raise ValueError("per-page image evidence contradicts document")
+            pages = tuple(verified_pages)
+        else:
+            pages = ()
 
-        # Per-page text was not proven in shared v1; do not manufacture page
-        # claims or mark the statement verified. A later visual QA stage is
-        # required before any financial transaction is accepted.
         return PdfDocumentFacts(
             document_sha256=digest,
             page_count=page_count,
             document_kind=kind,
             has_native_text=native,
             has_images=images,
+            pages=pages,
         )
