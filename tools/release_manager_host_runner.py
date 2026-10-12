@@ -122,6 +122,63 @@ def release_production_transaction_lock(handle) -> None:
         handle.close()
 
 
+QUICKBOOKS_READ_PROFILES = frozenset({
+    "quickbooks-sandbox-read-v1",
+    "quickbooks-production-read-v1",
+})
+
+
+def declared_quickbooks_read_profile(candidate_worktree: Path) -> str | None:
+    """Bind profile selection to the reviewed, immutable release source."""
+    path = candidate_worktree / "config" / "quickbooks-read-profile.json"
+    if not path.exists():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if (not isinstance(payload, dict)
+            or set(payload) != {"schema_version", "read_profile"}
+            or payload.get("schema_version") != "1.0"
+            or payload.get("read_profile") not in QUICKBOOKS_READ_PROFILES):
+        raise ReleaseManagerError("candidate QuickBooks read profile declaration invalid")
+    return str(payload["read_profile"])
+
+
+def live_quickbooks_read_profile() -> str:
+    """Require matching, supported read profiles from live Runtime and MCP."""
+    profiles = set()
+    for name in ("jason-runtime", "jason-mcp-pilot"):
+        env = json.loads(output([
+            "docker", "inspect", name, "--format", "{{json .Config.Env}}",
+        ]))
+        if not isinstance(env, list):
+            raise ReleaseManagerError("live QuickBooks profile environment unavailable")
+        matches = [
+            item.split("=", 1)[1]
+            for item in env
+            if isinstance(item, str)
+            and item.startswith("JASON_QUICKBOOKS_READ_PROFILE=")
+        ]
+        if len(matches) != 1 or matches[0] not in QUICKBOOKS_READ_PROFILES:
+            raise ReleaseManagerError("live QuickBooks read profile missing or invalid")
+        profiles.add(matches[0])
+    if len(profiles) != 1:
+        raise ReleaseManagerError("live Runtime and MCP QuickBooks profiles disagree")
+    return profiles.pop()
+
+
+def quickbooks_rollback_environment(
+    env: dict[str, str], *, rollback_sha: str, prior_profile: str
+) -> dict[str, str]:
+    """Restore the old profile alongside the old images on rollback."""
+    if prior_profile not in QUICKBOOKS_READ_PROFILES:
+        raise ReleaseManagerError("rollback QuickBooks read profile is not supported")
+    result = env.copy()
+    result["JASON_RUNTIME_PRODUCTION_IMAGE"] = "jason-runtime:rollback-current"
+    result["JASON_MCP_PRODUCTION_IMAGE"] = "jason-mcp:rollback-current"
+    result["JASON_SOURCE_REVISION_OVERRIDE"] = rollback_sha
+    result["JASON_QUICKBOOKS_READ_PROFILE"] = prior_profile
+    return result
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -1812,6 +1869,13 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         raise ReleaseManagerError(
             "exact candidate worktree is missing a required production deploy script"
         )
+    candidate_quickbooks_profile = declared_quickbooks_read_profile(deploy_worktree)
+    prior_quickbooks_profile = live_quickbooks_read_profile()
+    if (candidate_quickbooks_profile is not None
+            and os.environ.get("JASON_QUICKBOOKS_READ_PROFILE") not in (None, candidate_quickbooks_profile)):
+        raise ReleaseManagerError(
+            "invoking QuickBooks profile override conflicts with immutable candidate"
+        )
     host_contract = verify_candidate_host_reconciliation_contract(
         deploy_worktree, candidate_sha
     )
@@ -1861,6 +1925,8 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     env["JASON_RUNTIME_PRODUCTION_IMAGE"] = image
     env["JASON_MCP_PRODUCTION_IMAGE"] = mcp_image
     env["JASON_SOURCE_REVISION_OVERRIDE"] = candidate_sha
+    if candidate_quickbooks_profile is not None:
+        env["JASON_QUICKBOOKS_READ_PROFILE"] = candidate_quickbooks_profile
 
     runtime_deployed = False
     mcp_deployed = False
@@ -1990,10 +2056,9 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         save_record(state_root, record)
         return record
     except Exception as error:
-        rollback_env = os.environ.copy()
-        rollback_env["JASON_RUNTIME_PRODUCTION_IMAGE"] = "jason-runtime:rollback-current"
-        rollback_env["JASON_MCP_PRODUCTION_IMAGE"] = "jason-mcp:rollback-current"
-        rollback_env["JASON_SOURCE_REVISION_OVERRIDE"] = rollback_sha
+        rollback_env = quickbooks_rollback_environment(
+            os.environ, rollback_sha=rollback_sha, prior_profile=prior_quickbooks_profile
+        )
 
         rollback_errors: list[str] = []
 

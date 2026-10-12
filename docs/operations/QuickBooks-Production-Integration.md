@@ -166,6 +166,29 @@ This profile must select:
 
 The deployment must fail closed rather than falling back to development/sandbox state.
 
+## Immutable profile activation and rollback
+
+Production read activation is declared in protected source at
+`config/quickbooks-read-profile.json` with schema version `1.0` and
+`read_profile=quickbooks-production-read-v1`. The governed Release Manager
+must load this declaration from the exact candidate release worktree and set
+`JASON_QUICKBOOKS_READ_PROFILE` for both runtime and MCP deployment.
+Unsupported profiles or a contradictory invocation override fail closed.
+
+Before mutation, the Release Manager requires both live services to advertise
+the same supported read profile and records that prior value in memory for
+rollback. A failed deployment must restore the **previous** read profile
+alongside the previous runtime/MCP images. Existing production and sandbox
+OAuth databases and their OpenBao identities remain distinct; rollback does
+not revoke either token or delete either database.
+
+The prior production access token may be expired even while the Production
+OAuth refresh token and realm binding remain valid. The governed QuickBooks
+read connector must refresh normally without exposing token material; an
+invalid refresh requires reconnect rather than silent Sandbox fallback.
+Initial live CompanyInfo identity must match AOT before additional reads.
+No QuickBooks write capability is authorized by this profile.
+
 ## Production deployment AppRole mount isolation
 
 The active Sandbox runtime can already have read-only mounts at
