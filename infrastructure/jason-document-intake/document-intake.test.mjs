@@ -15,8 +15,9 @@ function fakeTools({ pages = 2, text = "Invoice 10.00", imageList = "", encrypte
   const invocations = [];
   function run(program, args) {
     invocations.push({ program, args });
-    assert.ok(existsSync(args[0]), "PDF source exists only for the duration of inspection");
-    assert.equal(statSync(args[0]).mode & 0o777, 0o600);
+    const file = args.find(value => typeof value === "string" && value.endsWith("/source.pdf"));
+    assert.ok(file && existsSync(file), "PDF source exists only for the duration of inspection");
+    assert.equal(statSync(file).mode & 0o777, 0o600);
     switch (program) {
       case "pdfinfo":
         return "Pages: " + pages + "\nEncrypted: " + (encrypted ? "yes" : "no") + "\n";
