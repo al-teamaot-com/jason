@@ -83,3 +83,36 @@ def test_unsupported_shared_contract_rejected():
     bad["schema"] = "jason.document_intake.pdf.v2"
     with pytest.raises(ValueError, match="unsupported"):
         SharedDocumentIntakeEvidenceAdapter().accept(RAW, bad)
+
+
+def test_mixed_scanned_page_inventory_is_preserved_for_visual_review():
+    e = evidence(native=True, images=True, pages=[
+        {"page_number": 1, "image_count": 0, "native_text_present": True, "native_text_chars": 20},
+        {"page_number": 2, "image_count": 1, "native_text_present": False, "native_text_chars": 0},
+    ])
+    facts = SharedDocumentIntakeEvidenceAdapter().accept(RAW, e)
+    assert len(facts.pages) == 2
+    assert facts.pages[0].has_native_text is True
+    assert facts.pages[1].has_native_text is False
+    assert facts.pages[1].image_count == 1
+
+
+def test_partial_page_text_coverage_is_unknown_not_verified():
+    e = evidence(native=True, images=True, pages=[
+        {"page_number": 1, "image_count": 0, "native_text_present": None, "native_text_chars": None},
+        {"page_number": 2, "image_count": 1, "native_text_present": True, "native_text_chars": 10},
+    ])
+    facts = SharedDocumentIntakeEvidenceAdapter().accept(RAW, e)
+    assert facts.pages == ()
+
+
+def test_per_page_text_must_agree_with_global_claims():
+    e = evidence(native=True, images=False, pages=[
+        {"page_number": 1, "image_count": 0, "native_text_present": False, "native_text_chars": 0},
+        {"page_number": 2, "image_count": 0, "native_text_present": False, "native_text_chars": 0},
+    ])
+    with pytest.raises(ValueError, match="contradicts"):
+        SharedDocumentIntakeEvidenceAdapter().accept(RAW, e)
+    e["pages"][0]["native_text_present"] = True
+    with pytest.raises(ValueError, match="inconsistent"):
+        SharedDocumentIntakeEvidenceAdapter().accept(RAW, e)
