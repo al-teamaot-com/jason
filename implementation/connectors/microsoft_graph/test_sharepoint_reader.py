@@ -125,3 +125,8 @@ def test_rejects_wrong_download_size():
 def test_requires_canonical_host():
     with pytest.raises(ValueError):
         MicrosoftGraphSharePointReader(Tokens(), Transport(), base_url="https://evil.invalid")
+
+
+def test_byte_limit_cannot_exceed_underlying_bounded_transport():
+    with pytest.raises(ValueError):
+        MicrosoftGraphSharePointReader(Tokens(), Transport(), max_content_bytes=16 * 1024 * 1024)

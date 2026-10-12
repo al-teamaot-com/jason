@@ -31,7 +31,7 @@ class MicrosoftGraphSharePointReader:
             raise ValueError("Graph SharePoint reader requires canonical endpoint")
         if isinstance(self.max_items, bool) or not 1 <= self.max_items <= 100:
             raise ValueError("max_items must be between 1 and 100")
-        if isinstance(self.max_content_bytes, bool) or not 1 <= self.max_content_bytes <= 25 * 1024 * 1024:
+        if isinstance(self.max_content_bytes, bool) or not 1 <= self.max_content_bytes <= 15 * 1024 * 1024:
             raise ValueError("invalid document byte limit")
 
     @staticmethod
