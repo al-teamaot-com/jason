@@ -1389,3 +1389,12 @@ def test_evidence_bundle_is_built_before_reporting_production_verified():
     assert source.index('record["evidence_bundle"] = {') < source.index(
         'gate_transition(repo, state_root, record, "production_verified")'
     )
+
+
+def test_release_contract_rejects_missing_risk_profile_with_manifest_present():
+    import pytest
+    record = {'state': 'production_eligible', 'rollback_sha': SHA_B,
+              'release_candidate': {'candidate_sha': SHA_A},
+              'release_manifest': {'candidate_sha': SHA_A, 'rollback_sha': SHA_B}}
+    with pytest.raises(runner.ReleaseManagerError, match='release_manifest or risk_profile'):
+        runner.validate_release_record_contract(record)
