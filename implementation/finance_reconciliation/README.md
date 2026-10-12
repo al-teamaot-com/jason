@@ -88,3 +88,12 @@ remains blocked on governed document acquisition, statement rendering/visual
 verification, domain transaction parsing, and historical Lori acceptance. The
 existing workbook contract is legacy pilot scaffolding; under TODO-FIN-003,
 Excel is comparison-only once governed QBO access is usable.
+
+### Merge sequencing and release gate
+
+The shared-intake PR #1326 should be reviewed and accepted before any runtime
+wiring from this finance foundation is enabled. This branch only validates the
+same v1 evidence *record*; it does not call the shared Node component directly.
+Actual transport must preserve source bytes and their hash, tenant/account
+scope, and the existing governed finance authorization boundary. A mismatched
+record must fail closed without attempting a second, silent extraction method.
