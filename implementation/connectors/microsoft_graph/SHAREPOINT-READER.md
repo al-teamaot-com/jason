@@ -42,3 +42,7 @@ Reconciled security checks from draft PR #1120: exact Graph drive membership und
 Document-content responses are base64 and SHA256 within the bounded internal adapter. Registering a public content-read MCP capability requires separate evidence-release limits and sensitivity classification. Production-wide application Sites.Read.All must not be interpreted as permission for every Jason user to view all AOT documents.
 
 Focused unit tests exercise negative requester/client binding, unauthorized site, path injection, mismatched drive and file identity, oversized content and missing information-release authorization. CI is defined in .github/workflows/sharepoint-reader.yml.
+
+## Separate runtime composition
+
+The inactive MicrosoftSharePointRuntime builder in implementation/runtime_service/src/jason_runtime/microsoft_sharepoint.py uses the existing MSAL certificate and OpenBao resolvers, but with isolated provider microsoft_graph_sharepoint, secret microsoft_graph.sharepoint_read and profile sharepoint-read. It neither acquires credentials nor contacts Microsoft during construction. Production requires a separately validated boundary record and deployment approval.
