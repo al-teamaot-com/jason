@@ -137,14 +137,17 @@ def _score(a: OrganizationRecord, b: OrganizationRecord) -> MatchCandidate:
     if _phone(a.phone) and _phone(a.phone) == _phone(b.phone):
         score += 25
         signals.append("phone_exact")
-    if _email(a.email) and _email(a.email) == _email(b.email):
+    corporate_email_match = bool(
+        _email(a.email) and _email(a.email) == _email(b.email)
+        and _domain(a.email) and _domain(b.email)
+    )
+    if corporate_email_match:
         score += 25
         signals.append("email_exact")
-    # Email and website domains describe the same business-domain evidence
-    # channel; never score both as two independent independent confirmations.
+    # A matching email address and its domain form one evidence channel.
     domains_a = {_domain(a.website), _domain(a.email)} - {""}
     domains_b = {_domain(b.website), _domain(b.email)} - {""}
-    if domains_a & domains_b:
+    if domains_a & domains_b and not corporate_email_match:
         score += 20
         signals.append("business_domain_exact")
     if (_words(a.street) and _words(a.street) == _words(b.street)
@@ -204,7 +207,7 @@ def match_organizations(
             continue
         candidates = [_score(item, other) for other in rhs if other.source_id not in used_right]
         proposed[item.source_id] = sorted(
-            [c for c in candidates if c.score >= 55],
+            [c for c in candidates if c.score >= 55 or "name_similar" in c.signals],
             key=lambda c: (-c.score, c.right_id),
         )
     owners: dict[str, list[str]] = {}
