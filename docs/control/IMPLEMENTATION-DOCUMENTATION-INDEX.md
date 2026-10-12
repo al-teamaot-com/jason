@@ -88,6 +88,7 @@ If a package README contains a material architecture, authority, security, or op
 
 | Implementation-local record | Supporting purpose | Governed human-facing owner / related records |
 |---|---|---|
+| `infrastructure/jason-document-intake/README.md` | Shared PDF intake contract, bounded extraction, provenance and consumer adoption mechanics; not an authorization or accounting decision source | `docs/control/EXTENSION-CONSTRUCTION-MAP.md`; ADR-005/ADR-006 for Teams ingress; `docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md` for finance scope; protected release governance |
 | `infrastructure/jason-runtime/README.md` | Docker/runtime deployment-package mechanics and required deployment inputs | System Registry, `docs/operations/`, runtime/component architecture; never use this README alone to assert current production state |
 | `infrastructure/kfs-collector/README.md` | Kyocera Fleet Services collector deployment-package mechanics | `docs/components/infrastructure/INF-016-Kyocera-KFS-Provider-Foundation.md`; KFS operational runbooks and System Registry for current deployment state |
 | `infrastructure/openclaw-jason-bridge/README.md` | OpenClaw Jason bridge deployment/plugin mechanics | ADR-005/ADR-006, INF-014, OpenClaw operational runbooks, System Registry for deployed bridge state |
