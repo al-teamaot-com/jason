@@ -1069,3 +1069,23 @@ def test_reassess_does_not_override_host_denial_transport_or_capacity(tmp_path):
     response_path.write_text(worker.json.dumps({'status': 'failed', 'error': 'HTTP transport failed'}))
     assert worker.reassess_model_scope_blocks(state, [item], tmp_path, 2) == []
     assert record['phase'] == 'blocked'
+
+
+def test_scope_review_chooses_one_p0_before_lower_priority(tmp_path):
+    priority = [
+        {'id': 'SUPPORT-OPS-400', 'title': 'P0 control failure', 'evidence': 'e', 'acceptance': 'a', 'priority': 'P0'},
+        {'id': 'SUPPORT-OPS-401', 'title': 'P1 report', 'evidence': 'e', 'acceptance': 'a', 'priority': 'P1'},
+    ]
+    items = {}
+    for item in priority:
+        rid = worker.queue_reasoning(tmp_path, kind='search_plan', item=item, context={})
+        result_dir = tmp_path / 'reasoning' / 'responses'
+        result_dir.mkdir(parents=True, exist_ok=True)
+        (result_dir / (rid + '.json')).write_text(worker.json.dumps({
+            'status': 'succeeded', 'result': {'blocked_reason': 'model scope denied'}}))
+        items[item['id']] = {'phase': 'blocked', 'reason': 'model scope denied', 'reasoning_request_id': rid}
+    state = {'items': items}
+    assert worker.reassess_model_scope_blocks(state, priority, tmp_path, 1) == ['SUPPORT-OPS-400']
+    assert items['SUPPORT-OPS-400']['phase'] == 'diagnosing'
+    assert items['SUPPORT-OPS-401']['phase'] == 'blocked'
+    assert worker.reassess_model_scope_blocks(state, priority, tmp_path, 1) == []
