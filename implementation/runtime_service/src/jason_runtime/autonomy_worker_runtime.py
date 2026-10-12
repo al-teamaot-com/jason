@@ -1014,19 +1014,33 @@ class OperationalAutonomyMaintenance:
 
         Notification failure must never undo an already-verified ticket change.
         A fingerprint prevents duplicate cards when a queued work item is resumed.
+        In-progress, on-hold, and other transient ticket-status updates stay quiet;
+        this notification rule does not affect governed ticket writes or approvals.
         """
         if self.completion_notifier is None:
             return
-        fingerprint = hashlib.sha256(
-            f"teams-ticket-v1|{event}|{work.ticket_number}|{status}".encode("utf-8")
-        ).hexdigest()
-        note_title = "Teams - Ticket Activity - " + event
-        if self.store.last_note_fingerprint(work.ticket_id, work.playbook_id, note_title) == fingerprint:
+        # Routine status churn is not an owner-action event. Only initial pickup
+        # and readback-verified completion produce lifecycle cards.
+        if event != "pickup" and status.casefold() != "complete":
             return
-        event_type = "work_started" if event == "pickup" else "work_completed" if status == "Complete" else "ticket_status_updated"
+        category = "pickup" if event == "pickup" else "completion"
+        fingerprint = hashlib.sha256(
+            f"teams-ticket-v2|{category}|{work.ticket_number}".encode("utf-8")
+        ).hexdigest()
+        note_title = "Teams - Ticket Activity - " + category
+        previous = self.store.last_note_fingerprint(work.ticket_id, work.playbook_id, note_title)
+        if previous == fingerprint:
+            return
+        # Prior deployments fingerprinted pickup with its status. Avoid a new
+        # pickup card immediately after upgrading the notification policy.
+        if category == "pickup" and previous == hashlib.sha256(
+            f"teams-ticket-v1|pickup|{work.ticket_number}|In Progress".encode("utf-8")
+        ).hexdigest():
+            return
+        event_type = "work_started" if category == "pickup" else "work_completed"
         summary = (
             f"Ticket: {work.ticket_number} | Device: {work.hostname or 'Not linked'} | "
-            f"Status: {status} | Action: {'Picked up by Jason' if event == 'pickup' else 'Status updated by Jason'}"
+            f"Status: {status} | Action: {'Picked up by Jason' if category == 'pickup' else 'Completed by Jason'}"
         )
         try:
             self.completion_notifier.send(
@@ -6875,6 +6889,7 @@ class OperationalAutonomyMaintenance:
                 last_reason=reason,
             )
         )
+        self._notify_ticket_event(work, "status_change", "Complete")
 
     def _notify_patch_completion(
         self,
