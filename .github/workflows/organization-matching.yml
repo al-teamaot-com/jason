@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'implementation/orchestrator/organization_matching.py'
+      - 'docs/engineering/finance/Organization-Matching.md'
       - 'implementation/orchestrator/organization_source_adapters.py'
       - 'implementation/orchestrator/organization_match_service.py'
       - 'implementation/orchestrator/tests/test_organization_match_service.py'
@@ -12,6 +13,7 @@ on:
   push:
     paths:
       - 'implementation/orchestrator/organization_matching.py'
+      - 'docs/engineering/finance/Organization-Matching.md'
       - 'implementation/orchestrator/organization_source_adapters.py'
       - 'implementation/orchestrator/organization_match_service.py'
       - 'implementation/orchestrator/tests/test_organization_match_service.py'
