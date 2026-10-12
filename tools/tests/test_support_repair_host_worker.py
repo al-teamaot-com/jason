@@ -1016,3 +1016,11 @@ def test_open_issue_listing_fails_closed_on_incomplete_page(monkeypatch, tmp_pat
     import pytest
     with pytest.raises(worker.WorkerError, match='incomplete'):
         worker.open_support_issue_records(tmp_path)
+
+
+def test_missing_non_p0_does_not_escalate_owner(tmp_path):
+    state = {}
+    issues = {'SUPPORT-OPS-600': {'title': 'P1 SUPPORT-OPS-600: review', 'priority': 'unknown'}}
+    assert worker.audit_support_admission(issues, [], state, event_root=tmp_path) == []
+    assert state['admission_audit']['status'] == 'healthy'
+    assert not list(tmp_path.glob('*.json'))
