@@ -1306,6 +1306,67 @@ def select_reconcile_ids(state: Mapping[str, Any], support: list[dict[str, str]]
     return selected
 
 
+
+def reassess_model_scope_blocks(
+    state: dict[str, Any], support: list[dict[str, str]], spool: Path,
+    max_active: int,
+) -> list[str]:
+    """Retry a model-only scope judgement once, never a denied host gate.
+
+    The reconsideration only queues a search plan. It grants no filesystem,
+    code-write, provider, deployment, or root authority; all existing host
+    gates still apply. An independently repeated block remains terminal.
+    """
+    items = state.get('items')
+    if not isinstance(items, dict):
+        return []
+    active = {'diagnosing', 'implementing', 'ci_repair_needed', 'ci_repairing'}
+    slots = max(0, max(1, int(max_active)) - sum(
+        1 for value in items.values()
+        if isinstance(value, Mapping) and value.get('phase') in active
+    ))
+    resumed: list[str] = []
+    for item in support:
+        if slots <= 0:
+            break
+        record = items.get(item['id'])
+        if not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        if record.get('scope_review_attempted'):
+            continue
+        reason = str(record.get('reason') or '')
+        prior_id = str(record.get('reasoning_request_id') or '')
+        if not reason or not prior_id:
+            continue
+        response = reasoning_response(spool, prior_id)
+        if not isinstance(response, Mapping) or response.get('status') != 'succeeded':
+            continue
+        result = response.get('result')
+        if not isinstance(result, Mapping) or str(result.get('blocked_reason') or '') != reason:
+            continue
+        review_id = queue_reasoning(
+            spool, kind='search_plan', item=item,
+            context={
+                'scope_review': 'source_diagnosis_only',
+                'prior_blocked_reason': reason[:1000],
+                'boundary': 'No new authority, privileged operation, security change, or production deployment; existing governed approvals remain mandatory.',
+            },
+        )
+        if review_id == prior_id:
+            continue
+        record.update({
+            'phase': 'diagnosing',
+            'reasoning_request_id': review_id,
+            'scope_review_request_id': review_id,
+            'scope_review_attempted': True,
+            'reason': 'bounded source-only scope reassessment; no authorization granted',
+            'updated_at': now(),
+        })
+        resumed.append(item['id'])
+        slots -= 1
+    return resumed
+
+
 def load_state(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {'schema_version': '1.0', 'items': {}}
@@ -1425,6 +1486,7 @@ def main() -> int:
     gate = load_gate(repo)
     policy = gate.load_json(repo / 'config' / 'autonomous-repair-release-policy.json')
 
+    reassess_model_scope_blocks(state, support, spool, args.max_active)
     selected = select_reconcile_ids(state, support, args.max_active)
 
     by_id = {item['id']: item for item in support}
