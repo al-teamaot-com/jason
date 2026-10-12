@@ -50,8 +50,8 @@ class PdfDocumentFacts:
 
 @runtime_checkable
 class PdfPreflightAdapter(Protocol):
-    def inspect(self, document: bytes) -> PdfDocumentFacts:
-        """Classify and inventory a PDF without changing it."""
+    def accept(self, document: bytes, evidence: dict) -> PdfDocumentFacts:
+        """Validate shared intake evidence against immutable PDF bytes."""
 
 
 @runtime_checkable
