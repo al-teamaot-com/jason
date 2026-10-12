@@ -76,6 +76,15 @@ def main() -> int:
 
     report = json.loads(completed.stdout)
     report['snapshot_source_exit_code'] = completed.returncode
+    if completed.returncode != 0:
+        # Even a contradictory source response must never publish PASS.
+        report['status'] = 'fail'
+        failures = report.get('failures')
+        if not isinstance(failures, list):
+            failures = []
+        if 'source_health_nonzero_exit' not in failures:
+            failures.append('source_health_nonzero_exit')
+        report['failures'] = failures
 
     write_atomic_snapshot(args.output, report)
 
