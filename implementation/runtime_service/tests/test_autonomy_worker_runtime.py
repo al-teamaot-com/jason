@@ -6309,3 +6309,30 @@ def test_backupiq_progress_percent_rejects_unverified_status_and_bad_values():
     assert parse({"percentComplete": 0}) == 0.0
     assert parse({"percentComplete": 100}) == 100.0
     assert parse({"progressPercentage": "NaN"}) is None
+
+
+def test_ticket_lifecycle_cards_suppress_status_flapping_and_repeat_completion():
+    class FingerprintStore:
+        def __init__(self):
+            self.values = {}
+
+        def last_note_fingerprint(self, ticket_id, playbook_id, title):
+            return self.values.get((ticket_id, playbook_id, title))
+
+        def remember_note_fingerprint(self, ticket_id, playbook_id, title, fingerprint):
+            self.values[(ticket_id, playbook_id, title)] = fingerprint
+
+    sends = []
+    worker = object.__new__(OperationalAutonomyMaintenance)
+    worker.store = FingerprintStore()
+    worker.completion_notifier = SimpleNamespace(send=lambda event, **kw: sends.append(event))
+    work = SimpleNamespace(ticket_id=142415, playbook_id="backupiq_endpoint_backup", ticket_number="T20261011.0011", hostname="RBH-50940", title="BackupIQ")
+    for status in ("In Progress", "On Hold", "In Progress", "Waiting Device Access"):
+        worker._notify_ticket_event(work, "status_change", status)
+    assert sends == []
+    worker._notify_ticket_event(work, "pickup", "In Progress")
+    worker._notify_ticket_event(work, "pickup", "In Progress")
+    worker._notify_ticket_event(work, "status_change", "Complete")
+    worker._notify_ticket_event(work, "status_change", "On Hold")
+    worker._notify_ticket_event(work, "status_change", "Complete")
+    assert sends == ["work_started", "work_completed"]

@@ -1017,13 +1017,18 @@ class OperationalAutonomyMaintenance:
         """
         if self.completion_notifier is None:
             return
+        # Routine status churn is not an owner-action event. Only initial pickup
+        # and readback-verified completion produce lifecycle cards.
+        if event != "pickup" and status.casefold() != "complete":
+            return
+        category = "pickup" if event == "pickup" else "completion"
         fingerprint = hashlib.sha256(
-            f"teams-ticket-v1|{event}|{work.ticket_number}|{status}".encode("utf-8")
+            f"teams-ticket-v2|{category}|{work.ticket_number}".encode("utf-8")
         ).hexdigest()
-        note_title = "Teams - Ticket Activity - " + event
+        note_title = "Teams - Ticket Activity - " + category
         if self.store.last_note_fingerprint(work.ticket_id, work.playbook_id, note_title) == fingerprint:
             return
-        event_type = "work_started" if event == "pickup" else "work_completed" if status == "Complete" else "ticket_status_updated"
+        event_type = "work_started" if category == "pickup" else "work_completed"
         summary = (
             f"Ticket: {work.ticket_number} | Device: {work.hostname or 'Not linked'} | "
             f"Status: {status} | Action: {'Picked up by Jason' if event == 'pickup' else 'Status updated by Jason'}"
@@ -6875,6 +6880,7 @@ class OperationalAutonomyMaintenance:
                 last_reason=reason,
             )
         )
+        self._notify_ticket_event(work, "status_change", "Complete")
 
     def _notify_patch_completion(
         self,
