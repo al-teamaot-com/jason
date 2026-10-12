@@ -83,3 +83,17 @@ implied by isolated unit tests.
 document content persistence or implicit tenant context. Every provider
 adapter must supply explicit scope/authority and preserve tenant-qualified
 provenance through later evidence storage.
+
+## Consumer routing matrix (planned and current)
+
+| Consumer | Shared intake | Domain-specific validation | Activation |
+| --- | --- | --- | --- |
+| Teams invoices | Native-text PDF evidence adapter | Procurement document normalization, spending approval and Autotask checks | Existing production path replaced only after separate acceptance |
+| Vendor quotes | Same Teams PDF evidence adapter | Quote/PO workflow and required line validation | Existing production path replaced only after separate acceptance |
+| Bank statements | Versioned evidence supplied to the finance adapter | Full page visual proof, balances, bank transaction rules | Not activated |
+| Credit-card statements | Same finance intake evidence | Payment/credit/fee separation, per-cardholder matching | Not activated |
+| Other financial documents | New authorized acquisition adapter only | Document-type-specific rules and policy | Not activated |
+
+Never activate an accounting consumer merely because shared PDF preflight succeeds.
+The final accounting system remains governed QuickBooks Online, not the PDF
+intake component or the temporary historical comparison spreadsheet.
