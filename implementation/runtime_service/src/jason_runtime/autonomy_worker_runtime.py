@@ -1014,6 +1014,8 @@ class OperationalAutonomyMaintenance:
 
         Notification failure must never undo an already-verified ticket change.
         A fingerprint prevents duplicate cards when a queued work item is resumed.
+        In-progress, on-hold, and other transient ticket-status updates stay quiet;
+        this notification rule does not affect governed ticket writes or approvals.
         """
         if self.completion_notifier is None:
             return
