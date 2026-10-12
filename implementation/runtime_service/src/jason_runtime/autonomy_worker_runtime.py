@@ -1026,7 +1026,14 @@ class OperationalAutonomyMaintenance:
             f"teams-ticket-v2|{category}|{work.ticket_number}".encode("utf-8")
         ).hexdigest()
         note_title = "Teams - Ticket Activity - " + category
-        if self.store.last_note_fingerprint(work.ticket_id, work.playbook_id, note_title) == fingerprint:
+        previous = self.store.last_note_fingerprint(work.ticket_id, work.playbook_id, note_title)
+        if previous == fingerprint:
+            return
+        # Prior deployments fingerprinted pickup with its status. Avoid a new
+        # pickup card immediately after upgrading the notification policy.
+        if category == "pickup" and previous == hashlib.sha256(
+            f"teams-ticket-v1|pickup|{work.ticket_number}|In Progress".encode("utf-8")
+        ).hexdigest():
             return
         event_type = "work_started" if category == "pickup" else "work_completed"
         summary = (
