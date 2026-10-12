@@ -20,7 +20,7 @@ import subprocess
 import tempfile
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -1656,6 +1656,117 @@ def validate_release_record_contract(record: dict[str, Any]) -> None:
         raise ReleaseManagerError('release manifest risk classification differs from release record')
 
 
+CCC_REQUIRED_CHECKS = frozenset({
+    "checker-currentness", "runtime-source-alignment", "j002-article-matrix",
+    "system-registry", "j900-release-validation",
+    "mcp-constitutional-production-equivalent", "systemd-failed-units",
+    "prometheus-targets", "openclaw-authority-health", "immutable-runtime-release",
+    "mcp-governance-boundary", "governed-provider-boundary-canaries",
+})
+
+
+def verify_release_ccc_report(
+    report: dict[str, Any], *, candidate_sha: str, runtime_sha: str,
+    before_mutation: bool,
+) -> dict[str, Any]:
+    """Fail closed on any CCC exception other than expected predeploy alignment.
+
+    A runtime-changing candidate cannot align with LIVE runtime before deployment.
+    This grants no CCC PASS: it only admits a scoped transition supported by
+    immutable preprod artifacts and a mandatory post-deploy PASS/rollback.
+    """
+    if report.get("schema_version") != "1.0":
+        raise ReleaseManagerError("CCC evidence schema is not recognized")
+    if report.get("source_revision") != exact_sha(candidate_sha, "candidate_sha"):
+        raise ReleaseManagerError("CCC evidence source is not the exact release candidate")
+    if report.get("runtime_revision") != exact_sha(runtime_sha, "runtime_sha"):
+        raise ReleaseManagerError("CCC evidence runtime revision does not match expected live revision")
+    if str(report.get("trigger") or "") not in {"material_change", "cadence"}:
+        raise ReleaseManagerError("CCC evidence must be a forced material/cadence review")
+    if not str(report.get("run_id") or "").strip():
+        raise ReleaseManagerError("CCC evidence run identifier is missing")
+    checks = report.get("checks")
+    if not isinstance(checks, list):
+        raise ReleaseManagerError("CCC evidence checks are missing")
+    indexed: dict[str, str] = {}
+    for entry in checks:
+        if not isinstance(entry, dict):
+            raise ReleaseManagerError("CCC evidence includes malformed check")
+        key = str(entry.get("check_id") or "")
+        if not key or key in indexed:
+            raise ReleaseManagerError("CCC evidence has an empty or duplicate check")
+        indexed[key] = str(entry.get("status") or "")
+    required = CCC_REQUIRED_CHECKS | (
+        {"material-change-owner-review"} if report.get("material_changes") else set()
+    )
+    missing = required - set(indexed)
+    if missing:
+        raise ReleaseManagerError("CCC mandatory checks are missing: " + ", ".join(sorted(missing)))
+    exceptional = {key: status for key, status in indexed.items() if status != "PASS"}
+    if before_mutation:
+        expected = {"runtime-source-alignment": "NOT_PROVEN"}
+        if not (report.get("status") == "PASS" and not exceptional or
+                report.get("status") == "NOT_PROVEN" and exceptional == expected):
+            raise ReleaseManagerError("pre-mutation CCC denied: " + str(exceptional)[:300])
+        mode = "candidate_transition" if exceptional else "aligned"
+    else:
+        if report.get("status") != "PASS" or exceptional:
+            raise ReleaseManagerError("post-mutation CCC did not certify exact live candidate")
+        mode = "live_certified"
+    return {
+        "status": report["status"], "mode": mode,
+        "source_revision": candidate_sha, "runtime_revision": runtime_sha,
+        "run_id": str(report.get("run_id") or ""),
+        "finished_at": str(report.get("finished_at") or ""),
+        "checks": indexed,
+    }
+
+
+def run_release_ccc_gate(
+    candidate_sha: str, runtime_sha: str, *, before_mutation: bool,
+    ccc_runner: Path = Path("/opt/jason/ccc-current/tools/run_ccc.py"),
+    ccc_config: Path = Path("/var/lib/jason/ccc/ccc.json"),
+    latest: Path = Path("/var/lib/jason/ccc/latest.json"),
+) -> dict[str, Any]:
+    """Run the installed independent checker and bind fresh evidence to SHA.
+
+    A NOT_PROVEN checker exit is admissible only at pre-mutation transition,
+    and only for its sole expected runtime-source-alignment check.
+    """
+    if not ccc_runner.is_file() or not ccc_config.is_file():
+        raise ReleaseManagerError("independent CCC checker/config unavailable")
+    started = datetime.now(timezone.utc)
+    try:
+        completed = subprocess.run(
+            ["python3", str(ccc_runner), "--config", str(ccc_config),
+             "--force", "--trigger", "material_change"],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            check=False, timeout=300,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ReleaseManagerError("independent CCC execution did not complete") from exc
+    if not latest.is_file():
+        raise ReleaseManagerError("independent CCC did not persist a report")
+    report = json.loads(latest.read_text(encoding="utf-8"))
+    if not isinstance(report, dict):
+        raise ReleaseManagerError("CCC report is not a JSON object")
+    try:
+        finished = datetime.fromisoformat(str(report.get("finished_at") or ""))
+    except (ValueError, TypeError) as exc:
+        raise ReleaseManagerError("CCC completion timestamp missing") from exc
+    if (finished.tzinfo is None or
+            finished < started - timedelta(seconds=2) or
+            finished > datetime.now(timezone.utc) + timedelta(seconds=15)):
+        raise ReleaseManagerError("CCC report is stale, future-dated or not independently refreshed")
+    evidence = verify_release_ccc_report(
+        report, candidate_sha=candidate_sha, runtime_sha=runtime_sha,
+        before_mutation=before_mutation,
+    )
+    if completed.returncode != 0 and evidence["status"] == "PASS":
+        raise ReleaseManagerError("independent CCC process failed despite PASS report")
+    return evidence
+
+
 def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
     if record.get("state") != "production_eligible":
         raise ReleaseManagerError("release is not Production Eligible")
@@ -1696,6 +1807,14 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     host_contract = verify_candidate_host_reconciliation_contract(
         deploy_worktree, candidate_sha
     )
+
+    # The existing live runtime can differ from a valid new candidate. This
+    # narrowly scoped preflight is NOT a CCC PASS and requires full post CCC.
+    verify_candidate_on_main(repo, candidate_sha)
+    ccc_preflight = run_release_ccc_gate(
+        candidate_sha, rollback_sha, before_mutation=True,
+    )
+    record["ccc_pre_mutation_gate"] = ccc_preflight
 
     controller_pin = controller_identity(deploy_worktree)
     baseline_manifest = capture_production_manifest(rollback_sha)
@@ -1784,6 +1903,12 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
 
         controller_verified = verify_controller_identity(controller_pin, deploy_worktree, installed_candidate=True)
         smoke = run_functional_smoke_tests(candidate_sha)
+        # Certification is mandatory BEFORE verified/closed or new LKG. A
+        # non-PASS or stale/wrong-SHA report raises inside the rollback block.
+        ccc_postflight = run_release_ccc_gate(
+            candidate_sha, candidate_sha, before_mutation=False,
+        )
+        record["ccc_post_mutation_gate"] = ccc_postflight
         drift_evidence = production_drift_evidence(state_root)
         production_manifest = capture_production_manifest(candidate_sha)
 
@@ -1794,6 +1919,8 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "artifact_digest": live_digest,
             "mcp_artifact_digest": live_mcp_digest,
             "health_passed": True,
+            "ccc_pre_mutation": ccc_preflight,
+            "ccc_post_mutation": ccc_postflight,
             "functional_smoke_tests_passed": bool(smoke.get("passed")),
             "functional_smoke_tests": smoke,
             "controller_identity_verified": True,
@@ -1831,6 +1958,8 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "release_manifest": record["release_manifest"],
             "risk_profile": record["risk_profile"],
             "owner_approval": record.get("owner_approval"),
+            "ccc_pre_mutation": ccc_preflight,
+            "ccc_post_mutation": ccc_postflight,
             "preproduction": record.get("preproduction"),
             "pre_mutation_health": record.get("pre_mutation_health"),
             "functional_smoke_tests": smoke,
