@@ -47,3 +47,25 @@ It is safe scaffolding for the first-account pilot.
 - connect bounded human-input requests to the existing Teams approval/continuation path
 - add audit persistence and operational metrics
 - run a historical completed period as the first acceptance test
+
+## PDF preflight slice (2026-10-12)
+
+The isolated `PypdfPreflightAdapter` performs a strict, read-only intake check:
+PDF magic header, configurable byte/page limits, encryption rejection, SHA-256
+fingerprinting, per-page native-text/image inventory, and conservative document
+classification. The original PDF bytes are unchanged; empty and malformed PDFs
+fail closed. The adapter does not use OCR or connect to any financial provider.
+
+**Accounting boundary:** A readable PDF is *not* a reconciled statement. Preflight
+does not verify page rendering, complete transaction extraction, opening/closing
+balances, accounting classifications, or ledger matches. Those must pass later
+independent, deterministic validation before any statement is accepted.
+
+The synthetic unit tests cover valid native-text files, blank/non-PDF inputs,
+encryption, size/page limits, immutable input, and truncation. The isolated CI
+workflow installs `pypdf` and `reportlab` for these tests.
+
+**Design alignment:** The existing workbook fields are legacy pilot scaffolding.
+Per TODO-FIN-003's 2026-10-06 decision, Excel is a temporary comparison source,
+not a required future write target or accounting system of record. QBO remains
+subject to independent governed authorization; no QBO writes are permitted here.
