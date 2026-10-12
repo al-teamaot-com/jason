@@ -987,3 +987,32 @@ def test_safe_search_discovers_named_provider_source_not_just_tests(tmp_path):
     assert 'implementation/connectors/it_glue/live_read.py' in result
     assert 'implementation/connectors/it_glue/operations.py' in result
     assert all(entry['content'] for entry in excerpts)
+
+
+def test_missing_p0_support_issue_is_visible_and_emits_blocker(tmp_path):
+    state = {}
+    issues = {
+        'SUPPORT-OPS-500': {'title': 'P0 SUPPORT-OPS-500: missing row', 'priority': 'P0'},
+        'SUPPORT-OPS-501': {'title': 'P1 SUPPORT-OPS-501: missing row', 'priority': 'unknown'},
+        'SUPPORT-OPS-502': {'title': 'P0 SUPPORT-OPS-502: admitted', 'priority': 'P0'},
+    }
+    known = [{'id': 'SUPPORT-OPS-502'}]
+    missing = worker.audit_support_admission(issues, known, state, event_root=tmp_path)
+    assert missing == ['SUPPORT-OPS-500']
+    assert state['admission_audit']['status'] == 'degraded'
+    assert state['admission_audit']['unadmitted_p0'] == ['SUPPORT-OPS-500']
+    payloads = [worker.json.loads(p.read_text()) for p in tmp_path.glob('*.json')]
+    assert len(payloads) == 1
+    assert payloads[0]['event_type'] == 'work_blocked'
+    assert payloads[0]['work_id'] == 'SUPPORT-OPS-500'
+    worker.audit_support_admission(issues, known, state, event_root=tmp_path)
+    assert len(list(tmp_path.glob('*.json'))) == 1  # duplicate-suppressed
+
+
+def test_open_issue_listing_fails_closed_on_incomplete_page(monkeypatch, tmp_path):
+    monkeypatch.setattr(worker, 'gh_json', lambda args, cwd: [
+        {'number': i, 'title': f'P0 SUPPORT-OPS-{i}: incident'} for i in range(1000)
+    ])
+    import pytest
+    with pytest.raises(worker.WorkerError, match='incomplete'):
+        worker.open_support_issue_records(tmp_path)
