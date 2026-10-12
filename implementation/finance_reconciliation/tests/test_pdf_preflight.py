@@ -74,7 +74,7 @@ def test_misclassified_and_unverified_pages_fail_closed():
         {"page_number": 1, "image_count": 0, "native_text_present": True},
         {"page_number": 2, "image_count": 0, "native_text_present": None},
     ])
-    with pytest.raises(ValueError, match="cannot assert per-page"):
+    with pytest.raises(ValueError, match="inconsistent per-page native text facts"):
         SharedDocumentIntakeEvidenceAdapter().accept(RAW, bad)
 
 
