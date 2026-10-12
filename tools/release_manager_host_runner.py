@@ -1646,8 +1646,16 @@ def validate_release_record_contract(record: dict[str, Any]) -> None:
     risk = record.get('risk_profile')
     sha = str(candidate.get('candidate_sha') or '')
     rollback = str(record.get('rollback_sha') or '')
-    if not isinstance(manifest, dict) or not isinstance(risk, dict):
-        raise ReleaseManagerError('release record lacks required release_manifest or risk_profile; reprepare through current controller')
+    # create_record/classify_change_risk emits the canonical enum string.
+    # Earlier test records may carry a structured risk object; preserve that
+    # compatible form, while rejecting absent, empty or unknown classifications.
+    allowed_risks = {'normal', 'production_repair', 'production_control_core', 'schema_or_contract'}
+    risk_valid = (
+        isinstance(risk, str) and risk in allowed_risks
+        or isinstance(risk, dict) and bool(risk)
+    )
+    if not isinstance(manifest, dict) or not risk_valid:
+        raise ReleaseManagerError('release record lacks valid release_manifest or risk_profile; reprepare through current controller')
     if not SHA.fullmatch(sha) or not SHA.fullmatch(rollback):
         raise ReleaseManagerError('release record has invalid exact revision identities')
     if manifest.get('candidate_sha') != sha or manifest.get('rollback_sha') != rollback:
