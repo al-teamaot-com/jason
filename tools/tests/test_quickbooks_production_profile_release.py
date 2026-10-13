@@ -28,9 +28,9 @@ def load_runner():
     return module
 
 
-def test_candidate_source_declares_production_read_profile():
+def test_controller_stage_explicitly_retains_sandbox_read_profile():
     runner = load_runner()
-    assert runner.declared_quickbooks_read_profile(ROOT) == "quickbooks-production-read-v1"
+    assert runner.declared_quickbooks_read_profile(ROOT) == "quickbooks-sandbox-read-v1"
 
 
 def test_declared_profile_rejects_unknown_or_extra_fields(tmp_path):
