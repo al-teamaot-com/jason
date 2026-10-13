@@ -272,3 +272,33 @@ This production v1 does **not** authorize:
 - any other QuickBooks mutation.
 
 Any future QuickBooks write authority requires a separate design, capability catalog, risk review, explicit approval model, tests, and production release.
+
+## Governed Production CompanyInfo acceptance (staged locally October 13)
+
+Activation of `quickbooks-production-read-v1` is a separate exact-SHA governed
+release **after** the new Release Manager controller is installed and verified
+with both services still using Sandbox. Never edit the running containers,
+token store, release records, or environment to work around GitHub or drift
+gates. Keep all Production accounting writes disabled.
+
+After the guarded activation, independently read both runtime and MCP
+`JASON_QUICKBOOKS_READ_PROFILE` values from the live deployment (do not take
+these values from user input or the provider response); both must equal
+`quickbooks-production-read-v1`. Confirm Production OAuth realm binding and
+normal refresh through approved credential handling. Then call Jason MCP's
+**governed** `accounting.company.read` with no alternate direct Intuit path.
+Use the original governed tool result as acceptance evidence. The local
+`tools/quickbooks_production_read_acceptance.py` evaluator checks read
+provenance, `CompanyInfo` identity and both observed profiles; it emits only
+a minimal pass/fail report rather than copying financial or OAuth data into
+logs. The evaluator is not an independent environment attestation: verify the
+profile and realm binding separately and retain the governed correlation ID.
+
+Reject Sandbox/sample/demo company names, a missing legal/company name, or
+unknown company identity. AOT is expected to identify as Atlantic Office
+Machines or Atlantic Office Technologies (with optional corporate suffix).
+If production OAuth refresh fails, request a new AOT owner authorization;
+never fall back to Sandbox and present it as Production. On unsuccessful
+validation, use the canonical Release Manager rollback to restore **both**
+images and the prior Sandbox read profile. Do not enable invoice, bill, journal,
+payment, or bank writes as a side effect.
