@@ -1,4 +1,4 @@
 {
   "schema_version": "1.0",
-  "read_profile": "quickbooks-sandbox-read-v1"
+  "read_profile": "quickbooks-production-read-v1"
 }
