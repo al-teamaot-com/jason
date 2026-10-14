@@ -120,6 +120,10 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'curl --connect-timeout 2 --max-time 15 -fsS' in text
     assert 'exporter verification failed on port $port after 3 bounded attempts' in text
     assert 'timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"' in text
+    assert 'timeout --signal=TERM --kill-after=5s 180s systemctl start "$unit"' in text
+    assert 'if [ "$unit" = "jason-openclaw-authority-health.service" ]; then' in text
+    assert text.index('timeout --signal=TERM --kill-after=5s 180s systemctl start "$unit"') < text.index('timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"')
+    assert 'HOST_RECONCILE_FAILURE step=' in text
     assert 'timeout --signal=TERM --kill-after=5s 180s env JASON_REPO_ROOT=' in text
 
 

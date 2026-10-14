@@ -24,3 +24,21 @@ The checker is `tools/release_exporter_port_guard.py`. It is part of the immutab
 - Failures in the activation path must produce diagnosable unit evidence and leave the protected rollback process active. Do not claim the previous failure record had a successful rollback.
 
 **Note:** Three historical `tools/tests/test_release_manager_atomic_surfaces.py` failures reproduce against the unmodified Stage 1 baseline. These are tracked separately from this repair and are not newly introduced.
+
+
+## Subsequent root-cause evidence: authority snapshot timeout
+
+In the next governed Stage 1 promotion, all ten exporter port-free and
+post-start ownership checks passed. The root worker then failed at
+`system_service_activation` on `jason-openclaw-authority-health.service`,
+`rc=124`. This is `timeout`'s expiration, not a failed health check.
+Systemd historical executions completed successfully after about 134-136
+seconds (e.g., 18:11:59 to 18:14:15 ET), exceeding the host installer's
+hard-coded 120-second `systemctl start` bound.
+
+For the named authority-health check only, the host installer permits a
+bounded 180-second `systemctl start`, still requiring the service to
+actually complete and pass; the other maintenance services retain 120
+seconds. The root reconciler retains its 360-second overall cap. No check is
+skipped, run asynchronously, or marked successful because it merely started.
+Retain failed release records from prior exact SHA attempts.
