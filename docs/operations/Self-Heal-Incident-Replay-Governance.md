@@ -29,6 +29,16 @@ when GitHub connectivity resumed.
   production convergence, provider health and ticket admission. All
   require detector rechecks before closure.
 
+## Integration coordination
+
+GitHub PR #1132 modifies the blocked-notification logic in
+sync_support_lifecycle_notification() and its early worker tests. This
+change modifies the separate load_self_heal_incidents() function and
+incident-intake tests. The source hunks do not overlap, but both PRs touch
+the same sensitive worker and test files. Keep both changes, rerun
+integration checks against the final protected merge SHA, and do not treat
+this document as an independent approval of either PR.
+
 ## Acceptance
 
 1. Synthetic 125-file legacy spool plus two current v2 incidents produces
