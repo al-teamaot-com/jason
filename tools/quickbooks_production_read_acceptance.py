@@ -19,6 +19,9 @@ PRODUCTION_PROFILE = "quickbooks-production-read-v1"
 EXPECTED_AOT_NAMES = frozenset({
     "atlantic office machines",
     "atlantic office technologies",
+    # Exact DBA form confirmed by the Intuit production connection notice.
+    # Do not use substring matching: unrelated similar names must fail closed.
+    "atlantic office machines inc dba atlantic office technologies",
 })
 
 

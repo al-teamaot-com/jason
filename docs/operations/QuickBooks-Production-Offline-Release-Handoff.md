@@ -92,3 +92,15 @@ Until those gates are independently approved, all changes stay offline.
 
 Never declare QuickBooks Production working from the mere existence of
 production credentials, access to Sandbox, or locally passing tests.
+
+
+## October 14 verification of AOT company-name acceptance
+
+The October 12 Intuit connection notification names the production company
+as "Atlantic Office Machines Inc. DBA Atlantic Office Technologies".
+The production CompanyInfo acceptance allowlist now includes that exact
+normalized DBA name in addition to the existing individual legal/trading
+names. Partial, substituted or extended DBA names still fail closed.
+This notification is **not** evidence of an active runtime production
+connection; live CompanyInfo, realm-bound OAuth and both production-profile
+readbacks remain mandatory.

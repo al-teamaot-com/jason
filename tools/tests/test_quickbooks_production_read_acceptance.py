@@ -128,6 +128,22 @@ def test_unauthorized_credential_logging_or_pending_auth_fails():
         assert evaluate(result(), oauth=status)["status"] == "fail"
 
 
+def test_exact_confirmed_intuit_dba_company_passes():
+    assert evaluate(result(
+        company="Atlantic Office Machines Inc. DBA Atlantic Office Technologies",
+        legal="Atlantic Office Machines, Inc.",
+    ))["status"] == "pass"
+
+
+def test_similar_but_unverified_dba_company_fails_closed():
+    for name in (
+        "Atlantic Office Machines Inc. DBA Another Company",
+        "Atlantic Office Machines Inc. DBA Atlantic Office Technologies West",
+        "Fake Atlantic Office Machines Inc. DBA Atlantic Office Technologies",
+    ):
+        assert evaluate(result(company=name, legal="Atlantic Office Machines, Inc."))["status"] == "fail"
+
+
 def test_conflicting_legal_name_requires_review():
     assert evaluate(result(company="Atlantic Office Technologies", legal="Different Business"))["status"] == "fail"
 
