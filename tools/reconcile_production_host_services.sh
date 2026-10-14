@@ -270,7 +270,13 @@ CURRENT_UNIT="$PROVIDER_CANARY_SERVICE"
 timeout --signal=TERM --kill-after=5s 45s systemctl start "$PROVIDER_CANARY_SERVICE"
 for unit in "${MAINTENANCE_SERVICES[@]}"; do
   CURRENT_UNIT="$unit"
-  timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"
+  if [ "$unit" = "jason-openclaw-authority-health.service" ]; then
+    # The intact JKD-001 full-integrity check requires about 135s in
+    # production. Keep the check mandatory, but give it a bounded 180s.
+    timeout --signal=TERM --kill-after=5s 180s systemctl start "$unit"
+  else
+    timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"
+  fi
 done
 CURRENT_UNIT=""
 systemctl reset-failed
