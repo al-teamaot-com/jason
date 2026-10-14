@@ -100,6 +100,7 @@ class QuickBooksConnector:
             access_token, realm_id, environment = quickbooks_access_context(
                 self._oauth_store,
                 credentials=credentials,
+                expected_environment=self._expected_environment,
             )
         except QuickBooksReconnectRequiredError as exc:
             self._audit.record(
