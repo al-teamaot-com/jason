@@ -54,18 +54,6 @@ OBSOLETE_UNITS=(
   jason-component-engineering-exporter.service
   jason-prompt-exporter.service
 )
-EXPORTER_SCRIPTS=(
-  client_posture_exporter.py
-  playbook_exporter.py
-  production_health_exporter.py
-  operations_configuration_exporter.py
-  resolution_memory_exporter.py
-  reflection_exporter.py
-  security_control_exporter.py
-  status_exporter.py
-  usage_attribution_exporter_runtime.py
-  usage_exporter.py
-)
 VERIFY_PORTS=(9464 9465 9466 9467 9468 9470 9471 9472 9476 9477)
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -108,6 +96,20 @@ step_pass() {
   finished="$(date +%s)"
   echo "HOST_RECONCILE_STEP_PASS=$1 duration_seconds=$((finished - STEP_STARTED_AT))"
 }
+
+# Keep actionable failure evidence in the root reconciliation result rather
+# than printing only the opaque start marker for a failed systemd command.
+CURRENT_UNIT=""
+on_host_reconcile_error() {
+  local code=$?
+  trap - ERR
+  echo "HOST_RECONCILE_FAILURE step=${STEP_NAME:-unknown} unit=${CURRENT_UNIT:-none} rc=$code" >&2
+  if [ -n "$CURRENT_UNIT" ]; then
+    systemctl show "$CURRENT_UNIT" -p ActiveState -p SubState -p Result -p ExecMainStatus --no-pager >&2 || true
+  fi
+  exit "$code"
+}
+trap 'on_host_reconcile_error' ERR
 
 verify_exporter_port() {
   local port="$1"
@@ -236,31 +238,41 @@ for unit in "${OBSOLETE_UNITS[@]}"; do
 done
 
 step_start system_service_activation
+PORT_GUARD="$RELEASE_DIR/tools/release_exporter_port_guard.py"
+test -f "$PORT_GUARD" || { echo "ERROR: missing candidate exporter port ownership guard" >&2; exit 9; }
 systemctl daemon-reload
+# Stop every system-managed exporter BEFORE any restart, then require that
+# every port is actually free. Never kill a process selected merely by script
+# name (it might belong to a user session or another service).
 for unit in "${EXPORTER_UNITS[@]}"; do
-  systemctl stop "$unit" >/dev/null 2>&1 || true
+  CURRENT_UNIT="$unit"
+  timeout --signal=TERM --kill-after=5s 25s systemctl stop "$unit"
 done
-
-for script_name in "${EXPORTER_SCRIPTS[@]}"; do
-  mapfile -t pids < <(pgrep -u al -f "$script_name" || true)
-  for pid in "${pids[@]}"; do
-    [ -n "$pid" ] || continue
-    kill "$pid" >/dev/null 2>&1 || true
-  done
-done
-
-sleep 1
 for unit in "${EXPORTER_UNITS[@]}"; do
+  CURRENT_UNIT="$unit"
+  /usr/bin/python3 "$PORT_GUARD" --mode free --unit "$unit" --timeout-seconds 12
+done
+# systemctl active does not prove that a freshly started Python exporter won
+# its socket. Require matching listening socket owner and systemd MainPID.
+for unit in "${EXPORTER_UNITS[@]}"; do
+  CURRENT_UNIT="$unit"
   systemctl enable --now "$unit"
+  /usr/bin/python3 "$PORT_GUARD" --mode owned --unit "$unit" --timeout-seconds 12
 done
+CURRENT_UNIT=""
 for timer in "${MAINTENANCE_TIMERS[@]}"; do
+  CURRENT_UNIT="$timer"
   systemctl enable --now "$timer"
 done
+CURRENT_UNIT="$PROVIDER_CANARY_TIMER"
 systemctl enable --now "$PROVIDER_CANARY_TIMER"
+CURRENT_UNIT="$PROVIDER_CANARY_SERVICE"
 timeout --signal=TERM --kill-after=5s 45s systemctl start "$PROVIDER_CANARY_SERVICE"
 for unit in "${MAINTENANCE_SERVICES[@]}"; do
+  CURRENT_UNIT="$unit"
   timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"
 done
+CURRENT_UNIT=""
 systemctl reset-failed
 step_pass system_service_activation
 

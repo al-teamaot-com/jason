@@ -74,7 +74,14 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'live MCP revision does not match requested host release' in text
     assert 'ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"' in text
     assert 'systemctl disable --now "$unit"' in text
-    assert 'pgrep -u al -f "$script_name"' in text
+    assert 'pgrep -u al -f "$script_name"' not in text
+    assert 'PORT_GUARD="$RELEASE_DIR/tools/release_exporter_port_guard.py"' in text
+    assert '--mode free --unit "$unit" --timeout-seconds 12' in text
+    assert '--mode owned --unit "$unit" --timeout-seconds 12' in text
+    assert 'HOST_RECONCILE_FAILURE step=' in text
+    assert 'kill "$pid"' not in text
+    assert text.index('--mode free --unit') < text.index('--mode owned --unit')
+    assert text.index('timeout --signal=TERM --kill-after=5s 25s systemctl stop') < text.index('--mode free --unit')
     assert 'developer checkout dependency remains in $unit' in text
     assert 'JASON_HOST_SERVICE_RECONCILIATION=PASS' in text
     assert 'DEFERRED_MAINTENANCE_SERVICES' in text
@@ -184,7 +191,7 @@ def test_production_reconciliation_emits_candidate_source_boundary_evidence() ->
 def test_control_panel_exporter_is_reconciled_on_dedicated_port() -> None:
     text = RECONCILE.read_text(encoding="utf-8")
     assert "jason-operations-configuration-exporter.service" in text
-    assert "operations_configuration_exporter.py" in text
+    assert "jason-operations-configuration-exporter.service" in text
     assert "9477" in text
     unit = (
         REPO_ROOT
