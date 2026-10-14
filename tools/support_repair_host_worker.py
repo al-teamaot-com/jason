@@ -269,18 +269,67 @@ def eligible_support_items(items: list[dict[str, str]], open_issue_ids: set[str]
 def load_self_heal_incidents(root: Path = Path('/var/lib/jason/openclaw/self-heal')) -> list[dict[str, str]]:
     incidents: list[dict[str, str]] = []
     directory = root / 'incidents'
-    if not directory.exists():
+    # Old incident files remain durable evidence. Do not re-admit their entire
+    # directory as current work when GitHub becomes available after an outage:
+    # that created a burst of new issues from stale per-scan fingerprints.
+    # The v2 watchdog atomically publishes its CURRENT incident paths in
+    # state.json only after writing those records.
+    state_path = root / 'state.json'
+    if not state_path.is_file() or not directory.is_dir():
         return incidents
-    for path in sorted(directory.glob('*.json'))[:100]:
+    try:
+        state = json.loads(state_path.read_text(encoding='utf-8'))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise WorkerError('Self-heal live incident manifest unreadable') from exc
+    if not isinstance(state, Mapping):
+        raise WorkerError('Self-heal live incident manifest invalid')
+    if state.get('schema_version') != '2.0':
+        # Legacy incident files are preserved for evidence/manual disposition,
+        # but are never silently promoted as fresh v2 incidents.
+        return incidents
+    if state.get('state') not in {'repair_required', 'owner_action_required'}:
+        return incidents
+    active = state.get('incidents')
+    paths = state.get('incident_paths')
+    if not isinstance(active, list) or not isinstance(paths, list):
+        raise WorkerError('Self-heal live manifest lacks incident identity')
+    if len(active) > 12 or len(paths) > 12 or len(active) != len(paths):
+        raise WorkerError('Self-heal incident admission exceeds bounded manifest')
+    declared = {}
+    for item in active:
+        if not isinstance(item, Mapping):
+            raise WorkerError('Invalid self-heal incident identity')
+        fp = item.get('fingerprint')
+        family = item.get('family')
+        if (not isinstance(fp, str) or not re.fullmatch(r'[0-9a-f]{24}', fp)
+                or not isinstance(family, str) or not family.strip()
+                or fp in declared):
+            raise WorkerError('Invalid or duplicate self-heal fingerprint')
+        declared[fp] = family
+    seen = set()
+    for name in paths:
+        if not isinstance(name, str):
+            raise WorkerError('Invalid self-heal incident locator')
+        path = Path(name)
+        if (not path.is_absolute() or path.is_symlink()
+                or path.parent.resolve() != directory.resolve()
+                or not re.fullmatch(r'[0-9a-f]{24}\.json', path.name)):
+            raise WorkerError('Unsafe self-heal incident locator')
+        fp = path.stem
+        if fp not in declared or fp in seen:
+            raise WorkerError('Unbound or duplicate live self-heal incident')
+        seen.add(fp)
         try:
             value = json.loads(path.read_text(encoding='utf-8'))
-        except (OSError, ValueError, json.JSONDecodeError):
-            continue
-        if not isinstance(value, Mapping) or value.get('state') != 'repair_required':
-            continue
-        item_id = str(value.get('support_item') or '').strip().upper()
-        if not re.fullmatch(r'SUPPORT-AUTO-[A-F0-9]{12}', item_id):
-            continue
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            raise WorkerError('Live self-heal incident unreadable') from exc
+        if (not isinstance(value, Mapping) or value.get('schema_version') != '2.0'
+                or value.get('state') != 'repair_required'
+                or value.get('fingerprint') != fp
+                or value.get('family') != declared[fp]
+                or value.get('support_item') != 'SUPPORT-AUTO-' + fp[:12].upper()):
+            raise WorkerError('Live self-heal incident evidence mismatch')
+        item_id = str(value['support_item'])
         root_invariant = str(value.get('root_invariant') or '').strip()
         occurrence_count = int(value.get('occurrence_count') or 1)
         repair_level = int(value.get('repair_level') or 2)
@@ -302,6 +351,8 @@ def load_self_heal_incidents(root: Path = Path('/var/lib/jason/openclaw/self-hea
             'evidence': evidence[:1600],
             'acceptance': acceptance[:1600],
         })
+    if seen != set(declared):
+        raise WorkerError('Missing self-heal incident evidence')
     incidents.sort(key=lambda item: (PRIORITY.get(item['priority'], 99), item['id']))
     return incidents
 
