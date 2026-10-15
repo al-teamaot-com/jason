@@ -1367,6 +1367,53 @@ def reassess_model_scope_blocks(
     return resumed
 
 
+
+def readmit_recovered_reasoning(
+    state: dict[str, Any], eligible: list[dict[str, str]], spool: Path,
+    *, max_active: int,
+) -> list[str]:
+    """Resume at most available repair slots after exact failed reasoning recovers.
+
+    No new request, approval, provider write, or source patch is authorized here.
+    The existing implementation and independent acceptance gates remain mandatory.
+    """
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active = sum(1 for record in records.values() if isinstance(record, Mapping)
+                 and record.get('phase') in {'diagnosing', 'implementing', 'ci_repair_needed', 'ci_repairing'})
+    slots = max(0, max(1, int(max_active)) - active)
+    resumed: list[str] = []
+    for item in eligible:
+        if slots == 0:
+            break
+        record = records.get(item['id'])
+        if not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        reason = str(record.get('reason') or '')
+        if reason.startswith('edit reasoning failed: HTTP transport failed'):
+            phase, expected_kind = 'implementing', 'edit_plan'
+        elif reason.startswith('reasoning request failed: HTTP transport failed'):
+            phase, expected_kind = 'diagnosing', 'search_plan'
+        else:
+            continue
+        rid = str(record.get('reasoning_request_id') or '')
+        if not re.fullmatch(r'[a-f0-9]{64}', rid):
+            continue
+        response = reasoning_response(spool, rid)
+        if not isinstance(response, Mapping) or response.get('status') != 'succeeded':
+            continue
+        if response.get('request_id') != rid or response.get('kind') != expected_kind:
+            continue
+        if response.get('support_item') != item['id']:
+            continue
+        if record.get('reasoning_recovered_request_id') == rid:
+            continue
+        record.update({'phase': phase, 'reason': 'Re-admitted after exact reasoning request recovered.',
+                       'reasoning_recovered_request_id': rid, 'updated_at': now()})
+        resumed.append(item['id'])
+        slots -= 1
+    return resumed
+
+
 def load_state(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {'schema_version': '1.0', 'items': {}}
@@ -1486,6 +1533,7 @@ def main() -> int:
     gate = load_gate(repo)
     policy = gate.load_json(repo / 'config' / 'autonomous-repair-release-policy.json')
 
+    readmit_recovered_reasoning(state, support, spool, max_active=args.max_active)
     reassess_model_scope_blocks(state, support, spool, args.max_active)
     selected = select_reconcile_ids(state, support, args.max_active)
 

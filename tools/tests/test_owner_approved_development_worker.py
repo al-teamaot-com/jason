@@ -1600,3 +1600,23 @@ def test_intervening_upgrade_rejects_untrusted_or_missing_git_history(tmp_path):
         'a'*40, 'c'*40, repo,
     )
     assert not module.verified_intervening_worker_upgrade([], 'a'*40, 'a'*40, repo)
+
+
+def test_development_readmit_only_exact_recovered_response(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(module, 'active_support_count', lambda spool: 0)
+    rid = 'c' * 64
+    responses = tmp_path / 'reasoning' / 'responses'
+    responses.mkdir(parents=True)
+    (responses / f'{rid}.json').write_text(json.dumps({
+        'status': 'succeeded', 'request_id': rid, 'kind': 'search_plan',
+        'support_item': 'DEV-111', 'result': {'search_terms': ['foo']},
+    }))
+    record = {'phase': 'blocked', 'reason': 'development reasoning failed: HTTP transport failed',
+              'reasoning_request_id': rid}
+    state = {'items': {'DEV-111': record}}
+    assert module.readmit_recovered_development_reasoning(state, [{'id': 'DEV-111'}], tmp_path,
+                                                             max_active=2) == ['DEV-111']
+    assert record['phase'] == 'diagnosing'
+    assert module.readmit_recovered_development_reasoning(state, [{'id': 'DEV-111'}], tmp_path,
+                                                             max_active=2) == []
