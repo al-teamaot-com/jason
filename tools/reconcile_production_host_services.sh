@@ -262,8 +262,11 @@ ensure_owned_exporter() {
   local unit="$1"
   local check_output
   local attempt
-  for attempt in 1 2 3; do
-    if check_output="$(/usr/bin/python3 "$PORT_GUARD" --mode owned --unit "$unit" --timeout-seconds 12 2>&1)"; then
+  # A start --no-block may remain queued during host-wide systemd activity.
+  # Preserve a hard four-probe bound (4 x 30s), with no acceptance unless the
+  # independent socket/MainPID ownership check actually passes.
+  for attempt in 1 2 3 4; do
+    if check_output="$(/usr/bin/python3 "$PORT_GUARD" --mode owned --unit "$unit" --timeout-seconds 30 2>&1)"; then
       printf '%s\n' "$check_output"
       return 0
     fi
@@ -271,13 +274,25 @@ ensure_owned_exporter() {
     # This is the only bounded transient eligible for automatic recovery:
     # no socket owner, and systemd explicitly reported MainPID=0. All other
     # failures go through protected rollback, unchanged.
-    if [[ "$check_output" != *"has no listening owner (MainPID=0)"* ]] || [ "$attempt" -eq 3 ]; then
+    if [[ "$check_output" != *"has no listening owner (MainPID=0)"* ]] || [ "$attempt" -eq 4 ]; then
       echo "EXPORTER_OWNERSHIP_RECONCILIATION=FAIL unit=$unit attempt=$attempt" >&2
       return 1
     fi
     /usr/bin/python3 "$PORT_GUARD" --mode free --unit "$unit" --timeout-seconds 4
-    echo "EXPORTER_OWNERSHIP_RECONCILIATION=RETRY unit=$unit attempt=$attempt" >&2
-    timeout --signal=TERM --kill-after=5s 15s systemctl restart --no-block "$unit"
+    # Do not continually restart an in-flight systemd activation job; doing
+    # so can prolong a slow but legitimate start until after release rollback.
+    # Query the real queue. Failed/unknown queue reads must fail closed.
+    local queued_job
+    if ! queued_job="$(timeout --signal=TERM --kill-after=5s 15s systemctl show "$unit" --property=Job --value)"; then
+      echo "EXPORTER_OWNERSHIP_RECONCILIATION=FAIL unit=$unit reason=job_read_failed" >&2
+      return 1
+    fi
+    if [ -n "$queued_job" ]; then
+      echo "EXPORTER_OWNERSHIP_RECONCILIATION=WAIT unit=$unit attempt=$attempt" >&2
+    else
+      echo "EXPORTER_OWNERSHIP_RECONCILIATION=RETRY unit=$unit attempt=$attempt" >&2
+      timeout --signal=TERM --kill-after=5s 15s systemctl restart --no-block "$unit"
+    fi
     sleep 3
   done
 }
