@@ -1056,6 +1056,141 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             with self.assertRaisesRegex(runner.ReleaseManagerError, "changed mid-transaction: policy_digest"):
                 runner.verify_controller_identity(pin, repo)
 
+    def test_operator_recovery_requires_owner_review_backup_and_git_main(self):
+        import json
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            old_root = root / SHA_B
+            new_root = root / SHA_A
+            old = old_root / "tools" / "release_manager_host_runner.py"
+            old.parent.mkdir(parents=True)
+            old.write_bytes(b"root-owned-original-runner")
+            new = new_root / "tools" / "release_manager_host_runner.py"
+            new.parent.mkdir(parents=True)
+            new.write_bytes(b"reviewed-fixed-runner")
+            policy = new_root / "config" / "release-manager-policy.json"
+            policy.parent.mkdir(parents=True)
+            policy.write_text("{}", encoding="utf-8")
+            installed = root / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+            installed.parent.mkdir(parents=True)
+            installed.write_bytes(new.read_bytes())
+            installed.chmod(0o755)
+            source_link = installed.parent / "release-manager-source"
+            source_link.symlink_to(old_root, target_is_directory=True)
+            backup = installed.with_name(
+                installed.name + ".recovery-backup-"
+                + runner.file_digest(old)[len("sha256:"):][:16]
+            )
+            backup.write_bytes(old.read_bytes())
+            backup.chmod(0o600)
+            review_path = root / "material-review.json"
+            review = {
+                "schema_version": "1.0", "status": "approved",
+                "source_revision": SHA_A, "recorded_by": "person-al",
+            }
+            review_path.write_text(json.dumps(review), encoding="utf-8")
+
+            def git_result(args, **kwargs):
+                if "show" in args:
+                    return new.read_bytes()
+                if "refs/remotes/origin/main" in args:
+                    return SHA_A
+                if "rev-parse" in args:
+                    return SHA_A
+                raise AssertionError("unreviewed git operation: " + str(args))
+
+            with (
+                patch.object(runner, "CONTROLLER_SOURCE", installed),
+                patch.object(runner.Path, "home", return_value=root),
+                patch.object(runner, "CONTROLLER_RECOVERY_MANAGED_REPO", root / "managed"),
+                patch.object(runner, "CONTROLLER_RECOVERY_OWNER_REVIEW", review_path),
+                patch.object(runner, "_controller_recovery_old_source_verified", return_value=True),
+                patch.object(runner.subprocess, "check_output", side_effect=git_result),
+            ):
+                pin = runner.controller_identity(new_root)
+                self.assertEqual(pin["controller_recovery_mode"], "canonical_owner_recovery")
+                self.assertEqual(pin["executing_controller_revision"], SHA_A)
+                self.assertEqual(pin["controller_recovery_old_source"], str(old))
+                # The privileged host reconciliation changes the source link
+                # from old N to new N+1. Immutable old provenance is pinned.
+                source_link.unlink()
+                source_link.symlink_to(new_root, target_is_directory=True)
+                attested = runner.verify_controller_identity(
+                    pin, new_root, installed_candidate=True,
+                    installed_runner=installed,
+                )
+                self.assertEqual(attested["controller_handoff"], "staged_for_next_transaction")
+                self.assertEqual(attested["executing_controller_digest"], pin["executing_controller_digest"])
+
+                review["status"] = "denied"
+                review_path.write_text(json.dumps(review), encoding="utf-8")
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "owner review does not match"
+                ):
+                    runner.verify_controller_identity(
+                        pin, new_root, installed_candidate=True,
+                        installed_runner=installed,
+                    )
+                review["status"] = "approved"
+                review["source_revision"] = SHA_B
+                review_path.write_text(json.dumps(review), encoding="utf-8")
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "owner review does not match"
+                ):
+                    runner.verify_controller_identity(
+                        pin, new_root, installed_candidate=True,
+                        installed_runner=installed,
+                    )
+                review["source_revision"] = SHA_A
+                review_path.write_text(json.dumps(review), encoding="utf-8")
+                backup.write_bytes(b"altered-backup")
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "backup missing or altered"
+                ):
+                    runner.verify_controller_identity(
+                        pin, new_root, installed_candidate=True,
+                        installed_runner=installed,
+                    )
+                backup.write_bytes(old.read_bytes())
+                new.write_bytes(b"unreviewed-candidate")
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "installed candidate differs"
+                ):
+                    runner.verify_controller_identity(
+                        pin, new_root, installed_candidate=True,
+                        installed_runner=installed,
+                    )
+
+    def test_operator_recovery_missing_review_fails_closed(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / SHA_A
+            old = root / SHA_B / "tools" / "release_manager_host_runner.py"
+            old.parent.mkdir(parents=True)
+            old.write_bytes(b"old")
+            installed = root / "release_manager_host_runner.py"
+            installed.write_bytes(b"new")
+            backup = installed.with_name(
+                installed.name + ".recovery-backup-"
+                + runner.file_digest(old)[len("sha256:"):][:16]
+            )
+            backup.write_bytes(b"old")
+            backup.chmod(0o600)
+            (repo / "tools").mkdir(parents=True)
+            (repo / "tools" / "release_manager_host_runner.py").write_bytes(b"new")
+            with (
+                patch.object(runner, "_controller_recovery_old_source_verified", return_value=True),
+                patch.object(runner, "CONTROLLER_RECOVERY_OWNER_REVIEW", root / "missing-review.json"),
+                patch.object(runner.subprocess, "check_output", side_effect=[
+                    SHA_A, SHA_A, b"new",
+                ]),
+            ):
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "exact owner review missing"
+                ):
+                    runner._operator_recovery_identity(repo, installed, old)
+
     def test_controller_self_update_pins_old_runner_and_attests_installed_new_runner(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -1183,7 +1318,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 runner.Path, "home", return_value=root
             ):
                 with self.assertRaisesRegex(
-                    runner.ReleaseManagerError, "differs from immutable executing source"
+                    runner.ReleaseManagerError, "controller recovery old source is not root immutable"
                 ):
                     runner.controller_identity(new)
 
