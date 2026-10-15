@@ -35,6 +35,8 @@ class PlanGrantLedger:
                 plan_id TEXT PRIMARY KEY, approval_id TEXT NOT NULL UNIQUE,
                 approver TEXT NOT NULL, fingerprint TEXT NOT NULL,
                 scope_json TEXT NOT NULL, decided_at TEXT NOT NULL)''')
+            db.execute('''CREATE TABLE IF NOT EXISTS revoked_plan_grants (
+                plan_id TEXT PRIMARY KEY, revoked_at TEXT NOT NULL, reason TEXT NOT NULL)''')
 
     def _connection(self):
         db = sqlite3.connect(self.path, timeout=15)
@@ -49,7 +51,8 @@ class PlanGrantLedger:
         if decision.decided_at.tzinfo is None:
             raise ValueError('decision time must be timezone-aware')
         require_plan_scope(scope, ProposedPlanStep(scope.plan_id, scope.organization_id,
-            scope.policy_digest, next(iter(scope.allowed_capabilities)), None, 0, False), now=decision.decided_at)
+            scope.policy_digest, next(iter(scope.allowed_capabilities)),
+            next(iter(scope.allowed_clients)) if scope.allowed_clients else None, 0, False), now=decision.decided_at)
         data = json.dumps({'plan_id': scope.plan_id, 'organization_id': scope.organization_id,
             'policy_digest': scope.policy_digest, 'allowed_capabilities': sorted(scope.allowed_capabilities),
             'allowed_clients': sorted(scope.allowed_clients), 'max_risk': scope.max_risk,
@@ -59,9 +62,20 @@ class PlanGrantLedger:
                 scope.plan_id, decision.approval_id, decision.approver_identity_id,
                 decision.plan_fingerprint, data, decision.decided_at.isoformat()))
 
+    def revoke(self, plan_id: str, *, at: datetime, reason: str) -> None:
+        if not plan_id or not reason.strip() or at.tzinfo is None:
+            raise ValueError('revocation needs plan, reason, and aware timestamp')
+        with self._connection() as db:
+            if db.execute('SELECT 1 FROM plan_grants WHERE plan_id=?', (plan_id,)).fetchone() is None:
+                raise PermissionError('unknown plan cannot be revoked')
+            db.execute('INSERT INTO revoked_plan_grants VALUES (?,?,?)', (plan_id, at.isoformat(), reason))
+
     def require_grant(self, step: ProposedPlanStep, *, plan_fingerprint: str, now: datetime) -> None:
         with self._connection() as db:
             row = db.execute('SELECT fingerprint, scope_json FROM plan_grants WHERE plan_id=?', (step.plan_id,)).fetchone()
+            revoked = db.execute('SELECT 1 FROM revoked_plan_grants WHERE plan_id=?', (step.plan_id,)).fetchone()
+        if revoked:
+            raise PermissionError('plan authorization revoked')
         if row is None or not plan_fingerprint or row[0] != plan_fingerprint:
             raise PermissionError('missing grant or changed plan fingerprint')
         data = json.loads(row[1])

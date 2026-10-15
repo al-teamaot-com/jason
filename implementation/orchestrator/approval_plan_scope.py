@@ -54,7 +54,7 @@ def require_plan_scope(scope: ApprovedPlanScope, step: ProposedPlanStep, *, now:
         raise PermissionError('capability outside approved plan')
     if step.risk < 0 or step.risk > scope.max_risk:
         raise PermissionError('risk exceeds approved ceiling')
-    if step.client_id is not None and step.client_id not in scope.allowed_clients:
+    if step.client_id not in scope.allowed_clients and not (step.client_id is None and not scope.allowed_clients):
         raise PermissionError('client outside approved plan')
     if step.production and not scope.production_allowed:
         raise PermissionError('production not included in plan')

@@ -45,3 +45,20 @@ def test_changed_plan_and_tenant_fail(tmp_path):
         ledger.require_grant(replace(step, organization_id='other'), plan_fingerprint='plan-digest-1', now=NOW)
     with pytest.raises(PermissionError):
         ledger.require_grant(step, plan_fingerprint='plan-digest-1', now=scope.expires_at)
+
+
+def test_revocation_survives_restart(tmp_path):
+    ledger, scope, decision, step = make_objects(tmp_path)
+    ledger.record(scope, decision)
+    ledger.revoke(scope.plan_id, at=NOW, reason='owner cancellation')
+    with pytest.raises(PermissionError, match='revoked'):
+        PlanGrantLedger(tmp_path / 'grants.db').require_grant(step, plan_fingerprint='plan-digest-1', now=NOW)
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.revoke(scope.plan_id, at=NOW, reason='replay')
+
+
+def test_client_scope_cannot_be_bypassed_with_null(tmp_path):
+    ledger, scope, decision, step = make_objects(tmp_path)
+    ledger.record(scope, decision)
+    with pytest.raises(PermissionError, match='client'):
+        ledger.require_grant(replace(step, client_id=None), plan_fingerprint='plan-digest-1', now=NOW)
