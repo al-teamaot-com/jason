@@ -265,7 +265,7 @@ def _recovered_exporter_probe(tmp_path: Path, mode: str) -> tuple[int, str, list
 
     script = RECONCILE.read_text(encoding="utf-8")
     start = script.index("ensure_owned_exporter() {")
-    end = script.index('\nfor unit in "${EXPORTER_UNITS[@]}"; do\n  CURRENT_UNIT="$unit"\n  timeout', start)
+    end = script.index('\nfor unit in "${EXPORTER_UNITS[@]}"; do', start)
     helper = script[start:end].replace(
         '/usr/bin/python3 "$PORT_GUARD"', 'python3 "$PORT_GUARD"'
     )
@@ -331,7 +331,7 @@ def test_exporter_ownership_guard_can_recover_only_verified_empty_socket(tmp_pat
     assert status == 0, stderr
     assert events == [
         "guard owned", "guard free",
-        "systemctl restart jason-status-exporter.service",
+        "systemctl restart --no-block jason-status-exporter.service",
         "guard owned",
     ]
 
@@ -349,4 +349,15 @@ def test_exporter_ownership_guard_persistent_absence_stays_fatal(tmp_path: Path)
     assert "EXPORTER_OWNERSHIP_RECONCILIATION=FAIL" in stderr
     assert events.count("guard owned") == 3
     assert events.count("guard free") == 2
-    assert events.count("systemctl restart jason-status-exporter.service") == 2
+    assert events.count("systemctl restart --no-block jason-status-exporter.service") == 2
+
+def test_exporter_activation_queues_nonblocking_start_and_waits_for_real_port_owner() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    assert 'systemctl enable --now "$unit"' not in text
+    assert 'systemctl start --no-block "$unit"' in text
+    assert 'systemctl restart --no-block "$unit"' in text
+    assert 'timeout --signal=TERM --kill-after=5s 15s systemctl enable "$unit"' in text
+    assert 'timeout --signal=TERM --kill-after=5s 15s systemctl start --no-block "$unit"' in text
+    assert 'timeout --signal=TERM --kill-after=5s 15s systemctl restart --no-block "$unit"' in text
+    assert text.index('systemctl start --no-block "$unit"') < text.index('ensure_owned_exporter "$unit"')
+    assert text.index('ensure_owned_exporter "$unit"') < text.index('if [ "$(systemctl is-active "$unit")" != "active" ]')

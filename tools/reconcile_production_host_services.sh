@@ -277,13 +277,20 @@ ensure_owned_exporter() {
     fi
     /usr/bin/python3 "$PORT_GUARD" --mode free --unit "$unit" --timeout-seconds 4
     echo "EXPORTER_OWNERSHIP_RECONCILIATION=RETRY unit=$unit attempt=$attempt" >&2
-    timeout --signal=TERM --kill-after=5s 25s systemctl restart "$unit"
+    timeout --signal=TERM --kill-after=5s 15s systemctl restart --no-block "$unit"
     sleep 3
   done
 }
 for unit in "${EXPORTER_UNITS[@]}"; do
   CURRENT_UNIT="$unit"
-  timeout --signal=TERM --kill-after=5s 25s systemctl enable --now "$unit"
+  # Enabling and starting are separate bounded operations. The old
+  # systemctl enable --now waited synchronously on a systemd start job and
+  # timed out during D-Bus pressure even though the service then started.
+  # Queue the job nonblocking and require the independent PID/socket guard
+  # to prove the exporter actually owns its listener. No systemctl success
+  # response alone can make an exporter count as healthy.
+  timeout --signal=TERM --kill-after=5s 15s systemctl enable "$unit"
+  timeout --signal=TERM --kill-after=5s 15s systemctl start --no-block "$unit"
   ensure_owned_exporter "$unit"
 done
 CURRENT_UNIT=""
