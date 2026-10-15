@@ -11,7 +11,7 @@ Describe the operational problem and the measurable result this change supports.
 
 ## Reuse assessment
 
-Reusable-by-default design review (required for material changes):
+Reusable-by-default design review (required for material changes). Keep this assessment proportional to the change; justify genuinely local-only work rather than introducing abstractions without consumers:
 
 - [ ] Inspected existing shared capabilities, services, adapters, and construction guidance before building new functionality.
 - [ ] Identified the shared/provider-neutral interface, or justified why this feature is legitimately workflow-specific.
