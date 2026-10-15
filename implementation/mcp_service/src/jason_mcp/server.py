@@ -134,6 +134,8 @@ from jason_runtime.resolution_memory_runtime import (
 from jason_runtime.datto_component_scope import (
     DATTO_AD_HOC_POWERSHELL_NAME,
     DATTO_AD_HOC_POWERSHELL_UID,
+    DATTO_AD_HOC_LINUX_SHELL_NAME,
+    DATTO_AD_HOC_LINUX_SHELL_UID,
     DATTO_EXECUTION_COMPONENTS_JSON_ENV,
     DATTO_APPROVAL_MODE_PER_RUN,
     configured_datto_components,
@@ -3590,6 +3592,26 @@ def _canonicalize_governed_action_arguments(
         raise ValueError(
             "DATTO_COMPONENT_VARIABLES_INVALID"
         )
+
+    # Arbitrary Linux shell execution is a separately enrolled worker
+    # capability, not a general permission on every managed endpoint.
+    # The configured allowlist is operator-controlled, never caller-supplied.
+    if (
+        selected_component.uid == DATTO_AD_HOC_LINUX_SHELL_UID
+        or selected_component.name.casefold()
+        == DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
+    ):
+        if (
+            selected_component.uid != DATTO_AD_HOC_LINUX_SHELL_UID
+            or selected_component.name.casefold()
+            != DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
+        ):
+            raise ValueError("DATTO_LINUX_SHELL_COMPONENT_IDENTITY_MISMATCH")
+        approved_worker = os.environ.get(
+            "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
+        ).strip()
+        if not approved_worker or requested_device != approved_worker:
+            raise ValueError("DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED")
 
     # Only exact server-resolved component identity and provider-neutral values
     # required by the runtime are forwarded. The model cannot widen the set.
