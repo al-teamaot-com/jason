@@ -9,6 +9,27 @@ Describe the operational problem and the measurable result this change supports.
 - Maximum operating mode:
 - Provider dependencies:
 
+## Reuse assessment
+
+Reusable-by-default design review (required for material changes). Keep this assessment proportional to the change; justify genuinely local-only work rather than introducing abstractions without consumers:
+
+- [ ] Inspected existing shared capabilities, services, adapters, and construction guidance before building new functionality.
+- [ ] Identified the shared/provider-neutral interface, or justified why this feature is legitimately workflow-specific.
+- [ ] Kept provider-specific behavior in adapters and business authority in existing governance/policy boundaries.
+- [ ] Made tenant/client/role-specific behavior configurable; avoided hardcoded principals, endpoints, and workflow recipients.
+- [ ] Documented existing and expected consumers, versioned contracts, compatibility, and tests (ideally two consumers when applicable).
+- [ ] Considered idempotency, audit/evidence, observability, degraded/fail-closed behavior, and safe retirement.
+
+Reuse decision: reuse existing / extend shared / introduce shared / justified local-only
+
+Existing component(s) considered:
+
+Shared interface and prospective consumers:
+
+Justification if workflow-specific:
+
+Tests proving composability and isolation:
+
 ## Governance and risk
 
 - [ ] Human authority remains explicit.
