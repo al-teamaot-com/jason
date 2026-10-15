@@ -254,10 +254,37 @@ for unit in "${EXPORTER_UNITS[@]}"; do
 done
 # systemctl active does not prove that a freshly started Python exporter won
 # its socket. Require matching listening socket owner and systemd MainPID.
+# The privileged host may transiently lose its D-Bus connection while services
+# are being activated. Recover only the bounded case where the *approved*
+# exporter owns no process AND its socket is genuinely free; never retry an
+# unknown/foreign listener, unexpected ownership, or missing MainPID evidence.
+ensure_owned_exporter() {
+  local unit="$1"
+  local check_output
+  local attempt
+  for attempt in 1 2 3; do
+    if check_output="$(/usr/bin/python3 "$PORT_GUARD" --mode owned --unit "$unit" --timeout-seconds 12 2>&1)"; then
+      printf '%s\n' "$check_output"
+      return 0
+    fi
+    printf '%s\n' "$check_output" >&2
+    # This is the only bounded transient eligible for automatic recovery:
+    # no socket owner, and systemd explicitly reported MainPID=0. All other
+    # failures go through protected rollback, unchanged.
+    if [[ "$check_output" != *"has no listening owner (MainPID=0)"* ]] || [ "$attempt" -eq 3 ]; then
+      echo "EXPORTER_OWNERSHIP_RECONCILIATION=FAIL unit=$unit attempt=$attempt" >&2
+      return 1
+    fi
+    /usr/bin/python3 "$PORT_GUARD" --mode free --unit "$unit" --timeout-seconds 4
+    echo "EXPORTER_OWNERSHIP_RECONCILIATION=RETRY unit=$unit attempt=$attempt" >&2
+    timeout --signal=TERM --kill-after=5s 25s systemctl restart "$unit"
+    sleep 3
+  done
+}
 for unit in "${EXPORTER_UNITS[@]}"; do
   CURRENT_UNIT="$unit"
-  systemctl enable --now "$unit"
-  /usr/bin/python3 "$PORT_GUARD" --mode owned --unit "$unit" --timeout-seconds 12
+  timeout --signal=TERM --kill-after=5s 25s systemctl enable --now "$unit"
+  ensure_owned_exporter "$unit"
 done
 CURRENT_UNIT=""
 for timer in "${MAINTENANCE_TIMERS[@]}"; do

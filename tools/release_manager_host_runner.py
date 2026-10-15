@@ -1957,49 +1957,97 @@ def verify_release_ccc_report(
     }
 
 
+# Keep the CCC itself authoritative. The only permitted bounded retry is an
+# independently refreshed post-deployment checker report whose *sole* failing
+# check is a transient Prometheus scrape gap while host units settle. Each
+# report remains subject to exact SHA, complete checks and freshness proofs.
+CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS = (15, 20, 25)
+
+
 def run_release_ccc_gate(
     candidate_sha: str, runtime_sha: str, *, before_mutation: bool,
     ccc_runner: Path = Path("/opt/jason/ccc-current/tools/run_ccc.py"),
     ccc_config: Path = Path("/var/lib/jason/ccc/ccc.json"),
     latest: Path = Path("/var/lib/jason/ccc/latest.json"),
 ) -> dict[str, Any]:
-    """Run the installed independent checker and bind fresh evidence to SHA.
+    """Demand a fresh independent CCC PASS; boundedly recheck scrape races.
 
-    A NOT_PROVEN checker exit is admissible only at pre-mutation transition,
-    and only for its sole expected runtime-source-alignment check.
+    Never reinterpret FAIL as PASS. For a single transient monitoring FAIL,
+    request a completely new checker run while keeping the production
+    transaction lock held. All non-monitoring failures fail immediately.
     """
     if not ccc_runner.is_file() or not ccc_config.is_file():
         raise ReleaseManagerError("independent CCC checker/config unavailable")
-    started = datetime.now(timezone.utc)
-    try:
-        completed = subprocess.run(
-            ["python3", str(ccc_runner), "--config", str(ccc_config),
-             "--force", "--trigger", "material_change"],
-            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            check=False, timeout=300,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ReleaseManagerError("independent CCC execution did not complete") from exc
-    if not latest.is_file():
-        raise ReleaseManagerError("independent CCC did not persist a report")
-    report = json.loads(latest.read_text(encoding="utf-8"))
-    if not isinstance(report, dict):
-        raise ReleaseManagerError("CCC report is not a JSON object")
-    try:
-        finished = datetime.fromisoformat(str(report.get("finished_at") or ""))
-    except (ValueError, TypeError) as exc:
-        raise ReleaseManagerError("CCC completion timestamp missing") from exc
-    if (finished.tzinfo is None or
-            finished < started - timedelta(seconds=2) or
-            finished > datetime.now(timezone.utc) + timedelta(seconds=15)):
-        raise ReleaseManagerError("CCC report is stale, future-dated or not independently refreshed")
-    evidence = verify_release_ccc_report(
-        report, candidate_sha=candidate_sha, runtime_sha=runtime_sha,
-        before_mutation=before_mutation,
-    )
-    if completed.returncode != 0 and evidence["status"] == "PASS":
-        raise ReleaseManagerError("independent CCC process failed despite PASS report")
-    return evidence
+    failed_monitoring_runs: list[str] = []
+    for attempt in range(len(CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS) + 1):
+        started = datetime.now(timezone.utc)
+        try:
+            completed = subprocess.run(
+                ["python3", str(ccc_runner), "--config", str(ccc_config),
+                 "--force", "--trigger", "material_change"],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                check=False, timeout=300,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ReleaseManagerError("independent CCC execution did not complete") from exc
+        if not latest.is_file():
+            raise ReleaseManagerError("independent CCC did not persist a report")
+        report = json.loads(latest.read_text(encoding="utf-8"))
+        if not isinstance(report, dict):
+            raise ReleaseManagerError("CCC report is not a JSON object")
+        try:
+            finished = datetime.fromisoformat(str(report.get("finished_at") or ""))
+        except (ValueError, TypeError) as exc:
+            raise ReleaseManagerError("CCC completion timestamp missing") from exc
+        if (finished.tzinfo is None or
+                finished < started - timedelta(seconds=2) or
+                finished > datetime.now(timezone.utc) + timedelta(seconds=15)):
+            raise ReleaseManagerError(
+                "CCC report is stale, future-dated or not independently refreshed"
+            )
+        try:
+            evidence = verify_release_ccc_report(
+                report, candidate_sha=candidate_sha, runtime_sha=runtime_sha,
+                before_mutation=before_mutation,
+            )
+        except ReleaseManagerError as exc:
+            # verify_release_ccc_report checked exact candidate and runtime SHA,
+            # required check set, unique IDs, and report schema BEFORE raising
+            # this specific failure. A missing/unverified check can never retry.
+            nonpassing = [
+                (x["check_id"], x["status"]) for x in report["checks"]
+                if x["status"] != "PASS"
+            ] if isinstance(report.get("checks"), list) else []
+            transient = (
+                not before_mutation
+                and str(exc) == "post-mutation CCC did not certify exact live candidate"
+                and report.get("status") == "FAIL"
+                and nonpassing == [("prometheus-targets", "FAIL")]
+                and completed.returncode != 0
+            )
+            if transient and attempt < len(CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS):
+                run_id = str(report["run_id"])
+                if run_id in failed_monitoring_runs:
+                    raise ReleaseManagerError("CCC repeated a prior monitoring report")
+                failed_monitoring_runs.append(run_id)
+                print(
+                    f"CCC_MONITORING_TRANSIENT=RECHECK run_id={run_id} "
+                    f"attempt={attempt + 1}",
+                    flush=True,
+                )
+                time.sleep(CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS[attempt])
+                continue
+            raise
+        if completed.returncode != 0 and evidence["status"] == "PASS":
+            raise ReleaseManagerError("independent CCC process failed despite PASS report")
+        if failed_monitoring_runs:
+            if str(evidence["run_id"]) in failed_monitoring_runs:
+                raise ReleaseManagerError("CCC reused an earlier failed report identifier")
+            evidence["transient_monitoring_retries"] = len(failed_monitoring_runs)
+            evidence["failed_monitoring_run_ids"] = failed_monitoring_runs
+        return evidence
+    raise ReleaseManagerError("independent CCC monitoring check never certified")
+
 
 
 def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:

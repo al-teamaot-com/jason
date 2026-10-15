@@ -1862,3 +1862,135 @@ def test_release_contract_rejects_missing_unknown_or_mismatched_risk():
     record['release_manifest']['risk_profile'] = 'normal'
     with pytest.raises(runner.ReleaseManagerError, match='risk classification differs'):
         runner.validate_release_record_contract(record)
+
+
+def test_ccc_postflight_transient_prometheus_rechecks_fresh_report_and_audits_runs(tmp_path):
+    from types import SimpleNamespace
+    import json
+
+    ccc = tmp_path / "run_ccc.py"
+    ccc.write_text("")
+    config = tmp_path / "ccc.json"
+    config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    calls = []
+
+    def ccc_check(*args, **kwargs):
+        calls.append(len(calls) + 1)
+        report = _ccc_test_report(runtime=SHA_A, mode="pass")
+        report["run_id"] = f"independent-check-{calls[-1]}"
+        report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        failed = calls[-1] <= 2
+        if failed:
+            report["status"] = "FAIL"
+            next(x for x in report["checks"] if x["check_id"] == "prometheus-targets")["status"] = "FAIL"
+        latest.write_text(json.dumps(report))
+        return SimpleNamespace(returncode=1 if failed else 0)
+
+    with patch.object(runner.subprocess, "run", side_effect=ccc_check), patch.object(runner.time, "sleep") as sleep:
+        evidence = runner.run_release_ccc_gate(
+            SHA_A, SHA_A, before_mutation=False,
+            ccc_runner=ccc, ccc_config=config, latest=latest,
+        )
+    assert evidence["mode"] == "live_certified"
+    assert evidence["checks"]["prometheus-targets"] == "PASS"
+    assert evidence["transient_monitoring_retries"] == 2
+    assert evidence["failed_monitoring_run_ids"] == [
+        "independent-check-1", "independent-check-2",
+    ]
+    assert len(calls) == 3
+    assert [x.args for x in sleep.call_args_list] == [(15,), (20,)]
+
+
+def test_ccc_postflight_persistent_monitoring_failure_remains_fatal(tmp_path):
+    from types import SimpleNamespace
+    import json
+    import pytest
+
+    ccc = tmp_path / "run_ccc.py"
+    ccc.write_text("")
+    config = tmp_path / "ccc.json"
+    config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    runs = []
+
+    def ccc_check(*args, **kwargs):
+        runs.append(len(runs) + 1)
+        report = _ccc_test_report(runtime=SHA_A, mode="pass")
+        report["status"] = "FAIL"
+        report["run_id"] = f"independent-check-{runs[-1]}"
+        report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        next(x for x in report["checks"] if x["check_id"] == "prometheus-targets")["status"] = "FAIL"
+        latest.write_text(json.dumps(report))
+        return SimpleNamespace(returncode=1)
+
+    with patch.object(runner.subprocess, "run", side_effect=ccc_check), patch.object(runner.time, "sleep") as sleep:
+        with pytest.raises(runner.ReleaseManagerError, match="post-mutation CCC did not certify"):
+            runner.run_release_ccc_gate(
+                SHA_A, SHA_A, before_mutation=False,
+                ccc_runner=ccc, ccc_config=config, latest=latest,
+            )
+    assert len(runs) == 4
+    assert [x.args for x in sleep.call_args_list] == [(15,), (20,), (25,)]
+
+
+def test_ccc_postflight_other_failures_and_wrong_identity_do_not_retry(tmp_path):
+    from types import SimpleNamespace
+    import json
+    import pytest
+
+    ccc = tmp_path / "run_ccc.py"
+    ccc.write_text("")
+    config = tmp_path / "ccc.json"
+    config.write_text("{}")
+    latest = tmp_path / "latest.json"
+
+    for check, source in [
+        ("systemd-failed-units", SHA_A),
+        ("openclaw-authority-health", SHA_A),
+        ("prometheus-targets", SHA_B),
+    ]:
+        report = _ccc_test_report(runtime=SHA_A, mode="pass")
+        report["status"] = "FAIL"
+        report["source_revision"] = source
+        report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        next(x for x in report["checks"] if x["check_id"] == check)["status"] = "FAIL"
+        latest.write_text(json.dumps(report))
+        with patch.object(runner.subprocess, "run", return_value=SimpleNamespace(returncode=1)) as proc, patch.object(runner.time, "sleep") as sleep:
+            with pytest.raises(runner.ReleaseManagerError):
+                runner.run_release_ccc_gate(
+                    SHA_A, SHA_A, before_mutation=False,
+                    ccc_runner=ccc, ccc_config=config, latest=latest,
+                )
+        assert proc.call_count == 1
+        sleep.assert_not_called()
+
+
+def test_ccc_postflight_reused_failed_run_id_fails_closed(tmp_path):
+    from types import SimpleNamespace
+    import json
+    import pytest
+
+    ccc = tmp_path / "run_ccc.py"
+    ccc.write_text("")
+    config = tmp_path / "ccc.json"
+    config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    report = _ccc_test_report(runtime=SHA_A, mode="pass")
+    report["status"] = "FAIL"
+    report["run_id"] = "reused-ccc-run"
+    next(x for x in report["checks"] if x["check_id"] == "prometheus-targets")["status"] = "FAIL"
+
+    def ccc_check(*args, **kwargs):
+        report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        latest.write_text(json.dumps(report))
+        return SimpleNamespace(returncode=1)
+
+    with patch.object(runner.subprocess, "run", side_effect=ccc_check) as proc, patch.object(runner.time, "sleep") as sleep:
+        with pytest.raises(runner.ReleaseManagerError, match="repeated a prior monitoring report"):
+            runner.run_release_ccc_gate(
+                SHA_A, SHA_A, before_mutation=False,
+                ccc_runner=ccc, ccc_config=config, latest=latest,
+            )
+    assert proc.call_count == 2
+    assert sleep.call_count == 1
