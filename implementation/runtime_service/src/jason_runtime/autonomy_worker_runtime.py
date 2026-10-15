@@ -2380,6 +2380,8 @@ class OperationalAutonomyMaintenance:
             unsupported=unsupported,
             governance_blocked=governance_blocked,
             assigned_elsewhere=assigned_elsewhere,
+            # Observed occupancy at scan end; not admission capacity at start.
+            # Some started work has already advanced into terminal/waiting.
             active_slots=len(self.store.list_open()),
             selected=started,
             waiting_device=waiting_device,
