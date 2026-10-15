@@ -1123,3 +1123,27 @@ def test_recovery_rejects_mismatched_reasoning_reply(tmp_path):
         'reasoning_request_id': rid}}}
     assert worker.readmit_recovered_reasoning(state, [{'id': 'SUPPORT-OPS-123'}], tmp_path,
                                                 max_active=2) == []
+
+
+def test_recovered_reasoning_respects_existing_active_worker_capacity(tmp_path):
+    import json
+    root = tmp_path / 'reasoning' / 'responses'
+    root.mkdir(parents=True)
+    state = {'items': {'SUPPORT-OPS-1': {'phase': 'diagnosing'}}}
+    eligible = []
+    for index, letter in enumerate('abc', start=2):
+        rid = letter * 64
+        item_id = f'SUPPORT-OPS-{index}'
+        (root / f'{rid}.json').write_text(json.dumps({
+            'status': 'succeeded', 'request_id': rid, 'kind': 'edit_plan',
+            'support_item': item_id, 'result': {'edits': []},
+        }))
+        state['items'][item_id] = {
+            'phase': 'blocked', 'reason': 'edit reasoning failed: HTTP transport failed with status 400',
+            'reasoning_request_id': rid,
+        }
+        eligible.append({'id': item_id})
+    resumed = worker.readmit_recovered_reasoning(state, eligible, tmp_path, max_active=2)
+    assert resumed == ['SUPPORT-OPS-2']
+    assert state['items']['SUPPORT-OPS-3']['phase'] == 'blocked'
+    assert state['items']['SUPPORT-OPS-4']['phase'] == 'blocked'
