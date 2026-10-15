@@ -1187,6 +1187,26 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 ):
                     runner.controller_identity(new)
 
+    def test_scheduled_controller_refuses_missing_immutable_source_link(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            candidate = root / SHA_A
+            c = candidate / "tools" / "release_manager_host_runner.py"
+            c.parent.mkdir(parents=True)
+            c.write_bytes(b"reviewed-candidate")
+            (candidate / "config").mkdir()
+            (candidate / "config" / "release-manager-policy.json").write_text("{}")
+            installed = root / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+            installed.parent.mkdir(parents=True)
+            installed.write_bytes(b"old-controller")
+            with patch.object(runner, "CONTROLLER_SOURCE", installed), patch.object(
+                runner.Path, "home", return_value=root
+            ):
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "immutable source link missing"
+                ):
+                    runner.controller_identity(candidate)
+
     def test_closeout_records_both_controller_digests_and_staged_handoff(self):
         source = (ROOT / "tools" / "release_manager_host_runner.py").read_text(
             encoding="utf-8"
