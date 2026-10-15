@@ -253,3 +253,100 @@ def test_production_drift_watchdog_is_installed_after_cleanup() -> None:
     assert "JASON_PRODUCTION_DRIFT_GUARD=PASS" in text
     assert "JASON_ROLLBACK_CONTAINER_RETENTION=PASS" in text
     assert "systemctl --user reset-failed" in text
+
+
+def _recovered_exporter_probe(tmp_path: Path, mode: str) -> tuple[int, str, list[str]]:
+    """Execute the actual bounded shell helper with fake stateless host tools.
+
+    Only tool paths are swapped to local fixtures. No systemd, Docker or
+    production service is contacted.
+    """
+    import os
+
+    script = RECONCILE.read_text(encoding="utf-8")
+    start = script.index("ensure_owned_exporter() {")
+    end = script.index('\nfor unit in "${EXPORTER_UNITS[@]}"; do\n  CURRENT_UNIT="$unit"\n  timeout', start)
+    helper = script[start:end].replace(
+        '/usr/bin/python3 "$PORT_GUARD"', 'python3 "$PORT_GUARD"'
+    )
+    guard = tmp_path / "fake_guard.py"
+    guard.write_text(
+        """
+import os, sys
+from pathlib import Path
+log = Path(os.environ["PROBE_LOG"])
+calls = log.read_text().splitlines() if log.exists() else []
+check = sys.argv[sys.argv.index("--mode") + 1]
+calls.append("guard " + check)
+log.write_text("\\n".join(calls) + "\\n")
+if check == "free":
+    print("EXPORTER_PORT_GUARD=PASS check=free")
+    sys.exit(0)
+attempt = sum(line == "guard owned" for line in calls)
+mode = os.environ["PROBE_MODE"]
+if mode == "foreign":
+    print("EXPORTER_PORT_GUARD=FAIL detail=owned by a different/unknown process", file=sys.stderr)
+    sys.exit(1)
+if mode == "persistent" or attempt == 1:
+    print("EXPORTER_PORT_GUARD=FAIL detail=port 9464 has no listening owner (MainPID=0)", file=sys.stderr)
+    sys.exit(1)
+print("EXPORTER_PORT_GUARD=PASS check=owned")
+"""
+    )
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    timeout = bindir / "timeout"
+    timeout.write_text(
+        '#!/bin/sh\n'
+        'shift 3\n'
+        'exec "$@"\n'
+    )
+    timeout.chmod(0o755)
+    systemctl = bindir / "systemctl"
+    systemctl.write_text(
+        '#!/bin/sh\n'
+        'printf "systemctl %s\\n" "$*" >> "$PROBE_LOG"\n'
+    )
+    systemctl.chmod(0o755)
+    sleep = bindir / "sleep"
+    sleep.write_text('#!/bin/sh\nexit 0\n')
+    sleep.chmod(0o755)
+    env = dict(os.environ)
+    env.update({
+        "PORT_GUARD": str(guard),
+        "PROBE_LOG": str(tmp_path / "calls"),
+        "PROBE_MODE": mode,
+        "PATH": str(bindir) + os.pathsep + env["PATH"],
+    })
+    result = subprocess.run(
+        ["bash", "-c", "set -eu\n" + helper + "\nensure_owned_exporter jason-status-exporter.service\n"],
+        env=env, capture_output=True, text=True, timeout=15,
+    )
+    events = (tmp_path / "calls").read_text().splitlines()
+    return result.returncode, result.stderr, events
+
+
+def test_exporter_ownership_guard_can_recover_only_verified_empty_socket(tmp_path: Path) -> None:
+    status, stderr, events = _recovered_exporter_probe(tmp_path, "transient")
+    assert status == 0, stderr
+    assert events == [
+        "guard owned", "guard free",
+        "systemctl restart jason-status-exporter.service",
+        "guard owned",
+    ]
+
+
+def test_exporter_ownership_guard_rejects_foreign_owner_without_restart(tmp_path: Path) -> None:
+    status, stderr, events = _recovered_exporter_probe(tmp_path, "foreign")
+    assert status != 0
+    assert "EXPORTER_OWNERSHIP_RECONCILIATION=FAIL" in stderr
+    assert events == ["guard owned"]
+
+
+def test_exporter_ownership_guard_persistent_absence_stays_fatal(tmp_path: Path) -> None:
+    status, stderr, events = _recovered_exporter_probe(tmp_path, "persistent")
+    assert status != 0
+    assert "EXPORTER_OWNERSHIP_RECONCILIATION=FAIL" in stderr
+    assert events.count("guard owned") == 3
+    assert events.count("guard free") == 2
+    assert events.count("systemctl restart jason-status-exporter.service") == 2

@@ -43,3 +43,39 @@ Keep it as a draft unless the production issue requires a new controlled
 release. Never weaken CCC required-check thresholds to make QuickBooks pass.
 
 Integration coordination: #1436, #1447, #1102.
+
+## Second same-SHA reissue: bounded exporter ownership recheck
+
+The governed `release-b906d9898f78db31-retry-1` was separately prepared,
+preproduction verified and Owner-approved under the SAME exact candidate
+SHA. The host reconciler again failed, this time before CCC, at the
+`system_service_activation` step. The full root-owned reconcile result
+`release-b906d9898f78-e2da75c2a706.json` proves that its managed Git
+sources were reconciled successfully; the release record's short error
+excerpt was truncated. During exporter activation systemd reported
+`Warning! D-Bus connection terminated`; the strict port-ownership guard
+then correctly rejected `jason-status-exporter.service` because TCP
+port 9464 had no listening owner and `MainPID=0`. The attempt performed a
+verified rollback to Sandbox LKG `5c65cde7`.
+
+The host script now allows up to two *explicit* bounded restarts of a
+candidate stateless exporter only for the precise guard failure
+`has no listening owner (MainPID=0)`. Before each restart, the SAME
+independent port guard must prove its socket is entirely free.
+`systemctl restart` is bounded with a 25-second timeout; the matching
+owned-port probe must then PASS. All missing/unrecognized ownership,
+occupied socket, nonzero MainPID with no listener, permanent D-Bus failures,
+non-allowlisted unit, or repeated failed restarts still cause the host
+reconciler to fail and the release manager to execute normal rollback.
+This procedure cannot kill a socket owner, change unit allowlists, or
+count a different process as the exporter.
+
+Regression tests run the extracted live shell helper against isolated
+mock port guard, timeout, systemctl and sleep binaries, covering a
+single startup gap, foreign port owner with no restart, and persistent
+listener absence after exactly two bounded restarts.
+
+This combined CCC/host repair requires a fresh reviewed source SHA, all
+protected CI, preproduction and explicit Owner approval before ANY live
+deployment. Do not reuse the older exact-SHA approval and do not edit
+root-owned state or source by hand.
