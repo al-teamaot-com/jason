@@ -30,3 +30,15 @@ Once N+1 is installed and independently healthy, prepare a **new SHA** for Stage
 ## Regression acceptance
 
 Tests exercise old executing bytes != new candidate bytes; matching installed N+1 succeeds, old executing identity remains N, tampered pinned immutable source, tampered candidate, altered installed bytes, changed policy and missing installer artifact all fail closed. The actual user-systemd copied runner path is tested independently: N's pinned immutable bytes survive replacement of the installed copy and release source symlink, while a fresh subsequent invocation selects N+1; a mismatching installed copy at transaction entry fails closed. All mandatory runtime, host, rollback and security tests must run on the protected branch and main merge.
+
+
+## Concurrent release-control change (#1112)
+
+PR #1112 modifies the host rollback reconcile worker and release-specific
+scheduled-control checks, whereas this patch changes the executing-versus-
+installed controller identity verification. Both touch the Release Manager
+source/tests, but their functions and safety assertions are independent. The
+integration owner must preserve #1112's historical rollback timer contract
+and this patch's immutable N / staged N+1 digest contract if both are merged.
+Re-run the combined protected tests on the final merged SHA before any
+controlled bootstrap or production promotion.
