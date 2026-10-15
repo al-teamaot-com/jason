@@ -1016,8 +1016,8 @@ def test_linux_shell_provider_prepares_only_enrolled_target(monkeypatch):
     mock_access_token(monkeypatch)
     value, transport = linux_worker_connector()
     prepared = value.prepare_governed_execution(linux_worker_request())
-    assert prepared.plan.resource_identifier == "claw2"
-    assert prepared.plan.payload["jobComponent"]["variables"] == [
+    assert prepared.resource_identifier == "claw2"
+    assert prepared.payload["jobComponent"]["variables"] == [
         {"name": "usrInput", "value": "uname -srm"}
     ]
     assert [call["method"] for call in transport.calls] == ["GET"]
