@@ -1,6 +1,6 @@
 # J-CHANGE-001 — Change Integration and Production Release Standard
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Status:** Active  
 **Owner:** Jason Architecture Authority  
 **Authority:** Jason Constitution; `CONTRIBUTING.md`; protected `main` branch validation  
@@ -8,7 +8,7 @@
 **Canonical source:** Yes  
 **Supersedes:** None  
 **Superseded by:** None  
-**Last reviewed:** 2026-09-28  
+**Last reviewed:** 2026-10-10  
 **Review interval:** On material change to source-control, CI, deployment, or production reconciliation  
 **Evidence references:** GitHub protected-branch checks; `tools/change_integration_gate.py`; `.github/workflows/production-release-preflight.yml`  
 **Security / data handling:** No secrets or provider payloads are required by this control.
@@ -24,6 +24,18 @@ The controlling principle is:
 ## Governing context
 
 This standard is subordinate to the Jason Constitution, canonical architecture, authority controls, and documentation-governance rules. It does not grant deployment or provider authority. It governs how approved source changes are reconciled before merge and how a production source revision is selected.
+
+## Mandatory prior-decision preflight (existing governance, no new release layer)
+
+Before proposing a material fix, refactoring a governed boundary, or preparing a production release, the workstream SHALL review the authoritative records for what was tried and decided previously. This is the operational entry check for J-404, not a new approval body, datastore, watchdog, or release authority.
+
+1. Resolve the exact support issue/change and current production evidence; inspect active, merged, rejected, and superseded PRs for the affected files/behavior, plus earlier rollback/acceptance failures.
+2. Read relevant approved decisions, standards, ADRs, runbooks, previous proof records, and the mandatory Jason fundamentals baseline. Resolve conflicting sources using the J-404 authority hierarchy, not whichever document or chat is easiest to find.
+3. Record in the existing support issue and PR **prior decisions and invariant(s)**, **approaches already tried and their results**, **current observed failure**, and **what new evidence distinguishes the proposed remedy**. Link evidence rather than recopying volatile production state.
+4. Do not reopen an explicitly accepted invariant, reintroduce a rejected fix, or recommend a contradictory repair without a separately approved decision change supported by fresh evidence. An unresolved contradiction or missing authoritative record blocks that specific proposed change, not unrelated safe diagnosis.
+5. If the investigation finds stale guidance, explicitly mark it superseded or reconcile it to its canonical owner while preserving its historical evidence. Do not erase previous failed proof.
+
+The existing J-CHANGE-001 integration/release gates and J-CHANGE-002 repair authority continue unchanged. This preflight MUST happen **before editing source**, not retroactively after a failed deployment.
 
 ## Authoritative statements
 
@@ -110,6 +122,7 @@ Automated documentation reconciliation may create follow-up PRs after validated 
 
 Before merging a material PR:
 
+0. Cite the historical-precedent preflight (accepted decisions, failed/rejected alternatives, current evidence, and reason this change differs) in the PR, or explicitly state that no material predecessor was found after checking the canonical sources.
 1. Confirm the PR head contains current `main`.
 2. Run protected validation.
 3. Review active overlapping PRs reported by the integration gate.
