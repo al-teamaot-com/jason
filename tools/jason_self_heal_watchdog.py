@@ -466,8 +466,12 @@ def autonomy_behavior_anomalies(
             failures.append(f"autonomy_invariant_violation:eligible_gt_evaluated:{cycle}")
         if numeric["selected"] > numeric["eligible"]:
             failures.append(f"autonomy_invariant_violation:selected_gt_eligible:{cycle}")
-        if numeric["selected"] > numeric["active_slots"]:
-            failures.append(f"autonomy_invariant_violation:selected_gt_active_slots:{cycle}")
+        # active_slots is the currently occupied slot count at scan
+        # completion, not admission capacity at decision time. Successfully
+        # started work can finish or move to WAITING in this scan. Comparing
+        # selected starts to post-scan occupancy creates false P0 incidents.
+        # The true admission bound remains enforced at each _admit() and
+        # preserved in the worker's own max_active_work_items checks.
 
     # Generic behavioral baseline: compare recent selection efficiency with Jason's
     # own older healthy-looking cycles instead of hard-coding a particular failure.
