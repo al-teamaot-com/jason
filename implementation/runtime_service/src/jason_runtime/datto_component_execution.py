@@ -58,6 +58,8 @@ from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.service import CapabilityInvoker
 
 from .datto_component_scope import (
+    DATTO_AD_HOC_LINUX_SHELL_NAME,
+    DATTO_AD_HOC_LINUX_SHELL_UID,
     DATTO_EXECUTION_COMPONENT_NAME_ENV,
     DATTO_EXECUTION_COMPONENT_UID_ENV,
     DATTO_EXECUTION_COMPONENTS_JSON_ENV,
@@ -754,6 +756,30 @@ class DattoRmmComponentExecutionConnector:
                 catalog_verified=True,
             )
         )
+        # Deny Linux shell at the provider boundary unless this runtime has
+        # separately enrolled the exact worker. MCP validation alone is not
+        # sufficient because other authorized call paths reach this invoker.
+        if (
+            selected_component.uid == DATTO_AD_HOC_LINUX_SHELL_UID
+            or selected_component.name.casefold()
+            == DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
+        ):
+            approved_worker = os.environ.get(
+                "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
+            ).strip()
+            if (
+                selected_component.uid != DATTO_AD_HOC_LINUX_SHELL_UID
+                or selected_component.name.casefold()
+                != DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
+                or not approved_worker
+                or requested_device != approved_worker
+            ):
+                raise PermissionError(
+                    "DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED"
+                )
+            if selected_component.requires_explicit_approval is not True:
+                raise PermissionError("DATTO_LINUX_SHELL_PER_RUN_REQUIRED")
+
         if (
             request.context.principal_id == "jason-autonomy-worker"
             and selected_component.requires_explicit_approval

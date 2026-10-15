@@ -74,7 +74,14 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'live MCP revision does not match requested host release' in text
     assert 'ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"' in text
     assert 'systemctl disable --now "$unit"' in text
-    assert 'pgrep -u al -f "$script_name"' in text
+    assert 'pgrep -u al -f "$script_name"' not in text
+    assert 'PORT_GUARD="$RELEASE_DIR/tools/release_exporter_port_guard.py"' in text
+    assert '--mode free --unit "$unit" --timeout-seconds 12' in text
+    assert '--mode owned --unit "$unit" --timeout-seconds 12' in text
+    assert 'HOST_RECONCILE_FAILURE step=' in text
+    assert 'kill "$pid"' not in text
+    assert text.index('--mode free --unit') < text.index('--mode owned --unit')
+    assert text.index('timeout --signal=TERM --kill-after=5s 25s systemctl stop') < text.index('--mode free --unit')
     assert 'developer checkout dependency remains in $unit' in text
     assert 'JASON_HOST_SERVICE_RECONCILIATION=PASS' in text
     assert 'DEFERRED_MAINTENANCE_SERVICES' in text
@@ -113,6 +120,10 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'curl --connect-timeout 2 --max-time 15 -fsS' in text
     assert 'exporter verification failed on port $port after 3 bounded attempts' in text
     assert 'timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"' in text
+    assert 'timeout --signal=TERM --kill-after=5s 180s systemctl start "$unit"' in text
+    assert 'if [ "$unit" = "jason-openclaw-authority-health.service" ]; then' in text
+    assert text.index('timeout --signal=TERM --kill-after=5s 180s systemctl start "$unit"') < text.index('timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"')
+    assert 'HOST_RECONCILE_FAILURE step=' in text
     assert 'timeout --signal=TERM --kill-after=5s 180s env JASON_REPO_ROOT=' in text
 
 
@@ -184,7 +195,7 @@ def test_production_reconciliation_emits_candidate_source_boundary_evidence() ->
 def test_control_panel_exporter_is_reconciled_on_dedicated_port() -> None:
     text = RECONCILE.read_text(encoding="utf-8")
     assert "jason-operations-configuration-exporter.service" in text
-    assert "operations_configuration_exporter.py" in text
+    assert "jason-operations-configuration-exporter.service" in text
     assert "9477" in text
     unit = (
         REPO_ROOT
@@ -242,3 +253,111 @@ def test_production_drift_watchdog_is_installed_after_cleanup() -> None:
     assert "JASON_PRODUCTION_DRIFT_GUARD=PASS" in text
     assert "JASON_ROLLBACK_CONTAINER_RETENTION=PASS" in text
     assert "systemctl --user reset-failed" in text
+
+
+def _recovered_exporter_probe(tmp_path: Path, mode: str) -> tuple[int, str, list[str]]:
+    """Execute the actual bounded shell helper with fake stateless host tools.
+
+    Only tool paths are swapped to local fixtures. No systemd, Docker or
+    production service is contacted.
+    """
+    import os
+
+    script = RECONCILE.read_text(encoding="utf-8")
+    start = script.index("ensure_owned_exporter() {")
+    end = script.index('\nfor unit in "${EXPORTER_UNITS[@]}"; do', start)
+    helper = script[start:end].replace(
+        '/usr/bin/python3 "$PORT_GUARD"', 'python3 "$PORT_GUARD"'
+    )
+    guard = tmp_path / "fake_guard.py"
+    guard.write_text(
+        """
+import os, sys
+from pathlib import Path
+log = Path(os.environ["PROBE_LOG"])
+calls = log.read_text().splitlines() if log.exists() else []
+check = sys.argv[sys.argv.index("--mode") + 1]
+calls.append("guard " + check)
+log.write_text("\\n".join(calls) + "\\n")
+if check == "free":
+    print("EXPORTER_PORT_GUARD=PASS check=free")
+    sys.exit(0)
+attempt = sum(line == "guard owned" for line in calls)
+mode = os.environ["PROBE_MODE"]
+if mode == "foreign":
+    print("EXPORTER_PORT_GUARD=FAIL detail=owned by a different/unknown process", file=sys.stderr)
+    sys.exit(1)
+if mode == "persistent" or attempt == 1:
+    print("EXPORTER_PORT_GUARD=FAIL detail=port 9464 has no listening owner (MainPID=0)", file=sys.stderr)
+    sys.exit(1)
+print("EXPORTER_PORT_GUARD=PASS check=owned")
+"""
+    )
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    timeout = bindir / "timeout"
+    timeout.write_text(
+        '#!/bin/sh\n'
+        'shift 3\n'
+        'exec "$@"\n'
+    )
+    timeout.chmod(0o755)
+    systemctl = bindir / "systemctl"
+    systemctl.write_text(
+        '#!/bin/sh\n'
+        'printf "systemctl %s\\n" "$*" >> "$PROBE_LOG"\n'
+    )
+    systemctl.chmod(0o755)
+    sleep = bindir / "sleep"
+    sleep.write_text('#!/bin/sh\nexit 0\n')
+    sleep.chmod(0o755)
+    env = dict(os.environ)
+    env.update({
+        "PORT_GUARD": str(guard),
+        "PROBE_LOG": str(tmp_path / "calls"),
+        "PROBE_MODE": mode,
+        "PATH": str(bindir) + os.pathsep + env["PATH"],
+    })
+    result = subprocess.run(
+        ["bash", "-c", "set -eu\n" + helper + "\nensure_owned_exporter jason-status-exporter.service\n"],
+        env=env, capture_output=True, text=True, timeout=15,
+    )
+    events = (tmp_path / "calls").read_text().splitlines()
+    return result.returncode, result.stderr, events
+
+
+def test_exporter_ownership_guard_can_recover_only_verified_empty_socket(tmp_path: Path) -> None:
+    status, stderr, events = _recovered_exporter_probe(tmp_path, "transient")
+    assert status == 0, stderr
+    assert events == [
+        "guard owned", "guard free",
+        "systemctl restart --no-block jason-status-exporter.service",
+        "guard owned",
+    ]
+
+
+def test_exporter_ownership_guard_rejects_foreign_owner_without_restart(tmp_path: Path) -> None:
+    status, stderr, events = _recovered_exporter_probe(tmp_path, "foreign")
+    assert status != 0
+    assert "EXPORTER_OWNERSHIP_RECONCILIATION=FAIL" in stderr
+    assert events == ["guard owned"]
+
+
+def test_exporter_ownership_guard_persistent_absence_stays_fatal(tmp_path: Path) -> None:
+    status, stderr, events = _recovered_exporter_probe(tmp_path, "persistent")
+    assert status != 0
+    assert "EXPORTER_OWNERSHIP_RECONCILIATION=FAIL" in stderr
+    assert events.count("guard owned") == 3
+    assert events.count("guard free") == 2
+    assert events.count("systemctl restart --no-block jason-status-exporter.service") == 2
+
+def test_exporter_activation_queues_nonblocking_start_and_waits_for_real_port_owner() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    assert 'systemctl enable --now "$unit"' not in text
+    assert 'systemctl start --no-block "$unit"' in text
+    assert 'systemctl restart --no-block "$unit"' in text
+    assert 'timeout --signal=TERM --kill-after=5s 15s systemctl enable "$unit"' in text
+    assert 'timeout --signal=TERM --kill-after=5s 15s systemctl start --no-block "$unit"' in text
+    assert 'timeout --signal=TERM --kill-after=5s 15s systemctl restart --no-block "$unit"' in text
+    assert text.index('systemctl start --no-block "$unit"') < text.index('ensure_owned_exporter "$unit"')
+    assert text.index('ensure_owned_exporter "$unit"') < text.index('if [ "$(systemctl is-active "$unit")" != "active" ]')

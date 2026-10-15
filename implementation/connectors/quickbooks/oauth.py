@@ -671,10 +671,16 @@ def quickbooks_access_context(
     *,
     credentials: Mapping[str, str],
     refresh_window_seconds: int = 120,
+    expected_environment: str | None = None,
 ) -> tuple[str, str, str]:
     token = store.get_token(credentials=credentials)
     if token is None:
         raise QuickBooksOAuthError("QuickBooks is not connected.")
+    # Verify profile-to-token trust boundary BEFORE any refresh request or
+    # token-store mutation. An incorrect environment never reaches Intuit.
+    environment = _require_environment(str(token.get("_environment") or ""))
+    if expected_environment is not None and environment != _require_environment(expected_environment):
+        raise QuickBooksOAuthError("QuickBooks OAuth environment does not match the active connector profile.")
     if int(token.get("_expires_at") or 0) <= int(time.time()) + refresh_window_seconds:
         refresh_quickbooks_oauth(store, credentials=credentials)
         token = store.get_token(credentials=credentials)

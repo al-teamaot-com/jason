@@ -20,7 +20,7 @@ import subprocess
 import tempfile
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -120,6 +120,63 @@ def release_production_transaction_lock(handle) -> None:
     finally:
         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         handle.close()
+
+
+QUICKBOOKS_READ_PROFILES = frozenset({
+    "quickbooks-sandbox-read-v1",
+    "quickbooks-production-read-v1",
+})
+
+
+def declared_quickbooks_read_profile(candidate_worktree: Path) -> str | None:
+    """Bind profile selection to the reviewed, immutable release source."""
+    path = candidate_worktree / "config" / "quickbooks-read-profile.json"
+    if not path.exists():
+        return None
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if (not isinstance(payload, dict)
+            or set(payload) != {"schema_version", "read_profile"}
+            or payload.get("schema_version") != "1.0"
+            or payload.get("read_profile") not in QUICKBOOKS_READ_PROFILES):
+        raise ReleaseManagerError("candidate QuickBooks read profile declaration invalid")
+    return str(payload["read_profile"])
+
+
+def live_quickbooks_read_profile() -> str:
+    """Require matching, supported read profiles from live Runtime and MCP."""
+    profiles = set()
+    for name in ("jason-runtime", "jason-mcp-pilot"):
+        env = json.loads(output([
+            "docker", "inspect", name, "--format", "{{json .Config.Env}}",
+        ]))
+        if not isinstance(env, list):
+            raise ReleaseManagerError("live QuickBooks profile environment unavailable")
+        matches = [
+            item.split("=", 1)[1]
+            for item in env
+            if isinstance(item, str)
+            and item.startswith("JASON_QUICKBOOKS_READ_PROFILE=")
+        ]
+        if len(matches) != 1 or matches[0] not in QUICKBOOKS_READ_PROFILES:
+            raise ReleaseManagerError("live QuickBooks read profile missing or invalid")
+        profiles.add(matches[0])
+    if len(profiles) != 1:
+        raise ReleaseManagerError("live Runtime and MCP QuickBooks profiles disagree")
+    return profiles.pop()
+
+
+def quickbooks_rollback_environment(
+    env: dict[str, str], *, rollback_sha: str, prior_profile: str
+) -> dict[str, str]:
+    """Restore the old profile alongside the old images on rollback."""
+    if prior_profile not in QUICKBOOKS_READ_PROFILES:
+        raise ReleaseManagerError("rollback QuickBooks read profile is not supported")
+    result = env.copy()
+    result["JASON_RUNTIME_PRODUCTION_IMAGE"] = "jason-runtime:rollback-current"
+    result["JASON_MCP_PRODUCTION_IMAGE"] = "jason-mcp:rollback-current"
+    result["JASON_SOURCE_REVISION_OVERRIDE"] = rollback_sha
+    result["JASON_QUICKBOOKS_READ_PROFILE"] = prior_profile
+    return result
 
 
 def now() -> str:
@@ -322,37 +379,207 @@ def scheduled_control_alignment() -> dict[str, str]:
     return states
 
 
+# Only the preinstalled canonical recovery utility may produce the backup
+# marker that permits the exact reviewed controller-copy transitional state.
+# The root-owned host source and original last-known-good stay unchanged.
+CONTROLLER_RECOVERY_MANAGED_REPO = Path("/home/al/.local/lib/jason/engineering-worker-source")
+CONTROLLER_RECOVERY_OWNER_REVIEW = Path("/var/lib/jason/ccc/material-review.json")
+
+
+def _controller_recovery_old_source_verified(source: Path) -> bool:
+    return (
+        source.is_file() and not source.is_symlink()
+        and source.stat().st_uid == 0
+    )
+
+
+def _operator_recovery_identity(repo: Path, installed: Path, old_source: Path) -> dict[str, Any]:
+    """Attest the one-time operator recovery copy against protected source.
+
+    This is NOT a general alternate production controller. Only a copied
+    canonical controller at the exact reviewed main revision, with the exact
+    old immutable runner and installer-created backup, is accepted.
+    """
+    if not _controller_recovery_old_source_verified(old_source):
+        raise ReleaseManagerError("controller recovery old source is not root immutable")
+    old_digest = file_digest(old_source)
+    backup = installed.with_name(
+        installed.name + ".recovery-backup-" + old_digest[len("sha256:"):][:16]
+    )
+    if (not backup.is_file() or backup.is_symlink()
+            or backup.stat().st_uid != os.geteuid()
+            or backup.stat().st_mode & 0o077
+            or file_digest(backup) != old_digest):
+        raise ReleaseManagerError("canonical controller recovery backup missing or altered")
+
+    managed = CONTROLLER_RECOVERY_MANAGED_REPO
+    try:
+        sha = subprocess.check_output(
+            ["git", "-C", str(managed), "rev-parse", "refs/remotes/origin/main"],
+            stderr=subprocess.DEVNULL, timeout=12, text=True,
+        ).strip()
+        repo_sha = subprocess.check_output(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL, timeout=12, text=True,
+        ).strip()
+        expected = subprocess.check_output(
+            ["git", "-C", str(managed), "show",
+             f"{sha}:tools/release_manager_host_runner.py"],
+            stderr=subprocess.DEVNULL, timeout=12,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise ReleaseManagerError("controller recovery reviewed source unavailable") from exc
+    if not SHA.fullmatch(sha) or repo_sha != sha:
+        raise ReleaseManagerError("controller recovery exact main revision is not aligned")
+    reviewed_digest = "sha256:" + hashlib.sha256(expected).hexdigest()
+    candidate = repo / "tools" / "release_manager_host_runner.py"
+    if (not candidate.is_file() or file_digest(candidate) != reviewed_digest
+            or not installed.is_file() or installed.is_symlink()
+            or installed.stat().st_uid != os.geteuid()
+            or file_digest(installed) != reviewed_digest):
+        raise ReleaseManagerError("controller recovery installed candidate differs from reviewed main")
+
+    try:
+        review = json.loads(CONTROLLER_RECOVERY_OWNER_REVIEW.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ReleaseManagerError("controller recovery exact owner review missing") from exc
+    if (review.get("schema_version") != "1.0"
+            or review.get("status") != "approved"
+            or review.get("source_revision") != sha
+            or review.get("recorded_by") != "person-al"):
+        raise ReleaseManagerError("controller recovery exact owner review does not match source")
+    return {
+        "controller_recovery_mode": "canonical_owner_recovery",
+        "controller_recovery_revision": sha,
+        "controller_recovery_old_source": str(old_source),
+        "controller_recovery_backup": str(backup),
+        "controller_recovery_digest": reviewed_digest,
+    }
+
+
 def controller_identity(repo: Path) -> dict[str, Any]:
     policy_path = repo / "config" / "release-manager-policy.json"
+    candidate_path = repo / "tools" / "release_manager_host_runner.py"
     if not policy_path.is_file():
         raise ReleaseManagerError("release-manager policy is missing")
-    source_revision = CONTROLLER_SOURCE.parents[1].name.casefold()
+    if not candidate_path.is_file():
+        raise ReleaseManagerError("immutable candidate Production Manager source is missing")
+
+    installed = Path.home() / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+    immutable = CONTROLLER_SOURCE
+    # The systemd user timer executes a COPIED installed runner, not an
+    # immutable /opt/jason/releases/<SHA>/tools path. A legitimate governed
+    # install replaces that copied file while the old Python process is
+    # running. Anchor N to its immutable release-manager-source BEFORE
+    # mutation so the scheduled path can safely stage N+1 without losing N.
+    if CONTROLLER_SOURCE == installed:
+        source_link = installed.parent / "release-manager-source"
+        if not source_link.is_symlink():
+            raise ReleaseManagerError("active Release Manager immutable source link missing")
+        immutable = source_link.resolve() / "tools" / "release_manager_host_runner.py"
+        if not immutable.is_file():
+            raise ReleaseManagerError("active Release Manager immutable source missing")
+        if file_digest(immutable) != file_digest(installed):
+            recovery = _operator_recovery_identity(repo, installed, immutable)
+            return {
+                "executing_controller_path": str(CONTROLLER_SOURCE),
+                "executing_controller_immutable_path": str(installed),
+                "executing_controller_revision": recovery["controller_recovery_revision"],
+                "executing_controller_digest": recovery["controller_recovery_digest"],
+                "candidate_controller_digest": file_digest(candidate_path),
+                "policy_digest": file_digest(policy_path),
+                "captured_at": now(),
+                **recovery,
+            }
+
+    source_revision = immutable.parents[1].name.casefold()
     return {
         "executing_controller_path": str(CONTROLLER_SOURCE),
+        "executing_controller_immutable_path": str(immutable),
         "executing_controller_revision": source_revision if SHA.fullmatch(source_revision) else "unknown",
-        "executing_controller_digest": file_digest(CONTROLLER_SOURCE),
+        "executing_controller_digest": file_digest(immutable),
+        "candidate_controller_digest": file_digest(candidate_path),
         "policy_digest": file_digest(policy_path),
         "captured_at": now(),
     }
 
 
-def verify_controller_identity(pin: dict[str, Any], repo: Path, *, installed_candidate: bool = False) -> dict[str, Any]:
-    current = controller_identity(repo)
-    # A governed host reconciliation may install the exact reviewed candidate
-    # controller while the old controller process remains in flight. Check
-    # its bytes against the immutable candidate worktree, not an arbitrary
-    # changed on-disk controller. The original pin remains in the record.
-    if installed_candidate:
+def verify_controller_identity(
+    pin: dict[str, Any], repo: Path, *, installed_candidate: bool = False,
+    installed_runner: Path | None = None,
+) -> dict[str, Any]:
+    """Keep executing N immutable while verifying separately installed N+1.
+
+    The active production transaction retains its flock and N's loaded code.
+    The scheduled user service can replace the installed *copy* of the runner,
+    but it must not alter the original immutable N source or policy.
+    """
+    if installed_candidate and pin.get("controller_recovery_mode") == "canonical_owner_recovery":
+        # The root host reconciler may legitimately switch the source link to
+        # new N+1. Verify the ORIGINAL recovery backup and root-owned N source
+        # against the exact reviewed main Git object, independent of the link.
+        recovered = _operator_recovery_identity(
+            repo, CONTROLLER_SOURCE,
+            Path(str(pin["controller_recovery_old_source"])),
+        )
+        if recovered != {key: pin.get(key) for key in recovered}:
+            raise ReleaseManagerError("controller recovery provenance changed during promotion")
         candidate = repo / "tools" / "release_manager_host_runner.py"
-        if not candidate.is_file() or current["executing_controller_digest"] != file_digest(candidate):
-            raise ReleaseManagerError("installed Production Manager controller differs from candidate source")
+        policy = repo / "config" / "release-manager-policy.json"
+        current = {
+            "executing_controller_path": str(CONTROLLER_SOURCE),
+            "executing_controller_immutable_path": str(CONTROLLER_SOURCE),
+            "executing_controller_revision": recovered["controller_recovery_revision"],
+            "executing_controller_digest": recovered["controller_recovery_digest"],
+            "candidate_controller_digest": file_digest(candidate),
+            "policy_digest": file_digest(policy),
+            "controller_recovery_mode": "canonical_owner_recovery",
+        }
+    elif installed_candidate:
+        # Re-read immutable N from the pre-mutation pin, never infer the old
+        # executing version from the installed file or retargeted source link.
+        # Both are legitimately updated to N+1 by the guarded installer.
+        immutable = Path(str(pin.get("executing_controller_immutable_path") or ""))
+        policy = repo / "config" / "release-manager-policy.json"
+        candidate = repo / "tools" / "release_manager_host_runner.py"
+        if not immutable.is_file() or not policy.is_file() or not candidate.is_file():
+            raise ReleaseManagerError("pinned controller, release policy or candidate missing")
+        current = {
+            "executing_controller_path": str(CONTROLLER_SOURCE),
+            "executing_controller_immutable_path": str(immutable),
+            "executing_controller_revision": (
+                immutable.parents[1].name.casefold()
+                if SHA.fullmatch(immutable.parents[1].name.casefold()) else "unknown"
+            ),
+            "executing_controller_digest": file_digest(immutable),
+            "candidate_controller_digest": file_digest(candidate),
+            "policy_digest": file_digest(policy),
+        }
+    else:
+        current = controller_identity(repo)
     for field in (
         "executing_controller_path",
+        "executing_controller_immutable_path",
         "executing_controller_revision",
+        "executing_controller_digest",
+        "candidate_controller_digest",
         "policy_digest",
-    ) + (() if installed_candidate else ("executing_controller_digest",)):
+    ):
         if current.get(field) != pin.get(field):
             raise ReleaseManagerError(f"active Production Manager controller changed mid-transaction: {field}")
+    if installed_candidate:
+        expected = pin["candidate_controller_digest"]
+        installed_path = installed_runner or (
+            Path.home() / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+        )
+        if not installed_path.is_file() or file_digest(installed_path) != expected:
+            raise ReleaseManagerError("installed Production Manager controller differs from candidate source")
+        # Installer separately verifies source-link revision and immutable host
+        # copy. No subprocess is run under candidate semantics in the active
+        # transaction. Only future lock-acquiring invocations use N+1.
+        current["installed_controller_path"] = str(installed_path)
+        current["installed_controller_digest"] = expected
+        current["controller_handoff"] = "staged_for_next_transaction"
     return current
 
 
@@ -1635,9 +1862,198 @@ def publish_production_closeout(repo: Path, candidate_sha: str) -> dict[str, str
     }
 
 
+def validate_release_record_contract(record: dict[str, Any]) -> None:
+    """Reject legacy/incomplete release evidence before production mutation.
+
+    A historical record produced by an older controller may have passed CI
+    and preproduction without ever constructing final closeout fields.
+    """
+    candidate = record.get('release_candidate') or {}
+    manifest = record.get('release_manifest')
+    risk = record.get('risk_profile')
+    sha = str(candidate.get('candidate_sha') or '')
+    rollback = str(record.get('rollback_sha') or '')
+    # create_record/classify_change_risk emits the canonical enum string.
+    # Earlier test records may carry a structured risk object; preserve that
+    # compatible form, while rejecting absent, empty or unknown classifications.
+    allowed_risks = {'normal', 'production_repair', 'production_control_core', 'schema_or_contract'}
+    risk_valid = (
+        isinstance(risk, str) and risk in allowed_risks
+        or isinstance(risk, dict) and bool(risk)
+    )
+    if not isinstance(manifest, dict) or not risk_valid:
+        raise ReleaseManagerError('release record lacks valid release_manifest or risk_profile; reprepare through current controller')
+    if not SHA.fullmatch(sha) or not SHA.fullmatch(rollback):
+        raise ReleaseManagerError('release record has invalid exact revision identities')
+    if manifest.get('candidate_sha') != sha or manifest.get('rollback_sha') != rollback:
+        raise ReleaseManagerError('release manifest identities do not match candidate and rollback baseline')
+    if manifest.get('risk_profile') != risk:
+        raise ReleaseManagerError('release manifest risk classification differs from release record')
+
+
+CCC_REQUIRED_CHECKS = frozenset({
+    "checker-currentness", "runtime-source-alignment", "j002-article-matrix",
+    "system-registry", "j900-release-validation",
+    "mcp-constitutional-production-equivalent", "systemd-failed-units",
+    "prometheus-targets", "openclaw-authority-health", "immutable-runtime-release",
+    "mcp-governance-boundary", "governed-provider-boundary-canaries",
+})
+
+
+def verify_release_ccc_report(
+    report: dict[str, Any], *, candidate_sha: str, runtime_sha: str,
+    before_mutation: bool,
+) -> dict[str, Any]:
+    """Fail closed on any CCC exception other than expected predeploy alignment.
+
+    A runtime-changing candidate cannot align with LIVE runtime before deployment.
+    This grants no CCC PASS: it only admits a scoped transition supported by
+    immutable preprod artifacts and a mandatory post-deploy PASS/rollback.
+    """
+    if report.get("schema_version") != "1.0":
+        raise ReleaseManagerError("CCC evidence schema is not recognized")
+    if report.get("source_revision") != exact_sha(candidate_sha, "candidate_sha"):
+        raise ReleaseManagerError("CCC evidence source is not the exact release candidate")
+    if report.get("runtime_revision") != exact_sha(runtime_sha, "runtime_sha"):
+        raise ReleaseManagerError("CCC evidence runtime revision does not match expected live revision")
+    if str(report.get("trigger") or "") not in {"material_change", "cadence"}:
+        raise ReleaseManagerError("CCC evidence must be a forced material/cadence review")
+    if not str(report.get("run_id") or "").strip():
+        raise ReleaseManagerError("CCC evidence run identifier is missing")
+    checks = report.get("checks")
+    if not isinstance(checks, list):
+        raise ReleaseManagerError("CCC evidence checks are missing")
+    indexed: dict[str, str] = {}
+    for entry in checks:
+        if not isinstance(entry, dict):
+            raise ReleaseManagerError("CCC evidence includes malformed check")
+        key = str(entry.get("check_id") or "")
+        if not key or key in indexed:
+            raise ReleaseManagerError("CCC evidence has an empty or duplicate check")
+        indexed[key] = str(entry.get("status") or "")
+    required = CCC_REQUIRED_CHECKS | (
+        {"material-change-owner-review"} if report.get("material_changes") else set()
+    )
+    missing = required - set(indexed)
+    if missing:
+        raise ReleaseManagerError("CCC mandatory checks are missing: " + ", ".join(sorted(missing)))
+    exceptional = {key: status for key, status in indexed.items() if status != "PASS"}
+    if before_mutation:
+        expected = {"runtime-source-alignment": "NOT_PROVEN"}
+        if not (report.get("status") == "PASS" and not exceptional or
+                report.get("status") == "NOT_PROVEN" and exceptional == expected):
+            raise ReleaseManagerError("pre-mutation CCC denied: " + str(exceptional)[:300])
+        mode = "candidate_transition" if exceptional else "aligned"
+    else:
+        if report.get("status") != "PASS" or exceptional:
+            raise ReleaseManagerError("post-mutation CCC did not certify exact live candidate")
+        mode = "live_certified"
+    return {
+        "status": report["status"], "mode": mode,
+        "source_revision": candidate_sha, "runtime_revision": runtime_sha,
+        "run_id": str(report.get("run_id") or ""),
+        "finished_at": str(report.get("finished_at") or ""),
+        "checks": indexed,
+    }
+
+
+# Keep the CCC itself authoritative. The only permitted bounded retry is an
+# independently refreshed post-deployment checker report whose *sole* failing
+# check is a transient Prometheus scrape gap while host units settle. Each
+# report remains subject to exact SHA, complete checks and freshness proofs.
+CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS = (15, 20, 25)
+
+
+def run_release_ccc_gate(
+    candidate_sha: str, runtime_sha: str, *, before_mutation: bool,
+    ccc_runner: Path = Path("/opt/jason/ccc-current/tools/run_ccc.py"),
+    ccc_config: Path = Path("/var/lib/jason/ccc/ccc.json"),
+    latest: Path = Path("/var/lib/jason/ccc/latest.json"),
+) -> dict[str, Any]:
+    """Demand a fresh independent CCC PASS; boundedly recheck scrape races.
+
+    Never reinterpret FAIL as PASS. For a single transient monitoring FAIL,
+    request a completely new checker run while keeping the production
+    transaction lock held. All non-monitoring failures fail immediately.
+    """
+    if not ccc_runner.is_file() or not ccc_config.is_file():
+        raise ReleaseManagerError("independent CCC checker/config unavailable")
+    failed_monitoring_runs: list[str] = []
+    for attempt in range(len(CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS) + 1):
+        started = datetime.now(timezone.utc)
+        try:
+            completed = subprocess.run(
+                ["python3", str(ccc_runner), "--config", str(ccc_config),
+                 "--force", "--trigger", "material_change"],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                check=False, timeout=300,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ReleaseManagerError("independent CCC execution did not complete") from exc
+        if not latest.is_file():
+            raise ReleaseManagerError("independent CCC did not persist a report")
+        report = json.loads(latest.read_text(encoding="utf-8"))
+        if not isinstance(report, dict):
+            raise ReleaseManagerError("CCC report is not a JSON object")
+        try:
+            finished = datetime.fromisoformat(str(report.get("finished_at") or ""))
+        except (ValueError, TypeError) as exc:
+            raise ReleaseManagerError("CCC completion timestamp missing") from exc
+        if (finished.tzinfo is None or
+                finished < started - timedelta(seconds=2) or
+                finished > datetime.now(timezone.utc) + timedelta(seconds=15)):
+            raise ReleaseManagerError(
+                "CCC report is stale, future-dated or not independently refreshed"
+            )
+        try:
+            evidence = verify_release_ccc_report(
+                report, candidate_sha=candidate_sha, runtime_sha=runtime_sha,
+                before_mutation=before_mutation,
+            )
+        except ReleaseManagerError as exc:
+            # verify_release_ccc_report checked exact candidate and runtime SHA,
+            # required check set, unique IDs, and report schema BEFORE raising
+            # this specific failure. A missing/unverified check can never retry.
+            nonpassing = [
+                (x["check_id"], x["status"]) for x in report["checks"]
+                if x["status"] != "PASS"
+            ] if isinstance(report.get("checks"), list) else []
+            transient = (
+                not before_mutation
+                and str(exc) == "post-mutation CCC did not certify exact live candidate"
+                and report.get("status") == "FAIL"
+                and nonpassing == [("prometheus-targets", "FAIL")]
+                and completed.returncode != 0
+            )
+            if transient and attempt < len(CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS):
+                run_id = str(report["run_id"])
+                if run_id in failed_monitoring_runs:
+                    raise ReleaseManagerError("CCC repeated a prior monitoring report")
+                failed_monitoring_runs.append(run_id)
+                print(
+                    f"CCC_MONITORING_TRANSIENT=RECHECK run_id={run_id} "
+                    f"attempt={attempt + 1}",
+                    flush=True,
+                )
+                time.sleep(CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS[attempt])
+                continue
+            raise
+        if completed.returncode != 0 and evidence["status"] == "PASS":
+            raise ReleaseManagerError("independent CCC process failed despite PASS report")
+        if failed_monitoring_runs:
+            if str(evidence["run_id"]) in failed_monitoring_runs:
+                raise ReleaseManagerError("CCC reused an earlier failed report identifier")
+            evidence["transient_monitoring_retries"] = len(failed_monitoring_runs)
+            evidence["failed_monitoring_run_ids"] = failed_monitoring_runs
+        return evidence
+    raise ReleaseManagerError("independent CCC monitoring check never certified")
+
+
+
 def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
     if record.get("state") != "production_eligible":
         raise ReleaseManagerError("release is not Production Eligible")
+    validate_release_record_contract(record)
     candidate = record["release_candidate"]
     candidate_sha = str(candidate["candidate_sha"])
     image = str(candidate["image"])
@@ -1671,9 +2087,24 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         raise ReleaseManagerError(
             "exact candidate worktree is missing a required production deploy script"
         )
+    candidate_quickbooks_profile = declared_quickbooks_read_profile(deploy_worktree)
+    prior_quickbooks_profile = live_quickbooks_read_profile()
+    if (candidate_quickbooks_profile is not None
+            and os.environ.get("JASON_QUICKBOOKS_READ_PROFILE") not in (None, candidate_quickbooks_profile)):
+        raise ReleaseManagerError(
+            "invoking QuickBooks profile override conflicts with immutable candidate"
+        )
     host_contract = verify_candidate_host_reconciliation_contract(
         deploy_worktree, candidate_sha
     )
+
+    # The existing live runtime can differ from a valid new candidate. This
+    # narrowly scoped preflight is NOT a CCC PASS and requires full post CCC.
+    verify_candidate_on_main(repo, candidate_sha)
+    ccc_preflight = run_release_ccc_gate(
+        candidate_sha, rollback_sha, before_mutation=True,
+    )
+    record["ccc_pre_mutation_gate"] = ccc_preflight
 
     controller_pin = controller_identity(deploy_worktree)
     baseline_manifest = capture_production_manifest(rollback_sha)
@@ -1712,6 +2143,8 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     env["JASON_RUNTIME_PRODUCTION_IMAGE"] = image
     env["JASON_MCP_PRODUCTION_IMAGE"] = mcp_image
     env["JASON_SOURCE_REVISION_OVERRIDE"] = candidate_sha
+    if candidate_quickbooks_profile is not None:
+        env["JASON_QUICKBOOKS_READ_PROFILE"] = candidate_quickbooks_profile
 
     runtime_deployed = False
     mcp_deployed = False
@@ -1762,6 +2195,12 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
 
         controller_verified = verify_controller_identity(controller_pin, deploy_worktree, installed_candidate=True)
         smoke = run_functional_smoke_tests(candidate_sha)
+        # Certification is mandatory BEFORE verified/closed or new LKG. A
+        # non-PASS or stale/wrong-SHA report raises inside the rollback block.
+        ccc_postflight = run_release_ccc_gate(
+            candidate_sha, candidate_sha, before_mutation=False,
+        )
+        record["ccc_post_mutation_gate"] = ccc_postflight
         drift_evidence = production_drift_evidence(state_root)
         production_manifest = capture_production_manifest(candidate_sha)
 
@@ -1772,10 +2211,15 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "artifact_digest": live_digest,
             "mcp_artifact_digest": live_mcp_digest,
             "health_passed": True,
+            "ccc_pre_mutation": ccc_preflight,
+            "ccc_post_mutation": ccc_postflight,
             "functional_smoke_tests_passed": bool(smoke.get("passed")),
             "functional_smoke_tests": smoke,
             "controller_identity_verified": True,
+            "controller_handoff": controller_verified["controller_handoff"],
             "executing_controller_revision": controller_verified["executing_controller_revision"],
+            "executing_controller_digest": controller_verified["executing_controller_digest"],
+            "installed_controller_digest": controller_verified["installed_controller_digest"],
             "last_known_good_manifest_captured": bool(baseline_manifest.get("complete")),
             "pre_mutation_health_passed": bool(record["pre_mutation_health"].get("passed")),
             "production_manifest_complete": bool(production_manifest.get("complete")),
@@ -1803,17 +2247,14 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "control_board_publication": closeout["control_board"],
             "verified_at": now(),
         }
-        gate_transition(repo, state_root, record, "production_verified")
-        write_owner_notification_event(
-            state_root, record, "production_queue_completed"
-        )
-        gate_transition(repo, state_root, record, "closed")
         record["evidence_bundle"] = {
             "release_id": record["release_id"],
             "candidate_sha": candidate_sha,
             "release_manifest": record["release_manifest"],
             "risk_profile": record["risk_profile"],
             "owner_approval": record.get("owner_approval"),
+            "ccc_pre_mutation": ccc_preflight,
+            "ccc_post_mutation": ccc_postflight,
             "preproduction": record.get("preproduction"),
             "pre_mutation_health": record.get("pre_mutation_health"),
             "functional_smoke_tests": smoke,
@@ -1823,6 +2264,11 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "final_state": "closed",
             "closed_at": now(),
         }
+        gate_transition(repo, state_root, record, "production_verified")
+        write_owner_notification_event(
+            state_root, record, "production_queue_completed"
+        )
+        gate_transition(repo, state_root, record, "closed")
         set_last_known_good(
             state_root,
             production_manifest,
@@ -1831,10 +2277,9 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         save_record(state_root, record)
         return record
     except Exception as error:
-        rollback_env = os.environ.copy()
-        rollback_env["JASON_RUNTIME_PRODUCTION_IMAGE"] = "jason-runtime:rollback-current"
-        rollback_env["JASON_MCP_PRODUCTION_IMAGE"] = "jason-mcp:rollback-current"
-        rollback_env["JASON_SOURCE_REVISION_OVERRIDE"] = rollback_sha
+        rollback_env = quickbooks_rollback_environment(
+            os.environ, rollback_sha=rollback_sha, prior_profile=prior_quickbooks_profile
+        )
 
         rollback_errors: list[str] = []
 
@@ -1940,6 +2385,11 @@ def prepare_release(
     reissue_rolled_back: bool = False,
 ) -> dict[str, Any]:
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    # Routine promotion and explicit owner-authorized preparation must share the
+    # same bounded, stopped-container-only retention hygiene. It must run
+    # before breaker revalidation (which checks drift including retention).
+    # Any Docker failure fails closed rather than masking real drift.
+    reconcile_stopped_rollback_retention()
     revalidate_circuit_breaker(state_root)
     release_id = record_id(candidate_sha)
     if reissue_rolled_back:
@@ -2107,8 +2557,15 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
                 return False
             return True
         reasons = [str(value) for value in result.get("reasons") or []]
-        owner_only = bool(result.get("protected_core")) and reasons and all(
-            "owner approval" in reason.casefold() for reason in reasons
+        # Missing owner approval is a normal waiting state for every release
+        # class, not a production health failure. Other denials still fail closed.
+        owner_only_reasons = {
+            'production release requires explicit owner approval',
+            'protected-core release requires explicit owner approval',
+            'owner approval is not bound to the exact candidate sha',
+        }
+        owner_only = bool(reasons) and all(
+            reason.strip().casefold() in owner_only_reasons for reason in reasons
         )
         if owner_only:
             write_owner_notification_event(

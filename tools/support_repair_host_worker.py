@@ -91,10 +91,12 @@ def emit_lifecycle_event(
     return fingerprint
 
 
-def run(args: list[str], *, cwd: Path | None = None, check: bool = True) -> str:
+def run(args: list[str], *, cwd: Path | None = None, check: bool = True,
+        env: Mapping[str, str] | None = None) -> str:
     completed = subprocess.run(
         args,
         cwd=str(cwd) if cwd else None,
+        env=dict(env) if env is not None else None,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -213,17 +215,51 @@ def support_id_from_title(title: str) -> str | None:
     return match.group(1).upper() if match else None
 
 
-def open_support_issue_ids(repo: Path) -> set[str]:
+def open_support_issue_records(repo: Path) -> dict[str, dict[str, str]]:
+    limit = 1000
     data = gh_json([
         'issue', 'list', '--state', 'open', '--search', 'SUPPORT- in:title',
-        '--limit', '1000', '--json', 'number,title'
+        '--limit', str(limit), '--json', 'number,title'
     ], cwd=repo) or []
-    result = set()
+    if not isinstance(data, list) or len(data) >= limit:
+        raise WorkerError('GitHub open SUPPORT listing incomplete; refusing partial admission')
+    records = {}
     for issue in data:
-        item_id = support_id_from_title(str(issue.get('title') or ''))
+        title = str(issue.get('title') or '')
+        item_id = support_id_from_title(title)
         if item_id:
-            result.add(item_id)
-    return result
+            records[item_id] = {'title': title, 'priority': 'P0' if re.search(r'\bP0\b', title, re.I) else 'unknown'}
+    return records
+
+
+def open_support_issue_ids(repo: Path) -> set[str]:
+    return set(open_support_issue_records(repo))
+
+
+def audit_support_admission(issues: Mapping[str, Mapping[str, str]],
+                            support: list[dict[str, str]],
+                            state: dict[str, Any], *,
+                            event_root: Path | None = None) -> list[str]:
+    known = {item['id'] for item in support}
+    missing = sorted(
+        item_id for item_id, issue in issues.items()
+        if issue.get('priority') == 'P0' and item_id not in known
+    )
+    state['admission_audit'] = {
+        'checked_at': now(),
+        'open_issue_count': len(issues),
+        'unadmitted_p0': missing,
+        'status': 'degraded' if missing else 'healthy',
+    }
+    for item_id in missing:
+        emit_lifecycle_event(
+            event_type='work_blocked', work_id=item_id,
+            work_title=issues[item_id]['title'],
+            summary='Open P0 SUPPORT issue has no canonical support source row; admission is blocked.',
+            owner_action='Reconcile issue with canonical SUPPORT.md through reviewed GitHub PR.',
+            event_root=event_root,
+        )
+    return missing
 
 
 def eligible_support_items(items: list[dict[str, str]], open_issue_ids: set[str]) -> list[dict[str, str]]:
@@ -631,7 +667,36 @@ def safe_search(worktree: Path, terms: list[str], gate, policy: Mapping[str, Any
             normalized,
         )
 
-    paths: list[str] = []
+    # Content-only grep can select tests mentioning a provider while missing
+    # short implementation modules whose names (not bodies) identify it.
+    # Admit a bounded set of real, policy-eligible implementation filenames,
+    # weighted toward uncommon query tokens. No document text or provider data
+    # is consulted; these are paths from the checked-out repository only.
+    tracked_paths = [
+        path for raw in run(['git', 'ls-files', '--', '*.py'], cwd=worktree,
+                            check=False).splitlines()
+        if (path := eligible_path(raw)) is not None
+        and path.startswith('implementation/')
+        and '/tests/' not in path
+        and not path.endswith('/__init__.py')
+    ]
+    names = {path: normalized_tokens(path) for path in tracked_paths}
+    frequencies: dict[str, int] = {}
+    for tokens in names.values():
+        for token in tokens:
+            frequencies[token] = frequencies.get(token, 0) + 1
+
+    ranked_names: list[tuple[float, int, str]] = []
+    for path, tokens in names.items():
+        matching = tokens & query_tokens
+        if not matching or not any(frequencies[t] <= 32 for t in matching):
+            continue
+        specificity = sum(1.0 / frequencies[t] for t in matching)
+        ranked_names.append((-specificity, -len(matching), path))
+
+    paths: list[str] = [
+        path for _, _, path in sorted(ranked_names)[:5]
+    ]
 
     # First pass: one best source candidate per reasoning concept.
     for group, concept_tokens, subject in concept_scores:
@@ -752,7 +817,17 @@ def bounded_symbol_excerpt(text: str, symbols: list[str], *, content_limit: int)
                and node.name in wanted]
     if not matches:
         return None
-    chunks = [text[:min(1300, content_limit // 6)]]
+    # A raw character prefix can end inside an unrelated function, making an
+    # otherwise complete symbol excerpt appear truncated to the edit planner.
+    # Admit only complete top-level syntax nodes within the bounded preamble.
+    preamble_limit = min(1300, content_limit // 6)
+    preamble_end = 0
+    for node in tree.body:
+        ending = sum(len(line) for line in lines[:node.end_lineno])
+        if ending > preamble_limit:
+            break
+        preamble_end = ending
+    chunks = [text[:preamble_end]]
     for node in sorted(matches, key=lambda n: n.lineno):
         start = min([node.lineno, *[d.lineno for d in getattr(node, 'decorator_list', [])]]) - 1
         snippet = ''.join(lines[start:node.end_lineno])
@@ -771,10 +846,12 @@ def source_excerpts_for_paths(
     terms: list[str] | None = None,
     limit: int = 6,
     content_limit: int = 24000,
+    full_file_paths: list[str] | None = None,
 ) -> list[dict[str, str]]:
-    """Read a bounded, policy-eligible set of previously discovered sources."""
+    """Read policy-eligible source, requiring complete bytes for requested files."""
     excerpts: list[dict[str, str]] = []
     seen: set[str] = set()
+    required_full = set(full_file_paths or [])
     for raw in paths:
         path = str(raw or '').strip()
         if not path or path in seen or path.startswith('.git'):
@@ -788,8 +865,11 @@ def source_excerpts_for_paths(
             text = candidate.read_text(encoding='utf-8')
         except UnicodeDecodeError:
             continue
-        symbols = [word for term in list(terms or []) for word in re.findall(
-            r'[A-Za-z_][A-Za-z0-9_]*', str(term))]
+        if path in required_full and len(text) > content_limit:
+            raise WorkerError('required complete source exceeds bounded limit: ' + path)
+        symbols = [] if path in required_full else [
+            word for term in list(terms or []) for word in re.findall(
+                r'[A-Za-z_][A-Za-z0-9_]*', str(term))]
         exact = bounded_symbol_excerpt(text, symbols, content_limit=content_limit)
         content = exact or (
             text
@@ -918,7 +998,17 @@ def validate_patch(worktree: Path, test_paths: list[str], gate, policy: Mapping[
     py_files = [path for path in files if path.endswith('.py')]
     if py_files:
         run([python_cmd, '-m', 'py_compile', *py_files], cwd=worktree)
-    run([python_cmd, '-m', 'pytest', '-q', *selected], cwd=worktree)
+    # Tools tests import sibling modules (for example support_repair_host_worker).
+    # An isolated issue worktree must resolve its OWN tools tree, not the host's
+    # checkout or a globally installed package. Preserve any caller PYTHONPATH.
+    test_env = dict(os.environ)
+    own_tools = str((worktree / 'tools').resolve())
+    previous_path = test_env.get('PYTHONPATH', '')
+    test_env['PYTHONPATH'] = os.pathsep.join(
+        [own_tools, previous_path] if previous_path else [own_tools]
+    )
+    run([python_cmd, '-m', 'pytest', '-q', *selected],
+        cwd=worktree, env=test_env)
     return selected
 
 
@@ -1216,6 +1306,114 @@ def select_reconcile_ids(state: Mapping[str, Any], support: list[dict[str, str]]
     return selected
 
 
+
+def reassess_model_scope_blocks(
+    state: dict[str, Any], support: list[dict[str, str]], spool: Path,
+    max_active: int,
+) -> list[str]:
+    """Retry a model-only scope judgement once, never a denied host gate.
+
+    The reconsideration only queues a search plan. It grants no filesystem,
+    code-write, provider, deployment, or root authority; all existing host
+    gates still apply. An independently repeated block remains terminal.
+    """
+    items = state.get('items')
+    if not isinstance(items, dict):
+        return []
+    active = {'diagnosing', 'implementing', 'ci_repair_needed', 'ci_repairing'}
+    slots = max(0, max(1, int(max_active)) - sum(
+        1 for value in items.values()
+        if isinstance(value, Mapping) and value.get('phase') in active
+    ))
+    resumed: list[str] = []
+    for item in support:
+        if slots <= 0:
+            break
+        record = items.get(item['id'])
+        if not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        if record.get('scope_review_attempted'):
+            continue
+        reason = str(record.get('reason') or '')
+        prior_id = str(record.get('reasoning_request_id') or '')
+        if not reason or not prior_id:
+            continue
+        response = reasoning_response(spool, prior_id)
+        if not isinstance(response, Mapping) or response.get('status') != 'succeeded':
+            continue
+        result = response.get('result')
+        if not isinstance(result, Mapping) or str(result.get('blocked_reason') or '') != reason:
+            continue
+        review_id = queue_reasoning(
+            spool, kind='search_plan', item=item,
+            context={
+                'scope_review': 'source_diagnosis_only',
+                'prior_blocked_reason': reason[:1000],
+                'boundary': 'No new authority, privileged operation, security change, or production deployment; existing governed approvals remain mandatory.',
+            },
+        )
+        if review_id == prior_id:
+            continue
+        record.update({
+            'phase': 'diagnosing',
+            'reasoning_request_id': review_id,
+            'scope_review_request_id': review_id,
+            'scope_review_attempted': True,
+            'reason': 'bounded source-only scope reassessment; no authorization granted',
+            'updated_at': now(),
+        })
+        resumed.append(item['id'])
+        slots -= 1
+    return resumed
+
+
+
+def readmit_recovered_reasoning(
+    state: dict[str, Any], eligible: list[dict[str, str]], spool: Path,
+    *, max_active: int,
+) -> list[str]:
+    """Resume at most available repair slots after exact failed reasoning recovers.
+
+    No new request, approval, provider write, or source patch is authorized here.
+    The existing implementation and independent acceptance gates remain mandatory.
+    """
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active = sum(1 for record in records.values() if isinstance(record, Mapping)
+                 and record.get('phase') in {'diagnosing', 'implementing', 'ci_repair_needed', 'ci_repairing'})
+    slots = max(0, max(1, int(max_active)) - active)
+    resumed: list[str] = []
+    for item in eligible:
+        if slots == 0:
+            break
+        record = records.get(item['id'])
+        if not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        reason = str(record.get('reason') or '')
+        if reason.startswith('edit reasoning failed: HTTP transport failed'):
+            phase, expected_kind = 'implementing', 'edit_plan'
+        elif reason.startswith('reasoning request failed: HTTP transport failed'):
+            phase, expected_kind = 'diagnosing', 'search_plan'
+        else:
+            continue
+        rid = str(record.get('reasoning_request_id') or '')
+        if not re.fullmatch(r'[a-f0-9]{64}', rid):
+            continue
+        response = reasoning_response(spool, rid)
+        if not isinstance(response, Mapping) or response.get('status') != 'succeeded':
+            continue
+        if response.get('request_id') != rid or response.get('kind') != expected_kind:
+            continue
+        if response.get('support_item') != item['id']:
+            continue
+        if record.get('reasoning_recovered_request_id') == rid:
+            continue
+        record.update({'phase': phase, 'reason': 'Re-admitted after exact reasoning request recovered.',
+                       'reasoning_recovered_request_id': rid, 'updated_at': now()})
+        resumed.append(item['id'])
+        slots -= 1
+    return resumed
+
+
 def load_state(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {'schema_version': '1.0', 'items': {}}
@@ -1291,7 +1489,11 @@ def main() -> int:
     development_recovery_incidents = load_development_recovery_incidents(spool)
     for item in auto_incidents:
         ensure_support_issue(repo, item)
-    open_issue_ids = open_support_issue_ids(repo)
+    open_issue_records = open_support_issue_records(repo)
+    open_issue_ids = set(open_issue_records)
+    unadmitted_p0 = audit_support_admission(
+        open_issue_records, parsed_support + auto_incidents + development_recovery_incidents, state,
+    )
     support = eligible_support_items(parsed_support, open_issue_ids)
     support.extend(
         item for item in auto_incidents
@@ -1331,6 +1533,8 @@ def main() -> int:
     gate = load_gate(repo)
     policy = gate.load_json(repo / 'config' / 'autonomous-repair-release-policy.json')
 
+    readmit_recovered_reasoning(state, support, spool, max_active=args.max_active)
+    reassess_model_scope_blocks(state, support, spool, args.max_active)
     selected = select_reconcile_ids(state, support, args.max_active)
 
     by_id = {item['id']: item for item in support}
@@ -1659,6 +1863,9 @@ def main() -> int:
 
     state['updated_at'] = now()
     save_state(state_path, state)
+    if unadmitted_p0:
+        print('SUPPORT_ADMISSION_HEALTH=DEGRADED unmatched_p0=' + ','.join(unadmitted_p0))
+        return 3
     return 0
 
 

@@ -267,7 +267,13 @@ def production_convergence_failures(
     automatic_window = production.get("automatic_window") if isinstance(production.get("automatic_window"), Mapping) else {}
     evidence["release_manager_policy_schedule"] = dict(schedule)
     evidence["development_release_automatic_window"] = dict(automatic_window)
-    if str(schedule.get("mode") or "").casefold() != "continuous_24x7":
+    # The production policy explicitly records the AOT owner's 24x7
+    # authorization. Both the canonical mode and this exact owner-approved
+    # mode denote continuous operation, not a legacy daily window.
+    if str(schedule.get("mode") or "").casefold() not in {
+        "continuous_24x7",
+        "continuous_24x7_owner_approved",
+    }:
         failures.append("production_convergence_intent_contradiction:release_policy_not_24x7")
     if "daily_window_local" in schedule:
         failures.append("production_convergence_intent_contradiction:legacy_daily_window_present")
@@ -460,8 +466,12 @@ def autonomy_behavior_anomalies(
             failures.append(f"autonomy_invariant_violation:eligible_gt_evaluated:{cycle}")
         if numeric["selected"] > numeric["eligible"]:
             failures.append(f"autonomy_invariant_violation:selected_gt_eligible:{cycle}")
-        if numeric["selected"] > numeric["active_slots"]:
-            failures.append(f"autonomy_invariant_violation:selected_gt_active_slots:{cycle}")
+        # active_slots is the currently occupied slot count at scan
+        # completion, not admission capacity at decision time. Successfully
+        # started work can finish or move to WAITING in this scan. Comparing
+        # selected starts to post-scan occupancy creates false P0 incidents.
+        # The true admission bound remains enforced at each _admit() and
+        # preserved in the worker's own max_active_work_items checks.
 
     # Generic behavioral baseline: compare recent selection efficiency with Jason's
     # own older healthy-looking cycles instead of hard-coding a particular failure.
@@ -828,6 +838,28 @@ def write_escalation(
     return path
 
 
+def bounded_detect(root: Path) -> tuple[list[str], dict[str, Any]]:
+    """Represent a timed-out read-only probe as unknown, never as healthy/down.
+
+    The ordinary bounded verification pass may retry once, but no restart or
+    container start is authorized from timing uncertainty alone. Persist
+    uncertainty if it remains unresolved rather than failing the systemd unit
+    with an uncaught subprocess exception.
+    """
+    try:
+        return detect(root)
+    except subprocess.TimeoutExpired as exc:
+        command = list(exc.cmd) if isinstance(exc.cmd, (list, tuple)) else [str(exc.cmd)]
+        if len(command) < 2 or command[0] != 'docker' or command[1] not in ('inspect', 'exec'):
+            raise
+        return ['docker_probe_timeout'], {
+            'probe_status': 'inconclusive',
+            'probe_command': command[:3],
+            'timeout_seconds': exc.timeout,
+            'observed_at': now(),
+        }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
@@ -838,7 +870,7 @@ def main() -> int:
     memory_path = root / "issue-memory.json"
     state = read_json(state_path)
 
-    failures, evidence = detect(root)
+    failures, evidence = bounded_detect(root)
     if not failures:
         update_recurrence_memory(memory_path, [])
         atomic_json(state_path, {
@@ -857,7 +889,7 @@ def main() -> int:
     if attempts < max(1, int(args.max_attempts)):
         actions = bounded_recovery(failures)
         attempts += 1
-        failures_after, evidence_after = detect(root)
+        failures_after, evidence_after = bounded_detect(root)
         if not failures_after:
             update_recurrence_memory(memory_path, [])
             atomic_json(state_path, {

@@ -36,6 +36,14 @@ def test_lifecycle_sync_does_not_claim_completion_without_pr(tmp_path):
     assert not list(tmp_path.glob('*.json'))
 
 
+def test_exact_approved_symbols_are_deduplicated_and_bounded():
+    scope = ('Use `bounded_symbol_excerpt` and `source_excerpts_for_paths` ' * 3) + '`tools/not_a_symbol.py`'
+    assert module.exact_approved_symbols(scope) == [
+        'bounded_symbol_excerpt', 'source_excerpts_for_paths'
+    ]
+    assert len(module.exact_approved_symbols(' '.join(f'`func_{i}`' for i in range(50)))) == 24
+
+
 def test_owner_approval_marker_is_exact():
     assert module.APPROVAL.search('- **Autonomous development:** owner-approved')
     assert not module.APPROVAL.search('- **Autonomous development:** approved')
@@ -867,18 +875,20 @@ def test_production_identity_api_context_keeps_complete_contract(tmp_path):
     assert chosen[0]['path'] == 'tools/release_manager_host_runner.py'
 
 
-def test_approved_test_file_full_context_with_bounded_56k_limit(tmp_path):
+def test_approved_test_file_full_context_with_bounded_96k_limit(tmp_path):
     import types
     test_path = tmp_path / 'tools/tests/test_owner_approved_development_worker.py'
     test_path.parent.mkdir(parents=True)
     expected = 'def test_reject_missing_production_identity():\n    assert True\n'
-    body = '# preexisting regression context\n' * 1100 + expected
-    assert 24000 < len(body) < 56000
+    body = '# preexisting regression context\n' * 2100 + expected
+    assert 56000 < len(body) < 96000
     test_path.write_text(body)
     gate = types.SimpleNamespace(path_denial_reason=lambda path, policy: '')
     context = module.support.source_excerpts_for_paths(
         tmp_path, ['tools/tests/test_owner_approved_development_worker.py'],
-        gate, {}, terms=['CCC production SHA'], content_limit=56000, limit=1)
+        gate, {}, terms=['test_reject_missing_production_identity'],
+        content_limit=96000, limit=1,
+        full_file_paths=['tools/tests/test_owner_approved_development_worker.py'])
     assert context[0]['content'] == body
     assert expected in context[0]['content']
 
@@ -1191,3 +1201,422 @@ def test_negated_test_excerpt_is_source_context():
     assert module.source_context_blocker(reason)
     assert module.self_recoverable_blocker(reason)
     assert not module.source_context_blocker('All regression tests passed.')
+
+
+def test_matching_source_without_required_regression_test_refreshes_before_mutation(monkeypatch, tmp_path):
+    import types
+    source = tmp_path / 'tools/worker.py'
+    regression = tmp_path / 'tools/tests/test_worker.py'
+    regression.parent.mkdir(parents=True)
+    source.write_text('value = 1\n')
+    regression.write_text('def test_value():\n    assert True\n')
+    gate = types.SimpleNamespace(path_denial_reason=lambda path, policy: '')
+    scope = 'Only edit `tools/worker.py` and `tools/tests/test_worker.py`.'
+    monkeypatch.setattr(module, 'approved_scope', lambda item: scope)
+    monkeypatch.setattr(module.support, 'source_excerpts_for_paths',
+                        lambda root, paths, *a, **kw: [
+                            {'path': path, 'content': (root / path).read_text()}
+                            for path in paths])
+    calls = []
+    monkeypatch.setattr(module, 'queue_reasoning',
+                        lambda spool, **kw: calls.append(kw) or 'new-edit-plan')
+    record = {'phase': 'implementing'}
+    edits = [{'path': 'tools/worker.py', 'old_text': 'value = 1',
+              'new_text': 'value = 2'}]
+    assert module.preflight_or_refresh_exact_anchors(
+        tmp_path, edits, gate, {}, record, {'issue_number': 42}, tmp_path)
+    assert record['reasoning_request_id'] == 'new-edit-plan'
+    assert record['anchor_refresh_attempts'] == 1
+    assert calls[0]['context']['missing_regression_test_edits'] is True
+    assert {entry['path'] for entry in calls[0]['context']['source_excerpts']} == {
+        'tools/worker.py', 'tools/tests/test_worker.py'}
+    assert source.read_text() == 'value = 1\n'
+    assert regression.read_text() == 'def test_value():\n    assert True\n'
+
+
+def test_recovery_worktree_preserves_failed_edits_and_is_clean(tmp_path, monkeypatch):
+    import subprocess
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    def git(*args, cwd=repo):
+        return subprocess.check_output(['git', *args], cwd=cwd, text=True).strip()
+    git('init', '-b', 'main')
+    git('config', 'user.email', 'test@example.invalid')
+    git('config', 'user.name', 'Worker Test')
+    (repo / 'worker.py').write_text('original\n')
+    git('add', 'worker.py')
+    git('commit', '-m', 'base')
+    git('remote', 'add', 'origin', str(repo))
+    git('fetch', 'origin', 'main')
+    root = tmp_path / 'worktrees'
+    root.mkdir()
+    monkeypatch.setattr(module, 'WORKTREE_ROOT', root)
+    failed = root / 'issue-42'
+    git('worktree', 'add', '-b', 'failed-42', str(failed), 'main')
+    (failed / 'worker.py').write_text('partial failed patch\n')
+    fresh = module.ensure_recovery_worktree(repo, 42, 'a' * 40)
+    assert fresh != failed
+    assert (failed / 'worker.py').read_text() == 'partial failed patch\n'
+    assert (fresh / 'worker.py').read_text() == 'original\n'
+    assert git('status', '--porcelain', cwd=fresh) == ''
+    assert module.ensure_recovery_worktree(repo, 42, 'a' * 40) == fresh
+    (fresh / 'worker.py').write_text('dirty new worktree\n')
+    import pytest
+    with pytest.raises(module.support.WorkerError, match='uncommitted changes'):
+        module.ensure_recovery_worktree(repo, 42, 'a' * 40)
+
+
+def test_regression_test_blocker_is_not_accepted_without_verified_upgrade(tmp_path):
+    state = {'items': {'DEV-42': {
+        'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+        'reason': 'WorkerError: autonomous support repair requires a changed regression test'
+    }}}
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, {'DEV-42'}, tmp_path, current_link=tmp_path / 'missing') == 0
+    assert state['items']['DEV-42']['phase'] == 'blocked'
+
+
+
+def test_missing_implementation_files_not_provided_in_excerpts_is_recoverable():
+    reason = (
+        'Required implementation files/functions for IT Glue knowledge-scope '
+        'enforcement were not provided in the excerpts, so an exact-text minimal '
+        'patch cannot be formed safely.'
+    )
+    assert module.source_context_blocker(reason)
+    assert module.self_recoverable_blocker(reason)
+    assert module.source_context_blocker(
+        'Necessary helper code was not included in the source context.'
+    )
+    assert not module.source_context_blocker(
+        'Required provider credential was not provided.'
+    )
+    assert not module.source_context_blocker(
+        'Owner approval was not provided for protected production deployment.'
+    )
+
+
+
+def test_verified_worker_upgrade_readmits_bounded_test_collection_import_failure(tmp_path):
+    import json
+    from datetime import datetime, timezone
+    spool = tmp_path / 'support-repair'
+    spool.mkdir()
+    root = tmp_path / 'release-manager'
+    (root / 'protected-readback').mkdir(parents=True)
+    (root / 'records').mkdir()
+    sha = 'c' * 40
+    live = tmp_path / sha
+    live.mkdir()
+    (root / 'protected-readback/production-control-state.json').write_text(json.dumps(
+        {'last_known_good': {'manifest': {'revision': sha}}}))
+    (root / 'protected-readback/production-drift.json').write_text(json.dumps(
+        {'status': 'pass', 'problems': [],
+         'observed_at': datetime.now(timezone.utc).isoformat()}))
+    (root / 'records/release-test.json').write_text(json.dumps({
+        'state': 'closed', 'release_candidate': {'candidate_sha': sha},
+        'changed_files': ['tools/support_repair_host_worker.py']}))
+    real_reason = (
+        'WorkerError: command failed (/home/al/projects/jason/.venv/bin/python): '
+        'ERROR collecting tools/tests/test_owner_approved_development_worker.py '
+        'ImportError while importing test module '
+        'tools/owner_approved_development_worker.py:13: in <module> '
+        'import support_repair_host_worker as support'
+    )
+    record = {'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+              'reason': real_reason, 'self_recovery_attempts': 2}
+    state = {'items': {'DEV-1245': record}}
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, {'DEV-1245'}, spool, current_link=live) == 1
+    assert record['phase'] == 'diagnosing'
+    assert record['recovery_worktree_revision'] == sha
+    assert record['self_recovery_attempts'] == 0
+    record.update(phase='blocked', reason=real_reason)
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, {'DEV-1245'}, spool, current_link=live) == 0
+
+
+def test_test_collection_import_recovery_cannot_admit_external_authority(tmp_path):
+    spool = tmp_path / 'support-repair'
+    spool.mkdir()
+    live = tmp_path / ('d' * 40)
+    live.mkdir()
+    record = {'phase': 'blocked', 'blocker_class': 'external_authority',
+              'reason': ('ERROR collecting tools/tests/test_worker.py '
+                         'ImportError while importing test module '
+                         'import support_repair_host_worker as support')}
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        {'items': {'DEV-1': record}}, {'DEV-1'}, spool, current_link=live) == 0
+    assert record['phase'] == 'blocked'
+
+
+
+def test_production_identity_contract_includes_complete_read_only_helper():
+    import types
+    repo = Path(__file__).resolve().parents[2]
+    gate = types.SimpleNamespace(path_denial_reason=lambda path, policy: '')
+    excerpts = module.bounded_production_identity_contract(repo, gate, {})
+    assert len(excerpts) == 1
+    assert excerpts[0]['path'] == 'tools/support_repair_host_worker.py'
+    content = excerpts[0]['content']
+    assert 'def production_state_from_main(repo: Path)' in content
+    assert "run(['git', 'fetch', '--no-tags', 'origin', 'main']" in content
+    assert 'return dict(value) if isinstance(value, Mapping) else {}' in content
+    assert len(content) <= 14500
+
+
+def test_production_identity_contract_obeys_policy_denial():
+    import types
+    repo = Path(__file__).resolve().parents[2]
+    gate = types.SimpleNamespace(
+        path_denial_reason=lambda path, policy: 'denied source')
+    assert module.bounded_production_identity_contract(repo, gate, {}) == []
+
+
+
+def test_exact_repository_source_shortage_is_recoverable_not_authority():
+    reason = (
+        'Additional exact repository source is still needed to make a safe '
+        'exact-text replacement for readmit_verified_ccc_owner_review '
+        'without inventing unseen API surface.'
+    )
+    assert module.source_context_blocker(reason)
+    assert module.self_recoverable_blocker(reason)
+    assert not module.source_context_blocker(
+        'Additional provider permission is still needed for writes.'
+    )
+    assert not module.source_context_blocker(
+        'Additional owner approval is needed for production deployment.'
+    )
+
+
+def test_verified_upgrade_readmits_real_1245_shortage_once(tmp_path):
+    import json
+    from datetime import datetime, timezone
+    spool = tmp_path / 'support-repair'
+    spool.mkdir()
+    root = tmp_path / 'release-manager'
+    (root / 'protected-readback').mkdir(parents=True)
+    (root / 'records').mkdir()
+    sha = 'e' * 40
+    live = tmp_path / sha
+    live.mkdir()
+    (root / 'protected-readback/production-control-state.json').write_text(json.dumps(
+        {'last_known_good': {'manifest': {'revision': sha}}}))
+    (root / 'protected-readback/production-drift.json').write_text(json.dumps(
+        {'status': 'pass', 'problems': [],
+         'observed_at': datetime.now(timezone.utc).isoformat()}))
+    (root / 'records/release-test.json').write_text(json.dumps({
+        'state': 'closed', 'release_candidate': {'candidate_sha': sha},
+        'changed_files': ['tools/owner_approved_development_worker.py']}))
+    original_reason = (
+        'Additional exact repository source is still needed to make a safe '
+        'exact-text replacement for `readmit_verified_ccc_owner_review` that '
+        'compares against the authoritative live production SHA using the '
+        'existing read-only production identity helper without inventing '
+        'unseen API surface.'
+    )
+    record = {
+        'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+        'reason': original_reason, 'context_expansion_attempts': 3,
+        'source_upgrade_readmitted_sha': 'f' * 40
+    }
+    state = {'items': {'DEV-1245': record}}
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, set(), spool, current_link=live) == 0
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, {'DEV-1245'}, spool, current_link=live) == 1
+    assert record['phase'] == 'diagnosing'
+    assert record['context_expansion_attempts'] == 0
+    assert record['source_upgrade_readmitted_sha'] == sha
+    assert record['recovery_worktree_revision'] == sha
+    record['phase'] = 'blocked'
+    record['reason'] = original_reason
+    assert module.readmit_source_context_after_verified_worker_upgrade(
+        state, {'DEV-1245'}, spool, current_link=live) == 0
+
+
+
+def test_exhausted_blocker_with_reset_recycle_counter_never_uses_generic_retry():
+    original = (
+        'Additional exact repository source is still needed to make a safe '
+        'exact-text replacement for readmit_verified_ccc_owner_review.'
+    )
+    record = {
+        'phase': 'blocked',
+        'blocker_class': 'internal_retry_exhausted',
+        'reason': original,
+        'self_recovery_attempts': 0,
+        'source_upgrade_readmitted_sha': 'a' * 40,
+        'recovery_worktree_revision': 'a' * 40,
+        'context_expansion_attempts': 3,
+    }
+    state = {'items': {'DEV-1245': record}}
+    module.recycle_self_recoverable_blockers(state, {'DEV-1245'})
+    assert record['phase'] == 'blocked'
+    assert record['reason'] == original
+    assert record['self_recovery_attempts'] == 0
+    assert record['recovery_worktree_revision'] == 'a' * 40
+    # Approval presence alone cannot reset a genuinely exhausted attempt.
+    module.recycle_self_recoverable_blockers(state, {'DEV-1245'})
+    assert record['phase'] == 'blocked'
+
+
+def test_ordinary_nonexhausted_internal_recovery_still_works():
+    state = {'items': {'DEV-77': {
+        'phase': 'blocked',
+        'reason': 'The supplied excerpts are insufficient',
+        'self_recovery_attempts': 0,
+    }}}
+    module.recycle_self_recoverable_blockers(state, {'DEV-77'})
+    assert state['items']['DEV-77']['phase'] == 'diagnosing'
+    assert state['items']['DEV-77']['self_recovery_attempts'] == 1
+
+
+def test_ancestral_worker_upgrade_readmits_after_later_watchdog_only_release(tmp_path):
+    import json
+    import subprocess
+    from datetime import datetime, timezone
+
+    repo = tmp_path / 'git-source'
+    repo.mkdir()
+    def git(*args):
+        return subprocess.check_output(['git', *args], cwd=repo, text=True).strip()
+    git('init', '-b', 'main')
+    git('config', 'user.email', 'test@example.invalid')
+    git('config', 'user.name', 'Test')
+    (repo / 'tools').mkdir()
+    source = repo / 'tools/owner_approved_development_worker.py'
+    source.write_text('CONTRACT = "old source context"\n')
+    watchdog = repo / 'tools/jason_self_heal_watchdog.py'
+    watchdog.write_text('PROBE = 0\n')
+    git('add', '.')
+    git('commit', '-m', 'prior baseline')
+    old = git('rev-parse', 'HEAD')
+    source.write_text('CONTRACT = "complete source context"\n')
+    git('add', '.')
+    git('commit', '-m', 'verified source retrieval upgrade')
+    worker_rev = git('rev-parse', 'HEAD')
+    watchdog.write_text('PROBE = 1\n')
+    git('add', '.')
+    git('commit', '-m', 'subsequent watchdog fix')
+    live_sha = git('rev-parse', 'HEAD')
+
+    spool = tmp_path / 'support-repair'
+    spool.mkdir()
+    state_root = tmp_path / 'release-manager'
+    (state_root / 'protected-readback').mkdir(parents=True)
+    (state_root / 'records').mkdir()
+    live = tmp_path / live_sha
+    live.mkdir()
+    (state_root / 'protected-readback/production-control-state.json').write_text(
+        json.dumps({'last_known_good': {'manifest': {'revision': live_sha}}})
+    )
+    drift_path = state_root / 'protected-readback/production-drift.json'
+    drift_path.write_text(json.dumps({
+        'status': 'pass', 'problems': [],
+        'observed_at': datetime.now(timezone.utc).isoformat(),
+    }))
+    worker_record = {
+        'state': 'closed', 'release_candidate': {'candidate_sha': worker_rev},
+        'changed_files': ['tools/owner_approved_development_worker.py'],
+    }
+    (state_root / 'records/release-worker.json').write_text(json.dumps(worker_record))
+    (state_root / 'records/release-live.json').write_text(json.dumps({
+        'state': 'closed', 'release_candidate': {'candidate_sha': live_sha},
+        'changed_files': ['tools/jason_self_heal_watchdog.py'],
+    }))
+    reason = (
+        'The repository excerpts are insufficient to form a guaranteed exact '
+        'replacement for readmit_verified_ccc_owner_review while preserving '
+        'its surrounding call conventions and helper availability.'
+    )
+    record = {
+        'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+        'reason': reason, 'source_upgrade_readmitted_sha': old,
+        'context_expansion_attempts': 3,
+        'self_recovery_attempts': 1,
+    }
+    state = {'items': {'DEV-1245': record}}
+    def admit():
+        return module.readmit_source_context_after_verified_worker_upgrade(
+            state, {'DEV-1245'}, spool, current_link=live, source_repo=repo,
+        )
+
+    # Missing confirmed live release cannot readmit, even when git ancestry matches.
+    live_record_path = state_root / 'records/release-live.json'
+    live_record_path.write_text(json.dumps({
+        'state': 'production', 'release_candidate': {'candidate_sha': live_sha},
+        'changed_files': ['tools/jason_self_heal_watchdog.py'],
+    }))
+    assert admit() == 0
+    assert record['phase'] == 'blocked'
+    live_record_path.write_text(json.dumps({
+        'state': 'closed', 'release_candidate': {'candidate_sha': live_sha},
+        'changed_files': ['tools/jason_self_heal_watchdog.py'],
+    }))
+    drift_path.write_text(json.dumps({
+        'status': 'drift_detected', 'problems': ['missing proof'],
+        'observed_at': datetime.now(timezone.utc).isoformat(),
+    }))
+    assert admit() == 0
+    drift_path.write_text(json.dumps({
+        'status': 'pass', 'problems': [],
+        'observed_at': datetime.now(timezone.utc).isoformat(),
+    }))
+
+    # A closed intermediate release without worker code changes is insufficient.
+    worker_path = state_root / 'records/release-worker.json'
+    worker_path.write_text(json.dumps({
+        'state': 'closed', 'release_candidate': {'candidate_sha': worker_rev},
+        'changed_files': ['tools/jason_self_heal_watchdog.py'],
+    }))
+    assert admit() == 0
+    worker_path.write_text(json.dumps(worker_record))
+    assert admit() == 1
+    assert record['phase'] == 'diagnosing'
+    assert record['source_upgrade_readmitted_sha'] == live_sha
+    assert record['recovery_worktree_revision'] == live_sha
+    assert record['self_recovery_attempts'] == 0
+    assert record['context_expansion_attempts'] == 0
+    record['phase'] = 'blocked'
+    record['reason'] = reason
+    assert admit() == 0
+
+    # Unchanged worker bytes between previous admission and live cannot re-admit.
+    record['source_upgrade_readmitted_sha'] = worker_rev
+    assert admit() == 0
+    assert record['phase'] == 'blocked'
+
+
+def test_intervening_upgrade_rejects_untrusted_or_missing_git_history(tmp_path):
+    import subprocess
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+    assert not module.verified_intervening_worker_upgrade(
+        [{'state':'closed', 'release_candidate':{'candidate_sha':'b'*40},
+          'changed_files':['tools/owner_approved_development_worker.py']}],
+        'a'*40, 'c'*40, repo,
+    )
+    assert not module.verified_intervening_worker_upgrade([], 'a'*40, 'a'*40, repo)
+
+
+def test_development_readmit_only_exact_recovered_response(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(module, 'active_support_count', lambda spool: 0)
+    rid = 'c' * 64
+    responses = tmp_path / 'reasoning' / 'responses'
+    responses.mkdir(parents=True)
+    (responses / f'{rid}.json').write_text(json.dumps({
+        'status': 'succeeded', 'request_id': rid, 'kind': 'search_plan',
+        'support_item': 'DEV-111', 'result': {'search_terms': ['foo']},
+    }))
+    record = {'phase': 'blocked', 'reason': 'development reasoning failed: HTTP transport failed',
+              'reasoning_request_id': rid}
+    state = {'items': {'DEV-111': record}}
+    assert module.readmit_recovered_development_reasoning(state, [{'id': 'DEV-111'}], tmp_path,
+                                                             max_active=2) == ['DEV-111']
+    assert record['phase'] == 'diagnosing'
+    assert module.readmit_recovered_development_reasoning(state, [{'id': 'DEV-111'}], tmp_path,
+                                                             max_active=2) == []

@@ -38,6 +38,33 @@ A passing report requires:
 
 The backup/restore proof uses an ephemeral local temporary directory and does not replace the live database.
 
+### Full-integrity execution budget
+
+The systemd one-shot health service still runs the **entire** source checker:
+`PRAGMA integrity_check` against all four SQLite stores, key-registry checks,
+and authority backup/restore with integrity and count verification. The
+orchestration-events audit store is multi-gigabyte, so the snapshot wrapper
+allows up to **900 seconds (15 minutes)** for the complete subprocess rather
+than the former 120 seconds. This is an execution budget, not a weaker
+integrity mode: do not replace `integrity_check` with `quick_check`, sample
+tables, or exclude the orchestration audit database.
+
+Timeouts remain fail-closed. If the full checker exceeds 900 seconds, the
+wrapper atomically writes a `status=fail` snapshot with
+`operational_health_timeout`, returns exit code 124, and causes the oneshot
+unit and authoritative drift controls to report failure. A previously healthy
+snapshot must never masquerade as a current pass after timeout. A nonzero
+checker exit similarly forces `status=fail`. Snapshot output remains mode
+`0600` and no provider credentials are read.
+
+The existing five-minute systemd timer is preserved. systemd will not run
+concurrent instances of the same oneshot unit; if a full check runs beyond
+five minutes, observe its completion and next activation, and investigate
+resource pressure. A full check that remains above 900 seconds is an
+engineering blocker, **not** a reason to waive release drift or integrity
+gates. Validate the updated immutable host release and successful scheduled
+service exit before asserting the host release gate is clean.
+
 ## Delegation lifecycle
 
 List sanitized delegation metadata:

@@ -889,3 +889,261 @@ def test_transient_pr_listing_classifier_preserves_authority_boundary():
     for error in ('HTTP 403: forbidden', 'HTTP 401: unauthorized',
                   'approval required', 'invalid JSON record'):
         assert not worker.transient_github_listing_failure(worker.WorkerError(error))
+
+
+def test_bounded_full_approved_test_source(tmp_path):
+    import types, pytest
+    f=tmp_path/'tools/tests/test_large.py'
+    f.parent.mkdir(parents=True)
+    body='def test_large():\n    assert True\n'+'# source\n'*7000
+    f.write_text(body)
+    g=types.SimpleNamespace(path_denial_reason=lambda path,policy:'')
+    p='tools/tests/test_large.py'
+    v=worker.source_excerpts_for_paths(tmp_path,[p],g,{},terms=['test_large'],content_limit=96000,full_file_paths=[p])
+    assert v[0]['content']==body
+    with pytest.raises(worker.WorkerError,match='required complete source exceeds'):
+        worker.source_excerpts_for_paths(tmp_path,[p],g,{},terms=['test_large'],content_limit=56000,full_file_paths=[p])
+    denied=types.SimpleNamespace(path_denial_reason=lambda path,policy:'denied')
+    assert worker.source_excerpts_for_paths(tmp_path,[p],denied,{},content_limit=96000,full_file_paths=[p])==[]
+
+
+
+def test_symbol_context_preamble_does_not_truncate_unrelated_function():
+    import ast
+    preamble = 'import json\n' + ''.join(
+        f'CONFIG_{i} = {i}\n' for i in range(82)
+    )
+    text = (preamble
+            + 'def unrelated():\n'
+            + '    one = 1\n'
+            + '    two = 2\n'
+            + '    return one + two\n'
+            + 'def requested_target():\n'
+            + '    return json.dumps({"ok": True})\n')
+    # The former raw 1,300-character prefix ends within a Python definition.
+    import pytest
+    with pytest.raises(SyntaxError):
+        ast.parse(text[:1300])
+    excerpt = worker.bounded_symbol_excerpt(
+        text, ['requested_target'], content_limit=9000
+    )
+    assert excerpt is not None
+    prefix, _, definition = excerpt.partition('\n# Complete definition')
+    ast.parse(prefix)
+    assert 'def requested_target' in definition
+    assert 'return json.dumps' in definition
+    assert 'def unrelated():\n    one = 1\n    two = 2\n    return one + two' in prefix or 'def unrelated' not in prefix
+
+
+
+def test_validate_patch_runs_isolated_worktree_tests_with_local_tools_import(monkeypatch, tmp_path):
+    import subprocess
+    import types
+    repo = tmp_path / 'isolated'
+    source = repo / 'tools' / 'local_validation_module.py'
+    test = repo / 'tools' / 'tests' / 'test_local_validation_module.py'
+    test.parent.mkdir(parents=True)
+    source.write_text('VALUE = 1\n')
+    test.write_text('from local_validation_module import VALUE\n\ndef test_value():\n    assert VALUE == 1\n')
+    subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+    subprocess.run(['git', 'config', 'user.email', 'test@example.invalid'], cwd=repo, check=True)
+    subprocess.run(['git', 'config', 'user.name', 'Test'], cwd=repo, check=True)
+    subprocess.run(['git', 'add', '.'], cwd=repo, check=True)
+    subprocess.run(['git', 'commit', '-qm', 'initial'], cwd=repo, check=True)
+    source.write_text('VALUE = 2\n')
+    test.write_text('from local_validation_module import VALUE\n\ndef test_value():\n    assert VALUE == 2\n')
+    monkeypatch.setenv('PYTHONPATH', str(tmp_path / 'unrelated'))
+    gate = types.SimpleNamespace(
+        path_denial_reason=lambda path, policy: '',
+        is_test_path=lambda path, policy: path.startswith('tools/tests/test_')
+    )
+    selected = worker.validate_patch(
+        repo, ['tools/tests/test_local_validation_module.py'], gate, {}
+    )
+    assert selected == ['tools/tests/test_local_validation_module.py']
+
+
+
+def test_safe_search_discovers_named_provider_source_not_just_tests(tmp_path):
+    import subprocess
+    import types
+    repo = tmp_path / 'repo'
+    base = repo / 'implementation/connectors/it_glue'
+    base.mkdir(parents=True)
+    (base / 'live_read.py').write_text('class DocumentReader:\n    pass\n')
+    (base / 'operations.py').write_text('class Operations:\n    pass\n')
+    other = repo / 'implementation/connectors/tests/test_it_glue_live_read.py'
+    other.parent.mkdir(parents=True)
+    other.write_text('def test_it_glue_document_search_read():\n    assert True\n')
+    subprocess.run(['git', 'init', '-q', str(repo)], check=True)
+    subprocess.run(['git', 'add', '.'], cwd=repo, check=True)
+    gate = types.SimpleNamespace(path_denial_reason=lambda path, policy: '')
+    excerpts = worker.safe_search(
+        repo, ['IT Glue document search read implementation',
+               'IT Glue provider adapter search read attachment'],
+        gate, {}
+    )
+    result = {entry['path'] for entry in excerpts}
+    assert 'implementation/connectors/it_glue/live_read.py' in result
+    assert 'implementation/connectors/it_glue/operations.py' in result
+    assert all(entry['content'] for entry in excerpts)
+
+
+def test_missing_p0_support_issue_is_visible_and_emits_blocker(tmp_path):
+    state = {}
+    issues = {
+        'SUPPORT-OPS-500': {'title': 'P0 SUPPORT-OPS-500: missing row', 'priority': 'P0'},
+        'SUPPORT-OPS-501': {'title': 'P1 SUPPORT-OPS-501: missing row', 'priority': 'unknown'},
+        'SUPPORT-OPS-502': {'title': 'P0 SUPPORT-OPS-502: admitted', 'priority': 'P0'},
+    }
+    known = [{'id': 'SUPPORT-OPS-502'}]
+    missing = worker.audit_support_admission(issues, known, state, event_root=tmp_path)
+    assert missing == ['SUPPORT-OPS-500']
+    assert state['admission_audit']['status'] == 'degraded'
+    assert state['admission_audit']['unadmitted_p0'] == ['SUPPORT-OPS-500']
+    payloads = [worker.json.loads(p.read_text()) for p in tmp_path.glob('*.json')]
+    assert len(payloads) == 1
+    assert payloads[0]['event_type'] == 'work_blocked'
+    assert payloads[0]['work_id'] == 'SUPPORT-OPS-500'
+    assert payloads[0]['owner_action'].startswith('Reconcile issue')
+    worker.audit_support_admission(issues, known, state, event_root=tmp_path)
+    assert len(list(tmp_path.glob('*.json'))) == 1  # duplicate-suppressed
+
+
+def test_open_issue_listing_fails_closed_on_incomplete_page(monkeypatch, tmp_path):
+    monkeypatch.setattr(worker, 'gh_json', lambda args, cwd: [
+        {'number': i, 'title': f'P0 SUPPORT-OPS-{i}: incident'} for i in range(1000)
+    ])
+    import pytest
+    with pytest.raises(worker.WorkerError, match='incomplete'):
+        worker.open_support_issue_records(tmp_path)
+
+
+def test_missing_non_p0_does_not_escalate_owner(tmp_path):
+    state = {}
+    issues = {'SUPPORT-OPS-600': {'title': 'P1 SUPPORT-OPS-600: review', 'priority': 'unknown'}}
+    assert worker.audit_support_admission(issues, [], state, event_root=tmp_path) == []
+    assert state['admission_audit']['status'] == 'healthy'
+    assert not list(tmp_path.glob('*.json'))
+
+
+def test_reassess_model_only_block_once_under_existing_active_cap(tmp_path):
+    item = {'id': 'SUPPORT-OPS-056', 'title': 'Release record defect',
+            'evidence': 'Missing release_manifest', 'acceptance': 'Test pass', 'priority': 'P0'}
+    previous = 'The defect inherently requires new authority because of root-governed rollback.'
+    rid = worker.queue_reasoning(tmp_path, kind='search_plan', item=item, context={})
+    response_path = tmp_path / 'reasoning' / 'responses' / (rid + '.json')
+    response_path.parent.mkdir(parents=True)
+    response_path.write_text(worker.json.dumps({
+        'status': 'succeeded', 'result': {'diagnosis': 'root',
+        'search_terms': ['release_manifest'], 'blocked_reason': previous}}))
+    record = {'phase': 'blocked', 'reason': previous, 'reasoning_request_id': rid}
+    state = {'items': {item['id']: record}}
+    assert worker.reassess_model_scope_blocks(state, [item], tmp_path, 2) == [item['id']]
+    assert record['phase'] == 'diagnosing'
+    assert record['scope_review_attempted'] is True
+    assert record['reasoning_request_id'] != rid
+    request = worker.json.loads((tmp_path / 'reasoning' / 'requests' / (record['reasoning_request_id'] + '.json')).read_text())
+    assert request['context']['scope_review'] == 'source_diagnosis_only'
+    assert request['context']['prior_blocked_reason'] == previous
+    assert worker.reassess_model_scope_blocks(state, [item], tmp_path, 2) == []
+    record.update({'phase': 'blocked', 'reason': 'Actually needs privilege'})
+    assert worker.reassess_model_scope_blocks(state, [item], tmp_path, 2) == []
+
+
+def test_reassess_does_not_override_host_denial_transport_or_capacity(tmp_path):
+    item = {'id': 'SUPPORT-OPS-057', 'title': 'Defect',
+            'evidence': 'e', 'acceptance': 'a', 'priority': 'P0'}
+    rid = worker.queue_reasoning(tmp_path, kind='search_plan', item=item, context={})
+    response_path = tmp_path / 'reasoning' / 'responses' / (rid + '.json')
+    response_path.parent.mkdir(parents=True)
+    response_path.write_text(worker.json.dumps({'status': 'succeeded', 'result': {'blocked_reason': 'model scope denied'}}))
+    record = {'phase': 'blocked', 'reason': 'model scope denied', 'reasoning_request_id': rid}
+    state = {'items': {item['id']: record, 'SUPPORT-OPS-099': {'phase': 'implementing'}}}
+    assert worker.reassess_model_scope_blocks(state, [item], tmp_path, 1) == []
+    assert record['phase'] == 'blocked'
+    state['items'].pop('SUPPORT-OPS-099')
+    record['reason'] = 'repair path denied by J-CHANGE-002'
+    assert worker.reassess_model_scope_blocks(state, [item], tmp_path, 2) == []
+    record['reason'] = 'model scope denied'
+    response_path.write_text(worker.json.dumps({'status': 'failed', 'error': 'HTTP transport failed'}))
+    assert worker.reassess_model_scope_blocks(state, [item], tmp_path, 2) == []
+    assert record['phase'] == 'blocked'
+
+
+def test_scope_review_chooses_one_p0_before_lower_priority(tmp_path):
+    priority = [
+        {'id': 'SUPPORT-OPS-400', 'title': 'P0 control failure', 'evidence': 'e', 'acceptance': 'a', 'priority': 'P0'},
+        {'id': 'SUPPORT-OPS-401', 'title': 'P1 report', 'evidence': 'e', 'acceptance': 'a', 'priority': 'P1'},
+    ]
+    items = {}
+    for item in priority:
+        rid = worker.queue_reasoning(tmp_path, kind='search_plan', item=item, context={})
+        result_dir = tmp_path / 'reasoning' / 'responses'
+        result_dir.mkdir(parents=True, exist_ok=True)
+        (result_dir / (rid + '.json')).write_text(worker.json.dumps({
+            'status': 'succeeded', 'result': {'blocked_reason': 'model scope denied'}}))
+        items[item['id']] = {'phase': 'blocked', 'reason': 'model scope denied', 'reasoning_request_id': rid}
+    state = {'items': items}
+    assert worker.reassess_model_scope_blocks(state, priority, tmp_path, 1) == ['SUPPORT-OPS-400']
+    assert items['SUPPORT-OPS-400']['phase'] == 'diagnosing'
+    assert items['SUPPORT-OPS-401']['phase'] == 'blocked'
+    assert worker.reassess_model_scope_blocks(state, priority, tmp_path, 1) == []
+
+
+def test_recovered_edit_reasoning_readmits_only_verified_exact_request(tmp_path):
+    import json
+    rid = 'a' * 64
+    response_dir = tmp_path / 'reasoning' / 'responses'
+    response_dir.mkdir(parents=True)
+    (response_dir / f'{rid}.json').write_text(json.dumps({
+        'status': 'succeeded', 'request_id': rid, 'kind': 'edit_plan',
+        'support_item': 'SUPPORT-OPS-123', 'result': {'edits': []},
+    }))
+    record = {'phase': 'blocked', 'reason': 'edit reasoning failed: HTTP transport failed with status 400',
+              'reasoning_request_id': rid}
+    state = {'items': {'SUPPORT-OPS-123': record}}
+    eligible = [{'id': 'SUPPORT-OPS-123'}]
+    assert worker.readmit_recovered_reasoning(state, eligible, tmp_path, max_active=2) == ['SUPPORT-OPS-123']
+    assert record['phase'] == 'implementing'
+    assert worker.readmit_recovered_reasoning(state, eligible, tmp_path, max_active=2) == []
+
+
+def test_recovery_rejects_mismatched_reasoning_reply(tmp_path):
+    import json
+    rid = 'b' * 64
+    response_dir = tmp_path / 'reasoning' / 'responses'
+    response_dir.mkdir(parents=True)
+    (response_dir / f'{rid}.json').write_text(json.dumps({
+        'status': 'succeeded', 'request_id': rid, 'kind': 'edit_plan',
+        'support_item': 'SUPPORT-OPS-OTHER', 'result': {},
+    }))
+    state = {'items': {'SUPPORT-OPS-123': {'phase': 'blocked',
+        'reason': 'edit reasoning failed: HTTP transport failed with status 400',
+        'reasoning_request_id': rid}}}
+    assert worker.readmit_recovered_reasoning(state, [{'id': 'SUPPORT-OPS-123'}], tmp_path,
+                                                max_active=2) == []
+
+
+def test_recovered_reasoning_respects_existing_active_worker_capacity(tmp_path):
+    import json
+    root = tmp_path / 'reasoning' / 'responses'
+    root.mkdir(parents=True)
+    state = {'items': {'SUPPORT-OPS-1': {'phase': 'diagnosing'}}}
+    eligible = []
+    for index, letter in enumerate('abc', start=2):
+        rid = letter * 64
+        item_id = f'SUPPORT-OPS-{index}'
+        (root / f'{rid}.json').write_text(json.dumps({
+            'status': 'succeeded', 'request_id': rid, 'kind': 'edit_plan',
+            'support_item': item_id, 'result': {'edits': []},
+        }))
+        state['items'][item_id] = {
+            'phase': 'blocked', 'reason': 'edit reasoning failed: HTTP transport failed with status 400',
+            'reasoning_request_id': rid,
+        }
+        eligible.append({'id': item_id})
+    resumed = worker.readmit_recovered_reasoning(state, eligible, tmp_path, max_active=2)
+    assert resumed == ['SUPPORT-OPS-2']
+    assert state['items']['SUPPORT-OPS-3']['phase'] == 'blocked'
+    assert state['items']['SUPPORT-OPS-4']['phase'] == 'blocked'

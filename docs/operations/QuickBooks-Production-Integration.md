@@ -166,6 +166,49 @@ This profile must select:
 
 The deployment must fail closed rather than falling back to development/sandbox state.
 
+## Immutable profile activation and rollback
+
+Production read activation is declared in protected source at
+`config/quickbooks-read-profile.json` with schema version `1.0` and
+`read_profile=quickbooks-production-read-v1`. The governed Release Manager
+must load this declaration from the exact candidate release worktree and set
+`JASON_QUICKBOOKS_READ_PROFILE` for both runtime and MCP deployment.
+Unsupported profiles or a contradictory invocation override fail closed.
+
+Before mutation, the Release Manager requires both live services to advertise
+the same supported read profile and records that prior value in memory for
+rollback. A failed deployment must restore the **previous** read profile
+alongside the previous runtime/MCP images. Existing production and sandbox
+OAuth databases and their OpenBao identities remain distinct; rollback does
+not revoke either token or delete either database.
+
+The prior production access token may be expired even while the Production
+OAuth refresh token and realm binding remain valid. The governed QuickBooks
+read connector must refresh normally without exposing token material; an
+invalid refresh requires reconnect rather than silent Sandbox fallback.
+Initial live CompanyInfo identity must match AOT before additional reads.
+No QuickBooks write capability is authorized by this profile.
+
+## Production deployment AppRole mount isolation
+
+The active Sandbox runtime can already have read-only mounts at
+`/run/jason-secrets/openbao/quickbooks/{role_id,secret_id}`.
+When activating Production, **do not replace those existing mount destinations**
+with a different Production AppRole source: the guarded Docker clone must reject
+conflicting binds.
+
+The Production MCP and runtime deployment scripts must bind the verified
+Production AppRole projection at distinct destinations:
+`/run/jason-secrets/openbao/quickbooks-production/{role_id,secret_id}`.
+Point the active QuickBooks OpenBao environment variables to those destinations
+and set the Production OAuth database separately. Preserve the Sandbox state.
+
+Before any live switch, require both canonical deployment scripts to pass their
+`--preflight` checks with `JASON_QUICKBOOKS_READ_PROFILE=quickbooks-production-read-v1`.
+A preflight failure is a blocker, not grounds to modify a live container manually.
+Production promotion must follow the exact-SHA, guarded Release Manager workflow
+with its applicable approvals, health checks, rollback, and live company readback.
+
 ## Production acceptance
 
 Run `accounting.company.read` first.
@@ -229,3 +272,60 @@ This production v1 does **not** authorize:
 - any other QuickBooks mutation.
 
 Any future QuickBooks write authority requires a separate design, capability catalog, risk review, explicit approval model, tests, and production release.
+
+## Governed Production CompanyInfo acceptance (staged locally October 13)
+
+Activation of `quickbooks-production-read-v1` is a separate exact-SHA governed
+release **after** the new Release Manager controller is installed and verified
+with both services still using Sandbox. Never edit the running containers,
+token store, release records, or environment to work around GitHub or drift
+gates. Keep all Production accounting writes disabled.
+
+After the guarded activation, use the acceptance evaluator's read-only
+Docker inspection to verify the **actual** Runtime and MCP profiles, matching
+source revisions, healthy Runtime, and running MCP. The profiles must both
+equal `quickbooks-production-read-v1`; never accept an operator-supplied
+profile string instead. Confirm Production OAuth realm binding and
+normal refresh through approved credential handling. Then call Jason MCP's
+**governed** `accounting.company.read` with no alternate direct Intuit path.
+Use the original governed tool result as acceptance evidence. The local
+`tools/quickbooks_production_read_acceptance.py` evaluator checks read
+provenance, `CompanyInfo` identity, live profiles/source alignment, and
+a fresh non-secret Production OAuth status report from the canonical lifecycle
+tool; it emits only minimal pass/fail decisions rather than copying financial
+or OAuth secrets into logs. The evaluator does **not** independently
+authenticate the OAuth evidence source or the governed-read JSON file: supply
+only evidence obtained through the approved, audited Jason tools and retain
+the original governed correlation ID. Run acceptance only **after** the
+Production read has refreshed the previously expired access token.
+
+Reject Sandbox/sample/demo company names, missing **both** names,
+conflicting supplied legal/company names, or unknown company identity. AOT is expected to identify as Atlantic Office
+Machines or Atlantic Office Technologies (with optional corporate suffix).
+If production OAuth refresh fails, request a new AOT owner authorization;
+never fall back to Sandbox and present it as Production. On unsuccessful
+validation, use the canonical Release Manager rollback to restore **both**
+images and the prior Sandbox read profile. Do not enable invoice, bill, journal,
+payment, or bank writes as a side effect.
+
+### Minimal safe verification command (after governed cutover only)
+
+1. Capture the complete original **governed** `accounting.company.read`
+   response as a protected local JSON file under an approved retention and
+   information-release policy (never paste OAuth tokens). Do not synthesize
+   its evidence or correlation ID.
+2. Capture `tools/quickbooks_oauth.py status --environment production`
+   output to a separate protected local JSON file. It must report
+   `connected=true` following the authorized token refresh.
+3. Run `python3 tools/quickbooks_production_read_acceptance.py
+   --result-json <governed-read.json> --oauth-status-json <oauth-status.json>`
+   from the reviewed production source. This automatically checks the actual
+   `jason-runtime` and `jason-mcp-pilot` Docker read profiles and aligned
+   source SHA through read-only Docker inspection. It never prints raw
+   container environment, account numbers, OAuth secrets, or CompanyInfo.
+4. Require `status=pass`, no production drift, and a canonical independent
+   Release Manager post-deployment readback before declaring success.
+
+The separate AOT OAuth state currently has a stored Production refresh token,
+but `connected=false` while the access token is expired. A stored refresh
+token **alone** does not establish a working Production connection.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -76,6 +77,23 @@ def explicit_approved_source_paths(scope: str) -> list[str]:
     return result
 
 
+def bounded_production_identity_contract(worktree: Path, gate, policy: Mapping[str, Any]) -> list[dict[str, str]]:
+    """Read complete existing production identity helper from an authorized source path.
+
+    Only adds read-only edit-plan evidence. Never changes approved edit paths,
+    provider capabilities, or production state.
+    """
+    return support.source_excerpts_for_paths(
+        worktree, ['tools/support_repair_host_worker.py'], gate, policy,
+        terms=['production_state_from_main'], limit=1, content_limit=14000,
+    )
+
+
+def exact_approved_symbols(scope: str) -> list[str]:
+    """Extract explicit function identifiers, not every word of an issue body."""
+    return list(dict.fromkeys(re.findall(r'`([A-Za-z_][A-Za-z0-9_]*)`', scope)))[:24]
+
+
 def owner_approved_issues(repo: Path) -> list[dict[str, Any]]:
     slug = repository_name(repo)
     issues = support.gh_json([
@@ -137,6 +155,30 @@ def ensure_worktree(repo: Path, issue_number: int, branch: str | None = None) ->
         support.run(['git', 'worktree', 'add', '-B', selected, str(path), f'origin/{selected}'], cwd=repo)
     else:
         support.run(['git', 'worktree', 'add', '-b', selected, str(path), 'origin/main'], cwd=repo)
+    return path
+
+
+def ensure_recovery_worktree(repo: Path, issue_number: int, revision: str) -> Path:
+    """Use a new isolated worktree, retaining failed partial edits as evidence.
+
+    Never reset, clean, stash or overwrite the original engineering worktree.
+    """
+    if not re.fullmatch(r'[0-9a-f]{40}', revision):
+        raise support.WorkerError('invalid recovery production revision')
+    path = WORKTREE_ROOT / f'issue-{issue_number}-recovery-{revision[:12]}'
+    if path.exists():
+        actual = support.run(['git', 'rev-parse', '--show-toplevel'], cwd=path)
+        if Path(actual).resolve() != path.resolve():
+            raise support.WorkerError('recovery worktree identity mismatch')
+        if support.run(['git', 'status', '--porcelain'], cwd=path):
+            raise support.WorkerError('recovery worktree has uncommitted changes')
+        return path
+    WORKTREE_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
+    support.run(['git', 'fetch', '--no-tags', 'origin', 'main'], cwd=repo)
+    branch = f'develop/owner-approved-issue-{issue_number}-recovery-{revision[:12]}'
+    support.run(['git', 'worktree', 'add', '-b', branch, str(path), 'origin/main'], cwd=repo)
+    if support.run(['git', 'status', '--porcelain'], cwd=path):
+        raise support.WorkerError('new recovery worktree is not clean')
     return path
 
 
@@ -337,6 +379,15 @@ def source_context_blocker(reason: str) -> bool:
     )
     if any(marker in text for marker in explicit_markers):
         return True
+    # Exact-repository-source shortages may be reported without the words
+    # "excerpt" or "context". They are still internal discovery failures,
+    # not authority to skip approval or provider restrictions.
+    if re.search(
+        r'\b(?:additional|more|missing)\s+(?:exact\s+)?repository\s+'
+        r'(?:source|code)\b.{0,100}\b(?:needed|required|missing)\b',
+        text,
+    ):
+        return True
     # Negated excerpt availability is a source-context failure.
     if re.search(r'\b(?:no|without)\s+(?:[\w-]+\s+){0,5}excerpts?\b', text):
         return True
@@ -355,6 +406,11 @@ def source_context_blocker(reason: str) -> bool:
         'does not expose',
         'do not expose',
         'missing',
+        'not provided',
+        'not supplied',
+        'not included',
+        'was not provided',
+        'were not provided',
         'would require inventing',
         'require inventing',
     )
@@ -492,6 +548,13 @@ def recycle_self_recoverable_blockers(
         if item_id not in eligible_ids or not isinstance(record, dict):
             continue
         if str(record.get('phase') or '') != 'blocked':
+            continue
+        # Retry budgets are independent. An already-exhausted engineering item
+        # must never fall back to the generic recycler just because a verified
+        # upgrade previously reset its ordinary retry counter to zero.
+        # Only the separately governed, release-verified readmission path may
+        # resume an internal_retry_exhausted record.
+        if record.get('blocker_class') == 'internal_retry_exhausted':
             continue
         reason = str(record.get('reason') or '')
         if not self_recoverable_blocker(reason):
@@ -792,21 +855,31 @@ def preflight_or_refresh_exact_anchors(
     Return True if a new edit plan was queued; callers must not mutate files.
     """
     mismatched = mismatched_exact_anchors(worktree, edits, gate, policy)
-    if not mismatched:
-        return False
-    retries = int(record.get('anchor_refresh_attempts', 0))
-    if retries >= 2:
-        raise support.WorkerError('exact anchor refresh exhausted: ' + ', '.join(mismatched[:3]))
     scope = approved_scope(item)
     approved_paths = explicit_approved_source_paths(scope)
     approved_tests = [path for path in approved_paths
                       if path.startswith('tools/tests/') and path.endswith('.py')]
+    test_edits = [edit for edit in edits
+                  if str(edit.get('path') or '') in approved_tests]
+    missing_test_change = bool(approved_tests) and not test_edits
+    if not mismatched and not missing_test_change:
+        return False
+    retries = int(record.get('anchor_refresh_attempts', 0))
+    if retries >= 2:
+        raise support.WorkerError('exact anchor refresh exhausted: ' + ', '.join(mismatched[:3]))
     # Regeneration needs the owner-approved test context as well as the stale
     # implementation file; otherwise the model cannot safely patch both.
-    required_paths = list(dict.fromkeys([*mismatched[:3], *approved_tests[:2]]))
+    # Missing-test proposals must be repaired before any source edit is applied.
+    # Include the original implementation files and their authorized tests.
+    implementation_paths = [str(edit.get('path') or '') for edit in edits
+                            if str(edit.get('path') or '') and
+                            str(edit.get('path') or '') not in approved_tests]
+    required_paths = list(dict.fromkeys([*mismatched[:3], *implementation_paths[:3],
+                                         *approved_tests[:2]]))
     refreshed = support.source_excerpts_for_paths(
         worktree, required_paths, gate, policy,
-        terms=[scope], limit=len(required_paths), content_limit=56000,
+        terms=[scope], limit=len(required_paths), content_limit=96000,
+        full_file_paths=approved_tests[:2],
     )
     returned_paths = {str(part.get('path') or '') for part in refreshed}
     if not refreshed or any(path not in returned_paths for path in required_paths):
@@ -816,10 +889,12 @@ def preflight_or_refresh_exact_anchors(
         context={
             'work_class': 'owner_approved_development',
             'approved_scope': approved_scope(item),
-            'diagnosis': 'Regenerate exact-text replacements from fresh current source; prior anchors did not match exactly once.',
+            'diagnosis': ('Regenerate a complete atomic implementation AND changed regression-test plan from fresh current source; '
+                          'prior anchors were stale or required test edits were missing. Never return implementation-only edits.'),
             'source_excerpts': refreshed,
             'required_test_paths': approved_tests[:2],
             'prior_anchor_failures': mismatched[:3],
+            'missing_regression_test_edits': missing_test_change,
         },
     )
     record.update({'phase': 'implementing', 'reasoning_request_id': edit_rid,
@@ -829,9 +904,71 @@ def preflight_or_refresh_exact_anchors(
     return True
 
 
+WORKER_SOURCE_PATHS = (
+    'tools/support_repair_host_worker.py',
+    'tools/owner_approved_development_worker.py',
+)
+
+
+def verified_intervening_worker_upgrade(
+    releases: list[dict[str, Any]], previous_sha: str, live_sha: str,
+    source_repo: Path,
+) -> bool:
+    """Prove that a released worker fix was inherited by healthy live production.
+
+    A later watchdog-only release must not hide an earlier worker correction.
+    This is read-only git ancestry/blob evidence, not inferred from chronology.
+    Reject missing history, unchanged worker blobs and unclosed releases.
+    """
+    if not (re.fullmatch(r'[0-9a-f]{40}', previous_sha)
+            and re.fullmatch(r'[0-9a-f]{40}', live_sha)
+            and previous_sha != live_sha):
+        return False
+
+    def git_ok(*args: str) -> bool:
+        try:
+            result = subprocess.run(
+                ['git', '-C', str(source_repo), *args],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                timeout=10, check=False,
+            )
+            return result.returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+
+    if not git_ok('merge-base', '--is-ancestor', previous_sha, live_sha):
+        return False
+    # Git diff --quiet returns 1 only if these exact worker files changed.
+    try:
+        diff = subprocess.run(
+            ['git', '-C', str(source_repo), 'diff', '--quiet', previous_sha,
+             live_sha, '--', *WORKER_SOURCE_PATHS],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=10, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if diff.returncode != 1:
+        return False
+    for release in releases:
+        if release.get('state') != 'closed':
+            continue
+        revision = str((release.get('release_candidate') or {}).get('candidate_sha') or '')
+        if not re.fullmatch(r'[0-9a-f]{40}', revision):
+            continue
+        if not set(release.get('changed_files') or []).intersection(WORKER_SOURCE_PATHS):
+            continue
+        if (git_ok('merge-base', '--is-ancestor', previous_sha, revision)
+                and revision != previous_sha
+                and git_ok('merge-base', '--is-ancestor', revision, live_sha)):
+            return True
+    return False
+
+
 def readmit_source_context_after_verified_worker_upgrade(
     state: dict[str, Any], eligible_ids: set[str], spool: Path,
     *, current_link: Path = Path('/opt/jason/current'),
+    source_repo: Path = DEFAULT_REPO,
 ) -> int:
     """One bounded readmission per closed, healthy production worker revision.
 
@@ -851,16 +988,20 @@ def readmit_source_context_after_verified_worker_upgrade(
         timestamp = datetime.fromisoformat(str(drift['observed_at']).replace('Z', '+00:00'))
         if timestamp.tzinfo is None or not 0 <= (datetime.now(timezone.utc)-timestamp).total_seconds() <= 180:
             return 0
-        releases = list((state_root / 'records').glob('release-*.json'))
-        verified = any(
-            (r := json.loads(path.read_text())).get('state') == 'closed'
+        releases = [
+            json.loads(path.read_text())
+            for path in (state_root / 'records').glob('release-*.json')
+        ]
+        live_releases = [
+            r for r in releases if r.get('state') == 'closed'
             and (r.get('release_candidate') or {}).get('candidate_sha') == sha
-            and set(r.get('changed_files') or []).intersection({
-                'tools/support_repair_host_worker.py', 'tools/owner_approved_development_worker.py'})
-            for path in releases
-        )
-        if not verified:
+        ]
+        if not live_releases:
             return 0
+        direct_worker_upgrade = any(
+            set(r.get('changed_files') or []).intersection(WORKER_SOURCE_PATHS)
+            for r in live_releases
+        )
     except (OSError, ValueError, KeyError, TypeError):
         return 0
     resumed = 0
@@ -877,14 +1018,36 @@ def readmit_source_context_after_verified_worker_upgrade(
             and 'workererror: exact repair anchor must occur once in ' in reason
             and '; found ' in reason
         )
-        if not (source_context_blocker(reason) or truncated_approved_test or stale_exact_anchor):
+        incomplete_regression = (
+            record.get('blocker_class') == 'internal_retry_exhausted'
+            and reason == 'workererror: autonomous support repair requires a changed regression test'
+        )
+        # The shared test runner historically omitted the isolated worktree's
+        # tools/ import path. Such a bounded collection failure is retryable
+        # only AFTER an independently verified worker upgrade; never reset
+        # partial edits in the old worktree or consume unrelated failures.
+        tool_test_import_failure = (
+            record.get('blocker_class') == 'internal_retry_exhausted'
+            and 'error collecting tools/tests/' in reason
+            and 'importerror while importing test module' in reason
+            and 'import support_repair_host_worker as support' in reason
+        )
+        if not (source_context_blocker(reason) or truncated_approved_test
+                or stale_exact_anchor or incomplete_regression
+                or tool_test_import_failure):
             continue
-        if record.get('source_upgrade_readmitted_sha') == sha:
+        previous_sha = str(record.get('source_upgrade_readmitted_sha') or '')
+        if previous_sha == sha:
+            continue
+        if not direct_worker_upgrade and not verified_intervening_worker_upgrade(
+            releases, previous_sha, sha, source_repo,
+        ):
             continue
         record.update({'phase': 'diagnosing', 'reasoning_request_id': '',
                        'context_expansion_attempts': 0, 'self_recovery_attempts': 0,
                        'anchor_refresh_attempts': 0,
                        'source_upgrade_readmitted_sha': sha, 'source_upgrade_readmitted_at': now(),
+                       'recovery_worktree_revision': sha,
                        'reason': 'Re-admitted after independently verified production source-retrieval upgrade.',
                        'updated_at': now()})
         resumed += 1
@@ -957,6 +1120,50 @@ def readmit_explicit_verified_dependencies(
                        'reasoning_request_id': '', 'updated_at': now()})
         return 1
     return 0
+
+
+
+def readmit_recovered_development_reasoning(
+    state: dict[str, Any], admitted: list[dict[str, Any]], spool: Path,
+    *, max_active: int,
+) -> list[str]:
+    """Readmit approved blocked work only after its exact reasoning reply succeeds."""
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active = sum(1 for record in records.values() if isinstance(record, Mapping)
+                 and record.get('phase') in ACTIVE_PHASES)
+    slots = max(0, max(1, int(max_active)) - active_support_count(spool) - active)
+    resumed = []
+    for item in admitted:
+        if slots == 0:
+            break
+        record = records.get(item['id'])
+        if not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        reason = str(record.get('reason') or '')
+        if reason.startswith('development edit reasoning failed: HTTP transport failed'):
+            phase, expected_kind = 'implementing', 'edit_plan'
+        elif reason.startswith('development reasoning failed: HTTP transport failed'):
+            phase, expected_kind = 'diagnosing', 'search_plan'
+        else:
+            continue
+        rid = str(record.get('reasoning_request_id') or '')
+        if not re.fullmatch(r'[a-f0-9]{64}', rid):
+            continue
+        response = support.reasoning_response(spool, rid)
+        if not isinstance(response, Mapping) or response.get('status') != 'succeeded':
+            continue
+        if response.get('request_id') != rid or response.get('kind') != expected_kind:
+            continue
+        if response.get('support_item') != item['id']:
+            continue
+        if record.get('reasoning_recovered_request_id') == rid:
+            continue
+        record.update({'phase': phase,
+                       'reason': 'Re-admitted after exact reasoning request recovered.',
+                       'reasoning_recovered_request_id': rid, 'updated_at': now()})
+        resumed.append(item['id'])
+        slots -= 1
+    return resumed
 
 
 def blocked_work_next_action(reason: str) -> dict[str, str]:
@@ -1050,8 +1257,11 @@ def main() -> int:
     reconcile_recovery_handoff_intake(state, admitted_ids, spool)
     raise_exhausted_repair_support_issues(state, admitted_ids, repo)
     readmit_verified_development_recoveries(state, admitted_ids, spool, repo)
-    readmit_source_context_after_verified_worker_upgrade(state, admitted_ids, spool)
+    readmit_source_context_after_verified_worker_upgrade(
+        state, admitted_ids, spool, source_repo=repo,
+    )
     readmit_explicit_verified_dependencies(state, admitted, spool, max_active=max(1, int(args.max_active)))
+    readmit_recovered_development_reasoning(state, admitted, spool, max_active=max(1, int(args.max_active)))
     state['discovery'] = {
         'observed_at': now(),
         'approved_issue_numbers': [item['issue_number'] for item in eligible],
@@ -1242,11 +1452,12 @@ def main() -> int:
                     })
                 continue
 
-            worktree = ensure_worktree(
-                repo,
-                item['issue_number'],
-                str(record.get('branch') or '') or None,
-            )
+            recovery_revision = str(record.get('recovery_worktree_revision') or '')
+            worktree = (ensure_recovery_worktree(repo, item['issue_number'], recovery_revision)
+                        if recovery_revision else ensure_worktree(
+                            repo, item['issue_number'],
+                            str(record.get('branch') or '') or None,
+                        ))
             record['branch'] = support.run(
                 ['git', 'branch', '--show-current'],
                 cwd=worktree,
@@ -1320,7 +1531,8 @@ def main() -> int:
                 if explicit_paths:
                     targeted = support.source_excerpts_for_paths(
                         worktree, explicit_paths, gate, policy,
-                        terms=[approved_scope(item), *search_terms], limit=6, content_limit=24000,
+                        terms=[*exact_approved_symbols(approved_scope(item)), *search_terms],
+                        limit=6, content_limit=24000,
                     )
                     excerpts = support.merge_source_excerpts(
                         targeted, excerpts, max_total=14,
@@ -1330,7 +1542,9 @@ def main() -> int:
                 # source context; the issue's permitted edit paths remain unchanged.
                 if any(word in (approved_scope(item) + ' ' + ' '.join(search_terms)).casefold()
                        for word in ('production sha', 'production identity', 'live production', 'read-only production')):
-                    api_context = support.source_excerpts_for_paths(
+                    api_context = bounded_production_identity_contract(
+                        worktree, gate, policy,
+                    ) + support.source_excerpts_for_paths(
                         worktree, ['tools/release_manager_host_runner.py'], gate, policy,
                         terms=['live_runtime', 'live_mcp', 'live_production_alignment'],
                         limit=1, content_limit=18000,
@@ -1347,7 +1561,8 @@ def main() -> int:
                 if test_paths:
                     full_tests = support.source_excerpts_for_paths(
                         worktree, test_paths[:1], gate, policy,
-                        terms=search_terms, limit=1, content_limit=56000,
+                        terms=search_terms, limit=1, content_limit=96000,
+                        full_file_paths=test_paths[:1],
                     )
                     excerpts = support.merge_source_excerpts(
                         full_tests, excerpts, max_total=14,

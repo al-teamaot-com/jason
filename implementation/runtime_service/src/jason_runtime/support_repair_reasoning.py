@@ -170,7 +170,18 @@ class SupportRepairReasoningMaintenance:
                     'You are the bounded Project Jason support-repair diagnostician. '
                     'Return search terms that help a deterministic host worker locate the smallest source area for this defect. '
                     'Do not propose shell commands, credentials, authority changes, security bypasses, or deployment actions. '
-                    'If the defect inherently requires new authority, constitutional change, secret access, or disruptive behavior, set blocked_reason.'
+                    'Diagnosing existing software code and proposing bounded regression-tested fixes does not itself require production, root, or provider-write authority. '
+                    'A defect mentioning root-governed release, rollback, or privileged verification is not by itself grounds to block source-only diagnosis. '
+                    'Do not request new authority, constitutional changes, secrets, service restarts, or production deployment. '
+                    'Set blocked_reason only when the proposed SOURCE-ONLY diagnosis inherently cannot proceed without such an action. '
+                )
+            if context.get('scope_review') == 'source_diagnosis_only' and not is_development:
+                system += (
+                    ' This is one bounded second assessment after an earlier model-only block. '
+                    'Assess whether safe source investigation can begin without executing privileged actions. '
+                    'Do not infer that permission to inspect and propose source patches authorizes deployment. '
+                    'Return a blocked_reason if even source-only work truly needs unapproved authority, or if scope is genuinely ambiguous. '
+                    'Otherwise return specific repository search terms; the host will independently enforce eligibility.'
                 )
             schema = _search_schema()
         elif kind == 'edit_plan':
@@ -221,7 +232,12 @@ class SupportRepairReasoningMaintenance:
             )
         except ConnectorTransportError as exc:
             transient = exc.status_code is None or exc.status_code in {408, 425, 429, 500, 502, 503, 504}
-            if self.fallback_structured_client is None or not transient:
+            # Patch-plan HTTP 400 is a non-retriable hosted request rejection, but
+            # the existing isolated local model can independently propose edits.
+            # This does not repeat the rejected hosted request or bypass host-side
+            # exact-text validation, tests, approval, or release governance.
+            local_patch_fallback = kind == 'edit_plan' and exc.status_code == 400
+            if self.fallback_structured_client is None or not (transient or local_patch_fallback):
                 raise
             return self.fallback_structured_client.complete(
                 system=system,
@@ -229,6 +245,14 @@ class SupportRepairReasoningMaintenance:
                 schema=schema,
                 max_output_tokens=1024,
             )
+
+    @staticmethod
+    def _request_kind_from_file(path: Path) -> str:
+        try:
+            raw = json.loads(path.read_text(encoding='utf-8'))
+            return str(raw.get('kind') or '') if isinstance(raw, Mapping) else ''
+        except (OSError, ValueError, json.JSONDecodeError):
+            return ''
 
     def tick(self) -> bool:
         current = self.now()
@@ -260,6 +284,8 @@ class SupportRepairReasoningMaintenance:
                     'status 429' in error
                     or any(f'status {code}' in error for code in (408, 425, 500, 502, 503, 504))
                     or 'status ' not in error
+                    or ('status 400' in error and self.fallback_structured_client is not None
+                        and self._request_kind_from_file(path) == 'edit_plan')
                 )
             )
             fallback_budget_mismatch = (

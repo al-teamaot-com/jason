@@ -721,6 +721,11 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 "release_id": runner.record_id(SHA_A),
                 "state": "production_eligible",
                 "rollback_sha": SHA_B,
+                "risk_profile": {"change_risk": "low"},
+                "release_manifest": {
+                    "candidate_sha": SHA_A, "rollback_sha": SHA_B,
+                    "risk_profile": {"change_risk": "low"},
+                },
                 "release_candidate": {
                     "candidate_sha": SHA_A,
                     "image": "jason-runtime:test",
@@ -1043,30 +1048,333 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             policy = repo / "config" / "release-manager-policy.json"
             policy.parent.mkdir(parents=True)
             policy.write_text('{"version":1}\n', encoding="utf-8")
+            candidate = repo / "tools" / "release_manager_host_runner.py"
+            candidate.parent.mkdir(parents=True)
+            candidate.write_bytes(b"candidate")
             pin = runner.controller_identity(repo)
             policy.write_text('{"version":2}\n', encoding="utf-8")
             with self.assertRaisesRegex(runner.ReleaseManagerError, "changed mid-transaction: policy_digest"):
                 runner.verify_controller_identity(pin, repo)
 
-    def test_controller_self_update_accepts_only_exact_candidate_bytes(self):
+    def test_operator_recovery_requires_owner_review_backup_and_git_main(self):
+        import json
+
         with tempfile.TemporaryDirectory() as td:
-            repo = Path(td)
+            root = Path(td)
+            old_root = root / SHA_B
+            new_root = root / SHA_A
+            old = old_root / "tools" / "release_manager_host_runner.py"
+            old.parent.mkdir(parents=True)
+            old.write_bytes(b"root-owned-original-runner")
+            new = new_root / "tools" / "release_manager_host_runner.py"
+            new.parent.mkdir(parents=True)
+            new.write_bytes(b"reviewed-fixed-runner")
+            policy = new_root / "config" / "release-manager-policy.json"
+            policy.parent.mkdir(parents=True)
+            policy.write_text("{}", encoding="utf-8")
+            installed = root / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+            installed.parent.mkdir(parents=True)
+            installed.write_bytes(new.read_bytes())
+            installed.chmod(0o755)
+            source_link = installed.parent / "release-manager-source"
+            source_link.symlink_to(old_root, target_is_directory=True)
+            backup = installed.with_name(
+                installed.name + ".recovery-backup-"
+                + runner.file_digest(old)[len("sha256:"):][:16]
+            )
+            backup.write_bytes(old.read_bytes())
+            backup.chmod(0o600)
+            review_path = root / "material-review.json"
+            review = {
+                "schema_version": "1.0", "status": "approved",
+                "source_revision": SHA_A, "recorded_by": "person-al",
+            }
+            review_path.write_text(json.dumps(review), encoding="utf-8")
+
+            def git_result(args, **kwargs):
+                if "show" in args:
+                    return new.read_bytes()
+                if "refs/remotes/origin/main" in args:
+                    return SHA_A
+                if "rev-parse" in args:
+                    return SHA_A
+                raise AssertionError("unreviewed git operation: " + str(args))
+
+            with (
+                patch.object(runner, "CONTROLLER_SOURCE", installed),
+                patch.object(runner.Path, "home", return_value=root),
+                patch.object(runner, "CONTROLLER_RECOVERY_MANAGED_REPO", root / "managed"),
+                patch.object(runner, "CONTROLLER_RECOVERY_OWNER_REVIEW", review_path),
+                patch.object(runner, "_controller_recovery_old_source_verified", return_value=True),
+                patch.object(runner.subprocess, "check_output", side_effect=git_result),
+            ):
+                pin = runner.controller_identity(new_root)
+                self.assertEqual(pin["controller_recovery_mode"], "canonical_owner_recovery")
+                self.assertEqual(pin["executing_controller_revision"], SHA_A)
+                self.assertEqual(pin["controller_recovery_old_source"], str(old))
+                # The privileged host reconciliation changes the source link
+                # from old N to new N+1. Immutable old provenance is pinned.
+                source_link.unlink()
+                source_link.symlink_to(new_root, target_is_directory=True)
+                attested = runner.verify_controller_identity(
+                    pin, new_root, installed_candidate=True,
+                    installed_runner=installed,
+                )
+                self.assertEqual(attested["controller_handoff"], "staged_for_next_transaction")
+                self.assertEqual(attested["executing_controller_digest"], pin["executing_controller_digest"])
+
+                review["status"] = "denied"
+                review_path.write_text(json.dumps(review), encoding="utf-8")
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "owner review does not match"
+                ):
+                    runner.verify_controller_identity(
+                        pin, new_root, installed_candidate=True,
+                        installed_runner=installed,
+                    )
+                review["status"] = "approved"
+                review["source_revision"] = SHA_B
+                review_path.write_text(json.dumps(review), encoding="utf-8")
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "owner review does not match"
+                ):
+                    runner.verify_controller_identity(
+                        pin, new_root, installed_candidate=True,
+                        installed_runner=installed,
+                    )
+                review["source_revision"] = SHA_A
+                review_path.write_text(json.dumps(review), encoding="utf-8")
+                backup.write_bytes(b"altered-backup")
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "backup missing or altered"
+                ):
+                    runner.verify_controller_identity(
+                        pin, new_root, installed_candidate=True,
+                        installed_runner=installed,
+                    )
+                backup.write_bytes(old.read_bytes())
+                new.write_bytes(b"unreviewed-candidate")
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "installed candidate differs"
+                ):
+                    runner.verify_controller_identity(
+                        pin, new_root, installed_candidate=True,
+                        installed_runner=installed,
+                    )
+
+    def test_operator_recovery_missing_review_fails_closed(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / SHA_A
+            old = root / SHA_B / "tools" / "release_manager_host_runner.py"
+            old.parent.mkdir(parents=True)
+            old.write_bytes(b"old")
+            installed = root / "release_manager_host_runner.py"
+            installed.write_bytes(b"new")
+            backup = installed.with_name(
+                installed.name + ".recovery-backup-"
+                + runner.file_digest(old)[len("sha256:"):][:16]
+            )
+            backup.write_bytes(b"old")
+            backup.chmod(0o600)
+            (repo / "tools").mkdir(parents=True)
+            (repo / "tools" / "release_manager_host_runner.py").write_bytes(b"new")
+            with (
+                patch.object(runner, "_controller_recovery_old_source_verified", return_value=True),
+                patch.object(runner, "CONTROLLER_RECOVERY_OWNER_REVIEW", root / "missing-review.json"),
+                patch.object(runner.subprocess, "check_output", side_effect=[
+                    SHA_A, SHA_A, b"new",
+                ]),
+            ):
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "exact owner review missing"
+                ):
+                    runner._operator_recovery_identity(repo, installed, old)
+
+    def test_controller_self_update_pins_old_runner_and_attests_installed_new_runner(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / "candidate"
             policy = repo / "config" / "release-manager-policy.json"
             policy.parent.mkdir(parents=True)
             policy.write_text("{}", encoding="utf-8")
             candidate = repo / "tools" / "release_manager_host_runner.py"
             candidate.parent.mkdir(parents=True)
-            candidate.write_bytes(runner.CONTROLLER_SOURCE.read_bytes())
+            candidate.write_bytes(b"reviewed-new-controller")
+            old = root / SHA_B / "tools" / "release_manager_host_runner.py"
+            old.parent.mkdir(parents=True)
+            old.write_bytes(b"immutable-old-controller")
+            installed = root / "installed" / "release_manager_host_runner.py"
+            installed.parent.mkdir(parents=True)
+            installed.write_bytes(candidate.read_bytes())
+            with patch.object(runner, "CONTROLLER_SOURCE", old):
+                pin = runner.controller_identity(repo)
+                self.assertNotEqual(pin["executing_controller_digest"], pin["candidate_controller_digest"])
+                verified = runner.verify_controller_identity(
+                    pin, repo, installed_candidate=True, installed_runner=installed
+                )
+                self.assertEqual(verified["executing_controller_revision"], SHA_B)
+                self.assertEqual(verified["executing_controller_digest"], pin["executing_controller_digest"])
+                self.assertEqual(verified["installed_controller_digest"], pin["candidate_controller_digest"])
+                self.assertEqual(verified["controller_handoff"], "staged_for_next_transaction")
+
+                # Reject a compromised installed N+1, a compromised immutable
+                # candidate, a replaced running N, and policy changes.
+                installed.write_bytes(b"unexpected-new-controller")
+                with self.assertRaisesRegex(runner.ReleaseManagerError, "installed Production Manager controller differs"):
+                    runner.verify_controller_identity(pin, repo, installed_candidate=True, installed_runner=installed)
+                installed.write_bytes(candidate.read_bytes())
+                candidate.write_bytes(b"tampered-candidate")
+                with self.assertRaisesRegex(runner.ReleaseManagerError, "candidate_controller_digest"):
+                    runner.verify_controller_identity(pin, repo, installed_candidate=True, installed_runner=installed)
+                candidate.write_bytes(b"reviewed-new-controller")
+                old.write_bytes(b"tampered-active-controller")
+                with self.assertRaisesRegex(runner.ReleaseManagerError, "executing_controller_digest"):
+                    runner.verify_controller_identity(pin, repo, installed_candidate=True, installed_runner=installed)
+                old.write_bytes(b"immutable-old-controller")
+                policy.write_text("changed", encoding="utf-8")
+                with self.assertRaisesRegex(runner.ReleaseManagerError, "policy_digest"):
+                    runner.verify_controller_identity(pin, repo, installed_candidate=True, installed_runner=installed)
+
+    def test_scheduled_installed_controller_copy_changes_only_for_next_transaction(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            old_root = root / SHA_B
+            new_root = root / SHA_A
+            old = old_root / "tools" / "release_manager_host_runner.py"
+            new = new_root / "tools" / "release_manager_host_runner.py"
+            old.parent.mkdir(parents=True)
+            new.parent.mkdir(parents=True)
+            old.write_bytes(b"immutable-old-version")
+            new.write_bytes(b"reviewed-new-version")
+            (new_root / "config").mkdir()
+            (new_root / "config" / "release-manager-policy.json").write_text("{}")
+            installed = root / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+            installed.parent.mkdir(parents=True)
+            installed.write_bytes(old.read_bytes())
+            active_source = installed.parent / "release-manager-source"
+            active_source.symlink_to(old_root, target_is_directory=True)
+
+            # Simulate the actual user-systemd ExecStart path, not a command
+            # launched directly from /opt/jason/releases/<old SHA>/tools.
+            with patch.object(runner, "CONTROLLER_SOURCE", installed), patch.object(
+                runner.Path, "home", return_value=root
+            ):
+                pin = runner.controller_identity(new_root)
+                self.assertEqual(pin["executing_controller_revision"], SHA_B)
+                self.assertEqual(
+                    pin["executing_controller_immutable_path"], str(old)
+                )
+                installed.write_bytes(new.read_bytes())
+                active_source.unlink()
+                active_source.symlink_to(new_root, target_is_directory=True)
+
+                verified = runner.verify_controller_identity(
+                    pin, new_root, installed_candidate=True
+                )
+                self.assertEqual(verified["executing_controller_revision"], SHA_B)
+                self.assertEqual(
+                    verified["executing_controller_digest"], runner.file_digest(old)
+                )
+                self.assertEqual(
+                    verified["installed_controller_digest"], runner.file_digest(new)
+                )
+                # A fresh future invocation resolves N+1 as active, only
+                # AFTER old transaction returns and releases its flock.
+                successor = runner.controller_identity(new_root)
+                self.assertEqual(successor["executing_controller_revision"], SHA_A)
+                self.assertNotEqual(
+                    successor["executing_controller_digest"],
+                    verified["executing_controller_digest"],
+                )
+                old.write_bytes(b"modified-immutable-old")
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "executing_controller_digest"
+                ):
+                    runner.verify_controller_identity(
+                        pin, new_root, installed_candidate=True
+                    )
+
+    def test_scheduled_controller_requires_immutable_source_match_at_entry(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            release = root / SHA_B
+            old = release / "tools" / "release_manager_host_runner.py"
+            old.parent.mkdir(parents=True)
+            old.write_bytes(b"immutable-old")
+            new = root / SHA_A
+            c = new / "tools" / "release_manager_host_runner.py"
+            c.parent.mkdir(parents=True)
+            c.write_bytes(b"reviewed-new")
+            (new / "config").mkdir()
+            (new / "config" / "release-manager-policy.json").write_text("{}")
+            installed = root / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+            installed.parent.mkdir(parents=True)
+            installed.write_bytes(b"untrusted-installed-runner")
+            (installed.parent / "release-manager-source").symlink_to(
+                release, target_is_directory=True
+            )
+            with patch.object(runner, "CONTROLLER_SOURCE", installed), patch.object(
+                runner.Path, "home", return_value=root
+            ):
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "controller recovery old source is not root immutable"
+                ):
+                    runner.controller_identity(new)
+
+    def test_scheduled_controller_refuses_missing_immutable_source_link(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            candidate = root / SHA_A
+            c = candidate / "tools" / "release_manager_host_runner.py"
+            c.parent.mkdir(parents=True)
+            c.write_bytes(b"reviewed-candidate")
+            (candidate / "config").mkdir()
+            (candidate / "config" / "release-manager-policy.json").write_text("{}")
+            installed = root / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+            installed.parent.mkdir(parents=True)
+            installed.write_bytes(b"old-controller")
+            with patch.object(runner, "CONTROLLER_SOURCE", installed), patch.object(
+                runner.Path, "home", return_value=root
+            ):
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "immutable source link missing"
+                ):
+                    runner.controller_identity(candidate)
+
+    def test_closeout_records_both_controller_digests_and_staged_handoff(self):
+        source = (ROOT / "tools" / "release_manager_host_runner.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            '"executing_controller_digest": controller_verified["executing_controller_digest"]',
+            source,
+        )
+        self.assertIn(
+            '"installed_controller_digest": controller_verified["installed_controller_digest"]',
+            source,
+        )
+        self.assertIn(
+            '"controller_handoff": controller_verified["controller_handoff"]',
+            source,
+        )
+
+    def test_controller_self_update_rejects_missing_installed_controller(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / "candidate"
+            p = repo / "config" / "release-manager-policy.json"
+            p.parent.mkdir(parents=True)
+            p.write_text("{}", encoding="utf-8")
+            c = repo / "tools" / "release_manager_host_runner.py"
+            c.parent.mkdir(parents=True)
+            c.write_bytes(b"candidate")
             pin = runner.controller_identity(repo)
-            verified = runner.verify_controller_identity(pin, repo, installed_candidate=True)
-            self.assertEqual(verified["policy_digest"], pin["policy_digest"])
-            candidate.write_text("modified candidate", encoding="utf-8")
-            with self.assertRaisesRegex(runner.ReleaseManagerError, "differs from candidate source"):
-                runner.verify_controller_identity(pin, repo, installed_candidate=True)
-            candidate.write_bytes(runner.CONTROLLER_SOURCE.read_bytes())
-            policy.write_text("changed", encoding="utf-8")
-            with self.assertRaisesRegex(runner.ReleaseManagerError, "policy_digest"):
-                runner.verify_controller_identity(pin, repo, installed_candidate=True)
+            with self.assertRaisesRegex(runner.ReleaseManagerError, "installed Production Manager controller differs"):
+                runner.verify_controller_identity(
+                    pin, repo, installed_candidate=True,
+                    installed_runner=root / "nonexistent" / "runner.py"
+                )
 
     def test_change_risk_classifies_release_manager_as_production_control_core(self):
         self.assertEqual(
@@ -1268,3 +1576,421 @@ def test_rollback_retention_only_removes_old_exited_named_containers():
     removed = [args[2] for args in calls if args[1] == 'rm']
     assert removed == list(reversed(names[:6]))
     assert not any('prune' in args for args in calls)
+
+
+def test_explicit_prepare_reconciles_retention_before_breaker_revalidation():
+    """Both automatic and owner-triggered releases reserve rollback headroom."""
+    from unittest.mock import patch
+    order = []
+    def cleanup():
+        order.append('retention')
+        return 16
+    def breaker(state_root):
+        order.append('breaker')
+        raise runner.ReleaseManagerError('controlled stop before release mutation')
+    with patch.object(runner, 'reconcile_stopped_rollback_retention', side_effect=cleanup), \
+         patch.object(runner, 'revalidate_circuit_breaker', side_effect=breaker):
+        with __import__('pytest').raises(runner.ReleaseManagerError,
+                                         match='controlled stop before release mutation'):
+            runner.prepare_release(Path('/tmp/nonexistent'), Path('/tmp/nonexistent'),
+                                   SHA_A, 'release_blocker', owner_approved=True)
+    assert order == ['retention', 'breaker']
+    # No release record or production mutation was reached.
+
+
+def test_retention_failure_prevents_breaker_revalidation_and_mutation():
+    from unittest.mock import patch
+    with patch.object(runner, 'reconcile_stopped_rollback_retention',
+                      side_effect=runner.ReleaseManagerError('docker unavailable')), \
+         patch.object(runner, 'revalidate_circuit_breaker') as breaker:
+        with __import__('pytest').raises(runner.ReleaseManagerError, match='docker unavailable'):
+            runner.prepare_release(Path('/tmp/nonexistent'), Path('/tmp/nonexistent'),
+                                   SHA_A, 'release_blocker', owner_approved=True)
+        breaker.assert_not_called()
+
+
+def test_release_contract_fails_before_mutation_on_legacy_missing_manifest(tmp_path):
+    import pytest
+    record = {'state': 'production_eligible', 'rollback_sha': SHA_B,
+              'release_candidate': {'candidate_sha': SHA_A}}
+    with patch.object(runner, 'require_host_reconciler_ready') as ready:
+        with pytest.raises(runner.ReleaseManagerError, match='release_manifest or risk_profile'):
+            runner._deploy_production_locked(ROOT, tmp_path, record)
+        ready.assert_not_called()
+    assert record['state'] == 'production_eligible'
+    assert not list(tmp_path.glob('records/*.json'))
+
+
+def test_release_contract_rejects_mismatched_release_sha_and_risk():
+    import pytest
+    record = {'state': 'production_eligible', 'rollback_sha': SHA_B,
+              'release_candidate': {'candidate_sha': SHA_A},
+              'risk_profile': {'score': 1},
+              'release_manifest': {'candidate_sha': SHA_B, 'rollback_sha': SHA_B,
+                                   'risk_profile': {'score': 1}}}
+    with pytest.raises(runner.ReleaseManagerError, match='identities do not match'):
+        runner.validate_release_record_contract(record)
+    record['release_manifest']['candidate_sha'] = SHA_A
+    record['release_manifest']['risk_profile'] = {'score': 9}
+    with pytest.raises(runner.ReleaseManagerError, match='risk classification differs'):
+        runner.validate_release_record_contract(record)
+    record['release_manifest']['risk_profile'] = record['risk_profile']
+    runner.validate_release_record_contract(record)
+
+
+def test_nonprotected_release_waits_for_owner_without_failing_systemd(tmp_path):
+    from unittest.mock import patch
+    records = tmp_path / 'records';records.mkdir()
+    record = {'release_id': runner.record_id(SHA_A), 'state': 'production_eligible',
+              'rollback_sha': SHA_B, 'owner_approval': {'approved': False}}
+    runner.atomic_json(records / (record['release_id'] + '.json'), record)
+    with (patch.object(runner.gate, 'load_json', return_value={'schedule': {'automatic_promotion_enabled': True}}),
+          patch.object(runner, 'consume_owner_approval_requests'),
+          patch.object(runner, 'production_window_open', return_value=True),
+          patch.object(runner, 'live_runtime', return_value={'revision': SHA_B}),
+          patch.object(runner, 'live_production_alignment', return_value={}),
+          patch.object(runner, 'reconcile_stopped_rollback_retention'),
+          patch.object(runner, 'production_gate_result', return_value={
+              'allowed': False, 'protected_core': False,
+              'reasons': ['production release requires explicit owner approval',
+                          'owner approval is not bound to the exact candidate SHA']}),
+          patch.object(runner, 'write_owner_notification_event') as notify,
+          patch.object(runner, 'deploy_production') as deploy):
+        assert runner.promote_eligible(ROOT, tmp_path) is False
+        notify.assert_called_once()
+        deploy.assert_not_called()
+    assert runner.load_record(tmp_path, record['release_id'])['state'] == 'production_eligible'
+
+
+def test_unapproved_release_with_other_denials_fails_closed(tmp_path):
+    import pytest
+    records = tmp_path / 'records';records.mkdir()
+    record = {'release_id': runner.record_id(SHA_A), 'state': 'production_eligible',
+              'rollback_sha': SHA_B}
+    runner.atomic_json(records / (record['release_id'] + '.json'), record)
+    with (patch.object(runner.gate, 'load_json', return_value={'schedule': {'automatic_promotion_enabled': True}}),
+          patch.object(runner, 'consume_owner_approval_requests'),
+          patch.object(runner, 'production_window_open', return_value=True),
+          patch.object(runner, 'live_runtime', return_value={'revision': SHA_B}),
+          patch.object(runner, 'live_production_alignment', return_value={}),
+          patch.object(runner, 'reconcile_stopped_rollback_retention'),
+          patch.object(runner, 'production_gate_result', return_value={
+              'allowed': False, 'protected_core': False,
+              'reasons': ['production release requires explicit owner approval',
+                          'candidate policy signature missing']}),
+          patch.object(runner, 'write_owner_notification_event') as notify,
+          patch.object(runner, 'deploy_production') as deploy):
+        with pytest.raises(runner.ReleaseManagerError, match='candidate policy signature missing'):
+            runner.promote_eligible(ROOT, tmp_path)
+        notify.assert_not_called()
+        deploy.assert_not_called()
+
+
+def test_evidence_bundle_is_built_before_reporting_production_verified():
+    import inspect
+    source = inspect.getsource(runner._deploy_production_locked)
+    assert source.index('record["evidence_bundle"] = {') < source.index(
+        'gate_transition(repo, state_root, record, "production_verified")'
+    )
+
+
+def test_release_contract_rejects_missing_risk_profile_with_manifest_present():
+    import pytest
+    record = {'state': 'production_eligible', 'rollback_sha': SHA_B,
+              'release_candidate': {'candidate_sha': SHA_A},
+              'release_manifest': {'candidate_sha': SHA_A, 'rollback_sha': SHA_B}}
+    with pytest.raises(runner.ReleaseManagerError, match='release_manifest or risk_profile'):
+        runner.validate_release_record_contract(record)
+
+
+def _ccc_test_report(candidate=SHA_A, runtime=SHA_B, *, mode='transition'):
+    ids = sorted(runner.CCC_REQUIRED_CHECKS | {'material-change-owner-review'})
+    checks = [
+        {'check_id': key, 'status': 'NOT_PROVEN' if key == 'runtime-source-alignment' and mode == 'transition' else 'PASS'}
+        for key in ids
+    ]
+    return {
+        'schema_version': '1.0', 'source_revision': candidate,
+        'runtime_revision': runtime, 'status': 'NOT_PROVEN' if mode == 'transition' else 'PASS',
+        'trigger': 'material_change', 'run_id': 'ccc-test-123',
+        'finished_at': datetime.now(timezone.utc).isoformat(),
+        'material_changes': ['implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py'],
+        'checks': checks,
+    }
+
+
+def test_ccc_preflight_permits_exactly_one_expected_runtime_alignment_gap():
+    report = _ccc_test_report()
+    evidence = runner.verify_release_ccc_report(
+        report, candidate_sha=SHA_A, runtime_sha=SHA_B, before_mutation=True,
+    )
+    assert evidence['status'] == 'NOT_PROVEN'
+    assert evidence['mode'] == 'candidate_transition'
+    assert evidence['source_revision'] == SHA_A
+    report['runtime_revision'] = SHA_A
+    report['status'] = 'PASS'
+    for item in report['checks']:
+        item['status'] = 'PASS'
+    assert runner.verify_release_ccc_report(
+        report, candidate_sha=SHA_A, runtime_sha=SHA_A, before_mutation=True,
+    )['mode'] == 'aligned'
+
+
+def test_ccc_preflight_rejects_any_other_not_proven_or_failure():
+    import pytest
+    for check, status in [
+        ('checker-currentness', 'NOT_PROVEN'),
+        ('material-change-owner-review', 'NOT_PROVEN'),
+        ('j900-release-validation', 'FAIL'),
+        ('systemd-failed-units', 'FAIL'),
+        ('governed-provider-boundary-canaries', 'NOT_PROVEN'),
+    ]:
+        report = _ccc_test_report()
+        for item in report['checks']:
+            if item['check_id'] == check:
+                item['status'] = status
+        with pytest.raises(runner.ReleaseManagerError, match='pre-mutation CCC denied'):
+            runner.verify_release_ccc_report(
+                report, candidate_sha=SHA_A, runtime_sha=SHA_B, before_mutation=True,
+            )
+
+
+def test_ccc_preflight_rejects_unsafe_evidence_shapes():
+    import pytest
+    base = _ccc_test_report()
+    for mutation in ['wrong_source', 'wrong_runtime', 'missing', 'duplicate', 'unknown', 'wrong_status', 'unreviewed_material']:
+        import copy
+        report = copy.deepcopy(base)
+        if mutation == 'wrong_source':
+            report['source_revision'] = SHA_B
+        elif mutation == 'wrong_runtime':
+            report['runtime_revision'] = SHA_A
+        elif mutation == 'missing':
+            report['checks'] = report['checks'][1:]
+        elif mutation == 'duplicate':
+            report['checks'].append(report['checks'][0])
+        elif mutation == 'unknown':
+            report['checks'].append({'check_id': 'unanticipated-required-gate', 'status': 'NOT_PROVEN'})
+        elif mutation == 'wrong_status':
+            report['status'] = 'PASS'
+        elif mutation == 'unreviewed_material':
+            report['checks'] = [v for v in report['checks'] if v['check_id'] != 'material-change-owner-review']
+        with pytest.raises(runner.ReleaseManagerError):
+            runner.verify_release_ccc_report(
+                report, candidate_sha=SHA_A, runtime_sha=SHA_B, before_mutation=True,
+            )
+
+
+def test_ccc_post_deploy_requires_exact_live_revision_and_unanimous_pass():
+    import pytest
+    report = _ccc_test_report(runtime=SHA_A, mode='pass')
+    assert runner.verify_release_ccc_report(
+        report, candidate_sha=SHA_A, runtime_sha=SHA_A, before_mutation=False,
+    )['mode'] == 'live_certified'
+    for field, value in [('status', 'NOT_PROVEN'), ('source_revision', SHA_B), ('runtime_revision', SHA_B)]:
+        altered = dict(report)
+        altered[field] = value
+        with pytest.raises(runner.ReleaseManagerError):
+            runner.verify_release_ccc_report(
+                altered, candidate_sha=SHA_A, runtime_sha=SHA_A, before_mutation=False,
+            )
+    report['checks'][0]['status'] = 'FAIL'
+    with pytest.raises(runner.ReleaseManagerError, match='post-mutation CCC'):
+        runner.verify_release_ccc_report(
+            report, candidate_sha=SHA_A, runtime_sha=SHA_A, before_mutation=False,
+        )
+
+
+def test_ccc_gate_execution_requires_fresh_report_and_matching_process_result(tmp_path):
+    import json
+    import pytest
+    from types import SimpleNamespace
+    ccc = tmp_path / 'run_ccc.py';ccc.write_text('')
+    config = tmp_path / 'ccc.json';config.write_text('{}')
+    latest = tmp_path / 'latest.json'
+    fresh = _ccc_test_report(runtime=SHA_A, mode='pass')
+    with patch.object(runner.subprocess, 'run', return_value=SimpleNamespace(returncode=0)):
+        with pytest.raises(runner.ReleaseManagerError, match='did not persist'):
+            runner.run_release_ccc_gate(SHA_A, SHA_A, before_mutation=False, ccc_runner=ccc, ccc_config=config, latest=latest)
+        latest.write_text(json.dumps(fresh))
+        assert runner.run_release_ccc_gate(SHA_A, SHA_A, before_mutation=False, ccc_runner=ccc, ccc_config=config, latest=latest)['mode'] == 'live_certified'
+        fresh['finished_at'] = '2020-01-01T00:00:00+00:00'
+        latest.write_text(json.dumps(fresh))
+        with pytest.raises(runner.ReleaseManagerError, match='stale'):
+            runner.run_release_ccc_gate(SHA_A, SHA_A, before_mutation=False, ccc_runner=ccc, ccc_config=config, latest=latest)
+        fresh['finished_at'] = '2031-01-01T00:00:00+00:00'
+        latest.write_text(json.dumps(fresh))
+        with pytest.raises(runner.ReleaseManagerError, match='future-dated'):
+            runner.run_release_ccc_gate(SHA_A, SHA_A, before_mutation=False, ccc_runner=ccc, ccc_config=config, latest=latest)
+    fresh['finished_at'] = datetime.now(timezone.utc).isoformat()
+    latest.write_text(json.dumps(fresh))
+    with patch.object(runner.subprocess, 'run', return_value=SimpleNamespace(returncode=2)):
+        with pytest.raises(runner.ReleaseManagerError, match='process failed'):
+            runner.run_release_ccc_gate(SHA_A, SHA_A, before_mutation=False, ccc_runner=ccc, ccc_config=config, latest=latest)
+
+
+def test_ccc_precedes_mutation_and_postflight_precedes_closed_release():
+    import inspect
+    source = inspect.getsource(runner._deploy_production_locked)
+    assert source.index('ccc_preflight = run_release_ccc_gate(') < source.index('gate_transition(repo, state_root, record, "production")')
+    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('runtime_deployed = True')
+    assert source.index('ccc_postflight = run_release_ccc_gate(') < source.index('gate_transition(repo, state_root, record, "production_verified")')
+    assert source.index('ccc_postflight = run_release_ccc_gate(') < source.index('set_last_known_good(\n            state_root,\n            production_manifest')
+
+
+def test_release_contract_accepts_emitted_string_risk_enum_with_exact_manifest():
+    for classification in ('normal', 'production_repair', 'production_control_core', 'schema_or_contract'):
+        record = {'state': 'production_eligible', 'rollback_sha': SHA_B,
+                  'release_candidate': {'candidate_sha': SHA_A},
+                  'risk_profile': classification,
+                  'release_manifest': {'candidate_sha': SHA_A, 'rollback_sha': SHA_B,
+                                       'risk_profile': classification}}
+        runner.validate_release_record_contract(record)
+
+
+def test_release_contract_rejects_missing_unknown_or_mismatched_risk():
+    import pytest
+    record = {'rollback_sha': SHA_B, 'release_candidate': {'candidate_sha': SHA_A},
+              'risk_profile': 'production_control_core',
+              'release_manifest': {'candidate_sha': SHA_A, 'rollback_sha': SHA_B,
+                                   'risk_profile': 'production_control_core'}}
+    for invalid in ('', 'unknown', None, {}, []):
+        record['risk_profile'] = invalid
+        with pytest.raises(runner.ReleaseManagerError, match='risk_profile'):
+            runner.validate_release_record_contract(record)
+    record['risk_profile'] = 'production_control_core'
+    record['release_manifest']['risk_profile'] = 'normal'
+    with pytest.raises(runner.ReleaseManagerError, match='risk classification differs'):
+        runner.validate_release_record_contract(record)
+
+
+def test_ccc_postflight_transient_prometheus_rechecks_fresh_report_and_audits_runs(tmp_path):
+    from types import SimpleNamespace
+    import json
+
+    ccc = tmp_path / "run_ccc.py"
+    ccc.write_text("")
+    config = tmp_path / "ccc.json"
+    config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    calls = []
+
+    def ccc_check(*args, **kwargs):
+        calls.append(len(calls) + 1)
+        report = _ccc_test_report(runtime=SHA_A, mode="pass")
+        report["run_id"] = f"independent-check-{calls[-1]}"
+        report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        failed = calls[-1] <= 2
+        if failed:
+            report["status"] = "FAIL"
+            next(x for x in report["checks"] if x["check_id"] == "prometheus-targets")["status"] = "FAIL"
+        latest.write_text(json.dumps(report))
+        return SimpleNamespace(returncode=1 if failed else 0)
+
+    with patch.object(runner.subprocess, "run", side_effect=ccc_check), patch.object(runner.time, "sleep") as sleep:
+        evidence = runner.run_release_ccc_gate(
+            SHA_A, SHA_A, before_mutation=False,
+            ccc_runner=ccc, ccc_config=config, latest=latest,
+        )
+    assert evidence["mode"] == "live_certified"
+    assert evidence["checks"]["prometheus-targets"] == "PASS"
+    assert evidence["transient_monitoring_retries"] == 2
+    assert evidence["failed_monitoring_run_ids"] == [
+        "independent-check-1", "independent-check-2",
+    ]
+    assert len(calls) == 3
+    assert [x.args for x in sleep.call_args_list] == [(15,), (20,)]
+
+
+def test_ccc_postflight_persistent_monitoring_failure_remains_fatal(tmp_path):
+    from types import SimpleNamespace
+    import json
+    import pytest
+
+    ccc = tmp_path / "run_ccc.py"
+    ccc.write_text("")
+    config = tmp_path / "ccc.json"
+    config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    runs = []
+
+    def ccc_check(*args, **kwargs):
+        runs.append(len(runs) + 1)
+        report = _ccc_test_report(runtime=SHA_A, mode="pass")
+        report["status"] = "FAIL"
+        report["run_id"] = f"independent-check-{runs[-1]}"
+        report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        next(x for x in report["checks"] if x["check_id"] == "prometheus-targets")["status"] = "FAIL"
+        latest.write_text(json.dumps(report))
+        return SimpleNamespace(returncode=1)
+
+    with patch.object(runner.subprocess, "run", side_effect=ccc_check), patch.object(runner.time, "sleep") as sleep:
+        with pytest.raises(runner.ReleaseManagerError, match="post-mutation CCC did not certify"):
+            runner.run_release_ccc_gate(
+                SHA_A, SHA_A, before_mutation=False,
+                ccc_runner=ccc, ccc_config=config, latest=latest,
+            )
+    assert len(runs) == 4
+    assert [x.args for x in sleep.call_args_list] == [(15,), (20,), (25,)]
+
+
+def test_ccc_postflight_other_failures_and_wrong_identity_do_not_retry(tmp_path):
+    from types import SimpleNamespace
+    import json
+    import pytest
+
+    ccc = tmp_path / "run_ccc.py"
+    ccc.write_text("")
+    config = tmp_path / "ccc.json"
+    config.write_text("{}")
+    latest = tmp_path / "latest.json"
+
+    for check, source in [
+        ("systemd-failed-units", SHA_A),
+        ("openclaw-authority-health", SHA_A),
+        ("prometheus-targets", SHA_B),
+    ]:
+        report = _ccc_test_report(runtime=SHA_A, mode="pass")
+        report["status"] = "FAIL"
+        report["source_revision"] = source
+        report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        next(x for x in report["checks"] if x["check_id"] == check)["status"] = "FAIL"
+        latest.write_text(json.dumps(report))
+        with patch.object(runner.subprocess, "run", return_value=SimpleNamespace(returncode=1)) as proc, patch.object(runner.time, "sleep") as sleep:
+            with pytest.raises(runner.ReleaseManagerError):
+                runner.run_release_ccc_gate(
+                    SHA_A, SHA_A, before_mutation=False,
+                    ccc_runner=ccc, ccc_config=config, latest=latest,
+                )
+        assert proc.call_count == 1
+        sleep.assert_not_called()
+
+
+def test_ccc_postflight_reused_failed_run_id_fails_closed(tmp_path):
+    from types import SimpleNamespace
+    import json
+    import pytest
+
+    ccc = tmp_path / "run_ccc.py"
+    ccc.write_text("")
+    config = tmp_path / "ccc.json"
+    config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    report = _ccc_test_report(runtime=SHA_A, mode="pass")
+    report["status"] = "FAIL"
+    report["run_id"] = "reused-ccc-run"
+    next(x for x in report["checks"] if x["check_id"] == "prometheus-targets")["status"] = "FAIL"
+
+    def ccc_check(*args, **kwargs):
+        report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        latest.write_text(json.dumps(report))
+        return SimpleNamespace(returncode=1)
+
+    with patch.object(runner.subprocess, "run", side_effect=ccc_check) as proc, patch.object(runner.time, "sleep") as sleep:
+        with pytest.raises(runner.ReleaseManagerError, match="repeated a prior monitoring report"):
+            runner.run_release_ccc_gate(
+                SHA_A, SHA_A, before_mutation=False,
+                ccc_runner=ccc, ccc_config=config, latest=latest,
+            )
+    assert proc.call_count == 2
+    assert sleep.call_count == 1

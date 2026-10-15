@@ -54,18 +54,6 @@ OBSOLETE_UNITS=(
   jason-component-engineering-exporter.service
   jason-prompt-exporter.service
 )
-EXPORTER_SCRIPTS=(
-  client_posture_exporter.py
-  playbook_exporter.py
-  production_health_exporter.py
-  operations_configuration_exporter.py
-  resolution_memory_exporter.py
-  reflection_exporter.py
-  security_control_exporter.py
-  status_exporter.py
-  usage_attribution_exporter_runtime.py
-  usage_exporter.py
-)
 VERIFY_PORTS=(9464 9465 9466 9467 9468 9470 9471 9472 9476 9477)
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -108,6 +96,20 @@ step_pass() {
   finished="$(date +%s)"
   echo "HOST_RECONCILE_STEP_PASS=$1 duration_seconds=$((finished - STEP_STARTED_AT))"
 }
+
+# Keep actionable failure evidence in the root reconciliation result rather
+# than printing only the opaque start marker for a failed systemd command.
+CURRENT_UNIT=""
+on_host_reconcile_error() {
+  local code=$?
+  trap - ERR
+  echo "HOST_RECONCILE_FAILURE step=${STEP_NAME:-unknown} unit=${CURRENT_UNIT:-none} rc=$code" >&2
+  if [ -n "$CURRENT_UNIT" ]; then
+    systemctl show "$CURRENT_UNIT" -p ActiveState -p SubState -p Result -p ExecMainStatus --no-pager >&2 || true
+  fi
+  exit "$code"
+}
+trap 'on_host_reconcile_error' ERR
 
 verify_exporter_port() {
   local port="$1"
@@ -236,31 +238,81 @@ for unit in "${OBSOLETE_UNITS[@]}"; do
 done
 
 step_start system_service_activation
+PORT_GUARD="$RELEASE_DIR/tools/release_exporter_port_guard.py"
+test -f "$PORT_GUARD" || { echo "ERROR: missing candidate exporter port ownership guard" >&2; exit 9; }
 systemctl daemon-reload
+# Stop every system-managed exporter BEFORE any restart, then require that
+# every port is actually free. Never kill a process selected merely by script
+# name (it might belong to a user session or another service).
 for unit in "${EXPORTER_UNITS[@]}"; do
-  systemctl stop "$unit" >/dev/null 2>&1 || true
+  CURRENT_UNIT="$unit"
+  timeout --signal=TERM --kill-after=5s 25s systemctl stop "$unit"
 done
-
-for script_name in "${EXPORTER_SCRIPTS[@]}"; do
-  mapfile -t pids < <(pgrep -u al -f "$script_name" || true)
-  for pid in "${pids[@]}"; do
-    [ -n "$pid" ] || continue
-    kill "$pid" >/dev/null 2>&1 || true
+for unit in "${EXPORTER_UNITS[@]}"; do
+  CURRENT_UNIT="$unit"
+  /usr/bin/python3 "$PORT_GUARD" --mode free --unit "$unit" --timeout-seconds 12
+done
+# systemctl active does not prove that a freshly started Python exporter won
+# its socket. Require matching listening socket owner and systemd MainPID.
+# The privileged host may transiently lose its D-Bus connection while services
+# are being activated. Recover only the bounded case where the *approved*
+# exporter owns no process AND its socket is genuinely free; never retry an
+# unknown/foreign listener, unexpected ownership, or missing MainPID evidence.
+ensure_owned_exporter() {
+  local unit="$1"
+  local check_output
+  local attempt
+  for attempt in 1 2 3; do
+    if check_output="$(/usr/bin/python3 "$PORT_GUARD" --mode owned --unit "$unit" --timeout-seconds 12 2>&1)"; then
+      printf '%s\n' "$check_output"
+      return 0
+    fi
+    printf '%s\n' "$check_output" >&2
+    # This is the only bounded transient eligible for automatic recovery:
+    # no socket owner, and systemd explicitly reported MainPID=0. All other
+    # failures go through protected rollback, unchanged.
+    if [[ "$check_output" != *"has no listening owner (MainPID=0)"* ]] || [ "$attempt" -eq 3 ]; then
+      echo "EXPORTER_OWNERSHIP_RECONCILIATION=FAIL unit=$unit attempt=$attempt" >&2
+      return 1
+    fi
+    /usr/bin/python3 "$PORT_GUARD" --mode free --unit "$unit" --timeout-seconds 4
+    echo "EXPORTER_OWNERSHIP_RECONCILIATION=RETRY unit=$unit attempt=$attempt" >&2
+    timeout --signal=TERM --kill-after=5s 15s systemctl restart --no-block "$unit"
+    sleep 3
   done
-done
-
-sleep 1
+}
 for unit in "${EXPORTER_UNITS[@]}"; do
-  systemctl enable --now "$unit"
+  CURRENT_UNIT="$unit"
+  # Enabling and starting are separate bounded operations. The old
+  # systemctl enable --now waited synchronously on a systemd start job and
+  # timed out during D-Bus pressure even though the service then started.
+  # Queue the job nonblocking and require the independent PID/socket guard
+  # to prove the exporter actually owns its listener. No systemctl success
+  # response alone can make an exporter count as healthy.
+  timeout --signal=TERM --kill-after=5s 15s systemctl enable "$unit"
+  timeout --signal=TERM --kill-after=5s 15s systemctl start --no-block "$unit"
+  ensure_owned_exporter "$unit"
 done
+CURRENT_UNIT=""
 for timer in "${MAINTENANCE_TIMERS[@]}"; do
+  CURRENT_UNIT="$timer"
   systemctl enable --now "$timer"
 done
+CURRENT_UNIT="$PROVIDER_CANARY_TIMER"
 systemctl enable --now "$PROVIDER_CANARY_TIMER"
+CURRENT_UNIT="$PROVIDER_CANARY_SERVICE"
 timeout --signal=TERM --kill-after=5s 45s systemctl start "$PROVIDER_CANARY_SERVICE"
 for unit in "${MAINTENANCE_SERVICES[@]}"; do
-  timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"
+  CURRENT_UNIT="$unit"
+  if [ "$unit" = "jason-openclaw-authority-health.service" ]; then
+    # The intact JKD-001 full-integrity check requires about 135s in
+    # production. Keep the check mandatory, but give it a bounded 180s.
+    timeout --signal=TERM --kill-after=5s 180s systemctl start "$unit"
+  else
+    timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"
+  fi
 done
+CURRENT_UNIT=""
 systemctl reset-failed
 step_pass system_service_activation
 

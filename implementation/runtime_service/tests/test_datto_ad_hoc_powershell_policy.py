@@ -138,3 +138,72 @@ def test_powershell_component_cannot_be_standing_safe(
         components[0].requires_explicit_approval
         is True
     )
+
+
+# Linux shell worker contract: exact live UID/name, per-run approval and
+# a source-controlled usrInput schema; no shell command is standing-safe.
+LINUX_SHELL_UID = "bc7c4531-6869-4658-b1d6-7639a477045e"
+LINUX_SHELL_NAME = "Run Ad Hoc Command (Shell) [MAC] [LIN]"
+
+
+def test_exact_linux_shell_component_accepts_usrinput():
+    cmd = "uname -srm"
+    prepared = policy_for(uid=LINUX_SHELL_UID, name=LINUX_SHELL_NAME).prepare(
+        allowlist_name="pilot-diagnostic",
+        device_uid="worker-1",
+        device_class="workstation",
+        component_uid=LINUX_SHELL_UID,
+        variables={"usrInput": cmd},
+        observed_component_name=LINUX_SHELL_NAME,
+    )
+    assert prepared.normalized_variables == {"usrInput": cmd}
+    assert prepared.provider_request.body["jobComponent"]["variables"] == [
+        {"name": "usrInput", "value": cmd}
+    ]
+
+
+def test_linux_shell_rejects_unknown_variable():
+    with pytest.raises(PermissionError):
+        policy_for(uid=LINUX_SHELL_UID, name=LINUX_SHELL_NAME).prepare(
+            allowlist_name="pilot-diagnostic",
+            device_uid="worker-1",
+            device_class="workstation",
+            component_uid=LINUX_SHELL_UID,
+            variables={"unexpected": "uname -srm"},
+            observed_component_name=LINUX_SHELL_NAME,
+        )
+
+
+def test_linux_shell_rejects_same_name_wrong_uid():
+    with pytest.raises(PermissionError):
+        policy_for(uid="unreviewed-uid", name=LINUX_SHELL_NAME).prepare(
+            allowlist_name="pilot-diagnostic",
+            device_uid="worker-1",
+            device_class="workstation",
+            component_uid="unreviewed-uid",
+            variables={"usrInput": "uname -srm"},
+            observed_component_name=LINUX_SHELL_NAME,
+        )
+
+
+def test_linux_shell_rejects_missing_input():
+    with pytest.raises((PermissionError, ValueError)):
+        policy_for(uid=LINUX_SHELL_UID, name=LINUX_SHELL_NAME).prepare(
+            allowlist_name="pilot-diagnostic",
+            device_uid="worker-1",
+            device_class="workstation",
+            component_uid=LINUX_SHELL_UID,
+            variables={},
+            observed_component_name=LINUX_SHELL_NAME,
+        )
+
+
+def test_linux_shell_cannot_be_configured_standing_safe(monkeypatch):
+    monkeypatch.setenv(
+        DATTO_EXECUTION_COMPONENTS_JSON_ENV,
+        json.dumps([{"uid": LINUX_SHELL_UID, "name": LINUX_SHELL_NAME, "approval_mode": "standing_safe"}]),
+    )
+    components = configured_datto_components()
+    assert len(components) == 1
+    assert components[0].approval_mode == "per_run"
+    assert components[0].requires_explicit_approval is True
