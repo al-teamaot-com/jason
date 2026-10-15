@@ -386,11 +386,28 @@ def controller_identity(repo: Path) -> dict[str, Any]:
         raise ReleaseManagerError("release-manager policy is missing")
     if not candidate_path.is_file():
         raise ReleaseManagerError("immutable candidate Production Manager source is missing")
-    source_revision = CONTROLLER_SOURCE.parents[1].name.casefold()
+
+    installed = Path.home() / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+    immutable = CONTROLLER_SOURCE
+    # The systemd user timer executes a COPIED installed runner, not an
+    # immutable /opt/jason/releases/<SHA>/tools path. A legitimate governed
+    # install replaces that copied file while the old Python process is
+    # running. Anchor N to its immutable release-manager-source BEFORE
+    # mutation so the scheduled path can safely stage N+1 without losing N.
+    if CONTROLLER_SOURCE == installed:
+        source_link = installed.parent / "release-manager-source"
+        if not source_link.is_symlink():
+            raise ReleaseManagerError("active Release Manager immutable source link missing")
+        immutable = source_link.resolve() / "tools" / "release_manager_host_runner.py"
+        if not immutable.is_file() or file_digest(immutable) != file_digest(installed):
+            raise ReleaseManagerError("active Release Manager differs from immutable executing source")
+
+    source_revision = immutable.parents[1].name.casefold()
     return {
         "executing_controller_path": str(CONTROLLER_SOURCE),
+        "executing_controller_immutable_path": str(immutable),
         "executing_controller_revision": source_revision if SHA.fullmatch(source_revision) else "unknown",
-        "executing_controller_digest": file_digest(CONTROLLER_SOURCE),
+        "executing_controller_digest": file_digest(immutable),
         "candidate_controller_digest": file_digest(candidate_path),
         "policy_digest": file_digest(policy_path),
         "captured_at": now(),
@@ -401,19 +418,37 @@ def verify_controller_identity(
     pin: dict[str, Any], repo: Path, *, installed_candidate: bool = False,
     installed_runner: Path | None = None,
 ) -> dict[str, Any]:
-    """Pin the running controller to N while attesting staged N+1 separately.
+    """Keep executing N immutable while verifying separately installed N+1.
 
-    A Python process cannot transform its own loaded source into the installed
-    release-controller version. The existing release transaction keeps N's
-    semantics and exclusive flock. N+1 is installed for future invocations
-    only, after the current transaction releases the lock.
+    The active production transaction retains its flock and N's loaded code.
+    The scheduled user service can replace the installed *copy* of the runner,
+    but it must not alter the original immutable N source or policy.
     """
-    current = controller_identity(repo)
-    # These fields must remain identical before and after installing N+1,
-    # including the *original* executing controller bytes, candidate source
-    # bytes, and release policy. Never accept a changed live process identity.
+    if installed_candidate:
+        # Re-read immutable N from the pre-mutation pin, never infer the old
+        # executing version from the installed file or retargeted source link.
+        # Both are legitimately updated to N+1 by the guarded installer.
+        immutable = Path(str(pin.get("executing_controller_immutable_path") or ""))
+        policy = repo / "config" / "release-manager-policy.json"
+        candidate = repo / "tools" / "release_manager_host_runner.py"
+        if not immutable.is_file() or not policy.is_file() or not candidate.is_file():
+            raise ReleaseManagerError("pinned controller, release policy or candidate missing")
+        current = {
+            "executing_controller_path": str(CONTROLLER_SOURCE),
+            "executing_controller_immutable_path": str(immutable),
+            "executing_controller_revision": (
+                immutable.parents[1].name.casefold()
+                if SHA.fullmatch(immutable.parents[1].name.casefold()) else "unknown"
+            ),
+            "executing_controller_digest": file_digest(immutable),
+            "candidate_controller_digest": file_digest(candidate),
+            "policy_digest": file_digest(policy),
+        }
+    else:
+        current = controller_identity(repo)
     for field in (
         "executing_controller_path",
+        "executing_controller_immutable_path",
         "executing_controller_revision",
         "executing_controller_digest",
         "candidate_controller_digest",
@@ -428,8 +463,9 @@ def verify_controller_identity(
         )
         if not installed_path.is_file() or file_digest(installed_path) != expected:
             raise ReleaseManagerError("installed Production Manager controller differs from candidate source")
-        # This does not execute N+1, reload any module, replace the open
-        # transaction lock, or claim the executing revision became N+1.
+        # Installer separately verifies source-link revision and immutable host
+        # copy. No subprocess is run under candidate semantics in the active
+        # transaction. Only future lock-acquiring invocations use N+1.
         current["installed_controller_path"] = str(installed_path)
         current["installed_controller_digest"] = expected
         current["controller_handoff"] = "staged_for_next_transaction"

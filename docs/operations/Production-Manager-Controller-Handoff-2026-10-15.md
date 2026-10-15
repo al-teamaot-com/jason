@@ -10,7 +10,7 @@ On October 14, 2026, governed release `release-514edda3eff4f53e` passed immutabl
 
 During one serialized production transaction, the controller must preserve these distinct identities:
 
-- **Executing controller N:** immutable `CONTROLLER_SOURCE` absolute path, parent release revision, and digest recorded before any mutation. Those remain exact throughout the transaction. A changed running source on disk fails closed.
+- **Executing controller N:** pin the immutable release source, parent revision and digest before mutation. For a manually launched release, this is the canonical `/opt/jason/releases/<SHA>/tools` source. For the user systemd timer, `CONTROLLER_SOURCE` is an installed **copy** which is allowed to be replaced during handoff: the executing N must instead be pinned via the pre-mutation `~/.local/lib/jason/release-manager-source` symlink to its immutable host release, with byte-for-byte comparison of the installed copy at entry. After N+1 is installed, validate the pinned old immutable source rather than re-reading the legitimately replaced installed copy.
 - **Candidate controller N+1:** digest of `tools/release_manager_host_runner.py` from the exact materialized source, pinned with the transaction before mutation. Candidate source changes fail closed.
 - **Installed controller N+1:** `~/.local/lib/jason/release_manager_host_runner.py` after the existing governed installer has independently required `/opt/jason/current` and `release-manager-source` to match the candidate SHA and checked installed file bytes against its immutable host copy. Verify installed digest equals pinned candidate digest; never assume running Python has loaded N+1.
 - **Policy:** candidate release-manager policy digest remains pinned; changes during the transaction fail closed.
@@ -29,4 +29,4 @@ Once N+1 is installed and independently healthy, prepare a **new SHA** for Stage
 
 ## Regression acceptance
 
-Tests exercise old executing bytes != new candidate bytes; matching installed N+1 succeeds, old executing identity remains N, tampered running source, tampered candidate, altered installed bytes, changed policy and missing installer artifact all fail closed. All mandatory runtime, host, rollback and security tests must run on the protected branch and main merge.
+Tests exercise old executing bytes != new candidate bytes; matching installed N+1 succeeds, old executing identity remains N, tampered pinned immutable source, tampered candidate, altered installed bytes, changed policy and missing installer artifact all fail closed. The actual user-systemd copied runner path is tested independently: N's pinned immutable bytes survive replacement of the installed copy and release source symlink, while a fresh subsequent invocation selects N+1; a mismatching installed copy at transaction entry fails closed. All mandatory runtime, host, rollback and security tests must run on the protected branch and main merge.

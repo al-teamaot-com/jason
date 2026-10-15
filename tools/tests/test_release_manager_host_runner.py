@@ -1101,6 +1101,92 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 with self.assertRaisesRegex(runner.ReleaseManagerError, "policy_digest"):
                     runner.verify_controller_identity(pin, repo, installed_candidate=True, installed_runner=installed)
 
+    def test_scheduled_installed_controller_copy_changes_only_for_next_transaction(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            old_root = root / SHA_B
+            new_root = root / SHA_A
+            old = old_root / "tools" / "release_manager_host_runner.py"
+            new = new_root / "tools" / "release_manager_host_runner.py"
+            old.parent.mkdir(parents=True)
+            new.parent.mkdir(parents=True)
+            old.write_bytes(b"immutable-old-version")
+            new.write_bytes(b"reviewed-new-version")
+            (new_root / "config").mkdir()
+            (new_root / "config" / "release-manager-policy.json").write_text("{}")
+            installed = root / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+            installed.parent.mkdir(parents=True)
+            installed.write_bytes(old.read_bytes())
+            active_source = installed.parent / "release-manager-source"
+            active_source.symlink_to(old_root, target_is_directory=True)
+
+            # Simulate the actual user-systemd ExecStart path, not a command
+            # launched directly from /opt/jason/releases/<old SHA>/tools.
+            with patch.object(runner, "CONTROLLER_SOURCE", installed), patch.object(
+                runner.Path, "home", return_value=root
+            ):
+                pin = runner.controller_identity(new_root)
+                self.assertEqual(pin["executing_controller_revision"], SHA_B)
+                self.assertEqual(
+                    pin["executing_controller_immutable_path"], str(old)
+                )
+                installed.write_bytes(new.read_bytes())
+                active_source.unlink()
+                active_source.symlink_to(new_root, target_is_directory=True)
+
+                verified = runner.verify_controller_identity(
+                    pin, new_root, installed_candidate=True
+                )
+                self.assertEqual(verified["executing_controller_revision"], SHA_B)
+                self.assertEqual(
+                    verified["executing_controller_digest"], runner.file_digest(old)
+                )
+                self.assertEqual(
+                    verified["installed_controller_digest"], runner.file_digest(new)
+                )
+                # A fresh future invocation resolves N+1 as active, only
+                # AFTER old transaction returns and releases its flock.
+                successor = runner.controller_identity(new_root)
+                self.assertEqual(successor["executing_controller_revision"], SHA_A)
+                self.assertNotEqual(
+                    successor["executing_controller_digest"],
+                    verified["executing_controller_digest"],
+                )
+                old.write_bytes(b"modified-immutable-old")
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "executing_controller_digest"
+                ):
+                    runner.verify_controller_identity(
+                        pin, new_root, installed_candidate=True
+                    )
+
+    def test_scheduled_controller_requires_immutable_source_match_at_entry(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            release = root / SHA_B
+            old = release / "tools" / "release_manager_host_runner.py"
+            old.parent.mkdir(parents=True)
+            old.write_bytes(b"immutable-old")
+            new = root / SHA_A
+            c = new / "tools" / "release_manager_host_runner.py"
+            c.parent.mkdir(parents=True)
+            c.write_bytes(b"reviewed-new")
+            (new / "config").mkdir()
+            (new / "config" / "release-manager-policy.json").write_text("{}")
+            installed = root / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+            installed.parent.mkdir(parents=True)
+            installed.write_bytes(b"untrusted-installed-runner")
+            (installed.parent / "release-manager-source").symlink_to(
+                release, target_is_directory=True
+            )
+            with patch.object(runner, "CONTROLLER_SOURCE", installed), patch.object(
+                runner.Path, "home", return_value=root
+            ):
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "differs from immutable executing source"
+                ):
+                    runner.controller_identity(new)
+
     def test_closeout_records_both_controller_digests_and_staged_handoff(self):
         source = (ROOT / "tools" / "release_manager_host_runner.py").read_text(
             encoding="utf-8"
