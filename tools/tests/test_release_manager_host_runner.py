@@ -1048,30 +1048,198 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             policy = repo / "config" / "release-manager-policy.json"
             policy.parent.mkdir(parents=True)
             policy.write_text('{"version":1}\n', encoding="utf-8")
+            candidate = repo / "tools" / "release_manager_host_runner.py"
+            candidate.parent.mkdir(parents=True)
+            candidate.write_bytes(b"candidate")
             pin = runner.controller_identity(repo)
             policy.write_text('{"version":2}\n', encoding="utf-8")
             with self.assertRaisesRegex(runner.ReleaseManagerError, "changed mid-transaction: policy_digest"):
                 runner.verify_controller_identity(pin, repo)
 
-    def test_controller_self_update_accepts_only_exact_candidate_bytes(self):
+    def test_controller_self_update_pins_old_runner_and_attests_installed_new_runner(self):
         with tempfile.TemporaryDirectory() as td:
-            repo = Path(td)
+            root = Path(td)
+            repo = root / "candidate"
             policy = repo / "config" / "release-manager-policy.json"
             policy.parent.mkdir(parents=True)
             policy.write_text("{}", encoding="utf-8")
             candidate = repo / "tools" / "release_manager_host_runner.py"
             candidate.parent.mkdir(parents=True)
-            candidate.write_bytes(runner.CONTROLLER_SOURCE.read_bytes())
+            candidate.write_bytes(b"reviewed-new-controller")
+            old = root / SHA_B / "tools" / "release_manager_host_runner.py"
+            old.parent.mkdir(parents=True)
+            old.write_bytes(b"immutable-old-controller")
+            installed = root / "installed" / "release_manager_host_runner.py"
+            installed.parent.mkdir(parents=True)
+            installed.write_bytes(candidate.read_bytes())
+            with patch.object(runner, "CONTROLLER_SOURCE", old):
+                pin = runner.controller_identity(repo)
+                self.assertNotEqual(pin["executing_controller_digest"], pin["candidate_controller_digest"])
+                verified = runner.verify_controller_identity(
+                    pin, repo, installed_candidate=True, installed_runner=installed
+                )
+                self.assertEqual(verified["executing_controller_revision"], SHA_B)
+                self.assertEqual(verified["executing_controller_digest"], pin["executing_controller_digest"])
+                self.assertEqual(verified["installed_controller_digest"], pin["candidate_controller_digest"])
+                self.assertEqual(verified["controller_handoff"], "staged_for_next_transaction")
+
+                # Reject a compromised installed N+1, a compromised immutable
+                # candidate, a replaced running N, and policy changes.
+                installed.write_bytes(b"unexpected-new-controller")
+                with self.assertRaisesRegex(runner.ReleaseManagerError, "installed Production Manager controller differs"):
+                    runner.verify_controller_identity(pin, repo, installed_candidate=True, installed_runner=installed)
+                installed.write_bytes(candidate.read_bytes())
+                candidate.write_bytes(b"tampered-candidate")
+                with self.assertRaisesRegex(runner.ReleaseManagerError, "candidate_controller_digest"):
+                    runner.verify_controller_identity(pin, repo, installed_candidate=True, installed_runner=installed)
+                candidate.write_bytes(b"reviewed-new-controller")
+                old.write_bytes(b"tampered-active-controller")
+                with self.assertRaisesRegex(runner.ReleaseManagerError, "executing_controller_digest"):
+                    runner.verify_controller_identity(pin, repo, installed_candidate=True, installed_runner=installed)
+                old.write_bytes(b"immutable-old-controller")
+                policy.write_text("changed", encoding="utf-8")
+                with self.assertRaisesRegex(runner.ReleaseManagerError, "policy_digest"):
+                    runner.verify_controller_identity(pin, repo, installed_candidate=True, installed_runner=installed)
+
+    def test_scheduled_installed_controller_copy_changes_only_for_next_transaction(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            old_root = root / SHA_B
+            new_root = root / SHA_A
+            old = old_root / "tools" / "release_manager_host_runner.py"
+            new = new_root / "tools" / "release_manager_host_runner.py"
+            old.parent.mkdir(parents=True)
+            new.parent.mkdir(parents=True)
+            old.write_bytes(b"immutable-old-version")
+            new.write_bytes(b"reviewed-new-version")
+            (new_root / "config").mkdir()
+            (new_root / "config" / "release-manager-policy.json").write_text("{}")
+            installed = root / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+            installed.parent.mkdir(parents=True)
+            installed.write_bytes(old.read_bytes())
+            active_source = installed.parent / "release-manager-source"
+            active_source.symlink_to(old_root, target_is_directory=True)
+
+            # Simulate the actual user-systemd ExecStart path, not a command
+            # launched directly from /opt/jason/releases/<old SHA>/tools.
+            with patch.object(runner, "CONTROLLER_SOURCE", installed), patch.object(
+                runner.Path, "home", return_value=root
+            ):
+                pin = runner.controller_identity(new_root)
+                self.assertEqual(pin["executing_controller_revision"], SHA_B)
+                self.assertEqual(
+                    pin["executing_controller_immutable_path"], str(old)
+                )
+                installed.write_bytes(new.read_bytes())
+                active_source.unlink()
+                active_source.symlink_to(new_root, target_is_directory=True)
+
+                verified = runner.verify_controller_identity(
+                    pin, new_root, installed_candidate=True
+                )
+                self.assertEqual(verified["executing_controller_revision"], SHA_B)
+                self.assertEqual(
+                    verified["executing_controller_digest"], runner.file_digest(old)
+                )
+                self.assertEqual(
+                    verified["installed_controller_digest"], runner.file_digest(new)
+                )
+                # A fresh future invocation resolves N+1 as active, only
+                # AFTER old transaction returns and releases its flock.
+                successor = runner.controller_identity(new_root)
+                self.assertEqual(successor["executing_controller_revision"], SHA_A)
+                self.assertNotEqual(
+                    successor["executing_controller_digest"],
+                    verified["executing_controller_digest"],
+                )
+                old.write_bytes(b"modified-immutable-old")
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "executing_controller_digest"
+                ):
+                    runner.verify_controller_identity(
+                        pin, new_root, installed_candidate=True
+                    )
+
+    def test_scheduled_controller_requires_immutable_source_match_at_entry(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            release = root / SHA_B
+            old = release / "tools" / "release_manager_host_runner.py"
+            old.parent.mkdir(parents=True)
+            old.write_bytes(b"immutable-old")
+            new = root / SHA_A
+            c = new / "tools" / "release_manager_host_runner.py"
+            c.parent.mkdir(parents=True)
+            c.write_bytes(b"reviewed-new")
+            (new / "config").mkdir()
+            (new / "config" / "release-manager-policy.json").write_text("{}")
+            installed = root / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+            installed.parent.mkdir(parents=True)
+            installed.write_bytes(b"untrusted-installed-runner")
+            (installed.parent / "release-manager-source").symlink_to(
+                release, target_is_directory=True
+            )
+            with patch.object(runner, "CONTROLLER_SOURCE", installed), patch.object(
+                runner.Path, "home", return_value=root
+            ):
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "differs from immutable executing source"
+                ):
+                    runner.controller_identity(new)
+
+    def test_scheduled_controller_refuses_missing_immutable_source_link(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            candidate = root / SHA_A
+            c = candidate / "tools" / "release_manager_host_runner.py"
+            c.parent.mkdir(parents=True)
+            c.write_bytes(b"reviewed-candidate")
+            (candidate / "config").mkdir()
+            (candidate / "config" / "release-manager-policy.json").write_text("{}")
+            installed = root / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+            installed.parent.mkdir(parents=True)
+            installed.write_bytes(b"old-controller")
+            with patch.object(runner, "CONTROLLER_SOURCE", installed), patch.object(
+                runner.Path, "home", return_value=root
+            ):
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "immutable source link missing"
+                ):
+                    runner.controller_identity(candidate)
+
+    def test_closeout_records_both_controller_digests_and_staged_handoff(self):
+        source = (ROOT / "tools" / "release_manager_host_runner.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            '"executing_controller_digest": controller_verified["executing_controller_digest"]',
+            source,
+        )
+        self.assertIn(
+            '"installed_controller_digest": controller_verified["installed_controller_digest"]',
+            source,
+        )
+        self.assertIn(
+            '"controller_handoff": controller_verified["controller_handoff"]',
+            source,
+        )
+
+    def test_controller_self_update_rejects_missing_installed_controller(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / "candidate"
+            p = repo / "config" / "release-manager-policy.json"
+            p.parent.mkdir(parents=True)
+            p.write_text("{}", encoding="utf-8")
+            c = repo / "tools" / "release_manager_host_runner.py"
+            c.parent.mkdir(parents=True)
+            c.write_bytes(b"candidate")
             pin = runner.controller_identity(repo)
-            verified = runner.verify_controller_identity(pin, repo, installed_candidate=True)
-            self.assertEqual(verified["policy_digest"], pin["policy_digest"])
-            candidate.write_text("modified candidate", encoding="utf-8")
-            with self.assertRaisesRegex(runner.ReleaseManagerError, "differs from candidate source"):
-                runner.verify_controller_identity(pin, repo, installed_candidate=True)
-            candidate.write_bytes(runner.CONTROLLER_SOURCE.read_bytes())
-            policy.write_text("changed", encoding="utf-8")
-            with self.assertRaisesRegex(runner.ReleaseManagerError, "policy_digest"):
-                runner.verify_controller_identity(pin, repo, installed_candidate=True)
+            with self.assertRaisesRegex(runner.ReleaseManagerError, "installed Production Manager controller differs"):
+                runner.verify_controller_identity(
+                    pin, repo, installed_candidate=True,
+                    installed_runner=root / "nonexistent" / "runner.py"
+                )
 
     def test_change_risk_classifies_release_manager_as_production_control_core(self):
         self.assertEqual(

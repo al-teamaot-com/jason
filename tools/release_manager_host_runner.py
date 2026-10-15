@@ -381,35 +381,94 @@ def scheduled_control_alignment() -> dict[str, str]:
 
 def controller_identity(repo: Path) -> dict[str, Any]:
     policy_path = repo / "config" / "release-manager-policy.json"
+    candidate_path = repo / "tools" / "release_manager_host_runner.py"
     if not policy_path.is_file():
         raise ReleaseManagerError("release-manager policy is missing")
-    source_revision = CONTROLLER_SOURCE.parents[1].name.casefold()
+    if not candidate_path.is_file():
+        raise ReleaseManagerError("immutable candidate Production Manager source is missing")
+
+    installed = Path.home() / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+    immutable = CONTROLLER_SOURCE
+    # The systemd user timer executes a COPIED installed runner, not an
+    # immutable /opt/jason/releases/<SHA>/tools path. A legitimate governed
+    # install replaces that copied file while the old Python process is
+    # running. Anchor N to its immutable release-manager-source BEFORE
+    # mutation so the scheduled path can safely stage N+1 without losing N.
+    if CONTROLLER_SOURCE == installed:
+        source_link = installed.parent / "release-manager-source"
+        if not source_link.is_symlink():
+            raise ReleaseManagerError("active Release Manager immutable source link missing")
+        immutable = source_link.resolve() / "tools" / "release_manager_host_runner.py"
+        if not immutable.is_file() or file_digest(immutable) != file_digest(installed):
+            raise ReleaseManagerError("active Release Manager differs from immutable executing source")
+
+    source_revision = immutable.parents[1].name.casefold()
     return {
         "executing_controller_path": str(CONTROLLER_SOURCE),
+        "executing_controller_immutable_path": str(immutable),
         "executing_controller_revision": source_revision if SHA.fullmatch(source_revision) else "unknown",
-        "executing_controller_digest": file_digest(CONTROLLER_SOURCE),
+        "executing_controller_digest": file_digest(immutable),
+        "candidate_controller_digest": file_digest(candidate_path),
         "policy_digest": file_digest(policy_path),
         "captured_at": now(),
     }
 
 
-def verify_controller_identity(pin: dict[str, Any], repo: Path, *, installed_candidate: bool = False) -> dict[str, Any]:
-    current = controller_identity(repo)
-    # A governed host reconciliation may install the exact reviewed candidate
-    # controller while the old controller process remains in flight. Check
-    # its bytes against the immutable candidate worktree, not an arbitrary
-    # changed on-disk controller. The original pin remains in the record.
+def verify_controller_identity(
+    pin: dict[str, Any], repo: Path, *, installed_candidate: bool = False,
+    installed_runner: Path | None = None,
+) -> dict[str, Any]:
+    """Keep executing N immutable while verifying separately installed N+1.
+
+    The active production transaction retains its flock and N's loaded code.
+    The scheduled user service can replace the installed *copy* of the runner,
+    but it must not alter the original immutable N source or policy.
+    """
     if installed_candidate:
+        # Re-read immutable N from the pre-mutation pin, never infer the old
+        # executing version from the installed file or retargeted source link.
+        # Both are legitimately updated to N+1 by the guarded installer.
+        immutable = Path(str(pin.get("executing_controller_immutable_path") or ""))
+        policy = repo / "config" / "release-manager-policy.json"
         candidate = repo / "tools" / "release_manager_host_runner.py"
-        if not candidate.is_file() or current["executing_controller_digest"] != file_digest(candidate):
-            raise ReleaseManagerError("installed Production Manager controller differs from candidate source")
+        if not immutable.is_file() or not policy.is_file() or not candidate.is_file():
+            raise ReleaseManagerError("pinned controller, release policy or candidate missing")
+        current = {
+            "executing_controller_path": str(CONTROLLER_SOURCE),
+            "executing_controller_immutable_path": str(immutable),
+            "executing_controller_revision": (
+                immutable.parents[1].name.casefold()
+                if SHA.fullmatch(immutable.parents[1].name.casefold()) else "unknown"
+            ),
+            "executing_controller_digest": file_digest(immutable),
+            "candidate_controller_digest": file_digest(candidate),
+            "policy_digest": file_digest(policy),
+        }
+    else:
+        current = controller_identity(repo)
     for field in (
         "executing_controller_path",
+        "executing_controller_immutable_path",
         "executing_controller_revision",
+        "executing_controller_digest",
+        "candidate_controller_digest",
         "policy_digest",
-    ) + (() if installed_candidate else ("executing_controller_digest",)):
+    ):
         if current.get(field) != pin.get(field):
             raise ReleaseManagerError(f"active Production Manager controller changed mid-transaction: {field}")
+    if installed_candidate:
+        expected = pin["candidate_controller_digest"]
+        installed_path = installed_runner or (
+            Path.home() / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+        )
+        if not installed_path.is_file() or file_digest(installed_path) != expected:
+            raise ReleaseManagerError("installed Production Manager controller differs from candidate source")
+        # Installer separately verifies source-link revision and immutable host
+        # copy. No subprocess is run under candidate semantics in the active
+        # transaction. Only future lock-acquiring invocations use N+1.
+        current["installed_controller_path"] = str(installed_path)
+        current["installed_controller_digest"] = expected
+        current["controller_handoff"] = "staged_for_next_transaction"
     return current
 
 
@@ -1998,7 +2057,10 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "functional_smoke_tests_passed": bool(smoke.get("passed")),
             "functional_smoke_tests": smoke,
             "controller_identity_verified": True,
+            "controller_handoff": controller_verified["controller_handoff"],
             "executing_controller_revision": controller_verified["executing_controller_revision"],
+            "executing_controller_digest": controller_verified["executing_controller_digest"],
+            "installed_controller_digest": controller_verified["installed_controller_digest"],
             "last_known_good_manifest_captured": bool(baseline_manifest.get("complete")),
             "pre_mutation_health_passed": bool(record["pre_mutation_health"].get("passed")),
             "production_manifest_complete": bool(production_manifest.get("complete")),
