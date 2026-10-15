@@ -379,6 +379,84 @@ def scheduled_control_alignment() -> dict[str, str]:
     return states
 
 
+# Only the preinstalled canonical recovery utility may produce the backup
+# marker that permits the exact reviewed controller-copy transitional state.
+# The root-owned host source and original last-known-good stay unchanged.
+CONTROLLER_RECOVERY_MANAGED_REPO = Path("/home/al/.local/lib/jason/engineering-worker-source")
+CONTROLLER_RECOVERY_OWNER_REVIEW = Path("/var/lib/jason/ccc/material-review.json")
+
+
+def _controller_recovery_old_source_verified(source: Path) -> bool:
+    return (
+        source.is_file() and not source.is_symlink()
+        and source.stat().st_uid == 0
+    )
+
+
+def _operator_recovery_identity(repo: Path, installed: Path, old_source: Path) -> dict[str, Any]:
+    """Attest the one-time operator recovery copy against protected source.
+
+    This is NOT a general alternate production controller. Only a copied
+    canonical controller at the exact reviewed main revision, with the exact
+    old immutable runner and installer-created backup, is accepted.
+    """
+    if not _controller_recovery_old_source_verified(old_source):
+        raise ReleaseManagerError("controller recovery old source is not root immutable")
+    old_digest = file_digest(old_source)
+    backup = installed.with_name(
+        installed.name + ".recovery-backup-" + old_digest[len("sha256:"):][:16]
+    )
+    if (not backup.is_file() or backup.is_symlink()
+            or backup.stat().st_uid != os.geteuid()
+            or backup.stat().st_mode & 0o077
+            or file_digest(backup) != old_digest):
+        raise ReleaseManagerError("canonical controller recovery backup missing or altered")
+
+    managed = CONTROLLER_RECOVERY_MANAGED_REPO
+    try:
+        sha = subprocess.check_output(
+            ["git", "-C", str(managed), "rev-parse", "refs/remotes/origin/main"],
+            stderr=subprocess.DEVNULL, timeout=12, text=True,
+        ).strip()
+        repo_sha = subprocess.check_output(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL, timeout=12, text=True,
+        ).strip()
+        expected = subprocess.check_output(
+            ["git", "-C", str(managed), "show",
+             f"{sha}:tools/release_manager_host_runner.py"],
+            stderr=subprocess.DEVNULL, timeout=12,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise ReleaseManagerError("controller recovery reviewed source unavailable") from exc
+    if not SHA.fullmatch(sha) or repo_sha != sha:
+        raise ReleaseManagerError("controller recovery exact main revision is not aligned")
+    reviewed_digest = "sha256:" + hashlib.sha256(expected).hexdigest()
+    candidate = repo / "tools" / "release_manager_host_runner.py"
+    if (not candidate.is_file() or file_digest(candidate) != reviewed_digest
+            or not installed.is_file() or installed.is_symlink()
+            or installed.stat().st_uid != os.geteuid()
+            or file_digest(installed) != reviewed_digest):
+        raise ReleaseManagerError("controller recovery installed candidate differs from reviewed main")
+
+    try:
+        review = json.loads(CONTROLLER_RECOVERY_OWNER_REVIEW.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ReleaseManagerError("controller recovery exact owner review missing") from exc
+    if (review.get("schema_version") != "1.0"
+            or review.get("status") != "approved"
+            or review.get("source_revision") != sha
+            or review.get("recorded_by") != "person-al"):
+        raise ReleaseManagerError("controller recovery exact owner review does not match source")
+    return {
+        "controller_recovery_mode": "canonical_owner_recovery",
+        "controller_recovery_revision": sha,
+        "controller_recovery_old_source": str(old_source),
+        "controller_recovery_backup": str(backup),
+        "controller_recovery_digest": reviewed_digest,
+    }
+
+
 def controller_identity(repo: Path) -> dict[str, Any]:
     policy_path = repo / "config" / "release-manager-policy.json"
     candidate_path = repo / "tools" / "release_manager_host_runner.py"
@@ -399,8 +477,20 @@ def controller_identity(repo: Path) -> dict[str, Any]:
         if not source_link.is_symlink():
             raise ReleaseManagerError("active Release Manager immutable source link missing")
         immutable = source_link.resolve() / "tools" / "release_manager_host_runner.py"
-        if not immutable.is_file() or file_digest(immutable) != file_digest(installed):
-            raise ReleaseManagerError("active Release Manager differs from immutable executing source")
+        if not immutable.is_file():
+            raise ReleaseManagerError("active Release Manager immutable source missing")
+        if file_digest(immutable) != file_digest(installed):
+            recovery = _operator_recovery_identity(repo, installed, immutable)
+            return {
+                "executing_controller_path": str(CONTROLLER_SOURCE),
+                "executing_controller_immutable_path": str(installed),
+                "executing_controller_revision": recovery["controller_recovery_revision"],
+                "executing_controller_digest": recovery["controller_recovery_digest"],
+                "candidate_controller_digest": file_digest(candidate_path),
+                "policy_digest": file_digest(policy_path),
+                "captured_at": now(),
+                **recovery,
+            }
 
     source_revision = immutable.parents[1].name.casefold()
     return {
@@ -424,7 +514,28 @@ def verify_controller_identity(
     The scheduled user service can replace the installed *copy* of the runner,
     but it must not alter the original immutable N source or policy.
     """
-    if installed_candidate:
+    if installed_candidate and pin.get("controller_recovery_mode") == "canonical_owner_recovery":
+        # The root host reconciler may legitimately switch the source link to
+        # new N+1. Verify the ORIGINAL recovery backup and root-owned N source
+        # against the exact reviewed main Git object, independent of the link.
+        recovered = _operator_recovery_identity(
+            repo, CONTROLLER_SOURCE,
+            Path(str(pin["controller_recovery_old_source"])),
+        )
+        if recovered != {key: pin.get(key) for key in recovered}:
+            raise ReleaseManagerError("controller recovery provenance changed during promotion")
+        candidate = repo / "tools" / "release_manager_host_runner.py"
+        policy = repo / "config" / "release-manager-policy.json"
+        current = {
+            "executing_controller_path": str(CONTROLLER_SOURCE),
+            "executing_controller_immutable_path": str(CONTROLLER_SOURCE),
+            "executing_controller_revision": recovered["controller_recovery_revision"],
+            "executing_controller_digest": recovered["controller_recovery_digest"],
+            "candidate_controller_digest": file_digest(candidate),
+            "policy_digest": file_digest(policy),
+            "controller_recovery_mode": "canonical_owner_recovery",
+        }
+    elif installed_candidate:
         # Re-read immutable N from the pre-mutation pin, never infer the old
         # executing version from the installed file or retargeted source link.
         # Both are legitimately updated to N+1 by the guarded installer.
