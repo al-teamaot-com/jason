@@ -75,11 +75,15 @@ def load_state(path: Path) -> dict[str, Any]:
 def todo_issues(repo: Path) -> list[dict[str, Any]]:
     issues = gh_json(
         [
-            "issue", "list", "--state", "open", "--limit", "200",
+            "issue", "list", "--state", "open", "--limit", "5000",
             "--json", "number,title,body,url,updatedAt",
         ],
         cwd=repo,
     ) or []
+    # GitHub CLI returns only the requested leading window. Silent truncation
+    # strands older owner-approved TODO issues with stale release states.
+    if len(issues) >= 5000:
+        raise TodoReleaseBridgeError("open issue inventory reached safe discovery limit")
     result = []
     for issue in issues:
         body = str(issue.get("body") or "")
