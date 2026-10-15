@@ -49,6 +49,22 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(self.state_file(), state)
         self.assertTrue(all(c["status"] == "succeeded" for c in state["stages"].values()))
 
+    def test_degraded_backlog_does_not_fail_systemd_unit(self):
+        self.spool.mkdir(parents=True, exist_ok=True)
+        (self.spool / "todo-intake-state.json").write_text(json.dumps({
+            "status": "stalled_upstream_or_downstream",
+            "active_development_items": 0, "active_support_repairs": 0,
+            "engineering_capacity": 3,
+            "downstream_commitments": {"outstanding_count": 7},
+        }))
+        state = self.execute()
+        self.assertEqual(state["status"], "degraded")
+        self.assertEqual(pipeline.service_exit_code(state), 0)
+
+    def test_failed_stage_still_fails_systemd_unit(self):
+        state = self.execute(failed={"support_repair_host_worker"})
+        self.assertEqual(pipeline.service_exit_code(state), 1)
+
     def test_upstream_stall_is_degraded_even_when_all_stages_succeed(self):
         self.spool.mkdir(parents=True, exist_ok=True)
         (self.spool / "todo-intake-state.json").write_text(json.dumps({

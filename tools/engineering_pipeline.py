@@ -150,6 +150,11 @@ def run_pipeline(
     return state
 
 
+def service_exit_code(state: dict[str, Any]) -> int:
+    """Fail systemd only when a stage failed; degraded backlog remains observable."""
+    return 1 if state["failed_or_skipped_stages"] else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", type=Path, required=True)
@@ -166,7 +171,8 @@ def main() -> int:
         release_state=args.release_state.resolve(),
         stage_timeout=args.stage_timeout,
     )
-    return 0 if state["status"] == "healthy" else 1
+    # Preserve degraded health without marking successful stage execution as a failed service.
+    return service_exit_code(state)
 
 
 if __name__ == "__main__":
