@@ -279,17 +279,34 @@ def test_generic_invariant_selected_cannot_exceed_eligible(tmp_path):
     assert evidence["cycles"][0]["cycle_id"] == "c1"
 
 
-def test_generic_invariant_selected_cannot_exceed_active_slots(tmp_path):
+def test_completed_or_waiting_admission_does_not_trigger_false_slot_invariant(tmp_path):
     db = tmp_path / "behavior.sqlite3"
     now_iso = datetime.now(timezone.utc).isoformat()
+    # One eligible candidate was admitted and immediately transitioned to
+    # completion/waiting, leaving zero occupied slots at scan completion.
     _create_behavior_db(
         db,
-        [("c2", now_iso, 4, 4, 0, 0, 0, 1, 2, 0, 0)],
+        [("c2", now_iso, 4, 1, 0, 0, 0, 0, 1, 0, 0)],
     )
 
     failures, evidence = module.autonomy_behavior_anomalies(db)
 
-    assert any("selected_gt_active_slots" in item for item in failures)
+    assert failures == []
+    assert evidence["cycles"][0]["selected"] == 1
+    assert evidence["cycles"][0]["active_slots"] == 0
+
+
+def test_true_over_selection_still_fails_closed(tmp_path):
+    db = tmp_path / "behavior.sqlite3"
+    now_iso = datetime.now(timezone.utc).isoformat()
+    _create_behavior_db(
+        db,
+        [("c2", now_iso, 4, 1, 0, 0, 0, 0, 2, 0, 0)],
+    )
+
+    failures, evidence = module.autonomy_behavior_anomalies(db)
+
+    assert any("selected_gt_eligible" in item for item in failures)
     assert evidence["cycles"][0]["cycle_id"] == "c2"
 
 

@@ -3,6 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Protocol
 
+from kernel.client_boundaries import BoundaryStatus, ClientBoundaryRepository
+from orchestrator.provider_health_canary_policy import (
+    PROVIDER_HEALTH_CANARY_PRINCIPAL,
+    expected_canary_arguments,
+    expected_canary_client_id,
+)
+
 from connectors.core.contracts import (
     AuditSink,
     ConnectorAuthorizationError,
@@ -32,6 +39,7 @@ class MicrosoftGraphDirectoryConnector:
     directory: MicrosoftGraphUserDirectoryReader
     bindings: TrustedMicrosoftBindingReader
     audit: AuditSink
+    canary_boundaries: ClientBoundaryRepository | None = None
 
     provider_name = "microsoft_graph"
     capabilities = frozenset(
@@ -41,7 +49,40 @@ class MicrosoftGraphDirectoryConnector:
         }
     )
 
-    def _binding(self, context: ConnectorContext):
+    def _binding(self, request: ConnectorRequest):
+        context = request.context
+        if context.principal_id == PROVIDER_HEALTH_CANARY_PRINCIPAL:
+            # A canary has no human Microsoft identity. Permit only the fixed
+            # sentinel directory read under a separately validated AOT client
+            # tenant boundary, with no service impersonation or tenant selector.
+            expected = expected_canary_arguments("identity.user.search")
+            client_id = expected_canary_client_id("identity.user.search")
+            if not (
+                context.organization_id == "aot"
+                and context.client_id == client_id
+                and context.capability == "microsoft_graph.user.search"
+                and context.mode == "observe"
+                and dict(request.arguments) == dict(expected or {})
+                and self.canary_boundaries is not None
+            ):
+                raise ConnectorAuthorizationError(
+                    "Graph provider canary requires exact approved synthetic scope"
+                )
+            boundary = self.canary_boundaries.find_active_for_client(
+                client_id=client_id, provider="microsoft_graph"
+            )
+            if not (
+                boundary is not None
+                and boundary.client_id == client_id
+                and boundary.provider == "microsoft_graph"
+                and boundary.status == BoundaryStatus.VALIDATED
+                and str(boundary.external_tenant_id or "").strip()
+            ):
+                raise ConnectorAuthorizationError(
+                    "Graph provider canary requires validated AOT tenant boundary"
+                )
+            return boundary, str(boundary.external_tenant_id).strip()
+
         binding = self.bindings.find_active_by_jason_identity(
             jason_identity_id=context.principal_id
         )
@@ -62,7 +103,7 @@ class MicrosoftGraphDirectoryConnector:
 
     def execute(self, request: ConnectorRequest) -> ConnectorResult:
         require_capability(request, self.capabilities)
-        _binding, tenant_id = self._binding(request.context)
+        _binding, tenant_id = self._binding(request)
 
         self.audit.record(
             "connector.requested",
