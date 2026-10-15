@@ -1147,6 +1147,28 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** AOT Owner / Jason Governance Authority
 - **Review trigger:** Implement before enabling general autonomous TODO engineering.
 
+### TODO-OPS-013 — Fully Jason-managed distributed development workers
+
+- **Priority:** P1
+- **Status:** Proposed — waiting for dedicated spare computer
+- **Risk level:** High
+- **Idea:** Convert spare Ubuntu/Datto RMM-managed computers into self-maintaining, replaceable Jason development-worker nodes. Workers accept only approved TODO engineering work and report evidence and PRs to Jason while the central orchestrator and Release Manager remain authoritative.
+- **Why it matters:** Increase development throughput without tying up the primary production host, reduce single-machine contention, support component-focused scaling, and establish a replaceable worker model suitable for eventual AWS deployment.
+- **Why not now:** The owner has not yet prepared a dedicated spare device; current development queue uses host-local state/worktrees and a one-item TODO concurrency limit. Additional machines cannot cure existing reasoning-transport or source-retrieval defects.
+- **Prerequisites:** Dedicated eligible computer enrolled in DRMM; trusted one-time enrollment; desired-state configuration and worker service; least-privilege per-node identities; centralized durable task leases, heartbeats, cancellation/checkpoints, recovery and no duplicate task execution; isolated builds/CI; tested maintenance/reboot and recovery; existing GitHub and Release Manager gates.
+- **Mandatory lifecycle behavior:** Jason governs versioned worker-role desired state, OS and toolchain patching, drift detection/repair, health reporting, safe job-draining reboots, resume, permitted rebuilding and secure retirement with minimal owner maintenance. Genuine hardware/network failures still escalate. Never give a worker production deployment credentials or authority to change policy.
+- **Production-host exclusion:** **aoteq-OptiPlex-3040 is the live production OpenClaw machine 'Claw'; it is not an available worker.** Datto enrollment and spare-looking hardware never authorize role changes. Verify workload dependencies, owner approval, and safety before provisioning or rebooting a device.
+- **Initial acceptance:** On a *different* owner-designated test machine, demonstrate secure enrollment, automated desired-state convergence, approved non-production TODO build/tests/PR, primary Jason unaffected, failure/reboot recovery, queue-lease safety, drift repair, and governed release handoff. Add further nodes after one full-lifecycle pilot succeeds.
+- **Autonomous engineering readiness:** Not reviewed — backlog capture only, no bootstrap, endpoint mutation, deployment or production authorization.
+- **Approved scope:** None yet.
+- **Authority basis:** Owner request to preserve the proposed project for later; not approval to execute or deploy.
+- **Required capabilities:** Datto endpoint identity/audit/approved bootstrap, worker identity/enrollment, centralized work coordination, secure desired-state reconciliation, health and evidence reporting, existing CI/Release Manager.
+- **Acceptance test:** The owner adds/removes capacity without maintaining an extra computer, while all worker changes, reboots, command execution and releases remain attributable, governed and independently verifiable.
+- **Open questions:** Exact spare hardware and OS; supported Datto bootstrap route; trusted credential and network model; node isolation vs Ubuntu production operations.
+- **Decision owner:** AOT Owner / Jason Architecture Authority
+- **Review trigger:** Owner supplies the hostname or exact Datto device ID of a **dedicated spare computer**.
+- **Tracking:** [GitHub #1459](https://github.com/al-teamaot-com/jason/issues/1459)
+
 ## Legacy ID aliases and consolidation map
 
 These aliases preserve old PR, support, session, and conversation references. An alias never creates implementation authority.
