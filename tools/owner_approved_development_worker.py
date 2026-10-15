@@ -1122,6 +1122,50 @@ def readmit_explicit_verified_dependencies(
     return 0
 
 
+
+def readmit_recovered_development_reasoning(
+    state: dict[str, Any], admitted: list[dict[str, Any]], spool: Path,
+    *, max_active: int,
+) -> list[str]:
+    """Readmit approved blocked work only after its exact reasoning reply succeeds."""
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active = sum(1 for record in records.values() if isinstance(record, Mapping)
+                 and record.get('phase') in ACTIVE_PHASES)
+    slots = max(0, max(1, int(max_active)) - active_support_count(spool) - active)
+    resumed = []
+    for item in admitted:
+        if slots == 0:
+            break
+        record = records.get(item['id'])
+        if not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        reason = str(record.get('reason') or '')
+        if reason.startswith('development edit reasoning failed: HTTP transport failed'):
+            phase, expected_kind = 'implementing', 'edit_plan'
+        elif reason.startswith('development reasoning failed: HTTP transport failed'):
+            phase, expected_kind = 'diagnosing', 'search_plan'
+        else:
+            continue
+        rid = str(record.get('reasoning_request_id') or '')
+        if not re.fullmatch(r'[a-f0-9]{64}', rid):
+            continue
+        response = support.reasoning_response(spool, rid)
+        if not isinstance(response, Mapping) or response.get('status') != 'succeeded':
+            continue
+        if response.get('request_id') != rid or response.get('kind') != expected_kind:
+            continue
+        if response.get('support_item') != item['id']:
+            continue
+        if record.get('reasoning_recovered_request_id') == rid:
+            continue
+        record.update({'phase': phase,
+                       'reason': 'Re-admitted after exact reasoning request recovered.',
+                       'reasoning_recovered_request_id': rid, 'updated_at': now()})
+        resumed.append(item['id'])
+        slots -= 1
+    return resumed
+
+
 def blocked_work_next_action(reason: str) -> dict[str, str]:
     text = str(reason or "").casefold()
     if any(x in text for x in ("approval", "authorization", "credential")):
@@ -1217,6 +1261,7 @@ def main() -> int:
         state, admitted_ids, spool, source_repo=repo,
     )
     readmit_explicit_verified_dependencies(state, admitted, spool, max_active=max(1, int(args.max_active)))
+    readmit_recovered_development_reasoning(state, admitted, spool, max_active=max(1, int(args.max_active)))
     state['discovery'] = {
         'observed_at': now(),
         'approved_issue_numbers': [item['issue_number'] for item in eligible],
