@@ -267,7 +267,13 @@ def production_convergence_failures(
     automatic_window = production.get("automatic_window") if isinstance(production.get("automatic_window"), Mapping) else {}
     evidence["release_manager_policy_schedule"] = dict(schedule)
     evidence["development_release_automatic_window"] = dict(automatic_window)
-    if str(schedule.get("mode") or "").casefold() != "continuous_24x7":
+    # The production policy explicitly records the AOT owner's 24x7
+    # authorization. Both the canonical mode and this exact owner-approved
+    # mode denote continuous operation, not a legacy daily window.
+    if str(schedule.get("mode") or "").casefold() not in {
+        "continuous_24x7",
+        "continuous_24x7_owner_approved",
+    }:
         failures.append("production_convergence_intent_contradiction:release_policy_not_24x7")
     if "daily_window_local" in schedule:
         failures.append("production_convergence_intent_contradiction:legacy_daily_window_present")
