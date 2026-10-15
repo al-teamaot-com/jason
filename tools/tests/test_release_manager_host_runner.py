@@ -1133,6 +1133,16 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                         installed_runner=installed,
                     )
                 review["status"] = "approved"
+                review["source_revision"] = SHA_B
+                review_path.write_text(json.dumps(review), encoding="utf-8")
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, "owner review does not match"
+                ):
+                    runner.verify_controller_identity(
+                        pin, new_root, installed_candidate=True,
+                        installed_runner=installed,
+                    )
+                review["source_revision"] = SHA_A
                 review_path.write_text(json.dumps(review), encoding="utf-8")
                 backup.write_bytes(b"altered-backup")
                 with self.assertRaisesRegex(
