@@ -408,6 +408,44 @@ def test_production_convergence_accepts_exact_live_release(tmp_path, monkeypatch
     assert evidence["release_manager_timer_active"] is True
 
 
+def test_production_convergence_accepts_owner_approved_24x7_policy(tmp_path, monkeypatch):
+    revision = "a" * 40
+    releases = tmp_path / "releases"
+    release = _write_release_manager_fixture(releases, revision)
+    policy_path = release / "config/release-manager-policy.json"
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    policy["schedule"]["mode"] = "continuous_24x7_owner_approved"
+    policy_path.write_text(json.dumps(policy), encoding="utf-8")
+
+    installed = tmp_path / "installed"
+    installed.mkdir()
+    source_link = installed / "release-manager-source"
+    source_link.symlink_to(release, target_is_directory=True)
+    runner = installed / "release_manager_host_runner.py"
+    timer = installed / "jason-release-manager.timer"
+    runner.write_bytes((release / "tools/release_manager_host_runner.py").read_bytes())
+    timer.write_bytes(
+        (release / "infrastructure/openclaw-operations/systemd/user/jason-release-manager.timer").read_bytes()
+    )
+
+    monkeypatch.setattr(module, "_container_source_revision", lambda name: revision)
+    monkeypatch.setattr(
+        module,
+        "run",
+        lambda args, **kwargs: SimpleNamespace(returncode=0, stdout="active\n", stderr=""),
+    )
+
+    failures, evidence = module.production_convergence_failures(
+        release_manager_source_link=source_link,
+        installed_runner=runner,
+        installed_timer=timer,
+        releases_root=releases,
+    )
+
+    assert failures == []
+    assert evidence["release_manager_policy_schedule"]["mode"] == "continuous_24x7_owner_approved"
+
+
 def test_production_convergence_detects_stale_installed_release(tmp_path, monkeypatch):
     revision = "a" * 40
     old_revision = "b" * 40
