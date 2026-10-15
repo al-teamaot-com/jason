@@ -1838,6 +1838,17 @@ def test_ccc_precedes_mutation_and_postflight_precedes_closed_release():
     assert source.index('ccc_postflight = run_release_ccc_gate(') < source.index('set_last_known_good(\n            state_root,\n            production_manifest')
 
 
+def test_production_complete_notification_follows_root_last_known_good_commit():
+    import inspect
+    source = inspect.getsource(runner._deploy_production_locked)
+    commit = source.index('set_last_known_good(\n            state_root,\n            production_manifest')
+    verified = source.index('gate_transition(repo, state_root, record, "production_verified")')
+    closed = source.index('gate_transition(repo, state_root, record, "closed")')
+    persisted = source.index('save_record(state_root, record)', closed)
+    complete_notification = source.index('"production_queue_completed"')
+    assert commit < verified < closed < persisted < complete_notification
+
+
 def test_release_contract_accepts_emitted_string_risk_enum_with_exact_manifest():
     for classification in ('normal', 'production_repair', 'production_control_core', 'schema_or_contract'):
         record = {'state': 'production_eligible', 'rollback_sha': SHA_B,

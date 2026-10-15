@@ -66,3 +66,41 @@ def test_root_transition_accepts_only_verified_authorized_retry(tmp_path):
         (root/(base+'.json')).write_text(json.dumps(historical))
         with pytest.raises(ValueError,match='historical rollback'):
             m.apply_transition(req,{'schema_version':'1.0'})
+
+
+def test_stale_root_drift_regenerated_only_by_clean_independent_guard(tmp_path):
+    from datetime import datetime, timezone, timedelta
+    from types import SimpleNamespace
+    stale={'schema_version':'1.0','status':'pass','problems':[],
+           'observed_at':(datetime.now(timezone.utc)-timedelta(minutes=6)).isoformat()}
+    fresh={'schema_version':'1.0','status':'pass','problems':[],
+           'observed_at':datetime.now(timezone.utc).isoformat()}
+    policy=tmp_path/'policy.json';policy.write_text('{}')
+    guard=tmp_path/'guard.py';guard.write_text('pass')
+    from unittest.mock import patch
+    with patch.object(m,'DRIFT_CONFIG',policy),patch.object(m,'DRIFT_EVALUATOR',guard), \
+         patch.object(m,'protected_read',side_effect=[stale,fresh]) as read, \
+         patch.object(m,'write_json') as write, \
+         patch.object(m.subprocess,'run',return_value=SimpleNamespace(returncode=0,stdout=json.dumps(fresh))):
+        # Mock root metadata for sandbox test fixture only.
+        with patch.object(m.Path,'stat',return_value=SimpleNamespace(st_mode=0o100600,st_uid=0)):
+            m.verify_drift()
+    assert read.call_count==2
+    write.assert_called_once_with(m.DRIFT,fresh,0,0)
+
+
+def test_stale_root_drift_refresh_rejects_failed_guard(tmp_path):
+    from datetime import datetime, timezone, timedelta
+    from types import SimpleNamespace
+    stale={'schema_version':'1.0','status':'pass','problems':[],
+           'observed_at':(datetime.now(timezone.utc)-timedelta(minutes=6)).isoformat()}
+    policy=tmp_path/'policy.json';policy.write_text('{}')
+    guard=tmp_path/'guard.py';guard.write_text('pass')
+    with patch.object(m,'DRIFT_CONFIG',policy),patch.object(m,'DRIFT_EVALUATOR',guard), \
+         patch.object(m,'protected_read',return_value=stale), \
+         patch.object(m,'write_json') as write, \
+         patch.object(m.subprocess,'run',return_value=SimpleNamespace(returncode=2,stdout='')):
+        with patch.object(m.Path,'stat',return_value=SimpleNamespace(st_mode=0o100600,st_uid=0)):
+            with pytest.raises(ValueError,match='did not pass'):
+                m.verify_drift()
+    write.assert_not_called()
