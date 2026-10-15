@@ -28,9 +28,9 @@ def load_runner():
     return module
 
 
-def test_controller_stage_explicitly_retains_sandbox_read_profile():
+def test_production_activation_stage_explicitly_selects_production_read_profile():
     runner = load_runner()
-    assert runner.declared_quickbooks_read_profile(ROOT) == "quickbooks-sandbox-read-v1"
+    assert runner.declared_quickbooks_read_profile(ROOT) == "quickbooks-production-read-v1"
 
 
 def test_declared_profile_rejects_unknown_or_extra_fields(tmp_path):
@@ -60,6 +60,20 @@ def test_live_profile_must_match_on_runtime_and_mcp():
     with patch.object(runner, "output", side_effect=[sandbox, production]):
         with pytest.raises(runner.ReleaseManagerError, match="disagree"):
             runner.live_quickbooks_read_profile()
+
+
+def test_live_profile_rejects_conflicting_or_unsupported_environment_entries():
+    runner = load_runner()
+    production = json.dumps(["JASON_QUICKBOOKS_READ_PROFILE=quickbooks-production-read-v1"])
+    duplicate = json.dumps([
+        "JASON_QUICKBOOKS_READ_PROFILE=quickbooks-production-read-v1",
+        "JASON_QUICKBOOKS_READ_PROFILE=quickbooks-sandbox-read-v1",
+    ])
+    unsupported = json.dumps(["JASON_QUICKBOOKS_READ_PROFILE=quickbooks-unsafe-write-v1"])
+    for incorrect in (duplicate, unsupported):
+        with patch.object(runner, "output", side_effect=[production, incorrect]):
+            with pytest.raises(runner.ReleaseManagerError, match="missing or invalid"):
+                runner.live_quickbooks_read_profile()
 
 
 def test_rollback_restores_sandbox_when_candidate_selected_production():
