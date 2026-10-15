@@ -21,6 +21,8 @@ RESULTS=ROOT/'protected-transitions'/'results'
 CONTROL=ROOT/'production-control-state.json'
 DRIFT=ROOT/'production-drift.json'
 LOCK=ROOT/'protected-transitions'/'root-control.lock'
+DRIFT_CONFIG=Path('/etc/jason/release-readback-recovery/production-desired-state.json')
+DRIFT_EVALUATOR=Path('/opt/jason/current/tools/production_drift_guard.py')
 SHA=re.compile(r'[0-9a-f]{40}\Z')
 RID=re.compile(r'[0-9a-f]{32}\Z')
 
@@ -68,6 +70,32 @@ def verify_health(revision: str) -> dict:
     return manifest
 
 
+def refresh_stale_drift() -> None:
+    """Regenerate drift from the independent policy while transaction lock is held.
+
+    The normal watchdog defers under the production transaction lock. Never
+    extend the 180-second validity window or trust caller-provided evidence:
+    run the immutable production guard against the root-controlled policy,
+    require a clean result, and atomically persist root-owned evidence.
+    """
+    for path in (DRIFT_CONFIG, DRIFT_EVALUATOR):
+        info=path.stat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or (info.st_mode & 0o002):
+            raise PermissionError('root-owned drift evaluator and policy required')
+    result=subprocess.run(
+        ['/usr/bin/python3',str(DRIFT_EVALUATOR),'--config',str(DRIFT_CONFIG)],
+        capture_output=True,text=True,timeout=70,check=False,
+    )
+    if result.returncode!=0:
+        raise ValueError('independent production drift refresh did not pass')
+    payload=json.loads(result.stdout)
+    if (payload.get('schema_version')!='1.0' or payload.get('status')!='pass'
+            or payload.get('problems') or not payload.get('observed_at')):
+        raise ValueError('independent drift refresh failed closed')
+    # Persist only validated, independently generated root-owned evidence.
+    write_json(DRIFT,payload,0,0)
+
+
 def verify_drift() -> None:
     drift=protected_read(DRIFT)
     if drift.get('status')!='pass' or drift.get('problems'):
@@ -75,7 +103,14 @@ def verify_drift() -> None:
     observed=datetime.datetime.fromisoformat(drift['observed_at'].replace('Z','+00:00'))
     age=(datetime.datetime.now(datetime.timezone.utc)-observed).total_seconds()
     if not -10 <= age <= 180:
-        raise ValueError('root-owned drift evidence is stale')
+        refresh_stale_drift()
+        drift=protected_read(DRIFT)
+        if drift.get('status')!='pass' or drift.get('problems'):
+            raise ValueError('independent drift refresh did not pass')
+        observed=datetime.datetime.fromisoformat(drift['observed_at'].replace('Z','+00:00'))
+        age=(datetime.datetime.now(datetime.timezone.utc)-observed).total_seconds()
+        if not -10 <= age <= 180:
+            raise ValueError('root-owned drift evidence is stale after independent refresh')
 
 
 def apply_transition(req: dict, state: dict) -> dict:
