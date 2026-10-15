@@ -34,6 +34,18 @@ def release_record(state="closed"):
 
 
 class TodoReleaseBridgeTests(unittest.TestCase):
+    def test_todo_inventory_covers_older_approved_issues(self):
+        issue = {"number": 950, "title": "TODO-CONN-005", "body": "- TODO item: TODO-CONN-005", "url": "https://github.com/a/b/issues/950", "updatedAt": "2026-10-15"}
+        with patch.object(module, "gh_json", return_value=[issue]) as gh:
+            observed = module.todo_issues(Path("/tmp/repo"))
+        self.assertEqual(observed[0]["issue_number"], 950)
+        self.assertEqual(gh.call_args.args[0][5], "5000")
+
+    def test_todo_inventory_does_not_silently_truncate(self):
+        with patch.object(module, "gh_json", return_value=[{}] * 5000):
+            with self.assertRaises(module.TodoReleaseBridgeError):
+                module.todo_issues(Path("/tmp/repo"))
+
     def test_release_id_requires_exact_sha(self):
         self.assertEqual(module.release_id(SHA), "release-" + "a" * 16)
         with self.assertRaises(module.TodoReleaseBridgeError):
