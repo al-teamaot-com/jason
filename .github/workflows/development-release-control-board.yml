@@ -27,9 +27,11 @@ permissions:
   pull-requests: read
   issues: write
 
+# Keep a running authoritative control-board reconciliation intact even when a
+# PR sync, CI completion, or hourly schedule triggers a later refresh.
 concurrency:
   group: jason-development-release-control-board
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   refresh:
