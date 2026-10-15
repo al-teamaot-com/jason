@@ -48,13 +48,13 @@ def build_microsoft_directory_runtime(
         application_factory=default_msal_application_factory,
         logical_secret="microsoft_graph.directory_read",
         provider_name="microsoft_graph",
-        profile_name="directory-read",
+        profile_name="identity-investigation-read",
     )
     tenant_tokens = GovernedTenantApplicationTokenProvider(
         boundaries=boundaries,
         tokens=application_tokens,
         provider_name="microsoft_graph",
-        profile_name="directory-read",
+        profile_name="identity-investigation-read",
     )
     directory = MicrosoftGraphUserDirectoryReader(
         tokens=tenant_tokens,
