@@ -381,35 +381,58 @@ def scheduled_control_alignment() -> dict[str, str]:
 
 def controller_identity(repo: Path) -> dict[str, Any]:
     policy_path = repo / "config" / "release-manager-policy.json"
+    candidate_path = repo / "tools" / "release_manager_host_runner.py"
     if not policy_path.is_file():
         raise ReleaseManagerError("release-manager policy is missing")
+    if not candidate_path.is_file():
+        raise ReleaseManagerError("immutable candidate Production Manager source is missing")
     source_revision = CONTROLLER_SOURCE.parents[1].name.casefold()
     return {
         "executing_controller_path": str(CONTROLLER_SOURCE),
         "executing_controller_revision": source_revision if SHA.fullmatch(source_revision) else "unknown",
         "executing_controller_digest": file_digest(CONTROLLER_SOURCE),
+        "candidate_controller_digest": file_digest(candidate_path),
         "policy_digest": file_digest(policy_path),
         "captured_at": now(),
     }
 
 
-def verify_controller_identity(pin: dict[str, Any], repo: Path, *, installed_candidate: bool = False) -> dict[str, Any]:
+def verify_controller_identity(
+    pin: dict[str, Any], repo: Path, *, installed_candidate: bool = False,
+    installed_runner: Path | None = None,
+) -> dict[str, Any]:
+    """Pin the running controller to N while attesting staged N+1 separately.
+
+    A Python process cannot transform its own loaded source into the installed
+    release-controller version. The existing release transaction keeps N's
+    semantics and exclusive flock. N+1 is installed for future invocations
+    only, after the current transaction releases the lock.
+    """
     current = controller_identity(repo)
-    # A governed host reconciliation may install the exact reviewed candidate
-    # controller while the old controller process remains in flight. Check
-    # its bytes against the immutable candidate worktree, not an arbitrary
-    # changed on-disk controller. The original pin remains in the record.
-    if installed_candidate:
-        candidate = repo / "tools" / "release_manager_host_runner.py"
-        if not candidate.is_file() or current["executing_controller_digest"] != file_digest(candidate):
-            raise ReleaseManagerError("installed Production Manager controller differs from candidate source")
+    # These fields must remain identical before and after installing N+1,
+    # including the *original* executing controller bytes, candidate source
+    # bytes, and release policy. Never accept a changed live process identity.
     for field in (
         "executing_controller_path",
         "executing_controller_revision",
+        "executing_controller_digest",
+        "candidate_controller_digest",
         "policy_digest",
-    ) + (() if installed_candidate else ("executing_controller_digest",)):
+    ):
         if current.get(field) != pin.get(field):
             raise ReleaseManagerError(f"active Production Manager controller changed mid-transaction: {field}")
+    if installed_candidate:
+        expected = pin["candidate_controller_digest"]
+        installed_path = installed_runner or (
+            Path.home() / ".local" / "lib" / "jason" / "release_manager_host_runner.py"
+        )
+        if not installed_path.is_file() or file_digest(installed_path) != expected:
+            raise ReleaseManagerError("installed Production Manager controller differs from candidate source")
+        # This does not execute N+1, reload any module, replace the open
+        # transaction lock, or claim the executing revision became N+1.
+        current["installed_controller_path"] = str(installed_path)
+        current["installed_controller_digest"] = expected
+        current["controller_handoff"] = "staged_for_next_transaction"
     return current
 
 
@@ -1998,7 +2021,10 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "functional_smoke_tests_passed": bool(smoke.get("passed")),
             "functional_smoke_tests": smoke,
             "controller_identity_verified": True,
+            "controller_handoff": controller_verified["controller_handoff"],
             "executing_controller_revision": controller_verified["executing_controller_revision"],
+            "executing_controller_digest": controller_verified["executing_controller_digest"],
+            "installed_controller_digest": controller_verified["installed_controller_digest"],
             "last_known_good_manifest_captured": bool(baseline_manifest.get("complete")),
             "pre_mutation_health_passed": bool(record["pre_mutation_health"].get("passed")),
             "production_manifest_complete": bool(production_manifest.get("complete")),
