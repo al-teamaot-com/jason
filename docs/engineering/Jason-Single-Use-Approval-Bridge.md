@@ -101,3 +101,13 @@ Separate code readiness from production activation. After targeted and broad reg
 - `production_enforced`: single decision yields authoritative exact-bound records under current policy; legacy CLI remains audited break-glass fallback.
 
 Default production mode is unchanged/off until an explicitly approved, verified activation.
+
+## Owner supersession: P0 universal plan approvals (2026-10-15)
+
+This section supersedes earlier priority and release-only wording above. Issue #1440 is now P0 ahead of QB and SharePoint development scheduling, without permission to interrupt unsafe in-flight operations or bypass existing protected release checks. Development and tests should proceed on isolated branches; production gates remain enforced until the replacement passes acceptance.
+
+The deliverable is a **universal, multi-user approval service** shared by release/CCC, QuickBooks, Autotask procurement, Datto RMM, and playbooks. No personal principal, chat, email, or role is hardcoded. Route by resolved Entra identity and configurable organization/tenant roles. Support delegated approvers and fallback escalation.
+
+A single identity-verified approval of a specific bounded plan covers all in-scope phases, including repair iterations, CI, release preparation, production deployment explicitly within the reviewed impact, and verification. Distinguish the one-use *approval response* from the durable *plan authorization*. At each execution gate, deterministically attest that the current action and updated source/artifact are still within the plan, authorized risk ceiling, tenant, effect, policy, and required independent review evidence. Hash changes by themselves must not create redundant owner approval prompts; changed semantics exceeding scope fail closed and require one amended approval covering the revised plan. Never blindly copy approval to an arbitrary SHA.
+
+Acceptance must include two requesters, two authorized approvers, wrong-role and cross-tenant rejection, replay and concurrency, expiration, plan/scope drift, unattended completion without repeat prompts, proper audit, and actual mobile Teams approve/deny with post-execution readback. Current feature work approval does not itself grant a live production release or provider mutation.
