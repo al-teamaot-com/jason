@@ -98,3 +98,16 @@ PowerShell; keep interactive transport disabled until one option has passed
 technical, vendor-terms, authorization and security review. Keep the approved
 component/job path separate from live streaming. No production approval is
 implied by this feasibility note.
+
+## Non-executing signed-grant test fixture
+
+`implementation/shared_sessions/grants.py` demonstrates SHA-256 command digest
+binding, exact tenant/client/device/technician/ticket/transport matching,
+HMAC signature validation, expiration, explicit revocation and atomic single-use
+consumption **in one test process**. The issuer function is explicitly named
+`issue_for_test` and is NEVER production authority. It lacks durable replay
+persistence, authenticated identity from Microsoft Teams, deployment key
+management, production event attribution, revocation distribution and server
+execution integration. All those must be implemented independently before any
+execution action. Passing its tests proves only local cryptographic and
+state-machine behavior; it does not satisfy the Owner's Teams approval gate.
