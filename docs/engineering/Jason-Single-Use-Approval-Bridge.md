@@ -296,3 +296,11 @@ source/package build failure does not trigger registry rotation or false success
 Eight isolated policy tests pass. The actual clean build and independent provider
 identity-separation checks remain mandatory, and the production Dockerfile's
 base-image default is unchanged.
+
+The same build stanza was independently changed in the unrelated shared-session
+PR #1465 at 19fb83df579d5a34d23582a9b9366593c1ec3322. Exact three-way comparison
+conflicts there: that proposal retries the whole image build for every error,
+whereas this priority candidate retries only a throttled public-base pull and pins
+the resulting digest. This candidate retains its narrower tested behavior; a later
+#1465 integration must rebase and preserve it, not restore all-error build retries.
+The unrelated shared-session feature is not included in this approval candidate.
