@@ -92,7 +92,7 @@ def build_universal_teams_plan_dispatch(*, dependencies: TeamsApprovalResponseRu
         'identity_bindings': (dependencies.identity_bindings, 'jason_identity_for_object'),
         'approval_service': (dependencies.approval_service, 'accept_response'),
         'resume_bridge': (dependencies.resume_bridge, 'resume'),
-        'audit': (dependencies.audit, 'append'),
+        'audit': (dependencies.audit, 'record'),
     }
     for name, (port, method) in required.items():
         if not callable(getattr(port, method, None)):

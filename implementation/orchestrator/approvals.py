@@ -129,7 +129,11 @@ class ApprovalResumeBridge:
             expires_at=accepted.expires_at,
         ))
         try:
-            mode = PermissionMode(original_request.requested_mode)
+            mode = PermissionMode(
+                original_request.permission_mode
+                if original_request.requested_mode in {'deterministic', 'local_ai', 'hosted_ai', 'human', 'none'}
+                else original_request.requested_mode  # Historical approval-request contract.
+            )
         except ValueError as exc:
             raise PermissionError("orchestration requested mode is not a JKD-001 mode") from exc
         decision = self.authority.evaluate(AuthorityRequest(
@@ -150,4 +154,5 @@ class ApprovalResumeBridge:
             authority_allowed=True,
             approval_present=True,
             authority_context_id=decision.execution_context.context_id,
+            approval_id=accepted.approval_id,
         )

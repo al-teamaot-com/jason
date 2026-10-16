@@ -83,3 +83,15 @@ class PlanGrantLedger:
             frozenset(data['allowed_capabilities']), frozenset(data['allowed_clients']),
             data['max_risk'], data['production_allowed'], datetime.fromisoformat(data['expires_at']))
         require_plan_scope(scope, step, now=now)
+
+
+    def decision_receipt(self, approval_id: str) -> dict | None:
+        """Return stored decision facts, not authority from caller-supplied fields."""
+        with sqlite3.connect(self.path) as db:
+            row = db.execute(
+                "SELECT p.plan_id, p.approval_id, p.approver, p.fingerprint, p.decided_at, r.revoked_at "
+                "FROM plan_grants p LEFT JOIN revoked_plan_grants r ON r.plan_id=p.plan_id "
+                "WHERE p.approval_id=?", (approval_id,)).fetchone()
+        if row is None:
+            return None
+        return dict(zip(('plan_id','approval_id','approver_identity_id','plan_fingerprint','decided_at','revoked_at'),row))

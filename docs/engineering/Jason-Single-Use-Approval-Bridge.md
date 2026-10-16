@@ -111,3 +111,61 @@ The deliverable is a **universal, multi-user approval service** shared by releas
 A single identity-verified approval of a specific bounded plan covers all in-scope phases, including repair iterations, CI, release preparation, production deployment explicitly within the reviewed impact, and verification. Distinguish the one-use *approval response* from the durable *plan authorization*. At each execution gate, deterministically attest that the current action and updated source/artifact are still within the plan, authorized risk ceiling, tenant, effect, policy, and required independent review evidence. Hash changes by themselves must not create redundant owner approval prompts; changed semantics exceeding scope fail closed and require one amended approval covering the revised plan. Never blindly copy approval to an arbitrary SHA.
 
 Acceptance must include two requesters, two authorized approvers, wrong-role and cross-tenant rejection, replay and concurrency, expiration, plan/scope drift, unattended completion without repeat prompts, proper audit, and actual mobile Teams approve/deny with post-execution readback. Current feature work approval does not itself grant a live production release or provider mutation.
+
+
+## Verified runtime integration repair (2026-10-16)
+
+The runtime now composes the existing universal approval service through a concrete
+adapter when `JASON_UNIVERSAL_APPROVAL_MODE=enforced`; `off` preserves legacy behavior.
+The adapter independently verifies the original Ed25519-signed Teams gateway envelope
+under ADR-009, preserves `botframework-authenticated` assurance (it does not invent
+an MFA or OAuth assertion), and rebinds the Microsoft tenant/object to live Jason
+identity, role, and exact capability authority. Unsigned or changed callback fields
+cannot become approval evidence.
+
+`JASON_UNIVERSAL_APPROVAL_DB` identifies the private SQLite plan/receipt/progress
+store. `JASON_UNIVERSAL_APPROVAL_POLICY` identifies the separately managed, versioned
+policy file. Enabling the service creates no users, roles, grants, or production
+permissions. A policy is explicit per organization: role members, capability-to-role
+routing, disabled principals, maximum risk, production permission, retention consent,
+and a bounded lifetime. An unknown organization/capability or unavailable recipient
+fails closed. Policy digest changes invalidate pending plans. The request issuer pins
+registered capability versions, actual registered risk, exact target parameters, and
+every ordered step in the immutable plan fingerprint. Credential-bearing request
+material is rejected instead of copied into a card, database, or log.
+
+Normal conversation requests which actually require approval are delivered through
+this composed service and the existing Teams gateway sender. Already-authorized reads
+retain their standing authority and do not create a redundant approval card. The
+human sees the exact steps, target parameters, highest risk, production indication,
+expiry, and fingerprint before deciding. The card never supplies those facts back as
+authority. Failed or partial delivery is recorded and never reported as success.
+
+Approval consumption and the decision receipt commit atomically under a SQLite write
+lock; competing approve/deny clicks cannot both win. The receipt includes the hash
+of the verified signed transport material. Append-only audit records bind that hash
+to both authentication and the resolved human actor before accepting the decision.
+The old premature `approval.orchestrator.resumed` event was removed: approval is not
+execution. The actual continuation emits execution evidence only when invoked.
+
+The existing isolated runtime maintenance process is the persistent plan owner.
+HTTP callbacks record approval and return promptly; maintenance continues the plan
+independently of the ChatGPT session. A restarted worker reloads immutable material,
+checks the original decision/audit chain and current role/authority, and obtains fresh
+JKD-001 execution contexts for each exact step. Child step approval records derive
+from the same verified bounded-plan grant, not a new human prompt. Completed steps
+are not repeated. A crash after atomic decision but before grant publication can
+recover from the persisted authenticated receipt. An uncertain provider outcome
+remains `indeterminate` with its original consumption claim; it is never blindly
+replayed. Source/release changes still require the specialized CCC and Release
+Manager conformance checks; this generic adapter does not grant arbitrary new SHAs.
+
+Synthetic integration tests use real Ed25519 signatures, real durable identity,
+approval, plan, receipt, and audit stores, real JKD-001 reauthorization and the real
+continuation; only the final provider-execution boundary is substituted. Tests cover
+two requesters/two approvers, denial, cross-organization identity, revoked roles,
+forged callback fields, replay, concurrent consumption, changed policy/material,
+normal request issuance, delivery failure, two-step unattended execution, restarts,
+and uncertain outcomes. These are NOT live Microsoft desktop/mobile acceptance.
+Production activation remains off until a governed deployment and actual Teams
+multi-user/mobile acceptance prove the complete provider path.

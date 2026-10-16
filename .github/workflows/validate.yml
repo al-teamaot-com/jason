@@ -124,6 +124,17 @@ jobs:
         run: python -m compileall -q implementation/runtime_service/src implementation/runtime_service/tests
       - name: Test governed runtime composition
         run: python -m pytest implementation/runtime_service/tests -q
+      - name: Test universal approval trust and persistence boundaries
+        run: >-
+          python -m pytest -q
+          implementation/connectors/tests/test_atomic_approval_decisions.py
+          implementation/connectors/tests/test_approval_requests.py
+          implementation/connectors/tests/test_teams_approval_ingress.py
+          implementation/orchestrator/tests/test_approval_resume.py
+          implementation/orchestrator/tests/test_teams_approval_flow.py
+          implementation/orchestrator/tests/test_teams_plan_request_repository.py
+          implementation/orchestrator/tests/test_teams_request_factory.py
+          implementation/connectors/openclaw/tests/test_conversation_ingress.py
 
   reflect-001:
     runs-on: ubuntu-latest

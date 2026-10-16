@@ -569,6 +569,10 @@ class RuntimeSettings:
         "/var/lib/jason/openclaw/procurement/billing-audit.sqlite3"
     )
     procurement_inventory_location_id: int = 1
+    universal_approval_mode: str = "off"
+    universal_approval_worker_enabled: bool = True
+    universal_approval_db: Path = Path("/var/lib/jason/openclaw/universal-approvals.sqlite3")
+    universal_approval_policy: Path = Path("/var/lib/jason/authority/universal-approval-policy.json")
     host: str = "0.0.0.0"
     port: int = 8080
 
@@ -1017,6 +1021,9 @@ class RuntimeSettings:
                     "/var/lib/jason/openclaw/procurement/billing-audit.sqlite3",
                 )
             ),
+            universal_approval_mode=os.getenv("JASON_UNIVERSAL_APPROVAL_MODE", "off").strip().lower(),
+            universal_approval_db=Path(os.getenv("JASON_UNIVERSAL_APPROVAL_DB", "/var/lib/jason/openclaw/universal-approvals.sqlite3")),
+            universal_approval_policy=Path(os.getenv("JASON_UNIVERSAL_APPROVAL_POLICY", "/var/lib/jason/authority/universal-approval-policy.json")),
             procurement_inventory_location_id=int(
                 os.getenv("JASON_PROCUREMENT_INVENTORY_LOCATION_ID", "1")
             ),
@@ -1027,6 +1034,8 @@ class RuntimeSettings:
         return settings
 
     def validate(self) -> None:
+        if self.universal_approval_mode not in {"off", "enforced"}:
+            raise ValueError("JASON_UNIVERSAL_APPROVAL_MODE must be off or enforced")
         if not self.ollama_model:
             raise ValueError("JASON_OLLAMA_MODEL is required")
         if self.procurement_inventory_location_id < 1:
@@ -2121,10 +2130,46 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         settings.continuation_db,
         ttl_seconds=1200,
     )
+    # Normal startup composes real authenticated/durable ports when explicitly
+    # activated. Activation never creates approver or requester authority grants.
+    from .universal_teams_approval import build_universal_teams_approval_runtime
+    trusted_keys = FileBackedTrustedKeyRegistry(settings.trusted_keys_registry)
+    teams_authenticator = trusted_keys.build_authenticator()
+    if universal_approval_handler is None:
+        universal_approval_handler = build_universal_teams_approval_runtime(
+            mode=settings.universal_approval_mode,
+            database_path=settings.universal_approval_db,
+            policy_path=settings.universal_approval_policy,
+            bindings=durable_bindings,
+            identities=SQLiteIdentityRepository(authority_store),
+            grants=SQLiteAuthorityGrantRepository(authority_store),
+            formal_approvals=approval_repository,
+            authority=identity_authority,
+            authenticator=teams_authenticator,
+            allowed_machine_identities=settings.allowed_machine_identities,
+            orchestrator=orchestrator,
+        )
+    if universal_approval_handler is not None and settings.universal_approval_mode == "enforced":
+        from dataclasses import replace as replace_dataclass
+        from .universal_plan_issuance import UniversalPlanIssuer, ExistingTeamsApprovalDelivery
+        from .universal_teams_approval import UniversalApprovalPolicyFile
+        universal_approval_handler = replace_dataclass(universal_approval_handler,
+            issuer=UniversalPlanIssuer(
+                handler=universal_approval_handler,
+                policy=UniversalApprovalPolicyFile(settings.universal_approval_policy),
+                authority=identity_authority, capabilities=capabilities, bindings=durable_bindings,
+                delivery=ExistingTeamsApprovalDelivery(
+                    gateway_url=settings.teams_gateway_internal_url,
+                    token_file=settings.teams_proactive_token_file,
+                    bindings=durable_bindings,
+                ),
+            ),
+        )
     request_factory = GovernedTeamsOrchestrationRequestFactory(
         authority=identity_authority,
         capabilities=capabilities,
         approvals=approval_repository,
+        approval_requester=universal_approval_handler,
     )
 
     legacy_flow = None
@@ -2342,18 +2387,14 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
             actions=procurement_worker,
         )
 
-    # No universal approval authority is fabricated during runtime composition.
-    # Production callers must supply a fully authenticated, server-backed handler;
-    # otherwise planapproval-* intents continue to fail closed.
     approval_interaction_flow = ApprovalInteractionDispatcher(
         procurement=procurement_approval_flow,
         fallback=playbook_approval_flow,
         universal=universal_approval_handler,
     )
 
-    trusted_keys = FileBackedTrustedKeyRegistry(settings.trusted_keys_registry)
     governed_ingress = GovernedOpenClawTeamsConversationIngress(
-        authenticator=trusted_keys.build_authenticator(),
+        authenticator=teams_authenticator,
         replay=SQLiteReplayStore(settings.replay_db),
         audit=SQLiteIngressSecurityAudit(settings.security_audit_db),
         flow=flow,
@@ -2473,7 +2514,12 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         cadence_minutes=settings.windows_time_source_shadow_cadence_minutes,
         audit=reflection_audit,
     )
+    universal_plan_maintenance = (
+        getattr(universal_approval_handler, "plan_runner", None)
+        if settings.universal_approval_worker_enabled else None
+    )
     autonomy_maintenance = CompositeAutonomyMaintenance(
+        universal_plan_maintenance,
         playbook_review_maintenance,
         autonomous_work_lifecycle_notification_maintenance,
         autonomous_deployment_completion_notification_maintenance,

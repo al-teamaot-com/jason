@@ -8,7 +8,7 @@ from orchestrator.teams_approval_flow import TeamsApprovalFlow
 from orchestrator.teams_plan_approval_service import UniversalTeamsPlanApprovalService
 from orchestrator.teams_plan_grant_bridge import ServerOwnedPlanProposal
 from test_teams_approval_flow import (NOW, OriginalRequest, ResumedRequest,
-    StubTokenVerifier, StubIngress, StubApprovalService, StubResumeBridge, TeamsApprovalFlowTests)
+    StubTokenVerifier, StubIngress, StubApprovalService, StubResumeBridge, TeamsApprovalFlowTests, bound_response)
 
 
 def test_actual_teams_flow_composes_and_audits_grant(tmp_path):
@@ -17,7 +17,7 @@ def test_actual_teams_flow_composes_and_audits_grant(tmp_path):
     scope=ApprovedPlanScope('plan-1','org-1','policy-v1',frozenset({'capability.read','capability.verify'}),frozenset({'client-1'}),2,False,NOW+timedelta(hours=1))
     proposal=ServerOwnedPlanProposal('approval-1','org-1','client-1','requester-1','capability.read','fingerprint-1',scope)
     sink=InMemoryApprovalAuditSink()
-    flow=TeamsApprovalFlow(StubTokenVerifier(helper.principal()),StubIngress(object()),
+    flow=TeamsApprovalFlow(StubTokenVerifier(helper.principal()),StubIngress(bound_response()),
         StubApprovalService(helper.accepted()),StubResumeBridge(ResumedRequest()),
         ApprovalAuditRecorder(sink),event_id_factory=iter(f'event-{i}' for i in range(20)).__next__)
     ledger=PlanGrantLedger(tmp_path/'plans.sqlite3')
