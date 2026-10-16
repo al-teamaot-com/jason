@@ -16,6 +16,7 @@ def parse_args():
     p=argparse.ArgumentParser(description="Run the deterministic Jason Constitutional and Compliance Check (CCC).")
     p.add_argument("--config", type=Path, default=Path("/etc/jason/ccc.json"))
     p.add_argument("--force", action="store_true")
+    p.add_argument("--candidate-sha", default=None)
     p.add_argument("--trigger", default="scheduled")
     return p.parse_args()
 
@@ -28,7 +29,7 @@ def main() -> int:
         if len(checker_revision)!=40:
             import subprocess
             checker_revision=subprocess.check_output(["git","-C",str(REPO),"rev-parse","HEAD"],text=True).strip()
-        result=CCCRunner(config,checker_revision=checker_revision).run(force=args.force,trigger=args.trigger)
+        result=CCCRunner(config,checker_revision=checker_revision).run(force=args.force,trigger=args.trigger,candidate_sha=args.candidate_sha)
     except (CCCRunnerError, OSError, ValueError) as exc:
         print(f"CCC_STATUS=NOT_PROVEN\nREASON={type(exc).__name__}:{exc}")
         return 2

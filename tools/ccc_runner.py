@@ -150,11 +150,15 @@ class CCCRunner:
         self.checker_revision = checker_revision.strip()
         self.now = now or (lambda: datetime.now(timezone.utc))
 
-    def run(self, *, force: bool = False, trigger: str = "scheduled") -> CCCRunResult:
+    def run(self, *, force: bool = False, trigger: str = "scheduled", candidate_sha: str | None = None) -> CCCRunResult:
         if not self.config.enabled and not force:
             return CCCRunResult("DISABLED", trigger, None, None, None)
 
-        source_revision = self._authoritative_source_revision()
+        if candidate_sha is not None and (not force or trigger != "material_change"):
+            raise CCCRunnerError(
+                "immutable release candidate validation requires forced material-change check"
+            )
+        source_revision = self._authoritative_source_revision(candidate_sha)
         runtime_revision = self._runtime_revision()
         changed_from_lkc = self._changed_from_last_compliant(source_revision)
         material_changes = tuple(path for path in changed_from_lkc if _matches(path, self.config.material_path_prefixes))
@@ -289,12 +293,29 @@ class CCCRunner:
             checkpoint_id,
         )
 
-    def _authoritative_source_revision(self) -> str:
+    def _authoritative_source_revision(self, candidate_sha: str | None = None) -> str:
+        """Select only an exact Git candidate reachable from protected main.
+
+        Scheduled CCC always checks current main. Release CCC may independently
+        verify an immutable owner-approved candidate without substituting newer
+        unrelated commits; invalid or unmerged candidates fail closed.
+        """
         repo = self.config.repository_root
         fetched = _run(("git", "fetch", "origin", "main"), cwd=repo, timeout=120)
         if fetched.returncode != 0:
             raise CCCRunnerError("Unable to refresh authoritative origin/main")
-        return _git(repo, "rev-parse", "origin/main")
+        head = _git(repo, "rev-parse", "origin/main")
+        if candidate_sha is None:
+            return head
+        import re
+        if not re.fullmatch(r"[0-9a-f]{40}", candidate_sha):
+            raise CCCRunnerError("release candidate must be one exact full SHA")
+        if _run(("git", "merge-base", "--is-ancestor", candidate_sha, head),
+                cwd=repo, timeout=30).returncode != 0:
+            raise CCCRunnerError("release candidate is not reachable from protected main")
+        if _git(repo, "rev-parse", f"{candidate_sha}^{{commit}}") != candidate_sha:
+            raise CCCRunnerError("release candidate does not identify exact commit")
+        return candidate_sha
 
     def _runtime_revision(self) -> str:
         result = _run((

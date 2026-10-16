@@ -109,3 +109,27 @@ activate finance or replace its isolation. Reviewed recovery PR #1331: its
 separate controller-recovery mechanism is not adopted or authorized by this
 change. Both older PRs must rebase independently and pass protected gates
 before any later integration. Worker release remains serialized and immutable.
+
+## Independent CCC exact-candidate certification prerequisite (2026-10-16)
+
+Release candidate 8cc5da52478899c73d475e50086c0b02fdfb37bf passed
+isolated preproduction and has the Owner's explicit bound approval, but the
+live Release Manager correctly rejected promotion before mutation because
+the independent CCC always selected a newer moving origin/main revision.
+
+The CCC correction adds a narrowly scoped candidate_sha argument to the
+independent checker for forced material_change release evaluations only.
+It fetches actual protected origin/main and proves the exact 40-hex candidate
+is a reachable Git commit; it never substitutes newer main or a branch. The
+scheduled CCC still evaluates moving main. Material owner review, checker
+currentness, immutable worktree/source checks, host and provider canaries,
+fresh report checks, rollback and post-deployment PASS all stay mandatory.
+
+The immutable CCC scheduler is installed separately under /opt/jason/ccc-current
+using the root-governed installer. The updated checker must itself be installed
+via its approved installation/review process, with an independently approved
+exact material review record. This PR does not install/repoint it or bypass
+production release approval. Do not promote an older release using the new
+runner until the installed independent checker accepts this exact-candidate
+argument and passes certification. Do not modify origin/main or CCC reports
+to impersonate the candidate. Recording a review is not equal to certification.

@@ -1988,7 +1988,8 @@ def run_release_ccc_gate(
         try:
             completed = subprocess.run(
                 ["python3", str(ccc_runner), "--config", str(ccc_config),
-                 "--force", "--trigger", "material_change"],
+                 "--force", "--trigger", "material_change",
+                 "--candidate-sha", candidate_sha],
                 text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 check=False, timeout=300,
             )
