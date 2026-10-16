@@ -45,3 +45,13 @@ The next implementation stage must use a transactional durable event store,
 server-controlled grants, explicit revocation/cancellation, output redaction,
 retention, tenant-authorized reads and independently tested transport adapters.
 No command execution or Teams approval integration is introduced by this stage.
+
+## Non-executing adapter catalog prototype
+
+`implementation/shared_sessions/adapters.py` defines explicit transport capability
+metadata (target type, supported modes, cancel/stream flags, execution identity,
+output bounds and expiry). No transport is registered by default and the registry
+has no execute/connect method. Registry entries do not prove support, approve a
+transport, or grant any execution authority. Live adapter implementations,
+server-side capability grants, transport-specific command classifiers, target
+identity verification and integration tests remain outside this prototype.
