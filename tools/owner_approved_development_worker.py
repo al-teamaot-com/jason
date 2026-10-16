@@ -268,6 +268,17 @@ def ensure_recovery_worktree(repo: Path, issue_number: int, revision: str) -> Pa
     return path
 
 
+def phase_for_existing_pr(phase: str) -> str:
+    """An existing PR must not erase a pending/in-progress CI repair.
+
+    The repair branch has its own bounded reasoning response and worktree;
+    resetting to validation would strand that work on every worker run.
+    """
+    if phase in {'ci_repair_needed', 'ci_repairing'}:
+        return phase
+    return 'pr_validating'
+
+
 def development_pr_for(issue_number: int, prs: list[dict[str, Any]]) -> dict[str, Any] | None:
     for pr in prs:
         match = META.search(str(pr.get('body') or ''))
@@ -599,7 +610,14 @@ def readmit_verified_ccc_owner_review(state: dict[str, Any], eligible_ids: set[s
                 or drift.get('status') != 'pass' or drift.get('problems')
                 or not 0 <= age <= 120):
             return 0
-    except (OSError, ValueError, TypeError, KeyError):
+        production_state = support.production_state_from_main(Path(__file__).resolve().parents[1])
+        production = production_state.get('production') if isinstance(production_state, dict) else None
+        live_sha = str((production or {}).get('revision') or '')
+        if len(live_sha) != 40 or any(c not in '0123456789abcdef' for c in live_sha):
+            return 0
+        if live_sha != sha:
+            return 0
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
         return 0
     items = state.get('items', {})
     for item_id, record in items.items():
@@ -1417,7 +1435,7 @@ def main() -> int:
             if pr is not None:
                 record['pr_number'] = int(pr['number'])
                 record['branch'] = str(pr['headRefName'])
-                phase = 'pr_validating'
+                phase = phase_for_existing_pr(phase)
             if phase in {'ci_repair_needed', 'ci_repairing'}:
                 worktree = ensure_worktree(
                     repo,

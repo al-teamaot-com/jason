@@ -50,3 +50,18 @@ credential disclosure, request-counter reset, or new execution authority is adde
 The official provider error taxonomy distinguishes credit exhaustion, organization
 and project spend caps, and provider-assigned usage limits. Ordinary 429 rate limits
 retain bounded retries and the existing fallback policy. Tests cover both paths.
+
+## Reconciled worker and CI dependencies
+
+The exact #1518/#1522 source pair originally conflicted in the runtime-validation
+workflow. The engineering continuity check now runs after dependency installation
+but before runtime compilation, preserving both it and the universal approval
+trust/persistence suite. No required test was dropped to resolve the conflict.
+
+Existing proposed repairs #1300 and #1296 were reviewed against this worker and
+reconciled with their original regressions: rediscovering a PR must not overwrite
+ci_repair_needed/ci_repairing, and current authoritative production identity must
+match CCC review/report identity before readmission. Four negative regressions
+failed before source reconciliation; all 123 targeted worker, focus, pipeline,
+reasoning and transport tests passed afterward. This is source-level evidence,
+not a claim that the installed worker or production release is already updated.
