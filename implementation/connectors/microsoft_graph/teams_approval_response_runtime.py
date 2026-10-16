@@ -74,3 +74,34 @@ def build_universal_teams_plan_approval_service(*, dependencies: TeamsApprovalRe
         teams_flow=build_teams_approval_response_flow(dependencies=dependencies),
         ledger=PlanGrantLedger(ledger_path),
     )
+
+
+def build_universal_teams_plan_dispatch(*, dependencies: TeamsApprovalResponseRuntimeDependencies,
+        ledger_path: str, proposal_repository, request_repository, verified_token_source):
+    """Compose universal dispatch only when all trusted runtime ports are supplied.
+
+    This does not provision Microsoft credentials, populate authority records,
+    or enable production. Caller must supply a verified, actor-bound token port.
+    """
+    required = {
+        'proposal_repository': (proposal_repository, 'require'),
+        'request_repository': (request_repository, 'require'),
+        'verified_token_source': (verified_token_source, 'require'),
+        'token_verifier': (dependencies.token_verifier, 'verify'),
+        'tenant_bindings': (dependencies.tenant_bindings, 'organization_for_tenant'),
+        'identity_bindings': (dependencies.identity_bindings, 'jason_identity_for_object'),
+        'approval_service': (dependencies.approval_service, 'accept_response'),
+        'resume_bridge': (dependencies.resume_bridge, 'resume'),
+        'audit': (dependencies.audit, 'append'),
+    }
+    for name, (port, method) in required.items():
+        if not callable(getattr(port, method, None)):
+            raise ValueError(f'trusted universal approval runtime dependency missing: {name}.{method}')
+    from orchestrator.teams_plan_response_dispatch import UniversalPlanResponseDispatch
+    return UniversalPlanResponseDispatch(
+        service=build_universal_teams_plan_approval_service(
+            dependencies=dependencies, ledger_path=ledger_path),
+        proposal_repository=proposal_repository,
+        request_repository=request_repository,
+        verified_token_source=verified_token_source,
+    )
