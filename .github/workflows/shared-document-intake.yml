@@ -32,6 +32,7 @@ jobs:
       - name: Check shared and gateway syntax
         run: |
           node --check infrastructure/jason-document-intake/document-intake.mjs
+          node --check infrastructure/jason-document-intake/ocr-fallback.mjs
           node --check infrastructure/jason-teams-gateway/index.mjs
       - name: Test shared intake and real PDF text extraction
-        run: node --test infrastructure/jason-document-intake/document-intake.test.mjs
+        run: node --test infrastructure/jason-document-intake/*.test.mjs

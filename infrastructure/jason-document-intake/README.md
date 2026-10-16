@@ -97,3 +97,7 @@ provenance through later evidence storage.
 Never activate an accounting consumer merely because shared PDF preflight succeeds.
 The final accounting system remains governed QuickBooks Online, not the PDF
 intake component or the temporary historical comparison spreadsheet.
+
+## Optional scanned-document OCR adapter (engineering only)
+
+`ocr-fallback.mjs` provides an **opt-in**, read-only page-rendering plus Tesseract OCR adapter. It verifies byte-source SHA-256 and page-count evidence, caps document size/page count/text volume, preserves page identity, uses temporary mode-0600 source bytes, and fails closed when rendering/OCR is unavailable. OCR text is always unverified evidence and **must never authorize or certify accounting reconciliation** without row/amount/date/account corroboration. The standard deployed Teams container and the Jason development host have not been verified to include Tesseract; no automatic runtime invocation, dependency installation or production activation is introduced by this branch. Integrating the OCR adapter into a governed consumer and visually validating scanned PDFs remain separate acceptance gates. Tests use controlled execution mocks rather than claim real Tesseract acceptance.
