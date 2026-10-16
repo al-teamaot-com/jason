@@ -3064,8 +3064,14 @@ class ProcurementApprovalInteractionFlow:
 class ApprovalInteractionDispatcher:
     procurement: ProcurementApprovalInteractionFlow | None
     fallback: Any | None
+    universal: Any | None = None
 
     def handle(self, *, approval_id: str, **kwargs):
+        # A bounded-plan intent must not fall through to another approval authority.
+        if approval_id.startswith("planapproval-"):
+            if self.universal is None:
+                raise PermissionError("universal plan approval flow is not configured")
+            return self.universal.handle(approval_id=approval_id, **kwargs)
         if approval_id.startswith("procapproval-"):
             if self.procurement is None:
                 raise PermissionError("procurement approval flow is not configured")
