@@ -282,3 +282,17 @@ performed. The separately recorded hosted-provider credit_balance_exhausted erro
 still requires account-level restoration, followed by a fresh authenticated probe;
 independent exact-candidate review and controlled real Teams acceptance remain
 release requirements, not facts inferred from these tests.
+
+
+### CI base-image registry availability
+
+The final combined candidate hit a real ECR public-registry 429 data-limit failure
+before the clean runtime build; one bounded retry of that job failed again. CI
+now resolves the existing ECR mirror first and, only for a throttled pull, tries
+its original Docker Official Python image once. A successful pull must return one
+content digest, which is pinned for the actual clean build. Both unavailable means
+failure; denied authentication, TLS/unknown-image errors, malformed digest or a
+source/package build failure does not trigger registry rotation or false success.
+Eight isolated policy tests pass. The actual clean build and independent provider
+identity-separation checks remain mandatory, and the production Dockerfile's
+base-image default is unchanged.
