@@ -7,6 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -89,14 +90,14 @@ class SingleUseGrantPrototype:
                     return False
                 self._used.add(digest)
                 return True
-        except (ValueError, KeyError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
+        except (ValueError, KeyError, TypeError, binascii.Error, json.JSONDecodeError, UnicodeDecodeError):
             return False
 
     def revoke(self, token: str) -> bool:
         """Revoke an issued unconsumed token within this ephemeral test process."""
         try:
             _, payload = self._decode(token)
-        except (ValueError, TypeError, json.JSONDecodeError, UnicodeDecodeError):
+        except (ValueError, TypeError, binascii.Error, json.JSONDecodeError, UnicodeDecodeError):
             return False
         digest = hashlib.sha256(payload).hexdigest()
         with self._lock:

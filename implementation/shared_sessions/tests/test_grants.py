@@ -40,3 +40,7 @@ class GrantsTests(unittest.TestCase):
             self.manager.issue_for_test(self.scope,lifetime_seconds=301)
         with self.assertRaises(ValueError):
             self.manager.issue_for_test(replace(self.scope,tenant_id=''))
+
+    def test_malformed_base64_is_denied_without_exceptions(self):
+        self.assertFalse(self.manager.consume('@@@.###',self.scope))
+        self.assertFalse(self.manager.revoke('@@@.###'))

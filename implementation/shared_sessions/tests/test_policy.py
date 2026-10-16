@@ -117,3 +117,9 @@ class SessionPolicyBoundaryTests(unittest.TestCase):
             replace(self.request, governed_grant_valid=1)).allowed)
         self.assertFalse(SessionPolicy(self.path).decide(
             replace(self.request, tenant_id=123)).allowed)
+
+    def test_non_string_transport_and_mode_are_denied_not_exception(self):
+        from dataclasses import replace
+        for kwargs in ({'transport':{}},{'mode':[]},{'classification':{'other':True}}):
+            with self.subTest(kwargs=kwargs):
+                self.assertFalse(SessionPolicy(self.path).decide(replace(self.request,**kwargs)).allowed)

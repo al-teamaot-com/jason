@@ -80,6 +80,8 @@ class SessionPolicy:
             return deny("incomplete_authoritative_context")
         if not (req.identity_verified and req.target_binding_verified and req.governed_grant_valid):
             return deny("identity_target_or_grant_unverified")
+        if any(type(value) is not str for value in (req.transport, req.mode, req.classification)):
+            return deny("invalid_request_type")
         if req.transport not in ALLOWED_TRANSPORTS or not c["transports"].get(req.transport, False):
             return deny("transport_not_enabled")
         if not req.execution_transport_approved:
