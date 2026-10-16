@@ -152,12 +152,14 @@ def run_pipeline(
 
 
 def service_exit_code(state: dict[str, Any]) -> int:
-    """Report unsuccessful engineering health to the service supervisor.
+    """Report failed execution, not a legitimate pending/blocked work state.
 
-    A successful controller invocation must not mask stalled approved work.
-    This does not grant retries or bypass any worker's recovery limits.
+    The user service has no automatic Restart/OnFailure recovery. Returning a
+    failure for backlog alone only adds a failed critical unit and can block CCC
+    from releasing the repair. Operational degradation remains explicit in the
+    state/event; the native work reconciler owns recovery and source adoption.
     """
-    return 1 if state.get("status") != "healthy" else 0
+    return 1 if state.get("failed_or_skipped_stages") else 0
 
 
 def main() -> int:

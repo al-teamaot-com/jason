@@ -49,7 +49,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(self.state_file(), state)
         self.assertTrue(all(c["status"] == "succeeded" for c in state["stages"].values()))
 
-    def test_stalled_approved_work_fails_service_health(self):
+    def test_stalled_work_stays_degraded_without_false_failed_controller(self):
         self.spool.mkdir(parents=True, exist_ok=True)
         (self.spool / "todo-intake-state.json").write_text(json.dumps({
             "status": "stalled_upstream_or_downstream",
@@ -59,7 +59,7 @@ class PipelineTests(unittest.TestCase):
         }))
         state = self.execute()
         self.assertEqual(state["status"], "degraded")
-        self.assertEqual(pipeline.service_exit_code(state), 1)
+        self.assertEqual(pipeline.service_exit_code(state), 0)
 
     def test_healthy_pipeline_exits_successfully(self):
         state = self.execute()

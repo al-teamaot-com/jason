@@ -1,6 +1,6 @@
 # Engineering pipeline stall health
 
-A pipeline stage returning zero is not proof of progress. When approved work is outstanding and no workers are active despite available capacity, the pipeline marks health degraded and exits nonzero for supervision. It does not automatically retry an exhausted reasoning request or grant additional execution authority.
+A pipeline stage returning zero is not proof of progress. When approved work is outstanding and no workers are active despite available capacity, the pipeline marks operational health degraded and includes the exact blocker in its event. A stage failure still exits nonzero. A blocked backlog alone is not an execution failure and does not force the controller unit into a failed state. It does not automatically retry an exhausted reasoning request or grant additional execution authority.
 
 Transport failures are classified into bounded non-secret categories such as DNS resolution, connection refused, timeout, TLS failure, and unreachable network. These diagnostics must never include raw connection exception contents, endpoint URLs, credentials, or headers.
 
@@ -23,3 +23,14 @@ new discretionary development to #1440 and its specifically authorized blockers
 #1493/#1458. Existing active engineering can reach a safe checkpoint; critical
 support remains under its existing separate priority lane. This implements the
 Owner's sole-priority instruction without creating another worker or dashboard.
+
+
+## Correction after actual supervisor inspection
+
+The live user service has `Restart=no` and no `OnFailure` action. The earlier
+proposed nonzero exit for every degraded backlog would not recover anything;
+it would instead introduce a failed critical service and could prevent CCC from
+releasing the actual repair. That change was removed before deployment. The
+pipeline keeps truthful degraded operational evidence, while the native
+owner-selected-PR reconciliation advances stale work to its real implementation
+and validation state. A process exit code is not a substitute for recovery.
