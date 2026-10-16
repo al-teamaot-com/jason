@@ -114,6 +114,8 @@ function parseApprovalSubmit(value) {
     "principal_id", "organization_id", "client_id", "capability",
     "capability_name", "provider", "provider_id", "connector",
     "connector_id", "authority_context_id", "requested_by",
+    "token", "access_token", "id_token", "refresh_token",
+    "authorization", "bearer", "sso_token",
   ]);
   const selections = {};
   for (const [key, raw] of Object.entries(value)) {

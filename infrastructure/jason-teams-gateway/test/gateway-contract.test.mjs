@@ -82,3 +82,14 @@ test("hardware billing disposition card is constrained and signed as a governed 
   assert.match(source, /disposition: billingDispositionSubmit\.disposition/);
   assert.match(source, /channel_response_id: messageId/);
 });
+
+
+test("approval card must never supply an authentication token or authority context", () => {
+  const approvalParser = source.split('function parseApprovalSubmit(value) {')[1]
+    .split('function parseProcurementSubmit(value) {')[0];
+  assert.ok(approvalParser);
+  for (const forbidden of ['token','access_token','id_token','refresh_token','authorization','sso_token', 'authority_context_id']) {
+    assert.match(approvalParser, new RegExp(`"${forbidden}"`));
+  }
+  assert.match(approvalParser, /if \(forbidden\.has\(key\)\) return null/);
+});
