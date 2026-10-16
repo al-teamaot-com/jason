@@ -55,7 +55,7 @@ class CCCConfig:
         return cls(
             enabled=bool(value.get("enabled", True)),
             cadence_days=cadence,
-            repository_root=Path(value.get("repository_root", "/home/al/projects/jason")),
+            repository_root=Path(value.get("repository_root", "/home/al/.local/lib/jason/engineering-worker-source")),
             evidence_root=Path(value.get("evidence_root", "/home/al/Jason-Evidence/CCC")),
             recovery_root=Path(value.get("recovery_root", "/home/al/Jason-Recovery/CCC")),
             state_root=Path(value.get("state_root", "/var/lib/jason/ccc")),
@@ -229,6 +229,12 @@ class CCCRunner:
             worktree = self._temporary_worktree(source_revision)
             checks.extend(self._source_checks(worktree, run_dir))
             checks.extend(self._host_checks(runtime_revision))
+            if candidate_sha is None:
+                # Scheduled observers must not treat a watchdog that failed
+                # solely *because CCC previously failed* as independent
+                # production drift. Exact-candidate release checks retain
+                # the original failed-unit result, with no exception.
+                checks = self._reconcile_scheduled_watchdog_feedback(checks)
             checks.append(self._provider_canary_check())
         except Exception as exc:
             checks.append(CheckResult(
@@ -420,6 +426,62 @@ class CCCRunner:
         mcp_ok = mcp.returncode == 0 and "MCP_CONSTITUTIONAL_CERTIFICATION=PASS" in (mcp.stdout or "")
         results.append(CheckResult("mcp-constitutional-production-equivalent", "PASS" if mcp_ok else "FAIL", (mcp.stdout or "")[-1500:]))
         return results
+
+    def _reconcile_scheduled_watchdog_feedback(
+        self, checks: list[CheckResult],
+    ) -> list[CheckResult]:
+        """Isolate one proven CCC-to-watchdog feedback loop, never release CCC.
+
+        The original failed unit and the independent watchdog readback remain
+        in the CCC report. Unknown/stale/multi-unit failures remain FAIL.
+        """
+        target = next((c for c in checks if c.check_id == "systemd-failed-units"), None)
+        if target is None or target.status != "FAIL":
+            return checks
+        evidence = dict(target.evidence or {})
+        failed_units = evidence.get("failed_units")
+        if not isinstance(failed_units, list) or len(failed_units) != 1 or not isinstance(failed_units[0], str):
+            return checks
+        parts = failed_units[0].split()
+        if parts and parts[0] == "●":
+            parts = parts[1:]
+        if (len(parts) < 4 or parts[:4] != [
+            "jason-production-drift-watchdog.service", "loaded", "failed", "failed",
+        ]):
+            return checks
+        snapshot_path = Path(
+            "/var/lib/jason/openclaw/release-manager/protected-readback/production-drift.json"
+        )
+        try:
+            report = json.loads(snapshot_path.read_text(encoding="utf-8"))
+            problems = report.get("problems")
+            observed = _parse_time(str(report.get("observed_at") or ""))
+            age = (self.now().astimezone(timezone.utc) - observed).total_seconds()
+            if (report.get("status") != "drift_detected"
+                    or not isinstance(problems, list) or len(problems) != 1
+                    or problems[0] != {
+                        "kind": "failed_system_unit",
+                        "unit": "jason-ccc.service",
+                        "state": "failed",
+                    } or not (0 <= age <= 300)):
+                return checks
+        except (OSError, ValueError, TypeError, KeyError):
+            return checks
+        recorded = CheckResult(
+            "systemd-failed-units",
+            "PASS",
+            "Scheduled CCC: watchdog failure is proven downstream of the prior CCC failure; "
+            "this does not certify or override the exact-candidate release gate.",
+            {
+                "failed_units": [],
+                "historical_watchdog_feedback": {
+                    "original_failed_unit": failed_units[0],
+                    "drift_observed_at": report["observed_at"],
+                    "reason": "only_failed_unit_in_watchdog_readback_was_prior_ccc",
+                },
+            },
+        )
+        return [recorded if c is target else c for c in checks]
 
     def _host_checks(self, runtime_revision: str) -> list[CheckResult]:
         results: list[CheckResult] = []

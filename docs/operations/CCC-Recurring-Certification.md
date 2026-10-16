@@ -22,6 +22,8 @@ A full run ends in exactly one of:
 
 Only `PASS` may call the Last Known Compliant promoter. `FAIL` and `NOT_PROVEN` never move the compliant pointer.
 
+**Scheduled-observer versus certification outcome:** When protected `main` contains a verified descendant of the live production SHA, a *scheduled, non-forced* CCC check may record `NOT_PROVEN` for exactly the unshipped source-alignment, checker-currentness, or material owner-review checks while every other check is `PASS`. In that narrow case, the scheduled service exits successfully **only to mean the observation was recorded**, and emits `CCC_SCHEDULED_EVALUATION=SOURCE_PENDING_NOT_CERTIFIED`. The durable report remains `NOT_PROVEN`; the Last Known Compliant pointer does not advance. Real failed controls, unknown/missing checks, exceptions, divergent Git ancestry, and **all forced/exact-source release certification** still fail closed. A service exit code must never be used in place of the CCC report as proof of authorization.
+
 ## Scheduled execution
 
 Canonical units:
@@ -36,7 +38,7 @@ Canonical configuration:
 - source default: `config/ccc/default.json`
 - production file: `/var/lib/jason/ccc/ccc.json`
 
-The installer preserves an existing production configuration rather than replacing it during an upgrade.
+The installer preserves an existing production configuration rather than replacing it during an upgrade. On an exact-reviewed checker installation, a narrowly scoped migration updates only the old `/home/al/projects/jason` repository-root default to `/home/al/.local/lib/jason/engineering-worker-source`, leaving custom roots and all other configuration unchanged. Its original configuration is backed up, private file ownership/mode is preserved, and symlinks or permissive files are rejected. The managed repository must remain trusted (actual target and Git directory owned by `al`, non-world-writable); a symbolic link's apparent `777` mode alone is not a directory permission defect.
 
 ## CCC service authority
 
@@ -69,7 +71,7 @@ When a full CCC run is due, the runner verifies at minimum:
 - System Registry deterministic validation;
 - J-900 release validation including Kernel/CAP-001 tests, documentation-control validation, strict documentation build, and whitespace checks;
 - production-equivalent MCP constitutional certification suite, with Docker/Buildx state isolated under `/var/lib/jason/ccc/docker`;
-- zero failed systemd units other than the currently executing `jason-ccc.service` itself; CCC cannot use its own transient prior failure as evidence against the host;
+- zero failed systemd units other than the currently executing `jason-ccc.service` itself; a **scheduled-only, explicitly evidenced** exception permits a stale failed `jason-production-drift-watchdog.service` state solely when a fresh root-controlled drift readback proves that watchdog failed **only** because the previous CCC unit was failed. The original failed state is retained in CCC's evidence; any other/stale/unverifiable failure remains `FAIL`. Forced release certification never receives this exception and still requires all systemd checks to pass;
 - all configured Prometheus targets healthy;
 - current OpenClaw/JKD-001 operational health snapshot is `pass` and fresh;
 - `/opt/jason/current` resolves to the exact live MCP runtime revision;
