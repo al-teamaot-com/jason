@@ -259,3 +259,20 @@ def test_hosted_search_400_does_not_bypass_request_validation(tmp_path: Path):
     response = json.loads((tmp_path / 'reasoning' / 'responses' / (request['request_id'] + '.json')).read_text())
     assert response['status'] == 'failed'
     assert fallback.calls == []
+
+
+def test_transport_failure_spool_keeps_only_bounded_diagnostic_code(tmp_path: Path):
+    class FailedClient:
+        def complete(self, **kwargs):
+            raise ConnectorTransportError('HTTP transport failed', provider_error_code='DNS_RESOLUTION')
+
+    request = _request('search_plan')
+    directory = tmp_path / 'reasoning' / 'requests'
+    directory.mkdir(parents=True)
+    (directory / f"{request['request_id']}.json").write_text(json.dumps(request))
+    maintenance = SupportRepairReasoningMaintenance(structured_client=FailedClient(), spool=tmp_path)
+    assert maintenance.tick() is True
+    response = json.loads((tmp_path / 'reasoning' / 'responses' / f"{request['request_id']}.json").read_text())
+    assert response['status'] == 'failed'
+    assert response['transport_failure_code'] == 'DNS_RESOLUTION'
+    assert response['attempts'] == 1
