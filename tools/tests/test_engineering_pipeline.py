@@ -61,6 +61,10 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(state["status"], "degraded")
         self.assertEqual(pipeline.service_exit_code(state), 1)
 
+    def test_healthy_pipeline_exits_successfully(self):
+        state = self.execute()
+        self.assertEqual(pipeline.service_exit_code(state), 0)
+
     def test_failed_stage_still_fails_systemd_unit(self):
         state = self.execute(failed={"support_repair_host_worker"})
         self.assertEqual(pipeline.service_exit_code(state), 1)
