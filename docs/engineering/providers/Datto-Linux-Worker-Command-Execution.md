@@ -15,6 +15,32 @@ Jason reuses `automation.component.execute` and the existing Datto RMM quick-job
 
 This component uses shell evaluation, so **no shell input is classified as standing-safe**. The exact component is forced `per_run` even if configuration or a durable component approval suggests otherwise. Unknown variable names, omitted command, unreviewed or renamed component identity, missing worker enrollment, or a different endpoint fail closed.
 
+## Separate worker scope — implementation change 2026-10-16
+
+The initial Linux-shell guard alone did not make the worker usable alongside
+the existing Desktop pilot. The proposed follow-up introduces a **separate**
+server-side scope selected only for the exact live Linux shell component
+UID/name and exactly enrolled worker UID:
+
+- Linux shell execution allowlist: `aot-approved-linux-worker`.
+- Role/device class: `Server` (server-controlled, not supplied by the model).
+- Provider component: `bc7c4531-6869-4658-b1d6-7639a477045e`, forced `per_run`.
+- Device: `JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID`, exact and operator-managed
+  in **both** MCP and runtime containers; unset means deny.
+- Existing Desktop pilot allowlist, component inventory, identity, and class are
+  unchanged for non-worker execution.
+- The runtime separately enforces exact component identity, enrolled endpoint,
+  class, and per-run requirement before provider execution. The requesting
+  `jason-autonomy-worker` cannot invoke the generic shell under standing
+  automation authority.
+- No production release, enrollment mutation, or role installation occurs
+  from merging this source. Use the existing immutable Release Manager, verify
+  installed runtime/MCP scopes, then run exactly approved read-only diagnostics.
+
+This is still a **diagnostic transport**, not an approved unattended role
+provisioning engine. The autonomous safe path must use reviewed, role-specific,
+deterministic commands and separate owner-promoted capability policy.
+
 ## Enrollment configuration
 
 The server-operator-managed setting `JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID` MUST contain one exact provider UID in **both** the MCP canonicalization environment and the actual execution runtime. Missing or mismatched setting denies the shell. The value may not be supplied by a tool caller, chat model, worker, or task payload.
