@@ -5,7 +5,7 @@ from orchestrator.teams_plan_response_dispatch import UniversalPlanResponseDispa
 class Store:
     def __init__(self, value):
         self.value = value
-    def require(self, key):
+    def require(self, key, **kwargs):
         assert key == 'planapproval-1'
         return self.value
 
@@ -22,7 +22,8 @@ def test_server_sources_override_card_identity_and_scope():
     repository = Store('server-proposal')
     adapter = UniversalPlanResponseDispatch(service, repository, Store(original_request), Store('trusted-token'))
     result = adapter.handle(approval_id='planapproval-1', decision='deny', token='forged',
-        original_request='forged', organization_id='forged', plan_fingerprint='forged')
+        original_request='forged', organization_id='forged', plan_fingerprint='forged',
+        microsoft_tenant_id='tenant', microsoft_object_id='actor')
     assert result == 'verified-flow-result'
     call = service.calls[0]
     assert call['token'] == 'trusted-token'
@@ -34,3 +35,12 @@ def test_non_plan_intent_rejected_without_dispatch():
     adapter = UniversalPlanResponseDispatch(Service(), object(), object(), object())
     with pytest.raises(PermissionError):
         adapter.handle(approval_id='procapproval-1', decision='approve')
+
+
+def test_missing_authenticated_actor_fails_before_server_lookups():
+    class ForbiddenStore:
+        def require(self, *args, **kwargs):
+            raise AssertionError('must not consult server-side stores without an actor')
+    adapter = UniversalPlanResponseDispatch(Service(), ForbiddenStore(), ForbiddenStore(), ForbiddenStore())
+    with pytest.raises(PermissionError, match='authenticated actor context required'):
+        adapter.handle(approval_id='planapproval-1', decision='approve')

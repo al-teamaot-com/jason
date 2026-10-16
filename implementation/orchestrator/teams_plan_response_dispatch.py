@@ -19,7 +19,12 @@ class UniversalPlanResponseDispatch:
         if not approval_id.startswith('planapproval-'):
             raise PermissionError('not a universal plan approval')
         # No identity token, original request, or plan scope is accepted from a card.
-        token = self.verified_token_source.require(approval_id)
+        # Explicit actor binding is mandatory: an approval ID is never a credential.
+        tenant_id = untrusted_payload.get('microsoft_tenant_id')
+        object_id = untrusted_payload.get('microsoft_object_id')
+        if not tenant_id or not object_id:
+            raise PermissionError('authenticated actor context required')
+        token = self.verified_token_source.require(approval_id, tenant_id=tenant_id, object_id=object_id)
         original_request = self.request_repository.require(approval_id)
         now = datetime.now(timezone.utc)
         return self.service.handle_stored_response(
