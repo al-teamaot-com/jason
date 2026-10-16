@@ -62,3 +62,28 @@ def test_client_scope_cannot_be_bypassed_with_null(tmp_path):
     ledger.record(scope, decision)
     with pytest.raises(PermissionError, match='client'):
         ledger.require_grant(replace(step, client_id=None), plan_fingerprint='plan-digest-1', now=NOW)
+
+
+def test_scope_mutation_cannot_change_persisted_record(tmp_path):
+    ledger, scope, decision, step = make_objects(tmp_path)
+    ledger.record(scope, decision)
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.record(replace(scope, max_risk=999), replace(decision, approval_id='approval-2'))
+    with pytest.raises(PermissionError):
+        ledger.require_grant(replace(step, risk=999), plan_fingerprint='plan-digest-1', now=NOW)
+
+
+def test_reused_approval_identifier_cannot_authorize_second_plan(tmp_path):
+    ledger, scope, decision, step = make_objects(tmp_path)
+    ledger.record(scope, decision)
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.record(replace(scope, plan_id='p2'), decision)
+
+
+def test_missing_client_is_permitted_only_for_org_scoped_plan(tmp_path):
+    ledger, scope, decision, step = make_objects(tmp_path)
+    org_scope = replace(scope, allowed_clients=frozenset())
+    ledger.record(org_scope, decision)
+    ledger.require_grant(replace(step, client_id=None), plan_fingerprint='plan-digest-1', now=NOW)
+    with pytest.raises(PermissionError):
+        ledger.require_grant(step, plan_fingerprint='plan-digest-1', now=NOW)
