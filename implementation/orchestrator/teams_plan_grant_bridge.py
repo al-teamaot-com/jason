@@ -43,7 +43,11 @@ def record_verified_teams_plan_grant(*, result: TeamsApprovalFlowResult,
         accepted.requested_by != proposal.requester_id or
         accepted.capability != proposal.capability):
         raise PermissionError('approval does not match server-owned proposal')
-    if proposal.scope.organization_id != proposal.organization_id or not proposal.plan_fingerprint:
+    if (proposal.scope.organization_id != proposal.organization_id or
+        not proposal.plan_fingerprint or not accepted.decided_by or
+        accepted.decided_at.tzinfo is None or decided_at.tzinfo is None or
+        accepted.decided_at != decided_at or
+        accepted.expires_at.tzinfo is None or decided_at >= accepted.expires_at):
         raise PermissionError('invalid plan proposal scope')
     ledger.record(proposal.scope, VerifiedPlanDecision(
         approval_id=accepted.approval_id,
