@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "status": "approved_diagnostic_transport_only",
+  "role_id": "jason-development-worker",
+  "target_name": "Claw2-PC",
+  "device_uid": "13eda165-08e0-ec79-026a-985b37e2eb9e",
+  "device_class": "Server",
+  "component_uid": "bc7c4531-6869-4658-b1d6-7639a477045e",
+  "approval_mode": "per_run",
+  "issue_number": 1459,
+  "authorization": "AOT Owner exact Claw2-PC authorization 2026-10-15 and bounded approved-device/role engineering 2026-10-16",
+  "limitations": "Diagnostic transport only: no standing-safe arbitrary shell, automated worker readiness, production secrets or deployment rights."
+}
