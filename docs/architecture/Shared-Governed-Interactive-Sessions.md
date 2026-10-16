@@ -162,3 +162,19 @@ cancellation, crash/reconnect handling, reliable durable audit and independent
 Teams approve/deny expiry/replay enforcement. Start with read-only commands on
 Claw2-pc in a disposable test state after authority verification. No
 production rollout or automatic promotion; retain explicit Owner gate.
+
+## Companion wire contract (2026-10-16)
+
+`implementation/shared_sessions/companion_protocol.py` introduces a strict,
+versioned **nonexecuting** frame schema for hello/proposal/output/completion/
+cancel/revoke/heartbeat events. The envelope validates exact identifiers,
+size bounds, sequence numbers and command SHA-256 digest; it explicitly rejects
+raw commands and secrets in protocol payloads. A local test-only replay guard
+checks authenticated tenant/device binding and duplicate or out-of-order frames.
+This is not a network listener, cryptographic channel, credential service or
+execution implementation. Production must implement mutual channel identity,
+structured command authorization on a separate protected channel, persistent
+shared nonce/sequence store, backpressure, cancellation, telemetry and external
+security testing. The approved Claw2-PC Datto identity was observed through
+governed read as `13eda165-08e0-ec79-026a-985b37e2eb9e` (site Atlantic Office
+Machines; online at inspection); enrollment must reverify it before use.
