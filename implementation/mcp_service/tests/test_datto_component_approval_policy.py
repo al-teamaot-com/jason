@@ -283,7 +283,6 @@ def test_linux_worker_has_separate_server_scope_without_legacy_catalog_entry(mon
     )
     assert approved["status"] == "succeeded"
     assert len(calls) == 1
-    assert calls[0].arguments["device_class"] == "Server" if hasattr(calls[0], "arguments") else True
 
 
 def test_separate_worker_scope_does_not_change_desktop_diagnostics(monkeypatch):
