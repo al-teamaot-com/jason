@@ -111,3 +111,16 @@ management, production event attribution, revocation distribution and server
 execution integration. All those must be implemented independently before any
 execution action. Passing its tests proves only local cryptographic and
 state-machine behavior; it does not satisfy the Owner's Teams approval gate.
+
+## Offline end-to-end acceptance simulation
+
+`implementation/shared_sessions/simulation.py` composes the local lifecycle,
+policy, grant verifier and event ledger to demonstrate a proposed command,
+policy decision and exact-command single-use grant validation **without ever
+executing**. It never stores raw command text in events; it records the digest
+only. Its regression tests check simulated allowance, deny under disabled policy,
+wrong technician, paused sessions, changed command, and grant replay. The
+`SimulationResult.executed` field is permanently false. It is NOT a user-facing
+terminal, a real executor, a trusted classification service, a Teams approval
+system, nor an endpoint transport. The separate human authorization and release
+gates remain unchanged.
