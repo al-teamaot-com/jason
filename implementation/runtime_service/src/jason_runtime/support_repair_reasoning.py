@@ -329,8 +329,12 @@ class SupportRepairReasoningMaintenance:
                     'request_id': path.stem,
                     'error_type': type(exc).__name__,
                     'transport_failure_code': (
-                        str(exc.provider_error_code)[:64]
-                        if isinstance(exc, ConnectorTransportError) and exc.provider_error_code
+                        exc.provider_error_code
+                        if isinstance(exc, ConnectorTransportError) and exc.provider_error_code in {
+                            'DNS_RESOLUTION', 'NETWORK_TIMEOUT', 'TLS_FAILURE',
+                            'CONNECTION_REFUSED', 'NETWORK_UNREACHABLE',
+                            'NETWORK_IO_FAILURE',
+                        }
                         else None
                     ),
                     'error': str(exc)[:800],
