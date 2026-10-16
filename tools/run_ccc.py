@@ -106,9 +106,10 @@ def main() -> int:
     if result.runtime_revision: print(f"RUNTIME_REVISION={result.runtime_revision}")
     if result.report_path: print(f"REPORT={result.report_path}")
     if result.checkpoint_id: print(f"LAST_KNOWN_COMPLIANT={result.checkpoint_id}")
-    if _scheduled_source_change_pending(
-        result, config, force=args.force, trigger=args.trigger
-    ):
+    if (not args.force and args.trigger == "scheduled" and
+            _scheduled_source_change_pending(
+                result, config, force=args.force, trigger=args.trigger
+            )):
         # The scheduled observer completed successfully, but certification
         # remains NOT_PROVEN, no compliant pointer advances, and no release
         # candidate gains authorization. A separate release CCC must PASS.

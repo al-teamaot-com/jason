@@ -89,6 +89,38 @@ class ScheduledSourcePendingTests(unittest.TestCase):
         ]
         self.assertFalse(self._evaluate(report))
 
+    def test_scheduled_main_returns_success_without_claiming_ccc_pass(self):
+        from contextlib import redirect_stdout
+        from io import StringIO
+        result = SimpleNamespace(
+            status="NOT_PROVEN", trigger="material_change",
+            source_revision=SOURCE, runtime_revision=RUNTIME,
+            report_path=Path("/test/review.json"), checkpoint_id=None,
+        )
+        fake = SimpleNamespace(run=lambda **kwargs: result)
+        for forced, pending, expected in (
+            (False, True, 0), (False, False, 1), (True, True, 1),
+        ):
+            with (
+                self.subTest(forced=forced, pending=pending),
+                patch.object(run_ccc, "parse_args", return_value=SimpleNamespace(
+                    config=Path("/fake/ccc.json"), force=forced,
+                    trigger="scheduled" if not forced else "material_change",
+                    candidate_sha=SOURCE if forced else None,
+                )),
+                patch.object(run_ccc.CCCConfig, "load", return_value=SimpleNamespace()),
+                patch.object(run_ccc, "CCCRunner", return_value=fake),
+                patch.object(run_ccc, "_scheduled_source_change_pending", return_value=pending),
+                patch.object(run_ccc, "REPO", Path("/tmp/" + RUNTIME)),
+            ):
+                output = StringIO()
+                with redirect_stdout(output):
+                    code = run_ccc.main()
+                self.assertEqual(code, expected)
+                self.assertIn("CCC_STATUS=NOT_PROVEN", output.getvalue())
+                self.assertNotIn("CCC_STATUS=PASS", output.getvalue())
+                self.assertNotIn("LAST_KNOWN_COMPLIANT", output.getvalue())
+
     def test_overall_fail_never_gets_exception(self):
         report = pending_report()
         report["status"] = "FAIL"
