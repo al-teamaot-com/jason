@@ -1,0 +1,34 @@
+# Azure Repos required PR policy bootstrap: BUILD/REVIEW ONLY.
+# No automatic CI merges, releases, credentials, provider writes or deployment.
+# Azure Repos main branch policy (not YAML trigger) invokes this build.
+trigger: none
+pr: none
+pool:
+  vmImage: ubuntu-latest
+stages:
+- stage: AzurePullRequestGovernance
+  displayName: Required Azure PR provenance and integration review
+  jobs:
+  - job: PrValidation
+    timeoutInMinutes: 20
+    steps:
+    - checkout: self
+      persistCredentials: false
+      fetchDepth: 0
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.12'
+    - bash: |
+        set -euo pipefail
+        python -m pip install --disable-pip-version-check 'cryptography>=45,<47'
+        python -m unittest -v tools.tests.test_azure_devops_engineering_provider tools.tests.test_azure_devops_pr_gates
+      displayName: Run fail-closed no-network PR gate regressions
+    - bash: |
+        set -euo pipefail
+        test -n "${SYSTEM_PULLREQUEST_PULLREQUESTID:-}"
+        test -n "${SYSTEM_ACCESSTOKEN:-}"
+        python tools/azure_devops_pr_gates.py --pr-id "$SYSTEM_PULLREQUEST_PULLREQUESTID"
+      displayName: Validate live PR documentation and concurrent changes
+      env:
+        SYSTEM_PULLREQUEST_PULLREQUESTID: $(System.PullRequest.PullRequestId)
+        SYSTEM_ACCESSTOKEN: $(System.AccessToken)
