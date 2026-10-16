@@ -265,3 +265,20 @@ For host-side tests the component-approval registry path was redirected to a fre
 temporary test directory; otherwise seven unrelated component-scope tests read the
 host's real approval registry and report extra components. No live registry was
 modified and no synthetic result is represented as a production approval.
+
+### Combined #1440 implementation and worker-recovery candidate
+
+The #1522 engineering recovery changes, including reconciled #1300/#1296 worker
+repairs, are integrated into this same approval candidate. Both sets of CI checks
+are retained. Delayed approval responses now report the durable execution state
+(completed, running, blocked or uncertain) rather than claiming the plan is still
+queued after the worker has advanced it.
+
+Validation of the combined source: 1,182 isolated Python tests and 26 actual Teams
+gateway Node tests passed. This includes approval/replay/identity boundaries,
+callback-worker races, durable execution, worker focus/CI repair/readmission and
+release-host safeguards. No live provider mutation or production activation was
+performed. The separately recorded hosted-provider credit_balance_exhausted error
+still requires account-level restoration, followed by a fresh authenticated probe;
+independent exact-candidate review and controlled real Teams acceptance remain
+release requirements, not facts inferred from these tests.

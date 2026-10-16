@@ -259,3 +259,85 @@ def test_hosted_search_400_does_not_bypass_request_validation(tmp_path: Path):
     response = json.loads((tmp_path / 'reasoning' / 'responses' / (request['request_id'] + '.json')).read_text())
     assert response['status'] == 'failed'
     assert fallback.calls == []
+
+
+def test_transport_failure_spool_keeps_only_bounded_diagnostic_code(tmp_path: Path):
+    class FailedClient:
+        def complete(self, **kwargs):
+            raise ConnectorTransportError('HTTP transport failed', provider_error_code='DNS_RESOLUTION')
+
+    request = _request('search_plan')
+    directory = tmp_path / 'reasoning' / 'requests'
+    directory.mkdir(parents=True)
+    (directory / f"{request['request_id']}.json").write_text(json.dumps(request))
+    maintenance = SupportRepairReasoningMaintenance(structured_client=FailedClient(), spool=tmp_path)
+    assert maintenance.tick() is True
+    response = json.loads((tmp_path / 'reasoning' / 'responses' / f"{request['request_id']}.json").read_text())
+    assert response['status'] == 'failed'
+    assert response['transport_failure_code'] == 'DNS_RESOLUTION'
+    assert response['attempts'] == 1
+
+
+class BillingFailureClient:
+    def __init__(self, code='credit_balance_exhausted'):
+        self.calls=0
+        self.code=code
+    def complete(self, **kwargs):
+        self.calls+=1
+        raise ConnectorTransportError('HTTP transport failed with status 429',status_code=429,
+            provider_error_type='insufficient_quota',provider_error_code=self.code)
+
+
+class FailedFallbackClient:
+    def __init__(self):self.calls=0
+    def complete(self, **kwargs):
+        self.calls+=1
+        raise ConnectorTransportError('HTTP transport failed')
+
+
+def test_empty_credit_error_survives_fallback_failure_and_is_not_retried(tmp_path):
+    from datetime import datetime,timedelta,timezone
+    clock=[datetime(2026,10,16,tzinfo=timezone.utc)]
+    primary=BillingFailureClient();fallback=FailedFallbackClient()
+    directory=tmp_path/'reasoning'/'requests';directory.mkdir(parents=True)
+    request=_request('search_plan')
+    (directory/(request['request_id']+'.json')).write_text(json.dumps(request))
+    maint=SupportRepairReasoningMaintenance(structured_client=primary,fallback_structured_client=fallback,
+        spool=tmp_path,interval_seconds=1,now=lambda:clock[0])
+    assert maint.tick()
+    response=json.loads((tmp_path/'reasoning'/'responses'/(request['request_id']+'.json')).read_text())
+    assert response['status']=='failed'
+    assert response['primary_provider_error_code']=='credit_balance_exhausted'
+    assert response['fallback_status']=='failed'
+    assert response['required_owner_action']=='restore_provider_credits'
+    assert response['retryable'] is False
+    assert 'credit_balance_exhausted' in response['error']
+    clock[0]+=timedelta(seconds=2)
+    assert maint.tick() is False
+    assert primary.calls==1 and fallback.calls==1
+
+
+def test_configured_fallback_can_complete_without_hiding_billing_warning(tmp_path):
+    primary=BillingFailureClient();fallback=Client()
+    directory=tmp_path/'reasoning'/'requests';directory.mkdir(parents=True)
+    request=_request('search_plan')
+    (directory/(request['request_id']+'.json')).write_text(json.dumps(request))
+    maint=SupportRepairReasoningMaintenance(structured_client=primary,fallback_structured_client=fallback,spool=tmp_path)
+    assert maint.tick()
+    response=json.loads((tmp_path/'reasoning'/'responses'/(request['request_id']+'.json')).read_text())
+    assert response['status']=='succeeded'
+    assert response['primary_provider_error_code']=='credit_balance_exhausted'
+    assert response['fallback_status']=='succeeded'
+    assert response['required_owner_action']=='restore_provider_credits'
+    assert len(fallback.calls)==1
+
+
+def test_quota_failure_without_fallback_is_not_mislabeled_network_error(tmp_path):
+    directory=tmp_path/'reasoning'/'requests';directory.mkdir(parents=True)
+    request=_request('search_plan')
+    (directory/(request['request_id']+'.json')).write_text(json.dumps(request))
+    maint=SupportRepairReasoningMaintenance(structured_client=BillingFailureClient('project_spend_limit_exceeded'),spool=tmp_path)
+    assert maint.tick()
+    response=json.loads((tmp_path/'reasoning'/'responses'/(request['request_id']+'.json')).read_text())
+    assert response['required_owner_action']=='review_project_spend_limit'
+    assert response['retryable'] is False

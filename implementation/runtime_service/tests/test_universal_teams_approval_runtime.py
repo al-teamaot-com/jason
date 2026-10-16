@@ -412,6 +412,8 @@ def test_callback_acknowledgement_cannot_requeue_plan_completed_by_worker(tmp_pa
     monkeypatch.setattr(env.handler.requests, 'record_progress', worker_finishes_before_callback_acknowledgement)
     result = click(env, signed(env, plan))
     assert result['approval_status'] == 'approved'
+    assert result['plan_status'] == 'completed'
+    assert result['executed'] is True
     assert env.handler.requests.progress(plan.approval_id)['state'] == 'completed'
     assert env.handler.requests.candidate_ids() == ()
     assert len(env.provider.calls) == 1
@@ -433,5 +435,24 @@ def test_callback_accepts_exact_grant_published_first_by_recovery_worker(tmp_pat
     monkeypatch.setattr(env.handler.service.ledger, 'record', worker_publishes_before_callback)
     result = click(env, signed(env, plan))
     assert result['approval_status'] == 'approved'
+    assert result['plan_status'] == 'completed'
+    assert result['executed'] is True
     assert env.handler.requests.progress(plan.approval_id)['state'] == 'completed'
     assert len(env.provider.calls) == 1
+
+
+@pytest.mark.parametrize('state,reason', [
+    ('running', None), ('blocked', 'step_reauthorization_PermissionError'),
+    ('indeterminate', 'step_execution_OSError'), ('denied', 'denied'),
+])
+def test_callback_reports_durable_execution_state_not_queued(tmp_path, state, reason):
+    env = setup(tmp_path)
+    plan = seed(env)
+    env.handler.requests.record_progress(plan.approval_id, state=state, now=NOW,
+                                         reason_code=reason)
+    result = click(env, signed(env, plan))
+    assert result['approval_status'] == 'approved'
+    assert result['plan_status'] == state
+    assert result['executed'] is False
+    assert 'queued' not in result['reply']['text']
+    assert env.provider.calls == []

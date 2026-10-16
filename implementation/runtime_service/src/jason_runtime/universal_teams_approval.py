@@ -169,9 +169,25 @@ class UniversalTeamsApprovalInteractionFlow:
             # 'completed' is the existing interaction envelope contract, not
             # provider completion. Keep a distinct queued plan state so deployed
             # gateways finalize the decision without a coupled gateway rollout.
+            progress = self.requests.progress(approval_id)
+            plan_status = progress['state']
+            messages = {
+                'approved': 'Approval recorded. Jason has queued the reviewed plan for execution.',
+                'running': 'Approval recorded. Jason is executing the reviewed plan.',
+                'completed': 'Approval recorded. The reviewed plan has completed successfully.',
+                'blocked': 'Approval recorded. The reviewed plan is blocked; Jason recorded the reason.',
+                'indeterminate': 'Approval recorded. An execution outcome needs review; Jason will not repeat it without verification.',
+                'denied': 'Approval recorded. Current execution controls denied the reviewed plan.',
+            }
+            if plan_status not in messages:
+                raise RuntimeError('approved plan execution state is not recognized')
+            # A worker may finish before this callback acknowledges the vote.
+            # Report its observed durable state, not a fabricated queued status.
             return {'status': 'completed', 'approval_id': approval_id,
-                    'approval_status': 'approved', 'plan_status': 'queued', 'executed': False,
-                    'reply': {'text': 'Approval recorded. Jason has queued the reviewed plan for execution.'}}
+                    'approval_status': 'approved',
+                    'plan_status': 'queued' if plan_status == 'approved' else plan_status,
+                    'executed': plan_status == 'completed',
+                    'reply': {'text': messages[plan_status]}}
         if self.continuation is None:
             return {'status': 'approved', 'approval_id': approval_id, 'executed': False,
                     'reply': {'text': 'Approval recorded. Execution has not started.'}}

@@ -1,0 +1,7 @@
+{
+  "schema_version": "1.0",
+  "enabled": true,
+  "issue_numbers": [1440, 1493, 1458],
+  "directive": "Owner-approved sole discretionary development priority: Universal Teams Approval and required blockers. Critical support and safely completing active work remain allowed.",
+  "authority_source": "https://github.com/al-teamaot-com/jason/issues/1440#issuecomment-6217970983"
+}
