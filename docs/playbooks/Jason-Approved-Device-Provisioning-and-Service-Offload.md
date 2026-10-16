@@ -132,7 +132,7 @@ Escalate new tenant/privilege/role scope, uncertain device production dependenci
 
 ## 17. Verification
 
-Independently read back enrollment, service identity, approved role hash, package/services/health, network isolation and restricted credentials. Prove one real bounded task completes on the worker with output/artifacts persisted centrally and without main-host ticket processing interruption. Verify rollback, drain/rejoin and replacement with no double-execution.
+Independently read back enrollment, service identity, approved role hash, package/services/health, network isolation and restricted credentials. Prove one real bounded task completes on the worker with output/artifacts persisted centrally and without main-host ticket processing interruption. A partially configured, unverified, blocked, or revoked worker must never be eligible for task admission. Verify rollback, drain/rejoin and replacement with no double-execution.
 
 ## 18. Completion Criteria
 
