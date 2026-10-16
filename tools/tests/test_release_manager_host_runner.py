@@ -896,6 +896,27 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             self.assertTrue(any(name.endswith("/support-repair") for name in copied))
             self.assertFalse(any("orchestration-events" in name for name in copied))
 
+    def test_bounded_preprod_refuses_growth_past_reserve_after_copy(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "clone"
+            seen = []
+            def record(command):
+                seen.append(command)
+                if command[:3] == ["docker", "exec", "jason-runtime"]:
+                    return "governed-execution.sqlite3"
+                return ""
+            with (
+                patch.object(runner.shutil, "disk_usage",
+                             side_effect=[Mock(free=8 * 1024**3), Mock(free=2 * 1024**3)]),
+                patch.object(runner, "run", side_effect=record),
+            ):
+                with self.assertRaisesRegex(runner.ReleaseManagerError, "bounded disk capacity"):
+                    runner.copy_state_from_live_container(
+                        "/var/lib/jason/openclaw", target,
+                    )
+            self.assertEqual(len([c for c in seen if c[:2] == ["docker", "cp"]]), 1)
+
     def test_release_manager_defaults_to_managed_source_not_developer_checkout(self):
         self.assertEqual(
             runner.DEFAULT_REPO,
