@@ -25,6 +25,13 @@ class UniversalPlanResponseDispatch:
         if not tenant_id or not object_id:
             raise PermissionError('authenticated actor context required')
         token = self.verified_token_source.require(approval_id, tenant_id=tenant_id, object_id=object_id)
+        # Verify the trusted token independently, including its actor binding.
+        # An approval ID and a machine-authenticated envelope do not prove the
+        # responding human's identity on their own.
+        verifier = self.service.teams_flow.token_verifier
+        principal = verifier.verify(token)
+        if principal.tenant_id != tenant_id or principal.object_id != object_id:
+            raise PermissionError('Teams actor does not match verified Microsoft principal')
         original_request = self.request_repository.require(approval_id)
         if not getattr(original_request, 'organization_id', None):
             raise PermissionError('stored governed request has no organization')

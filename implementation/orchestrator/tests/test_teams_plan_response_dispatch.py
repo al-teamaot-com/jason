@@ -12,6 +12,8 @@ class Store:
 class Service:
     def __init__(self):
         self.calls = []
+        self.teams_flow = SimpleNamespace(token_verifier=SimpleNamespace(
+            verify=lambda token: SimpleNamespace(tenant_id='tenant', object_id='actor')))
     def handle_stored_response(self, **kwargs):
         self.calls.append(kwargs)
         return 'verified-flow-result'
@@ -55,3 +57,24 @@ def test_missing_response_receipt_fails_closed():
         adapter.handle(approval_id='planapproval-1', decision='approve',
             microsoft_tenant_id='tenant', microsoft_object_id='actor')
     assert service.calls == []
+
+
+def test_mismatched_verified_microsoft_actor_rejected_before_approval():
+    service = Service()
+    adapter = UniversalPlanResponseDispatch(service, Store('proposal'),
+        Store(SimpleNamespace(organization_id='tenant-org')), Store('trusted-token'))
+    with pytest.raises(PermissionError, match='does not match verified Microsoft principal'):
+        adapter.handle(approval_id='planapproval-1', decision='approve',
+            microsoft_tenant_id='tenant', microsoft_object_id='impostor',
+            channel_response_id='receipt')
+    assert not service.calls
+
+def test_mismatched_verified_tenant_rejected_before_approval():
+    service = Service()
+    adapter = UniversalPlanResponseDispatch(service, Store('proposal'),
+        Store(SimpleNamespace(organization_id='tenant-org')), Store('trusted-token'))
+    with pytest.raises(PermissionError, match='does not match verified Microsoft principal'):
+        adapter.handle(approval_id='planapproval-1', decision='approve',
+            microsoft_tenant_id='other-tenant', microsoft_object_id='actor',
+            channel_response_id='receipt')
+    assert not service.calls
