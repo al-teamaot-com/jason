@@ -100,3 +100,12 @@ This only enables a diagnostic transport. It does not mark the worker role
 ready, install software on the endpoint, make shell standing-safe, or authorize
 disruptive actions. Each generic Linux shell job needs exact per-run approval
 and same-job provider output evidence before any subsequent provisioning.
+
+### Concurrent engineering coordination
+
+Reviewed open finance PR #692: it modifies release scripts/installer/controller
+for dormant finance features; this worker change uses current main and does not
+activate finance or replace its isolation. Reviewed recovery PR #1331: its
+separate controller-recovery mechanism is not adopted or authorized by this
+change. Both older PRs must rebase independently and pass protected gates
+before any later integration. Worker release remains serialized and immutable.
