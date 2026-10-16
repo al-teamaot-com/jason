@@ -21,14 +21,15 @@ stages:
     - bash: |
         set -euo pipefail
         python -m pip install --disable-pip-version-check 'cryptography>=45,<47'
-        python -m unittest -v tools.tests.test_azure_devops_engineering_provider tools.tests.test_azure_devops_pr_gates
+        python -m unittest -v tools.tests.test_azure_devops_engineering_provider tools.tests.test_azure_devops_pr_gates tools.tests.test_azure_pr_context
       displayName: Run fail-closed no-network PR gate regressions
     - bash: |
         set -euo pipefail
-        test -n "${SYSTEM_PULLREQUEST_PULLREQUESTID:-}"
         test -n "${SYSTEM_ACCESSTOKEN:-}"
-        python tools/azure_devops_pr_gates.py --pr-id "$SYSTEM_PULLREQUEST_PULLREQUESTID"
+        PR_ID="$(python tools/azure_pr_context.py --explicit "${SYSTEM_PULLREQUEST_PULLREQUESTID:-}" --source-branch "${BUILD_SOURCEBRANCH:-}")"
+        python tools/azure_devops_pr_gates.py --pr-id "$PR_ID"
       displayName: Validate live PR documentation and concurrent changes
       env:
         SYSTEM_PULLREQUEST_PULLREQUESTID: $(System.PullRequest.PullRequestId)
+        BUILD_SOURCEBRANCH: $(Build.SourceBranch)
         SYSTEM_ACCESSTOKEN: $(System.AccessToken)
