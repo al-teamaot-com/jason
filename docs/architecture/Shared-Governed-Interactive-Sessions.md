@@ -124,3 +124,17 @@ wrong technician, paused sessions, changed command, and grant replay. The
 terminal, a real executor, a trusted classification service, a Teams approval
 system, nor an endpoint transport. The separate human authorization and release
 gates remain unchanged.
+
+## SQLite durable event prototype
+
+`implementation/shared_sessions/durable_events.py` adds an isolated SQLite
+append-only prototype with transactional per-session sequence allocation,
+restart-persistent event history, tenant-scoped retrieval and SHA-256 chain
+verification. Its acceptance tests demonstrate restart, tenant separation,
+terminal revocation and tamper detection. This is **not** production audit:
+there is no centralized authenticated append service, immutable external/WORM
+anchor, cryptographic signature, encryption policy, tenant-aware access-control
+boundary, retention, or backup/restore certification. It is not connected to
+a live command executor or Teams approvals. Production integration must select
+an audited shared store and demonstrate concurrency, crash recovery, redaction,
+access isolation, secret handling and replay protection under hostile inputs.
