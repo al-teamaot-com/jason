@@ -12,7 +12,6 @@ import argparse
 import json
 import os
 import re
-import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -67,21 +66,8 @@ class Api:
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         request = urllib.request.Request(url, data=data, headers=headers, method=method)
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            # Never echo response bodies or authorization headers: both can
-            # include request content. GitHub's safe classification headers
-            # distinguish missing scopes from rate/abuse restrictions.
-            accepted = exc.headers.get("X-Accepted-GitHub-Permissions", "unknown")
-            remaining = exc.headers.get("X-RateLimit-Remaining", "unknown")
-            retry_after = exc.headers.get("Retry-After", "none")
-            raise RuntimeError(
-                f"GitHub API denied {method} {urllib.parse.urlsplit(url).path}: "
-                f"status={exc.code} accepted_permissions={accepted[:160]!r} "
-                f"rate_remaining={remaining[:24]!r} retry_after={retry_after[:24]!r}"
-            ) from None
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8"))
 
     def paged(self, path: str) -> list[dict[str, Any]]:
         page = 1
