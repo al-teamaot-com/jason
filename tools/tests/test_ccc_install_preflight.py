@@ -83,7 +83,9 @@ def test_invalid_revision_rejected(tmp_path):
 
 def test_shell_invokes_preflight_before_first_production_write():
     script = (Path(__file__).parents[1] / "install_ccc_scheduler.sh").read_text()
-    preflight = script.index('python3 "$REPO_ROOT/tools/ccc_install_preflight.py"')
+    preflight = script.index('git -C "$REPO_ROOT" show "$SOURCE_REVISION:tools/ccc_install_preflight.py"')
     first_mutation = script.index('mkdir -p "$RELEASE_ROOT"')
     assert preflight < first_mutation
     assert preflight < script.index('ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"')
+    assert 'python3 - --revision "$SOURCE_REVISION"' in script
+    assert 'python3 "$REPO_ROOT/tools/ccc_install_preflight.py"' not in script
