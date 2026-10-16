@@ -985,15 +985,16 @@ def linux_worker_connector():
 
 
 def linux_worker_request(device_uid="claw2", **overrides):
-    return execution_request(
-        allowlist_name="aot-approved-linux-worker",
-        device_class="Server",
-        device_uid=device_uid,
-        component_uid=LINUX_WORKER_UID,
-        component_name=LINUX_WORKER_NAME,
-        variables={"usrInput": "uname -srm"},
-        **overrides,
-    )
+    arguments = {
+        "allowlist_name": "aot-approved-linux-worker",
+        "device_class": "Server",
+        "device_uid": device_uid,
+        "component_uid": LINUX_WORKER_UID,
+        "component_name": LINUX_WORKER_NAME,
+        "variables": {"usrInput": "uname -srm"},
+    }
+    arguments.update(overrides)
+    return execution_request(**arguments)
 
 
 def test_linux_shell_provider_blocks_missing_worker_enrollment(monkeypatch):
