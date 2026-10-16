@@ -8,6 +8,8 @@ fi
 SOURCE_REVISION="$1"
 MATERIAL_REVIEW_FILE="${2:-}"
 REPO_ROOT="/home/al/projects/jason"
+# The operator checkout may be old or dirty; load approval-validation code
+# from the exact immutable source revision being installed, not from HEAD.
 RELEASE_ROOT="/opt/jason/ccc-releases"
 RELEASE_DIR="$RELEASE_ROOT/$SOURCE_REVISION"
 CURRENT_LINK="/opt/jason/ccc-current"
@@ -30,8 +32,8 @@ git -C "$REPO_ROOT" cat-file -e "$SOURCE_REVISION^{commit}"
 # without a new review; changing the checker revision is always material.
 REVIEW_ARGS=()
 if [ -n "$MATERIAL_REVIEW_FILE" ]; then REVIEW_ARGS=(--review-file "$MATERIAL_REVIEW_FILE"); fi
-python3 "$REPO_ROOT/tools/ccc_install_preflight.py" \
-  --revision "$SOURCE_REVISION" --current-link "$CURRENT_LINK" "${REVIEW_ARGS[@]}"
+git -C "$REPO_ROOT" show "$SOURCE_REVISION:tools/ccc_install_preflight.py" | \
+  python3 - --revision "$SOURCE_REVISION" --current-link "$CURRENT_LINK" "${REVIEW_ARGS[@]}"
 mkdir -p "$RELEASE_ROOT" "$CONFIG_DIR" "$BACKUP_DIR" /home/al/Jason-Evidence/CCC /home/al/Jason-Recovery/CCC
 
 if [ ! -d "$RELEASE_DIR" ]; then
