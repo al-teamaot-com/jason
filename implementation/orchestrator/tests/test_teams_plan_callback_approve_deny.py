@@ -9,9 +9,11 @@ from test_teams_plan_approval_service import setup, NOW
 from orchestrator.teams_plan_approval_service import UniversalTeamsPlanApprovalService
 
 class TrustedSource:
-    def require(self, approval_id, *, tenant_id, object_id):
+    def require(self, approval_id, *, tenant_id, object_id, channel_response_id):
         if approval_id != 'planapproval-1' or (tenant_id, object_id) != ('tenant', 'actor'):
             raise PermissionError('actor not recognized')
+        if not channel_response_id.startswith('receipt-'):
+            raise PermissionError('invalid receipt')
         return 'verified-token'
 
 class StoredRequest:

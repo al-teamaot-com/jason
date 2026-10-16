@@ -78,3 +78,19 @@ def test_mismatched_verified_tenant_rejected_before_approval():
             microsoft_tenant_id='other-tenant', microsoft_object_id='actor',
             channel_response_id='receipt')
     assert not service.calls
+
+
+def test_receipt_is_bound_to_trusted_token_lookup():
+    class ReceiptBoundSource:
+        def require(self, approval_id, *, tenant_id, object_id, channel_response_id):
+            if channel_response_id != 'expected-receipt':
+                raise PermissionError('response receipt mismatch')
+            return 'trusted-token'
+    service = Service()
+    adapter = UniversalPlanResponseDispatch(service, Store('proposal'),
+        Store(SimpleNamespace(organization_id='tenant-org')), ReceiptBoundSource())
+    with pytest.raises(PermissionError, match='response receipt mismatch'):
+        adapter.handle(approval_id='planapproval-1', decision='approve',
+            microsoft_tenant_id='tenant', microsoft_object_id='actor',
+            channel_response_id='wrong-receipt')
+    assert service.calls == []

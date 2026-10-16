@@ -24,7 +24,11 @@ class UniversalPlanResponseDispatch:
         object_id = untrusted_payload.get('microsoft_object_id')
         if not tenant_id or not object_id:
             raise PermissionError('authenticated actor context required')
-        token = self.verified_token_source.require(approval_id, tenant_id=tenant_id, object_id=object_id)
+        channel_response_id = untrusted_payload.get('channel_response_id', '')
+        if not channel_response_id:
+            raise PermissionError('authenticated interaction response identifier required')
+        token = self.verified_token_source.require(approval_id, tenant_id=tenant_id,
+            object_id=object_id, channel_response_id=channel_response_id)
         # Verify the trusted token independently, including its actor binding.
         # An approval ID and a machine-authenticated envelope do not prove the
         # responding human's identity on their own.
@@ -35,9 +39,6 @@ class UniversalPlanResponseDispatch:
         original_request = self.request_repository.require(approval_id)
         if not getattr(original_request, 'organization_id', None):
             raise PermissionError('stored governed request has no organization')
-        channel_response_id = untrusted_payload.get('channel_response_id', '')
-        if not channel_response_id:
-            raise PermissionError('authenticated interaction response identifier required')
         now = datetime.now(timezone.utc)
         return self.service.handle_stored_response(
             proposal_repository=self.proposal_repository,
