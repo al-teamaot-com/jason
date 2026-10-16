@@ -259,3 +259,18 @@ def test_hosted_search_400_does_not_bypass_request_validation(tmp_path: Path):
     response = json.loads((tmp_path / 'reasoning' / 'responses' / (request['request_id'] + '.json')).read_text())
     assert response['status'] == 'failed'
     assert fallback.calls == []
+
+
+def test_transport_failure_records_safe_classification(tmp_path: Path):
+    class FailingClient:
+        def complete(self, **kwargs):
+            raise ConnectorTransportError('HTTP transport failed')
+    request_dir = tmp_path / 'reasoning' / 'requests'
+    request_dir.mkdir(parents=True)
+    request = _request('search_plan')
+    (request_dir / f"{request['request_id']}.json").write_text(json.dumps(request))
+    maint = SupportRepairReasoningMaintenance(structured_client=FailingClient(), spool=tmp_path)
+    assert maint.tick()
+    response = json.loads((tmp_path / 'reasoning' / 'responses' / f"{request['request_id']}.json").read_text())
+    assert response['transport_status_code'] is None
+    assert response['transport_class'] == 'network_or_timeout'
