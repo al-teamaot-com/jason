@@ -13,7 +13,9 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.parse
+import time
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -62,8 +64,27 @@ def api_json(url: str, token: str) -> object:
             "User-Agent": "project-jason-change-integration-gate",
         },
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return json.loads(response.read().decode("utf-8"))
+    # GitHub can temporarily throttle busy repositories. Retry *only* genuine
+    # rate-limits; other 403s and persistent rate-limits fail closed.
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            error = exc.read(2048).decode("utf-8", errors="replace")
+            limited = exc.code == 429 or (
+                exc.code == 403
+                and ("rate limit" in error.casefold()
+                     or exc.headers.get("X-RateLimit-Remaining") == "0"
+                     or exc.headers.get("Retry-After") is not None)
+            )
+            if not limited or attempt == 2:
+                raise RuntimeError(
+                    f"GitHub integration validation HTTP {exc.code}: "
+                    f"{error[:240]}"
+                ) from exc
+            time.sleep(5 * (attempt + 1))
+    raise RuntimeError("GitHub integration validation retry exhausted")
 
 
 def paged(url: str, token: str) -> list[dict]:
