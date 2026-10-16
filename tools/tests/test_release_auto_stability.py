@@ -133,6 +133,28 @@ def test_protected_main_advancing_after_gate_cancels_promotion(tmp_path: Path):
         deploy.assert_not_called()
 
 
+def test_remote_failure_during_final_head_recheck_defers_without_cleanup(tmp_path: Path):
+    queue_release(tmp_path, SHA_MAIN, approved=True)
+    with (
+        patch.object(runner.gate, "load_json", return_value={
+            "schedule": {"automatic_promotion_enabled": True}}),
+        patch.object(runner, "production_window_open", return_value=True),
+        patch.object(runner, "consume_owner_approval_requests"),
+        patch.object(runner, "authoritative_auto_promotion_head", side_effect=[
+            SHA_MAIN, runner.ReleaseManagerError("remote now unavailable"),
+        ]),
+        patch.object(runner, "live_runtime", return_value={"revision": SHA_LIVE}),
+        patch.object(runner, "live_production_alignment", return_value={}),
+        patch.object(runner, "production_gate_result", return_value={
+            "allowed": True, "reasons": []}),
+        patch.object(runner, "reconcile_stopped_rollback_retention") as cleanup,
+        patch.object(runner, "deploy_production") as deploy,
+    ):
+        assert runner.promote_eligible(Path("/trusted"), tmp_path) is False
+        cleanup.assert_not_called()
+        deploy.assert_not_called()
+
+
 def test_remote_unavailable_is_audited_deferral_not_a_failed_service(tmp_path: Path, capsys):
     original = queue_release(tmp_path, SHA_MAIN, approved=True)
     with (
