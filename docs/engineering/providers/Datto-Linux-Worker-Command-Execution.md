@@ -133,3 +133,5 @@ production release approval. Do not promote an older release using the new
 runner until the installed independent checker accepts this exact-candidate
 argument and passes certification. Do not modify origin/main or CCC reports
 to impersonate the candidate. Recording a review is not equal to certification.
+
+Integration coordination: #692 and #1331 are independent open finance and recovery workstreams. This change retains their governance boundaries and does not alter either branch.
