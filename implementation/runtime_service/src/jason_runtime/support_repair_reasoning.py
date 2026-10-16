@@ -328,6 +328,11 @@ class SupportRepairReasoningMaintenance:
                     'status': 'failed',
                     'request_id': path.stem,
                     'error_type': type(exc).__name__,
+                    'transport_failure_code': (
+                        str(exc.provider_error_code)[:64]
+                        if isinstance(exc, ConnectorTransportError) and exc.provider_error_code
+                        else None
+                    ),
                     'error': str(exc)[:800],
                     'attempts': prior_attempts + 1,
                     'completed_at': _now(),
