@@ -133,10 +133,17 @@ No blind deployment retries.
 
 The production timer invokes `promote-eligible` every five minutes, 24x7 but returns without consuming approvals, selecting candidates or promoting any release while `schedule.automatic_promotion_enabled` is false. The timer remains installed to avoid introducing desired-state drift.
 
-It:
-- scans durable release records;
-- selects at most one Production Eligible record;
-- performs no action when none is eligible.
+When the approved automatic-promotion policy is enabled, each scheduler tick now performs a **fresh, exact** lookup of protected remote `refs/heads/main` before considering records. It:
+
+- preserves all old exact-SHA approvals and release records, but **never selects a superseded SHA** merely because its owner approval is still recorded;
+- evaluates only a `production_eligible` record whose immutable candidate SHA equals the current protected main tip, then still requires its **own exact-SHA Owner approval** and all other production gates;
+- rechecks the protected main tip immediately before any rollback-container retention operation or production deployment; if protected main advances, it defers without mutation;
+- reports remote-source unavailability as an explicit `RELEASE_MANAGER_AUTO_DEFERRED=authoritative_main_unavailable` observation rather than making the systemd service fail or claiming approval;
+- selects at most one eligible candidate, preserving the release timer even when no matching authorized candidate exists.
+
+**Emergency stability hold:** When the installed controller is still unsafe, the bounded `auto-promotion-incident-hold` marker can prevent unattended service execution through its installed systemd `ConditionPathExists` gate while leaving the required timer active. A hold is **not** equivalent to a repaired controller and must not be removed until exact reviewed source, installed controller identity, owner approval, health and drift readbacks pass. Explicit release approvals are never fabricated or transferred.
+
+Release worktrees use distinct nonce-qualified exact-SHA paths and canonical Git worktree registration/removal rather than recursively deleting a previously existing SHA-named checkout. Git checkout failures include bounded diagnostic output and occur before the durable production state transition.
 
 ## 12. Aging / Stale Condition
 

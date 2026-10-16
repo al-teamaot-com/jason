@@ -527,11 +527,13 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 "state": "production_eligible",
                 "created_at": "2026-10-07T17:00:00+00:00",
                 "rollback_sha": SHA_B,
+                "release_candidate": {"candidate_sha": SHA_A},
             }
             runner.atomic_json(records / f"{payload['release_id']}.json", payload)
             with (
                 patch.object(runner.gate, "load_json", return_value={"schedule": {"automatic_promotion_enabled": True}}),
                 patch.object(runner, "production_window_open", return_value=True),
+                patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
                 patch.object(runner, "live_runtime", return_value={"revision": SHA_B}),
                 patch.object(runner, "live_production_alignment", return_value={}),
                 patch.object(
@@ -558,6 +560,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                     "state": "production_eligible",
                     "created_at": f"2026-10-02T0{index}:00:00+00:00",
                     "rollback_sha": SHA_B,
+                    "release_candidate": {"candidate_sha": sha},
                 }
                 runner.atomic_json(records / f"{payload['release_id']}.json", payload)
 
@@ -569,6 +572,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             with (
                 patch.object(runner.gate, "load_json", return_value={"schedule": {"automatic_promotion_enabled": True}}),
                 patch.object(runner, "production_window_open", return_value=True),
+                patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
                 patch.object(runner, "live_runtime", return_value={"revision": SHA_B}),
                 patch.object(runner, "live_production_alignment", return_value={}),
                 patch.object(
@@ -600,6 +604,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             with (
                 patch.object(runner.gate, "load_json", return_value={"schedule": {"automatic_promotion_enabled": True}}),
                 patch.object(runner, "production_window_open", return_value=True),
+                patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
                 patch.object(runner, "live_runtime", return_value={"revision": "c" * 40}),
                 patch.object(runner, "live_production_alignment", return_value={}),
                 patch.object(runner, "deploy_production") as deploy,
@@ -668,7 +673,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             self.assertTrue(create.call_args.kwargs["owner_approved"])
             preprod.assert_called_once()
 
-    def test_promote_eligible_skips_unapproved_protected_core_and_continues(self):
+    def test_promote_eligible_skips_superseded_and_selects_only_main(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             records = root / "records"
@@ -681,6 +686,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                     "state": "production_eligible",
                     "created_at": f"2026-10-02T0{index}:00:00+00:00",
                     "rollback_sha": SHA_B,
+                    "release_candidate": {"candidate_sha": sha},
                 }
                 runner.atomic_json(records / f"{payload['release_id']}.json", payload)
 
@@ -700,6 +706,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             with (
                 patch.object(runner.gate, "load_json", return_value={"schedule": {"automatic_promotion_enabled": True}}),
                 patch.object(runner, "production_window_open", return_value=True),
+                patch.object(runner, "authoritative_auto_promotion_head", return_value=second_sha),
                 patch.object(runner, "live_runtime", return_value={"revision": SHA_B}),
                 patch.object(runner, "live_production_alignment", return_value={}),
                 patch.object(runner, "production_gate_result", side_effect=gate_result),
@@ -1766,11 +1773,12 @@ def test_nonprotected_release_waits_for_owner_without_failing_systemd(tmp_path):
     from unittest.mock import patch
     records = tmp_path / 'records';records.mkdir()
     record = {'release_id': runner.record_id(SHA_A), 'state': 'production_eligible',
-              'rollback_sha': SHA_B, 'owner_approval': {'approved': False}}
+              'rollback_sha': SHA_B, 'release_candidate': {'candidate_sha': SHA_A}, 'owner_approval': {'approved': False}}
     runner.atomic_json(records / (record['release_id'] + '.json'), record)
     with (patch.object(runner.gate, 'load_json', return_value={'schedule': {'automatic_promotion_enabled': True}}),
           patch.object(runner, 'consume_owner_approval_requests'),
           patch.object(runner, 'production_window_open', return_value=True),
+          patch.object(runner, 'authoritative_auto_promotion_head', return_value=SHA_A),
           patch.object(runner, 'live_runtime', return_value={'revision': SHA_B}),
           patch.object(runner, 'live_production_alignment', return_value={}),
           patch.object(runner, 'reconcile_stopped_rollback_retention'),
@@ -1790,11 +1798,12 @@ def test_unapproved_release_with_other_denials_fails_closed(tmp_path):
     import pytest
     records = tmp_path / 'records';records.mkdir()
     record = {'release_id': runner.record_id(SHA_A), 'state': 'production_eligible',
-              'rollback_sha': SHA_B}
+              'rollback_sha': SHA_B, 'release_candidate': {'candidate_sha': SHA_A}}
     runner.atomic_json(records / (record['release_id'] + '.json'), record)
     with (patch.object(runner.gate, 'load_json', return_value={'schedule': {'automatic_promotion_enabled': True}}),
           patch.object(runner, 'consume_owner_approval_requests'),
           patch.object(runner, 'production_window_open', return_value=True),
+          patch.object(runner, 'authoritative_auto_promotion_head', return_value=SHA_A),
           patch.object(runner, 'live_runtime', return_value={'revision': SHA_B}),
           patch.object(runner, 'live_production_alignment', return_value={}),
           patch.object(runner, 'reconcile_stopped_rollback_retention'),
