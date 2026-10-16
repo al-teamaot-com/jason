@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -62,8 +63,18 @@ def api_json(url: str, token: str) -> object:
             "User-Agent": "project-jason-change-integration-gate",
         },
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        accepted = exc.headers.get("X-Accepted-GitHub-Permissions", "unknown")
+        remaining = exc.headers.get("X-RateLimit-Remaining", "unknown")
+        retry_after = exc.headers.get("Retry-After", "none")
+        raise RuntimeError(
+            f"GitHub API denied GET {urllib.parse.urlsplit(url).path}: "
+            f"status={exc.code} accepted_permissions={accepted[:160]!r} "
+            f"rate_remaining={remaining[:24]!r} retry_after={retry_after[:24]!r}"
+        ) from None
 
 
 def paged(url: str, token: str) -> list[dict]:
