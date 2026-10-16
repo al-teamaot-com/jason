@@ -33,6 +33,7 @@ ACCOUNTING_CUSTOMER_SEARCH = "accounting.customer.search"
 ACCOUNTING_INVOICE_SEARCH = "accounting.invoice.search"
 ACCOUNTING_BILL_SEARCH = "accounting.bill.search"
 ACCOUNTING_BILL_PAYMENT_SEARCH = "accounting.billpayment.search"
+ACCOUNTING_BILL_PAYMENT_READ = "accounting.billpayment.read"
 ACCOUNTING_PROFIT_LOSS_READ = "accounting.report.profitloss.read"
 ACCOUNTING_BALANCE_SHEET_READ = "accounting.report.balancesheet.read"
 
@@ -45,6 +46,7 @@ QUICKBOOKS_CAPABILITIES = frozenset(
         ACCOUNTING_INVOICE_SEARCH,
         ACCOUNTING_BILL_SEARCH,
         ACCOUNTING_BILL_PAYMENT_SEARCH,
+        ACCOUNTING_BILL_PAYMENT_READ,
         ACCOUNTING_PROFIT_LOSS_READ,
         ACCOUNTING_BALANCE_SHEET_READ,
     }
@@ -200,6 +202,16 @@ def quickbooks_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             operation="search",
             selector_keys="start_position,max_results",
             fact_hints="bill payment billpayment check bank vendor transaction account payable",
+        ),
+        _read_capability(
+            now=now,
+            name=ACCOUNTING_BILL_PAYMENT_READ,
+            display_name="Read Accounting Bill Payment",
+            purpose="Read an exact vendor bill payment by the linked QuickBooks payment ID in the OAuth-authorized company.",
+            resource_types="accounting_bill_payment",
+            operation="read",
+            selector_keys="billpayment_id",
+            fact_hints="billpayment linked bill payment account check bank account reference",
         ),
         _read_capability(
             now=now,

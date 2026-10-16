@@ -33,6 +33,7 @@ QUICKBOOKS_CUSTOMER_SEARCH = "quickbooks.customer.search"
 QUICKBOOKS_INVOICE_SEARCH = "quickbooks.invoice.search"
 QUICKBOOKS_BILL_SEARCH = "quickbooks.bill.search"
 QUICKBOOKS_BILL_PAYMENT_SEARCH = "quickbooks.billpayment.search"
+QUICKBOOKS_BILL_PAYMENT_READ = "quickbooks.billpayment.read"
 QUICKBOOKS_PROFIT_LOSS_READ = "quickbooks.report.profit_loss.read"
 QUICKBOOKS_BALANCE_SHEET_READ = "quickbooks.report.balance_sheet.read"
 
@@ -44,6 +45,7 @@ _CAPABILITY_OPERATIONS = {
     QUICKBOOKS_INVOICE_SEARCH: ("query", "Invoice"),
     QUICKBOOKS_BILL_SEARCH: ("query", "Bill"),
     QUICKBOOKS_BILL_PAYMENT_SEARCH: ("query", "BillPayment"),
+    QUICKBOOKS_BILL_PAYMENT_READ: ("entity_read", "billpayment"),
     QUICKBOOKS_PROFIT_LOSS_READ: ("report", "ProfitAndLoss"),
     QUICKBOOKS_BALANCE_SHEET_READ: ("report", "BalanceSheet"),
 }
@@ -195,6 +197,8 @@ class QuickBooksConnector:
         allowed = (
             frozenset()
             if operation == "company"
+            else frozenset({"billpayment_id"})
+            if operation == "entity_read"
             else _QUERY_ARGUMENTS
             if operation == "query"
             else _REPORT_ARGUMENTS
@@ -205,6 +209,14 @@ class QuickBooksConnector:
                 "QuickBooks request contains unsupported argument(s): "
                 + ", ".join(unexpected)
             )
+
+        if operation == "entity_read":
+            payment_id = arguments.get("billpayment_id")
+            if not isinstance(payment_id, (str, int)) or isinstance(payment_id, bool):
+                raise ConnectorConfigurationError("QuickBooks billpayment_id must be a positive numeric ID.")
+            identifier = str(payment_id)
+            if not identifier.isascii() or not identifier.isdecimal() or len(identifier) > 20 or int(identifier) < 1:
+                raise ConnectorConfigurationError("QuickBooks billpayment_id must be a positive numeric ID.")
 
         if operation == "query":
             try:
@@ -241,6 +253,9 @@ class QuickBooksConnector:
         company_base = f"{base_url}/v3/company/{quote(realm_id, safe='')}"
         if operation == "company":
             return f"{company_base}/companyinfo/{quote(realm_id, safe='')}", None
+        if operation == "entity_read" and entity == "billpayment":
+            payment_id = quote(str(arguments["billpayment_id"]), safe="")
+            return f"{company_base}/billpayment/{payment_id}", None
         if operation == "query" and entity is not None:
             start = int(arguments.get("start_position", 1))
             maximum = int(arguments.get("max_results", 100))
