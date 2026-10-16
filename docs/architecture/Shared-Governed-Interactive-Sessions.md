@@ -55,3 +55,12 @@ has no execute/connect method. Registry entries do not prove support, approve a
 transport, or grant any execution authority. Live adapter implementations,
 server-side capability grants, transport-specific command classifiers, target
 identity verification and integration tests remain outside this prototype.
+
+## Non-executing lifecycle controller
+
+`implementation/shared_sessions/lifecycle.py` is an isolated lifecycle test
+fixture for session open, pause, revoke and close. It rejects cross-tenant and
+wrong-technician access and disallows reopening terminal sessions. There is
+no resume operation until actual reauthentication, identity verification and
+new server-side grants exist. This in-memory controller is not a production
+session service, and does not enforce cancellation at any external transport.
