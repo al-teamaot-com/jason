@@ -839,6 +839,69 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         )
         self.assertNotIn("/home/al/projects/jason", service)
 
+    def test_bounded_preprod_filters_only_event_history(self):
+        names = (
+            "orchestration-events.sqlite3\n"
+            "orchestration-events.sqlite3-wal\n"
+            "orchestration-events.sqlite3-shm\n"
+            "authority.sqlite3\n"
+            "governed-execution.sqlite3\n"
+            "support-repair\n"
+        )
+        self.assertEqual(
+            runner.bounded_preprod_openclaw_entries(names),
+            ["authority.sqlite3", "governed-execution.sqlite3", "support-repair"],
+        )
+
+    def test_bounded_preprod_refuses_unsafe_or_oversized_listing(self):
+        for value in ("", "../escape\n", "a/b\n", "dup\ndup\n", "entry\n" * 257):
+            with self.subTest(value=value[:25]):
+                with self.assertRaises(runner.ReleaseManagerError):
+                    runner.bounded_preprod_openclaw_entries(value)
+
+    def test_bounded_preprod_rejects_low_disk_before_provider_io(self):
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "clone"
+            from unittest.mock import Mock
+            with (
+                patch.object(runner.shutil, "disk_usage", return_value=Mock(free=5 * 1024**3)),
+                patch.object(runner, "run") as command,
+            ):
+                with self.assertRaisesRegex(runner.ReleaseManagerError, "disk headroom"):
+                    runner.copy_state_from_live_container(
+                        "/var/lib/jason/openclaw", target,
+                    )
+            command.assert_not_called()
+
+    def test_bounded_preprod_copies_authority_but_not_large_event_journal(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "clone"
+            commands = []
+            def record(command):
+                commands.append(command)
+                if command[:3] == ["docker", "exec", "jason-runtime"]:
+                    return "orchestration-events.sqlite3\nauthority.sqlite3\nsupport-repair"
+                return ""
+            with (
+                patch.object(runner.shutil, "disk_usage", return_value=Mock(free=12 * 1024**3)),
+                patch.object(runner, "run", side_effect=record),
+            ):
+                runner.copy_state_from_live_container(
+                    "/var/lib/jason/openclaw", target,
+                )
+            copied = [str(v[2]) for v in commands if v[:2] == ["docker", "cp"]]
+            self.assertEqual(len(copied), 2)
+            self.assertTrue(any(name.endswith("/authority.sqlite3") for name in copied))
+            self.assertTrue(any(name.endswith("/support-repair") for name in copied))
+            self.assertFalse(any("orchestration-events" in name for name in copied))
+
+    def test_release_manager_defaults_to_managed_source_not_developer_checkout(self):
+        self.assertEqual(
+            runner.DEFAULT_REPO,
+            Path("/home/al/.local/lib/jason/engineering-worker-source"),
+        )
+
     def test_preprod_state_clone_uses_live_container_not_host_cp(self):
         source = (ROOT / "tools" / "release_manager_host_runner.py").read_text(
             encoding="utf-8"
@@ -876,6 +939,44 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(runner.ReleaseManagerError, "production alignment mismatch"):
                 runner.live_production_alignment(SHA_A)
+
+    def test_preprod_partial_clone_failure_cleans_only_isolated_scratch(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            state_root = root / "openclaw" / "release-manager"
+            state_root.mkdir(parents=True)
+            live_source = root / "live-openclaw"
+            live_source.mkdir()
+            release_id = "release-" + "a" * 16
+            live = {
+                "inspect": {
+                    "Config": {"Env": [], "Labels": {}},
+                    "HostConfig": {"NetworkMode": "bridge", "Tmpfs": {}},
+                    "Mounts": [{
+                        "Type": "bind",
+                        "Source": str(live_source),
+                        "Destination": "/var/lib/jason/openclaw",
+                        "RW": True,
+                    }],
+                    "NetworkSettings": {"Networks": {}},
+                },
+            }
+            with (
+                patch.object(runner.subprocess, "run"),
+                patch.object(
+                    runner, "copy_state_from_live_container",
+                    side_effect=OSError("simulated test copy failure"),
+                ),
+            ):
+                with self.assertRaisesRegex(OSError, "simulated test copy failure"):
+                    runner.create_preprod_container(
+                        live=live, candidate_image="jason-runtime:test",
+                        candidate_sha=SHA_A, state_root=state_root,
+                        release_id=release_id,
+                    )
+            scratch = runner.preprod_scratch_path(state_root, release_id)
+            self.assertFalse(scratch.exists())
+            self.assertTrue(live_source.is_dir())
 
     def test_preprod_scratch_is_outside_live_openclaw_tree(self):
         state_root = Path("/var/lib/jason/openclaw/release-manager")
