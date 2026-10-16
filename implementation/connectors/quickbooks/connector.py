@@ -32,6 +32,7 @@ QUICKBOOKS_VENDOR_SEARCH = "quickbooks.vendor.search"
 QUICKBOOKS_CUSTOMER_SEARCH = "quickbooks.customer.search"
 QUICKBOOKS_INVOICE_SEARCH = "quickbooks.invoice.search"
 QUICKBOOKS_BILL_SEARCH = "quickbooks.bill.search"
+QUICKBOOKS_BILL_PAYMENT_SEARCH = "quickbooks.billpayment.search"
 QUICKBOOKS_PROFIT_LOSS_READ = "quickbooks.report.profit_loss.read"
 QUICKBOOKS_BALANCE_SHEET_READ = "quickbooks.report.balance_sheet.read"
 
@@ -42,6 +43,7 @@ _CAPABILITY_OPERATIONS = {
     QUICKBOOKS_CUSTOMER_SEARCH: ("query", "Customer"),
     QUICKBOOKS_INVOICE_SEARCH: ("query", "Invoice"),
     QUICKBOOKS_BILL_SEARCH: ("query", "Bill"),
+    QUICKBOOKS_BILL_PAYMENT_SEARCH: ("query", "BillPayment"),
     QUICKBOOKS_PROFIT_LOSS_READ: ("report", "ProfitAndLoss"),
     QUICKBOOKS_BALANCE_SHEET_READ: ("report", "BalanceSheet"),
 }
