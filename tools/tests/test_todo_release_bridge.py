@@ -221,3 +221,55 @@ def test_development_records_by_issue_reads_durable_worker_state(tmp_path):
     )
     records = module.development_records_by_issue(tmp_path)
     assert records[42]['phase'] == 'blocked'
+
+
+def test_merged_canonical_closure_recovers_stale_blocked_ledger(tmp_path):
+    rid = module.release_id(SHA_B)
+    path = tmp_path / 'records' / f'{rid}.json'
+    path.parent.mkdir()
+    path.write_text(json.dumps({
+        'release_id': rid, 'state': 'closed',
+        'release_candidate': {'candidate_sha': SHA_B},
+        'production': {'live_sha': SHA_B, 'verified_at': '2026-10-16T08:20:00Z',
+                       'alignment_verified': True},
+    }))
+    item = {'issue_number': 950, 'closure_pr': 1487, 'release_id': rid,
+            'merge_sha': SHA, 'phase': 'development_blocked',
+            'reason': 'stale duplicate worker HTTP failure'}
+    closure = {'number': 1487, 'mergedAt': '2026-10-16T08:29:19Z',
+               'body': f'- TODO closure: TODO-CONN-005\n- Development issue: #950\n- Release ID: {rid}\n- Production SHA: {SHA_B}'}
+    issue = {'number': 950, 'state': 'CLOSED', 'body': '- TODO item: TODO-CONN-005'}
+    with patch.object(module, 'gh_json', side_effect=[closure, issue]), \
+         patch.object(module, 'commit_is_ancestor', return_value=True):
+        module.reconcile_verified_closed_issues(
+            tmp_path, tmp_path, {'TODO-CONN-005': item})
+    assert item['phase'] == 'complete'
+    assert item['verified_operational_evidence']['canonical_issue'] == 950
+
+
+def test_unmerged_or_wrong_issue_never_closes_ledger(tmp_path):
+    rid = module.release_id(SHA)
+    path = tmp_path / 'records' / f'{rid}.json'
+    path.parent.mkdir()
+    path.write_text(json.dumps({
+        'release_id': rid, 'state': 'closed',
+        'release_candidate': {'candidate_sha': SHA},
+        'production': {'live_sha': SHA, 'verified_at': 'now', 'alignment_verified': True},
+    }))
+    base = {'issue_number': 950, 'closure_pr': 1487, 'release_id': rid,
+            'merge_sha': SHA, 'phase': 'development_blocked'}
+    text = f'- TODO closure: TODO-CONN-005\n- Development issue: #950\n- Release ID: {rid}\n- Production SHA: {SHA}'
+    for closure, issue in [
+        ({'number': 1487, 'mergedAt': None, 'body': text}, None),
+        ({'number': 1487, 'mergedAt': 'today', 'body': text},
+         {'number': 1444, 'state': 'CLOSED', 'body': '- TODO item: TODO-CONN-005'}),
+        ({'number': 1487, 'mergedAt': 'today', 'body': text},
+         {'number': 950, 'state': 'OPEN', 'body': '- TODO item: TODO-CONN-005'}),
+        ({'number': 1487, 'mergedAt': 'today', 'body': text.replace('950', '1444')}, None),
+    ]:
+        item = dict(base)
+        evidence = [closure] if issue is None else [closure, issue]
+        with patch.object(module, 'gh_json', side_effect=evidence):
+            module.reconcile_verified_closed_issues(
+                tmp_path, tmp_path, {'TODO-CONN-005': item})
+        assert item['phase'] == 'development_blocked'
