@@ -64,3 +64,37 @@ wrong-technician access and disallows reopening terminal sessions. There is
 no resume operation until actual reauthentication, identity verification and
 new server-side grants exist. This in-memory controller is not a production
 session service, and does not enforce cancellation at any external transport.
+
+## Vendor-supported transport feasibility (2026-10-16)
+
+Official Datto Web Remote documentation says technician browser PowerShell
+uses WebRTC and a Windows Console session running as SYSTEM. PowerShell support
+requires Windows 10 1809+ or Windows Server 2019+; Web Remote's private terminal
+runs Windows PowerShell at `C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`,
+not PowerShell 7 (`pwsh`). Its browser connection ends on tab closure, and a
+reconnect window applies to brief interruptions. No documented third-party
+API for injecting commands into that live WebRTC browser PowerShell channel
+was established during this investigation. Therefore **Datto Web Remote is
+NOT a demonstrated programmable adapter**. Never scrape browser auth,
+intercept WebRTC private messages or silently impersonate a technician.
+
+Official Datto RMM APIv2 documentation does describe OAuth-secured component
+Quick Jobs with component-level permissions, plus job status retrieval. This
+is a **separate, non-interactive job execution model**, not a live Web Remote
+PowerShell session. Datto's integration whitepaper likewise recommends
+noninteractive components for scripts. An approved governed job adapter may be
+a pragmatic read-only pilot, but must not be mislabeled Web Remote live input,
+and must preserve existing owner/technician approval, target verification,
+execution, recheck and audit boundaries.
+
+Sources (vendor):
+- https://rmm.datto.com/help/en/Content/3NEWUI/WebRemote/WebRemote.htm
+- https://rmm.datto.com/help/en/Content/2SETUP/APIv2.htm
+- https://rmm.datto.com/help/Integrations/DattoRMMIntegrationsWhitepaper.pdf
+
+Decision gate: Validate a supported vendor-authorized Web Remote terminal API
+or design an explicitly approved endpoint companion/proxy for interactive
+PowerShell; keep interactive transport disabled until one option has passed
+technical, vendor-terms, authorization and security review. Keep the approved
+component/job path separate from live streaming. No production approval is
+implied by this feasibility note.
