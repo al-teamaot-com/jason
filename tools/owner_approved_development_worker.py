@@ -134,6 +134,92 @@ def owner_approved_issues(repo: Path) -> list[dict[str, Any]]:
         })
     eligible.sort(key=lambda item: item['issue_number'])
     return eligible
+
+def apply_owner_development_focus(state: Mapping[str, Any], admitted: list[dict[str, Any]],
+                                  policy: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Restrict new discretionary work without granting authority or killing work.
+
+    Critical support uses its existing separate priority lane. Already-active
+    engineering is allowed to reach its safe checkpoint rather than interrupted.
+    """
+    if policy.get('enabled') is not True:
+        return admitted
+    if policy.get('schema_version') != '1.0':
+        raise ValueError('invalid development focus schema')
+    numbers=policy.get('issue_numbers')
+    if (not isinstance(numbers,list) or not numbers
+            or any(type(n) is not int or n<1 for n in numbers)):
+        raise ValueError('development focus requires explicit issue numbers')
+    records=state.get('items') or {}
+    allowed=[]
+    for item in admitted:
+        record=records.get(item['id']) or {}
+        continuing=record.get('phase') in (ACTIVE_PHASES-{'identified'}) | {'pr_validating','pr_monitoring'}
+        if item['issue_number'] in numbers or continuing:
+            allowed.append(item)
+    return allowed
+
+
+def reconcile_owner_selected_pull_requests(repo: Path, state: dict[str, Any],
+                                           admitted: list[dict[str, Any]]) -> list[str]:
+    """Adopt a PR explicitly selected in an already Owner-authorized issue.
+
+    This replaces a stale reasoning-stage blocker with actual source/CI evidence.
+    It does not reset retry counters, mutate source, approve or deploy anything.
+    The worker monitors draft/CI state; independent integration remains required.
+    """
+    selected=re.compile(r'(?im)^\s*-\s*Development pull request\s*:\s*#([1-9][0-9]*)\s*$')
+    records=state.setdefault('items',{})
+    slug=None
+    monitored=[]
+    for item in admitted:
+        matches=selected.findall(str(item.get('body') or ''))
+        if not matches:
+            continue
+        if len(set(matches))!=1:
+            raise support.WorkerError('ambiguous Owner-selected development PR')
+        number=int(matches[0])
+        slug=slug or repository_name(repo)
+        pr=support.gh_json(['api',f'repos/{slug}/pulls/{number}'],cwd=repo) or {}
+        head=pr.get('head') or {};base=pr.get('base') or {}
+        if (pr.get('number')!=number or (head.get('repo') or {}).get('full_name')!=slug
+                or (base.get('repo') or {}).get('full_name')!=slug or base.get('ref')!='main'
+                or not re.fullmatch(r'[0-9a-f]{40}',str(head.get('sha') or ''))):
+            raise support.WorkerError('Owner-selected PR does not match governed repository boundary')
+        record=records.setdefault(item['id'],{'attempts':0,'issue_number':item['issue_number'],
+            'approval_source':item['approval_source'],'approved_by':item['approved_by'],
+            'worker':'jason-owner-approved-development-worker','claimed_at':now()})
+        if record.get('phase') in ACTIVE_PHASES and record.get('owner_selected_pr')!=number:
+            # Never seize a live editor's worktree mid-operation.
+            continue
+        if not record.get('owner_selected_pr'):
+            record['prior_stage_evidence']={k:record[k] for k in ('phase','reason','reasoning_request_id',
+                'recovery_diagnostic_request_id','self_recovery_attempts','attempts') if k in record}
+        previous_sha=record.get('source_sha')
+        record.update({'owner_selected_pr':number,'pr_number':number,'branch':str(head.get('ref') or ''),
+            'source_sha':head['sha'],'last_observed_at':now(),'updated_at':now(),
+            'source_owner':'explicit_owner_selected_pull_request','next_action':'observe_pr_validation'})
+        if previous_sha!=head['sha']:
+            record['last_meaningful_progress_at']=now()
+        if pr.get('merged_at'):
+            record.update(phase='complete',reason='Owner-selected PR merged; production acceptance remains separate.',
+                merge_sha=pr.get('merge_commit_sha'),next_action='governed_release_preparation')
+        elif pr.get('state')!='open':
+            record.update(phase='blocked',reason='Owner-selected PR closed without merge.',next_action='owner_selected_pr_replacement')
+        elif pr.get('draft'):
+            record.update(phase='pr_monitoring',reason='Owner-selected implementation is a draft; observing source and tests, not running duplicate reasoning.')
+        else:
+            fresh=support.pr_view(repo,number)
+            check_phase,detail=support.check_state(fresh)
+            if check_phase=='passed':
+                record.update(phase='pr_ready',checks='passed',reason='Owner-selected exact source passed checks; awaiting governed integration.',next_action='governed_integration')
+            else:
+                record.update(phase='pr_monitoring',checks=check_phase,
+                    reason='Owner-selected source validation: '+', '.join(detail),
+                    next_action='repair_selected_pr_ci' if check_phase=='failed' else 'observe_pr_validation')
+        monitored.append(item['id'])
+    return monitored
+
 def active_support_count(spool: Path) -> int:
     state = support.load_state(spool / 'state.json')
     items = state.get('items') if isinstance(state.get('items'), Mapping) else {}
@@ -1248,8 +1334,14 @@ def main() -> int:
     eligible_ids = {item['id'] for item in eligible}
     reconcile_issue_dependency_holds(state, eligible, repo)
     admitted = [item for item in eligible if not issue_has_closed_dependency_gate(item)]
+    focus_path=repo/'config'/'owner-approved-development-focus.json'
+    focus=json.loads(focus_path.read_text()) if focus_path.exists() else {'enabled':False}
+    admitted=apply_owner_development_focus(state,admitted,focus)
     admitted_ids = {item['id'] for item in admitted}
     reconcile_removed_approval(state, eligible_ids)
+    monitored_ids=set(reconcile_owner_selected_pull_requests(repo,state,admitted))
+    state['focus']={'enabled':bool(focus.get('enabled')),'issue_numbers':focus.get('issue_numbers',[]),
+                    'observed_at':now(),'owner_selected_pr_items':sorted(monitored_ids)}
     readmit_verified_ccc_owner_review(state, admitted_ids)
     recycle_self_recoverable_blockers(state, admitted_ids)
     queue_exhausted_recovery_diagnostics(state, admitted, spool)
@@ -1277,7 +1369,8 @@ def main() -> int:
         0,
         max(1, int(args.max_active)) - support_active - development_active,
     )
-    selected = select_items(state, admitted, capacity=capacity)
+    selected = [item_id for item_id in select_items(state, admitted, capacity=capacity)
+                if item_id not in monitored_ids]
     by_id = {item['id']: item for item in admitted}
     try:
         prs = support.open_prs(repo)

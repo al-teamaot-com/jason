@@ -124,6 +124,8 @@ jobs:
         run: python -m compileall -q implementation/runtime_service/src implementation/runtime_service/tests
       - name: Test governed runtime composition
         run: python -m pytest implementation/runtime_service/tests -q
+      - name: Test Owner-selected engineering continuity
+        run: PYTHONPATH=tools python -m pytest tools/tests/test_owner_development_focus.py -q
 
   reflect-001:
     runs-on: ubuntu-latest
