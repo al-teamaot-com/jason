@@ -178,3 +178,21 @@ shared nonce/sequence store, backpressure, cancellation, telemetry and external
 security testing. The approved Claw2-PC Datto identity was observed through
 governed read as `13eda165-08e0-ec79-026a-985b37e2eb9e` (site Atlantic Office
 Machines; online at inspection); enrollment must reverify it before use.
+
+## Claw2 read-only PowerShell local probe engine (unactivated)
+
+`command_catalog.py` contains a finite, parameterless list of reviewed
+PowerShell diagnostic commands, digest-bound to proposed action IDs.
+`companion_local_probe.py` provides an **opt-in, local-only engineering test
+engine** with a source-level Claw2-PC hostname and Datto UID constraint,
+explicit in-process grant verifier, fixed `/usr/bin/pwsh` executable, no shell
+interpolation, timeout and bounded captured output. No default execution,
+command-line entrypoint, network listener, installer or production connection
+exists. Tests use a mocked subprocess and must **not** be cited as proof that
+PowerShell runs on Claw2-PC. This initial probe is not a general interactive
+terminal and must never run on a production device. Before even a controlled
+live diagnostic: independently confirm the bound device UID/OS, verify `pwsh`
+is installed, enroll a reviewed transport, use server-authenticated grants
+backed by durable replay state, prove audit/output protections and apply the
+normal exact per-run Datto component approval. Do not promote this local test
+fixture as a production companion.
