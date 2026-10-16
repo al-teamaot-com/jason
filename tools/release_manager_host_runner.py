@@ -997,12 +997,30 @@ def image_id(image: str) -> str:
 
 
 def worktree(repo: Path, state_root: Path, candidate_sha: str) -> Path:
+    """Create a fresh, exact-SHA release worktree without deleting old ones.
+
+    A previous deployment attempt may leave Git worktree registration behind.
+    Reusing the same SHA-named path can then produce git exit 128 even when
+    its directory was removed. Never blindly rmtree an existing checkout:
+    every attempt receives a fresh, scoped worktree identity and Git owns
+    its cleanup through remove_worktree().
+    """
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
     root = state_root / "worktrees"
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    path = root / candidate_sha
-    if path.exists():
-        shutil.rmtree(path)
-    run(["git", "worktree", "add", "--detach", str(path), candidate_sha], cwd=repo)
+    if root.is_symlink() or not root.is_dir():
+        raise ReleaseManagerError("release worktree root is not a real directory")
+    path = root / f"{candidate_sha}-{uuid4().hex[:12]}"
+    if path.exists() or path.is_symlink():
+        raise ReleaseManagerError("release worktree attempt path already exists")
+    try:
+        run(["git", "worktree", "add", "--detach", str(path), candidate_sha], cwd=repo)
+    except subprocess.CalledProcessError as exc:
+        detail = (str(exc.stdout or "")[-600:]).strip()
+        raise ReleaseManagerError(
+            "immutable release worktree materialization failed before production mutation: "
+            + (detail or f"git exit {exc.returncode}")
+        ) from exc
     return path
 
 
@@ -2586,6 +2604,26 @@ def reconcile_stopped_rollback_retention(*, keep: int = 16) -> int:
     return len(eligible[:keep])
 
 
+def authoritative_auto_promotion_head(repo: Path) -> str:
+    """Read the exact protected remote-main tip, never a stale local checkout."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", "--exit-code", "origin", "refs/heads/main"],
+            cwd=repo, text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, check=False, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ReleaseManagerError("protected main cannot be verified for automatic promotion") from exc
+    if result.returncode != 0:
+        raise ReleaseManagerError("protected main cannot be verified for automatic promotion")
+    lines = [line.split() for line in result.stdout.splitlines() if line.strip()]
+    if (len(lines) != 1 or len(lines[0]) != 2
+            or lines[0][1] != "refs/heads/main"
+            or not SHA.fullmatch(lines[0][0])):
+        raise ReleaseManagerError("protected main returned an invalid exact revision")
+    return lines[0][0]
+
+
 def promote_eligible(repo: Path, state_root: Path) -> bool:
     # Keep the required five-minute timer active, but do not allow it to
     # execute a production promotion while Owner has selected manual mode.
@@ -2599,9 +2637,27 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
     records = state_root / "records"
     if not records.exists():
         return False
+    try:
+        main_sha = authoritative_auto_promotion_head(repo)
+    except ReleaseManagerError:
+        # Network failure is an explicit *deferral*, not a production-service
+        # outage. No approval or queued release state is changed.
+        print("RELEASE_MANAGER_AUTO_DEFERRED=authoritative_main_unavailable", flush=True)
+        return False
+    superseded = 0
     for path in sorted(records.glob("*.json"), key=lambda item: item.stat().st_mtime):
         record = json.loads(path.read_text(encoding="utf-8"))
         if record.get("state") != "production_eligible":
+            continue
+        candidate_sha = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
+        if not SHA.fullmatch(candidate_sha):
+            print("RELEASE_MANAGER_AUTO_DEFERRED=invalid_candidate_identity", flush=True)
+            continue
+        # A prior explicit Owner approval remains valid for its exact SHA,
+        # but must never be selected unattended after a newer protected
+        # source becomes authoritative. Preserve its record as evidence.
+        if candidate_sha != main_sha:
+            superseded += 1
             continue
 
         # A queued release is tied to the production baseline against which it
@@ -2630,11 +2686,21 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
             save_record(state_root, record)
             continue
 
-        # Preserve retention headroom for two runtime/MCP rollback containers.
-        # Any Docker failure aborts promotion rather than weakening the drift gate.
-        reconcile_stopped_rollback_retention()
         result = production_gate_result(repo, record)
         if result.get("allowed") is True:
+            # Close the TOCTOU gap between scanning the queue and opening the
+            # production transaction. A newer protected merge defers the
+            # unattended release without redefining Owner authorization.
+            try:
+                if authoritative_auto_promotion_head(repo) != candidate_sha:
+                    print("RELEASE_MANAGER_AUTO_DEFERRED=protected_main_advanced", flush=True)
+                    return False
+            except ReleaseManagerError:
+                print("RELEASE_MANAGER_AUTO_DEFERRED=authoritative_main_unavailable", flush=True)
+                return False
+            # No rollback retention mutation until exact-source Owner and
+            # production gates are verified for the current protected HEAD.
+            reconcile_stopped_rollback_retention()
             try:
                 deploy_production(repo, state_root, record)
             except ReleaseManagerBusy:
@@ -2663,6 +2729,8 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
             "Production Eligible release failed production gate: "
             + "; ".join(reasons)
         )
+    if superseded:
+        print(f"RELEASE_MANAGER_AUTO_DEFERRED=superseded_candidate_count:{superseded}", flush=True)
     return False
 
 
