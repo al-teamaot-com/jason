@@ -58,7 +58,11 @@ def approved_diagnostic_uid(repo: Path) -> str:
 
 
 def live_diagnostic_uid(output: Callable[[list[str]], str]) -> str:
-    """Read both Docker planes; reject missing, duplicate, or divergent scope."""
+    """Verify both Docker planes, tolerating only explicitly disabled legacy scope.
+
+    A missing live variable is compatible with an *explicitly empty* value in
+    the other plane; absent-on-both, duplicates, and any real UID mismatch fail.
+    """
     values = []
     present = []
     for container in ("jason-runtime", "jason-mcp-pilot"):
