@@ -99,3 +99,34 @@ def test_policy_is_refreshed_after_runtime_construction(tmp_path):
     policy[0] = 'policy-v2'
     with pytest.raises(PermissionError,match='policy'):
         repo.verify_proposal(plan)
+
+
+@pytest.mark.parametrize('state,reason', [
+    ('running', None), ('completed', None), ('denied', 'denied'),
+    ('indeterminate', 'step_execution_OSError'),
+    ('blocked', 'step_reauthorization_PermissionError'),
+    ('blocked', None),
+])
+def test_late_approval_acknowledgement_preserves_execution_progress(tmp_path, state, reason):
+    repo, _, _ = fixture(tmp_path)
+    repo.record_progress('approval', state=state, now=NOW, completed_steps=1,
+                         current_execution_id='execution', reason_code=reason)
+    before = repo.progress('approval')
+    repo.record_progress('approval', state='approved', now=NOW+timedelta(seconds=2))
+    assert repo.progress('approval') == before
+
+
+@pytest.mark.parametrize('prior_state', ['awaiting_approval', 'approved'])
+def test_pending_approval_can_still_enter_execution_queue(tmp_path, prior_state):
+    repo, _, _ = fixture(tmp_path)
+    repo.record_progress('approval', state=prior_state, now=NOW)
+    repo.record_progress('approval', state='approved', now=NOW+timedelta(seconds=1))
+    assert repo.progress('approval')['state'] == 'approved'
+
+
+def test_authenticated_approval_can_resume_after_partial_delivery_failure(tmp_path):
+    repo, _, _ = fixture(tmp_path)
+    repo.record_progress('approval', state='blocked', now=NOW,
+                         reason_code='approval_delivery_RuntimeError')
+    repo.record_progress('approval', state='approved', now=NOW+timedelta(seconds=1))
+    assert repo.progress('approval')['state'] == 'approved'

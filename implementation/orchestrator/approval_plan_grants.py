@@ -43,7 +43,8 @@ class PlanGrantLedger:
         db.execute('PRAGMA busy_timeout=15000')
         return db
 
-    def record(self, scope: ApprovedPlanScope, decision: VerifiedPlanDecision) -> None:
+    @staticmethod
+    def _decision_values(scope: ApprovedPlanScope, decision: VerifiedPlanDecision) -> tuple:
         if not (decision.authenticated and decision.authorized and decision.approved):
             raise PermissionError('verified authorized affirmative decision required')
         if not decision.approval_id or not decision.approver_identity_id or not decision.plan_fingerprint:
@@ -57,10 +58,31 @@ class PlanGrantLedger:
             'policy_digest': scope.policy_digest, 'allowed_capabilities': sorted(scope.allowed_capabilities),
             'allowed_clients': sorted(scope.allowed_clients), 'max_risk': scope.max_risk,
             'production_allowed': scope.production_allowed, 'expires_at': scope.expires_at.isoformat()}, sort_keys=True)
+        return (scope.plan_id, decision.approval_id, decision.approver_identity_id,
+                decision.plan_fingerprint, data, decision.decided_at.isoformat())
+
+    def record(self, scope: ApprovedPlanScope, decision: VerifiedPlanDecision) -> None:
+        values = self._decision_values(scope, decision)
         with self._connection() as db:
-            db.execute('INSERT INTO plan_grants VALUES (?,?,?,?,?,?)', (
-                scope.plan_id, decision.approval_id, decision.approver_identity_id,
-                decision.plan_fingerprint, data, decision.decided_at.isoformat()))
+            db.execute('INSERT INTO plan_grants VALUES (?,?,?,?,?,?)', values)
+
+    def require_matching_decision(self, scope: ApprovedPlanScope,
+                                  decision: VerifiedPlanDecision) -> None:
+        """Verify an identical prior publication without accepting another decision.
+
+        Used only after the authenticated callback and recovery worker race to
+        publish the same accepted receipt. The original append-once record API
+        stays strict; changed scope, actor, time, fingerprint or revocation fails.
+        This method neither changes the ledger nor grants execution authority.
+        """
+        values = self._decision_values(scope, decision)
+        with self._connection() as db:
+            row = db.execute(
+                'SELECT p.plan_id,p.approval_id,p.approver,p.fingerprint,p.scope_json,p.decided_at,r.revoked_at '
+                'FROM plan_grants p LEFT JOIN revoked_plan_grants r ON r.plan_id=p.plan_id '
+                'WHERE p.approval_id=?', (decision.approval_id,)).fetchone()
+        if row is None or tuple(row[:6]) != values or row[6] is not None:
+            raise PermissionError('existing plan decision differs from the verified receipt or is revoked')
 
     def revoke(self, plan_id: str, *, at: datetime, reason: str) -> None:
         if not plan_id or not reason.strip() or at.tzinfo is None:

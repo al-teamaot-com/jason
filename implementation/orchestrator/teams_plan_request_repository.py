@@ -187,6 +187,23 @@ class PlanRequestRepository:
             completed_steps=completed_steps,current_execution_id=current_execution_id,
             reason_code=reason_code),sort_keys=True)
         with sqlite3.connect(self.path) as db:
+            db.execute('BEGIN IMMEDIATE')
+            if state == 'approved':
+                prior = db.execute(
+                    'SELECT state,progress_json FROM universal_plan_progress WHERE approval_id=?',
+                    (approval_id,)).fetchone()
+                if prior is not None:
+                    # The maintenance worker can finish before the HTTP callback
+                    # acknowledges its decision. A late acknowledgement cannot
+                    # reset running, completed or uncertain execution to queued.
+                    if prior[0] in {'running','completed','denied','indeterminate'}:
+                        return
+                    if prior[0] == 'blocked':
+                        reason = json.loads(prior[1]).get('reason_code')
+                        # A partially delivered valid card is still decidable;
+                        # execution/security blocks must not be cleared by an ack.
+                        if not isinstance(reason, str) or not reason.startswith('approval_delivery_'):
+                            return
             db.execute('INSERT INTO universal_plan_progress VALUES (?,?,?) '
                        'ON CONFLICT(approval_id) DO UPDATE SET state=excluded.state,progress_json=excluded.progress_json',
                        (approval_id,state,payload))

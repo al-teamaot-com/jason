@@ -87,3 +87,53 @@ def test_missing_client_is_permitted_only_for_org_scoped_plan(tmp_path):
     ledger.require_grant(replace(step, client_id=None), plan_fingerprint='plan-digest-1', now=NOW)
     with pytest.raises(PermissionError):
         ledger.require_grant(step, plan_fingerprint='plan-digest-1', now=NOW)
+
+
+def test_exact_publication_readback_does_not_accept_another_human_vote(tmp_path):
+    ledger, scope, decision, _ = make_objects(tmp_path)
+    ledger.record(scope, decision)
+    ledger.require_matching_decision(scope, decision)
+    with pytest.raises(sqlite3.IntegrityError):
+        ledger.record(scope, decision)
+
+
+@pytest.mark.parametrize('changes', [
+    {'approver_identity_id': 'another-actor'},
+    {'approval_id': 'another-approval'},
+    {'plan_fingerprint': 'another-fingerprint'},
+    {'decided_at': NOW + timedelta(seconds=1)},
+])
+def test_publication_recovery_rejects_changed_decision(tmp_path, changes):
+    ledger, scope, decision, _ = make_objects(tmp_path)
+    ledger.record(scope, decision)
+    with pytest.raises(PermissionError):
+        ledger.require_matching_decision(scope, replace(decision, **changes))
+
+
+@pytest.mark.parametrize('changes', [
+    {'plan_id': 'another-plan'},
+    {'organization_id': 'another-org'},
+    {'policy_digest': 'another-policy'},
+    {'allowed_capabilities': frozenset({'build'})},
+    {'allowed_clients': frozenset({'another-client'})},
+    {'max_risk': 1},
+    {'production_allowed': False},
+    {'expires_at': NOW + timedelta(hours=1)},
+])
+def test_publication_recovery_rejects_changed_scope(tmp_path, changes):
+    ledger, scope, decision, _ = make_objects(tmp_path)
+    ledger.record(scope, decision)
+    with pytest.raises(PermissionError):
+        ledger.require_matching_decision(replace(scope, **changes), decision)
+
+
+def test_publication_recovery_never_restores_revoked_or_unverified_decision(tmp_path):
+    ledger, scope, decision, _ = make_objects(tmp_path)
+    with pytest.raises(PermissionError):
+        ledger.require_matching_decision(scope, decision)
+    ledger.record(scope, decision)
+    with pytest.raises(PermissionError):
+        ledger.require_matching_decision(scope, replace(decision, authenticated=False))
+    ledger.revoke(scope.plan_id, at=NOW, reason='owner cancellation')
+    with pytest.raises(PermissionError):
+        ledger.require_matching_decision(scope, decision)

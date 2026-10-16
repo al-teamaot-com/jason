@@ -394,3 +394,44 @@ def test_preproduction_mode_and_worker_guards_are_read_from_environment(monkeypa
     assert settings.universal_approval_mode=='off'
     assert settings.universal_approval_worker_enabled is False
     assert not autonomy_maintenance_enabled(settings)
+
+
+def test_callback_acknowledgement_cannot_requeue_plan_completed_by_worker(tmp_path, monkeypatch):
+    env = setup(tmp_path)
+    plan = seed(env)
+    original_progress = env.handler.requests.record_progress
+    raced = []
+
+    def worker_finishes_before_callback_acknowledgement(approval_id, *, state, **kwargs):
+        if state == 'approved' and not raced:
+            raced.append(True)
+            rebuild(env, tmp_path).plan_runner.process(approval_id)
+            assert env.handler.requests.progress(approval_id)['state'] == 'completed'
+        return original_progress(approval_id, state=state, **kwargs)
+
+    monkeypatch.setattr(env.handler.requests, 'record_progress', worker_finishes_before_callback_acknowledgement)
+    result = click(env, signed(env, plan))
+    assert result['approval_status'] == 'approved'
+    assert env.handler.requests.progress(plan.approval_id)['state'] == 'completed'
+    assert env.handler.requests.candidate_ids() == ()
+    assert len(env.provider.calls) == 1
+
+
+def test_callback_accepts_exact_grant_published_first_by_recovery_worker(tmp_path, monkeypatch):
+    env = setup(tmp_path)
+    plan = seed(env)
+    original_record = env.handler.service.ledger.record
+    raced = []
+
+    def worker_publishes_before_callback(scope, decision):
+        if not raced:
+            raced.append(True)
+            rebuild(env, tmp_path).plan_runner.process(plan.approval_id)
+            assert env.handler.requests.progress(plan.approval_id)['state'] == 'completed'
+        return original_record(scope, decision)
+
+    monkeypatch.setattr(env.handler.service.ledger, 'record', worker_publishes_before_callback)
+    result = click(env, signed(env, plan))
+    assert result['approval_status'] == 'approved'
+    assert env.handler.requests.progress(plan.approval_id)['state'] == 'completed'
+    assert len(env.provider.calls) == 1

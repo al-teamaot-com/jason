@@ -6,6 +6,7 @@ with the verified result from TeamsApprovalFlow and the server-owned proposal.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import sqlite3
 from datetime import datetime
 
 from .approval_plan_grants import PlanGrantLedger, VerifiedPlanDecision
@@ -49,9 +50,15 @@ def record_verified_teams_plan_grant(*, result: TeamsApprovalFlowResult,
         accepted.decided_at != decided_at or
         accepted.expires_at.tzinfo is None or decided_at >= accepted.expires_at):
         raise PermissionError('invalid plan proposal scope')
-    ledger.record(proposal.scope, VerifiedPlanDecision(
+    decision = VerifiedPlanDecision(
         approval_id=accepted.approval_id,
         approver_identity_id=accepted.decided_by,
         authenticated=True, authorized=True, approved=True,
         plan_fingerprint=proposal.plan_fingerprint,
-        decided_at=decided_at))
+        decided_at=decided_at)
+    try:
+        ledger.record(proposal.scope, decision)
+    except sqlite3.IntegrityError:
+        # Recovery may publish this same atomic human receipt while its original
+        # HTTP callback is still finishing. This is not a replayed human vote.
+        ledger.require_matching_decision(proposal.scope, decision)

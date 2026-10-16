@@ -240,3 +240,28 @@ The canonical Release Manager's cloned preproduction environment explicitly sets
 prevents copied approved plans from executing when live writable state is cloned
 for candidate testing. Runtime settings read the explicit worker flag; production
 activation must not be inferred from the presence of a cloned receipt database.
+
+### Callback and recovery-worker publication races
+
+The human decision is committed before its HTTP acknowledgement finishes. The
+existing maintenance worker may therefore publish the exact same plan grant or
+finish the plan before that acknowledgement returns. Two deterministic tests
+reproduced the former unique-constraint error and the latter completed-to-queued
+state regression using the real signed approval flow and durable repositories.
+
+Publication now reconciles only an exactly matching, non-revoked stored decision,
+including its complete scope, actor, fingerprint and decision time. The append-once
+ledger API remains strict, a fresh callback cannot reuse a published decision, and
+atomic pending-decision consumption still rejects replayed or concurrent votes.
+A late approval acknowledgement cannot overwrite running, terminal, uncertain or
+security-blocked execution progress. A prior partial-delivery block remains
+resumable after a valid authenticated approval, without clearing execution blocks.
+These are in-source regression proofs, not live Teams or production acceptance.
+
+Validation of this handoff repair: both new race regressions failed on the prior
+candidate and passed after the repair. The combined runtime, approval, signed
+Teams ingress, replay, persistence and release-host suite then passed 1,029 tests.
+For host-side tests the component-approval registry path was redirected to a fresh
+temporary test directory; otherwise seven unrelated component-scope tests read the
+host's real approval registry and report extra components. No live registry was
+modified and no synthetic result is represented as a production approval.

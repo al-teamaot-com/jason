@@ -35,6 +35,11 @@ class UniversalTeamsPlanApprovalService:
                 proposal.requester_id != original_request.principal_id or \
                 proposal.capability != original_request.capability_name:
             raise PermissionError('proposal does not match original governed request')
+        # A fresh callback must never reuse an already-published human decision.
+        # Only a publication race after this callback has begun may reconcile an
+        # identical receipt; atomic approval consumption still rejects two votes.
+        if self.ledger.decision_receipt(proposal.approval_id) is not None:
+            raise PermissionError('plan decision was already published')
         result = self.teams_flow.handle_response(
             token=token, payload=payload, original_request=original_request,
             decided_at=decided_at, now=now)
