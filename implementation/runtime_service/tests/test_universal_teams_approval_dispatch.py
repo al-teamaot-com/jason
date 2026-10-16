@@ -55,3 +55,11 @@ def test_runtime_composition_has_explicit_universal_handler_boundary():
     assert any(isinstance(v, ast.Constant) and v.value is None
                for v in function.args.kw_defaults)
     assert 'universal=universal_approval_handler' in src.read_text()
+
+
+def test_unconfigured_universal_plan_denial_also_fails_closed():
+    fallback = RecordingFlow({'status': 'denied'})
+    dispatcher = ApprovalInteractionDispatcher(None, fallback)
+    with pytest.raises(PermissionError, match='universal plan approval flow is not configured'):
+        dispatcher.handle(approval_id='planapproval-abc', decision='deny')
+    assert fallback.calls == []
