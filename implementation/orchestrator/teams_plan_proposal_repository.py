@@ -22,8 +22,13 @@ class PlanProposalRepository:
 
     def store(self, proposal: ServerOwnedPlanProposal) -> None:
         scope = proposal.scope
-        if not proposal.approval_id or not proposal.plan_fingerprint or scope.organization_id != proposal.organization_id:
-            raise ValueError('invalid server-owned proposal')
+        if (not proposal.approval_id or not proposal.plan_fingerprint or
+                not proposal.requester_id or not proposal.capability or
+                scope.organization_id != proposal.organization_id or
+                proposal.capability not in scope.allowed_capabilities or
+                (proposal.client_id not in scope.allowed_clients and not
+                 (proposal.client_id is None and not scope.allowed_clients))):
+            raise ValueError('invalid or out-of-scope server-owned proposal')
         payload = dict(approval_id=proposal.approval_id, organization_id=proposal.organization_id,
             client_id=proposal.client_id, requester_id=proposal.requester_id, capability=proposal.capability,
             plan_fingerprint=proposal.plan_fingerprint,

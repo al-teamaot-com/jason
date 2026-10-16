@@ -50,3 +50,17 @@ def test_unstored_callback_does_not_touch_identity_flow(tmp_path):
         service.handle_stored_response(proposal_repository=repo, token='signed',
             payload={'approval_id':'approval'}, original_request=request, decided_at=NOW)
     assert flow.calls == 0
+
+
+@pytest.mark.parametrize('field,value', [
+    ('client_id', 'other-client'),
+    ('capability', 'other-capability'),
+    ('requester_id', ''),
+])
+def test_out_of_scope_proposals_cannot_be_stored(tmp_path, field, value):
+    from dataclasses import replace
+    repo = PlanProposalRepository(tmp_path/'proposals.sqlite3')
+    with pytest.raises(ValueError, match='out-of-scope'):
+        repo.store(replace(proposal(), **{field: value}))
+    with pytest.raises(PermissionError):
+        repo.require('approval')
