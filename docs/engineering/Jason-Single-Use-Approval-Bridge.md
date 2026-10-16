@@ -230,3 +230,13 @@ completion branch were read directly and verified to support this contract. The
 additional gateway token-field hardening is a separately tested source change;
 activation does not rely on it because the runtime rejects all universal-plan
 selection/token fields independently.
+
+
+### Preproduction execution isolation
+
+The canonical Release Manager's cloned preproduction environment explicitly sets
+`JASON_UNIVERSAL_APPROVAL_MODE=off` and
+`JASON_UNIVERSAL_APPROVAL_WORKER_ENABLED=false`, and verifies both values. This
+prevents copied approved plans from executing when live writable state is cloned
+for candidate testing. Runtime settings read the explicit worker flag; production
+activation must not be inferred from the presence of a cloned receipt database.

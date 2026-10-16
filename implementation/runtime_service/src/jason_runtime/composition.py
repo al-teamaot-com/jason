@@ -1022,6 +1022,9 @@ class RuntimeSettings:
                 )
             ),
             universal_approval_mode=os.getenv("JASON_UNIVERSAL_APPROVAL_MODE", "off").strip().lower(),
+            universal_approval_worker_enabled=os.getenv(
+                "JASON_UNIVERSAL_APPROVAL_WORKER_ENABLED", "true"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
             universal_approval_db=Path(os.getenv("JASON_UNIVERSAL_APPROVAL_DB", "/var/lib/jason/openclaw/universal-approvals.sqlite3")),
             universal_approval_policy=Path(os.getenv("JASON_UNIVERSAL_APPROVAL_POLICY", "/var/lib/jason/authority/universal-approval-policy.json")),
             procurement_inventory_location_id=int(

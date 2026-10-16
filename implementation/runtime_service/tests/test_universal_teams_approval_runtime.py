@@ -379,3 +379,18 @@ def test_queued_plan_approval_has_accepted_not_failure_http_status(tmp_path):
     assert RuntimeHttpApplication._http_status({'status':'approved'})==500
     assert RuntimeHttpApplication._http_status({'status':'approved','approval_id':'foreign','executed':False})==500
     assert RuntimeHttpApplication._http_status({'status':'approved','approval_id':plan.approval_id,'executed':True})==500
+
+
+
+def test_preproduction_mode_and_worker_guards_are_read_from_environment(monkeypatch):
+    from jason_runtime.composition import RuntimeSettings
+    from jason_runtime.maintenance_process import autonomy_maintenance_enabled
+    monkeypatch.setenv('JASON_OLLAMA_MODEL','synthetic-test-model')
+    monkeypatch.setenv('JASON_UNIVERSAL_APPROVAL_MODE','off')
+    monkeypatch.setenv('JASON_UNIVERSAL_APPROVAL_WORKER_ENABLED','false')
+    for key in ('JASON_AUTONOMY_WORKER_ENABLED','JASON_AUTONOMY_SHADOW_ENABLED','JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED'):
+        monkeypatch.setenv(key,'false')
+    settings=RuntimeSettings.from_env()
+    assert settings.universal_approval_mode=='off'
+    assert settings.universal_approval_worker_enabled is False
+    assert not autonomy_maintenance_enabled(settings)
