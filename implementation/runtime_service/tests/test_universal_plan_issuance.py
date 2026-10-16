@@ -61,7 +61,7 @@ def test_normal_factory_sends_real_approval_and_never_executes_before_click(tmp_
     assert plan.scope.expires_at==pending.expires_at
     assert env.handler.requests.require(pending.approval_id).capability_version=='1.0'
     assert env.handler.requests.require(pending.approval_id).data_handling.retention_allowed
-    assert click(env,signed(env,plan))['status']=='approved'
+    assert click(env,signed(env,plan))['status']=='completed'
     assert env.handler.plan_runner.tick()
     assert len(env.provider.calls)==1
     assert env.handler.requests.progress(pending.approval_id)['state']=='completed'

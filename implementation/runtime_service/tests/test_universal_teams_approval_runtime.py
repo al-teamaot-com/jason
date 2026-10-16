@@ -130,7 +130,7 @@ def test_verified_requesters_and_approvers_reach_actual_continuation(tmp_path,re
     env=setup(tmp_path); plan=seed(env,requester)
     result=click(env,signed(env,plan,approver=approver))
     assert isinstance(result,dict) and result['executed'] is False
-    assert result['status']=='approved' and not env.provider.calls
+    assert result['status']=='completed' and result['plan_status']=='queued' and not env.provider.calls
     assert env.handler.plan_runner.tick() is True
     assert env.handler.requests.progress(plan.approval_id)['state']=='completed'
     assert len(env.provider.calls)==1
@@ -199,7 +199,7 @@ def test_cross_organization_binding_never_authorizes_plan(tmp_path):
 
 def test_replayed_approval_cannot_execute_twice(tmp_path):
     env=setup(tmp_path);plan=seed(env);envelope=signed(env,plan)
-    assert click(env,envelope)['status']=='approved'
+    assert click(env,envelope)['status']=='completed'
     assert env.handler.plan_runner.tick() is True
     with pytest.raises((ValueError,PermissionError)):
         click(env,envelope)
@@ -251,7 +251,7 @@ def grant_verification_step(env):
 
 def test_one_human_click_runs_two_exact_steps_with_fresh_independent_authority(tmp_path):
     env=setup(tmp_path);grant_verification_step(env);plan=seed(env,extra_step=True)
-    assert click(env,signed(env,plan))['status']=='approved'
+    assert click(env,signed(env,plan))['status']=='completed'
     # Recreate the worker from durable stores; this is not tied to the HTTP object.
     worker=rebuild(env,tmp_path).plan_runner
     assert worker.tick() is True

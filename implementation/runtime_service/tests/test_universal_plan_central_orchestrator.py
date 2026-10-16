@@ -74,7 +74,7 @@ def test_one_signed_approval_executes_through_actual_central_gates(tmp_path):
     env=setup(tmp_path);grant_verification_step(env)
     provider,audit=real_central(env,tmp_path)
     plan=seed(env,extra_step=True)
-    assert click(env,signed(env,plan))['status']=='approved'
+    assert click(env,signed(env,plan))['status']=='completed'
     assert env.handler.plan_runner.tick()
     progress=env.handler.requests.progress(plan.approval_id)
     assert progress['state']=='completed',progress

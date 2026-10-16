@@ -216,3 +216,17 @@ contexts, exact concrete-plan binding and canonical completed-result recovery.
 Node bridge and gateway suites passed 43 tests. These counts describe specific
 local runs, not current-head GitHub CI or production acceptance; future changes
 must rerun the protected suites.
+
+
+### Backward-compatible gateway activation boundary
+
+The deployed gateway accepts `status=completed` as a completed interaction, so the
+new callback preserves that established envelope while adding
+`approval_status=approved`, `plan_status=queued`, and `executed=false`. Its HTTP
+status is 202 and its text explicitly says the plan is queued. That is not a claim
+of provider completion. This avoids requiring a simultaneous gateway replacement
+merely to acknowledge a saved decision. The current live gateway parser and
+completion branch were read directly and verified to support this contract. The
+additional gateway token-field hardening is a separately tested source change;
+activation does not rely on it because the runtime rejects all universal-plan
+selection/token fields independently.

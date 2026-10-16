@@ -166,7 +166,11 @@ class UniversalTeamsApprovalInteractionFlow:
                     'approval_status': accepted.status, 'executed': False, 'reply': {'text': text}}
         if self.plan_runner is not None:
             self.requests.record_progress(approval_id,state='approved',now=now)
-            return {'status': 'approved', 'approval_id': approval_id, 'executed': False,
+            # 'completed' is the existing interaction envelope contract, not
+            # provider completion. Keep a distinct queued plan state so deployed
+            # gateways finalize the decision without a coupled gateway rollout.
+            return {'status': 'completed', 'approval_id': approval_id,
+                    'approval_status': 'approved', 'plan_status': 'queued', 'executed': False,
                     'reply': {'text': 'Approval recorded. Jason has queued the reviewed plan for execution.'}}
         if self.continuation is None:
             return {'status': 'approved', 'approval_id': approval_id, 'executed': False,

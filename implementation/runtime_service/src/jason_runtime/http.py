@@ -125,6 +125,10 @@ class RuntimeHttpApplication:
         status = str(result.get("status", "")).strip()
         error_code = str(result.get("error_code", "")).strip()
         if status == "completed":
+            if (str(result.get("approval_id", "")).startswith("planapproval-")
+                    and result.get("approval_status") == "approved"
+                    and result.get("plan_status") == "queued" and result.get("executed") is False):
+                return 202
             return 200
         if status == "duplicate":
             return 200
