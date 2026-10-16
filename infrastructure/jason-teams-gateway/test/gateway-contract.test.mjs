@@ -50,7 +50,9 @@ test("failed runtime responses log only bounded correlation metadata", () => {
 });
 
 test("approval card submit path supports request_changes and signs structured interaction", () => {
-  assert.match(source, /"approve", "deny", "request_changes"/);
+  const parserSource=readFileSync(new URL('../approval-submit.mjs',import.meta.url),'utf8');
+  assert.match(parserSource, /"approve", "deny", "request_changes"/);
+  assert.match(source,/import \{ parseApprovalSubmit \} from "\.\/approval-submit\.mjs"/);
   assert.match(source, /kind: "approval\.submit"/);
   assert.match(source, /channel_response_id: messageId/);
 });
@@ -85,11 +87,23 @@ test("hardware billing disposition card is constrained and signed as a governed 
 
 
 test("approval card must never supply an authentication token or authority context", () => {
-  const approvalParser = source.split('function parseApprovalSubmit(value) {')[1]
+  const approvalParser = readFileSync(new URL('../approval-submit.mjs', import.meta.url), 'utf8').split('export function parseApprovalSubmit(value) {')[1]
     .split('function parseProcurementSubmit(value) {')[0];
   assert.ok(approvalParser);
   for (const forbidden of ['token','access_token','id_token','refresh_token','authorization','sso_token', 'authority_context_id']) {
     assert.match(approvalParser, new RegExp(`"${forbidden}"`));
   }
   assert.match(approvalParser, /if \(forbidden\.has\(key\)\) return null/);
+});
+
+
+test('gateway image packages the exact approval parser used at runtime',()=>{
+  const dockerfile=readFileSync(new URL('../Dockerfile',import.meta.url),'utf8');
+  assert.match(dockerfile,/COPY infrastructure\/jason-teams-gateway\/approval-submit\.mjs \.\/approval-submit\.mjs/);
+});
+
+
+test("queued universal plan acceptance finalizes the decision without claiming execution",()=>{
+  assert.match(source,/approvalSubmit\.approvalId\.startsWith\("planapproval-"\)/);
+  assert.match(source,/result\?\.payload\?\.status === "approved" && result\?\.payload\?\.executed === false/);
 });

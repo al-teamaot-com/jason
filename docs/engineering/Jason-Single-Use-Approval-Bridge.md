@@ -169,3 +169,50 @@ normal request issuance, delivery failure, two-step unattended execution, restar
 and uncertain outcomes. These are NOT live Microsoft desktop/mobile acceptance.
 Production activation remains off until a governed deployment and actual Teams
 multi-user/mobile acceptance prove the complete provider path.
+
+
+### Concrete gateway, HTTP and execution-ledger compatibility
+
+The card renderer previously embedded `organization_id` in Action.Submit while the
+actual Teams gateway rejects such caller-supplied authority. Approval actions now
+carry only `approval_id` and `decision`; the gateway restriction is unchanged. Its
+pure parser is shared by runtime and cross-language tests which feed the actual
+Python-rendered action data into Node. The gateway image explicitly packages that
+module. A recorded queued plan now returns HTTP 202, renders an accurate queued
+acknowledgement, and finalizes the gateway's human-decision record without claiming
+that provider execution has completed.
+
+The persistent runner also reserves each exact derived step in the existing
+`SQLiteGovernedExecutionLedger`. A formal JKD approval alone is not sufficient for
+Central Orchestrator execution. Each reservation binds the parent human approval,
+immutable plan fingerprint, exact intent and stable idempotency key; normal
+resolution, fresh context validation, provider-plan binding, consumption and result
+recording remain enforced. Integration tests execute through real JKD context
+validation, capability/provider resolution, the Central Orchestrator and its ledger;
+only the external provider transport is synthetic. An already completed canonical
+result can be recovered after a small plan-receipt crash without another invocation.
+
+Restart recovery re-verifies the original archived Ed25519 decision evidence, not
+merely a self-described digest or a status label. The archive is private, bounded,
+immutable and contains no bearer token. Both its digest and resolved actor must
+match the original authenticated audit chain and atomic decision receipt. Missing
+or tampered evidence fails closed before execution.
+
+Terminal state reporting uses the existing Teams proactive transport and fixed
+non-actionable text to the active original requester and actual approver only. It
+sends no provider result content. A per-recipient durable send claim prevents
+repeated notifications across restarts. Unknown delivery is visible as
+`indeterminate`; notification failure never rewrites an execution result. This
+maintenance runs alongside existing runtime maintenance, not in a new daemon.
+
+
+### Validation checkpoint
+
+The combined local runtime, approval, identity, request-factory, replay, immutable
+plan and connector regression suite passed 927 tests before the queued-HTTP case
+was added; the subsequent targeted universal runtime suite passed 45 cases. The
+actual Central Orchestrator integration exercises provider resolution, fresh JKD
+contexts, exact concrete-plan binding and canonical completed-result recovery.
+Node bridge and gateway suites passed 43 tests. These counts describe specific
+local runs, not current-head GitHub CI or production acceptance; future changes
+must rerun the protected suites.

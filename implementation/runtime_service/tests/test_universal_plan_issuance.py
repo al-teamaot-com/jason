@@ -48,7 +48,7 @@ def test_normal_factory_sends_real_approval_and_never_executes_before_click(tmp_
     factory=GovernedTeamsOrchestrationRequestFactory(
         authority=issuer.authority,capabilities=RegisteredCapabilities(),approval_requester=env.handler,
         execution_id_factory=lambda:'normal-execution',clock=lambda:NOW)
-    intent=ConversationIntent('test.read',{'resource_id':'controlled-test'})
+    intent=ConversationIntent('synthetic.resource.read',{'resource_id':'controlled-test'})
     with pytest.raises(ConversationGuidanceRequiredError,match='universal_approval_requested') as caught:
         factory.build(principal=BoundConversationPrincipal('requester-a','org','client'),
             intent=intent,identity=identity(),correlation_id='normal-correlation')
@@ -73,7 +73,7 @@ def test_requester_without_jkd_grant_cannot_trigger_delivery(tmp_path):
         authority=issuer.authority,capabilities=RegisteredCapabilities(),approval_requester=env.handler)
     with pytest.raises(ConversationAuthorityError):
         factory.build(principal=BoundConversationPrincipal('outsider','wrong-org','client'),
-            intent=ConversationIntent('test.read'),identity=identity(),correlation_id='corr')
+            intent=ConversationIntent('synthetic.resource.read'),identity=identity(),correlation_id='corr')
     assert not delivery.requests
 
 
@@ -83,7 +83,7 @@ def test_standing_authority_read_does_not_get_unnecessary_approval(tmp_path):
         authority=issuer.authority,capabilities=RegisteredCapabilities(),approval_requester=env.handler)
     evidence=replace(identity(),microsoft_object_id='object-approver-a')
     result=factory.build(principal=BoundConversationPrincipal('approver-a','org','client'),
-        intent=ConversationIntent('test.read'),identity=evidence,correlation_id='corr')
+        intent=ConversationIntent('synthetic.resource.read'),identity=evidence,correlation_id='corr')
     assert result.authority_allowed
     assert not delivery.requests and not env.provider.calls
 
@@ -96,7 +96,7 @@ def test_explicit_retention_policy_required_before_card_delivery(tmp_path):
         authority=issuer.authority,capabilities=RegisteredCapabilities(),approval_requester=env.handler)
     with pytest.raises(PermissionError,match='retention'):
         factory.build(principal=BoundConversationPrincipal('requester-a','org','client'),
-            intent=ConversationIntent('test.read'),identity=identity(),correlation_id='corr')
+            intent=ConversationIntent('synthetic.resource.read'),identity=identity(),correlation_id='corr')
     assert not delivery.requests
 
 
@@ -106,7 +106,7 @@ def test_embedded_secret_cannot_be_retained_or_sent_to_approver(tmp_path):
         authority=issuer.authority,capabilities=RegisteredCapabilities(),approval_requester=env.handler)
     with pytest.raises(ValueError,match='credential'):
         factory.build(principal=BoundConversationPrincipal('requester-a','org','client'),
-            intent=ConversationIntent('test.read',{'password':'synthetic'}),identity=identity(),correlation_id='corr')
+            intent=ConversationIntent('synthetic.resource.read',{'password':'synthetic'}),identity=identity(),correlation_id='corr')
     assert not delivery.requests
 
 
@@ -122,6 +122,33 @@ def test_partial_delivery_is_not_reported_as_success(tmp_path):
         authority=issuer.authority,capabilities=RegisteredCapabilities(),approval_requester=env.handler)
     with pytest.raises(RuntimeError,match='every selected recipient'):
         factory.build(principal=BoundConversationPrincipal('requester-a','org','client'),
-            intent=ConversationIntent('test.read'),identity=identity(),correlation_id='corr')
+            intent=ConversationIntent('synthetic.resource.read'),identity=identity(),correlation_id='corr')
     assert env.handler.requests.progress('planapproval-issued')['reason_code']=='approval_delivery_RuntimeError'
     assert not env.provider.calls
+
+
+def test_actual_adaptive_card_actions_are_accepted_by_actual_gateway_parser(tmp_path):
+    from pathlib import Path
+    import subprocess
+    from connectors.microsoft_graph.teams_approval_channel import render_approval_card
+    from jason_runtime.playbook_autonomy_review import TeamsGatewayPlaybookApprovalSender
+    env=setup(tmp_path);delivery,issuer=with_issuer(env)
+    factory=GovernedTeamsOrchestrationRequestFactory(authority=issuer.authority,
+        capabilities=RegisteredCapabilities(),approval_requester=env.handler)
+    with pytest.raises(ConversationGuidanceRequiredError):
+        factory.build(principal=BoundConversationPrincipal('requester-a','org','client'),
+            intent=ConversationIntent('synthetic.resource.read'),identity=identity(),correlation_id='corr')
+    card=TeamsGatewayPlaybookApprovalSender._adaptive_card(render_approval_card(delivery.requests[0]))
+    values=[a['data'] for a in card['actions']]
+    assert all(set(v)=={'approval_id','decision'} for v in values)
+    root=Path(__file__).resolve().parents[3]
+    module=(root/'infrastructure/jason-teams-gateway/approval-submit.mjs')
+    # Python is installed under implementation/runtime_service/tests; resolve repository root.
+    if not module.exists():
+        root=root.parent;module=root/'infrastructure/jason-teams-gateway/approval-submit.mjs'
+    script='import { parseApprovalSubmit } from '+json.dumps(module.as_uri())+'; let s=""; for await (const c of process.stdin) s+=c; const a=JSON.parse(s).map(parseApprovalSubmit); if(a.some(x=>x===null)) process.exit(7); console.log(JSON.stringify(a));'
+    result=subprocess.run(['node','--input-type=module','-e',script],input=json.dumps(values),
+        capture_output=True,text=True,timeout=10,check=True)
+    parsed=json.loads(result.stdout)
+    assert [v['decision'] for v in parsed]==['approve','deny','request_changes']
+    assert all(not v['selections'] for v in parsed)

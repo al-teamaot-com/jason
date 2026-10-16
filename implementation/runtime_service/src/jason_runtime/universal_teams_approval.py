@@ -149,6 +149,9 @@ class UniversalTeamsApprovalInteractionFlow:
                     organization_id=step.organization_id, client_id=step.client_id,
                     capability=step.capability_name, requested_mode=step.permission_mode):
                 raise PermissionError('approver lacks current authority for a reviewed plan step')
+        # Store the actual non-bearer signed decision as well as its digest, so a
+        # restarted worker re-verifies cryptography instead of trusting an audit label.
+        self.requests.store_transport_evidence(principal.authentication_evidence_hash, signed_envelope)
         result = self.service.handle_response(
             token=token, payload={'approval_id': approval_id, 'decision': decision,
                 'organization_id': original.organization_id,
@@ -258,7 +261,7 @@ class ConfiguredPlanApprovalAuthority:
 
 def build_universal_teams_approval_runtime(*, mode: str, database_path, policy_path,
         bindings, identities, grants, formal_approvals, authority,
-        authenticator, allowed_machine_identities, orchestrator,
+        authenticator, allowed_machine_identities, orchestrator, governed_execution_ledger,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
     """Compose real durable ports; no monkey-patching, fake token source or grants."""
     if mode == 'off':
@@ -297,6 +300,6 @@ def build_universal_teams_approval_runtime(*, mode: str, database_path, policy_p
     continuation = ApprovalExecutionContinuation(orchestrator,audit,continuation_guard,clock=clock)
     from .universal_plan_continuation import UniversalPlanContinuationMaintenance
     service=UniversalTeamsPlanApprovalService(flow,ledger)
-    runner=UniversalPlanContinuationMaintenance(service,proposals,requests,continuation,policy,clock)
+    runner=UniversalPlanContinuationMaintenance(service,proposals,requests,continuation,policy,governed_execution_ledger,clock)
     handler = UniversalTeamsApprovalInteractionFlow(service,verifier,proposals,requests,continuation,clock,runner)
     return handler

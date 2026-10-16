@@ -97,9 +97,15 @@ class PlanRequestRepository:
                        'approval_id TEXT PRIMARY KEY, material_json TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS universal_plan_progress ('
                        'approval_id TEXT PRIMARY KEY, state TEXT NOT NULL, progress_json TEXT NOT NULL)')
+            db.execute('CREATE TABLE IF NOT EXISTS universal_approval_transport_evidence ('
+                       'evidence_hash TEXT PRIMARY KEY, signed_envelope_json TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS universal_plan_step_results ('
                        'approval_id TEXT NOT NULL, execution_id TEXT NOT NULL, result_json TEXT NOT NULL, '
                        'PRIMARY KEY(approval_id, execution_id))')
+            db.execute('CREATE TABLE IF NOT EXISTS universal_plan_status_deliveries ('
+                       'approval_id TEXT NOT NULL, state TEXT NOT NULL, recipient TEXT NOT NULL, '
+                       'delivery_status TEXT NOT NULL, receipt TEXT, updated_at TEXT NOT NULL, '
+                       'PRIMARY KEY(approval_id,state,recipient))')
         os.chmod(self.path, 0o600)
 
     @property
@@ -204,3 +210,59 @@ class PlanRequestRepository:
         with sqlite3.connect(self.path) as db:
             db.execute('INSERT INTO universal_plan_step_results VALUES (?,?,?)',
                        (approval_id,result.execution_id,encoded))
+
+
+    def store_transport_evidence(self, evidence_hash: str, envelope: Mapping) -> None:
+        """Retain the signed non-bearer decision evidence for independent restart verification.
+
+        This private store holds the gateway signature and bounded human decision,
+        never an OAuth token, credential, document body, or unsigned authority.
+        """
+        from jason_openclaw.signed_transport import canonical_signed_payload
+        _safe_material(envelope)
+        if hashlib.sha256(canonical_signed_payload(envelope)).hexdigest() != evidence_hash:
+            raise PermissionError('signed approval evidence hash mismatch')
+        encoded=json.dumps(dict(envelope),sort_keys=True,separators=(',',':'),allow_nan=False)
+        if len(encoded.encode('utf-8'))>65536:
+            raise ValueError('signed approval evidence exceeds retention bound')
+        with sqlite3.connect(self.path) as db:
+            row=db.execute('SELECT signed_envelope_json FROM universal_approval_transport_evidence WHERE evidence_hash=?',
+                           (evidence_hash,)).fetchone()
+            if row is not None:
+                if row[0]!=encoded:
+                    raise PermissionError('immutable signed evidence was changed')
+                return
+            db.execute('INSERT INTO universal_approval_transport_evidence VALUES (?,?)',(evidence_hash,encoded))
+
+    def transport_evidence(self, evidence_hash: str) -> dict:
+        with sqlite3.connect(self.path) as db:
+            row=db.execute('SELECT signed_envelope_json FROM universal_approval_transport_evidence WHERE evidence_hash=?',
+                           (evidence_hash,)).fetchone()
+        if row is None:
+            raise PermissionError('signed approval evidence is unavailable')
+        return json.loads(row[0])
+
+
+    def terminal_progress_ids(self, *, limit: int = 32, after: str = "") -> tuple[str, ...]:
+        with sqlite3.connect(self.path) as db:
+            rows=db.execute("SELECT approval_id FROM universal_plan_progress "
+                "WHERE state IN ('completed','denied','blocked','indeterminate') AND approval_id>? ORDER BY approval_id LIMIT ?",
+                (after,max(1,min(limit,32)))).fetchall()
+        return tuple(row[0] for row in rows)
+
+    def claim_status_delivery(self, approval_id: str, state: str, recipient: str, *, now: datetime) -> bool:
+        with sqlite3.connect(self.path) as db:
+            result=db.execute('INSERT OR IGNORE INTO universal_plan_status_deliveries VALUES (?,?,?,?,?,?)',
+                (approval_id,state,recipient,'sending',None,now.isoformat()))
+            return result.rowcount==1
+
+    def status_delivery_result(self, approval_id: str, state: str, recipient: str, *, now: datetime,
+                               status: str, receipt: str | None = None) -> None:
+        if status not in {'sent','failed','indeterminate'}:
+            raise ValueError('invalid status delivery result')
+        if receipt is not None and (not isinstance(receipt,str) or len(receipt)>512):
+            raise ValueError('bounded status delivery receipt required')
+        with sqlite3.connect(self.path) as db:
+            db.execute('UPDATE universal_plan_status_deliveries SET delivery_status=?,receipt=?,updated_at=? '
+                       'WHERE approval_id=? AND state=? AND recipient=? AND delivery_status=?',
+                       (status,receipt,now.isoformat(),approval_id,state,recipient,'sending'))

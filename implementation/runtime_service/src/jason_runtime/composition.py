@@ -2148,6 +2148,7 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
             authenticator=teams_authenticator,
             allowed_machine_identities=settings.allowed_machine_identities,
             orchestrator=orchestrator,
+            governed_execution_ledger=governed_execution_ledger,
         )
     if universal_approval_handler is not None and settings.universal_approval_mode == "enforced":
         from dataclasses import replace as replace_dataclass
@@ -2518,8 +2519,19 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         getattr(universal_approval_handler, "plan_runner", None)
         if settings.universal_approval_worker_enabled else None
     )
+    universal_plan_status_maintenance = None
+    if universal_plan_maintenance is not None:
+        from .universal_plan_status import UniversalPlanStatusMaintenance
+        universal_plan_status_maintenance = UniversalPlanStatusMaintenance(
+            handler=universal_approval_handler, bindings=durable_bindings,
+            identities=SQLiteIdentityRepository(authority_store),
+            sender_factory=TeamsGatewayPlaybookApprovalSender,
+            gateway_url=settings.teams_gateway_internal_url,
+            token_file=settings.teams_proactive_token_file,
+        )
     autonomy_maintenance = CompositeAutonomyMaintenance(
         universal_plan_maintenance,
+        universal_plan_status_maintenance,
         playbook_review_maintenance,
         autonomous_work_lifecycle_notification_maintenance,
         autonomous_deployment_completion_notification_maintenance,

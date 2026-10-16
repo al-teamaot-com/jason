@@ -11,6 +11,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import logging
+import json
 import sqlite3
 from typing import Any, Callable
 
@@ -30,6 +31,7 @@ class UniversalPlanContinuationMaintenance:
     requests: Any
     continuation: Any
     policy: Any
+    execution_ledger: Any
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
     interval_seconds: int = 5
     _next_due: datetime | None = field(default=None,init=False)
@@ -126,6 +128,24 @@ class UniversalPlanContinuationMaintenance:
                         and e.metadata.get('authentication_evidence_hash')==accepted.authentication_evidence_hash
                         for e in events)):
                 raise PermissionError('atomic decision lacks matching verified Teams audit evidence')
+            signed=self.requests.transport_evidence(accepted.authentication_evidence_hash)
+            # Evaluate original transport freshness at the persisted decision time,
+            # while current plan expiry/revocation/identity are separately rechecked.
+            verifier=replace(self.service.teams_flow.token_verifier,clock=lambda:accepted.decided_at)
+            token=json.dumps(signed,sort_keys=True,separators=(',',':'))
+            _,parsed=verifier.parse(token)
+            principal=verifier.verify(token)
+            interaction=parsed.approval_submit
+            if (principal.authentication_evidence_hash!=accepted.authentication_evidence_hash
+                    or interaction.approval_id!=approval_id or interaction.decision!='approve'
+                    or interaction.channel_response_id!=accepted.channel_response_id):
+                raise PermissionError('persisted signature does not prove this human approval')
+            actor=self.service.teams_flow.ingress.accept_verified_interaction(
+                principal=principal,payload={'approval_id':approval_id,'decision':'approve',
+                    'organization_id':proposal.organization_id,'channel_response_id':accepted.channel_response_id},
+                decided_at=accepted.decided_at)
+            if actor.approver_identity_id!=accepted.decided_by:
+                raise PermissionError('persisted Teams approver binding changed')
             self.requests.verify_proposal(proposal)
             steps=self.requests.steps(approval_id)
             self._require_policy(proposal,accepted,steps)
@@ -151,6 +171,11 @@ class UniversalPlanContinuationMaintenance:
                     plan_fingerprint=proposal.plan_fingerprint,now=self.clock())
                 child_id='planstep-'+hashlib.sha256(
                     (approval_id+'|'+original.execution_id+'|'+proposal.plan_fingerprint).encode()).hexdigest()
+                reservation=self.execution_ledger.reserve_approved_plan_step(
+                    approval_id=child_id,parent_approval_id=approval_id,
+                    plan_fingerprint=proposal.plan_fingerprint,request=original,
+                    expires_at=min(accepted.expires_at,proposal.scope.expires_at))
+                original=replace(original,idempotency_key=reservation.idempotency_key)
                 child=replace(accepted,approval_id=child_id,request_id=original.execution_id,
                     capability=original.capability_name,client_id=original.client_id,
                     organization_id=original.organization_id,requested_by=original.principal_id)
@@ -161,6 +186,16 @@ class UniversalPlanContinuationMaintenance:
                     actor_identity_id=accepted.decided_by,channel=accepted.channel,
                     channel_reference_id=accepted.channel_response_id,authority_context_id=resumed.authority_context_id,
                     metadata={'parent_approval_id':approval_id,'plan_fingerprint':proposal.plan_fingerprint})
+                # A post-provider crash may have lost the plan's small receipt,
+                # while the canonical execution ledger still proves completion.
+                # Recover that exact result without invoking the provider again.
+                replay=self.execution_ledger.check_intent(resumed).replay_result
+                if replay is not None:
+                    self.requests.record_step_result(approval_id,replay,now=self.clock())
+                    if replay.status.value != 'succeeded':
+                        raise PermissionError('canonical prior execution was not successful')
+                    completed+=1
+                    continue
                 self._progress(approval_id,'running',completed=completed,execution_id=current_execution_id)
                 stage='step_execution'
                 result=self.continuation.execute(approval_id=child_id,approved_by=child.decided_by,

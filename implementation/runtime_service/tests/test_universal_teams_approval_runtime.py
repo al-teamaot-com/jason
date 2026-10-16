@@ -27,6 +27,7 @@ from orchestrator.teams_identity_binding import MicrosoftIdentityBinding
 from orchestrator.teams_identity_binding_sqlite import SQLiteMicrosoftIdentityBindingStore
 from orchestrator.teams_plan_grant_bridge import ServerOwnedPlanProposal
 from orchestrator.teams_plan_request_repository import plan_fingerprint
+from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
 from jason_runtime.universal_teams_approval import build_universal_teams_approval_runtime
 
 NOW = datetime(2026,10,16,16,0,tzinfo=timezone.utc)
@@ -51,12 +52,12 @@ def setup(tmp_path):
     for name in ('requester-a','requester-b','approver-a','approver-b','outsider'):
         identities.put(IdentityRecord(name,'human','org'))
         bindings.put(MicrosoftIdentityBinding('tenant','object-'+name,name,client_id='client'))
-        grants.put(AuthorityGrant('grant-'+name,name,'test.read','org','client',
+        grants.put(AuthorityGrant('grant-'+name,name,'synthetic.resource.read','org','client',
             PermissionMode.EXECUTE,approval_required=name.startswith('requester')))
     policy=tmp_path/'policy.json'
     policy.write_text(json.dumps({'schema_version':'1.0','organizations':{'org':{
         'role_members':{'reviewer':['approver-a','approver-b']},
-        'capability_roles':{'test.read':['reviewer'],'test.verify':['reviewer']},
+        'capability_roles':{'synthetic.resource.read':['reviewer'],'synthetic.resource.verify':['reviewer']},
         'disabled_principals':[], 'max_risk':1,'production_allowed':False,
         'request_retention_allowed':True,'max_ttl_seconds':1800}}}))
     private=Ed25519PrivateKey.generate()
@@ -64,31 +65,34 @@ def setup(tmp_path):
     authenticator=Ed25519TransportAuthenticator({'gateway-key':public},{'gateway-key':'registered-gateway'})
     authority=IdentityAuthorityService(identities,grants,approvals,contexts=store,clock=lambda:NOW)
     provider=ProviderBoundary()
+    execution_ledger=SQLiteGovernedExecutionLedger(str(tmp_path/'execution-ledger.db'),clock=lambda:NOW)
+    execution_ledger.initialize()
     handler=build_universal_teams_approval_runtime(mode='enforced', database_path=tmp_path/'plans.db',
         policy_path=policy,bindings=bindings,identities=identities,grants=grants,
         formal_approvals=approvals,authority=authority,authenticator=authenticator,
-        allowed_machine_identities=frozenset({'registered-gateway'}),orchestrator=provider,clock=lambda:NOW)
+        allowed_machine_identities=frozenset({'registered-gateway'}),orchestrator=provider,
+        governed_execution_ledger=execution_ledger,clock=lambda:NOW)
     return SimpleNamespace(handler=handler,private=private,provider=provider,identities=identities,
-        grants=grants,approvals=approvals,bindings=bindings,policy=policy)
+        grants=grants,approvals=approvals,bindings=bindings,policy=policy,execution_ledger=execution_ledger)
 
 
 def seed(env, requester='requester-a', *, extra_step=False):
     h=env.handler
     request=OrchestrationRequest('execution-'+requester,'correlation-'+requester,requester,'org',
-        'test.read',None,'deterministic',OrchestrationMode.EXECUTE,False,False,'low',
+        'synthetic.resource.read',None,'deterministic',OrchestrationMode.EXECUTE,False,False,'low',
         DataHandlingPolicy('internal',False,retention_allowed=True),ExecutionBudget(Decimal('0')),
         arguments={'resource_id':'controlled-test'},client_id='client',permission_mode='observe')
     steps=(request,)
     if extra_step:
-        steps+=(replace(request,execution_id='verify-'+requester,capability_name='test.verify'),)
+        steps+=(replace(request,execution_id='verify-'+requester,capability_name='synthetic.resource.verify'),)
     scope=ApprovedPlanScope('plan-'+requester,'org',h.requests.current_policy_digest,
         frozenset(s.capability_name for s in steps),frozenset({'client'}),1,False,NOW+timedelta(minutes=20))
-    proposal=ServerOwnedPlanProposal('planapproval-'+requester,'org','client',requester,'test.read',
+    proposal=ServerOwnedPlanProposal('planapproval-'+requester,'org','client',requester,'synthetic.resource.read',
         plan_fingerprint(steps,scope),scope)
     h.requests.store(proposal,steps,now=NOW)
     h.proposals.store(proposal)
     h.service.teams_flow.approval_service.create(ApprovalRequest(proposal.approval_id,
-        request.execution_id,request.correlation_id,'org','client',requester,'test.read','observe',
+        request.execution_id,request.correlation_id,'org','client',requester,'synthetic.resource.read','observe',
         NOW-timedelta(seconds=1),NOW+timedelta(minutes=5),('approver-a','approver-b')),now=NOW)
     return proposal
 
@@ -235,12 +239,13 @@ def rebuild(env, tmp_path):
         policy_path=env.policy,bindings=SQLiteMicrosoftIdentityBindingStore(tmp_path/'bindings.db'),
         identities=identities,grants=grants,formal_approvals=approvals,authority=authority,
         authenticator=env.handler.evidence_verifier.authenticator,
-        allowed_machine_identities=frozenset({'registered-gateway'}),orchestrator=env.provider,clock=lambda:NOW)
+        allowed_machine_identities=frozenset({'registered-gateway'}),orchestrator=env.provider,
+        governed_execution_ledger=env.execution_ledger,clock=lambda:NOW)
 
 
 def grant_verification_step(env):
     for name in ('requester-a','requester-b','approver-a','approver-b'):
-        env.grants.put(AuthorityGrant('verify-grant-'+name,name,'test.verify','org','client',
+        env.grants.put(AuthorityGrant('verify-grant-'+name,name,'synthetic.resource.verify','org','client',
             PermissionMode.EXECUTE,approval_required=name.startswith('requester')))
 
 
@@ -250,7 +255,7 @@ def test_one_human_click_runs_two_exact_steps_with_fresh_independent_authority(t
     # Recreate the worker from durable stores; this is not tied to the HTTP object.
     worker=rebuild(env,tmp_path).plan_runner
     assert worker.tick() is True
-    assert [r.capability_name for r in env.provider.calls]==['test.read','test.verify']
+    assert [r.capability_name for r in env.provider.calls]==['synthetic.resource.read','synthetic.resource.verify']
     assert len({r.approval_id for r in env.provider.calls})==2
     assert len({r.authority_context_id for r in env.provider.calls})==2
     assert env.handler.requests.progress(plan.approval_id)['completed_steps']==2
@@ -305,7 +310,7 @@ def test_restart_between_steps_skips_completed_step_and_finishes_remaining_step(
     assert len(env.provider.calls)==1
     resumed=rebuild(env,tmp_path)
     assert resumed.plan_runner.tick() is True
-    assert [r.capability_name for r in env.provider.calls]==['test.read','test.verify']
+    assert [r.capability_name for r in env.provider.calls]==['synthetic.resource.read','synthetic.resource.verify']
     assert resumed.requests.progress(plan.approval_id)['state']=='completed'
 
 
@@ -338,3 +343,39 @@ def test_universal_maintenance_isolated_from_http_process():
     assert serving.universal_approval_mode=='enforced'
     assert serving.universal_approval_worker_enabled is False
     assert not autonomy_maintenance_enabled(serving)
+
+
+def test_recovery_reverifies_signature_not_just_a_recorded_hash(tmp_path):
+    env=setup(tmp_path);plan=seed(env)
+    click(env,signed(env,plan))
+    import sqlite3
+    with sqlite3.connect(env.handler.requests.path) as db:
+        row=db.execute('SELECT evidence_hash,signed_envelope_json FROM universal_approval_transport_evidence').fetchone()
+        forged=json.loads(row[1]);forged['signature']='not-a-valid-signature'
+        db.execute('UPDATE universal_approval_transport_evidence SET signed_envelope_json=? WHERE evidence_hash=?',
+                   (json.dumps(forged),row[0]))
+    assert rebuild(env,tmp_path).plan_runner.tick()
+    assert env.handler.requests.progress(plan.approval_id)['state']=='blocked'
+    assert not env.provider.calls
+
+
+def test_missing_signature_archive_blocks_recovery_without_execution(tmp_path):
+    env=setup(tmp_path);plan=seed(env)
+    click(env,signed(env,plan))
+    import sqlite3
+    with sqlite3.connect(env.handler.requests.path) as db:
+        db.execute('DELETE FROM universal_approval_transport_evidence')
+    assert rebuild(env,tmp_path).plan_runner.tick()
+    assert env.handler.requests.progress(plan.approval_id)['state']=='blocked'
+    assert not env.provider.calls
+
+
+def test_queued_plan_approval_has_accepted_not_failure_http_status(tmp_path):
+    from jason_runtime.http import RuntimeHttpApplication
+    env=setup(tmp_path);plan=seed(env)
+    payload=click(env,signed(env,plan))
+    assert RuntimeHttpApplication._http_status(payload)==202
+    assert payload['executed'] is False
+    assert RuntimeHttpApplication._http_status({'status':'approved'})==500
+    assert RuntimeHttpApplication._http_status({'status':'approved','approval_id':'foreign','executed':False})==500
+    assert RuntimeHttpApplication._http_status({'status':'approved','approval_id':plan.approval_id,'executed':True})==500

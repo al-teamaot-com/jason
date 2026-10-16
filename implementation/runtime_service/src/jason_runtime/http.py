@@ -132,6 +132,10 @@ class RuntimeHttpApplication:
             return 200
         if status == "approval_required":
             return 202
+        if (status == "approved" and str(result.get("approval_id", "")).startswith("planapproval-")
+                and result.get("executed") is False):
+            # The human decision is durably accepted; execution remains queued.
+            return 202
         if status == "denied":
             return 403
         if status == "failed":
