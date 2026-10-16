@@ -14,6 +14,7 @@ import json
 import secrets
 from threading import RLock
 from typing import Callable
+from .durable_grant_replay import SqliteGrantReplayStore
 
 @dataclass(frozen=True)
 class GrantScope:
@@ -35,10 +36,12 @@ class GrantScope:
 
 class SingleUseGrantPrototype:
     """Server-side demonstration; NOT integrated into Jason runtime or capable of execution."""
-    def __init__(self, key: bytes, *, now: Callable[[], datetime] | None = None):
+    def __init__(self, key: bytes, *, now: Callable[[], datetime] | None = None,
+                 replay_store: SqliteGrantReplayStore | None = None):
         if not isinstance(key, bytes) or len(key) < 32:
             raise ValueError('grant signing key must be at least 32 bytes')
         self._key = key
+        self._replay_store = replay_store
         self._clock = now or (lambda: datetime.now(timezone.utc))
         self._used: set[str] = set()
         self._revoked: set[str] = set()
@@ -85,6 +88,8 @@ class SingleUseGrantPrototype:
             if body['scope'] != expected_scope.as_dict() or self._time() >= exp:
                 return False
             digest = hashlib.sha256(payload).hexdigest()
+            if self._replay_store is not None:
+                return self._replay_store.consume(token_digest=digest, exp=exp, now=self._time())
             with self._lock:
                 if digest in self._used or digest in self._revoked:
                     return False
@@ -96,10 +101,12 @@ class SingleUseGrantPrototype:
     def revoke(self, token: str) -> bool:
         """Revoke an issued unconsumed token within this ephemeral test process."""
         try:
-            _, payload = self._decode(token)
+            body, payload = self._decode(token)
         except (ValueError, TypeError, binascii.Error, json.JSONDecodeError, UnicodeDecodeError):
             return False
         digest = hashlib.sha256(payload).hexdigest()
+        if self._replay_store is not None:
+            return self._replay_store.revoke(token_digest=digest, exp=int(body["exp"]), now=self._time())
         with self._lock:
             self._revoked.add(digest)
             return True

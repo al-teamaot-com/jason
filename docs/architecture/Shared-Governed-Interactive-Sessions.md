@@ -196,3 +196,14 @@ is installed, enroll a reviewed transport, use server-authenticated grants
 backed by durable replay state, prove audit/output protections and apply the
 normal exact per-run Datto component approval. Do not promote this local test
 fixture as a production companion.
+
+## Restart-persistent one-time grant replay prototype
+
+`durable_grant_replay.py` implements a transactional SQLite receipt store with
+exact signed-token digest, revocation, expiry and atomic single-use claims;
+its concurrency tests require exactly one winner. The isolated HMAC test
+verifier can use this durable store and checks one-time use/revocation across
+new verifier objects. This improves *test* reliability but is not server-side
+production authority: issuer authentication, grant lifecycle, durable shared
+storage beyond one host, policy, key rotation, nonce binding, mTLS and Teams
+approve/deny still require independent production-ready implementation.
