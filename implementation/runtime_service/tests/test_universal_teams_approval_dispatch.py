@@ -42,3 +42,16 @@ def test_existing_approval_routes_remain_unchanged():
     assert dispatcher.handle(approval_id='procapproval-abc') == {'route': 'procurement'}
     assert dispatcher.handle(approval_id='playbook-abc') == {'route': 'fallback'}
     assert not universal.calls
+
+
+def test_runtime_composition_has_explicit_universal_handler_boundary():
+    import ast
+    from pathlib import Path
+    src = Path(__file__).resolve().parents[1] / 'src/jason_runtime/composition.py'
+    module = ast.parse(src.read_text())
+    function = next(n for n in module.body if isinstance(n, ast.FunctionDef)
+                    and n.name == 'build_runtime_application')
+    assert 'universal_approval_handler' in [arg.arg for arg in function.args.kwonlyargs]
+    assert any(isinstance(v, ast.Constant) and v.value is None
+               for v in function.args.kw_defaults)
+    assert 'universal=universal_approval_handler' in src.read_text()

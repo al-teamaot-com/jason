@@ -1260,7 +1260,7 @@ def _deterministic_resource_contracts(
     return tuple(contracts)
 
 
-def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplication:
+def build_runtime_application(settings: RuntimeSettings, *, universal_approval_handler=None) -> RuntimeHttpApplication:
     settings.validate()
 
     authority_store = SQLiteIdentityAuthorityStore(settings.authority_db)
@@ -2342,9 +2342,13 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             actions=procurement_worker,
         )
 
+    # No universal approval authority is fabricated during runtime composition.
+    # Production callers must supply a fully authenticated, server-backed handler;
+    # otherwise planapproval-* intents continue to fail closed.
     approval_interaction_flow = ApprovalInteractionDispatcher(
         procurement=procurement_approval_flow,
         fallback=playbook_approval_flow,
+        universal=universal_approval_handler,
     )
 
     trusted_keys = FileBackedTrustedKeyRegistry(settings.trusted_keys_registry)
