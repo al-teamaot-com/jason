@@ -207,3 +207,15 @@ new verifier objects. This improves *test* reliability but is not server-side
 production authority: issuer authentication, grant lifecycle, durable shared
 storage beyond one host, policy, key rotation, nonce binding, mTLS and Teams
 approve/deny still require independent production-ready implementation.
+
+## CI integration coordination — 2026-10-16
+
+PR #1465's Docker runtime clean-build check now tries the same official Python
+3.12-slim image from AWS Public ECR and, only when the first registry fails,
+Docker Hub. GitHub CI demonstrated a successful `provider-read-runtime-credentials`
+check after the change. Reviewed open finance PR #692 because it also touches
+`.github/workflows/provider-read-runtime-credentials.yml`. The current main
+already retains its QuickBooks separation assertions; #1465 preserves those
+checks and adds only fallback for intermittent HTTP 429. The PR body records
+`Integration coordination: #692` for the repository's concurrent-change gate.
+This development compatibility change does not activate finance functionality.
