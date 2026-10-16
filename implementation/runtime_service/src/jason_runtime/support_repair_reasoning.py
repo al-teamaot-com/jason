@@ -332,6 +332,10 @@ class SupportRepairReasoningMaintenance:
                     'attempts': prior_attempts + 1,
                     'completed_at': _now(),
                 }
+                if isinstance(exc, ConnectorTransportError):
+                    payload['transport_status_code'] = exc.status_code
+                    payload['transport_class'] = ('network_or_timeout' if exc.status_code is None else
+                        'http_transient' if exc.status_code in {408,425,429,500,502,503,504} else 'http_nontransient')
             _atomic_json(response_path, payload)
             processed = True
         return processed
