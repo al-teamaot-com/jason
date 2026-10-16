@@ -1,0 +1,38 @@
+name: Shared Document Intake
+
+on:
+  push:
+    paths:
+      - "infrastructure/jason-document-intake/**"
+      - "infrastructure/jason-teams-gateway/index.mjs"
+      - "infrastructure/jason-teams-gateway/Dockerfile"
+      - ".github/workflows/shared-document-intake.yml"
+  pull_request:
+    paths:
+      - "infrastructure/jason-document-intake/**"
+      - "infrastructure/jason-teams-gateway/index.mjs"
+      - "infrastructure/jason-teams-gateway/Dockerfile"
+      - ".github/workflows/shared-document-intake.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Install existing Poppler runtime tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends poppler-utils
+      - name: Check shared and gateway syntax
+        run: |
+          node --check infrastructure/jason-document-intake/document-intake.mjs
+          node --check infrastructure/jason-document-intake/ocr-fallback.mjs
+          node --check infrastructure/jason-teams-gateway/index.mjs
+      - name: Test shared intake and real PDF text extraction
+        run: node --test infrastructure/jason-document-intake/*.test.mjs

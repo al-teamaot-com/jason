@@ -1,6 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from "node:fs";
-import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import express from "express";
 import JSON5 from "json5";
 import {
@@ -20,6 +18,7 @@ import {
 import { createApprovalDecisionStore } from "./approval-decision-store.mjs";
 import { resolveProactiveSendResult } from "./proactive-send-result.mjs";
 import { ensureTeamsUserBootstrap, TeamsBootstrapError } from "./teams-user-bootstrap.mjs";
+import { inspectPdfBuffer, readBoundedResponse, toProcurementDocument } from "./document-intake.mjs";
 
 const PORT = Number(process.env.PORT ?? 3979);
 const OPENCLAW_CONFIG_PATH =
@@ -270,51 +269,6 @@ function teamsFileAttachments(activity) {
   });
 }
 
-async function readBoundedResponse(response, maxBytes) {
-  const declared = Number(response.headers.get("content-length") ?? 0);
-  if (Number.isFinite(declared) && declared > maxBytes) {
-    throw new Error("procurement document exceeds maximum size");
-  }
-  if (!response.body) throw new Error("procurement document download returned no body");
-  const reader = response.body.getReader();
-  const chunks = [];
-  let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      try { await reader.cancel(); } catch {}
-      throw new Error("procurement document exceeds maximum size");
-    }
-    chunks.push(Buffer.from(value));
-  }
-  if (total < 1) throw new Error("procurement document is empty");
-  return Buffer.concat(chunks, total);
-}
-
-function extractPdfText(bytes, ordinal) {
-  const tempPath = `/tmp/jason-procurement-${process.pid}-${Date.now()}-${ordinal}.pdf`;
-  try {
-    writeFileSync(tempPath, bytes, { mode: 0o600 });
-    const result = spawnSync("pdftotext", ["-layout", tempPath, "-"], {
-      encoding: "utf8",
-      maxBuffer: 2 * 1024 * 1024,
-      timeout: 20_000,
-    });
-    if (result.error || result.status !== 0) {
-      throw new Error("procurement PDF text extraction failed");
-    }
-    const text = String(result.stdout ?? "").replace(/\u0000/g, "").trim();
-    if (!text) throw new Error("procurement PDF contains no extractable text");
-    return text.length > PROCUREMENT_DOCUMENT_MAX_TEXT
-      ? text.slice(0, PROCUREMENT_DOCUMENT_MAX_TEXT)
-      : text;
-  } finally {
-    try { unlinkSync(tempPath); } catch {}
-  }
-}
-
 async function acquireProcurementDocuments(activity) {
   const files = teamsFileAttachments(activity);
   if (files.length === 0) return [];
@@ -336,14 +290,15 @@ async function acquireProcurementDocuments(activity) {
     }
     const bytes = await readBoundedResponse(response, PROCUREMENT_DOCUMENT_MAX_BYTES);
     const name = nonBlank(attachment.name) ?? `invoice-${index + 1}.pdf`;
-    documents.push({
-      name,
-      content_type: "application/pdf",
-      size: bytes.length,
-      sha256: createHash("sha256").update(bytes).digest("hex"),
-      extracted_text: extractPdfText(bytes, index),
-      source_id: nonBlank(content.uniqueId) ?? nonBlank(attachment.id) ?? "",
+    const evidence = inspectPdfBuffer(bytes, {
+      maxBytes: PROCUREMENT_DOCUMENT_MAX_BYTES,
+      maxTextChars: PROCUREMENT_DOCUMENT_MAX_TEXT,
+      requireNativeText: true,
     });
+    documents.push(toProcurementDocument(evidence, {
+      name,
+      sourceId: nonBlank(content.uniqueId) ?? nonBlank(attachment.id) ?? "",
+    }));
   }
   return documents;
 }
