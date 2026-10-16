@@ -7,7 +7,7 @@ if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
 fi
 SOURCE_REVISION="$1"
 MATERIAL_REVIEW_FILE="${2:-}"
-REPO_ROOT="/home/al/projects/jason"
+REPO_ROOT="/home/al/.local/lib/jason/engineering-worker-source"
 # The operator checkout may be old or dirty; load approval-validation code
 # from the exact immutable source revision being installed, not from HEAD.
 RELEASE_ROOT="/opt/jason/ccc-releases"
@@ -59,6 +59,10 @@ install -o root -g root -m 0644 "$RELEASE_DIR/infrastructure/ccc/systemd/jason-c
 install -o root -g root -m 0644 "$RELEASE_DIR/infrastructure/ccc/systemd/jason-ccc.timer" /etc/systemd/system/jason-ccc.timer
 if [ ! -f "$CONFIG_PATH" ]; then
   install -o al -g al -m 0600 "$RELEASE_DIR/config/ccc/default.json" "$CONFIG_PATH"
+else
+  # After exact-source owner review and config backup, migrate ONLY the
+  # historical developer-checkout default. Custom roots remain untouched.
+  python3 "$RELEASE_DIR/tools/ccc_config_source_migration.py" --config "$CONFIG_PATH"
 fi
 chown al:al /var/lib/jason/ccc /home/al/Jason-Evidence/CCC /home/al/Jason-Recovery/CCC
 chmod 0700 /var/lib/jason/ccc
