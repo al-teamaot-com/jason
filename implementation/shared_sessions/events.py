@@ -5,6 +5,7 @@ Persistence and signed event streaming are required before runtime integration.
 """
 from __future__ import annotations
 from dataclasses import dataclass
+from copy import deepcopy
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
@@ -59,10 +60,29 @@ class SessionEventLedger:
             digest = sha256(canonical.encode('utf-8')).hexdigest()
             event = SessionEvent(session_id, tenant_id, sequence, kind, stamp, copied, previous, digest)
             history.append(event)
-            return event
+            return deepcopy(event)
 
     def history(self, *, tenant_id: str, session_id: str) -> tuple[SessionEvent, ...]:
         if not tenant_id or not session_id:
             raise ValueError('tenant and session are required')
         with self._lock:
-            return tuple(self._events.get((tenant_id, session_id), ()))
+            return tuple(deepcopy(self._events.get((tenant_id, session_id), ())))
+
+    def verify(self, *, tenant_id: str, session_id: str) -> bool:
+        """Recalculate internal hash chain; not a substitute for signatures or durability."""
+        if not tenant_id or not session_id:
+            raise ValueError("tenant and session are required")
+        with self._lock:
+            history = self._events.get((tenant_id, session_id), ())
+            previous = "GENESIS"
+            for expected_sequence, event in enumerate(history, start=1):
+                if (event.tenant_id != tenant_id or event.session_id != session_id or
+                    event.sequence != expected_sequence or event.previous_digest != previous):
+                    return False
+                canonical = json.dumps([tenant_id, session_id, event.sequence, event.kind,
+                                        event.occurred_at, event.evidence, previous],
+                                        sort_keys=True, separators=(",", ":"), allow_nan=False)
+                if sha256(canonical.encode("utf-8")).hexdigest() != event.digest:
+                    return False
+                previous = event.digest
+            return True

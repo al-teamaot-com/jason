@@ -36,3 +36,20 @@ class LedgerTests(unittest.TestCase):
         for kwargs in ({'kind':'unknown','evidence':{}}, {'kind':'session_opened','evidence':object()}):
             with self.assertRaises(ValueError):
                 ledger.append(tenant_id='a', session_id='s', **kwargs)
+
+    def test_returned_events_cannot_modify_internal_evidence(self):
+        ledger = SessionEventLedger()
+        returned = ledger.append(tenant_id='a', session_id='s', kind='session_opened', evidence={'items':['original']})
+        returned.evidence['items'].append('tampered')
+        history = ledger.history(tenant_id='a',session_id='s')
+        history[0].evidence['items'].append('tampered again')
+        self.assertEqual(ledger.history(tenant_id='a',session_id='s')[0].evidence, {'items':['original']})
+        self.assertTrue(ledger.verify(tenant_id='a',session_id='s'))
+
+    def test_chain_verification_detects_internal_corruption(self):
+        ledger = SessionEventLedger()
+        ledger.append(tenant_id='a',session_id='s',kind='session_opened',evidence={})
+        ledger.append(tenant_id='a',session_id='s',kind='session_paused',evidence={'reason':'test'})
+        self.assertTrue(ledger.verify(tenant_id='a',session_id='s'))
+        ledger._events[('a','s')][1].evidence['reason'] = 'changed'
+        self.assertFalse(ledger.verify(tenant_id='a',session_id='s'))
