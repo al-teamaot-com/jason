@@ -719,7 +719,7 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-CONN-005 — Microsoft 365 / Entra security-posture reads
 
 - **Priority:** P1
-- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-04
+- **Status:** Implemented — production verified 2026-10-16T08:25:21+00:00; release release-e953b80949459dff; SHA e953b80949459dff3a61c3b92f81296c81c857b3
 - **Implementation state at approval:** In progress — governed Entra posture read code deployed; production acceptance blocked by current Microsoft app consent/profile
 - **Autonomous engineering readiness:** Approved
 - **Authority basis:** Owner approval on 2026-10-04 authorizes autonomous engineering only within this exact TODO scope; existing Jason governance, client/provider boundaries, protected-core release approval, financial authority, and disruptive-action controls remain unchanged.
@@ -733,7 +733,7 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Prerequisites:** least-privilege Microsoft Graph/Exchange read scopes, tenant isolation, evidence normalization, and sanitized acceptance fixtures.
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** When Microsoft 365 security-posture automation becomes an approved implementation priority.
-
+- **Implementation evidence:** Jason Release Manager release-e953b80949459dff reached closed; production SHA e953b80949459dff3a61c3b92f81296c81c857b3.
 ### TODO-CONN-006 — Client backup-posture reads / Datto Endpoint Backup API
 
 - **Priority:** P1
