@@ -76,3 +76,16 @@ def test_incorrect_capability_rejected_before_call(tmp_path):
     with pytest.raises(PermissionError):
         service.handle_response(token='signed', payload={'approval_id':'approval'}, original_request=request, proposal=proposal, decided_at=NOW)
     assert flow.calls == 0
+
+
+@pytest.mark.parametrize('field, value', [
+    ('client_id', 'other-client'),
+    ('principal_id', 'other-requester'),
+])
+def test_changed_request_identity_rejected_before_flow_dispatch(tmp_path, field, value):
+    service, flow, proposal, request = setup(tmp_path)
+    setattr(request, field, value)
+    with pytest.raises(PermissionError):
+        service.handle_response(token='signed', payload={'approval_id': 'approval'},
+            original_request=request, proposal=proposal, decided_at=NOW)
+    assert flow.calls == 0
