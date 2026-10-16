@@ -241,6 +241,25 @@ prevents copied approved plans from executing when live writable state is cloned
 for candidate testing. Runtime settings read the explicit worker flag; production
 activation must not be inferred from the presence of a cloned receipt database.
 
+### Bounded preproduction clone and failure cleanup
+
+The release acceptance clone preserves approval, authority, replay, execution and
+other operational databases. The large append-only
+`orchestration-events.sqlite3` journal (and its `-wal` and `-shm` files)
+is excluded from the isolated preproduction clone and initialized independently
+by the test runtime. It is **not** legal to infer historical-event acceptance
+from this clean preproduction database. Production audit evidence is never
+deleted, truncated, or mutated.
+
+Preproduction refuses malformed state names, requires adequate free disk
+capacity before cloning, and fails closed if the bounded clone exceeds its
+cap. A partially created clone is cleaned up on failure (even before the
+preproduction constructor returns), without removing live authority or
+production state. The canonical Release Manager's default repo is the
+managed engineering source, never an arbitrary developer checkout.
+These constraints are covered by isolated tests; live production
+activation, root CCC and exact-SHA owner review remain independent gates.
+
 ### Callback and recovery-worker publication races
 
 The human decision is committed before its HTTP acknowledgement finishes. The

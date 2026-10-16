@@ -30,7 +30,7 @@ import release_manager_gate as gate
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import worker_execution_enrollment as worker_enrollment
 
-DEFAULT_REPO = Path("/home/al/projects/jason")
+DEFAULT_REPO = Path("/home/al/.local/lib/jason/engineering-worker-source")
 DEFAULT_STATE = Path("/var/lib/jason/openclaw/release-manager")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 MUTATION_ENV_OVERRIDES = {
@@ -1265,6 +1265,26 @@ def install_release_manager_from_current(expected_sha: str) -> dict[str, Any]:
     }
 
 
+_PREPROD_OPENCLAW_EXCLUDED = frozenset({
+    "orchestration-events.sqlite3",
+    "orchestration-events.sqlite3-wal",
+    "orchestration-events.sqlite3-shm",
+})
+_PREPROD_CLONE_MAX_BYTES = 4 * 1024**3
+_PREPROD_DISK_RESERVE_BYTES = 3 * 1024**3
+
+
+def bounded_preprod_openclaw_entries(raw: str) -> list[str]:
+    """Exclude only the large append-only event journal, not authority data."""
+    entries = raw.splitlines()
+    if not entries or len(entries) > 256:
+        raise ReleaseManagerError("invalid preproduction OpenClaw state listing")
+    if any(not re.fullmatch(r"[A-Za-z0-9_.-]+", name) or name in {".", ".."}
+           for name in entries) or len(set(entries)) != len(entries):
+        raise ReleaseManagerError("unsafe preproduction OpenClaw state name")
+    return [name for name in entries if name not in _PREPROD_OPENCLAW_EXCLUDED]
+
+
 def copy_state_from_live_container(
     container_path: str,
     destination: Path,
@@ -1273,6 +1293,27 @@ def copy_state_from_live_container(
     if destination.exists():
         shutil.rmtree(destination)
     destination.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if container_path == "/var/lib/jason/openclaw":
+        # Docker copies from the live container (never via a mutable host
+        # checkout), but whole-tree docker cp can fill the host disk with
+        # years of append-only orchestration event history.
+        free_at_start = shutil.disk_usage(destination).free
+        if free_at_start < _PREPROD_CLONE_MAX_BYTES + _PREPROD_DISK_RESERVE_BYTES:
+            raise ReleaseManagerError("insufficient disk headroom for isolated preproduction state")
+        names = bounded_preprod_openclaw_entries(run([
+            "docker", "exec", "jason-runtime", "python", "-c",
+            "import os; print('\\n'.join(sorted(os.listdir('/var/lib/jason/openclaw'))))",
+        ]))
+        for name in names:
+            run(["docker", "cp", f"jason-runtime:{container_path}/{name}", str(destination / name)])
+            free_now = shutil.disk_usage(destination).free
+            if (free_now < _PREPROD_DISK_RESERVE_BYTES
+                    or free_at_start - free_now > _PREPROD_CLONE_MAX_BYTES):
+                raise ReleaseManagerError("isolated preproduction state exceeded bounded disk capacity")
+        if any((destination / name).exists() for name in _PREPROD_OPENCLAW_EXCLUDED):
+            raise ReleaseManagerError("excluded production event journal was copied")
+        # Runtime startup initializes a fresh isolated orchestration journal.
+        return
     run(
         [
             "docker",
@@ -1287,6 +1328,28 @@ def preprod_scratch_path(state_root: Path, release_id: str) -> Path:
     return state_root.parent.parent / "release-manager-preprod" / release_id
 
 
+def _preprod_cleanup_on_failure(function):
+    """Remove only canonical scratch and preprod container on partial failure."""
+    def guarded(*, state_root: Path, release_id: str, candidate_sha: str, **kwargs):
+        try:
+            return function(state_root=state_root, release_id=release_id,
+                            candidate_sha=candidate_sha, **kwargs)
+        except BaseException:
+            if (re.fullmatch(r"release-[0-9a-f]{16}(?:-retry-[1-9][0-9]{0,2})?", release_id)
+                    and SHA.fullmatch(candidate_sha)):
+                scratch = preprod_scratch_path(state_root, release_id)
+                expected = state_root.parent.parent / "release-manager-preprod"
+                if scratch.parent.resolve() == expected.resolve() and not scratch.is_symlink():
+                    shutil.rmtree(scratch, ignore_errors=True)
+                subprocess.run(["docker", "rm", "-f",
+                                "jason-runtime-preprod-" + candidate_sha[:12]],
+                               check=False, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+            raise
+    return guarded
+
+
+@_preprod_cleanup_on_failure
 def create_preprod_container(
     *,
     live: dict[str, Any],
@@ -1320,7 +1383,12 @@ def create_preprod_container(
                 raise ReleaseManagerError(
                     f"pre-production clone destination is nested under live state source: {destination}"
                 )
-            copy_state_from_live_container(destination, clone)
+            try:
+                copy_state_from_live_container(destination, clone)
+            except BaseException:
+                # A failed state clone must never leave its temporary bytes on disk.
+                shutil.rmtree(scratch, ignore_errors=True)
+                raise
             mount_sources[destination] = str(clone)
 
     config = src["Config"]
