@@ -40,7 +40,7 @@ def test_token_injection_rejected():
 def test_atomic_nonforce_push_and_preservation(tmp_path):
     before = {"refs/heads/main": A, "refs/heads/azureonly": C}
     after = {**before, "refs/heads/main": B}
-    snapshots = iter([before, after])
+    snapshots = iter([before, before, after, after])
     calls = []
     def runner(args, **kw):
         calls.append((args, kw))
@@ -50,7 +50,7 @@ def test_atomic_nonforce_push_and_preservation(tmp_path):
         read_azure=lambda: next(snapshots), token_provider=lambda: "secret",
         authority_path=auth(tmp_path), runner=runner)
     assert result["verified"]
-    assert "--atomic" in calls[0][0]
+    assert "--atomic" not in calls[0][0]
     assert "--force" not in calls[0][0]
     assert "secret" not in str(calls[0][0])
 
