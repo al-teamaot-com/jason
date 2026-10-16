@@ -145,6 +145,7 @@ def run_pipeline(
     print("ENGINEERING_PIPELINE_RESULT " + json.dumps({
         "status": state["status"],
         "failed_or_skipped_stages": failed,
+        "operational_blocker": stalled,
         "state_path": str(output),
     }, sort_keys=True), flush=True)
     return state
