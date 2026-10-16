@@ -73,3 +73,30 @@ The normal `JASON_DATTO_COMPONENT_EXECUTION_*` configured allowlist/profile, exa
 - `docs/engineering/Jason-Change-Integration-and-Release-Standard.md`
 - `docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md`
 - GitHub #1459
+
+## Source-controlled enrollment and immutable release management (2026-10-16)
+
+The config/worker-execution-enrollment.json file is the bounded, non-secret
+owner-authorized diagnostic transport enrollment for Claw2-PC. It is validated
+against the pending role manifest by tools/worker_execution_enrollment.py
+(schema, exact UID, role, Server class, exact shell component, per-run policy
+and owner issue).
+
+The serialized Release Manager reads approved configuration from the immutable
+candidate source, not a model-supplied request, and passes the exact UID to
+runtime and MCP deploy scripts. It independently verifies matching single-valued
+environment bindings in both containers. On failed promotion, it restores
+the previously observed exact binding with verified release rollback.
+Preproduction always has an empty enrollment. Existing Desktop pilot is
+unchanged.
+
+For first migration from an older Release Manager, activate using two
+separately approved immutable releases: first install the new controller
+with enrollment fail-closed, then use that installed controller to carry
+and verify the exact enrolled device in a subsequent release. A GitHub merge
+is not live enrollment.
+
+This only enables a diagnostic transport. It does not mark the worker role
+ready, install software on the endpoint, make shell standing-safe, or authorize
+disruptive actions. Each generic Linux shell job needs exact per-run approval
+and same-job provider output evidence before any subsequent provisioning.
