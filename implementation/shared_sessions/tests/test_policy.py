@@ -108,3 +108,12 @@ class SessionPolicyBoundaryTests(unittest.TestCase):
         self.assertFalse(gate.decide(replace(self.request, mode='autonomous')).allowed)
         self.assertFalse(gate.decide(replace(self.request, transport='winrm')).allowed)
         self.assertFalse(gate.decide(replace(self.request, classification='other')).allowed)
+
+    def test_truthy_non_boolean_attestations_fail_closed(self):
+        from dataclasses import replace
+        self.assertFalse(SessionPolicy(self.path).decide(
+            replace(self.request, identity_verified='false')).allowed)
+        self.assertFalse(SessionPolicy(self.path).decide(
+            replace(self.request, governed_grant_valid=1)).allowed)
+        self.assertFalse(SessionPolicy(self.path).decide(
+            replace(self.request, tenant_id=123)).allowed)

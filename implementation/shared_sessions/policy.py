@@ -68,6 +68,14 @@ class SessionPolicy:
             return SessionDecision(False, reason, version)
         if not c["enabled"]:
             return deny("feature_disabled")
+        context = (req.tenant_id, req.client_id, req.target_id, req.technician_id, req.ticket_id)
+        if any(type(value) is not str or not value.strip() for value in context):
+            return deny("invalid_authoritative_context")
+        attestation_fields = (req.governed_grant_valid, req.identity_verified,
+                              req.target_binding_verified, req.execution_transport_approved,
+                              req.separate_sensitive_grant, req.specific_change_approval)
+        if any(type(flag) is not bool for flag in attestation_fields):
+            return deny("invalid_authorization_attestation")
         if not all((req.tenant_id, req.client_id, req.target_id, req.technician_id, req.ticket_id)):
             return deny("incomplete_authoritative_context")
         if not (req.identity_verified and req.target_binding_verified and req.governed_grant_valid):
