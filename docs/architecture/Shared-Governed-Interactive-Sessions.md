@@ -30,3 +30,18 @@ Define append-only `session_opened`, `command_proposed`, `decision_recorded`, `c
 ## Production safety
 
 This prototype deliberately makes **no** service changes, host connections, endpoint commands, vendor API calls, credential changes, or deployments. The existing `endpoint.powershell.read` capability remains dormant. Do not enable the example config in production. A successful session admission result is not authorization to execute a command.
+
+## Non-executing event ledger prototype (engineering checkpoint)
+
+`implementation/shared_sessions/events.py` introduces an isolated, in-memory,
+append-only session event model. It rejects unknown event kinds, requires a
+session-open event, segregates histories by tenant and session identifier,
+orders events with a per-session sequence number, links each event to the
+preceding SHA-256 digest, and prohibits events after revocation or closure.
+Its unit tests demonstrate these admission and event-lifecycle boundaries.
+**This is not production audit evidence:** the ledger is not durable,
+cryptographically authenticated, signed, redacted, or wired to any transport.
+The next implementation stage must use a transactional durable event store,
+server-controlled grants, explicit revocation/cancellation, output redaction,
+retention, tenant-authorized reads and independently tested transport adapters.
+No command execution or Teams approval integration is introduced by this stage.
