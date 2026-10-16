@@ -151,8 +151,12 @@ def run_pipeline(
 
 
 def service_exit_code(state: dict[str, Any]) -> int:
-    """Fail systemd only when a stage failed; degraded backlog remains observable."""
-    return 1 if state["failed_or_skipped_stages"] else 0
+    """Report unsuccessful engineering health to the service supervisor.
+
+    A successful controller invocation must not mask stalled approved work.
+    This does not grant retries or bypass any worker's recovery limits.
+    """
+    return 1 if state.get("status") != "healthy" else 0
 
 
 def main() -> int:
