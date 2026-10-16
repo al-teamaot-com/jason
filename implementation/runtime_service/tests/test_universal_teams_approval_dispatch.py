@@ -1,0 +1,44 @@
+from types import SimpleNamespace
+
+import pytest
+
+from jason_runtime.procurement_teams_flow import ApprovalInteractionDispatcher
+
+
+class RecordingFlow:
+    def __init__(self, result):
+        self.calls = []
+        self.result = result
+
+    def handle(self, **kwargs):
+        self.calls.append(kwargs)
+        return self.result
+
+
+def test_universal_approval_routes_only_to_universal_handler():
+    procurement = RecordingFlow({'route': 'procurement'})
+    fallback = RecordingFlow({'route': 'fallback'})
+    universal = RecordingFlow({'route': 'universal'})
+    dispatcher = ApprovalInteractionDispatcher(procurement, fallback, universal)
+    result = dispatcher.handle(approval_id='planapproval-abc', decision='deny')
+    assert result == {'route': 'universal'}
+    assert universal.calls == [{'approval_id': 'planapproval-abc', 'decision': 'deny'}]
+    assert not procurement.calls and not fallback.calls
+
+
+def test_unconfigured_plan_cannot_be_reinterpreted_as_playbook_approval():
+    fallback = RecordingFlow({'status': 'approved'})
+    dispatcher = ApprovalInteractionDispatcher(None, fallback)
+    with pytest.raises(PermissionError, match='universal plan approval flow is not configured'):
+        dispatcher.handle(approval_id='planapproval-abc', decision='approve')
+    assert fallback.calls == []
+
+
+def test_existing_approval_routes_remain_unchanged():
+    procurement = RecordingFlow({'route': 'procurement'})
+    fallback = RecordingFlow({'route': 'fallback'})
+    universal = RecordingFlow({'route': 'universal'})
+    dispatcher = ApprovalInteractionDispatcher(procurement, fallback, universal)
+    assert dispatcher.handle(approval_id='procapproval-abc') == {'route': 'procurement'}
+    assert dispatcher.handle(approval_id='playbook-abc') == {'route': 'fallback'}
+    assert not universal.calls
