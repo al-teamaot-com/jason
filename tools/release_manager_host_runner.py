@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import sys
 import time
 import urllib.request
 from datetime import datetime, timezone, timedelta
@@ -26,6 +27,8 @@ from typing import Any
 from uuid import uuid4
 
 import release_manager_gate as gate
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import worker_execution_enrollment as worker_enrollment
 
 DEFAULT_REPO = Path("/home/al/projects/jason")
 DEFAULT_STATE = Path("/var/lib/jason/openclaw/release-manager")
@@ -38,6 +41,7 @@ MUTATION_ENV_OVERRIDES = {
     "JASON_AUTOTASK_PROCUREMENT_MCP_PROFILE": "",
     "JASON_DATTO_COMPONENT_EXECUTION_MCP_PROFILE": "",
     "JASON_DATTO_COMPONENT_EXECUTION_AUTONOMY_ENABLED": "false",
+    "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID": "",
     "JASON_AUTONOMY_WORKER_ENABLED": "false",
     "JASON_AUTONOMY_SHADOW_ENABLED": "false",
     "JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED": "false",
@@ -2088,6 +2092,8 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "exact candidate worktree is missing a required production deploy script"
         )
     candidate_quickbooks_profile = declared_quickbooks_read_profile(deploy_worktree)
+    candidate_worker_uid = worker_enrollment.approved_diagnostic_uid(deploy_worktree)
+    previous_worker_uid = worker_enrollment.live_diagnostic_uid(output)
     prior_quickbooks_profile = live_quickbooks_read_profile()
     if (candidate_quickbooks_profile is not None
             and os.environ.get("JASON_QUICKBOOKS_READ_PROFILE") not in (None, candidate_quickbooks_profile)):
@@ -2143,6 +2149,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     env["JASON_RUNTIME_PRODUCTION_IMAGE"] = image
     env["JASON_MCP_PRODUCTION_IMAGE"] = mcp_image
     env["JASON_SOURCE_REVISION_OVERRIDE"] = candidate_sha
+    env[worker_enrollment.ENV_NAME] = candidate_worker_uid
     if candidate_quickbooks_profile is not None:
         env["JASON_QUICKBOOKS_READ_PROFILE"] = candidate_quickbooks_profile
 
@@ -2166,6 +2173,8 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             env=env,
         )
         mcp_deployed = True
+        if worker_enrollment.live_diagnostic_uid(output) != candidate_worker_uid:
+            raise ReleaseManagerError("diagnostic worker enrollment failed dual-plane readback")
         if live_mcp()["revision"] != candidate_sha:
             raise ReleaseManagerError(
                 "MCP did not report the exact candidate revision after deployment"
@@ -2283,6 +2292,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         rollback_env = quickbooks_rollback_environment(
             os.environ, rollback_sha=rollback_sha, prior_profile=prior_quickbooks_profile
         )
+        rollback_env[worker_enrollment.ENV_NAME] = previous_worker_uid
 
         rollback_errors: list[str] = []
 
