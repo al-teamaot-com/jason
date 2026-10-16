@@ -61,3 +61,18 @@ def test_repeated_decision_cannot_issue_new_grant(tmp_path):
     service.handle_response(**kw)
     with pytest.raises(Exception):
         service.handle_response(**kw)
+
+
+def test_changed_approval_id_rejected_before_call(tmp_path):
+    service, flow, proposal, request = setup(tmp_path)
+    with pytest.raises(PermissionError):
+        service.handle_response(token='signed', payload={'approval_id':'other'}, original_request=request, proposal=proposal, decided_at=NOW)
+    assert flow.calls == 0
+
+
+def test_incorrect_capability_rejected_before_call(tmp_path):
+    service, flow, proposal, request = setup(tmp_path)
+    request.capability_name='dangerous.other'
+    with pytest.raises(PermissionError):
+        service.handle_response(token='signed', payload={'approval_id':'approval'}, original_request=request, proposal=proposal, decided_at=NOW)
+    assert flow.calls == 0
