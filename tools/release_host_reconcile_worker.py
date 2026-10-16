@@ -21,7 +21,9 @@ CURRENT = Path("/opt/jason/current")
 REPO = Path("/home/al/.local/lib/jason/engineering-source-repo")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 REQUEST_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
-MAX_REQUESTS_PER_RUN = 8
+# Process one request per systemd activation; DirectoryNotEmpty retriggers for
+# remaining requests. Multiple 360s scripts must never overrun one unit start.
+MAX_REQUESTS_PER_RUN = 1
 HOST_RECONCILE_TIMEOUT_SECONDS = 360
 
 
