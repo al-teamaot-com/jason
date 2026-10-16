@@ -80,6 +80,45 @@ class WorkerEnrollmentTests(unittest.TestCase):
             "13eda165-08e0-ec79-026a-985b37e2eb9e",
         )
 
+    def test_legacy_absent_runtime_and_explicitly_disabled_mcp(self):
+        disabled = module.ENV_NAME + "="
+        self.assertEqual(
+            module.live_diagnostic_uid(self.fake_docker_env([], [disabled])),
+            "",
+        )
+        self.assertEqual(
+            module.live_diagnostic_uid(self.fake_docker_env([disabled], [])),
+            "",
+        )
+        self.assertEqual(
+            module.live_diagnostic_uid(self.fake_docker_env([disabled], [disabled])),
+            "",
+        )
+
+    def test_reject_both_missing_or_ambiguous_disabled_assignment(self):
+        disabled = module.ENV_NAME + "="
+        with self.assertRaisesRegex(module.WorkerEnrollmentError, "missing or duplicated"):
+            module.live_diagnostic_uid(self.fake_docker_env([], []))
+        with self.assertRaisesRegex(module.WorkerEnrollmentError, "missing or duplicated"):
+            module.live_diagnostic_uid(self.fake_docker_env([], [
+                disabled, disabled,
+            ]))
+        with self.assertRaisesRegex(module.WorkerEnrollmentError, "missing or duplicated"):
+            module.live_diagnostic_uid(self.fake_docker_env([
+                disabled, disabled,
+            ], [disabled]))
+
+    def test_one_plane_unset_cannot_hide_real_enrollment(self):
+        enrolled = module.ENV_NAME + "=13eda165-08e0-ec79-026a-985b37e2eb9e"
+        with self.assertRaisesRegex(module.WorkerEnrollmentError, "missing or duplicated"):
+            module.live_diagnostic_uid(self.fake_docker_env([], [enrolled]))
+        with self.assertRaisesRegex(module.WorkerEnrollmentError, "missing or duplicated"):
+            module.live_diagnostic_uid(self.fake_docker_env([enrolled], []))
+        with self.assertRaisesRegex(module.WorkerEnrollmentError, "differs"):
+            module.live_diagnostic_uid(self.fake_docker_env([
+                module.ENV_NAME + "=",
+            ], [enrolled]))
+
     def test_reject_missing_and_duplicate(self):
         entry = module.ENV_NAME + "=a"
         with self.assertRaisesRegex(module.WorkerEnrollmentError, "missing or duplicated"):

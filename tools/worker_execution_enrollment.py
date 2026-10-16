@@ -60,6 +60,7 @@ def approved_diagnostic_uid(repo: Path) -> str:
 def live_diagnostic_uid(output: Callable[[list[str]], str]) -> str:
     """Read both Docker planes; reject missing, duplicate, or divergent scope."""
     values = []
+    present = []
     for container in ("jason-runtime", "jason-mcp-pilot"):
         entries = json.loads(output([
             "docker", "inspect", container, "--format", "{{json .Config.Env}}",
@@ -68,9 +69,18 @@ def live_diagnostic_uid(output: Callable[[list[str]], str]) -> str:
             raise WorkerEnrollmentError("container environment invalid")
         matching = [value.partition("=")[2] for value in entries
                     if isinstance(value, str) and value.startswith(ENV_NAME + "=")]
-        if len(matching) != 1:
+        if len(matching) > 1:
             raise WorkerEnrollmentError("worker enrollment environment missing or duplicated")
-        values.append(matching[0])
+        values.append(matching[0] if matching else "")
+        present.append(bool(matching))
+    # The pre-enrollment runtime image may omit the field entirely while
+    # MCP explicitly records an empty value. Both mean *no* enrollment.
+    # Require at least one explicit empty value so a missing integration in
+    # both planes cannot silently masquerade as a valid disabled policy.
+    if not any(present):
+        raise WorkerEnrollmentError("worker enrollment environment missing or duplicated")
     if values[0] != values[1]:
+        if not all(present):
+            raise WorkerEnrollmentError("worker enrollment environment missing or duplicated")
         raise WorkerEnrollmentError("MCP/runtime worker enrollment differs")
     return values[0]
