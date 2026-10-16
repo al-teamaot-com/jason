@@ -2264,17 +2264,20 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "final_state": "closed",
             "closed_at": now(),
         }
-        gate_transition(repo, state_root, record, "production_verified")
-        write_owner_notification_event(
-            state_root, record, "production_queue_completed"
-        )
-        gate_transition(repo, state_root, record, "closed")
+        # The final root-governed last-known-good commit is part of production
+        # acceptance. No verified/closed state or success notification may be
+        # emitted until that protected transition independently succeeds.
         set_last_known_good(
             state_root,
             production_manifest,
             release_id=str(record["release_id"]),
         )
+        gate_transition(repo, state_root, record, "production_verified")
+        gate_transition(repo, state_root, record, "closed")
         save_record(state_root, record)
+        write_owner_notification_event(
+            state_root, record, "production_queue_completed"
+        )
         return record
     except Exception as error:
         rollback_env = quickbooks_rollback_environment(

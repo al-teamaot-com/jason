@@ -692,6 +692,30 @@ class DattoRmmComponentExecutionConnector:
                 "Datto component execution requires execute mode"
             )
 
+        # A separately owner-enrolled Server worker is independent of the
+        # preexisting Desktop diagnostic pilot. The shell remains forced
+        # per-run and cannot be chosen autonomously by a worker principal.
+        requested_uid = str(request.arguments.get("component_uid") or "").strip()
+        requested_name = str(request.arguments.get("component_name") or "").strip()
+        requested_target = str(
+            request.arguments.get("device_uid")
+            or request.arguments.get("resource_id") or ""
+        ).strip()
+        shell_named = (
+            requested_uid == DATTO_AD_HOC_LINUX_SHELL_UID
+            or requested_name.casefold() == DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
+        )
+        worker_uid = os.environ.get(
+            "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
+        ).strip()
+        if shell_named and (
+            requested_uid != DATTO_AD_HOC_LINUX_SHELL_UID
+            or requested_name.casefold() != DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
+            or not worker_uid or requested_target != worker_uid
+        ):
+            raise PermissionError("DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED")
+        worker_scope = shell_named and requested_target == worker_uid
+
         pilot = self._pilot
         playbook_scoped_component = (
             None
@@ -706,16 +730,19 @@ class DattoRmmComponentExecutionConnector:
                 or playbook_scoped_component is not None
             )
         )
-        if pilot is None and not autonomous_scope:
+        if pilot is None and not autonomous_scope and not worker_scope:
             raise PermissionError("DATTO_COMPONENT_EXECUTION_SCOPE_DISABLED")
 
         requested_allowlist = str(
             request.arguments.get("allowlist_name") or ""
         ).strip()
         effective_allowlist = (
-            pilot.allowlist_name
-            if pilot is not None
-            else DATTO_COMPONENT_EXECUTION_AUTONOMY_ALLOWLIST
+            "aot-approved-linux-worker"
+            if worker_scope else (
+                pilot.allowlist_name
+                if pilot is not None
+                else DATTO_COMPONENT_EXECUTION_AUTONOMY_ALLOWLIST
+            )
         )
         if requested_allowlist and requested_allowlist != effective_allowlist:
             raise PermissionError("DATTO_COMPONENT_ALLOWLIST_MISMATCH")
@@ -732,9 +759,12 @@ class DattoRmmComponentExecutionConnector:
             request.arguments.get("device_class") or ""
         ).strip()
         effective_device_class = (
-            pilot.device_class
-            if pilot is not None
-            else DATTO_COMPONENT_EXECUTION_AUTONOMY_DEVICE_CLASS
+            "Server"
+            if worker_scope else (
+                pilot.device_class
+                if pilot is not None
+                else DATTO_COMPONENT_EXECUTION_AUTONOMY_DEVICE_CLASS
+            )
         )
         if (
             requested_class
@@ -747,13 +777,20 @@ class DattoRmmComponentExecutionConnector:
         ).strip()
         playbook_scoped_authorized = playbook_scoped_component is not None
         selected_component = (
-            playbook_scoped_component
-            if playbook_scoped_component is not None
-            else resolve_datto_component(
-                pilot.components if pilot is not None else self._autonomy_components,
-                component_uid=request.arguments.get("component_uid"),
-                component_name=request.arguments.get("component_name"),
-                catalog_verified=True,
+            DattoApprovedComponent(
+                uid=DATTO_AD_HOC_LINUX_SHELL_UID,
+                name=DATTO_AD_HOC_LINUX_SHELL_NAME,
+                approval_mode="per_run",
+                approval_source="separate_worker_enrollment",
+            ) if worker_scope else (
+                playbook_scoped_component
+                if playbook_scoped_component is not None
+                else resolve_datto_component(
+                    pilot.components if pilot is not None else self._autonomy_components,
+                    component_uid=request.arguments.get("component_uid"),
+                    component_name=request.arguments.get("component_name"),
+                    catalog_verified=True,
+                )
             )
         )
         # Deny Linux shell at the provider boundary unless this runtime has
@@ -915,12 +952,23 @@ class DattoRmmComponentExecutionConnector:
             raise PermissionError("prepared Datto quick-job target changed")
         if dict(prepared.provider_request.body) != dict(prepared_execution.payload):
             raise PermissionError("prepared Datto quick-job payload changed")
+        worker_execution = (
+            selected_component.uid == DATTO_AD_HOC_LINUX_SHELL_UID
+            and selected_component.name.casefold()
+            == DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
+        )
+        if worker_execution and os.environ.get(
+            "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
+        ).strip() != requested_device:
+            raise PermissionError("DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED")
         expected_parameters = {
             "allowlist_name": opaque.prepared.allowlist_entry.allowlist_name,
             "device_class": (
-                self._pilot.device_class
-                if self._pilot is not None
-                else DATTO_COMPONENT_EXECUTION_AUTONOMY_DEVICE_CLASS
+                "Server" if worker_execution else (
+                    self._pilot.device_class
+                    if self._pilot is not None
+                    else DATTO_COMPONENT_EXECUTION_AUTONOMY_DEVICE_CLASS
+                )
             ),
             "component_name": selected_component.name,
         }

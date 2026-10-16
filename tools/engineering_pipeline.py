@@ -59,6 +59,30 @@ def atomic_json(path: Path, state: dict[str, Any]) -> None:
             os.unlink(name)
 
 
+def stalled_approved_work(spool: Path) -> dict[str, Any] | None:
+    """Fail health projection when approved work is stranded upstream.
+
+    Stage exit code success only proves controller execution, not work progress.
+    This read-only assessment does not claim, retry, or mutate work items.
+    """
+    path = spool / "todo-intake-state.json"
+    if not path.exists():
+        return None
+    try:
+        intake = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(intake, dict):
+            raise ValueError("invalid intake state")
+        commitments = intake.get("downstream_commitments") or {}
+        outstanding = int(commitments.get("outstanding_count") or 0)
+        active = int(intake.get("active_development_items") or 0) + int(intake.get("active_support_repairs") or 0)
+        capacity = int(intake.get("engineering_capacity") or 0)
+        if outstanding > 0 and active == 0 and capacity > 0 and intake.get("status") == "stalled_upstream_or_downstream":
+            return {"reason": "approved_work_stalled", "outstanding": outstanding, "active": active, "capacity": capacity}
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return {"reason": "intake_health_unknown"}
+    return None
+
+
 def run_pipeline(
     *,
     scripts: Path,
@@ -112,8 +136,11 @@ def run_pipeline(
         print(f"ENGINEERING_STAGE_END name={stage.name} status={item['status']}", flush=True)
     failed = [name for name, item in state["stages"].items() if item["status"] != "succeeded"]
     state["finished_at"] = now()
-    state["status"] = "degraded" if failed else "healthy"
+    stalled = stalled_approved_work(spool) if not failed else None
+    state["status"] = "degraded" if failed or stalled else "healthy"
     state["failed_or_skipped_stages"] = failed
+    if stalled:
+        state["operational_blocker"] = stalled
     atomic_json(output, state)
     print("ENGINEERING_PIPELINE_RESULT " + json.dumps({
         "status": state["status"],
@@ -121,6 +148,11 @@ def run_pipeline(
         "state_path": str(output),
     }, sort_keys=True), flush=True)
     return state
+
+
+def service_exit_code(state: dict[str, Any]) -> int:
+    """Fail systemd only when a stage failed; degraded backlog remains observable."""
+    return 1 if state["failed_or_skipped_stages"] else 0
 
 
 def main() -> int:
@@ -139,7 +171,8 @@ def main() -> int:
         release_state=args.release_state.resolve(),
         stage_timeout=args.stage_timeout,
     )
-    return 0 if state["status"] == "healthy" else 1
+    # Preserve degraded health without marking successful stage execution as a failed service.
+    return service_exit_code(state)
 
 
 if __name__ == "__main__":

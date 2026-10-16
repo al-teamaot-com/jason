@@ -242,3 +242,55 @@ def test_linux_worker_bound_to_exact_per_run_permission(monkeypatch):
     )
     assert with_approval["status"] == "succeeded"
     assert len(calls) == 1
+
+
+def test_linux_worker_has_separate_server_scope_without_legacy_catalog_entry(monkeypatch):
+    set_scope(monkeypatch)
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_component_name",
+        lambda name: (LINUX_SHELL_UID, LINUX_SHELL_NAME),
+    )
+    monkeypatch.setenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", "claw2")
+    # The Desktop catalog intentionally has no Linux shell component.
+    assert all(
+        component.uid != LINUX_SHELL_UID
+        for component in server.configured_datto_components()
+    )
+    result = server._canonicalize_governed_action_arguments(
+        "automation.component.execute",
+        {"device_uid": "claw2", "component_name": LINUX_SHELL_NAME,
+         "device_class": "Desktop",
+         "variables": {"usrInput": "uname -srm"}},
+    )
+    assert result["device_uid"] == "claw2"
+    assert result["allowlist_name"] == "aot-approved-linux-worker"
+    assert result["device_class"] == "Server"
+    assert result["component_uid"] == LINUX_SHELL_UID
+    _, calls = install_runtime(monkeypatch)
+    unapproved = server._governed_execute(
+        capability_name="automation.component.execute",
+        arguments={"device_uid": "claw2", "component_name": LINUX_SHELL_NAME,
+                   "variables": {"usrInput": "uname -srm"}},
+    )
+    assert unapproved["status"] == "approval_required"
+    assert calls == []
+    approved = server._governed_execute(
+        capability_name="automation.component.execute",
+        arguments={"device_uid": "claw2", "component_name": LINUX_SHELL_NAME,
+                   "variables": {"usrInput": "uname -srm"}},
+        explicit_approval=True,
+    )
+    assert approved["status"] == "succeeded"
+    assert len(calls) == 1
+
+
+def test_separate_worker_scope_does_not_change_desktop_diagnostics(monkeypatch):
+    set_scope(monkeypatch)
+    monkeypatch.setenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", "claw2")
+    result = server._canonicalize_governed_action_arguments(
+        "automation.component.execute",
+        {"device_uid": "device-123", "component_uid": "component-dns"},
+    )
+    assert result["allowlist_name"] == "AOT governed diagnostic pilot"
+    assert result["device_class"] == "Desktop"

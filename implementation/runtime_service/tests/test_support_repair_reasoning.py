@@ -216,3 +216,46 @@ def test_second_scope_review_separates_code_diagnosis_from_deployment(tmp_path: 
     assert 'does not itself require production' in prompt
     assert 'Do not infer that permission' in prompt
     assert 'root-governed' in prompt
+
+
+def test_hosted_patch_400_recovers_once_through_bounded_local_fallback(tmp_path: Path):
+    request_dir = tmp_path / 'reasoning' / 'requests'
+    response_dir = tmp_path / 'reasoning' / 'responses'
+    request_dir.mkdir(parents=True)
+    response_dir.mkdir(parents=True)
+    request = _request('edit_plan')
+    (request_dir / (request['request_id'] + '.json')).write_text(json.dumps(request))
+    (response_dir / (request['request_id'] + '.json')).write_text(json.dumps({
+        'status': 'failed', 'request_id': request['request_id'],
+        'error_type': 'ConnectorTransportError',
+        'error': 'HTTP transport failed with status 400', 'attempts': 1,
+    }))
+    primary = TransientFailureClient(400)
+    fallback = Client()
+    maintenance = SupportRepairReasoningMaintenance(
+        structured_client=primary, fallback_structured_client=fallback,
+        spool=tmp_path, interval_seconds=1,
+    )
+    assert maintenance.tick() is True
+    response = json.loads((response_dir / (request['request_id'] + '.json')).read_text())
+    assert response['status'] == 'succeeded'
+    assert response['result']['edits'][0]['path'] == 'implementation/example.py'
+    assert primary.calls == 1
+    assert len(fallback.calls) == 1
+    assert fallback.calls[0]['max_output_tokens'] <= 1024
+
+
+def test_hosted_search_400_does_not_bypass_request_validation(tmp_path: Path):
+    request_dir = tmp_path / 'reasoning' / 'requests'
+    request_dir.mkdir(parents=True)
+    request = _request('search_plan')
+    (request_dir / (request['request_id'] + '.json')).write_text(json.dumps(request))
+    fallback = Client()
+    maintenance = SupportRepairReasoningMaintenance(
+        structured_client=TransientFailureClient(400),
+        fallback_structured_client=fallback, spool=tmp_path, interval_seconds=1,
+    )
+    assert maintenance.tick() is True
+    response = json.loads((tmp_path / 'reasoning' / 'responses' / (request['request_id'] + '.json')).read_text())
+    assert response['status'] == 'failed'
+    assert fallback.calls == []

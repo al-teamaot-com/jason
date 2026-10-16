@@ -77,7 +77,7 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'pgrep -u al -f "$script_name"' not in text
     assert 'PORT_GUARD="$RELEASE_DIR/tools/release_exporter_port_guard.py"' in text
     assert '--mode free --unit "$unit" --timeout-seconds 12' in text
-    assert '--mode owned --unit "$unit" --timeout-seconds 12' in text
+    assert '--mode owned --unit "$unit" --timeout-seconds 30' in text
     assert 'HOST_RECONCILE_FAILURE step=' in text
     assert 'kill "$pid"' not in text
     assert text.index('--mode free --unit') < text.index('--mode owned --unit')
@@ -287,7 +287,7 @@ mode = os.environ["PROBE_MODE"]
 if mode == "foreign":
     print("EXPORTER_PORT_GUARD=FAIL detail=owned by a different/unknown process", file=sys.stderr)
     sys.exit(1)
-if mode == "persistent" or attempt == 1:
+if mode == "persistent" or attempt == 1 or (mode == "queued" and attempt <= 2):
     print("EXPORTER_PORT_GUARD=FAIL detail=port 9464 has no listening owner (MainPID=0)", file=sys.stderr)
     sys.exit(1)
 print("EXPORTER_PORT_GUARD=PASS check=owned")
@@ -306,6 +306,11 @@ print("EXPORTER_PORT_GUARD=PASS check=owned")
     systemctl.write_text(
         '#!/bin/sh\n'
         'printf "systemctl %s\\n" "$*" >> "$PROBE_LOG"\n'
+    )
+    # Model a real systemd start job which remains pending during a slow boot.
+    systemctl_script = systemctl.read_text()
+    systemctl.write_text(systemctl_script +
+        'if [ "$1" = "show" ] && [ "$PROBE_MODE" = "queued" ]; then printf "123/start\\n"; fi\n'
     )
     systemctl.chmod(0o755)
     sleep = bindir / "sleep"
@@ -331,7 +336,21 @@ def test_exporter_ownership_guard_can_recover_only_verified_empty_socket(tmp_pat
     assert status == 0, stderr
     assert events == [
         "guard owned", "guard free",
+        "systemctl show jason-status-exporter.service --property=Job --value",
         "systemctl restart --no-block jason-status-exporter.service",
+        "guard owned",
+    ]
+
+
+def test_exporter_ownership_guard_waits_for_queued_job_without_restart(tmp_path: Path) -> None:
+    status, stderr, events = _recovered_exporter_probe(tmp_path, "queued")
+    assert status == 0, stderr
+    assert "EXPORTER_OWNERSHIP_RECONCILIATION=WAIT" in stderr
+    assert events == [
+        "guard owned", "guard free",
+        "systemctl show jason-status-exporter.service --property=Job --value",
+        "guard owned", "guard free",
+        "systemctl show jason-status-exporter.service --property=Job --value",
         "guard owned",
     ]
 
@@ -347,9 +366,10 @@ def test_exporter_ownership_guard_persistent_absence_stays_fatal(tmp_path: Path)
     status, stderr, events = _recovered_exporter_probe(tmp_path, "persistent")
     assert status != 0
     assert "EXPORTER_OWNERSHIP_RECONCILIATION=FAIL" in stderr
-    assert events.count("guard owned") == 3
-    assert events.count("guard free") == 2
-    assert events.count("systemctl restart --no-block jason-status-exporter.service") == 2
+    assert events.count("guard owned") == 4
+    assert events.count("guard free") == 3
+    assert events.count("systemctl show jason-status-exporter.service --property=Job --value") == 3
+    assert events.count("systemctl restart --no-block jason-status-exporter.service") == 3
 
 def test_exporter_activation_queues_nonblocking_start_and_waits_for_real_port_owner() -> None:
     text = RECONCILE.read_text(encoding="utf-8")

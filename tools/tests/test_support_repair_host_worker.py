@@ -1089,3 +1089,61 @@ def test_scope_review_chooses_one_p0_before_lower_priority(tmp_path):
     assert items['SUPPORT-OPS-400']['phase'] == 'diagnosing'
     assert items['SUPPORT-OPS-401']['phase'] == 'blocked'
     assert worker.reassess_model_scope_blocks(state, priority, tmp_path, 1) == []
+
+
+def test_recovered_edit_reasoning_readmits_only_verified_exact_request(tmp_path):
+    import json
+    rid = 'a' * 64
+    response_dir = tmp_path / 'reasoning' / 'responses'
+    response_dir.mkdir(parents=True)
+    (response_dir / f'{rid}.json').write_text(json.dumps({
+        'status': 'succeeded', 'request_id': rid, 'kind': 'edit_plan',
+        'support_item': 'SUPPORT-OPS-123', 'result': {'edits': []},
+    }))
+    record = {'phase': 'blocked', 'reason': 'edit reasoning failed: HTTP transport failed with status 400',
+              'reasoning_request_id': rid}
+    state = {'items': {'SUPPORT-OPS-123': record}}
+    eligible = [{'id': 'SUPPORT-OPS-123'}]
+    assert worker.readmit_recovered_reasoning(state, eligible, tmp_path, max_active=2) == ['SUPPORT-OPS-123']
+    assert record['phase'] == 'implementing'
+    assert worker.readmit_recovered_reasoning(state, eligible, tmp_path, max_active=2) == []
+
+
+def test_recovery_rejects_mismatched_reasoning_reply(tmp_path):
+    import json
+    rid = 'b' * 64
+    response_dir = tmp_path / 'reasoning' / 'responses'
+    response_dir.mkdir(parents=True)
+    (response_dir / f'{rid}.json').write_text(json.dumps({
+        'status': 'succeeded', 'request_id': rid, 'kind': 'edit_plan',
+        'support_item': 'SUPPORT-OPS-OTHER', 'result': {},
+    }))
+    state = {'items': {'SUPPORT-OPS-123': {'phase': 'blocked',
+        'reason': 'edit reasoning failed: HTTP transport failed with status 400',
+        'reasoning_request_id': rid}}}
+    assert worker.readmit_recovered_reasoning(state, [{'id': 'SUPPORT-OPS-123'}], tmp_path,
+                                                max_active=2) == []
+
+
+def test_recovered_reasoning_respects_existing_active_worker_capacity(tmp_path):
+    import json
+    root = tmp_path / 'reasoning' / 'responses'
+    root.mkdir(parents=True)
+    state = {'items': {'SUPPORT-OPS-1': {'phase': 'diagnosing'}}}
+    eligible = []
+    for index, letter in enumerate('abc', start=2):
+        rid = letter * 64
+        item_id = f'SUPPORT-OPS-{index}'
+        (root / f'{rid}.json').write_text(json.dumps({
+            'status': 'succeeded', 'request_id': rid, 'kind': 'edit_plan',
+            'support_item': item_id, 'result': {'edits': []},
+        }))
+        state['items'][item_id] = {
+            'phase': 'blocked', 'reason': 'edit reasoning failed: HTTP transport failed with status 400',
+            'reasoning_request_id': rid,
+        }
+        eligible.append({'id': item_id})
+    resumed = worker.readmit_recovered_reasoning(state, eligible, tmp_path, max_active=2)
+    assert resumed == ['SUPPORT-OPS-2']
+    assert state['items']['SUPPORT-OPS-3']['phase'] == 'blocked'
+    assert state['items']['SUPPORT-OPS-4']['phase'] == 'blocked'
