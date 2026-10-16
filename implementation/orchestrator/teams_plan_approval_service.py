@@ -43,3 +43,12 @@ class UniversalTeamsPlanApprovalService:
                 result=result, proposal=proposal, ledger=self.ledger,
                 decided_at=result.accepted_approval.decided_at)
         return result
+
+    def handle_stored_response(self, *, proposal_repository, token: str,
+            payload: Mapping[str, str], original_request: OrchestrationRequest,
+            decided_at: datetime, now: datetime | None = None) -> TeamsApprovalFlowResult:
+        """Resolve plan authority from server storage, never from Teams card data."""
+        proposal = proposal_repository.require(payload.get('approval_id', ''))
+        return self.handle_response(token=token, payload=payload,
+            original_request=original_request, proposal=proposal,
+            decided_at=decided_at, now=now)
