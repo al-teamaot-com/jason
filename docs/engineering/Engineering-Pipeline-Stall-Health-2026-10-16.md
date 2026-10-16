@@ -34,3 +34,19 @@ releasing the actual repair. That change was removed before deployment. The
 pipeline keeps truthful degraded operational evidence, while the native
 owner-selected-PR reconciliation advances stale work to its real implementation
 and validation state. A process exit code is not a substitute for recovery.
+
+## Primary billing failures must not disappear behind fallback errors
+
+The 2026-10-16 authenticated synthetic runtime probe returned HTTP 429,
+`insufficient_quota`, `credit_balance_exhausted`. This is distinct from transient
+rate limiting and cannot be repaired by retrying the same request. The reasoning
+maintenance now preserves that allowlisted primary error code and a specific
+Owner action even when the configured local fallback fails. A successful fallback
+may complete bounded work, but the primary billing dependency remains visible.
+Persisted billing/spend/quota failures are non-retryable until the external
+condition is corrected and recovery is explicitly re-evaluated. No billing changes,
+credential disclosure, request-counter reset, or new execution authority is added.
+
+The official provider error taxonomy distinguishes credit exhaustion, organization
+and project spend caps, and provider-assigned usage limits. Ordinary 429 rate limits
+retain bounded retries and the existing fallback policy. Tests cover both paths.
