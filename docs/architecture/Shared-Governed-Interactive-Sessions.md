@@ -138,3 +138,27 @@ boundary, retention, or backup/restore certification. It is not connected to
 a live command executor or Teams approvals. Production integration must select
 an audited shared store and demonstrate concurrency, crash recovery, redaction,
 access isolation, secret handling and replay protection under hostile inputs.
+
+## Owner-approved companion path for Claw2-pc (2026-10-16)
+
+Owner authorized a governed Jason Companion on **Claw2-pc**, explicitly as a
+nonproduction interactive PowerShell evaluation platform instead of relying
+on an undocumented Datto Web Remote WebRTC injection API. Keep the shared
+session contracts transport-neutral. Before any agent installation or device
+command, identify the actual Datto device UID, Windows version, companion
+installation identity, network path and supported PowerShell edition. Bind
+the device, tenant, client and technician to separate audited authority records.
+
+`companion_contract.py` is an **inert** session handshake contract with strict
+identity matching, per-device fingerprint, authenticated binding attestations,
+nonce, expiration <= 5 minutes and explicit engineering-only scope. Its
+booleans are inputs to local boundary tests, **not cryptographic proofs**.
+No agent or executable process is supplied by this change.
+
+Engineering acceptance requires a reviewed authenticated mutual channel,
+device enrollment and revocation, per-command digest/approval, isolated
+execution identity, streamed output with redaction and hard limits, transport
+cancellation, crash/reconnect handling, reliable durable audit and independent
+Teams approve/deny expiry/replay enforcement. Start with read-only commands on
+Claw2-pc in a disposable test state after authority verification. No
+production rollout or automatic promotion; retain explicit Owner gate.
