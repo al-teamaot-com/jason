@@ -26,8 +26,13 @@ class VerifiedMicrosoftPrincipal:
     audience: str
     issuer: str
     authentication_assurance: str
+    authentication_evidence_hash: str | None = None
 
     def validate(self) -> None:
+        if self.authentication_evidence_hash is not None:
+            import re
+            if not re.fullmatch(r'[0-9a-f]{64}', self.authentication_evidence_hash):
+                raise ValueError('authentication evidence must be a SHA-256 digest')
         for name, value in {
             "tenant_id": self.tenant_id,
             "object_id": self.object_id,

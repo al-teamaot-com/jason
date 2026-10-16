@@ -351,3 +351,11 @@ test("approval interactions preserve bounded card selections", () => {
     requested_window: "02:30",
   });
 });
+
+
+test("queued universal approval never renders as failed or completed execution", () => {
+  const reply=replyForRuntimeResult({httpStatus:200,payload:{status:"approved",executed:false,
+    reply:{text:"Approval recorded. Jason has queued the reviewed plan for execution."}}});
+  assert.equal(reply,"Approval recorded. Jason has queued the reviewed plan for execution.");
+  assert.doesNotMatch(reply,/could not safely|completed the request/i);
+});

@@ -6,7 +6,7 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import sqlite3
-from typing import Any, Mapping
+from typing import Any, Mapping, Callable
 from uuid import uuid4
 
 from .contracts import ArtifactReference, OrchestrationRequest, OrchestrationResult, OrchestrationStatus, ExecutionStage
@@ -57,6 +57,7 @@ class ExecutionPlanBinding:
 @dataclass(frozen=True, slots=True)
 class SQLiteGovernedExecutionLedger:
     database_path: str
+    clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
 
     def initialize(self) -> None:
         path = Path(self.database_path)
@@ -84,6 +85,8 @@ class SQLiteGovernedExecutionLedger:
                 "execution_plan_fingerprint": "TEXT",
                 "execution_plan_json": "TEXT",
                 "failure_reason": "TEXT",
+                "parent_approval_id": "TEXT",
+                "approved_plan_fingerprint": "TEXT",
             }
             for name, ddl in migrations.items():
                 if name not in columns:
@@ -95,7 +98,7 @@ class SQLiteGovernedExecutionLedger:
 
     def reserve_approval(self, *, principal_id: str, organization_id: str, client_id: str | None, capability_name: str, arguments: Mapping[str, Any], request_id: str, ttl_seconds: int = 300) -> ApprovalReservation:
         fp = intent_fingerprint(principal_id=principal_id, organization_id=organization_id, client_id=client_id, capability_name=capability_name, arguments=arguments)
-        now = datetime.now(timezone.utc); expires = now + timedelta(seconds=ttl_seconds)
+        now = self.clock(); expires = now + timedelta(seconds=ttl_seconds)
         with self._connect() as c:
             c.execute("BEGIN IMMEDIATE")
             row=c.execute("SELECT * FROM governed_action_approvals WHERE action_fingerprint=?", (fp,)).fetchone()
@@ -110,6 +113,48 @@ class SQLiteGovernedExecutionLedger:
                 (approval_id,fp,fp,idem,principal_id,organization_id,client_id,capability_name,request_id,'reserved',now.isoformat(),expires.isoformat())
             )
             c.commit(); return ApprovalReservation(approval_id, fp, idem, request_id, True, expires)
+
+    def reserve_approved_plan_step(self, *, approval_id: str, parent_approval_id: str,
+            plan_fingerprint: str, request: OrchestrationRequest, expires_at: datetime) -> ApprovalReservation:
+        """Reserve exact child intent after a verified plan decision; never grant authority.
+
+        This uses the existing execution ledger and consumes through its normal
+        concrete provider-plan checks. Different reviewed plan steps cannot collide
+        with legacy action-only reservations or inherit their expired decisions.
+        """
+        import re
+        if (not re.fullmatch(r'planstep-[0-9a-f]{64}',approval_id)
+                or not parent_approval_id.startswith('planapproval-')
+                or not re.fullmatch(r'[0-9a-f]{64}',plan_fingerprint)):
+            raise ValueError('exact approved plan and child identifiers required')
+        now=self.clock()
+        if expires_at.tzinfo is None or now.tzinfo is None or expires_at<=now:
+            raise PermissionError('approved plan step has expired')
+        fp=intent_fingerprint(principal_id=request.principal_id,organization_id=request.organization_id,
+            client_id=request.client_id,capability_name=request.capability_name,arguments=request.arguments)
+        key=sha256((parent_approval_id+'|'+request.execution_id+'|'+plan_fingerprint+'|'+fp).encode()).hexdigest()
+        idem='idem_plan_step_'+key
+        unique_action='plan_step_'+key
+        with self._connect() as c:
+            c.execute('BEGIN IMMEDIATE')
+            row=c.execute('SELECT * FROM governed_action_approvals WHERE approval_id=?',(approval_id,)).fetchone()
+            if row is not None:
+                if (row['intent_fingerprint']!=fp or row['request_id']!=request.execution_id
+                        or row['idempotency_key']!=idem or row['parent_approval_id']!=parent_approval_id
+                        or row['approved_plan_fingerprint']!=plan_fingerprint
+                        or datetime.fromisoformat(row['expires_at'])!=expires_at):
+                    raise PermissionError('approved plan step reservation changed')
+                c.commit()
+                return ApprovalReservation(approval_id,fp,idem,request.execution_id,False,expires_at)
+            c.execute(
+                'INSERT INTO governed_action_approvals(approval_id,action_fingerprint,intent_fingerprint,'
+                'idempotency_key,principal_id,organization_id,client_id,capability_name,request_id,state,'
+                'created_at,expires_at,parent_approval_id,approved_plan_fingerprint) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                (approval_id,unique_action,fp,idem,request.principal_id,request.organization_id,request.client_id,
+                 request.capability_name,request.execution_id,'reserved',now.isoformat(),expires_at.isoformat(),
+                 parent_approval_id,plan_fingerprint))
+            c.commit()
+            return ApprovalReservation(approval_id,fp,idem,request.execution_id,True,expires_at)
 
     def check_intent(self, request: OrchestrationRequest) -> IntentCheck:
         row, fp = self._validated_row(request)
@@ -131,7 +176,7 @@ class SQLiteGovernedExecutionLedger:
         )
         plan_fp = plan.fingerprint
         plan_json = json.dumps(plan.canonical_material(), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        now = datetime.now(timezone.utc)
+        now = self.clock()
         with self._connect() as c:
             c.execute("BEGIN IMMEDIATE")
             row=c.execute("SELECT * FROM governed_action_approvals WHERE approval_id=?", (request.approval_id,)).fetchone()
@@ -157,7 +202,7 @@ class SQLiteGovernedExecutionLedger:
             capability_name=request.capability_name,
             arguments=request.arguments,
         )
-        now=datetime.now(timezone.utc)
+        now=self.clock()
         with self._connect() as c:
             row=c.execute("SELECT * FROM governed_action_approvals WHERE approval_id=?", (request.approval_id,)).fetchone()
             self._validate_row_values(row, request=request, fp=fp, now=now)
@@ -178,7 +223,7 @@ class SQLiteGovernedExecutionLedger:
 
     def complete(self, request: OrchestrationRequest, result: OrchestrationResult) -> None:
         if not request.approval_id: return
-        payload=self._result_to_json(result); now=datetime.now(timezone.utc).isoformat()
+        payload=self._result_to_json(result); now=self.clock().isoformat()
         with self._connect() as c:
             c.execute("BEGIN IMMEDIATE")
             c.execute("UPDATE governed_action_approvals SET state='succeeded',result_json=?,completed_at=?,failure_reason=NULL WHERE approval_id=? AND state='consumed'", (json.dumps(payload,sort_keys=True,separators=(",",":"),default=str),now,request.approval_id))
@@ -202,7 +247,7 @@ class SQLiteGovernedExecutionLedger:
         if not request.approval_id:
             raise PermissionError("approval_id is required for approval-governed execution")
         fp=intent_fingerprint(principal_id=request.principal_id, organization_id=request.organization_id, client_id=request.client_id, capability_name=request.capability_name, arguments=request.arguments)
-        now=datetime.now(timezone.utc)
+        now=self.clock()
         with self._connect() as c:
             row=c.execute("SELECT * FROM governed_action_approvals WHERE approval_id=?", (request.approval_id,)).fetchone()
             self._validate_row_values(row, request=request, fp=fp, now=now)

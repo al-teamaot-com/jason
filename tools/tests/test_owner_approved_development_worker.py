@@ -760,7 +760,7 @@ def test_development_does_not_defer_permission_denial(monkeypatch, tmp_path):
         module.main()
 
 
-def test_verified_ccc_owner_review_readmits_once(tmp_path):
+def test_verified_ccc_owner_review_readmits_once(monkeypatch, tmp_path):
     import json
     from datetime import datetime, timezone
     sha = 'e' * 40
@@ -772,6 +772,7 @@ def test_verified_ccc_owner_review_readmits_once(tmp_path):
     review.write_text(json.dumps({'status': 'approved', 'source_revision': sha}))
     drift.write_text(json.dumps({'status': 'pass', 'problems': [], 'observed_at': datetime.now(timezone.utc).isoformat()}))
     (folder / 'ccc-report.json').write_text(json.dumps({'status': 'PASS', 'source_revision': sha, 'runtime_revision': sha, 'checks': [{'status': 'PASS'}]}))
+    monkeypatch.setattr(module.support, 'production_state_from_main', lambda repo: {'production': {'revision': sha}})
     original = 'Exact owner-approved CCC material-change review for the current production SHA is required and not yet authorized.'
     state = {'items': {'DEV-1237': {'phase': 'blocked', 'reason': original}}}
     kwargs = dict(review_path=review, report_root=reports, drift_path=drift)
@@ -782,6 +783,42 @@ def test_verified_ccc_owner_review_readmits_once(tmp_path):
     state['items']['DEV-1237'].pop('verified_ccc_readmission_sha')
     drift.write_text(json.dumps({'status': 'drift_detected', 'problems': ['failed'], 'observed_at': datetime.now(timezone.utc).isoformat()}))
     assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, **kwargs) == 0
+
+
+def test_verified_ccc_owner_review_rejects_production_sha_mismatch(monkeypatch, tmp_path):
+    import json
+    from datetime import datetime, timezone
+    sha = 'e' * 40
+    review = tmp_path / 'review.json'
+    drift = tmp_path / 'drift.json'
+    reports = tmp_path / 'reports'
+    folder = reports / 'run1'
+    folder.mkdir(parents=True)
+    review.write_text(json.dumps({'status': 'approved', 'source_revision': sha}))
+    drift.write_text(json.dumps({'status': 'pass', 'problems': [], 'observed_at': datetime.now(timezone.utc).isoformat()}))
+    (folder / 'ccc-report.json').write_text(json.dumps({'status': 'PASS', 'source_revision': sha, 'runtime_revision': sha, 'checks': [{'status': 'PASS'}]}))
+    monkeypatch.setattr(module.support, 'production_state_from_main', lambda repo: {'production': {'revision': 'a' * 40}})
+    state = {'items': {'DEV-1237': {'phase': 'blocked', 'reason': 'Exact owner-approved CCC material-change review for the current production SHA is required and not yet authorized.'}}}
+    assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, review_path=review, report_root=reports, drift_path=drift) == 0
+    assert state['items']['DEV-1237']['phase'] == 'blocked'
+
+
+def test_verified_ccc_owner_review_rejects_missing_production_identity(monkeypatch, tmp_path):
+    import json
+    from datetime import datetime, timezone
+    sha = 'e' * 40
+    review = tmp_path / 'review.json'
+    drift = tmp_path / 'drift.json'
+    reports = tmp_path / 'reports'
+    folder = reports / 'run1'
+    folder.mkdir(parents=True)
+    review.write_text(json.dumps({'status': 'approved', 'source_revision': sha}))
+    drift.write_text(json.dumps({'status': 'pass', 'problems': [], 'observed_at': datetime.now(timezone.utc).isoformat()}))
+    (folder / 'ccc-report.json').write_text(json.dumps({'status': 'PASS', 'source_revision': sha, 'runtime_revision': sha, 'checks': [{'status': 'PASS'}]}))
+    monkeypatch.setattr(module.support, 'production_state_from_main', lambda repo: {})
+    state = {'items': {'DEV-1237': {'phase': 'blocked', 'reason': 'Exact owner-approved CCC material-change review for the current production SHA is required and not yet authorized.'}}}
+    assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, review_path=review, report_root=reports, drift_path=drift) == 0
+    assert state['items']['DEV-1237']['phase'] == 'blocked'
 
 
 def test_ccc_readmission_rejects_empty_certification_checks(tmp_path):
@@ -1620,3 +1657,13 @@ def test_development_readmit_only_exact_recovered_response(tmp_path, monkeypatch
     assert record['phase'] == 'diagnosing'
     assert module.readmit_recovered_development_reasoning(state, [{'id': 'DEV-111'}], tmp_path,
                                                              max_active=2) == []
+
+
+def test_existing_pr_preserves_pending_and_inflight_ci_repairs():
+    assert module.phase_for_existing_pr('ci_repair_needed') == 'ci_repair_needed'
+    assert module.phase_for_existing_pr('ci_repairing') == 'ci_repairing'
+
+
+def test_existing_pr_reconciles_other_phases_through_validation():
+    for phase in ('identified', 'diagnosing', 'implementing', 'pr_validating'):
+        assert module.phase_for_existing_pr(phase) == 'pr_validating'

@@ -113,6 +113,34 @@ class TeamsGatewayPlaybookApprovalSender:
             message_ids.append(str(result["message_id"]).strip())
         return tuple(message_ids)
 
+    def send_status(self, *, text: str) -> tuple[str, ...]:
+        """Deliver a bounded non-actionable status to the pre-resolved recipients.
+
+        Callers own authorization/routing and fixed-template construction. This
+        reuses the same registered gateway transport as approval-card delivery.
+        """
+        if not isinstance(text, str) or not 1 <= len(text) <= 1200:
+            raise ValueError("bounded Teams status text required")
+        token = self.token_file.read_text(encoding="utf-8").strip()
+        if not token:
+            raise PermissionError("Teams proactive token unavailable")
+        receipts: list[str] = []
+        for identity_id in self.owner_identity_ids:
+            binding = self.bindings.find_active_by_jason_identity(jason_identity_id=identity_id)
+            if binding is None or binding.status != "active":
+                raise PermissionError("Teams status recipient binding unavailable")
+            payload = {"aadObjectId": binding.microsoft_object_id,
+                       "tenantId": binding.microsoft_tenant_id, "text": text}
+            request = Request(self.gateway_url + "/internal/proactive/send",
+                data=json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(),
+                method="POST",headers={"Authorization":"Bearer "+token,"Content-Type":"application/json"})
+            with urlopen(request, timeout=20) as response:
+                result=json.loads(response.read().decode())
+            if result.get("status")!="succeeded" or not result.get("message_id"):
+                raise RuntimeError("Teams status delivery was not confirmed")
+            receipts.append(str(result["message_id"]))
+        return tuple(receipts)
+
     @staticmethod
     def _adaptive_card(card) -> dict:
         facts = [
@@ -147,7 +175,6 @@ class TeamsGatewayPlaybookApprovalSender:
                     "title": "Approve",
                     "data": {
                         "approval_id": card.approval_id,
-                        "organization_id": card.organization_id,
                         "decision": "approve",
                     },
                 },
@@ -156,7 +183,6 @@ class TeamsGatewayPlaybookApprovalSender:
                     "title": "Deny",
                     "data": {
                         "approval_id": card.approval_id,
-                        "organization_id": card.organization_id,
                         "decision": "deny",
                     },
                 },
@@ -165,7 +191,6 @@ class TeamsGatewayPlaybookApprovalSender:
                     "title": "Request Changes",
                     "data": {
                         "approval_id": card.approval_id,
-                        "organization_id": card.organization_id,
                         "decision": "request_changes",
                     },
                 },

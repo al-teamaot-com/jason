@@ -145,14 +145,21 @@ def run_pipeline(
     print("ENGINEERING_PIPELINE_RESULT " + json.dumps({
         "status": state["status"],
         "failed_or_skipped_stages": failed,
+        "operational_blocker": stalled,
         "state_path": str(output),
     }, sort_keys=True), flush=True)
     return state
 
 
 def service_exit_code(state: dict[str, Any]) -> int:
-    """Fail systemd only when a stage failed; degraded backlog remains observable."""
-    return 1 if state["failed_or_skipped_stages"] else 0
+    """Report failed execution, not a legitimate pending/blocked work state.
+
+    The user service has no automatic Restart/OnFailure recovery. Returning a
+    failure for backlog alone only adds a failed critical unit and can block CCC
+    from releasing the repair. Operational degradation remains explicit in the
+    state/event; the native work reconciler owns recovery and source adoption.
+    """
+    return 1 if state.get("failed_or_skipped_stages") else 0
 
 
 def main() -> int:
