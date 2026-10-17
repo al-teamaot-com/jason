@@ -48,3 +48,9 @@ Never create, edit, or delete the file outside a separately owner-approved, audi
 ## Go-live restrictions
 
 Full containment requires a separately authorized production change. The earlier disputed approval in #1553 remains unresolved. The harmless owner UAT acceptance in PR #1555 is a distinct workflow and must be verified by the Owner actually clicking Approve and Deny in Teams. A Bot Framework signature or provider-accepted card receipt is not proof of a physical human click.
+
+## Active pull-request coordination
+
+Source review must preserve independent work in PR #692 (broad finance/release foundation), PR #1331 (immutable release-controller/CCC verification), and PR #1548 (Teams signed callback and test-clock changes). The shared files are the host release runner and mobile-release approval tests. PR #692 is large enough that its complete overlapping runner patch requires a separate exact-hunk review if it is ever merged; no other PR has been merged or authorized by declaring this dependency.
+
+An explicit owner-approved release path outside held Teams card approvals remains available under the original release constitution: exact revision and identity authority, original CCC, rollback and independently verified release-manager checks. A safety hold cannot manufacture that approval, delete audit evidence or relax its gates.
