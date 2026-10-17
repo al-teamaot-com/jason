@@ -51,3 +51,43 @@ and terminal active-unit certification. Run full host-reconcile,
 release-manager, CCC, rollback, drift and exporter guard regressions.
 
 Integration coordination: #1112, #1436, #1453.
+
+## 2026-10-17 incident: status exporter must not wait on authority-health job
+
+In the failed `de5b94ca9dd9` release transaction, source preproduction and
+post-deploy CCC passed, but the downstream documentation-publisher request
+failed, initiating automatic rollback. The root-owned rollback host
+reconciler stopped all ten allowlisted exporters and later failed at
+`jason-status-exporter.service`: the strict MainPID/listener guard saw
+`MainPID=0` and no owned listener on port 9464 until its finite retry
+budget was exhausted. Later-listed usage exporters (ports 9465/9466)
+remained stopped, and the drift watchdog correctly opened the breaker.
+
+The status exporter's canonical unit ordered its start **After**
+`jason-openclaw-authority-health.service`. That separate full-integrity
+job takes over two minutes and may already be active during rollback.
+An exporter start queued behind it can therefore outlast the bounded
+ownership probes without actually having failed. This creates a timing
+dependency that the metrics exporter does not technically require.
+
+The source fix removes **only that ordering dependency**, retaining
+`Requires=docker.service`, its immutable working directory, restricted
+service user, read-only paths, restart rules and the existing independent
+socket/MainPID ownership gate. The exporter continues to derive
+`jason_openclaw_authority_operational_health` from the actual snapshot:
+a missing snapshot reports **0** (unhealthy), with age **-1**.
+Starting metrics exposure early cannot promote a stale/missing authority
+snapshot into a green result.
+
+The exact observed rollback defect and its successor fix are tracked in
+Project Jason issue #1440. This configuration is **production control
+infrastructure**; the change requires protected CI, separately reviewed
+preproduction and exact owner authorization before production restart.
+No live unit, runtime source, root control file or circuit breaker is
+changed by committing the fix.
+
+Integration coordination for the 2026-10-17 follow-up: #1331, #1453,
+#692. PR #1331 adds bounded exporter-reconciliation contract assertions
+in the same test module. Preserve both its existing ownership/cadence
+regressions and this independent service-ordering contract on merge; do
+not replace the newer main-based tests with an old branch snapshot.

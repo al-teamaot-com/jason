@@ -64,6 +64,28 @@ def test_canonical_host_units_use_immutable_release_path() -> None:
         assert "/home/al/jason-worktrees/" not in text
 
 
+def test_status_exporter_start_is_not_blocked_by_long_authority_health() -> None:
+    unit = (
+        REPO_ROOT / "infrastructure" / "showcase" / "systemd"
+        / "jason-status-exporter.service"
+    ).read_text(encoding="utf-8")
+    after = [line for line in unit.splitlines() if line.startswith("After=")]
+    assert len(after) == 1
+    assert "docker.service" in after[0]
+    assert "jason-openclaw-authority-health.service" not in after[0]
+    assert "Requires=docker.service" in unit
+    assert "JASON_OPENCLAW_AUTHORITY_HEALTH_PATH" in unit
+
+    # Existing exporter logic fails closed when that asynchronous
+    # authority-health snapshot has not been produced yet.
+    exporter = (
+        REPO_ROOT / "infrastructure" / "showcase" / "status_exporter.py"
+    ).read_text(encoding="utf-8")
+    assert "jason_openclaw_authority_operational_health" in exporter
+    assert "jason_openclaw_authority_snapshot_age_seconds" in exporter
+    assert 'operational.get("status") == "pass"' in exporter
+
+
 def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     text = RECONCILE.read_text(encoding="utf-8")
 
