@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "enabled": true,
+  "purpose": "owner_teams_nonexecuting_uat",
+  "organization_id": "aot",
+  "owner_identity_id": "person-al",
+  "requester_identity_id": "svc-jason-acceptance-test",
+  "capability": "interaction.owner.acceptance.record",
+  "execution_permitted": false,
+  "session_id": "OwnerUAT20261017Pilot",
+  "expires_at": "2026-10-19T00:00:00Z"
+}
