@@ -327,3 +327,52 @@ def test_owner_only_issuer_skips_unreviewed_core_release(tmp_path):
     )
     assert worker.tick() is False
     assert repo.list_all() == ()
+
+
+def test_real_card_decision_accepts_transport_delivery_evidence_after_issuance(tmp_path):
+    """Reproduces the actual owner phone 403: issuer adds delivery receipt to metadata.
+
+    The immutable approval intent remains the original request. Transport
+    delivery is a bounded receipt, not a change to authority or plan.
+    """
+    from dataclasses import replace
+    flow, request, repo, release_path = flow_fixture(tmp_path)
+    before = release_path.read_bytes()
+    repo.put(replace(
+        request, metadata={
+            **request.metadata, "delivery_message_ids": "accepted:synthetic-receipt-id",
+        },
+    ))
+    result = click(flow, request)
+    assert result["approval_status"] == "approved"
+    assert result["executed"] is False
+    assert repo.get(request.approval_id).status == ApprovalRequestStatus.APPROVED
+    receipt = repo.accepted_decision(request.approval_id)
+    assert receipt.decided_by == "person-al"
+    assert receipt.channel == "microsoft_teams"
+    assert release_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("malicious", [
+    {"delivery_message_ids": ""},
+    {"delivery_message_ids": []},
+    {"delivery_message_ids": "x" * 1500},
+    {"delivery_message_ids": "accepted:signed\nHeader: override"},
+    {"unexpected_authority_grant": "true"},
+    {"delivery_message_ids": "accepted:proof", "owner_policy_sha256": "f" * 64},
+])
+def test_mobile_request_refuses_malformed_delivery_or_changed_immutable_intent(tmp_path, malicious):
+    from dataclasses import replace
+    flow, request, repo, _ = flow_fixture(tmp_path)
+    try:
+        repo.put(replace(request, metadata={**request.metadata, **malicious}))
+    except ValueError:
+        # Immutable ledger rejects an invalid/altered approval scope before
+        # it could ever be presented to the Teams callback.
+        assert repo.get(request.approval_id).status == ApprovalRequestStatus.PENDING
+        assert repo.accepted_decision(request.approval_id) is None
+        return
+    with pytest.raises(PermissionError):
+        click(flow, request)
+    assert repo.get(request.approval_id).status == ApprovalRequestStatus.PENDING
+    assert repo.accepted_decision(request.approval_id) is None
