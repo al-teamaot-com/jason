@@ -96,6 +96,30 @@ messages. Tests cover the exact PR review message, code/Teams/Graph docs
 links, ordinary status links and legitimate vendor product links. This fixes
 routing; it does not authorize a purchase or bypass existing URL validation.
 
+## Existing Microsoft directory authorization alignment
+
+The live AOT `microsoft_graph` tenant boundary is validated for
+`directory-read`, not the separately cataloged
+`identity-investigation-read` profile. The expanded profile requires an
+explicit consent/authorization change and cannot silently replace the basic
+Teams identity-enrichment dependency. Production source at
+`f7f33cf6d7133dabb1d30cb78ef73dd8b0524c75` erroneously configured both
+directory token providers for the broader profile, causing otherwise
+authenticated Teams conversations to fail closed with
+`MICROSOFT_PROFILE_NOT_APPROVED`.
+
+The constitutional repair restores the **already approved**
+`directory-read` profile for ordinary Teams identity lookup, leaving the
+broader identity-investigation provider catalog and administrative consent
+requirements unchanged. A bounded fixture tests both the approved lookup
+and rejection of a boundary carrying only the unapproved investigative
+profile; no new Graph permissions, secrets, tenant registration, or live
+database policy changes are introduced.
+
+This is a source repair awaiting protected CI, review and a separately
+approved exact-SHA production release. It does not pretend current
+production inbound Teams conversations already work.
+
 ## Risk and rollouts
 
 1. **Transport acceptance is not user delivery or approval.** Gateway response
