@@ -85,3 +85,9 @@ infrastructure**; the change requires protected CI, separately reviewed
 preproduction and exact owner authorization before production restart.
 No live unit, runtime source, root control file or circuit breaker is
 changed by committing the fix.
+
+Integration coordination for the 2026-10-17 follow-up: #1331, #1453,
+#692. PR #1331 adds bounded exporter-reconciliation contract assertions
+in the same test module. Preserve both its existing ownership/cadence
+regressions and this independent service-ordering contract on merge; do
+not replace the newer main-based tests with an old branch snapshot.
