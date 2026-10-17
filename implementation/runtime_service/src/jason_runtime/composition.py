@@ -2519,7 +2519,7 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         from .universal_interaction.owner_uat import (
             APPROVAL_PREFIX as OWNER_UAT_PREFIX,
             OwnerUatAuthority, OwnerUatDecisionFlow, OwnerUatIssuer,
-            OwnerUatMaintenance, OwnerUatRouteAuthority,
+            OwnerUatMaintenance, OwnerUatReleaseGate, OwnerUatRouteAuthority,
             OwnerUatWorkflowSendAuthority,
         )
         from .universal_teams_approval import SignedTeamsApprovalEvidenceVerifier
@@ -2574,6 +2574,10 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
                 ),
                 session_id=settings.owner_uat_session_id,
                 enabled=True,
+                release_ready=OwnerUatReleaseGate(
+                    state_root=Path("/var/lib/jason/openclaw/release-manager"),
+                    source_revision=os.getenv("JASON_SOURCE_REVISION", ""),
+                ).ready,
             )
 
     approval_interaction_flow = ApprovalInteractionDispatcher(
