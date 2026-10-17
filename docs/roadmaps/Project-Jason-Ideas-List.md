@@ -8,6 +8,27 @@
 
 **Anyone at AOT can propose an idea in plain language.** When the governed submission capability eventually goes live, Jason should save the text, source and author automatically, suggest a single primary category and one value rating, check existing ideas/TODOs, and respond with a stable IDEA ID. Employees need not fill in a form, choose categories, supply evidence, or obtain management approval just to submit.
 
+### Two ways ideas reach the list: employees and Jason's work-friction observations
+
+**Open participation:** Every **authenticated active AOT employee**—technician, administration, sales, copier/service staff, finance, leadership or other employee—may ask Jason to add an idea. **No manager approval, technical specification or form is needed.** Jason performs basic verified AOT identity and duplicate checks, records the employee's actual request, automatically suggests a category and potential value, and confirms the **actual persisted** `IDEA-xxxx` after creation. Submission confers no extra rights to see sensitive idea sources or client records.
+
+**Recognize needs while helping people work:** Jason should actively notice useful improvement opportunities **during conversations and workflows it is already permitted to handle**. Employee statements such as "It takes me forever to find this", "Can't Jason automatically check that?", "We keep doing this every week", "I wish the report also showed X" or a repeated manual workaround can become a useful idea even if the employee never says the word *idea*. Recognize cross-role needs, including people who are not technically inclined or do not know what automation might be possible. The employee's **original task remains the priority**.
+
+| Capture path | What Jason does | Attribution / acknowledgement |
+| --- | --- | --- |
+| **Employee-submitted** | Direct request is accepted without management approval, matched against existing ideas/TODOs, saved or linked | `employee-submitted`; actual authenticated employee and original wording retained within access controls; return the saved IDEA ID |
+| **Jason-observed** | Clear unmet work need or useful recurring friction is distilled into a **short, non-sensitive** improvement candidate; use the same Ideas List, not a second suggestions queue | `Jason-observed`; distinguish AI inference from an employee's explicit request; give brief unobtrusive acknowledgement after save |
+| **Ambiguous or sensitive** | Ask one short optional question or **do not capture**; respect "don't log this", private/HR/client-confidential context and protected data | Never pretend a suggestion was employee-endorsed; never copy private conversation/transcripts into the general list |
+| **Existing defect / duplicate** | Route demonstrable failures of currently supported functions to the existing Support process; link similar ideas and existing TODOs instead of opening another project | Preserve links and original source attribution; do not auto-start engineering |
+
+**Practical examples:** A copier technician says, "I have to open three places to check a device's service history." Jason may identify a technician-experience improvement to display the relevant records together. A nontechnical office employee says, "I wish I could tell whether the toner was actually ordered without calling anyone." Jason can record a client/service visibility idea even though the employee may not know the underlying KFS or Autotask systems. Neither comment authorizes device actions, a customer notification or a feature build.
+
+**Privacy means participating in a conversation, not spying:** "Listen carefully" **does not** mean always-on microphone or ambient recording, searching private mail/chats, recording meetings, broader client access or collecting colleagues' communications without authorization. Base discovery on interactions Jason already legitimately sees and allowed operational evidence, using minimal summaries and permitted references. Never expose secrets, confidential client details, HR/payroll content or sensitive source conversations to other employees. Respect a user's direction not to capture a topic.
+
+**Selection bar:** Capture actionable, materially useful opportunities, not every frustration or speculative question. Defer weak or duplicate candidates without noise, and retain source confidence. Keep the six categories, four potential-value ratings and simple statuses; no P0 tagging, intake priority override or new discovery scheduler.
+
+**Implementation boundary:** This is the staged design, **not an activated `ideas.submit` capability**. Existing [#877](https://github.com/al-teamaot-com/jason/issues/877) owns discovery; [#1519](https://github.com/al-teamaot-com/jason/issues/1519) owns employee authorization and submission. Implementation and actual staff access must wait for the required production/Universal Teams Approver acceptance and governed release, without interrupting current support, Production Manager or TODO worker work.
+
 **Impact areas:**
 - **System & Reliability:** Jason stability, system integrations, performance, architecture and dependable operation.
 - **Usability & Technician Experience:** easy interfaces, useful technician tools, onboarding and less friction.
