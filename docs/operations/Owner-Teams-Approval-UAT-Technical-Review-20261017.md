@@ -7,7 +7,7 @@
 ## Reviewed source boundary
 
 - Authoritative baseline `a30f6c392f0e1b74c64a948cdea49e7a4ceae43a`; combined **code** integration commit `79c36338c695c040cb6acf2cf29bec2569a48cd8` (from #1549, #1555 and #1556 at their exact tested heads). Adding this review document changes the overall PR commit SHA, not the reviewed code changes. **Owner approval must bind the final, subsequently verified exact SHA**, not an earlier partial SHA.
-- Source changes: 36 paths including architecture/operations documentation, runtime composition, existing Teams gateway adapter, versioned universal interaction models, test-only owner flow, protected release containment, signed ingress callback route, and automated tests. `git diff --check` clean; no merge conflict; main and production unchanged.
+- Source changes: 36 paths including architecture and operations documentation, runtime composition, existing Teams gateway adapter, versioned universal interaction models, test-only owner flow, protected release containment, signed ingress callback route, and automated tests. `git diff --check` clean; no merge conflict; main and production unchanged.
 - No new Teams OAuth app, bot, delegated Graph consent, transport, approval ledger, or provider execution authority. Existing registered Teams/Agents SDK gateway, identity binding, stored ApprovalRequest, audience routing, ApprovalInteractionDispatcher and one-use approval receipts are reused.
 
 ## Boundary-specific code and test review
