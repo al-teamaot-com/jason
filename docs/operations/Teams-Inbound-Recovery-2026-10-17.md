@@ -59,8 +59,16 @@ tenant grant, or role change is needed for normal Teams messages.
 
 ## Concurrent-source protection
 
-Open PR #1331 includes the opposite, unrelated expansion of the same common
-directory profile. Its finance scope is not authorization to broaden AOT's
-Microsoft Graph consent. Exact patch reviewed and coordination comment
-recorded; preserve the narrow profile until a separately approved entitlement
-and distinct investigative reader are provisioned.
+Open PRs #1331 **and #692** contain the opposite, unrelated expansion of
+the same common directory profile. Their finance scope is not authorization
+to broaden AOT's Microsoft Graph consent. Exact patches in both were reviewed
+and coordination comments recorded. PR #692 also overlaps the older
+procurement/billing conversation-ingress implementation; no merge should
+overwrite the canonical signed Teams entrypoint or this bounded URL classifier.
+Preserve the narrow profile until a separately approved entitlement and
+distinct investigative reader are provisioned.
+
+The synthetic owner-only mobile-release tests also used a fixed time in the
+past, causing false expiry failures in unrelated CI jobs. This hotfix adopts
+the existing established rolling test-time fixture. It does not change
+actual release expiry, release policy or approval execution behavior.
