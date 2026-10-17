@@ -14,7 +14,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
+from pathlib import Path
 import re
+import stat
 from typing import Any, Mapping
 
 from connectors.src.jason_connectors.approval_requests import (
@@ -63,6 +66,8 @@ def create_nonexecuting_approval(
     approval_id = APPROVAL_PREFIX + hashlib.sha256(
         ("owner-acceptance:1:" + session_id).encode("utf-8")
     ).hexdigest()[:32]
+    followup = session_id.endswith(".approve")
+    phase = "2/2: APPROVE" if followup else "1/2: DENY"
     return ApprovalRequest(
         approval_id=approval_id,
         request_id="owner-uat:" + session_id,
@@ -73,7 +78,7 @@ def create_nonexecuting_approval(
         expires_at=now + timedelta(seconds=TTL_SECONDS),
         authorized_approver_ids=(owner_identity_id,),
         presentation=ApprovalPresentation(
-            title="TEST ONLY: Jason owner approval in Teams",
+            title="TEST ONLY: Jason owner approval in Teams (" + phase + ")",
             summary=(
                 "This is a NONEXECUTING acceptance test. Choose Approve or "
                 "Deny to verify Teams authorization; no production, ticket, "
@@ -84,7 +89,7 @@ def create_nonexecuting_approval(
                 ("Session", session_id),
                 ("Impact", "None: records one test approval decision"),
                 ("Expires", (now + timedelta(seconds=TTL_SECONDS)).isoformat()),
-                ("Next action", "Confirm the button you personally clicked"),
+                ("Next action", "Click APPROVE (test only)" if followup else "Click DENY (test only)"),
             ),
         ),
         metadata={"test_only": "true", "execution_permitted": "false"},
@@ -255,6 +260,72 @@ class OwnerUatWorkflowSendAuthority:
         )
 
 
+@dataclass(frozen=True)
+class OwnerUatReleaseGate:
+    """No Teams card before root-verified exact-SHA release closeout.
+
+    The runtime can READ these existing managed release records, but never
+    transition release state or grant approval by reading them.
+    """
+    state_root: Path
+    source_revision: str
+
+    @staticmethod
+    def _private_json(path: Path, *, owner_uid: int) -> dict[str, Any]:
+        if path.is_symlink() or not path.is_file():
+            raise PermissionError("Owner UAT needs a regular protected release record")
+        info = path.stat()
+        if info.st_uid != owner_uid or not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+            raise PermissionError("Owner UAT release proof has insecure ownership/mode")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("Owner UAT release proof is malformed")
+        return data
+
+    def ready(self) -> bool:
+        sha = self.source_revision
+        if not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{40}", sha) is None:
+            return False
+        try:
+            uid = os.getuid()
+            release = self._private_json(
+                self.state_root / "records" / ("release-" + sha[:16] + ".json"),
+                owner_uid=uid,
+            )
+            protected = self._private_json(
+                self.state_root / "protected-readback" / "production-control-state.json",
+                owner_uid=uid,
+            )
+            candidate = release.get("release_candidate") or {}
+            production = release.get("production") or {}
+            ccc = production.get("ccc_post_mutation") or {}
+            lkg = (protected.get("last_known_good") or {}).get("manifest") or {}
+            return (
+                release.get("schema_version") == "2.0"
+                and release.get("release_id") == "release-" + sha[:16]
+                and release.get("state") == "closed"
+                and candidate.get("candidate_sha") == sha
+                and (release.get("owner_approval") or {}).get("candidate_sha") == sha
+                and (release.get("owner_approval") or {}).get("approved") is True
+                and production.get("live_sha") == sha
+                and production.get("host_revision") == sha
+                and production.get("runtime_revision") == sha
+                and production.get("mcp_revision") == sha
+                and production.get("release_manager_source_revision") == sha
+                and ccc.get("status") == "PASS"
+                and ccc.get("source_revision") == sha
+                and ccc.get("runtime_revision") == sha
+                and protected.get("schema_version") == "1.0"
+                and (protected.get("circuit_breaker") or {}).get("state") == "closed"
+                and lkg.get("revision") == sha
+                and lkg.get("runtime_revision") == sha
+                and lkg.get("mcp_revision") == sha
+                and lkg.get("host_revision") == sha
+            )
+        except (OSError, ValueError, TypeError, KeyError, PermissionError):
+            return False
+
+
 @dataclass
 class OwnerUatMaintenance:
     """Existing runtime maintenance cycle, one-shot per configured session.
@@ -265,16 +336,30 @@ class OwnerUatMaintenance:
     issuer: OwnerUatIssuer
     session_id: str
     enabled: bool = False
+    release_ready: Any = lambda: False
 
     def tick(self) -> bool:
-        if not self.enabled:
+        if not self.enabled or not self.release_ready():
             return False
-        if not SESSION_ID.fullmatch(self.session_id):
-            raise ValueError("invalid bounded UAT session")
+        if not SESSION_ID.fullmatch(self.session_id) or len(self.session_id) > 88:
+            raise ValueError("invalid bounded UAT campaign session")
         candidate = create_nonexecuting_approval(
             session_id=self.session_id, now=self.issuer.clock()
         )
-        if self.issuer.requests.repository.get(candidate.approval_id) is not None:
+        first = self.issuer.requests.repository.get(candidate.approval_id)
+        if first is None:
+            self.issuer.issue(session_id=self.session_id)
+            return True
+        # The second card is contingent on the *verified* terminal DENY
+        # receipt from the real signed gateway. Never send both at once,
+        # infer a click from provider delivery, or resend ambiguous sends.
+        if first.status != ApprovalRequestStatus.DENIED:
             return False
-        self.issuer.issue(session_id=self.session_id)
+        followup_session = self.session_id + ".approve"
+        followup = create_nonexecuting_approval(
+            session_id=followup_session, now=self.issuer.clock()
+        )
+        if self.issuer.requests.repository.get(followup.approval_id) is not None:
+            return False
+        self.issuer.issue(session_id=followup_session)
         return True
