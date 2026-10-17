@@ -213,18 +213,62 @@ class TeamsGatewayPlaybookApprovalSender:
 
     @staticmethod
     def _adaptive_card(card) -> dict:
-        facts = [
-            {"title": "Capability", "value": card.capability},
-            {"title": "Mode", "value": card.requested_mode},
-            {"title": "Expires", "value": card.expires_at},
-            {"title": "Approval ID", "value": card.approval_id},
-        ]
-        facts.extend({"title": str(k), "value": str(v)} for k, v in card.facts)
-        body = [
-            {"type": "TextBlock", "text": card.title, "weight": "Bolder", "wrap": True},
-            {"type": "TextBlock", "text": card.summary, "wrap": True},
-            {"type": "FactSet", "facts": facts},
-        ]
+        # Release approval cards arrive alongside ordinary release status
+        # notifications. On narrow phone screens the full 14-field metadata
+        # block pushes Approve/Deny out of view, making the owner mistake a
+        # status-only notification for the actionable card. Keep a separate
+        # concise, unambiguous release layout; authority always comes from
+        # the original immutable request, never the displayed field count.
+        is_mobile_release = (
+            card.capability == "release.production.approve"
+            and card.approval_id.startswith("relapproval-")
+        )
+        if is_mobile_release:
+            review = dict(card.facts)
+            keys = (
+                ("Release", "Release"),
+                ("Highest risk", "Risk"),
+                ("Exact SHA", "Exact commit"),
+                ("Affected services", "Affected systems"),
+                ("Changed files", "Changed files"),
+                ("Rollback", "Rollback SHA"),
+                ("Preproduction and rollback", "Preproduction"),
+                ("Manifest fingerprint", "Manifest SHA-256"),
+            )
+            facts = [{"title": label, "value": str(review[key])}
+                     for key, label in keys if key in review]
+            facts.append({"title": "Expires", "value": card.expires_at})
+            actions = (
+                ("Approve", "approve"), ("Deny", "deny"),
+            )
+            body = [
+                {"type": "TextBlock", "text": "ACTION REQUIRED: PRODUCTION + CCC",
+                 "weight": "Bolder", "wrap": True},
+                {"type": "TextBlock", "text": card.title, "weight": "Bolder", "wrap": True},
+                {"type": "TextBlock",
+                 "text": ("Review this exact release. The Approve and Deny buttons "
+                          "are below the details. Approve authorizes only this SHA; "
+                          "independent deployment, CCC and rollback gates still apply."),
+                 "wrap": True},
+                {"type": "FactSet", "facts": facts},
+            ]
+        else:
+            facts = [
+                {"title": "Capability", "value": card.capability},
+                {"title": "Mode", "value": card.requested_mode},
+                {"title": "Expires", "value": card.expires_at},
+                {"title": "Approval ID", "value": card.approval_id},
+            ]
+            facts.extend({"title": str(k), "value": str(v)} for k, v in card.facts)
+            actions = (
+                ("Approve", "approve"), ("Deny", "deny"),
+                ("Request Changes", "request_changes"),
+            )
+            body = [
+                {"type": "TextBlock", "text": card.title, "weight": "Bolder", "wrap": True},
+                {"type": "TextBlock", "text": card.summary, "wrap": True},
+                {"type": "FactSet", "facts": facts},
+            ]
         if card.evidence_artifact_ids:
             body.append(
                 {
@@ -242,28 +286,10 @@ class TeamsGatewayPlaybookApprovalSender:
             "actions": [
                 {
                     "type": "Action.Submit",
-                    "title": "Approve",
-                    "data": {
-                        "approval_id": card.approval_id,
-                        "decision": "approve",
-                    },
-                },
-                {
-                    "type": "Action.Submit",
-                    "title": "Deny",
-                    "data": {
-                        "approval_id": card.approval_id,
-                        "decision": "deny",
-                    },
-                },
-                {
-                    "type": "Action.Submit",
-                    "title": "Request Changes",
-                    "data": {
-                        "approval_id": card.approval_id,
-                        "decision": "request_changes",
-                    },
-                },
+                    "title": title,
+                    "data": {"approval_id": card.approval_id, "decision": decision},
+                }
+                for title, decision in actions
             ],
         }
 

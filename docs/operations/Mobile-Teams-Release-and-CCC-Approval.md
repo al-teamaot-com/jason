@@ -70,8 +70,12 @@ development/production management cadence.
    (configurable within 5–30 minutes) for **person-al only**. The card
    shows the bounded human-readable GitHub change purpose, release ID,
    full 40-character source revision, risk,
-   affected surfaces, representative changed files, exact rollback SHA,
-   preproduction proof, policy hash and the entire immutable manifest digest.
+   affected systems, representative changed files, exact rollback SHA,
+   preproduction proof and immutable manifest digest. To keep the two
+   Approve/Deny actions practical on narrow mobile screens, administrative
+   duplicates (capability/mode/approval ID) and the unsupported Request Changes
+   button are not shown; the original signed request still retains and binds
+   the policy hash, owner identity and full detailed evidence.
    Additional source changes force a new review; cards never silently carry
    forward from an old SHA. One request is issued per eligible release, with
    no repeated unsolicited cards after expiry.
