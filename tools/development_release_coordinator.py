@@ -9,6 +9,7 @@ never grants deployment or provider authority.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import re
@@ -131,6 +132,17 @@ def release_control_view(state_root: Path | None = None) -> dict[str, Any]:
     if control_path.is_file():
         try:
             control = load_json(control_path)
+        except PermissionError:
+            # Normal documentation publication runs as unprivileged al.
+            # Its canonical root-owned control file is deliberately 0600.
+            # Use only the existing root-published, read-only user snapshot;
+            # it conveys evidence but never grants release authority.
+            try:
+                control = load_json(root / "protected-readback" / control_path.name)
+                if control.get("schema_version") != "1.0":
+                    raise ValueError("invalid protected control snapshot")
+            except (OSError, ValueError, KeyError, TypeError):
+                control = {"circuit_breaker": {"state": "unknown", "reason": "unreadable_control_snapshot"}}
         except Exception:
             control = {"circuit_breaker": {"state": "unknown", "reason": "unreadable_control_state"}}
 
@@ -170,6 +182,13 @@ def release_control_view(state_root: Path | None = None) -> dict[str, Any]:
     if drift_path.is_file():
         try:
             drift = load_json(drift_path)
+        except PermissionError:
+            try:
+                drift = load_json(root / "protected-readback" / drift_path.name)
+                if drift.get("schema_version") != "1.0":
+                    raise ValueError("invalid protected drift snapshot")
+            except (OSError, ValueError, KeyError, TypeError):
+                drift = {"status": "unknown", "problems": [{"kind": "unreadable_drift_snapshot"}]}
         except Exception:
             drift = {"status": "unknown", "problems": [{"kind": "unreadable_drift_evidence"}]}
     lkg = dict(control.get("last_known_good") or {})
@@ -375,45 +394,70 @@ def collect(api: Api, config: dict[str, Any]) -> dict[str, Any]:
     pr_states: list[dict[str, Any]] = []
     active_files: dict[int, set[str]] = {}
 
-    for pr in pulls:
+    # The control board displays only recently updated PRs, and overlap
+    # detection is explicitly limited by active_overlap_days. Exhaustively
+    # comparing/checking every historical open PR is unnecessary, grows
+    # without bound (123 open PRs in production), and can fail the *entire*
+    # production release during documentation publication. Preserve every
+    # open PR in the older count and support-repair correlation, but require
+    # fresh remote checks for every PR actually displayed.
+    #
+    # Independent reads use a bounded worker pool; neither approval authority
+    # nor release gates are inferred from results that were not checked.
+    def inspect(pr: dict[str, Any]) -> tuple[dict[str, Any], set[str] | None]:
         number = int(pr["number"])
-        head_sha = str(pr["head"]["sha"])
-        compare = api.request(f"/compare/{main_sha}...{head_sha}")
-        checks_payload = api.request(f"/commits/{head_sha}/check-runs")
-        check_state, check_count, check_detail = summarize_required_checks(
-            required, list(checks_payload.get("check_runs", []))
-        )
-        state = classify_pr(
-            pr,
-            compare,
-            check_state,
-            bool(config.get("preproduction", {}).get("configured", False)),
-        )
         updated = datetime.fromisoformat(str(pr["updated_at"]).replace("Z", "+00:00"))
         recent = updated >= display_cutoff
+        files: set[str] | None = None
+
+        if recent:
+            head_sha = str(pr["head"]["sha"])
+            compare = api.request(f"/compare/{main_sha}...{head_sha}")
+            checks_payload = api.request(f"/commits/{head_sha}/check-runs")
+            check_state, check_count, _ = summarize_required_checks(
+                required, list(checks_payload.get("check_runs", []))
+            )
+            state = classify_pr(
+                pr, compare, check_state,
+                bool(config.get("preproduction", {}).get("configured", False)),
+            )
+            behind_by: int | None = int(compare.get("behind_by", 0) or 0)
+        else:
+            # Do not assert health/drift for PRs that have not been checked.
+            # When resumed, they must be revalidated against protected main.
+            check_state, check_count = "not_checked_stale", "not checked"
+            behind_by = None
+            state = "In development" if pr.get("draft") else "Needs revalidation"
+
         if updated >= active_cutoff:
-            files = api.paged(f"/pulls/{number}/files")
-            active_files[number] = {
+            response = api.paged(f"/pulls/{number}/files")
+            files = {
                 str(item["filename"])
-                for item in files
-                if sensitive(str(item["filename"]))
+                for item in response if sensitive(str(item["filename"]))
             }
 
-        pr_states.append(
-            {
-                "number": number,
-                "title": str(pr["title"]),
-                "url": str(pr["html_url"]),
-                "updated_at": str(pr["updated_at"]),
-                "head_sha": head_sha,
-                "behind_by": int(compare.get("behind_by", 0) or 0),
-                "check_state": check_state,
-                "check_count": check_count,
-                "check_detail": check_detail,
-                "state": state,
-                "recent": recent,
-            }
-        )
+        return {
+            "number": number,
+            "title": str(pr["title"]),
+            "url": str(pr["html_url"]),
+            "updated_at": str(pr["updated_at"]),
+            "head_sha": str(pr["head"]["sha"]),
+            "behind_by": behind_by,
+            "check_state": check_state,
+            "check_count": check_count,
+            "check_detail": [] if recent else ["revalidation required before merge"],
+            "state": state,
+            "recent": recent,
+        }, files
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        # executor.map preserves repository listing order for release-attention
+        # prioritization; any GitHub read failure still propagates and blocks
+        # publication rather than claiming a false healthy board.
+        for result, files in executor.map(inspect, pulls):
+            pr_states.append(result)
+            if files is not None:
+                active_files[result["number"]] = files
 
     overlaps: list[dict[str, Any]] = []
     numbers = sorted(active_files)

@@ -65,6 +65,30 @@ The board shows recently active PRs and summarizes older open PRs rather than al
 
 Human roadmap authority remains controlling. The coordinator may recommend; it may not silently reorder or approve work.
 
+### Bounded GitHub evidence and protected operational readback
+
+The board enumerates **all open PRs** so older PR counts and open Support List
+repair correlations remain complete. It fetches protected-main comparisons and
+required CI checks for **every recently active displayed PR** (currently three
+days), and implementation-sensitive file lists for every PR in the independent
+overlap window (currently seven days). An older PR that is not checked is marked
+**Needs revalidation**, never silently reported as CI-ready or current. Six
+bounded concurrent readers preserve GitHub listing order in the published board;
+an authoritative read failure still aborts publication rather than fabricating
+green evidence. The refresh must not make per-PR verification scale unboundedly
+with historical inactive branches.
+
+When the unprivileged coordinator cannot read the root-owned mode-0600 release
+control or drift files directly, it consults the existing **root-published
+protected-readback snapshots** for advisory status. Missing, invalid, or
+unreadable evidence remains explicitly unknown; the board never uses these
+snapshots to grant an owner approval, close the breaker, or deploy anything.
+
+Production documentation closeout is an accepted release gate. Failure to
+publish is not a reason to bypass that gate: the release must fail closed,
+preserve its rollback evidence, and report a separately remediable publication
+or monitoring defect rather than declaring a successful deployment.
+
 ## Autonomous TODO engineering readiness
 
 The TODO roadmap is not itself an execution queue. A TODO becomes eligible for autonomous engineering only after an owner-approved readiness record declares the exact scope, dependencies, authority basis, safety class, required capabilities, acceptance test, production path, and `open_questions=none`. Material changes to that approved scope invalidate readiness and return the item to Design Review.
