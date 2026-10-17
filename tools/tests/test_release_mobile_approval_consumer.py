@@ -1,6 +1,6 @@
 """Signed and durable owner consent becomes exact CCC review + release approval."""
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -76,7 +76,7 @@ def fixture(tmp_path, *, approve=True):
         "request_id": "signed-retest-" + request.approval_id,
         "correlation_id": "mobile-release-signed-test",
         "issued_at": NOW.isoformat(),
-        "expires_at": (request.requested_at.replace(second=30)).isoformat(),
+        "expires_at": (NOW + timedelta(minutes=2)).isoformat(),
         "nonce": "unique-" + request.approval_id,
         "channel": "msteams",
         "text": "Mobile production release review",
