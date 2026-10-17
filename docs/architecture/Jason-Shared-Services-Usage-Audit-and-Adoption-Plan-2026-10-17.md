@@ -83,6 +83,12 @@ Priority among *eligible* work should reflect **breadth of use, frequency, secur
 - For each later wave, measured call reduction/behavioral equivalence, one authoritative service per function and adoption proven by actual production consumers, rather than merely publishing a library.
 - Keep the original domain owners (#190, #607, #1468, #436, #1510, #1078, #866, #1475); this issue coordinates cross-consumer **adoption only**. No parallel scheduler and no duplicate scope.
 
+## Related non-disruptive P0 causal reconciliation use case (read-only)
+
+[October 17, 2026 P0 Support List audit](../operations/Jason-P0-Incident-Correlation-Read-Only-Audit-2026-10-17.md) establishes 23 historical P0 rows, only 22 distinct recorded IDs (two unrelated records share `SUPPORT-OPS-046`), and two linked issues (#1317/#1313) closed on GitHub while Support rows remain Open. These facts justify **evidence-first incident correlation and status reconciliation** within existing self-heal #635 and Resolution Memory #951, not a separate incident/ticket/repair controller. Root-cause clusters remain hypotheses until independent fresh detector evidence confirms them.
+
+**Non-impact sequencing:** Read-only inventory and cross-referencing now; defer code/adoption/automatic P0 state or ticket mutations until the active Production Manager, TODO worker and Universal Teams Approver acceptance gates permit it. Future consumer testing must include a real shared-cause case, an unrelated negative case, a reused Support ID, tenant/client segregation, recurrence and independent post-fix original-detector readback. Preserving current approved work is mandatory.
+
 ## Execution hold / TODO routing
 
 **Block all new implementation/admission** until Production Manager #1078 is independently verified, engineering advancement #1196 works safely, and Universal Teams Approver #1440/#1468 with #1493 transport fix passes live approve/deny, replay/expiry and callback verification. Existing #1100/#1069 architectural gates still apply. Do not disrupt existing active work or bypass Release Manager/protected-core approval.
