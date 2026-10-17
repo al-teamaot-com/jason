@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "msp": {
+    "organization_id": "example-msp",
+    "display_name": "Example MSP",
+    "timezone": "America/New_York"
+  },
+  "providers": {
+    "autotask": {
+      "enabled": true,
+      "secret_reference": "autotask.readonly",
+      "settings": {
+        "instance_profile": "managed"
+      }
+    },
+    "datto_rmm": {
+      "enabled": true,
+      "secret_reference": "datto_rmm.readonly",
+      "settings": {}
+    }
+  },
+  "communications": {
+    "default_sender": null,
+    "teams_targets": {}
+  },
+  "capability_bundles": ["ticketing-core"]
+}
