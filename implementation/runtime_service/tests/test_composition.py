@@ -130,6 +130,125 @@ def test_production_composition_builds_and_serves_internal_health(tmp_path):
     assert (tmp_path / "events.sqlite3").stat().st_mode & 0o777 == 0o600
 
 
+
+def test_playbook_approve_callback_remains_live_when_maintenance_is_split(tmp_path, monkeypatch):
+    """The HTTP process must consume genuine owner clicks, not spawn card producers."""
+    from datetime import datetime, timedelta, timezone
+
+    from autonomous_remediation.playbook_autonomy_approval import SQLitePlaybookAutonomyApprovalStore
+    from autonomous_remediation.playbook_autonomy_review import PlaybookAutonomyReviewService
+    from connectors.src.jason_connectors.approval_requests import (
+        ApprovalRequestService,
+        SQLiteApprovalRequestRepository,
+    )
+    from jason_runtime.maintenance_process import http_runtime_settings
+    from jason_runtime.playbook_autonomy_review import (
+        OwnerOnlyPlaybookAutonomyAuthority,
+        PlaybookAutonomyApprovalInteractionFlow,
+        PlaybookAutonomyReviewMaintenance,
+    )
+    from orchestrator.teams_identity_binding import MicrosoftIdentityBinding
+    from orchestrator.teams_identity_binding_sqlite import SQLiteMicrosoftIdentityBindingStore
+
+    monkeypatch.setattr(
+        "jason_runtime.composition.approval_owner_identities",
+        lambda: frozenset({"person-owner"}),
+    )
+    registry = tmp_path / "demo-registry.json"
+    registry.write_text(json.dumps({
+        "schema_version": 2,
+        "playbooks": [{
+            "id": "demo", "name": "Demonstration", "version": "1.0.0",
+            "lifecycle": "production", "enabled": True,
+            "source": "tests/no-provider.md", "review_status": "test_only",
+            "autonomy": {
+                "activation": "autonomous",
+                "required_gates": ["identity"],
+                "allowed_capabilities": ["service.ticket.note.create"],
+                "policy_id": "playbook-autonomy:demo",
+            },
+        }],
+    }), encoding="utf-8")
+    settings = replace(
+        _settings(tmp_path),
+        autonomy_review_enabled=True,
+        autonomy_playbook_registry=registry,
+        autonomy_review_db=tmp_path / "review.sqlite3",
+        autonomy_promotion_db=tmp_path / "promotions.sqlite3",
+        autonomy_review_audit_path=tmp_path / "review-audit.jsonl",
+    )
+    SQLiteMicrosoftIdentityBindingStore(settings.bindings_db).put(
+        MicrosoftIdentityBinding(
+            microsoft_tenant_id="tenant-a",
+            microsoft_object_id="object-owner",
+            jason_identity_id="person-owner",
+        )
+    )
+    serving = http_runtime_settings(settings)
+    assert serving.autonomy_review_enabled is False
+    assert serving.playbook_approval_ingress_enabled is True
+
+    application = build_runtime_application(serving)
+    dispatcher = application.ingress.ingress.approval_flow
+    assert isinstance(dispatcher.fallback, PlaybookAutonomyApprovalInteractionFlow)
+    assert not any(
+        isinstance(item, PlaybookAutonomyReviewMaintenance)
+        for item in application.maintenance.services
+    ), "HTTP must never duplicate the scheduled approval request generator"
+
+    requests = SQLiteApprovalRequestRepository(settings.autonomy_review_db)
+    promotions = SQLitePlaybookAutonomyApprovalStore(settings.autonomy_promotion_db)
+    review = PlaybookAutonomyReviewService(
+        registry_path=registry,
+        promotion_store=promotions,
+        owner_identity_ids=frozenset({"person-owner"}),
+        audit_path=settings.autonomy_review_audit_path,
+    )
+    service = ApprovalRequestService(
+        repository=requests,
+        authority=OwnerOnlyPlaybookAutonomyAuthority({"person-owner"}),
+    )
+    now = datetime.now(timezone.utc)
+    request = review.build_request(
+        playbook_id="demo", requested_by="svc-test-runner",
+        now=now, ttl=timedelta(minutes=5),
+    )
+    service.create(request, now=now)
+
+    # The exact HTTP composition, using its independent SQLite connection,
+    # rejects an unbound Microsoft actor while leaving the request pending.
+    import pytest
+    with pytest.raises(PermissionError, match="not bound"):
+        dispatcher.handle(
+            approval_id=request.approval_id,
+            decision="approve",
+            microsoft_tenant_id="tenant-a",
+            microsoft_object_id="object-unbound",
+            conversation_id="test-conversation",
+            channel_response_id="unbound-message",
+            decided_at=now + timedelta(seconds=20),
+        )
+    assert requests.get(request.approval_id).status.value == "pending"
+
+    accepted = dispatcher.handle(
+        approval_id=request.approval_id,
+        decision="approve",
+        microsoft_tenant_id="tenant-a",
+        microsoft_object_id="object-owner",
+        conversation_id="test-conversation",
+        channel_response_id="owner-message",
+        decided_at=now + timedelta(seconds=30),
+    )
+    assert accepted["status"] == "completed"
+    receipt = requests.accepted_decision(request.approval_id)
+    assert receipt is not None
+    assert receipt.status == "approved"
+    assert receipt.decided_by == "person-owner"
+    assert receipt.channel_response_id == "owner-message"
+    # The only resulting promotion is in the isolated test database. No
+    # provider action, production authority or real Teams message was touched.
+    assert len(promotions.list_all()) == 1
+
 def test_procurement_web_profile_seeds_exact_aot_observe_authority(tmp_path, monkeypatch):
     monkeypatch.setenv(PROCUREMENT_WEB_READ_PROFILE_ENV, PROCUREMENT_WEB_READ_PROFILE)
     application = build_runtime_application(_settings(tmp_path))

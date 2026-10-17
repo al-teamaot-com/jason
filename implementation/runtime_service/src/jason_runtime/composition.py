@@ -544,6 +544,9 @@ class RuntimeSettings:
     )
     windows_time_source_shadow_cadence_minutes: int = 15
     autonomy_review_enabled: bool = False
+    # The HTTP process must accept authenticated approval responses even
+    # when scheduled review generation runs only in the maintenance child.
+    playbook_approval_ingress_enabled: bool = False
     autonomy_review_db: Path = Path(
         "/var/lib/jason/openclaw/playbook-autonomy-review.sqlite3"
     )
@@ -2270,7 +2273,7 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
 
     playbook_approval_flow = None
     playbook_review_maintenance = None
-    if settings.autonomy_review_enabled:
+    if settings.autonomy_review_enabled or settings.playbook_approval_ingress_enabled:
         owner_ids = approval_owner_identities()
         playbook_promotion_store = SQLitePlaybookAutonomyApprovalStore(
             settings.autonomy_promotion_db
@@ -2293,22 +2296,23 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
             approval_service=playbook_approval_service,
             review_service=playbook_review_service,
         )
-        playbook_approval_sender = TeamsGatewayPlaybookApprovalSender(
-            gateway_url=settings.teams_gateway_internal_url,
-            token_file=settings.teams_proactive_token_file,
-            bindings=bindings,
-            owner_identity_ids=owner_ids,
-        )
-        playbook_review_maintenance = PlaybookAutonomyReviewMaintenance(
-            enabled=True,
-            registry_path=settings.autonomy_playbook_registry,
-            request_repository=playbook_review_repository,
-            approval_service=playbook_approval_service,
-            review_service=playbook_review_service,
-            sender=playbook_approval_sender,
-            promotion_store=playbook_promotion_store,
-            interval_seconds=settings.autonomy_review_interval_seconds,
-        )
+        if settings.autonomy_review_enabled:
+            playbook_approval_sender = TeamsGatewayPlaybookApprovalSender(
+                gateway_url=settings.teams_gateway_internal_url,
+                token_file=settings.teams_proactive_token_file,
+                bindings=bindings,
+                owner_identity_ids=owner_ids,
+            )
+            playbook_review_maintenance = PlaybookAutonomyReviewMaintenance(
+                enabled=True,
+                registry_path=settings.autonomy_playbook_registry,
+                request_repository=playbook_review_repository,
+                approval_service=playbook_approval_service,
+                review_service=playbook_review_service,
+                sender=playbook_approval_sender,
+                promotion_store=playbook_promotion_store,
+                interval_seconds=settings.autonomy_review_interval_seconds,
+            )
 
     procurement_teams_flow = None
     procurement_approval_flow = None
