@@ -18,7 +18,7 @@ from jason_openclaw.signed_transport import (
     Ed25519TransportAuthenticator, canonical_signed_payload,
 )
 from jason_runtime.universal_teams_approval import SignedTeamsApprovalEvidenceVerifier
-from jason_runtime.teams_human_token_binding import VerifiedTeamsHumanTokenBinding
+from jason_runtime.teams_human_token_binding import VerifiedTeamsHumanTokenBinding, BoundTeamsHumanProof
 
 NOW = datetime(2026, 10, 17, 16, 0, tzinfo=timezone.utc)
 TENANT = "11111111-2222-4333-8444-555555555555"
@@ -198,3 +198,63 @@ def test_verifier_must_have_explicit_scopes_and_client_allowlist():
     empty = replace(boundary, required_delegated_scopes=frozenset())
     with pytest.raises(PermissionError, match="not configured"):
         verify(empty, signed(private))
+
+
+def test_same_turn_ephemeral_token_source_is_one_time_and_actor_bound():
+    binding, private = setup()
+
+    class OneTimeSource:
+        def __init__(self):
+            self.token = TOKEN
+
+        def require(self, approval_id, *, tenant_id, object_id, channel_response_id):
+            assert approval_id == "planapproval-controlled-aot-test"
+            assert tenant_id == TENANT and object_id == ACTOR
+            assert channel_response_id == "teams-callback-message-1"
+            if not self.token:
+                raise PermissionError("already consumed")
+            value, self.token = self.token, None
+            return value
+
+    port = BoundTeamsHumanProof(binding, OneTimeSource())
+    callback = dict(
+        signed_envelope=signed(private),
+        approval_id="planapproval-controlled-aot-test",
+        tenant_id=TENANT, object_id=ACTOR,
+        channel_response_id="teams-callback-message-1",
+    )
+    principal = port.verify_callback(**callback)
+    assert principal.object_id == ACTOR
+    assert len(principal.authentication_evidence_hash) == 64
+    assert TOKEN not in repr(principal)
+    with pytest.raises(PermissionError, match="not available"):
+        port.verify_callback(**callback)
+
+
+def test_independent_human_proof_adapter_rejects_wrong_callback_actor():
+    binding, private = setup()
+
+    class Source:
+        def require(self, *args, **kwargs):
+            return TOKEN
+
+    port = BoundTeamsHumanProof(binding, Source())
+    with pytest.raises(PermissionError, match="does not bind"):
+        port.verify_callback(
+            signed_envelope=signed(private),
+            approval_id="planapproval-controlled-aot-test",
+            tenant_id=TENANT,object_id="different-user",
+            channel_response_id="teams-callback-message-1",
+        )
+
+
+def test_missing_token_source_fails_closed_without_authority():
+    binding, private = setup()
+    port = BoundTeamsHumanProof(binding, object())
+    with pytest.raises(PermissionError,match="not configured"):
+        port.verify_callback(
+            signed_envelope=signed(private),
+            approval_id="planapproval-controlled-aot-test",
+            tenant_id=TENANT,object_id=ACTOR,
+            channel_response_id="teams-callback-message-1",
+        )

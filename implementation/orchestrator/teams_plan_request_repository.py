@@ -99,6 +99,9 @@ class PlanRequestRepository:
                        'approval_id TEXT PRIMARY KEY, state TEXT NOT NULL, progress_json TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS universal_approval_transport_evidence ('
                        'evidence_hash TEXT PRIMARY KEY, signed_envelope_json TEXT NOT NULL)')
+            db.execute('CREATE TABLE IF NOT EXISTS universal_approval_human_evidence ('
+                       'approval_id TEXT PRIMARY KEY, human_evidence_hash TEXT NOT NULL, '
+                       'transport_evidence_hash TEXT NOT NULL)')
             db.execute('CREATE TABLE IF NOT EXISTS universal_plan_step_results ('
                        'approval_id TEXT NOT NULL, execution_id TEXT NOT NULL, result_json TEXT NOT NULL, '
                        'PRIMARY KEY(approval_id, execution_id))')
@@ -250,6 +253,50 @@ class PlanRequestRepository:
                     raise PermissionError('immutable signed evidence was changed')
                 return
             db.execute('INSERT INTO universal_approval_transport_evidence VALUES (?,?)',(evidence_hash,encoded))
+
+    def store_verified_human_evidence(self, approval_id: str,
+            human_evidence_hash: str, transport_evidence_hash: str) -> None:
+        """Persist only a verified human-token commitment, never the bearer.
+
+        This record is subordinate to the original signed Teams transport and
+        the atomic decision receipt. It is NOT itself approval authority.
+        """
+        import re
+        if (not isinstance(approval_id,str) or not approval_id.startswith('planapproval-')
+                or any(not isinstance(h,str) or not re.fullmatch(r'[0-9a-f]{64}',h)
+                       for h in (human_evidence_hash,transport_evidence_hash))):
+            raise PermissionError('human approval proof metadata invalid')
+        with sqlite3.connect(self.path) as db:
+            transport=db.execute(
+                'SELECT 1 FROM universal_approval_transport_evidence WHERE evidence_hash=?',
+                (transport_evidence_hash,)).fetchone()
+            if transport is None:
+                raise PermissionError('human proof has no persisted signed Teams response')
+            prior=db.execute(
+                'SELECT human_evidence_hash,transport_evidence_hash '
+                'FROM universal_approval_human_evidence WHERE approval_id=?',
+                (approval_id,)).fetchone()
+            expected=(human_evidence_hash,transport_evidence_hash)
+            if prior is not None:
+                if prior != expected:
+                    raise PermissionError('immutable human approval proof changed')
+                return
+            db.execute(
+                'INSERT INTO universal_approval_human_evidence VALUES (?,?,?)',
+                (approval_id,human_evidence_hash,transport_evidence_hash),
+            )
+
+    def require_verified_human_evidence(self, approval_id: str,
+            transport_evidence_hash: str) -> str:
+        with sqlite3.connect(self.path) as db:
+            row=db.execute(
+                'SELECT human_evidence_hash,transport_evidence_hash '
+                'FROM universal_approval_human_evidence WHERE approval_id=?',
+                (approval_id,)).fetchone()
+        if (row is None or row[1] != transport_evidence_hash
+                or not isinstance(row[0],str) or len(row[0]) != 64):
+            raise PermissionError('persisted human approval proof missing or mismatched')
+        return row[0]
 
     def transport_evidence(self, evidence_hash: str) -> dict:
         with sqlite3.connect(self.path) as db:

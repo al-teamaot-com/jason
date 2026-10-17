@@ -76,3 +76,36 @@ class VerifiedTeamsHumanTokenBinding:
         token_digest = sha256(user_token.encode("utf-8")).digest()
         commitment = sha256(b"jason-human-teams-approval-v1" + envelope_digest + token_digest).hexdigest()
         return replace(principal, authentication_evidence_hash=commitment)
+
+
+@dataclass(frozen=True, slots=True)
+class BoundTeamsHumanProof:
+    """Require an ephemeral independently verified token for one exact callback.
+
+    A token source must only expose same-turn, single-use user bearer evidence
+    captured from an authenticated SDK authorization route. No implementation
+    is registered in production yet; installing only this class grants nothing.
+    """
+    binding: VerifiedTeamsHumanTokenBinding
+    token_source: Any
+
+    def verify_callback(self, *, signed_envelope: Mapping[str, Any],
+            approval_id: str, tenant_id: str, object_id: str,
+            channel_response_id: str):
+        if not callable(getattr(self.token_source, "require", None)):
+            raise PermissionError("verified human token source is not configured")
+        try:
+            user_token = self.token_source.require(
+                approval_id, tenant_id=tenant_id, object_id=object_id,
+                channel_response_id=channel_response_id,
+            )
+        except Exception as exc:
+            raise PermissionError("verified human user token not available") from exc
+        principal = self.binding.verify(
+            signed_envelope=signed_envelope, user_token=user_token,
+        )
+        if (principal.tenant_id.casefold() != tenant_id.casefold()
+                or principal.object_id.casefold() != object_id.casefold()
+                or not principal.authentication_evidence_hash):
+            raise PermissionError("human user token does not bind to Teams callback")
+        return principal

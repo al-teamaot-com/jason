@@ -108,6 +108,7 @@ class UniversalTeamsApprovalInteractionFlow:
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
     plan_runner: Any | None = None
     issuer: Any | None = None
+    human_evidence: Any | None = None
 
     def request_approval(self, *, request, identity):
         if self.issuer is None:
@@ -139,7 +140,18 @@ class UniversalTeamsApprovalInteractionFlow:
         now = self.clock()
         # Require exact immutable, server-owned request fingerprint before consumption.
         self.requests.verify_proposal(proposal)
-        principal = self.evidence_verifier.verify(token)
+        if not callable(getattr(self.human_evidence, 'verify_callback', None)):
+            raise PermissionError('independently verified human approval identity required')
+        principal = self.human_evidence.verify_callback(
+            signed_envelope=signed_envelope, approval_id=approval_id,
+            tenant_id=microsoft_tenant_id, object_id=microsoft_object_id,
+            channel_response_id=channel_response_id,
+        )
+        if (not isinstance(principal, VerifiedMicrosoftPrincipal)
+                or principal.tenant_id != microsoft_tenant_id
+                or principal.object_id != microsoft_object_id
+                or not principal.authentication_evidence_hash):
+            raise PermissionError('human proof does not match Teams approver')
         response = self.service.teams_flow.ingress.accept_verified_interaction(
             principal=principal, payload={'approval_id': approval_id, 'decision': decision,
                 'organization_id': original.organization_id, 'channel_response_id': channel_response_id},
@@ -155,7 +167,13 @@ class UniversalTeamsApprovalInteractionFlow:
                 raise PermissionError('approver lacks current authority for a reviewed plan step')
         # Store the actual non-bearer signed decision as well as its digest, so a
         # restarted worker re-verifies cryptography instead of trusting an audit label.
-        self.requests.store_transport_evidence(principal.authentication_evidence_hash, signed_envelope)
+        # Preserve the original gateway-signed transport digest for deterministic
+        # restart signature validation. Store the independent human-token proof
+        # as a separate non-bearer commitment bound to that exact digest.
+        transport_hash=self.evidence_verifier.verify(token).authentication_evidence_hash
+        self.requests.store_transport_evidence(transport_hash,signed_envelope)
+        self.requests.store_verified_human_evidence(
+            approval_id,principal.authentication_evidence_hash,transport_hash)
         result = self.service.handle_response(
             token=token, payload={'approval_id': approval_id, 'decision': decision,
                 'organization_id': original.organization_id,
@@ -286,12 +304,15 @@ class ConfiguredPlanApprovalAuthority:
 def build_universal_teams_approval_runtime(*, mode: str, database_path, policy_path,
         bindings, identities, grants, formal_approvals, authority,
         authenticator, allowed_machine_identities, orchestrator, governed_execution_ledger,
-        clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
-    """Compose real durable ports; no monkey-patching, fake token source or grants."""
+        clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
+        human_evidence: Any | None = None):
+    """Compose durable ports only with independently verified human proof."""
     if mode == 'off':
         return None
     if mode != 'enforced':
         raise ValueError('universal approval mode must be off or enforced')
+    if not callable(getattr(human_evidence, 'verify_callback', None)):
+        raise PermissionError('universal approvals require a verified human proof port')
     from pathlib import Path
     from connectors.src.jason_connectors.approval_requests import ApprovalRequestService, SQLiteApprovalRequestRepository
     from orchestrator.approval_audit import ApprovalAuditRecorder
@@ -325,5 +346,8 @@ def build_universal_teams_approval_runtime(*, mode: str, database_path, policy_p
     from .universal_plan_continuation import UniversalPlanContinuationMaintenance
     service=UniversalTeamsPlanApprovalService(flow,ledger)
     runner=UniversalPlanContinuationMaintenance(service,proposals,requests,continuation,policy,governed_execution_ledger,clock)
-    handler = UniversalTeamsApprovalInteractionFlow(service,verifier,proposals,requests,continuation,clock,runner)
+    handler = UniversalTeamsApprovalInteractionFlow(
+        service,verifier,proposals,requests,continuation,clock,runner,
+        human_evidence=human_evidence,
+    )
     return handler

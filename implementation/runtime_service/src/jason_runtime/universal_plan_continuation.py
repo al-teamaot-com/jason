@@ -129,6 +129,10 @@ class UniversalPlanContinuationMaintenance:
                         for e in events)):
                 raise PermissionError('atomic decision lacks matching verified Teams audit evidence')
             signed=self.requests.transport_evidence(accepted.authentication_evidence_hash)
+            # A signed bot activity alone is not independently verified human
+            # authorization. Require its separate recorded user-token proof.
+            self.requests.require_verified_human_evidence(
+                approval_id,accepted.authentication_evidence_hash)
             # Evaluate original transport freshness at the persisted decision time,
             # while current plan expiry/revocation/identity are separately rechecked.
             verifier=replace(self.service.teams_flow.token_verifier,clock=lambda:accepted.decided_at)

@@ -48,3 +48,31 @@ a reviewed integration must preserve the proof through the existing
 one-time approval/JKD execution path. No production rollout or owner approval
 may be inferred from unit tests; complete the live desktop/mobile acceptance
 steps below first.
+
+
+## Integrated production fail-closed gate (2026-10-17)
+
+Before `JASON_UNIVERSAL_APPROVAL_MODE=enforced` can compose an approval
+runtime, the factory now requires an independent human-proof port with a
+`verify_callback` contract. The current production composition intentionally
+does not provide such a port: attempting to enable universal mode without
+completing the reviewed SDK user-token bridge **fails startup closed**, rather
+than treating the registered Teams gateway's signed identity assertions as
+independent human authentication. Owner-only mobile release approvals and
+existing playbook approval mechanisms are unchanged.
+
+When a genuine human proof source is subsequently installed, each universal
+approval callback must provide a token verified through Microsoft JWKS and
+the exact signed Teams actor/receipt. The independent non-bearer human proof
+digest is retained in a separate protected SQLite table bound to the original
+signed transport hash; neither OAuth bearer tokens nor delegated credentials
+are retained. Resume/restart workers require the independent proof record
+in addition to the authenticated gateway signature, decision audit,
+immutable scope, JKD grants, plan ledger and per-step reauthorization. A
+missing or changed independent proof blocks execution.
+
+This integration currently uses a **clearly synthetic, test-only** human
+proof fixture in its isolated unit tests. That fixture is never instantiated
+by production composition. Passing unit tests and CI is **not** live Entra
+proof, real Teams acceptance, an OAuth app registration, or permission to
+deploy or change approval authority.
