@@ -378,3 +378,80 @@ def test_mobile_request_refuses_malformed_delivery_or_changed_immutable_intent(t
         click(flow, request)
     assert repo.get(request.approval_id).status == ApprovalRequestStatus.PENDING
     assert repo.accepted_decision(request.approval_id) is None
+
+
+def _write_owner_release_hold(root, *, state="held", released_at=None):
+    from jason_runtime.owner_release_approval_containment import HOLD_FILENAME
+    started_at = NOW - timedelta(minutes=5)
+    item = {
+        "schema_version": "1.0",
+        "capability": "release.production.approve",
+        "state": state,
+        "hold_id": "P0-1553",
+        "hold_started_at": started_at.isoformat(),
+    }
+    if released_at is not None:
+        item["released_at"] = released_at.isoformat()
+    hold_path = root / HOLD_FILENAME
+    hold_path.write_text(json.dumps(item), encoding="utf-8")
+    hold_path.chmod(0o600)
+    return hold_path
+
+
+@pytest.mark.parametrize("decision", ["approve", "deny"])
+def test_p0_active_owner_containment_blocks_both_signed_decisions(tmp_path, decision):
+    flow, req, repo, record = flow_fixture(tmp_path, decision=decision)
+    _write_owner_release_hold(flow.state_root)
+    before = record.read_bytes()
+    with pytest.raises(PermissionError, match="owner_release_approval_hold_active"):
+        click(flow, req, decision=decision)
+    assert repo.get(req.approval_id).status == ApprovalRequestStatus.PENDING
+    assert repo.accepted_decision(req.approval_id) is None
+    assert record.read_bytes() == before
+
+
+def test_p0_released_hold_refuses_signed_callback_from_old_request(tmp_path):
+    flow, req, repo, record = flow_fixture(tmp_path)
+    _write_owner_release_hold(
+        flow.state_root,
+        state="released",
+        released_at=NOW + timedelta(seconds=1),
+    )
+    with pytest.raises(PermissionError, match="pre_hold_request_revoked"):
+        click(flow, req)
+    assert repo.get(req.approval_id).status == ApprovalRequestStatus.PENDING
+
+
+def test_p0_invalid_hold_policy_fails_closed_before_signed_evidence(tmp_path):
+    from jason_runtime.owner_release_approval_containment import HOLD_FILENAME
+    flow, req, repo, record = flow_fixture(tmp_path)
+    p = flow.state_root / HOLD_FILENAME
+    p.write_text('{"unexpected":"bypass"}')
+    p.chmod(0o600)
+    with pytest.raises(PermissionError, match="policy_invalid"):
+        click(flow, req)
+    assert repo.accepted_decision(req.approval_id) is None
+
+
+def test_p0_issuer_never_sends_or_creates_approval_while_hold_is_active(tmp_path):
+    from jason_runtime.mobile_release_approval import (
+        MobileReleaseApprovalMaintenance, MobileReleaseOwnerAuthority,
+    )
+    policy_path = policy_file(tmp_path)
+    root, _ = release_record(tmp_path)
+    make_eligible_main_offer(root, policy_path)
+    _write_owner_release_hold(root)
+    repo = SQLiteApprovalRequestRepository(tmp_path / "held-approvals.sqlite3")
+    approval_service = ApprovalRequestService(
+        repo, MobileReleaseOwnerAuthority(policy_path)
+    )
+    class Sender:
+        def send(self, request):
+            pytest.fail("owner mobile Teams approval card cannot be issued during hold")
+    worker = MobileReleaseApprovalMaintenance(
+        enabled=True, policy_path=policy_path,
+        state_root=root, requests=repo, approvals=approval_service,
+        sender=Sender(), interval_seconds=60, clock=lambda: NOW,
+    )
+    assert worker.tick() is False
+    assert repo.list_all() == ()
