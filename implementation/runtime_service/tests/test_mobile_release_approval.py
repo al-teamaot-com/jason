@@ -52,6 +52,7 @@ def release_record(tmp_path, **updates):
     record = {
         "release_id": RELEASE, "state": "production_eligible",
         "rollback_sha": ROLLBACK, "risk_profile": "normal",
+        "description": "Fix Teams mobile release approval without allowing extra roles",
         "release_manifest": manifest,
         "release_candidate": {
             "candidate_sha": SHA,
@@ -89,6 +90,8 @@ def test_exact_release_request_binds_full_manifest_policy_and_preprod(tmp_path):
     assert SHA in repr(request.presentation.facts)
     assert ROLLBACK in repr(request.presentation.facts)
     assert "normal" in repr(request.presentation.facts)
+    assert "Fix Teams mobile release approval" in request.presentation.title
+    assert request.metadata["purpose_sha256"] == digest(evidence.purpose)
 
 
 @pytest.mark.parametrize("updates", [

@@ -68,7 +68,8 @@ development/production management cadence.
    with no previous owner approval, normal risk and safe preproduction evidence.
 2. Jason creates a durable `relapproval-...` request with 15-minute TTL
    (configurable within 5–30 minutes) for **person-al only**. The card
-   summarizes purpose, release ID, full 40-character source revision, risk,
+   shows the bounded human-readable GitHub change purpose, release ID,
+   full 40-character source revision, risk,
    affected surfaces, representative changed files, exact rollback SHA,
    preproduction proof, policy hash and the entire immutable manifest digest.
    Additional source changes force a new review; cards never silently carry

@@ -92,6 +92,7 @@ class ExactRelease:
     desired_state_policy_digest: str
     risk_profile: str
     change_class: str
+    purpose: str
     affected_files: tuple[str, ...]
     affected_surfaces: tuple[str, ...]
 
@@ -133,10 +134,14 @@ def read_eligible_release(state_root: Path, release_id: str, policy: MobileRelea
     if (not isinstance(files, list) or not all(isinstance(f, str) and f for f in files)
             or not isinstance(surfaces, list) or not all(isinstance(f, str) and f for f in surfaces)):
         raise PermissionError("release manifest has no reviewable bounded change inventory")
+    purpose = doc.get("description")
+    if not isinstance(purpose, str) or not purpose.strip() or len(purpose) > 500:
+        raise PermissionError("mobile release card must contain a bounded human-readable change purpose")
     return ExactRelease(release_id, sha, rollback, digest(manifest),
         str(manifest.get("policy_digest") or ""),
         str(manifest.get("desired_state_policy_digest") or ""),
-        risk, str(manifest.get("change_class") or ""), tuple(files), tuple(surfaces))
+        risk, str(manifest.get("change_class") or ""), purpose.strip(),
+        tuple(files), tuple(surfaces))
 
 
 def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleasePolicy,
@@ -156,6 +161,7 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
         "candidate_sha": evidence.candidate_sha,
         "rollback_sha": evidence.rollback_sha,
         "manifest_sha256": evidence.manifest_sha256,
+        "purpose_sha256": digest(evidence.purpose),
         "policy_sha256": evidence.policy_sha256,
         "desired_state_policy_digest": evidence.desired_state_policy_digest,
         "owner_policy_sha256": policy.policy_sha256,
@@ -173,10 +179,11 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
         expires_at=instant + timedelta(seconds=policy.ttl_seconds),
         authorized_approver_ids=policy.owner_identity_ids,
         presentation=ApprovalPresentation(
-            title="Production + CCC: one owner decision",
+            title="Production + CCC: " + evidence.purpose[:90],
             summary="Review this exact immutable release. Approve authorizes only this SHA's "
                     "release and CCC material review; independent checks, deployment and rollback remain mandatory.",
             facts=(
+                ("Purpose", evidence.purpose),
                 ("Release", evidence.release_id),
                 ("Exact SHA", evidence.candidate_sha),
                 ("Highest risk", evidence.risk_profile),
