@@ -772,12 +772,21 @@ def test_verified_ccc_owner_review_readmits_once(monkeypatch, tmp_path):
     review.write_text(json.dumps({'status': 'approved', 'source_revision': sha}))
     drift.write_text(json.dumps({'status': 'pass', 'problems': [], 'observed_at': datetime.now(timezone.utc).isoformat()}))
     (folder / 'ccc-report.json').write_text(json.dumps({'status': 'PASS', 'source_revision': sha, 'runtime_revision': sha, 'checks': [{'status': 'PASS'}]}))
-    monkeypatch.setattr(module.support, 'production_state_from_main', lambda repo: {'production': {'revision': sha}})
+    observed_repositories = []
+    def capture_verified_repository(repo):
+        observed_repositories.append(repo)
+        assert repo == tmp_path
+        return {'production': {'revision': sha}}
+    monkeypatch.setattr(module.support, 'production_state_from_main', capture_verified_repository)
+    # Reproduce installation outside a Git checkout: __file__ must never
+    # control the production-state readback repository.
+    monkeypatch.setattr(module, '__file__', '/home/al/.local/lib/jason/owner_approved_development_worker.py')
     original = 'Exact owner-approved CCC material-change review for the current production SHA is required and not yet authorized.'
     state = {'items': {'DEV-1237': {'phase': 'blocked', 'reason': original}}}
-    kwargs = dict(review_path=review, report_root=reports, drift_path=drift)
+    kwargs = dict(source_repo=tmp_path, review_path=review, report_root=reports, drift_path=drift)
     assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, **kwargs) == 1
     assert state['items']['DEV-1237']['phase'] == 'diagnosing'
+    assert observed_repositories == [tmp_path]
     state['items']['DEV-1237'].update(phase='blocked', reason=original)
     assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, **kwargs) == 0
     state['items']['DEV-1237'].pop('verified_ccc_readmission_sha')
@@ -799,7 +808,7 @@ def test_verified_ccc_owner_review_rejects_production_sha_mismatch(monkeypatch, 
     (folder / 'ccc-report.json').write_text(json.dumps({'status': 'PASS', 'source_revision': sha, 'runtime_revision': sha, 'checks': [{'status': 'PASS'}]}))
     monkeypatch.setattr(module.support, 'production_state_from_main', lambda repo: {'production': {'revision': 'a' * 40}})
     state = {'items': {'DEV-1237': {'phase': 'blocked', 'reason': 'Exact owner-approved CCC material-change review for the current production SHA is required and not yet authorized.'}}}
-    assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, review_path=review, report_root=reports, drift_path=drift) == 0
+    assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, source_repo=tmp_path, review_path=review, report_root=reports, drift_path=drift) == 0
     assert state['items']['DEV-1237']['phase'] == 'blocked'
 
 
@@ -817,8 +826,56 @@ def test_verified_ccc_owner_review_rejects_missing_production_identity(monkeypat
     (folder / 'ccc-report.json').write_text(json.dumps({'status': 'PASS', 'source_revision': sha, 'runtime_revision': sha, 'checks': [{'status': 'PASS'}]}))
     monkeypatch.setattr(module.support, 'production_state_from_main', lambda repo: {})
     state = {'items': {'DEV-1237': {'phase': 'blocked', 'reason': 'Exact owner-approved CCC material-change review for the current production SHA is required and not yet authorized.'}}}
-    assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, review_path=review, report_root=reports, drift_path=drift) == 0
+    assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, source_repo=tmp_path, review_path=review, report_root=reports, drift_path=drift) == 0
     assert state['items']['DEV-1237']['phase'] == 'blocked'
+
+
+
+def test_ccc_readmission_git_failure_is_fail_closed_without_worker_crash(monkeypatch, tmp_path):
+    import json
+    from datetime import datetime, timezone
+    sha = 'e' * 40
+    review = tmp_path / 'review.json'
+    drift = tmp_path / 'drift.json'
+    reports = tmp_path / 'reports'
+    folder = reports / 'run1'
+    folder.mkdir(parents=True)
+    review.write_text(json.dumps({'status': 'approved', 'source_revision': sha}))
+    drift.write_text(json.dumps({
+        'status': 'pass',
+        'problems': [],
+        'observed_at': datetime.now(timezone.utc).isoformat(),
+    }))
+    (folder / 'ccc-report.json').write_text(json.dumps({
+        'status': 'PASS', 'source_revision': sha, 'runtime_revision': sha,
+        'checks': [{'status': 'PASS'}],
+    }))
+
+    def unavailable_source(repo):
+        assert repo == tmp_path
+        raise module.support.WorkerError('synthetic source fetch unavailable')
+
+    monkeypatch.setattr(module.support, 'production_state_from_main', unavailable_source)
+    item = {'phase': 'blocked', 'reason': 'Exact owner-approved CCC material-change review required.'}
+    state = {'items': {'DEV-1237': item}}
+    assert module.readmit_verified_ccc_owner_review(
+        state, {'DEV-1237'}, source_repo=tmp_path,
+        review_path=review, drift_path=drift, report_root=reports,
+    ) == 0
+    assert item['phase'] == 'blocked'
+
+    # A timed-out Git source fetch is also a failed CCC read, not an exception
+    # that should mark the systemd engineering worker itself as failed.
+    import subprocess
+    def timed_out_source(repo):
+        assert repo == tmp_path
+        raise subprocess.TimeoutExpired(['git', 'fetch'], timeout=5)
+    monkeypatch.setattr(module.support, 'production_state_from_main', timed_out_source)
+    assert module.readmit_verified_ccc_owner_review(
+        state, {'DEV-1237'}, source_repo=tmp_path,
+        review_path=review, drift_path=drift, report_root=reports,
+    ) == 0
+    assert item['phase'] == 'blocked'
 
 
 def test_ccc_readmission_rejects_empty_certification_checks(tmp_path):
@@ -834,7 +891,7 @@ def test_ccc_readmission_rejects_empty_certification_checks(tmp_path):
     drift.write_text(json.dumps({'status': 'pass', 'problems': [], 'observed_at': datetime.now(timezone.utc).isoformat()}))
     (folder / 'ccc-report.json').write_text(json.dumps({'status': 'PASS', 'source_revision': sha, 'runtime_revision': sha, 'checks': []}))
     state = {'items': {'DEV-1237': {'phase': 'blocked', 'reason': 'Exact CCC material-change review required.'}}}
-    assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, review_path=review, drift_path=drift, report_root=reports) == 0
+    assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, source_repo=tmp_path, review_path=review, drift_path=drift, report_root=reports) == 0
     assert state['items']['DEV-1237']['phase'] == 'blocked'
 
 
