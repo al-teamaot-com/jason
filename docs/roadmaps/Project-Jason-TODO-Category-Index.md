@@ -2,7 +2,7 @@
 
 > **Read-only organizational view — staged on a documentation branch.** The [canonical governed TODO backlog](./Project-Jason-TODO-and-Future-Ideas.md), its protected-main content, `SUPPORT.md`, and the existing GitHub issues remain authoritative. This index is not an intake source, an approval, or permission to begin work.
 
-**Catalog snapshot:** 2026-10-17 · **Items categorized:** 37 · **Categories:** 8 · **Scope:** the current canonical TODO roadmap only. Items are listed **once**, by primary category; cross-cutting topics can use secondary tags in a future metadata-only enhancement.
+**Catalog snapshot:** 2026-10-17 · **Items categorized:** 38 · **Categories:** 8 · **Scope:** the current canonical TODO roadmap only. Items are listed **once**, by primary category; cross-cutting topics can use secondary tags in a future metadata-only enhancement.
 
 ## Category priority order — proposed scheduling policy
 
@@ -39,7 +39,7 @@
 2. [Security & Governance](#security--governance) (4)
 3. [MSP Operations & Playbooks](#msp-operations--playbooks) (5)
 4. [Finance & Procurement](#finance--procurement) (4)
-5. [Infrastructure & Engineering](#infrastructure--engineering) (2)
+5. [Infrastructure & Engineering](#infrastructure--engineering) (3)
 6. [Integrations & Connectors](#integrations--connectors) (9)
 7. [New Features & User Experience](#new-features--user-experience) (7)
 8. [Research, Knowledge & Improvement](#research-knowledge--improvement) (3)
@@ -58,6 +58,8 @@ System integrity, security of core operations, and recovery resilience.
 
 Compliance, policies, authorization, and controlled capability retirement.
 
+ Cross-cutting shared implementation/adoption review: [TODO-ARCH-001](./Project-Jason-TODO-and-Future-Ideas.md#todo-arch-001--cross-workflow-shared-services-adoption-and-usage-led-migration) (counted only under Infrastructure & Engineering).
+
 | TODO | Work item | Priority |
 | --- | --- | --- |
 | [TODO-OPS-003](./Project-Jason-TODO-and-Future-Ideas.md#todo-ops-003--evidence-backed-cyber-insurance-and-security-questionnaire-readiness) | Evidence-backed cyber insurance and security questionnaire readiness | P1 |
@@ -68,6 +70,8 @@ Compliance, policies, authorization, and controlled capability retirement.
 ## MSP Operations & Playbooks
 
 Technician assistance, client support, ticket processing, and operational playbooks.
+
+ Shared ticket/playbook workflow adoption is coordinated under [TODO-ARCH-001](./Project-Jason-TODO-and-Future-Ideas.md#todo-arch-001--cross-workflow-shared-services-adoption-and-usage-led-migration); original domain items remain independently governed.
 
 | TODO | Work item | Priority |
 | --- | --- | --- |
@@ -80,6 +84,8 @@ Technician assistance, client support, ticket processing, and operational playbo
 ## Finance & Procurement
 
 Quotes, purchasing, invoicing, accounting, contracts, and billing.
+
+ Universal approval and notification consumers participate through [TODO-ARCH-001](./Project-Jason-TODO-and-Future-Ideas.md#todo-arch-001--cross-workflow-shared-services-adoption-and-usage-led-migration) after existing finance gates.
 
 | TODO | Work item | Priority |
 | --- | --- | --- |
@@ -96,10 +102,13 @@ Worker systems, delivery architecture, and engineering readiness.
 | --- | --- | --- |
 | [TODO-OPS-013](./Project-Jason-TODO-and-Future-Ideas.md#todo-ops-013--approved-device-provisioning-and-service-offload) | Approved device provisioning and service offload | P1 |
 | [TODO-GOV-006](./Project-Jason-TODO-and-Future-Ideas.md#todo-gov-006--configuration-driven-todo-engineering-readiness) | Configuration-driven TODO engineering readiness | P1 |
+| [TODO-ARCH-001](./Project-Jason-TODO-and-Future-Ideas.md#todo-arch-001--cross-workflow-shared-services-adoption-and-usage-led-migration) | Cross-workflow shared-services adoption and usage-led migration | P1 — blocked / planning only |
 
 ## Integrations & Connectors
 
 External platforms, provider APIs, and governed data/action surfaces.
+
+ Evidence and capability-cache adoption is cross-referenced from [TODO-ARCH-001](./Project-Jason-TODO-and-Future-Ideas.md#todo-arch-001--cross-workflow-shared-services-adoption-and-usage-led-migration) without changing connector authority.
 
 | TODO | Work item | Priority |
 | --- | --- | --- |
@@ -116,6 +125,8 @@ External platforms, provider APIs, and governed data/action surfaces.
 ## New Features & User Experience
 
 New interfaces, user-facing workflows, control panels, and assistant experiences.
+
+ Channel-neutral session and delivery reuse is cross-referenced from [TODO-ARCH-001](./Project-Jason-TODO-and-Future-Ideas.md#todo-arch-001--cross-workflow-shared-services-adoption-and-usage-led-migration); new voice/portal features remain deferred.
 
 | TODO | Work item | Priority |
 | --- | --- | --- |
@@ -152,12 +163,12 @@ These are cross-cutting **GitHub operational/support workstreams**, not addition
 ## Preservation and update rules
 
 1. **One governed backlog:** Categories are a view, not separate queues. Do not duplicate TODOs or create a new admission engine. Existing Support-first precedence remains intact.
-7. **Category rank has no execution authority:** Rankings are descriptive and must not silently rewrite P0-P3, alter item readiness, reshuffle an active worker, or activate a scheduler change. Changes to prioritization behavior require separate tests and governed admission.
 2. **No behavioral edits:** Do not change the canonical TODO headings, IDs, body text, priority, status, owner approvals, prerequisites, evidence, dependency gates, phase, or item ordering as part of categorization.
 3. **No silent authority changes:** A label or category can never move an item into `Planned` or `In progress` or authorize provider writes, merges, releases, or production activity.
 4. **Live status from source:** This navigation page intentionally does not copy mutable status values. Read each authoritative TODO entry, linked issue, and live production state before claiming work is complete/approved/blocked.
 5. **Keep legacy/completed history:** No archival, deletion, merging or retitling of existing entries from this operation. Legacy ID mapping remains in the canonical document and the consolidation history.
 6. **Future maintenance:** When the roadmap changes, refresh this view from the same protected source; validate every current `### TODO-...` entry appears exactly once, and reject missing/duplicate identifiers. Any automated category sync belongs to a future approved, independently tested docs-only change.
+7. **Category rank has no execution authority:** Rankings are descriptive and must not silently rewrite P0-P3, alter item readiness, reshuffle an active worker, or activate a scheduler change. Changes to prioritization behavior require separate tests and governed admission.
 
 ## Agreed sequencing for version-lifecycle work (informational)
 
