@@ -387,3 +387,61 @@ def test_governed_send_and_legacy_workflows_share_one_provider_post():
     assert "urlopen(" not in reused
     assert canonical.count("urlopen(")==1
     assert '"/internal/proactive/send"' in canonical
+
+
+def test_callback_server_clock_rejects_expired_pending_decision():
+    from dataclasses import replace
+    from connectors.src.jason_connectors.approval_requests import (
+        ApprovalRequestService, InMemoryApprovalRequestRepository,
+    )
+    from jason_runtime.teams_communication_service import ExistingTeamsApprovalReceiptHandler
+    repo=InMemoryApprovalRequestRepository()
+    now=datetime.now(timezone.utc)
+    expired=replace(canonical_approval(),requested_at=now-timedelta(days=2),
+                    expires_at=now-timedelta(days=1))
+    repo.put(expired)
+    flow=ExistingTeamsApprovalReceiptHandler(
+        bindings=SimpleNamespace(find=lambda **kw:binding()),
+        identities=SimpleNamespace(get=lambda key:SimpleNamespace(
+            identity_id=key,status="active",organization_id="aot")),
+        approval_service=ApprovalRequestService(
+            repo,SimpleNamespace(can_approve=lambda **kw:True)),
+        allowed_capabilities=frozenset({"finance.expense.approve"}),
+        approval_prefix="expenseapproval-",
+    )
+    with pytest.raises(PermissionError,match="expired"):
+        flow.handle(
+            approval_id=expired.approval_id,decision="approve",selections={},
+            microsoft_tenant_id=TENANT,microsoft_object_id=ACTOR,
+            conversation_id="test-thread",channel_response_id="test-click",
+            decided_at=expired.expires_at-timedelta(minutes=1),
+        )
+    assert not repo.decisions
+
+
+def test_callback_binding_cannot_switch_tenant_or_actor():
+    from connectors.src.jason_connectors.approval_requests import (
+        ApprovalRequestService, InMemoryApprovalRequestRepository,
+    )
+    from jason_runtime.teams_communication_service import ExistingTeamsApprovalReceiptHandler
+    repo=InMemoryApprovalRequestRepository()
+    req=canonical_approval();repo.put(req)
+    flow=ExistingTeamsApprovalReceiptHandler(
+        bindings=SimpleNamespace(find=lambda **kw:binding()),
+        identities=SimpleNamespace(get=lambda key:SimpleNamespace(
+            identity_id=key,status="active",organization_id="aot")),
+        approval_service=ApprovalRequestService(
+            repo,SimpleNamespace(can_approve=lambda **kw:True)),
+        allowed_capabilities=frozenset({"finance.expense.approve"}),
+        approval_prefix="expenseapproval-",
+    )
+    for wrong in ({"microsoft_tenant_id":"00000000-2222-4333-8444-555555555555"},
+                  {"microsoft_object_id":"00000000-bbbb-4ccc-8ddd-eeeeeeeeeeee"}):
+        args=dict(approval_id=req.approval_id,decision="approve",selections={},
+            microsoft_tenant_id=TENANT,microsoft_object_id=ACTOR,
+            conversation_id="test-thread",channel_response_id="test-click",
+            decided_at=datetime.now(timezone.utc))
+        args.update(wrong)
+        with pytest.raises(PermissionError,match="not bound"):
+            flow.handle(**args)
+    assert not repo.decisions

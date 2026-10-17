@@ -9,6 +9,7 @@ This class is NOT a parallel Teams bot, identity provider or approval engine.
 from __future__ import annotations
 
 import re
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -249,7 +250,9 @@ class ExistingTeamsApprovalReceiptHandler:
             microsoft_tenant_id=microsoft_tenant_id,
             microsoft_object_id=microsoft_object_id,
         )
-        if binding is None or getattr(binding, "status", None) != "active":
+        if (binding is None or getattr(binding, "status", None) != "active"
+                or _uuid(getattr(binding, "microsoft_tenant_id", None)) != _uuid(microsoft_tenant_id)
+                or _uuid(getattr(binding, "microsoft_object_id", None)) != _uuid(microsoft_object_id)):
             raise PermissionError("Teams approver Microsoft identity is not bound")
         identity = self.identities.get(binding.jason_identity_id)
         if (identity is None or getattr(identity, "status", None) != "active"
@@ -269,7 +272,9 @@ class ExistingTeamsApprovalReceiptHandler:
                 channel="microsoft_teams",
                 channel_response_id=channel_response_id,
             ),
-            now=decided_at,
+            # Signed callback event time cannot override the server clock.
+            # A valid but delayed/replayed Teams click must not revive expiry.
+            now=datetime.now(timezone.utc),
         )
         return {
             "status": "completed", "approval_id":approval_id,
