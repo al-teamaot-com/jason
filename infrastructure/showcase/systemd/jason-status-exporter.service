@@ -1,6 +1,9 @@
 [Unit]
 Description=Jason Status Metrics Exporter
-After=network-online.target docker.service jason-openclaw-authority-health.service
+# The authority-health job is a 2+ minute full-integrity check. Metrics
+# exporter startup must not queue behind it during governed rollback:
+# the exporter explicitly reports missing/stale health evidence as non-green.
+After=network-online.target docker.service
 Wants=network-online.target
 Requires=docker.service
 
