@@ -1312,7 +1312,8 @@ def _deterministic_resource_contracts(
     return tuple(contracts)
 
 
-def build_runtime_application(settings: RuntimeSettings, *, universal_approval_handler=None) -> RuntimeHttpApplication:
+def build_runtime_application(settings: RuntimeSettings, *, universal_approval_handler=None,
+        teams_workflow_approval_handlers: Mapping[str, Any] | None = None) -> RuntimeHttpApplication:
     settings.validate()
 
     authority_store = SQLiteIdentityAuthorityStore(settings.authority_db)
@@ -2487,6 +2488,7 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         fallback=playbook_approval_flow,
         universal=universal_approval_handler,
         mobile_release=release_mobile_flow,
+        workflow_routes=dict(teams_workflow_approval_handlers or {}),
     )
 
     governed_ingress = GovernedOpenClawTeamsConversationIngress(

@@ -53,6 +53,13 @@ explicitly registered workflow handlers. It keeps existing owner
 procurement `procapproval-`, mobile release `relapproval-`, bounded plan
 `planapproval-`, and playbook approval routing unchanged. Adding a workflow
 is a policy/handler registration, not a second gateway or approval engine.
+The existing runtime factory accepts a trusted
+`teams_workflow_approval_handlers` mapping, which is forwarded to the sole
+`ApprovalInteractionDispatcher` behind the already proven signed Teams ingress.
+The registry rejects reserved `procapproval-`, `planapproval-` and
+`relapproval-` overlaps, and no additional HTTP route or delegated identity
+provider is installed. Production defaults to an empty extension registry
+until a workflow's independent financial/role policy is reviewed and installed.
 
 ## Supported use cases and exact scope
 

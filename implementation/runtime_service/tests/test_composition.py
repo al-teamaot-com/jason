@@ -694,3 +694,43 @@ def test_dnsfilter_policy_delete_acceptance_profile_registers_only_delete(
     assert active_mutations == {
         DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_CAPABILITY
     }
+
+
+def test_canonical_teams_workflow_approval_dependency_is_registered_on_real_ingress(tmp_path):
+    """One existing Teams ingress, not another HTTP callback or approval bot."""
+    from types import SimpleNamespace
+    from jason_runtime.procurement_teams_flow import ApprovalInteractionDispatcher
+
+    observed=[]
+    def safe_handler(**arguments):
+        observed.append(arguments)
+        return {"status":"completed","executed":False}
+
+    handler=SimpleNamespace(handle=safe_handler)
+    app=build_runtime_application(
+        _settings(tmp_path),
+        teams_workflow_approval_handlers={"expenseapproval-":handler},
+    )
+    dispatcher=app.ingress.ingress.approval_flow
+    assert isinstance(dispatcher,ApprovalInteractionDispatcher)
+    assert dispatcher.workflow_routes=={"expenseapproval-":handler}
+    result=dispatcher.handle(approval_id="expenseapproval-exact-controlled")
+    assert result=={"status":"completed","executed":False}
+    assert len(observed)==1
+    assert observed[0]["approval_id"]=="expenseapproval-exact-controlled"
+    # Protected existing routes are never redirected into this hook.
+    import pytest
+    with pytest.raises(PermissionError,match="universal plan"):
+        dispatcher.handle(approval_id="planapproval-fake")
+    assert len(observed)==1
+
+
+def test_canonical_teams_workflow_extensions_cannot_override_legacy_approval_routes(tmp_path):
+    from types import SimpleNamespace
+    import pytest
+    handler=SimpleNamespace(handle=lambda **kwargs:{"status":"ignored"})
+    with pytest.raises(ValueError,match="overlapping"):
+        build_runtime_application(
+            _settings(tmp_path),
+            teams_workflow_approval_handlers={"procapproval-":handler},
+        )
