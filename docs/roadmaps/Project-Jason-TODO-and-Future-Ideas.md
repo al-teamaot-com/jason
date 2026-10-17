@@ -1170,6 +1170,29 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Decision owner:** AOT Owner / Jason Governance Authority
 - **Review trigger:** Implement before enabling general autonomous TODO engineering.
 
+## Infrastructure & Engineering — shared-services reuse and adoption
+
+### TODO-ARCH-001 — Cross-workflow shared-services adoption and usage-led migration
+
+- **Priority:** P1 — systemic reliability and maintainability; do not displace existing P0 production/support work.
+- **Status:** Blocked — plan recorded 2026-10-17; production and Universal Teams Approver acceptance prerequisites outstanding. **Not approved for autonomous development or deployment.**
+- **Autonomous engineering readiness:** Not eligible — planning only; no actionable intake status or release authority.
+- **Risk level:** High — touches shared identity, approval, ticket, provider and release workflow boundaries.
+- **Category:** Infrastructure & Engineering (cross-cutting: Security & Governance, MSP Operations & Playbooks, Finance & Procurement, Integrations & Connectors, New Features & User Experience).
+- **Idea:** Inventory the existing shared modules and their actual workflow consumers, identify genuinely duplicated/divergent workflow functions, rank migration by measured usage and operational risk, and incrementally move the remaining consumers onto **existing** canonical shared services. Do not create a duplicate scheduler, approval service, evidence store, or release manager.
+- **Why it matters:** Reusable processes should be implemented and governed once; individual playbooks, integrations and interfaces should supply only domain-specific policy/logic. Inconsistent per-workflow implementations have previously caused approval, notes, version/rollback and workflow-continuation problems.
+- **Scope:** Reconcile all 18 common playbook runtime responsibilities and 8 cross-domain service families (26 responsibilities, not 26 new services), across the 16 currently registered playbook definitions and relevant finance/Teams/engineering/connector consumers. Classify each responsibility as already shared, adoption gap, distinct domain logic, unsupported or unknown. Retain existing per-provider safety and client boundaries.
+- **Usage rule:** Before prioritizing a migration, measure existing consumers and (where telemetry exists) last-30-day governed invocation/failure/duplicate counts by workflow, with client/tenant-safe identifiers. Code references and registry declarations are useful exposure proxies, **not verified live invocation counts**; mark unavailable metrics unknown.
+- **Proposed staged sequencing:** (0) read-only source/live-usage inventory; (1) finish P0 Production Manager #1078, autonomous progression #1196 and Universal Teams Approver #1440/#1468/#1493; (2) single-workflow adoption of existing ticket association, note/idempotency, retry/recheck, pending-approval resume and verification controls (#190/#607/#605/#770); (3) expand proven shared approvals, communications and evidence across finance/operations (#1468/#697/#436); (4) shared provider read/cache where measurable (#1510); (5) separately gated version retirement and multi-channel reuse (#866/#960/#1475).
+- **Why not now:** Current P0 systems and the universal approval workflow remain under stabilization. Shared-core refactoring can amplify drift or break in-flight work if attempted during recovery. Planning and read-only inventory only until verified gates.
+- **Prerequisites:** Fresh independent production acceptance for #1078, stabilized engineering admission #1196, real authenticated end-to-end Universal Teams Approver accept/deny/expiry/replay evidence for #1440/#1468 (and #1493 remediation), plus existing #1100/#1069 architecture and concurrency holds as applicable.
+- **Safety and migration approach:** One existing owning service per responsibility; versioned contracts and adapters; per-consumer reversible cutover; controlled non-mutating shadow/parity checks, no duplicate live writes, no new authority, no client/tenant boundary expansion; protect in-flight approvals/tickets, independently verify production behavior and rollback. Retire old paths only after zero active dependency and accepted replacement under #866.
+- **Acceptance test:** Publish an evidence-backed 26-responsibility consumer/adoption matrix with actual counts or `unknown`; prove shared capability parity and fail-closed gates on one representative eligible workflow; verify no repeat approval, note, notification or provider write; independent postrelease readback and rollback; migrate remaining eligible consumers only behind separately authorized bounded changes; retain signed evidence and no stranded old-version consumers.
+- **Planning issue:** [#1535](https://github.com/al-teamaot-com/jason/issues/1535).
+- **Detailed inventory / staged design:** [Jason shared-services adoption and usage-based migration plan](../architecture/Jason-Shared-Services-Usage-Audit-and-Adoption-Plan-2026-10-17.md).
+- **Owners:** Jason Platform Architecture / existing governing shared-service owners; AOT Owner for any new material approval.
+- **Review trigger:** When P0 Production Manager and Universal Teams Approver are independently production-verified and engineering admission is stable. Do not infer eligibility from a merge, CI PASS or healthy MCP process alone.
+
 ## Legacy ID aliases and consolidation map
 
 These aliases preserve old PR, support, session, and conversation references. An alias never creates implementation authority.
