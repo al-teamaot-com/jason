@@ -582,6 +582,7 @@ def reconcile_issue_dependency_holds(
 
 
 def readmit_verified_ccc_owner_review(state: dict[str, Any], eligible_ids: set[str], *,
+                                    source_repo: Path,
                                     review_path: Path = Path('/var/lib/jason/ccc/material-review.json'),
                                     report_root: Path = Path('/home/al/Jason-Evidence/CCC/runs'),
                                     drift_path: Path = Path('/var/lib/jason/openclaw/release-manager/protected-readback/production-drift.json')) -> int:
@@ -610,14 +611,18 @@ def readmit_verified_ccc_owner_review(state: dict[str, Any], eligible_ids: set[s
                 or drift.get('status') != 'pass' or drift.get('problems')
                 or not 0 <= age <= 120):
             return 0
-        production_state = support.production_state_from_main(Path(__file__).resolve().parents[1])
+        # Installed production workers live outside the source Git checkout.
+        # Use the already-selected, verified worker repository, never __file__.
+        production_state = support.production_state_from_main(source_repo)
         production = production_state.get('production') if isinstance(production_state, dict) else None
         live_sha = str((production or {}).get('revision') or '')
         if len(live_sha) != 40 or any(c not in '0123456789abcdef' for c in live_sha):
             return 0
         if live_sha != sha:
             return 0
-    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+    except (support.WorkerError, subprocess.TimeoutExpired, OSError, ValueError, TypeError, KeyError, AttributeError):
+        # A temporary source-read failure must not crash the scheduled worker
+        # or turn an unverified CCC review into permission to resume work.
         return 0
     items = state.get('items', {})
     for item_id, record in items.items():
@@ -1360,7 +1365,7 @@ def main() -> int:
     monitored_ids=set(reconcile_owner_selected_pull_requests(repo,state,admitted))
     state['focus']={'enabled':bool(focus.get('enabled')),'issue_numbers':focus.get('issue_numbers',[]),
                     'observed_at':now(),'owner_selected_pr_items':sorted(monitored_ids)}
-    readmit_verified_ccc_owner_review(state, admitted_ids)
+    readmit_verified_ccc_owner_review(state, admitted_ids, source_repo=repo)
     recycle_self_recoverable_blockers(state, admitted_ids)
     queue_exhausted_recovery_diagnostics(state, admitted, spool)
     reconcile_exhausted_recovery_diagnostics(state, admitted_ids, spool)
