@@ -52,7 +52,8 @@ for argument in "$@"; do
   fi
 done
 UAT_RESULT="$(python3 "$REPO_ROOT/tools/owner_uat_activation.py" \
-  --manifest "$REPO_ROOT/config/owner-uat-campaign.json" "${UAT_PREFLIGHT[@]}")"
+  --manifest "$REPO_ROOT/config/owner-uat-campaign.json" \
+  --source-revision "$REVISION" "${UAT_PREFLIGHT[@]}")"
 IFS='|' read -r OWNER_UAT_MODE OWNER_UAT_WORKER OWNER_UAT_SESSION <<< "$UAT_RESULT"
 if [ "$OWNER_UAT_SESSION" = "none" ]; then
   OWNER_UAT_SESSION=""
