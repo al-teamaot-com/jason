@@ -61,6 +61,28 @@ class TodoEngineeringIntakeTests(unittest.TestCase):
         self.assertEqual(items[0].readiness, "Approved")
         self.assertIn("Build the thing.", items[0].section)
 
+    def test_decorated_priority_is_normalized(self):
+        text = TODO_TEXT + """
+
+### TODO-OPS-014 — Decorated priority
+
+- **Priority:** P1 — implement before lower-priority work
+- **Status:** Approved for Autonomous Engineering
+- **Autonomous engineering readiness:** Approved
+- **Idea:** Normalize the priority token.
+"""
+        item = module.parse_todo_sections(text)[-1]
+        self.assertEqual(item.priority, "P1")
+        candidate, reason = module.select_candidate(
+            todos=[item],
+            support_text="",
+            support_state={"items": {}},
+            max_support_repairs=2,
+            existing_issues={},
+        )
+        self.assertEqual(reason, "eligible")
+        self.assertEqual(candidate.item_id, "TODO-OPS-014")
+
     def test_only_owner_approved_ready_items_are_executable(self):
         items = module.parse_todo_sections(TODO_TEXT)
         status = {item.item_id: item.executable for item in items}
