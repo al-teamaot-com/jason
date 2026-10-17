@@ -1,6 +1,6 @@
 # Project Jason — TODO category index
 
-> **Read-only organizational view — staged on a documentation branch.** The [canonical governed TODO backlog](./Project-Jason-TODO-and-Future-Ideas.md), its protected-main content, `SUPPORT.md`, and the existing GitHub issues remain authoritative. This index is not an intake source, an approval, or permission to begin work.
+> **Read-only organizational view — staged on a documentation branch.** The [canonical governed TODO backlog](./Project-Jason-TODO-and-Future-Ideas.md), its protected-main content, `SUPPORT.md`, and the existing GitHub issues remain authoritative. The [lightweight Ideas List](./Project-Jason-Ideas-List.md) is a **separate pre-TODO discovery catalog**; its 44 idea records are **not** part of the 38 staged governed TODO records. This index is not an intake source, an approval, or permission to begin work.
 
 **Catalog snapshot:** 2026-10-17 · **Items categorized:** 38 · **Categories:** 8 · **Scope:** the current canonical TODO roadmap only. Items are listed **once**, by primary category; cross-cutting topics can use secondary tags in a future metadata-only enhancement.
 
