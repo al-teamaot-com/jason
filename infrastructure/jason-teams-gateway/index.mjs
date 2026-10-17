@@ -9,6 +9,7 @@ import {
   CloudAdapter,
   CreateConversationOptionsBuilder,
   MemoryStorage,
+  RouteRank,
 } from "@microsoft/agents-hosting";
 import { createAgentRequestHandler } from "@microsoft/agents-hosting-express";
 import {
@@ -19,8 +20,10 @@ import {
   replyForRuntimeResult,
 } from "./bridge-core.mjs";
 import { createApprovalDecisionStore } from "./approval-decision-store.mjs";
+import { isBoundTeamsApprovalActivity } from "./verified-approval-activity.mjs";
 import { resolveProactiveSendResult } from "./proactive-send-result.mjs";
 import { ensureTeamsUserBootstrap, TeamsBootstrapError } from "./teams-user-bootstrap.mjs";
+import { parseUtaSsoProbeConfig, handleUtaSsoProbe, UTA_SSO_PROBE_COMMAND } from "./uta-sso-probe.mjs";
 
 const PORT = Number(process.env.PORT ?? 3979);
 const OPENCLAW_CONFIG_PATH =
@@ -351,11 +354,23 @@ const authConfiguration = {
 
 const adapter = new CloudAdapter(authConfiguration);
 const storage = new MemoryStorage();
+const utaSsoProbe = parseUtaSsoProbeConfig(process.env);
 const agent = new AgentApplication({
   storage,
   adapter,
   agentAppId: auth.clientId,
+  ...(utaSsoProbe ? { authorization: utaSsoProbe.authorization } : {}),
 });
+
+// Probe only: obtain a human-scoped SDK token after interactive Teams sign-in.
+// Never create an approval, resume a plan, or transmit the bearer to Jason.
+if (utaSsoProbe) {
+  agent.onMessage(UTA_SSO_PROBE_COMMAND, async (context) => {
+    await handleUtaSsoProbe({
+      context, authorization: agent.authorization, handlerId: utaSsoProbe.handlerId,
+    });
+  }, [utaSsoProbe.handlerId], RouteRank.First);
+}
 
 function buildProactiveActivity(text, card) {
   return card
@@ -442,8 +457,15 @@ agent.onActivity("message", async (context) => {
   }
 
   try {
-    storeConversationReference(context, aadObjectId, tenantId);
     const approvalSubmit = parseApprovalSubmit(submitValue);
+    // The SDK authenticated the incoming channel request. For approvals,
+    // additionally require explicit Teams channel, tenant and user binding;
+    // the ordinary message tenant fallback must never authorize a decision.
+    if (approvalSubmit && !isBoundTeamsApprovalActivity({ activity, expectedTenantId: auth.tenantId })) {
+      await context.sendActivity("Jason rejected this approval because its Teams identity evidence was incomplete.");
+      return;
+    }
+    storeConversationReference(context, aadObjectId, tenantId);
     const procurementSubmit = approvalSubmit ? null : parseProcurementSubmit(submitValue);
     const billingDispositionSubmit =
       approvalSubmit || procurementSubmit

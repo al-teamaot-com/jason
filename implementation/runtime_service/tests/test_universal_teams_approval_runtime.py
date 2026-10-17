@@ -33,6 +33,24 @@ from jason_runtime.universal_teams_approval import build_universal_teams_approva
 NOW = datetime(2026,10,16,16,0,tzinfo=timezone.utc)
 
 
+class SyntheticHumanEvidence:
+    """Synthetic test-only proof; NOT a real Microsoft user authorization."""
+    def verify_callback(self, *, signed_envelope, approval_id, tenant_id,
+            object_id, channel_response_id):
+        import hashlib
+        from connectors.microsoft_graph.teams_approval_ingress import VerifiedMicrosoftPrincipal
+        identity=signed_envelope['transport_identity']
+        interaction=signed_envelope['interaction']
+        assert identity['microsoft_tenant_id']==tenant_id
+        assert identity['microsoft_object_id']==object_id
+        assert interaction['approval_id']==approval_id
+        assert interaction['channel_response_id']==channel_response_id
+        digest=hashlib.sha256(json.dumps(signed_envelope,sort_keys=True).encode()).hexdigest()
+        return VerifiedMicrosoftPrincipal(tenant_id=tenant_id,object_id=object_id,
+            subject=object_id,audience='synthetic-test-only',issuer='synthetic-test-only',
+            authentication_assurance='mfa',authentication_evidence_hash=digest)
+
+
 class ProviderBoundary:
     def __init__(self):
         self.calls=[]
@@ -71,7 +89,8 @@ def setup(tmp_path):
         policy_path=policy,bindings=bindings,identities=identities,grants=grants,
         formal_approvals=approvals,authority=authority,authenticator=authenticator,
         allowed_machine_identities=frozenset({'registered-gateway'}),orchestrator=provider,
-        governed_execution_ledger=execution_ledger,clock=lambda:NOW)
+        governed_execution_ledger=execution_ledger,clock=lambda:NOW,
+        human_evidence=SyntheticHumanEvidence())
     return SimpleNamespace(handler=handler,private=private,provider=provider,identities=identities,
         grants=grants,approvals=approvals,bindings=bindings,policy=policy,execution_ledger=execution_ledger)
 
@@ -222,6 +241,35 @@ def test_policy_change_invalidates_old_pending_plan(tmp_path):
     assert not env.provider.calls
 
 
+
+def test_universal_enforced_mode_rejects_missing_independent_human_port(tmp_path):
+    from jason_runtime.universal_teams_approval import build_universal_teams_approval_runtime
+    with pytest.raises(PermissionError, match='verified human proof'):
+        build_universal_teams_approval_runtime(
+            mode='enforced',database_path=tmp_path/'proof-missing.db',
+            policy_path=tmp_path/'missing-policy.json',bindings=None,
+            identities=None,grants=None,formal_approvals=None,authority=None,
+            authenticator=None,allowed_machine_identities=frozenset(),
+            orchestrator=None,governed_execution_ledger=None,
+        )
+
+
+def test_universal_callback_requires_human_port_before_vote(tmp_path):
+    env=setup(tmp_path); plan=seed(env)
+    from dataclasses import replace
+    handler=replace(env.handler,human_evidence=None)
+    with pytest.raises(PermissionError, match='verified human'):
+        handler.handle(
+            approval_id=plan.approval_id,decision='approve',
+            microsoft_tenant_id='tenant',microsoft_object_id='object-approver-a',
+            conversation_id='conversation-approver-a',
+            channel_response_id='message-approver-a',
+            decided_at=NOW,signed_envelope=signed(env,plan),
+        )
+    assert env.approvals.get(plan.approval_id) is None
+    assert not env.provider.calls
+
+
 def test_absent_signed_evidence_fails_closed(tmp_path):
     env=setup(tmp_path);plan=seed(env)
     with pytest.raises(PermissionError,match='signed'):
@@ -240,7 +288,8 @@ def rebuild(env, tmp_path):
         identities=identities,grants=grants,formal_approvals=approvals,authority=authority,
         authenticator=env.handler.evidence_verifier.authenticator,
         allowed_machine_identities=frozenset({'registered-gateway'}),orchestrator=env.provider,
-        governed_execution_ledger=env.execution_ledger,clock=lambda:NOW)
+        governed_execution_ledger=env.execution_ledger,clock=lambda:NOW,
+        human_evidence=env.handler.human_evidence)
 
 
 def grant_verification_step(env):
@@ -355,6 +404,19 @@ def test_recovery_reverifies_signature_not_just_a_recorded_hash(tmp_path):
         db.execute('UPDATE universal_approval_transport_evidence SET signed_envelope_json=? WHERE evidence_hash=?',
                    (json.dumps(forged),row[0]))
     assert rebuild(env,tmp_path).plan_runner.tick()
+    assert env.handler.requests.progress(plan.approval_id)['state']=='blocked'
+    assert not env.provider.calls
+
+
+
+def test_missing_independent_human_evidence_blocks_recovery(tmp_path):
+    import sqlite3
+    env=setup(tmp_path);plan=seed(env)
+    click(env,signed(env,plan))
+    with sqlite3.connect(tmp_path/'plans.db') as db:
+        db.execute('DELETE FROM universal_approval_human_evidence WHERE approval_id=?',
+                   (plan.approval_id,))
+    assert env.handler.plan_runner.tick() is True
     assert env.handler.requests.progress(plan.approval_id)['state']=='blocked'
     assert not env.provider.calls
 
