@@ -305,6 +305,7 @@ def test_existing_runtime_maintenance_issues_once_then_never_resends(env):
         issuer=env.issuer,
         session_id="acceptance-one-time",
         enabled=False,
+        release_ready=lambda: True,
     )
     assert worker.tick() is False
     assert env.repo.list_all() == ()
@@ -329,6 +330,7 @@ def test_uncertain_teams_send_is_not_blindly_reissued_by_worker(env):
         issuer=env.issuer,
         session_id="acceptance-failure",
         enabled=True,
+        release_ready=lambda: True,
     )
     with pytest.raises(TimeoutError, match="unknown"):
         worker.tick()
@@ -348,6 +350,7 @@ def test_owner_campaign_requires_denial_then_separate_signed_approval(env):
     env.callback.enabled = True
     worker = OwnerUatMaintenance(
         issuer=env.issuer, session_id="OwnerUAT20261017Pilot", enabled=True,
+        release_ready=lambda: True,
     )
     assert worker.tick() is True
     first = env.repo.list_all()[0]
@@ -381,9 +384,86 @@ def test_first_approve_does_not_issue_second_card(env):
     env.callback.enabled = True
     worker = OwnerUatMaintenance(
         issuer=env.issuer, session_id="OwnerUATWrongButton", enabled=True,
+        release_ready=lambda: True,
     )
     assert worker.tick() is True
     first = env.repo.list_all()[0]
     click(env.callback, signed(env, first, decision="approve"))
     assert worker.tick() is False
     assert len(env.repo.list_all()) == len(env.channel.sends) == 1
+
+
+def test_uat_worker_fails_closed_without_release_gate(env):
+    from jason_runtime.universal_interaction.owner_uat import OwnerUatMaintenance
+    env.issuer.enabled = True
+    worker = OwnerUatMaintenance(
+        issuer=env.issuer, session_id="OwnerUATNotReleased", enabled=True,
+    )
+    assert worker.tick() is False
+    assert env.repo.list_all() == ()
+    assert env.channel.sends == []
+
+
+def test_root_verified_exact_sha_closeout_required_for_uat(tmp_path):
+    from jason_runtime.universal_interaction.owner_uat import OwnerUatReleaseGate
+
+    sha = "0dceb0af7498e14fedb35aca71b35ed0a95e2526"
+    root = tmp_path / "release-manager"
+    record_path = root / "records" / ("release-" + sha[:16] + ".json")
+    snapshot = root / "protected-readback" / "production-control-state.json"
+
+    def write(path, payload):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        path.chmod(0o600)
+
+    production = {
+        "live_sha": sha, "runtime_revision": sha, "mcp_revision": sha,
+        "host_revision": sha, "release_manager_source_revision": sha,
+        "ccc_post_mutation": {
+            "status": "PASS", "source_revision": sha, "runtime_revision": sha,
+        },
+    }
+    record = {
+        "schema_version": "2.0",
+        "release_id": "release-" + sha[:16],
+        "state": "closed",
+        "release_candidate": {"candidate_sha": sha},
+        "owner_approval": {"approved": True, "candidate_sha": sha},
+        "production": production,
+    }
+    state = {
+        "schema_version": "1.0",
+        "circuit_breaker": {"state": "closed"},
+        "last_known_good": {"manifest": {
+            "revision": sha, "runtime_revision": sha,
+            "mcp_revision": sha, "host_revision": sha,
+        }},
+    }
+    gate = OwnerUatReleaseGate(root, sha)
+    assert gate.ready() is False
+    write(record_path, record)
+    assert gate.ready() is False
+    write(snapshot, state)
+    assert gate.ready() is True
+    record["state"] = "production"
+    write(record_path, record)
+    assert gate.ready() is False
+    record["state"] = "closed"
+    record["production"]["ccc_post_mutation"]["status"] = "FAIL"
+    write(record_path, record)
+    assert gate.ready() is False
+    record["production"]["ccc_post_mutation"]["status"] = "PASS"
+    write(record_path, record)
+    state["circuit_breaker"]["state"] = "open"
+    write(snapshot, state)
+    assert gate.ready() is False
+    state["circuit_breaker"]["state"] = "closed"
+    state["last_known_good"]["manifest"]["revision"] = "f" * 40
+    write(snapshot, state)
+    assert gate.ready() is False
+    state["last_known_good"]["manifest"]["revision"] = sha
+    write(snapshot, state)
+    assert gate.ready() is True
+    snapshot.chmod(0o644)
+    assert gate.ready() is False
