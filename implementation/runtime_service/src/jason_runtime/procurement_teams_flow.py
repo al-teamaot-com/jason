@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from hashlib import sha256
@@ -3066,6 +3066,20 @@ class ApprovalInteractionDispatcher:
     fallback: Any | None
     universal: Any | None = None
     mobile_release: Any | None = None
+    # Extension registration reuses one authenticated callback dispatcher and
+    # one persisted ApprovalRequestService per workflow. Not a new engine.
+    workflow_routes: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        reserved = ("relapproval-", "planapproval-", "procapproval-")
+        for prefix, route in self.workflow_routes.items():
+            if (not isinstance(prefix, str)
+                    or not prefix.endswith("approval-")
+                    or not prefix.isascii()
+                    or not prefix.replace("-", "").replace("_", "").isalnum()
+                    or any(prefix.startswith(p) or p.startswith(prefix) for p in reserved)
+                    or not callable(getattr(route, "handle", None))):
+                raise ValueError("invalid or overlapping Teams approval workflow route")
 
     def handle(self, *, approval_id: str, **kwargs):
         if approval_id.startswith("relapproval-"):
@@ -3081,6 +3095,9 @@ class ApprovalInteractionDispatcher:
             if self.procurement is None:
                 raise PermissionError("procurement approval flow is not configured")
             return self.procurement.handle(approval_id=approval_id, **kwargs)
+        for prefix, handler in self.workflow_routes.items():
+            if approval_id.startswith(prefix):
+                return handler.handle(approval_id=approval_id, **kwargs)
         if self.fallback is None:
             raise PermissionError("approval flow is not configured")
         return self.fallback.handle(approval_id=approval_id, **kwargs)

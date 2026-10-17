@@ -923,3 +923,51 @@ def test_actual_signed_ingress_keeps_explicit_vendor_procurement_routing():
     assert len(procurement.urls) == 1
     assert procurement.urls[0]["url"] == "https://www.newegg.com/p/2VF-0046-00012"
     assert flow.requests == []
+
+
+def test_nonexecuting_owner_uat_receives_existing_signed_gateway_evidence():
+    """Only explicit owner-UAT callback receives signed evidence, not general flow."""
+    approval = ApprovalFlow()
+    normal = Flow()
+    original = envelope(
+        request_id="req-owner-uat-signed",
+        interaction={
+            "kind": "approval.submit",
+            "approval_id": "owneruatapproval-exact-1",
+            "decision": "deny",
+            "channel_response_id": "teams-message-1",
+            "selections": {},
+        },
+    )
+    flow = GovernedOpenClawTeamsConversationIngress(
+        authenticator=Authenticator(), replay=Replay(), audit=Audit(),
+        flow=normal, allowed_machine_identities=frozenset({"machine:openclaw-jason"}),
+        approval_flow=approval,
+    )
+    result = flow.handle(original)
+    assert result["status"] == "completed"
+    assert not normal.requests
+    assert len(approval.calls) == 1
+    assert approval.calls[0]["signed_envelope"] == original
+    assert approval.calls[0]["approval_id"] == "owneruatapproval-exact-1"
+    assert approval.calls[0]["decision"] == "deny"
+
+
+def test_ordinary_workflow_does_not_receive_signed_envelope_by_default():
+    approval = ApprovalFlow()
+    flow = GovernedOpenClawTeamsConversationIngress(
+        authenticator=Authenticator(), replay=Replay(), audit=Audit(),
+        flow=Flow(), allowed_machine_identities=frozenset({"machine:openclaw-jason"}),
+        approval_flow=approval,
+    )
+    result = flow.handle(envelope(
+        request_id="req-unprivileged-test",
+        interaction={
+            "kind": "approval.submit",
+            "approval_id": "supportapproval-test-1",
+            "decision": "deny",
+            "channel_response_id": "teams-message-1",
+        },
+    ))
+    assert result["status"] == "completed"
+    assert "signed_envelope" not in approval.calls[0]

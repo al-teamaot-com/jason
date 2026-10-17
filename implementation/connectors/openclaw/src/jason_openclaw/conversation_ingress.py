@@ -585,7 +585,9 @@ class GovernedOpenClawTeamsConversationIngress:
                         channel_response_id=parsed.approval_submit.channel_response_id,
                         decided_at=parsed.issued_at,
                         **({'signed_envelope': envelope}
-                           if parsed.approval_submit.approval_id.startswith(('planapproval-', 'relapproval-')) else {}),
+                           if parsed.approval_submit.approval_id.startswith((
+                               'planapproval-', 'relapproval-', 'owneruatapproval-'
+                           )) else {}),
                     )
                 )
             except PermissionError as error:

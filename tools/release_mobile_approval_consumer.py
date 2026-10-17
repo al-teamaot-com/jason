@@ -88,11 +88,16 @@ def consume_mobile_release_decisions(
         read_eligible_release, read_mobile_release_policy,
     )
     from jason_runtime.universal_teams_approval import SignedTeamsApprovalEvidenceVerifier
+    from jason_runtime.owner_release_approval_containment import read_release_approval_containment
     from jason_openclaw.key_registry import FileBackedTrustedKeyRegistry
     from orchestrator.teams_identity_binding_sqlite import SQLiteMicrosoftIdentityBindingStore
     from kernel.identity_authority import SQLiteIdentityAuthorityStore, SQLiteIdentityRepository
 
     policy = read_mobile_release_policy(policy_file)
+    containment = read_release_approval_containment(state_root)
+    if containment.active:
+        print('OWNER_RELEASE_APPROVAL_HOLD_ACTIVE=' + containment.hold_id, flush=True)
+        return 0  # Do not convert held Teams decisions into owner/CCC authority.
     con = sqlite3.connect("file:" + str(database) + "?mode=ro", uri=True)
     try:
         records = con.execute("""
@@ -122,6 +127,10 @@ def consume_mobile_release_decisions(
                 raise PermissionError("processed mobile decision marker has conflicting evidence")
             continue
         request = SQLiteApprovalRequestRepository._decode(encoded)
+        if not containment.is_request_eligible(request.requested_at):
+            # Immutable revocation watermark survives release of the hold.
+            # Preserve historical receipt/evidence, but never materialize it.
+            continue
         receipt = json.loads(receipt_json)
         if request.status.value != "approved":
             continue  # Deny does not create release authority.
@@ -171,6 +180,9 @@ def consume_mobile_release_decisions(
         raw_release = json.loads((state_root / "records" / (release_id + ".json")).read_text())
         prior_approval = raw_release.get("owner_approval") or {}
         exact_prior_source = "authenticated_mobile_teams_owner:" + approval_id
+        read_release_approval_containment(state_root).require_request_eligible(
+            request.requested_at
+        )
         if prior_approval.get("approved") is True:
             manifest = raw_release.get("release_manifest") or {}
             named = ccc_root / ("material-review-" + request.metadata["candidate_sha"][:16] + ".json")
@@ -205,6 +217,11 @@ def consume_mobile_release_decisions(
                 or request.requested_mode != expected.requested_mode):
             raise PermissionError("mobile release policy or exact reviewed manifest changed")
 
+        # Cross-process race guard immediately before CCC/release state writes.
+        # A hold activated while evidence was being verified must still win.
+        read_release_approval_containment(state_root).require_request_eligible(
+            request.requested_at
+        )
         # All trusted evidence is now independently reverified. CCC is an
         # *owner material review*, not a CCC PASS; fresh CCC must still run.
         sha = candidate.candidate_sha
@@ -251,6 +268,11 @@ def consume_mobile_release_decisions(
 
         # Exact released artifacts and protected main are verified by existing
         # approve_release; this call never starts production itself.
+        # Check one final time before transferring authority to the existing
+        # exact-SHA release approver. Card delivery/CCC files are not sufficient.
+        read_release_approval_containment(state_root).require_request_eligible(
+            request.requested_at
+        )
         approve_release(
             repo, state_root, release_id=candidate.release_id,
             candidate_sha=sha, source="authenticated_mobile_teams_owner:" + approval_id,

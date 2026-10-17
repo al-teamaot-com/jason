@@ -590,6 +590,11 @@ class RuntimeSettings:
     release_mobile_approval_db: Path = Path("/var/lib/jason/openclaw/mobile-release-approvals.sqlite3")
     release_mobile_state_root: Path = Path("/var/lib/jason/openclaw/release-manager")
     release_mobile_interval_seconds: int = 300
+    # Nonexecuting owner Teams acceptance pilot. Disabled independently of
+    # normal-risk mobile release approval and Universal approval modes.
+    owner_uat_mode: str = "off"
+    owner_uat_worker_enabled: bool = False
+    owner_uat_session_id: str = ""
     host: str = "0.0.0.0"
     port: int = 8080
 
@@ -1063,6 +1068,11 @@ class RuntimeSettings:
             release_mobile_interval_seconds=int(os.getenv(
                 "JASON_RELEASE_MOBILE_INTERVAL_SECONDS", "300"
             )),
+            owner_uat_mode=os.getenv("JASON_OWNER_UAT_MODE", "off").strip().lower(),
+            owner_uat_worker_enabled=os.getenv(
+                "JASON_OWNER_UAT_WORKER_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            owner_uat_session_id=os.getenv("JASON_OWNER_UAT_SESSION_ID", "").strip(),
             procurement_inventory_location_id=int(
                 os.getenv("JASON_PROCUREMENT_INVENTORY_LOCATION_ID", "1")
             ),
@@ -1079,6 +1089,14 @@ class RuntimeSettings:
             raise ValueError("JASON_RELEASE_MOBILE_APPROVAL_MODE must be off or owner_only_pilot")
         if self.release_mobile_interval_seconds < 60:
             raise ValueError("mobile release approval scans require at least a 60-second interval")
+        if self.owner_uat_mode not in {"off", "nonexecuting_test_only"}:
+            raise ValueError("JASON_OWNER_UAT_MODE must be off or nonexecuting_test_only")
+        if self.owner_uat_worker_enabled and self.owner_uat_mode != "nonexecuting_test_only":
+            raise ValueError("owner UAT worker requires test-only mode")
+        if self.owner_uat_mode == "nonexecuting_test_only":
+            from .universal_interaction.owner_uat import SESSION_ID
+            if SESSION_ID.fullmatch(self.owner_uat_session_id) is None:
+                raise ValueError("owner UAT requires bounded unique session identifier")
         if not self.ollama_model:
             raise ValueError("JASON_OLLAMA_MODEL is required")
         if self.procurement_inventory_location_id < 1:
@@ -1312,7 +1330,8 @@ def _deterministic_resource_contracts(
     return tuple(contracts)
 
 
-def build_runtime_application(settings: RuntimeSettings, *, universal_approval_handler=None) -> RuntimeHttpApplication:
+def build_runtime_application(settings: RuntimeSettings, *, universal_approval_handler=None,
+        teams_workflow_approval_handlers: Mapping[str, Any] | None = None) -> RuntimeHttpApplication:
     settings.validate()
 
     authority_store = SQLiteIdentityAuthorityStore(settings.authority_db)
@@ -2482,11 +2501,87 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
                 interval_seconds=settings.release_mobile_interval_seconds,
             )
 
+    # Owner acceptance: an explicitly gated, one-time NONEXECUTING Teams card.
+    # There is no provider execution/host approval consumer for its capability.
+    # Off by default; it never changes release/procurement/playbook behavior.
+    owner_uat_maintenance = None
+    workflow_approval_routes = dict(teams_workflow_approval_handlers or {})
+    if settings.owner_uat_mode == "nonexecuting_test_only":
+        from communication.audience.engine import AudiencePolicyEngine
+        from .teams_communication_service import (
+            ExistingTeamsGatewayTransport, JasonTeamsCommunicationService,
+        )
+        from .universal_interaction.service import (
+            ExistingApprovalGuard, OrchestrationInteractionJournal,
+            UniversalInteractionService,
+        )
+        from .universal_interaction.teams import ExistingTeamsInteractionAdapter
+        from .universal_interaction.owner_uat import (
+            APPROVAL_PREFIX as OWNER_UAT_PREFIX,
+            OwnerUatAuthority, OwnerUatDecisionFlow, OwnerUatIssuer,
+            OwnerUatMaintenance, OwnerUatRouteAuthority,
+            OwnerUatWorkflowSendAuthority,
+        )
+        from .universal_teams_approval import SignedTeamsApprovalEvidenceVerifier
+
+        if OWNER_UAT_PREFIX in workflow_approval_routes:
+            raise ValueError("duplicate reserved owner UAT approval route")
+        owner_uat_repository = SQLiteApprovalRequestRepository(
+            settings.release_mobile_approval_db
+        )
+        owner_uat_approval_service = ApprovalRequestService(
+            owner_uat_repository, OwnerUatAuthority(),
+        )
+        owner_uat_flow = OwnerUatDecisionFlow(
+            approvals=owner_uat_approval_service,
+            signed_verifier=SignedTeamsApprovalEvidenceVerifier(
+                authenticator=teams_authenticator,
+                allowed_machine_identities=settings.allowed_machine_identities,
+                allowed_approval_prefixes=(OWNER_UAT_PREFIX,),
+            ),
+            bindings=durable_bindings,
+            identities=SQLiteIdentityRepository(authority_store),
+            enabled=True,
+        )
+        workflow_approval_routes[OWNER_UAT_PREFIX] = owner_uat_flow
+        owner_uat_sender = JasonTeamsCommunicationService(
+            transport=ExistingTeamsGatewayTransport(
+                gateway_url=settings.teams_gateway_internal_url,
+                token_file=settings.teams_proactive_token_file,
+            ),
+            bindings=durable_bindings,
+            identities=SQLiteIdentityRepository(authority_store),
+            workflow_authority=OwnerUatWorkflowSendAuthority(),
+            approval_requests=owner_uat_repository,
+            audience=AudiencePolicyEngine(),
+        )
+        owner_uat_core = UniversalInteractionService(
+            authority=OwnerUatRouteAuthority(),
+            channels={"teams": ExistingTeamsInteractionAdapter(
+                sender=owner_uat_sender,
+                approval_callbacks_registered=True,
+            )},
+            audit=OrchestrationInteractionJournal(orchestration_events),
+            approvals=ExistingApprovalGuard(owner_uat_repository),
+            approval_dispatch_enabled=True,
+        )
+        if settings.owner_uat_worker_enabled:
+            owner_uat_maintenance = OwnerUatMaintenance(
+                issuer=OwnerUatIssuer(
+                    requests=owner_uat_approval_service,
+                    universal_interactions=owner_uat_core,
+                    enabled=True,
+                ),
+                session_id=settings.owner_uat_session_id,
+                enabled=True,
+            )
+
     approval_interaction_flow = ApprovalInteractionDispatcher(
         procurement=procurement_approval_flow,
         fallback=playbook_approval_flow,
         universal=universal_approval_handler,
         mobile_release=release_mobile_flow,
+        workflow_routes=workflow_approval_routes,
     )
 
     governed_ingress = GovernedOpenClawTeamsConversationIngress(
@@ -2626,6 +2721,7 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         )
     autonomy_maintenance = CompositeAutonomyMaintenance(
         release_mobile_maintenance,
+        owner_uat_maintenance,
         universal_plan_maintenance,
         universal_plan_status_maintenance,
         playbook_review_maintenance,
