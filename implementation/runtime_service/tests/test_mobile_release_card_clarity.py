@@ -104,3 +104,61 @@ def test_old_release_notice_prominently_identifies_itself_as_status_only():
     assert "NOT an approval card" in rendered["body"][0]["text"]
     assert "no approval buttons" in rendered["body"][1]["text"].lower()
     assert not rendered.get("actions")
+
+
+def test_owner_acceptance_card_is_unambiguously_test_only_two_button():
+    from connectors.microsoft_graph.teams_approval_channel import TeamsApprovalCard
+    card = TeamsApprovalCard(
+        approval_id="owneruatapproval-abcd1234", organization_id="aot",
+        title="TEST ONLY: Jason owner approval in Teams",
+        summary=("NONEXECUTING test; no production, ticket, PO or customer "
+                 "action occurs regardless of decision."),
+        capability="interaction.owner.acceptance.record",
+        requested_mode="test:nonexecuting",
+        expires_at="2026-10-17T22:50:00Z",
+        evidence_artifact_ids=(),
+        facts=(("Impact", "None"), ("Session", "one-time-test")),
+    )
+    rendered = TeamsGatewayPlaybookApprovalSender._adaptive_card(card)
+    assert rendered["type"] == "AdaptiveCard"
+    assert rendered["body"][0]["text"] == "TEST ONLY: NO OPERATION WILL EXECUTE"
+    assert rendered["body"][0]["color"] == "Warning"
+    assert [a["title"] for a in rendered["actions"]] == ["Approve", "Deny"]
+    assert [a["data"]["decision"] for a in rendered["actions"]] == [
+        "approve", "deny",
+    ]
+    assert all(a["data"]["approval_id"] == card.approval_id
+               for a in rendered["actions"])
+    assert "Request Changes" not in json.dumps(rendered)
+    assert "TEST ONLY" in json.dumps(rendered)
+    assert "production, ticket, PO" in json.dumps(rendered)
+
+
+def test_owner_acceptance_buttons_use_existing_gateway_parser():
+    from connectors.microsoft_graph.teams_approval_channel import TeamsApprovalCard
+    candidate = TeamsApprovalCard(
+        approval_id="owneruatapproval-testonly", organization_id="aot",
+        title="Test only", summary="No execution",
+        capability="interaction.owner.acceptance.record",
+        requested_mode="test:nonexecuting", expires_at="2026-10-17T22:50:00Z",
+        evidence_artifact_ids=(), facts=(),
+    )
+    rendered = TeamsGatewayPlaybookApprovalSender._adaptive_card(candidate)
+    root = Path(__file__).resolve().parents[3]
+    module = root / "infrastructure/jason-teams-gateway/approval-submit.mjs"
+    if not module.exists():
+        module = root.parent / "infrastructure/jason-teams-gateway/approval-submit.mjs"
+    script = (
+        "import { parseApprovalSubmit } from " + json.dumps(module.as_uri()) +
+        '; let s=""; for await (const c of process.stdin) s+=c;'
+        " console.log(JSON.stringify(JSON.parse(s).map(parseApprovalSubmit)));"
+    )
+    parsed = subprocess.run(
+        ["node", "--input-type=module", "-e", script],
+        input=json.dumps([a["data"] for a in rendered["actions"]]),
+        capture_output=True, text=True, check=True, timeout=12,
+    )
+    decisions = json.loads(parsed.stdout)
+    assert [x["decision"] for x in decisions] == ["approve", "deny"]
+    assert all(x["approvalId"] == "owneruatapproval-testonly" for x in decisions)
+    assert all(x["selections"] == {} for x in decisions)

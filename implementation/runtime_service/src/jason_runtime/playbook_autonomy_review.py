@@ -198,6 +198,11 @@ class TeamsGatewayPlaybookApprovalSender:
             card.capability == "release.production.approve"
             and card.approval_id.startswith("relapproval-")
         )
+        is_owner_uat = (
+            card.capability == "interaction.owner.acceptance.record"
+            and card.approval_id.startswith("owneruatapproval-")
+            and card.requested_mode == "test:nonexecuting"
+        )
         if is_mobile_release:
             review = dict(card.facts)
             keys = (
@@ -225,6 +230,24 @@ class TeamsGatewayPlaybookApprovalSender:
                           "are below the details. Approve authorizes only this SHA; "
                           "independent deployment, CCC and rollback gates still apply."),
                  "wrap": True},
+                {"type": "FactSet", "facts": facts},
+            ]
+        elif is_owner_uat:
+            # Harmless owner acceptance must offer exactly the two supported
+            # decisions. It must never look like a real release or expose a
+            # Request Changes button that its signed handler rejects.
+            facts = [
+                {"title": str(k), "value": str(v)} for k, v in card.facts
+            ]
+            facts.append({"title": "Expires", "value": card.expires_at})
+            actions = (("Approve", "approve"), ("Deny", "deny"))
+            body = [
+                {"type": "TextBlock",
+                 "text": "TEST ONLY: NO OPERATION WILL EXECUTE",
+                 "weight": "Bolder", "color": "Warning", "wrap": True},
+                {"type": "TextBlock", "text": card.title,
+                 "weight": "Bolder", "wrap": True},
+                {"type": "TextBlock", "text": card.summary, "wrap": True},
                 {"type": "FactSet", "facts": facts},
             ]
         else:
