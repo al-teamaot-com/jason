@@ -79,6 +79,15 @@ development/production management cadence.
    Additional source changes force a new review; cards never silently carry
    forward from an old SHA. One request is issued per eligible release, with
    no repeated unsolicited cards after expiry.
+   Delivery receipts (real provider IDs or a bounded `accepted:` transport
+   receipt) are appended to the private ledger **after** card issuance. They
+   are operational transport evidence, not owner authorization or changes to
+   the immutable release/policy fingerprint. The signed callback validates
+   exactly this one optional bounded field independently; any additional
+   mutable approval data, unexpected request scope or a changed manifest
+   fails closed. Regression tests exercise the real post-send metadata path
+   through signed Teams intake and independent host CCC review, not only a
+   pre-send synthetic request.
 3. The existing Teams Bot Framework ingress verifies the signed Ed25519 gateway
    envelope, bound Microsoft tenant/object and unique callback. Jason checks
    the active AOT identity and separate owner role; **the requester is a service

@@ -195,3 +195,52 @@ def test_crash_after_exact_owner_record_restores_only_verified_marker(tmp_path):
     marker.unlink()
     assert consume_mobile_release_decisions(**opts) == 0
     assert json.loads(marker.read_text())["recovery"] == "previous_exact_owner_approval_verified"
+
+
+def test_actual_delivered_card_signed_click_and_independent_host_attestation(tmp_path):
+    """Prove real worker's delivery ledger mutation cannot cause a Teams 403.
+
+    Both runtime signed ingress and host release/CCC revalidation must accept
+    the *same* bounded delivery receipt without changing immutable authority.
+    """
+    from dataclasses import replace
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(tmp_path)
+    repo.put(replace(
+        request, metadata={
+            **request.metadata, "delivery_message_ids": "accepted:test-transport-receipt",
+        },
+    ))
+    result = flow.handle(**args)
+    assert result["approval_status"] == "approved"
+    assert result["executed"] is False
+    applied = []
+    opts["approve_release"] = lambda _repo, _root, *, release_id, candidate_sha, source: (
+        applied.append((release_id, candidate_sha, source))
+    )
+    assert consume_mobile_release_decisions(**opts) == 1
+    assert len(applied) == 1
+    assert applied[0] == (
+        RID, SHA, "authenticated_mobile_teams_owner:" + request.approval_id,
+    )
+    review = json.loads((opts["ccc_root"] / "material-review.json").read_text())
+    assert review["source_revision"] == SHA
+    assert review["recorded_by"] == "person-al"
+    assert review["mobile_approval_id"] == request.approval_id
+    assert consume_mobile_release_decisions(**opts) == 0
+
+
+def test_transport_delivery_receipt_does_not_weaken_policy_or_manifest_gate(tmp_path):
+    from dataclasses import replace
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(tmp_path)
+    repo.put(replace(
+        request, metadata={
+            **request.metadata, "delivery_message_ids": "accepted:test-transport-receipt",
+        },
+    ))
+    data = json.loads(release_path.read_text())
+    data["release_manifest"]["changed_files"].append("unreviewed.py")
+    release_path.write_text(json.dumps(data))
+    with pytest.raises(PermissionError):
+        flow.handle(**args)
+    assert repo.accepted_decision(request.approval_id) is None
+    assert not (opts["ccc_root"] / "material-review.json").exists()

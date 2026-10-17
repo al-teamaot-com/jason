@@ -296,8 +296,20 @@ class MobileReleaseApprovalFlow:
         release_id = request.metadata.get("release_id", "")
         current = read_eligible_release(self.state_root, release_id, policy)
         expected = create_mobile_release_request(current, policy, now=request.requested_at)
+        # The issuer durably records the *transport receipt* after calling
+        # TeamsGatewayPlaybookApprovalSender.send(). That single field cannot
+        # appear in the immutable reviewed intent reconstructed above. Do not
+        # mistake its presence for a policy/manifest change and reject every
+        # genuine phone click. Accept no other mutable metadata fields.
+        verified_metadata = dict(request.metadata)
+        delivery_receipt = verified_metadata.pop("delivery_message_ids", None)
+        if delivery_receipt is not None and (
+            type(delivery_receipt) is not str
+            or re.fullmatch(r"[!-~]{1,512}", delivery_receipt) is None
+        ):
+            raise PermissionError("mobile Teams delivery receipt is invalid")
         if (expected.requested_mode != request.requested_mode
-                or expected.metadata != request.metadata
+                or expected.metadata != verified_metadata
                 or expected.presentation != request.presentation
                 or expected.expires_at != request.expires_at):
             raise PermissionError("release contents or approval policy changed after Teams card issuance")
