@@ -159,6 +159,7 @@ These are cross-cutting **GitHub operational/support workstreams**, not addition
 | Universal Teams approvals | [#1440](https://github.com/al-teamaot-com/jason/issues/1440) |
 | Teams approval engineering transport failure | [#1493](https://github.com/al-teamaot-com/jason/issues/1493) |
 | Capability retirement dependency gates | [#866](https://github.com/al-teamaot-com/jason/issues/866) |
+| Read-only P0 reconciliation / shared root-cause verification | [Self-heal #635](https://github.com/al-teamaot-com/jason/issues/635) · [staged read-only audit](../operations/Jason-P0-Incident-Correlation-Read-Only-Audit-2026-10-17.md) · [shared-service TODO #1535](https://github.com/al-teamaot-com/jason/issues/1535) — no extra P0 or TODO item |
 
 ## Preservation and update rules
 
