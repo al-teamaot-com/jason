@@ -2,7 +2,9 @@
 
 This document is the governed backlog for ideas, enhancements, integrations, and capabilities Jason is not yet expected to provide.
 
-The purpose is to preserve good ideas without allowing them to become undocumented scope, hidden commitments, or accidental production features. If Jason should already be able to perform a workflow and cannot, or a blocker/defect is discovered during real troubleshooting, that belongs in `SUPPORT.md` instead of this backlog.
+The purpose is to preserve good ideas without allowing them to become undocumented scope, hidden commitments, or accidental production features.
+
+**Pre-TODO capture:** [Project Jason Ideas List](./Project-Jason-Ideas-List.md) records lightweight suggestions by impact and potential value. An IDEA is **not** an actionable TODO or new engineering authority; promotion must follow the governed process below. This link is staged for documentation review only and does not change autonomous intake eligibility. If Jason should already be able to perform a workflow and cannot, or a blocker/defect is discovered during real troubleshooting, that belongs in `SUPPORT.md` instead of this backlog.
 
 ## How to use this document
 
