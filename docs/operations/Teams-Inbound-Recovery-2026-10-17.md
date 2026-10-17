@@ -68,6 +68,12 @@ overwrite the canonical signed Teams entrypoint or this bounded URL classifier.
 Preserve the narrow profile until a separately approved entitlement and
 distinct investigative reader are provisioned.
 
+PR integration reconciliation must appear on the **first**
+`Integration coordination:` line of the live GitHub PR body. Jason's
+`change_integration_gate.py` deliberately parses the first matching line,
+not appended later acknowledgements. The explicitly reviewed concurrent
+PRs for this recovery are #692, #1331, #1548, #1440, #1545 and #1549.
+
 The synthetic owner-only mobile-release tests also used a fixed time in the
 past, causing false expiry failures in unrelated CI jobs. This hotfix adopts
 the existing established rolling test-time fixture. It does not change
