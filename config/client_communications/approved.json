@@ -2,11 +2,11 @@
   "version": 1,
   "templates": [
     {
-      "template_id": "vulscan-approved-or-installed-v1",
+      "template_id": "vulscan-complete-v1",
       "workflow_id": "vulscan_missing_patch",
       "enabled": true,
-      "title": "Vulnerability Update",
-      "body": "The identified vulnerability mentioned in this ticket has been reviewed. The required update has either already been installed or has been approved for implementation and is scheduled to be applied during the device’s next regular patching window in accordance with our maintenance policy.\n\nNo further action is required at this time. Monitoring will continue to confirm successful deployment and remediation. Please reopen the ticket if you experience any issues following the update.",
+      "title": "Vulnerability Resolved",
+      "body": "The vulnerability identified in this ticket has been reviewed and the technical work is complete. Current verification confirms the reported vulnerability condition is resolved.\n\nNo further action is required at this time. Please reply to or reopen the ticket if you experience any related issues.",
       "recipient_policy": "ticket_contact",
       "require_email_notifications": true
     }
