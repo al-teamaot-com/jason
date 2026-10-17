@@ -18,7 +18,7 @@ import re
 import stat
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Protocol
-from urllib.request import Request, urlopen
+from .teams_communication_service import ExistingTeamsGatewayTransport
 
 from autonomous_remediation.playbook_autonomy_approval import (
     SQLitePlaybookAutonomyApprovalStore,
@@ -149,66 +149,41 @@ class TeamsGatewayPlaybookApprovalSender:
         self.bindings = bindings
         self.owner_identity_ids = tuple(sorted(str(x).strip() for x in owner_identity_ids if str(x).strip()))
 
+    def _existing_transport(self) -> ExistingTeamsGatewayTransport:
+        # Single canonical adapter to the already-approved Teams gateway.
+        return ExistingTeamsGatewayTransport(
+            gateway_url=self.gateway_url, token_file=self.token_file)
+
     def send(self, request: ApprovalRequest) -> tuple[str, ...]:
         card = render_approval_card(request)
         adaptive = self._adaptive_card(card)
-        token = self.token_file.read_text(encoding="utf-8").strip()
-        if not token:
-            raise PermissionError("Teams proactive token unavailable")
-        message_ids: list[str] = []
+        receipts: list[str] = []
+        transport = self._existing_transport()
         for owner_id in self.owner_identity_ids:
-            binding = self.bindings.find_active_by_jason_identity(jason_identity_id=owner_id)
+            # The persisted ApprovalRequest is authoritative for audience.
+            if (request.organization_id and owner_id not in request.authorized_approver_ids):
+                raise PermissionError("Teams approver is not authorized for this approval")
+            binding = self.bindings.find_active_by_jason_identity(
+                jason_identity_id=owner_id)
             if binding is None or getattr(binding, "status", None) != "active":
-                raise PermissionError(f"owner Microsoft identity binding unavailable: {owner_id}")
-            payload = {
-                "aadObjectId": binding.microsoft_object_id,
-                "tenantId": binding.microsoft_tenant_id,
-                "text": card.summary,
-                "card": adaptive,
-            }
-            body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            http_request = Request(
-                self.gateway_url + "/internal/proactive/send",
-                data=body,
-                method="POST",
-                headers={
-                    "Authorization": "Bearer " + token,
-                    "Content-Type": "application/json",
-                },
-            )
-            with urlopen(http_request, timeout=20) as response:
-                result = json.loads(response.read().decode("utf-8"))
-            if result.get("status") != "succeeded" or not result.get("message_id"):
-                raise RuntimeError("Teams playbook approval delivery failed")
-            message_ids.append(str(result["message_id"]).strip())
-        return tuple(message_ids)
+                raise PermissionError(
+                    f"owner Microsoft identity binding unavailable: {owner_id}")
+            receipt = transport.send(binding=binding, text=card.summary, card=adaptive)
+            receipts.append(receipt.message_id)
+        return tuple(receipts)
 
     def send_status(self, *, text: str) -> tuple[str, ...]:
-        """Deliver a bounded non-actionable status to the pre-resolved recipients.
-
-        Callers own authorization/routing and fixed-template construction. This
-        reuses the same registered gateway transport as approval-card delivery.
-        """
+        """Existing governed owner status messaging, no approval implied."""
         if not isinstance(text, str) or not 1 <= len(text) <= 1200:
             raise ValueError("bounded Teams status text required")
-        token = self.token_file.read_text(encoding="utf-8").strip()
-        if not token:
-            raise PermissionError("Teams proactive token unavailable")
+        transport = self._existing_transport()
         receipts: list[str] = []
         for identity_id in self.owner_identity_ids:
-            binding = self.bindings.find_active_by_jason_identity(jason_identity_id=identity_id)
-            if binding is None or binding.status != "active":
+            binding = self.bindings.find_active_by_jason_identity(
+                jason_identity_id=identity_id)
+            if binding is None or getattr(binding, "status", None) != "active":
                 raise PermissionError("Teams status recipient binding unavailable")
-            payload = {"aadObjectId": binding.microsoft_object_id,
-                       "tenantId": binding.microsoft_tenant_id, "text": text}
-            request = Request(self.gateway_url + "/internal/proactive/send",
-                data=json.dumps(payload, sort_keys=True, separators=(",", ":")).encode(),
-                method="POST",headers={"Authorization":"Bearer "+token,"Content-Type":"application/json"})
-            with urlopen(request, timeout=20) as response:
-                result=json.loads(response.read().decode())
-            if result.get("status")!="succeeded" or not result.get("message_id"):
-                raise RuntimeError("Teams status delivery was not confirmed")
-            receipts.append(str(result["message_id"]))
+            receipts.append(transport.send(binding=binding, text=text).message_id)
         return tuple(receipts)
 
     @staticmethod
