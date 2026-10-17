@@ -864,6 +864,19 @@ def test_ccc_readmission_git_failure_is_fail_closed_without_worker_crash(monkeyp
     ) == 0
     assert item['phase'] == 'blocked'
 
+    # A timed-out Git source fetch is also a failed CCC read, not an exception
+    # that should mark the systemd engineering worker itself as failed.
+    import subprocess
+    def timed_out_source(repo):
+        assert repo == tmp_path
+        raise subprocess.TimeoutExpired(['git', 'fetch'], timeout=5)
+    monkeypatch.setattr(module.support, 'production_state_from_main', timed_out_source)
+    assert module.readmit_verified_ccc_owner_review(
+        state, {'DEV-1237'}, source_repo=tmp_path,
+        review_path=review, drift_path=drift, report_root=reports,
+    ) == 0
+    assert item['phase'] == 'blocked'
+
 
 def test_ccc_readmission_rejects_empty_certification_checks(tmp_path):
     import json
