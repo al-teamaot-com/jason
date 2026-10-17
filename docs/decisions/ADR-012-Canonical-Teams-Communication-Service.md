@@ -79,6 +79,23 @@ until a workflow's independent financial/role policy is reviewed and installed.
   policy, recipient/audience specification and (if actionable) exact persisted
   approval record; do not create workflow-specific Teams credentials.
 
+## Existing Teams conversation routing isolation
+
+The existing signed Teams ingress must not treat a GitHub PR, source-control
+or documentation link as an invoice/part/PO procurement request simply because
+the same sentence describes a related process. The original procurement URL
+classifier inspected entire text with broad substring matching. During the
+P0 review handoff it misrouted a GitHub PR link into procurement, producing
+an unrelated Microsoft boundary error instead of a technical review.
+
+The bounded fix keeps **standalone HTTPS vendor product links** (no vendor
+allowlist newly invented), explicit procurement requests and ticket-scoped
+product URLs working, but excludes recognized developer/documentation hosts
+and requires word-boundary procurement intent in ordinary mixed-content
+messages. Tests cover the exact PR review message, code/Teams/Graph docs
+links, ordinary status links and legitimate vendor product links. This fixes
+routing; it does not authorize a purchase or bypass existing URL validation.
+
 ## Risk and rollouts
 
 1. **Transport acceptance is not user delivery or approval.** Gateway response

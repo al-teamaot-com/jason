@@ -828,3 +828,51 @@ def test_procurement_url_context_does_not_hijack_unrelated_link_message():
     )
     assert url is None
     assert ticket is None
+
+
+def test_teams_code_review_github_link_never_enters_procurement():
+    message = (
+        "@Jason review existing PR #1549 "
+        "(https://github.com/al-teamaot-com/jason/pull/1549), "
+        "exact SHA 9add202c. Confirm invoice/part/PO workflows, "
+        "review approvals, and production boundary without any mutation."
+    )
+    assert _procurement_url_context(message) == (None, None)
+
+
+def test_standalone_source_control_and_document_urls_do_not_purchase():
+    for url in (
+        "https://github.com/al-teamaot-com/jason/pull/1549",
+        "https://gist.github.com/employee/abc",
+        "https://gitlab.com/company/project/merge_requests/7",
+        "https://bitbucket.org/company/project/pull-requests/22",
+        "https://dev.azure.com/company/project/_git/example/pullrequest/22",
+        "https://learn.microsoft.com/en-us/microsoftteams/platform/",
+    ):
+        assert _procurement_url_context(url) == (None, None)
+        assert _procurement_url_context(
+            "Review this invoice/part design: " + url
+        ) == (None, None)
+
+
+def test_embedded_procurement_substrings_do_not_hijack_unrelated_link():
+    text = "Please check department status https://example.com/status"
+    assert _procurement_url_context(text) == (None, None)
+
+
+def test_explicit_procurement_context_still_routes_vendor_product_links():
+    url = "https://supplier.example/products/part-42"
+    for message, ticket in (
+        ("Procurement request: " + url, None),
+        ("Please quote this part " + url, None),
+        (url + " and create a quote for a customer", None),
+        ("Order " + url + " for ticket T20261017.0123", "T20261017.0123"),
+    ):
+        assert _procurement_url_context(message) == (url, ticket)
+    assert _procurement_url_context(url) == (url, None)
+
+
+def test_unrelated_vendor_link_in_general_message_stays_conversation():
+    assert _procurement_url_context(
+        "Please review this policy: https://example.com/status"
+    ) == (None, None)
