@@ -41,7 +41,31 @@ else
   QBO_MOUNT_BASE="/run/jason-secrets/openbao/quickbooks"
 fi
 
+# Resolve only an immutable, source-committed, expiring NONEXECUTING test
+# campaign. The existing Release Manager invokes this canonical script only
+# after exact-SHA owner authority, preproduction, CCC and rollback gates.
+# Preflight always forces the test OFF; it cannot issue a Teams card.
+UAT_PREFLIGHT=()
+for argument in "$@"; do
+  if [ "$argument" = "--preflight" ]; then
+    UAT_PREFLIGHT=(--preflight)
+  fi
+done
+UAT_RESULT="$(python3 "$REPO_ROOT/tools/owner_uat_activation.py" \
+  --manifest "$REPO_ROOT/config/owner-uat-campaign.json" "${UAT_PREFLIGHT[@]}")"
+IFS='|' read -r OWNER_UAT_MODE OWNER_UAT_WORKER OWNER_UAT_SESSION <<< "$UAT_RESULT"
+if [ "$OWNER_UAT_SESSION" = "none" ]; then
+  OWNER_UAT_SESSION=""
+fi
+case "$OWNER_UAT_MODE:$OWNER_UAT_WORKER" in
+  off:false|nonexecuting_test_only:true) ;;
+  *) echo "DENIED: UAT manifest activation returned unsupported mode" >&2; exit 2 ;;
+esac
+
 exec python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-runtime   --image "$IMAGE"   --rollback "$ROLLBACK"   --source-revision "$REVISION"   --harden \
+  --set-env "JASON_OWNER_UAT_MODE=$OWNER_UAT_MODE" \
+  --set-env "JASON_OWNER_UAT_WORKER_ENABLED=$OWNER_UAT_WORKER" \
+  --set-env "JASON_OWNER_UAT_SESSION_ID=$OWNER_UAT_SESSION" \
   --set-env "JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE=$COMPLETION_TEAMS_PROFILE" \
   --set-env "JASON_QUICKBOOKS_OPENBAO_ROLE_ID_PATH=$QBO_MOUNT_BASE/role_id" \
   --set-env "JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH=$QBO_MOUNT_BASE/secret_id" \
