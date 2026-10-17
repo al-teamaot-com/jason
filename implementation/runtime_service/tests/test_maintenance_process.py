@@ -40,10 +40,48 @@ def test_http_runtime_settings_disable_only_autonomy_maintenance(monkeypatch):
     assert serving.autonomy_worker_enabled is False
     assert serving.autonomy_shadow_enabled is False
     assert serving.autonomy_review_enabled is False
+    assert serving.playbook_approval_ingress_enabled is True
     assert serving.support_repair_autonomy_enabled is False
+    assert autonomy_maintenance_enabled(serving) is False
     assert serving.authority_db == settings.authority_db
     assert serving.port == settings.port
     assert serving.autonomy_worker_db == settings.autonomy_worker_db
+
+
+
+def test_http_only_playbook_ingress_preserves_owner_callbacks_without_producers(monkeypatch):
+    monkeypatch.setenv("JASON_OLLAMA_MODEL", "qwen3:1.7b")
+    monkeypatch.setenv("JASON_AUTONOMY_WORKER_ENABLED", "false")
+    monkeypatch.setenv("JASON_AUTONOMY_SHADOW_ENABLED", "false")
+    monkeypatch.setenv("JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED", "true")
+    monkeypatch.setenv("JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED", "false")
+    settings = RuntimeSettings.from_env()
+
+    serving = http_runtime_settings(settings)
+    assert serving.playbook_approval_ingress_enabled is True
+    assert serving.autonomy_review_enabled is False
+    assert autonomy_maintenance_enabled(serving) is False
+
+    # The maintenance child still owns card issuance; the HTTP parent only
+    # receives signed Teams decisions from the existing bound owner.
+    child_settings = settings
+    assert child_settings.autonomy_review_enabled is True
+    assert child_settings.playbook_approval_ingress_enabled is False
+    assert autonomy_maintenance_enabled(child_settings) is True
+
+
+def test_http_settings_never_enable_owner_ingress_when_review_is_off(monkeypatch):
+    monkeypatch.setenv("JASON_OLLAMA_MODEL", "qwen3:1.7b")
+    monkeypatch.setenv("JASON_AUTONOMY_WORKER_ENABLED", "false")
+    monkeypatch.setenv("JASON_AUTONOMY_SHADOW_ENABLED", "false")
+    monkeypatch.setenv("JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED", "false")
+    monkeypatch.setenv("JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED", "false")
+    settings = RuntimeSettings.from_env()
+
+    serving = http_runtime_settings(settings)
+    assert serving.playbook_approval_ingress_enabled is False
+    assert serving.autonomy_review_enabled is False
+    assert autonomy_maintenance_enabled(serving) is False
 
 
 def test_maintenance_failure_is_logged_and_process_retries(monkeypatch, caplog):
