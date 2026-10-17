@@ -30,9 +30,12 @@ replacement. This ADR does not alter those existing production boundaries.
 | Provider execution | Central Orchestrator plus per-step governance/CCC/JKD | Only after the workflow verifies the receipt and execution authority |
 | Multi-step bounded plans | Existing `UniversalTeamsApprovalInteractionFlow` and immutable plan ledger | Kept disabled until live benign acceptance and review |
 
-The newly introduced `ExistingTeamsGatewayTransport` is an **adapter around the
-existing live provider**, not a replacement provider or new communication
-transport. Existing playbook review and hardware-billing notification senders
+`ExistingTeamsGatewayTransport` is an **adapter around the existing live
+provider**, not a replacement provider or new communication transport. Both
+this adapter and the already active governed `TeamsMessageSendInvoker` now
+call the single `post_existing_teams_gateway()` HTTP client. It is not
+possible for either to fork a competing raw Teams delivery implementation
+without violating the architecture regression test. Existing playbook review and hardware-billing notification senders
 are refactored to reuse this adapter; invoice/PO form cards and other workflows
 must use the same shared transport, not duplicate low-level HTTP calls.
 

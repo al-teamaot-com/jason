@@ -21,6 +21,39 @@ class _PreparedTeamsMessageSend:
     payload: dict
 
 
+def post_existing_teams_gateway(
+    *, gateway_url: str, token: str, payload: dict,
+    timeout_seconds: float = 20,
+) -> dict:
+    """One production transport for every approved Teams sender.
+
+    This is the existing managed Teams provider POST, NOT a policy/authority
+    check. All callers must establish their governance before invocation.
+    Never retry an ambiguous Teams POST or claim a human approved on send.
+    """
+    if (not isinstance(gateway_url, str) or not gateway_url.strip()
+            or not isinstance(token, str) or not token.strip()
+            or not isinstance(payload, dict)):
+        raise PermissionError("configured Teams transport unavailable")
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":"),
+                      allow_nan=False).encode("utf-8")
+    if len(body) > 65536:
+        raise ValueError("Teams gateway payload exceeds bound")
+    req = Request(
+        gateway_url.rstrip("/") + "/internal/proactive/send",
+        data=body, method="POST",
+        headers={"Authorization": "Bearer " + token,
+                 "Content-Type": "application/json"},
+    )
+    with urlopen(req, timeout=bounded_execution_timeout(timeout_seconds)) as response:
+        result = json.loads(response.read().decode("utf-8"))
+    if (not isinstance(result, dict) or result.get("status") != "succeeded"
+            or not isinstance(result.get("message_id"), str)
+            or not result["message_id"].strip()):
+        raise RuntimeError("Teams proactive send failed")
+    return result
+
+
 @dataclass
 class TeamsMessageSendInvoker:
     gateway_url: str
@@ -91,20 +124,11 @@ class TeamsMessageSendInvoker:
             raise PermissionError("prepared Teams target changed")
         if dict(plan.normalized_payload) != payload or opaque.payload != payload:
             raise PermissionError("prepared Teams payload changed")
-        body = json.dumps(payload).encode()
-        req = Request(
-            opaque.gateway_url + plan.normalized_path,
-            data=body,
-            method="POST",
-            headers={
-                "Authorization": "Bearer " + opaque.token,
-                "Content-Type": "application/json",
-            },
+        result = post_existing_teams_gateway(
+            gateway_url=opaque.gateway_url,
+            token=opaque.token,
+            payload=payload,
         )
-        with urlopen(req, timeout=bounded_execution_timeout(20)) as response:
-            result = json.loads(response.read().decode())
-        if result.get("status") != "succeeded" or not result.get("message_id"):
-            raise RuntimeError("Teams proactive send failed")
         return InvocationResult(
             output={
                 "provider": PROVIDER,

@@ -78,7 +78,9 @@ def transport(tmp_path, monkeypatch, result=None):
         calls.append((request, timeout))
         return FakeResponse(result or {"status":"succeeded","message_id":"provider-accepted-234",
                                        "conversation_id":"teams-123"})
-    import jason_runtime.teams_communication_service as module
+    # Exercise the exact same provider POST used by the governed Teams send
+    # capability. Shared workflows must not own a second HTTP implementation.
+    import jason_runtime.teams_message_send as module
     monkeypatch.setattr(module,"urlopen",fake_urlopen)
     return ExistingTeamsGatewayTransport("https://gateway.internal",p), calls
 
@@ -204,7 +206,7 @@ def test_outbound_audience_and_secret_review_are_enforced(tmp_path,monkeypatch):
 
 def test_provider_accepted_receipt_never_masquerades_as_user_approval(tmp_path,monkeypatch):
     trans,calls=transport(tmp_path,monkeypatch,result={"status":"rejected"})
-    with pytest.raises(RuntimeError,match="did not accept"):
+    with pytest.raises(RuntimeError,match="proactive send failed"):
         facade(trans).send(request())
     assert len(calls)==1  # no blind retry
 
@@ -369,3 +371,19 @@ def test_old_workflows_cannot_fork_a_second_teams_http_transport():
         assert "ExistingTeamsGatewayTransport" in source
         assert "/internal/proactive/send" not in source
         assert "urlopen(" not in source
+
+
+def test_governed_send_and_legacy_workflows_share_one_provider_post():
+    import inspect
+    from jason_runtime import teams_message_send
+    from jason_runtime.teams_communication_service import ExistingTeamsGatewayTransport
+
+    governed=inspect.getsource(teams_message_send.TeamsMessageSendInvoker.invoke_execution_plan)
+    reused=inspect.getsource(ExistingTeamsGatewayTransport.send)
+    canonical=inspect.getsource(teams_message_send.post_existing_teams_gateway)
+    assert "post_existing_teams_gateway(" in governed
+    assert "post_existing_teams_gateway(" in reused
+    assert "urlopen(" not in governed
+    assert "urlopen(" not in reused
+    assert canonical.count("urlopen(")==1
+    assert '"/internal/proactive/send"' in canonical

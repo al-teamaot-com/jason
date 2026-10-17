@@ -8,12 +8,11 @@ This class is NOT a parallel Teams bot, identity provider or approval engine.
 """
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
-from urllib.request import Request, urlopen
+from .teams_message_send import post_existing_teams_gateway
 from uuid import UUID
 
 from communication.audience.engine import AudiencePolicyEngine
@@ -22,7 +21,6 @@ from communication.audience.models import (
     AudienceType, CommunicationDraft, MessagePurpose, Recipient, ReviewDecision,
 )
 
-_TEAMS_ENDPOINT = "/internal/proactive/send"
 _ALLOWED_KINDS = frozenset(("notification", "status", "card", "approval"))
 _WORD = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$")
 
@@ -71,25 +69,16 @@ class ExistingTeamsGatewayTransport:
                     or not isinstance(card.get("version"), str)):
                 raise ValueError("Teams card must be a bounded AdaptiveCard")
             payload["card"] = dict(card)
-        data = json.dumps(payload, sort_keys=True, separators=(",", ":"),
-                          allow_nan=False).encode("utf-8")
-        if len(data) > 65536:
-            raise ValueError("Teams payload exceeds bound")
         credential = Path(self.token_file).read_text(encoding="utf-8").strip()
         if not credential:
             raise PermissionError("existing Teams proactive token unavailable")
-        request = Request(
-            self.gateway_url.rstrip("/") + _TEAMS_ENDPOINT,
-            data=data, method="POST",
-            headers={"Authorization": "Bearer " + credential,
-                     "Content-Type": "application/json"},
+        result = post_existing_teams_gateway(
+            gateway_url=self.gateway_url,
+            token=credential,
+            payload=payload,
+            timeout_seconds=self.timeout_seconds,
         )
-        with urlopen(request, timeout=self.timeout_seconds) as response:
-            result = json.loads(response.read().decode("utf-8"))
-        message_id = result.get("message_id")
-        if (result.get("status") != "succeeded"
-                or not isinstance(message_id, str) or not message_id.strip()):
-            raise RuntimeError("existing Teams gateway did not accept message")
+        message_id = result["message_id"]
         conversation_id = result.get("conversation_id")
         return TeamsDeliveryReceipt(
             message_id=message_id.strip(),
