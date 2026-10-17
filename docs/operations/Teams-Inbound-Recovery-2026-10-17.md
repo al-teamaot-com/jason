@@ -1,0 +1,66 @@
+# P0 Teams inbound conversation recovery
+
+**Status:** Minimal source hotfix for independent governed review. Not deployed.
+**Date:** 2026-10-17
+**Parent:** UTA P0 #1440/#1545 and canonical PR #1549.
+
+## Production incident: two independent fail-closed problems
+
+1. A Teams user message requesting a GitHub code review included a PR link
+   and finance examples. The existing broad procurement URL classifier
+   incorrectly sent it into the procurement product URL handler.
+   Audit correlation: `41d50575-ac33-4945-a4d8-f959a7faab83`.
+2. Even an ordinary **no-URL** Teams review request failed with
+   `MicrosoftBoundaryError / MICROSOFT_PROFILE_NOT_APPROVED`.
+   Audit correlation: `a02ff53d-53ab-4fcf-a4ee-999874d9f63b`.
+
+The original production code at `f7f33cf6d7133dabb1d30cb78ef73dd8b0524c75`
+set its common Microsoft Graph identity-directory reader to the expanded
+`identity-investigation-read` profile. Production's durable and validated
+AOT `microsoft_graph` client boundary is intentionally `directory-read`.
+The additional profile demands separate Microsoft consent; it must not be
+assumed or silently granted. No new user identity, secret, OAuth application,
+tenant grant, or role change is needed for normal Teams messages.
+
+## Bounded repair (no new capability)
+
+- Restore the existing `directory-read` profile at both Microsoft directory
+  token-provider layers, leaving the `identity-investigation-read` catalog
+  available separately pending controlled tenant/admin consent.
+- Exclude non-commerce source-control/docs hostnames from automatic procurement
+  URL pickup. Use whole-word procurement intent instead of loose substring
+  matching. Maintain standalone vendor HTTPS product-link and explicit purchase,
+  invoice, quote, part and Autotask-ticket behavior.
+- No changes to Teams gateway authentication, SDK, trusted identity bindings,
+  approval rules, Autotask writes, OpenBao secrets, provider authorizations,
+  J-002/ADR-009 governance or any production worker configuration.
+
+## Verification and rollout gates
+
+- Confirm exact GitHub candidate and independent regression/architecture
+  review. Run existing OpenClaw conversation, Microsoft token/boundary, runtime
+  composition, Teams gateway and security CI suites.
+- Validate a synthetic narrow directory boundary succeeds using a stub token;
+  test expanded-only profile **fails closed**. No Graph tokens issued in tests.
+- Validate signed generic Teams messages mentioning GitHub PR, finance nouns
+  and source links use **conversation ingress**, not procurement; actual vendor
+  product links continue to use procurement.
+- After **Owner approval for the exact SHA**, deploy via the existing governed
+  Release Manager (CCC, rollback, host reconciliation, protected drift).
+  Never alter the live SQLite boundary, disable Graph profile checks, forge a
+  Teams approval, or bypass a release check.
+- After deployment, ask Jason to read-only-review canonical UTA PR #1549 from
+  Teams without a web URL. Confirm authenticated message, successfully bound
+  identity, response, and review findings. Verify invoice/PO card routing and
+  existing release approvals still function. Unverified Approve/Deny remains
+  outstanding for universal acceptance.
+- Preserve exact rollback revision and audit. Do not claim success until a
+  real inbound Teams message and governed readback both pass.
+
+## Concurrent-source protection
+
+Open PR #1331 includes the opposite, unrelated expansion of the same common
+directory profile. Its finance scope is not authorization to broaden AOT's
+Microsoft Graph consent. Exact patch reviewed and coordination comment
+recorded; preserve the narrow profile until a separately approved entitlement
+and distinct investigative reader are provisioned.
