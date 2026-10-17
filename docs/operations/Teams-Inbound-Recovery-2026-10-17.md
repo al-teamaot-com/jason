@@ -72,3 +72,7 @@ The synthetic owner-only mobile-release tests also used a fixed time in the
 past, causing false expiry failures in unrelated CI jobs. This hotfix adopts
 the existing established rolling test-time fixture. It does not change
 actual release expiry, release policy or approval execution behavior.
+Draft PR #1548 includes the **same exact test-only timestamp fix**; its
+OAuth-first approval architecture remains explicitly out of scope and in
+draft. That overlapping fixture must be retained once, not treated as a
+reason to merge an unapproved second approval architecture.
