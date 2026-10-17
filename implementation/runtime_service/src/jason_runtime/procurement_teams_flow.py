@@ -763,6 +763,12 @@ def _po_card(payload: Mapping[str, Any]) -> dict[str, Any]:
         value = payload.get(key)
         if value not in (None, ""):
             po_facts.append({"title": title, "value": str(value)})
+    requester_comments = str(payload.get("requester_comments") or "").strip()
+    if requester_comments:
+        po_facts.append({
+            "title": "Requester comments / requests",
+            "value": requester_comments[:4000],
+        })
     body = [
             {
                 "type": "Container",
@@ -1678,6 +1684,7 @@ class ProcurementTeamsFlow:
                 "fees",
                 "customer",
                 "ship_to",
+                "requester_comments",
             )
             if normalized.get(key) is not None
         }
