@@ -12,6 +12,7 @@ RUN npm install --omit=dev --no-audit --no-fund
 COPY infrastructure/jason-teams-gateway/index.mjs ./index.mjs
 COPY infrastructure/jason-teams-gateway/approval-submit.mjs ./approval-submit.mjs
 COPY infrastructure/jason-teams-gateway/verified-approval-activity.mjs ./verified-approval-activity.mjs
+COPY infrastructure/jason-teams-gateway/uta-sso-probe.mjs ./uta-sso-probe.mjs
 COPY infrastructure/jason-teams-gateway/approval-decision-store.mjs ./approval-decision-store.mjs
 COPY infrastructure/jason-teams-gateway/proactive-send-result.mjs ./proactive-send-result.mjs
 COPY infrastructure/jason-teams-gateway/teams-user-bootstrap.mjs ./teams-user-bootstrap.mjs
