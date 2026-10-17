@@ -372,3 +372,120 @@ def test_receipt_mismatch_never_creates_false_success(harness):
         "claimed", "reconciliation_required",
     ]
     harness.teams.deliver = original
+
+
+def test_production_owner_card_is_one_teams_interaction_without_ssh(harness):
+    """Real shared sender/card renderer; no host, SSH, CLI or provider write."""
+    import json
+    from jason_runtime.universal_interaction import interaction_from_owner_approval
+    sha = "a" * 40
+    rollback = "b" * 40
+    existing = ApprovalRequest(
+        approval_id="relapproval-synthetic-owner-test",
+        request_id="mobile-release:release-" + sha[:16],
+        correlation_id="mobile-release:" + sha,
+        organization_id="aot", client_id=None,
+        requested_by="svc-jason-release-manager",
+        capability="release.production.approve",
+        requested_mode="release:" + sha,
+        requested_at=NOW,
+        expires_at=NOW + timedelta(minutes=15),
+        authorized_approver_ids=("owner-al",),
+        presentation=ApprovalPresentation(
+            title="Production + CCC: harmless test candidate",
+            summary="Review the exact SHA. Approval does not bypass CCC.",
+            facts=(
+                ("Release", "release-" + sha[:16]),
+                ("Exact SHA", sha),
+                ("Highest risk", "normal"),
+                ("Affected services", "synthetic-only"),
+                ("Rollback", rollback),
+                ("Preproduction and rollback", "Passed"),
+                ("Manifest fingerprint", "c" * 64),
+            ),
+        ),
+    )
+    harness.approvals.put(existing)
+    harness.auth.route = route(purpose=MessagePurpose.APPROVAL_REQUEST)
+    harness.teams.approval_callbacks_registered = True
+    spec = interaction_from_owner_approval(
+        existing, interaction_id="ui.release.owner", workflow="owner_release",
+    )
+    assert spec.approval_id == existing.approval_id
+    assert spec.requester_identity_id == "svc-jason-release-manager"
+    with pytest.raises(InteractionRejected, match="suspended"):
+        harness.svc.dispatch(spec)
+    assert harness.transport.calls == []
+    # Inert opt-in ONLY within this isolated unit test; no production settings.
+    harness.svc.approval_dispatch_enabled = True
+    outcome = harness.svc.dispatch(spec)
+    _, text, card = harness.transport.calls[0]
+    assert outcome.state == "provider_accepted"
+    assert text == existing.presentation.summary
+    assert "Exact commit" in json.dumps(card)
+    assert sha in json.dumps(card)
+    assert rollback in json.dumps(card)
+    assert {a["data"]["decision"] for a in card["actions"]} == {"approve", "deny"}
+    assert all(a["type"] == "Action.Submit" for a in card["actions"])
+    assert harness.approvals.get(existing.approval_id).status.value == "pending"
+    # Message acceptance never approves a release or claims physical click.
+    assert [e.stage for e in harness.events.list_by_execution(spec.interaction_id)] == [
+        "claimed", "provider_accepted",
+    ]
+
+
+def test_other_owner_level_request_uses_identical_teams_interface(harness):
+    """Owner decisions need no new Teams adapter for each Jason capability."""
+    from jason_runtime.universal_interaction import interaction_from_owner_approval
+    existing = ApprovalRequest(
+        approval_id="ownerapproval-synthetic-1",
+        request_id="owner-action:test-maintenance",
+        correlation_id="owner-action:change-one",
+        organization_id="aot", client_id=None,
+        requested_by="svc-jason-policy",
+        capability="owner.maintenance.authorize",
+        requested_mode="review-only",
+        requested_at=NOW,
+        expires_at=NOW + timedelta(minutes=20),
+        authorized_approver_ids=("owner-al",),
+        presentation=ApprovalPresentation(
+            title="Owner authorization: test maintenance",
+            summary="Request permission to schedule a harmless demonstration.",
+            facts=(("Impact", "No customer impact"),
+                   ("Scope", "AOT test only"),
+                   ("Next step", "No actual execution")),
+        ),
+    )
+    harness.approvals.put(existing)
+    harness.auth.route = route(purpose=MessagePurpose.APPROVAL_REQUEST)
+    harness.teams.approval_callbacks_registered = True
+    harness.svc.approval_dispatch_enabled = True
+    spec = interaction_from_owner_approval(
+        existing, interaction_id="ui.owner.other", workflow="owner_maintenance")
+    result = harness.svc.dispatch(spec)
+    _, _, card = harness.transport.calls[0]
+    assert result.channel_id == "teams"
+    assert "Owner authorization" in card["body"][0]["text"]
+    assert {a["data"]["decision"] for a in card["actions"]} >= {"approve", "deny"}
+    assert harness.approvals.get(existing.approval_id).status.value == "pending"
+
+
+def test_owner_request_wrong_recipient_or_terminal_status_blocks_message(harness):
+    from dataclasses import replace
+    from connectors.src.jason_connectors.approval_requests import ApprovalRequestStatus
+    from jason_runtime.universal_interaction import interaction_from_owner_approval
+    existing = persisted_approval()
+    harness.approvals.put(existing)
+    harness.auth.route = route(purpose=MessagePurpose.APPROVAL_REQUEST,
+                               recipient_identity_id="tech-no-owner-rights")
+    harness.svc.approval_dispatch_enabled = True
+    harness.teams.approval_callbacks_registered = True
+    spec = interaction_from_owner_approval(
+        existing, interaction_id="ui.owner.unauthorized", workflow="owner_release")
+    with pytest.raises(InteractionRejected, match="mismatched persisted approval"):
+        harness.svc.dispatch(spec)
+    assert harness.transport.calls == []
+    with pytest.raises(PermissionError, match="pending"):
+        interaction_from_owner_approval(
+            replace(existing, status=ApprovalRequestStatus.APPROVED),
+            interaction_id="ui.owner.terminal", workflow="owner_release")

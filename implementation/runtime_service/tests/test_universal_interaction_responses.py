@@ -197,3 +197,23 @@ def test_uncertain_business_callback_stays_claimed_not_blindly_replayed(fixture)
     assert len(fixture.sink_calls) == 1
     events = fixture.events.list_by_execution("ui.response.po")
     assert [e.stage for e in events] == ["response_claim", "response_uncertain"]
+
+
+def test_owner_level_deny_returns_only_existing_denial_receipt(fixture):
+    """Deny has its own one-use audit result and cannot execute anything."""
+    fixture.handoff.callback_enabled = True
+    fixture.replies[0] = reply(approval(), action_key="no")
+    approvals = []
+    fixture.handoff.existing_approvals = SimpleNamespace(
+        accept_from_existing_signed_ingress=lambda **kwargs: (
+            approvals.append(kwargs) or "denied"
+        ),
+    )
+    result = fixture.handoff.accept(approval(), "preverified-signed-gateway-event")
+    assert result.existing_approval_result == "denied"
+    assert len(approvals) == 1
+    assert approvals[0]["verified"].action_key == "no"
+    assert fixture.sink_calls == []
+    with pytest.raises(InteractionRejected, match="already claimed"):
+        fixture.handoff.accept(approval(), "same-signed-gateway-event")
+    assert len(approvals) == 1
