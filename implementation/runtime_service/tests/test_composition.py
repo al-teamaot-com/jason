@@ -734,3 +734,52 @@ def test_canonical_teams_workflow_extensions_cannot_override_legacy_approval_rou
             _settings(tmp_path),
             teams_workflow_approval_handlers={"procapproval-":handler},
         )
+
+
+def test_owner_uat_is_not_registered_when_disabled(tmp_path):
+    """Default-off UAT adds no callback or issuer to real runtime composition."""
+    from jason_runtime.universal_interaction.owner_uat import APPROVAL_PREFIX
+    app = build_runtime_application(_settings(tmp_path))
+    dispatcher = app.ingress.ingress.approval_flow
+    assert APPROVAL_PREFIX not in dispatcher.workflow_routes
+    assert not any(
+        svc.__class__.__name__ == "OwnerUatMaintenance"
+        for svc in app.maintenance.services
+    )
+
+
+def test_owner_uat_registered_only_with_separately_enabled_nonexecuting_mode(tmp_path):
+    """One existing signed callback dispatcher and one existing worker cycle."""
+    from jason_runtime.universal_interaction.owner_uat import (
+        APPROVAL_PREFIX, OwnerUatDecisionFlow, OwnerUatMaintenance,
+    )
+    cfg = replace(
+        _settings(tmp_path),
+        owner_uat_mode="nonexecuting_test_only",
+        owner_uat_worker_enabled=True,
+        owner_uat_session_id="OneShot-October17",
+        release_mobile_approval_db=tmp_path / "existing-owner-approvals.db",
+    )
+    app = build_runtime_application(cfg)
+    dispatcher = app.ingress.ingress.approval_flow
+    assert isinstance(dispatcher.workflow_routes[APPROVAL_PREFIX], OwnerUatDecisionFlow)
+    maintenance = [m for m in app.maintenance.services
+                   if isinstance(m, OwnerUatMaintenance)]
+    assert len(maintenance) == 1
+    assert maintenance[0].session_id == "OneShot-October17"
+    assert maintenance[0].issuer.universal_interactions.channels["teams"].channel_id == "teams"
+    # Do NOT call tick: that would attempt a real gateway send.
+
+
+def test_owner_uat_invalid_environment_modes_fail_closed(tmp_path):
+    import pytest
+    settings = _settings(tmp_path)
+    for bad in (
+        {"owner_uat_mode": "production"},
+        {"owner_uat_worker_enabled": True},
+        {"owner_uat_mode": "nonexecuting_test_only", "owner_uat_session_id": ""},
+        {"owner_uat_mode": "nonexecuting_test_only",
+         "owner_uat_session_id": "../../../escape"},
+    ):
+        with pytest.raises(ValueError, match="UAT"):
+            replace(settings, **bad).validate()

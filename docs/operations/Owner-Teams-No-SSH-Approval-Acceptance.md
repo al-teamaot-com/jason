@@ -50,3 +50,19 @@ When Teams is unavailable, expire/pause safely and provide a **separately author
 - The approved acceptance evidence must contain timestamps, actual provider message ID (if available), exact approval ID and source SHA (for release), signed activity reference, identity/tenant validation, audit event and host-side result; never print signature material or credentials.
 
 **Release rule:** Do not declare production or generic owner-level Teams approvals operational until the Owner has successfully completed both real-world workflows **without SSH** and all negative security cases have passed. Any subsequent rollout requires normal source review, protected CI, exact-SHA Owner authorization, CCC, root host reconciliation and rollback.
+
+## Nonexecuting owner acceptance campaign (prepared; NOT active in production)
+
+A safe test-only workflow is prepared in source through the same universal interaction contract and existing Teams sender. There is no second bot, OAuth application, provider capability, approval database, or callback endpoint. The sender uses an existing persisted ApprovalRequest, and the callback uses the existing signed dispatcher, Ed25519 verifier, Microsoft/Jason identity binding, and ApprovalRequestService.
+
+Campaign configuration, all disabled by default:
+
+- JASON_OWNER_UAT_MODE=nonexecuting_test_only
+- JASON_OWNER_UAT_WORKER_ENABLED=true (single card issuance through existing runtime maintenance; false keeps callback-only routing)
+- JASON_OWNER_UAT_SESSION_ID=unique-bounded-session-identifier (one immutable request per ID; never automatically resend)
+
+Defaults remain mode OFF, worker false, empty session. The UAT request is exactly capability interaction.owner.acceptance.record, mode test:nonexecuting, owner person-al, requester svc-jason-acceptance-test, 10-minute TTL, and immutable test_only=true plus execution_permitted=false. This cannot be a production release, CCC, procurement or ticket authorization.
+
+Live test: (1) After separately owner-approved exact-SHA test deployment, create one session. Owner personally sees TEST ONLY in Teams and clicks Deny. Independently verify signed callback, active owner binding and one durable DENIED receipt, with no provider execution. (2) Use a DIFFERENT session ID and have owner personally click Approve. Verify signed callback and an APPROVED test-only receipt, again no execution. Confirm owner visibility, not merely a provider-accepted transport reference. (3) Reject unsigned/tampered, wrong account, expired, duplicated and replayed responses; no cross-tenant or extra capabilities.
+
+Source and automated security tests cannot establish a real human click. The disputed approval provenance #1553 and governed containment #1554 remain high-impact rollout blockers. A normal-risk release still requires exact SHA, CCC, root host reconciliation and rollback. Owner interaction never requires an owner SSH session.
