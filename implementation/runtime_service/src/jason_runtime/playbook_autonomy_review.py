@@ -13,7 +13,11 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
-from typing import Mapping, Protocol
+import os
+import re
+import stat
+from dataclasses import dataclass
+from typing import Iterable, Mapping, Protocol
 from urllib.request import Request, urlopen
 
 from autonomous_remediation.playbook_autonomy_approval import (
@@ -38,14 +42,76 @@ from connectors.src.jason_connectors.approval_requests import (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class PlaybookOwnerApprovalPolicy:
+    owner_identity_ids: frozenset[str]
+    allowed_requested_modes: frozenset[str] | None = None
+
+
+def load_playbook_owner_approval_policy(
+    *,
+    path: Path,
+    legacy_owner_identity_ids: Iterable[str],
+) -> PlaybookOwnerApprovalPolicy:
+    """Read a narrowly scoped local owner-approved role; otherwise keep legacy gates.
+
+    This file is not supplied by Teams, ticket text or a requester. It resides
+    only in the existing local Jason authority volume. Invalid files fail
+    closed instead of quietly granting broader or fallback authority.
+    """
+    policy_path = Path(path)
+    try:
+        metadata = policy_path.lstat()
+    except FileNotFoundError:
+        return PlaybookOwnerApprovalPolicy(
+            frozenset(str(x).strip() for x in legacy_owner_identity_ids if str(x).strip())
+        )
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or metadata.st_uid not in (0, os.geteuid())
+    ):
+        raise PermissionError("playbook owner policy must be an owned 0600 regular file")
+    data = json.loads(policy_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or set(data) != {
+        "schema_version", "organization_id", "capability", "policy_mode",
+        "owner_identity_ids", "allowed_requested_modes",
+    }:
+        raise PermissionError("playbook owner policy schema not approved")
+    if (
+        data.get("schema_version") != "1.0"
+        or data.get("organization_id") != "aot"
+        or data.get("capability") != PLAYBOOK_AUTONOMY_PROMOTION_CAPABILITY
+        or data.get("policy_mode") != "owner_only_test"
+    ):
+        raise PermissionError("playbook owner policy is outside bounded AOT pilot")
+    identities = data.get("owner_identity_ids")
+    modes = data.get("allowed_requested_modes")
+    if (
+        not isinstance(identities, list) or len(identities) != 1
+        or not isinstance(modes, list) or len(modes) != 1
+        or any(not isinstance(x, str) for x in identities + modes)
+        or not re.fullmatch(r"person-[a-z0-9-]{1,80}", identities[0])
+        or not re.fullmatch(r"promote:[a-z0-9_]+@[0-9]+\.[0-9]+\.[0-9]+", modes[0])
+    ):
+        raise PermissionError("playbook owner policy requires one exact owner and mode")
+    return PlaybookOwnerApprovalPolicy(
+        owner_identity_ids=frozenset(identities),
+        allowed_requested_modes=frozenset(modes),
+    )
+
+
 class ActiveMicrosoftIdentityBindingReader(Protocol):
     def find_active_by_jason_identity(self, *, jason_identity_id: str): ...
     def find(self, *, microsoft_tenant_id: str, microsoft_object_id: str): ...
 
 
 class OwnerOnlyPlaybookAutonomyAuthority:
-    def __init__(self, owner_identity_ids) -> None:
+    def __init__(
+        self, owner_identity_ids, *, allowed_requested_modes: frozenset[str] | None = None
+    ) -> None:
         self.owner_identity_ids = frozenset(str(x).strip() for x in owner_identity_ids if str(x).strip())
+        self.allowed_requested_modes = allowed_requested_modes
 
     def can_approve(
         self,
@@ -61,6 +127,10 @@ class OwnerOnlyPlaybookAutonomyAuthority:
             and client_id is None
             and capability == PLAYBOOK_AUTONOMY_PROMOTION_CAPABILITY
             and requested_mode.startswith("promote:")
+            and (
+                self.allowed_requested_modes is None
+                or requested_mode in self.allowed_requested_modes
+            )
             and approver_identity_id in self.owner_identity_ids
         )
 
@@ -381,6 +451,28 @@ class PlaybookAutonomyApprovalInteractionFlow:
         except ValueError as exc:
             raise PermissionError("invalid playbook autonomy approval decision") from exc
 
+        pilot_modes = getattr(
+            self.approval_service.authority, "allowed_requested_modes", None
+        )
+        if pilot_modes is not None:
+            # A bounded owner-only test may reuse an independently authorized
+            # promotion, but must never create a new operational capability.
+            pilot_scope = registered_autonomy_scope(
+                registry_path=self.review_service.registry_path,
+                playbook_id=str(request.metadata.get("playbook_id") or ""),
+            )
+            if (
+                request.requested_mode != pilot_scope.requested_mode()
+                or request.metadata.get("entry_sha256") != pilot_scope.entry_sha256
+                or self.review_service.promotion_store.find_scope_approved(
+                    playbook_id=pilot_scope.playbook_id,
+                    playbook_version=pilot_scope.playbook_version,
+                    policy_id=pilot_scope.policy_id,
+                    required_capabilities=pilot_scope.allowed_capabilities,
+                ) is None
+            ):
+                raise PermissionError("owner-only pilot requires existing exact promotion")
+
         accepted = self.approval_service.accept_response(
             ApprovalResponse(
                 approval_id=approval_id,
@@ -394,7 +486,10 @@ class PlaybookAutonomyApprovalInteractionFlow:
             now=decided_at,
         )
         if accepted.status == "approved":
-            result = self.review_service.promote_accepted(request=request, accepted=accepted)
+            result = self.review_service.promote_accepted(
+                request=request, accepted=accepted,
+                allow_new_promotion=(pilot_modes is None),
+            )
             return {
                 "status": "completed",
                 "reply": {

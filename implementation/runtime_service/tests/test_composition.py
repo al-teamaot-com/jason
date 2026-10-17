@@ -94,6 +94,7 @@ def _trusted_registry(root: Path) -> Path:
 def _settings(tmp_path: Path, *, ollama_model: str = "local-test") -> RuntimeSettings:
     return RuntimeSettings(
         authority_db=tmp_path / "authority.sqlite3",
+        playbook_owner_approval_policy=tmp_path / "playbook-owner-pilot.json",
         bindings_db=tmp_path / "bindings.sqlite3",
         continuation_db=tmp_path / "continuation.sqlite3",
         replay_db=tmp_path / "replay.sqlite3",
@@ -152,8 +153,18 @@ def test_playbook_approve_callback_remains_live_when_maintenance_is_split(tmp_pa
 
     monkeypatch.setattr(
         "jason_runtime.composition.approval_owner_identities",
-        lambda: frozenset({"person-owner"}),
+        lambda: frozenset(),  # Reproduce production's empty shared owner list.
     )
+    pilot = tmp_path / "playbook-owner-pilot.json"
+    pilot.write_text(json.dumps({
+        "schema_version": "1.0",
+        "organization_id": "aot",
+        "capability": "playbook.autonomy.promote",
+        "policy_mode": "owner_only_test",
+        "owner_identity_ids": ["person-owner"],
+        "allowed_requested_modes": ["promote:demo@1.0.0"],
+    }), encoding="utf-8")
+    pilot.chmod(0o600)
     registry = tmp_path / "demo-registry.json"
     registry.write_text(json.dumps({
         "schema_version": 2,
@@ -191,6 +202,14 @@ def test_playbook_approve_callback_remains_live_when_maintenance_is_split(tmp_pa
     application = build_runtime_application(serving)
     dispatcher = application.ingress.ingress.approval_flow
     assert isinstance(dispatcher.fallback, PlaybookAutonomyApprovalInteractionFlow)
+    assert dispatcher.fallback.approval_service.authority.owner_identity_ids == frozenset({"person-owner"})
+    assert dispatcher.fallback.approval_service.authority.allowed_requested_modes == frozenset({"promote:demo@1.0.0"})
+    assert not dispatcher.fallback.approval_service.authority.can_approve(
+        approver_identity_id="person-owner",
+        organization_id="aot", client_id=None,
+        capability="playbook.autonomy.promote",
+        requested_mode="promote:unrelated@1.0.0",
+    )
     assert not any(
         isinstance(item, PlaybookAutonomyReviewMaintenance)
         for item in application.maintenance.services
@@ -198,6 +217,18 @@ def test_playbook_approve_callback_remains_live_when_maintenance_is_split(tmp_pa
 
     requests = SQLiteApprovalRequestRepository(settings.autonomy_review_db)
     promotions = SQLitePlaybookAutonomyApprovalStore(settings.autonomy_promotion_db)
+    # Seed an independently preapproved scope; the pilot is explicitly
+    # forbidden to create new operational promotion authority.
+    from autonomous_remediation.playbook_autonomy_scope import registered_autonomy_scope
+    exact = registered_autonomy_scope(registry_path=registry, playbook_id="demo")
+    existing = promotions.new(
+        playbook_id=exact.playbook_id,
+        playbook_version=exact.playbook_version,
+        policy_id=exact.policy_id,
+        allowed_capabilities=exact.allowed_capabilities,
+        approved_by="person-owner",
+    )
+    promotions.put(existing)
     review = PlaybookAutonomyReviewService(
         registry_path=registry,
         promotion_store=promotions,
@@ -248,6 +279,7 @@ def test_playbook_approve_callback_remains_live_when_maintenance_is_split(tmp_pa
     # The only resulting promotion is in the isolated test database. No
     # provider action, production authority or real Teams message was touched.
     assert len(promotions.list_all()) == 1
+    assert promotions.list_all()[0].approval_id == existing.approval_id
 
     # A second button delivery cannot reuse the already-consumed approval.
     with pytest.raises(ValueError, match="no longer pending"):

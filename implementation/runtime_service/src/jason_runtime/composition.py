@@ -350,6 +350,7 @@ from .playbook_autonomy_review import (
     PlaybookAutonomyApprovalInteractionFlow,
     PlaybookAutonomyReviewMaintenance,
     TeamsGatewayPlaybookApprovalSender,
+    load_playbook_owner_approval_policy,
 )
 from autonomous_remediation.playbook_autonomy_approval import SQLitePlaybookAutonomyApprovalStore
 from autonomous_remediation.playbook_autonomy_review import PlaybookAutonomyReviewService
@@ -547,6 +548,11 @@ class RuntimeSettings:
     # The HTTP process must accept authenticated approval responses even
     # when scheduled review generation runs only in the maintenance child.
     playbook_approval_ingress_enabled: bool = False
+    # Local 0600 owner-reviewed AOT pilot policy. Absent means the existing
+    # independently configured owner allowlist stays in force.
+    playbook_owner_approval_policy: Path = Path(
+        "/var/lib/jason/authority/playbook-owner-approval-policy.json"
+    )
     autonomy_review_db: Path = Path(
         "/var/lib/jason/openclaw/playbook-autonomy-review.sqlite3"
     )
@@ -2274,7 +2280,11 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
     playbook_approval_flow = None
     playbook_review_maintenance = None
     if settings.autonomy_review_enabled or settings.playbook_approval_ingress_enabled:
-        owner_ids = approval_owner_identities()
+        owner_policy = load_playbook_owner_approval_policy(
+            path=settings.playbook_owner_approval_policy,
+            legacy_owner_identity_ids=approval_owner_identities(),
+        )
+        owner_ids = owner_policy.owner_identity_ids
         playbook_promotion_store = SQLitePlaybookAutonomyApprovalStore(
             settings.autonomy_promotion_db
         )
@@ -2289,7 +2299,9 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         )
         playbook_approval_service = ApprovalRequestService(
             repository=playbook_review_repository,
-            authority=OwnerOnlyPlaybookAutonomyAuthority(owner_ids),
+            authority=OwnerOnlyPlaybookAutonomyAuthority(
+                owner_ids, allowed_requested_modes=owner_policy.allowed_requested_modes
+            ),
         )
         playbook_approval_flow = PlaybookAutonomyApprovalInteractionFlow(
             bindings=bindings,
