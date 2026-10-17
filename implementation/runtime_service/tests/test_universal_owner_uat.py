@@ -339,3 +339,51 @@ def test_uncertain_teams_send_is_not_blindly_reissued_by_worker(env):
     assert record.status == ApprovalRequestStatus.PENDING
     stages = [e.stage for e in env.events.list_by_execution("uat."+record.approval_id)]
     assert stages == ["claimed", "reconciliation_required"]
+
+
+def test_owner_campaign_requires_denial_then_separate_signed_approval(env):
+    from jason_runtime.universal_interaction.owner_uat import OwnerUatMaintenance
+
+    env.issuer.enabled = True
+    env.callback.enabled = True
+    worker = OwnerUatMaintenance(
+        issuer=env.issuer, session_id="OwnerUAT20261017Pilot", enabled=True,
+    )
+    assert worker.tick() is True
+    first = env.repo.list_all()[0]
+    assert "DENY" in first.presentation.title
+    assert "Click DENY" in dict(first.presentation.facts)["Next action"]
+    assert worker.tick() is False  # no second card merely from delivery
+    click(env.callback, signed(env, first, decision="deny"))
+    assert env.repo.get(first.approval_id).status == ApprovalRequestStatus.DENIED
+    assert worker.tick() is True
+    assert len(env.channel.sends) == 2
+    second = next(r for r in env.repo.list_all() if r.approval_id != first.approval_id)
+    assert second.request_id == "owner-uat:OwnerUAT20261017Pilot.approve"
+    assert "APPROVE" in second.presentation.title
+    assert "Click APPROVE" in dict(second.presentation.facts)["Next action"]
+    assert second.metadata == {"test_only": "true", "execution_permitted": "false"}
+    assert worker.tick() is False
+    click(env.callback, signed(env, second, decision="approve"))
+    assert env.repo.get(second.approval_id).status == ApprovalRequestStatus.APPROVED
+    assert worker.tick() is False
+    assert len(env.channel.sends) == 2
+    for request in (first, second):
+        receipt = env.repo.accepted_decision(request.approval_id)
+        assert receipt is not None
+        assert receipt.authentication_evidence_hash is not None
+
+
+def test_first_approve_does_not_issue_second_card(env):
+    from jason_runtime.universal_interaction.owner_uat import OwnerUatMaintenance
+
+    env.issuer.enabled = True
+    env.callback.enabled = True
+    worker = OwnerUatMaintenance(
+        issuer=env.issuer, session_id="OwnerUATWrongButton", enabled=True,
+    )
+    assert worker.tick() is True
+    first = env.repo.list_all()[0]
+    click(env.callback, signed(env, first, decision="approve"))
+    assert worker.tick() is False
+    assert len(env.repo.list_all()) == len(env.channel.sends) == 1
