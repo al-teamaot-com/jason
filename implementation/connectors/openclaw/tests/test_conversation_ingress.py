@@ -99,13 +99,15 @@ def envelope(**overrides):
     return value
 
 
-def ingress(*, authenticator=None, replay=None, audit=None, flow=None):
+def ingress(*, authenticator=None, replay=None, audit=None, flow=None,
+            procurement_flow=None):
     return GovernedOpenClawTeamsConversationIngress(
         authenticator=authenticator or Authenticator(),
         replay=replay or Replay(),
         audit=audit or Audit(),
         flow=flow or Flow(),
         allowed_machine_identities=frozenset({"machine:openclaw-jason"}),
+        procurement_flow=procurement_flow,
     )
 
 
@@ -876,3 +878,48 @@ def test_unrelated_vendor_link_in_general_message_stays_conversation():
     assert _procurement_url_context(
         "Please review this policy: https://example.com/status"
     ) == (None, None)
+
+
+
+def test_actual_signed_ingress_routes_github_pr_to_conversation_not_procurement():
+    class Procurement:
+        def __init__(self):
+            self.urls = []
+
+        def handle_url(self, **kwargs):
+            self.urls.append(kwargs)
+            raise AssertionError("a GitHub PR is not a vendor product")
+
+    flow = Flow()
+    procurement = Procurement()
+    handler = ingress(flow=flow, procurement_flow=procurement)
+    result = handler.handle(envelope(
+        text=("Review PR #1549 https://github.com/al-teamaot-com/jason/pull/1549 "
+              "and check our invoice, part, quote and PO flows."),
+    ))
+    assert result["status"] == "completed"
+    assert procurement.urls == []
+    assert len(flow.requests) == 1
+    assert "PR #1549" in flow.requests[0].text
+
+
+def test_actual_signed_ingress_keeps_explicit_vendor_procurement_routing():
+    class Procurement:
+        def __init__(self):
+            self.urls = []
+
+        def handle_url(self, **kwargs):
+            self.urls.append(kwargs)
+            return {"status": "completed", "route": "procurement"}
+
+    flow = Flow()
+    procurement = Procurement()
+    handler = ingress(flow=flow, procurement_flow=procurement)
+    result = handler.handle(envelope(
+        text="Procurement request https://www.newegg.com/p/2VF-0046-00012",
+    ))
+    assert result["status"] == "completed"
+    assert result["route"] == "procurement"
+    assert len(procurement.urls) == 1
+    assert procurement.urls[0]["url"] == "https://www.newegg.com/p/2VF-0046-00012"
+    assert flow.requests == []
