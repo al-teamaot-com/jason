@@ -184,6 +184,15 @@ def test_exact_distinct_teams_decisions_have_distinct_commitments():
     assert approve.authentication_evidence_hash != deny.authentication_evidence_hash
 
 
+def test_every_required_delegated_scope_must_be_present():
+    boundary, private = setup()
+    boundary = replace(boundary, required_delegated_scopes=frozenset({
+        "user_impersonation", "second_delegated_scope",
+    }))
+    with pytest.raises(PermissionError, match="not approved delegated"):
+        verify(boundary, signed(private))
+
+
 def test_verifier_must_have_explicit_scopes_and_client_allowlist():
     boundary, private = setup()
     empty = replace(boundary, required_delegated_scopes=frozenset())

@@ -59,7 +59,7 @@ class VerifiedTeamsHumanTokenBinding:
         scopes = set(raw_scopes.split()) if isinstance(raw_scopes, str) else set()
         client_id = verified_claims.get("azp") or verified_claims.get("appid")
         if (verified_claims.get("idtyp") == "app"
-                or not scopes.intersection(self.required_delegated_scopes)
+                or not self.required_delegated_scopes.issubset(scopes)
                 or not isinstance(client_id, str)
                 or client_id not in self.allowed_client_ids):
             raise PermissionError("Microsoft user token is not approved delegated evidence")
