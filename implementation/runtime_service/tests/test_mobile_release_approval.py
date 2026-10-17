@@ -17,7 +17,8 @@ from jason_runtime.mobile_release_approval import (
 SHA = "9adde7fd62c0ca6ce0e1c1578b75cb8751841dfa"
 ROLLBACK = "71edbeabfdec2fa5dcb43022ac8fdc44a4c77334"
 RELEASE = "release-" + SHA[:16]
-NOW = datetime(2026, 10, 17, 16, 0, tzinfo=timezone.utc)
+# Synthetic mobile-release requests must not expire as wall-clock time advances.
+NOW = datetime.now(timezone.utc).replace(microsecond=0)
 
 
 def policy_file(tmp_path, **updates):
