@@ -19,6 +19,7 @@ import {
   replyForRuntimeResult,
 } from "./bridge-core.mjs";
 import { createApprovalDecisionStore } from "./approval-decision-store.mjs";
+import { isBoundTeamsApprovalActivity } from "./verified-approval-activity.mjs";
 import { resolveProactiveSendResult } from "./proactive-send-result.mjs";
 import { ensureTeamsUserBootstrap, TeamsBootstrapError } from "./teams-user-bootstrap.mjs";
 
@@ -442,8 +443,15 @@ agent.onActivity("message", async (context) => {
   }
 
   try {
-    storeConversationReference(context, aadObjectId, tenantId);
     const approvalSubmit = parseApprovalSubmit(submitValue);
+    // The SDK authenticated the incoming channel request. For approvals,
+    // additionally require explicit Teams channel, tenant and user binding;
+    // the ordinary message tenant fallback must never authorize a decision.
+    if (approvalSubmit && !isBoundTeamsApprovalActivity({ activity, expectedTenantId: auth.tenantId })) {
+      await context.sendActivity("Jason rejected this approval because its Teams identity evidence was incomplete.");
+      return;
+    }
+    storeConversationReference(context, aadObjectId, tenantId);
     const procurementSubmit = approvalSubmit ? null : parseProcurementSubmit(submitValue);
     const billingDispositionSubmit =
       approvalSubmit || procurementSubmit
