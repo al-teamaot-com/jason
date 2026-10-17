@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -85,3 +86,16 @@ def test_symlink_and_writable_source_rejected(tmp_path):
     original.chmod(0o666)
     with pytest.raises(PermissionError, match="writable"):
         activation.activate_from_manifest(original, now=NOW)
+
+
+def test_git_object_pins_immutable_campaign(tmp_path):
+    root = MODULE.parents[1]
+    revision = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True,
+    ).strip()
+    activation.verify_source_pinned_manifest(root / "config" / "owner-uat-campaign.json", revision)
+    with pytest.raises(ValueError, match="exact immutable"):
+        activation.verify_source_pinned_manifest(root / "config" / "owner-uat-campaign.json", "bad")
+    forged = write(tmp_path, manifest())
+    with pytest.raises(PermissionError, match="exact release tree"):
+        activation.verify_source_pinned_manifest(forged, revision)
