@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -24,12 +25,14 @@ from connectors.src.jason_connectors.approval_requests import (
     ApprovalRequestService, ApprovalRequestStatus, ApprovalResponse,
 )
 from jason_runtime.playbook_autonomy_review import TeamsGatewayPlaybookApprovalSender
+from jason_runtime.owner_release_approval_containment import read_release_approval_containment
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
 RELEASE_ID = re.compile(r"^release-[0-9a-f]{16}$")
 CAPABILITY = "release.production.approve"
 REQUEST_PREFIX = "relapproval-"
 RISK_LEVELS = frozenset({"normal", "production_repair", "production_control_core", "schema_or_contract"})
+_LOG = logging.getLogger(__name__)
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -264,6 +267,8 @@ class MobileReleaseApprovalFlow:
         if (not approval_id.startswith(REQUEST_PREFIX) or signed_envelope is None
                 or selections or decision not in {"approve", "deny"}):
             raise PermissionError("exact signed mobile release decision required")
+        # Bounded emergency hold does not affect Teams chat or other workflows.
+        read_release_approval_containment(self.state_root).require_can_issue()
         token = json.dumps(dict(signed_envelope), separators=(",", ":"), ensure_ascii=False)
         machine, parsed = self.signed_verifier.parse(token)
         submit = parsed.approval_submit
@@ -288,6 +293,9 @@ class MobileReleaseApprovalFlow:
         request = self.requests.get(approval_id)
         if request is None or request.status is not ApprovalRequestStatus.PENDING:
             raise PermissionError("mobile release decision is missing or already terminal")
+        read_release_approval_containment(self.state_root).require_request_eligible(
+            request.requested_at
+        )
         if (request.organization_id != policy.organization_id or request.client_id is not None
                 or request.requested_by == identity.identity_id or request.requested_by != "svc-jason-release-manager"
                 or request.capability != CAPABILITY or request.authorized_approver_ids != policy.owner_identity_ids
@@ -313,10 +321,18 @@ class MobileReleaseApprovalFlow:
                 or expected.presentation != request.presentation
                 or expected.expires_at != request.expires_at):
             raise PermissionError("release contents or approval policy changed after Teams card issuance")
+        # Recheck shared hold immediately before any durable signed decision
+        # artifact. The independent host consumer repeats this control.
+        read_release_approval_containment(self.state_root).require_request_eligible(
+            request.requested_at
+        )
         self.signed_evidence.save(
             approval_id=approval_id,
             signed_envelope=signed_envelope,
             evidence_sha256=principal.authentication_evidence_hash,
+        )
+        read_release_approval_containment(self.state_root).require_request_eligible(
+            request.requested_at
         )
         accepted = self.approvals.accept_response(
             ApprovalResponse(approval_id=approval_id, organization_id=policy.organization_id,
@@ -371,6 +387,12 @@ class MobileReleaseApprovalMaintenance:
     def tick(self) -> bool:
         if not self.enabled:
             return False
+        containment = read_release_approval_containment(self.state_root)
+        if containment.active:
+            # Distinct auditable reason; never interfere with ordinary Teams,
+            # site diagnostics or tickets. The shared host consumer also gates.
+            _LOG.warning('OWNER_RELEASE_APPROVAL_HOLD_ACTIVE=%s', containment.hold_id)
+            return False
         if self.interval_seconds < 60:
             raise ValueError("release approval scan cadence must be at least 60 seconds")
         now = self.clock()
@@ -399,6 +421,10 @@ class MobileReleaseApprovalMaintenance:
                     continue
             except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
                 continue
+            if (containment.released_at is not None
+                    and offered <= containment.released_at):
+                # An offer created before/during a hold may not be revived.
+                continue
             if path.stem in existing_ids:
                 # Terminal cards are never silently reissued. A fresh review
                 # requires a separately recorded owner/release request.
@@ -411,10 +437,14 @@ class MobileReleaseApprovalMaintenance:
                     or evidence.rollback_sha != offer.get("live_rollback_sha")
                     or evidence.manifest_sha256 != offer.get("manifest_sha256")):
                 continue
+            read_release_approval_containment(self.state_root).require_request_eligible(now)
             request = create_mobile_release_request(evidence, policy, now=now)
             self.approvals.create(request, now=now)
             # A failed delivery leaves one durable pending request, not a loop
             # that spams new cards or bypasses Teams unavailable failure.
+            read_release_approval_containment(self.state_root).require_request_eligible(
+                request.requested_at
+            )
             receipts = self.sender.send(request)
             if len(receipts) != len(policy.owner_identity_ids):
                 raise RuntimeError("mobile Teams approval was not delivered to every bound owner")

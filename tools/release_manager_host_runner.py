@@ -2643,9 +2643,16 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
     if tools_root not in sys.path:
         sys.path.insert(0, tools_root)
     from release_mobile_approval_consumer import consume_mobile_release_decisions
-    consume_mobile_release_decisions(
-        repo=repo, state_root=state_root, approve_release=approve_release,
-    )
+    from jason_runtime.owner_release_approval_containment import read_release_approval_containment
+    release_teams_containment = read_release_approval_containment(state_root)
+    # SECURITY: the default mobile approval database contains LIVE signed owner
+    # decisions. Isolated/preproduction release-manager state roots MUST never
+    # consume them into a different release/CCC state or test fixture.
+    # Existing explicit test invocation of the consumer uses injected test DBs.
+    if Path(state_root).resolve() == DEFAULT_STATE.resolve():
+        consume_mobile_release_decisions(
+            repo=repo, state_root=state_root, approve_release=approve_release,
+        )
     consume_owner_approval_requests(repo, state_root)
     if not production_window_open():
         return False
@@ -2710,7 +2717,8 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
             save_record(state_root, record)
             continue
 
-        if (Path("/var/lib/jason/authority/mobile-release-approval-policy.json").is_file()
+        if (not release_teams_containment.active
+                and Path("/var/lib/jason/authority/mobile-release-approval-policy.json").is_file()
                 and (record.get("owner_approval") or {}).get("approved") is not True
                 and record.get("risk_profile") == "normal"):
             offer_root.mkdir(parents=True, exist_ok=True, mode=0o700)

@@ -25,7 +25,7 @@ from release_mobile_approval_consumer import consume_mobile_release_decisions
 
 SHA = "9adde7fd62c0ca6ce0e1c1578b75cb8751841dfa"
 ROLLBACK = "71edbeabfdec2fa5dcb43022ac8fdc44a4c77334"
-NOW = datetime(2026, 10, 17, 16, 0, tzinfo=timezone.utc)
+NOW = datetime.now(timezone.utc).replace(microsecond=0)  # avoid expired historical fixture
 RID = "release-" + SHA[:16]
 
 
@@ -244,3 +244,65 @@ def test_transport_delivery_receipt_does_not_weaken_policy_or_manifest_gate(tmp_
         flow.handle(**args)
     assert repo.accepted_decision(request.approval_id) is None
     assert not (opts["ccc_root"] / "material-review.json").exists()
+
+
+def test_p0_owner_hold_blocks_already_recorded_signed_approval_before_host_ccc(tmp_path):
+    """A previously accepted Teams callback must not authorize CCC when held."""
+    from datetime import timedelta
+    from jason_runtime.owner_release_approval_containment import HOLD_FILENAME
+    flow, repo, record, request, args, opts, identities, bindings = fixture(tmp_path)
+    signed = flow.handle(**args)
+    assert signed["approval_status"] == "approved"
+    holds = opts["state_root"] / HOLD_FILENAME
+    holds.write_text(json.dumps({
+        "schema_version":"1.0",
+        "capability":"release.production.approve",
+        "state":"held",
+        "hold_id":"P0-1553",
+        "hold_started_at":(NOW+timedelta(seconds=1)).isoformat(),
+    }))
+    holds.chmod(0o600)
+    calls=[]
+    opts["approve_release"] = lambda *_args,**_kwargs:calls.append(1)
+    assert consume_mobile_release_decisions(**opts)==0
+    assert calls==[]
+    assert not (opts["ccc_root"]/"material-review.json").exists()
+    assert not (opts["state_root"]/"mobile-release-decisions-processed"/
+                (request.approval_id+".json")).exists()
+
+
+def test_releasing_hold_cannot_revive_old_signed_decision(tmp_path):
+    from datetime import timedelta
+    from jason_runtime.owner_release_approval_containment import HOLD_FILENAME
+    flow, repo, record, request, args, opts, identities, bindings = fixture(tmp_path)
+    flow.handle(**args)
+    hold = opts["state_root"]/HOLD_FILENAME
+    payload={
+        "schema_version":"1.0",
+        "capability":"release.production.approve",
+        "state":"released",
+        "hold_id":"P0-1553",
+        "hold_started_at":(NOW+timedelta(seconds=1)).isoformat(),
+        "released_at":(NOW+timedelta(minutes=5)).isoformat(),
+    }
+    hold.write_text(json.dumps(payload));hold.chmod(0o600)
+    calls=[]
+    opts["approve_release"]=lambda *_args,**_kwargs:calls.append(1)
+    assert consume_mobile_release_decisions(**opts)==0
+    assert calls==[]
+    assert repo.accepted_decision(request.approval_id) is not None
+    assert not (opts["ccc_root"]/"material-review.json").exists()
+
+
+def test_malformed_containment_prevents_host_material_review(tmp_path):
+    from jason_runtime.owner_release_approval_containment import HOLD_FILENAME
+    flow, repo, record, request, args, opts, identities, bindings = fixture(tmp_path)
+    flow.handle(**args)
+    hold = opts["state_root"]/HOLD_FILENAME
+    hold.write_text('{"state":"off"}');hold.chmod(0o600)
+    opts["approve_release"] = lambda *_args,**_kwargs: pytest.fail(
+        "malformed hold cannot mint CCC material review"
+    )
+    with pytest.raises(PermissionError,match="policy_invalid"):
+        consume_mobile_release_decisions(**opts)
+    assert not (opts["ccc_root"]/"material-review.json").exists()
