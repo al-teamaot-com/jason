@@ -17,6 +17,7 @@ def autonomy_maintenance_enabled(settings: RuntimeSettings) -> bool:
         or settings.autonomy_review_enabled
         or settings.support_repair_autonomy_enabled
         or (settings.universal_approval_mode == "enforced" and settings.universal_approval_worker_enabled)
+        or (settings.owner_uat_mode == "nonexecuting_test_only" and settings.owner_uat_worker_enabled)
     )
 
 
@@ -36,6 +37,7 @@ def http_runtime_settings(settings: RuntimeSettings) -> RuntimeSettings:
         support_repair_autonomy_enabled=False,
         universal_approval_worker_enabled=False,
         release_mobile_approval_worker_enabled=False,
+        owner_uat_worker_enabled=False,
     )
 
 
