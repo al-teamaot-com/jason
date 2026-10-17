@@ -47,6 +47,10 @@ MUTATION_ENV_OVERRIDES = {
     "JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED": "false",
     "JASON_UNIVERSAL_APPROVAL_MODE": "off",
     "JASON_UNIVERSAL_APPROVAL_WORKER_ENABLED": "false",
+    # A test-only Teams card must never be issued from isolated preproduction.
+    "JASON_OWNER_UAT_MODE": "off",
+    "JASON_OWNER_UAT_WORKER_ENABLED": "false",
+    "JASON_OWNER_UAT_SESSION_ID": "",
     # Isolated preproduction must not issue real owner Teams cards or read
     # live mobile release approvals even when production mode is enabled.
     "JASON_RELEASE_MOBILE_APPROVAL_MODE": "off",
