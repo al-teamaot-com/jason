@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 import re
 import stat
+import subprocess
 
 OFF = "off|false|none"
 SESSION = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{4,88}$")
@@ -23,6 +24,22 @@ EXPECTED_KEYS = frozenset({
 })
 
 
+def verify_source_pinned_manifest(path: Path, source_revision: str) -> None:
+    """Reject a runtime-edited manifest; trust only the reviewed Git blob."""
+    if not re.fullmatch(r"[0-9a-f]{40}", source_revision):
+        raise ValueError("an exact immutable release revision is required")
+    root = Path(__file__).resolve().parents[1]
+    canonical = root / "config" / "owner-uat-campaign.json"
+    if path.is_symlink() or path.absolute() != canonical:
+        raise PermissionError("UAT manifest must come from the exact release tree")
+    expected = subprocess.check_output([
+        "git", "-C", str(root), "show",
+        source_revision + ":config/owner-uat-campaign.json",
+    ], timeout=15)
+    if path.read_bytes() != expected:
+        raise PermissionError("UAT manifest differs from approved source revision")
+
+
 def activate_from_manifest(
     path: Path, *, now: datetime | None = None, preflight: bool = False
 ) -> str:
@@ -31,8 +48,8 @@ def activate_from_manifest(
         return OFF
     if path.is_symlink() or not path.is_file() or path.stat().st_size > 4096:
         raise ValueError("UAT manifest must be a small regular tracked source file")
-    if path.stat().st_mode & (stat.S_IWGRP | stat.S_IWOTH):
-        raise PermissionError("UAT activation source is group/world writable")
+    if path.stat().st_mode & stat.S_IWOTH:
+        raise PermissionError("UAT activation source is world writable")
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or set(data) != EXPECTED_KEYS:
         raise ValueError("UAT manifest has unknown or missing fields")
@@ -72,8 +89,11 @@ def activate_from_manifest(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument("--source-revision", required=True)
     parser.add_argument("--preflight", action="store_true")
     args = parser.parse_args()
+    if not args.preflight and args.manifest.exists():
+        verify_source_pinned_manifest(args.manifest, args.source_revision)
     print(activate_from_manifest(args.manifest, preflight=args.preflight))
     return 0
 
