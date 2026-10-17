@@ -13,6 +13,124 @@ SPEC.loader.exec_module(coordinator)
 
 
 class DevelopmentReleaseCoordinatorTests(unittest.TestCase):
+    def test_control_board_skips_stale_PR_api_checks_but_preserves_count_and_overlap(self):
+        import json
+        import tempfile
+        from datetime import datetime, timedelta, timezone
+        from unittest.mock import patch
+
+        now = datetime.now(timezone.utc)
+
+        def pull(n, sha, age_days):
+            return {
+                "number": n, "title": f"PR {n}", "html_url": f"https://example.invalid/pr/{n}",
+                "head": {"sha": sha}, "updated_at": (
+                    now - timedelta(days=age_days)
+                ).isoformat(), "draft": False, "body": "",
+            }
+
+        recent = pull(101, "a" * 40, 1)
+        overlap_only = pull(102, "b" * 40, 5)
+        old = pull(103, "c" * 40, 30)
+
+        class FakeApi:
+            def __init__(self):
+                self.paths = []
+
+            def request(self, path):
+                self.paths.append(path)
+                if path == "/branches/main":
+                    return {"commit": {"sha": "d" * 40}}
+                if path == "/compare/" + "d" * 40 + "..." + "a" * 40:
+                    return {"behind_by": 0}
+                if path == "/commits/" + "a" * 40 + "/check-runs":
+                    return {"check_runs": [
+                        {"name": "ci", "status": "completed", "conclusion": "success", "id": 1},
+                    ]}
+                raise AssertionError("Unexpected stale API call: " + path)
+
+            def paged(self, path):
+                self.paths.append(path)
+                if path.startswith("/pulls?state=open"):
+                    return [recent, overlap_only, old]
+                if path in ("/pulls/101/files", "/pulls/102/files"):
+                    return [{"filename": "tools/important.py"}]
+                raise AssertionError("Unexpected stale file lookup: " + path)
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            state = root / "state"
+            state.mkdir()
+            state.joinpath("records").mkdir()
+            files = {
+                "ROADMAP_STATUS": {"schema_version": "1.0"},
+                "AUTOMATED_CHANGE_STATE": {"production": {"status": "unknown"}},
+            }
+            for name, data in files.items():
+                (root / (name + ".json")).write_text(json.dumps(data))
+            (root / "support.md").write_text("")
+            (root / "todos.md").write_text("")
+            api = FakeApi()
+            config = {
+                "base_branch": "main", "required_checks": ["ci"],
+                "active_display_days": 3, "active_overlap_days": 7,
+                "preproduction": {"configured": True},
+            }
+            with (
+                patch.object(coordinator, "ROADMAP_STATUS", root / "ROADMAP_STATUS.json"),
+                patch.object(coordinator, "AUTOMATED_CHANGE_STATE", root / "AUTOMATED_CHANGE_STATE.json"),
+                patch.object(coordinator, "SUPPORT", root / "support.md"),
+                patch.object(coordinator, "TODO_BACKLOG", root / "todos.md"),
+                patch.object(coordinator, "RELEASE_MANAGER_STATE_ROOT", state),
+            ):
+                board = coordinator.collect(api, config)
+
+        self.assertEqual(len(board["pr_states"]), 3)
+        self.assertEqual(board["older_open_pr_count"], 2)
+        self.assertEqual(board["pr_states"][0]["state"], "Pre-prod ready")
+        self.assertTrue(board["pr_states"][0]["recent"])
+        self.assertEqual(board["pr_states"][1]["state"], "Needs revalidation")
+        self.assertEqual(board["pr_states"][2]["check_state"], "not_checked_stale")
+        self.assertIsNone(board["pr_states"][2]["behind_by"])
+        self.assertEqual(
+            board["overlaps"],
+            [{"left": 101, "right": 102, "files": ["tools/important.py"]}],
+        )
+        self.assertEqual(
+            len([path for path in api.paths if path.startswith("/compare/")]), 1,
+        )
+        self.assertEqual(
+            len([path for path in api.paths if path.endswith("/check-runs")]), 1,
+        )
+        self.assertFalse(any("/pulls/103/files" in path for path in api.paths))
+
+    def test_recent_pr_check_error_fails_closed(self):
+        from datetime import datetime, timezone
+        from unittest.mock import patch
+
+        latest = {
+            "number": 12, "title": "Active PR", "html_url": "https://example.invalid/12",
+            "head": {"sha": "b" * 40}, "updated_at": datetime.now(timezone.utc).isoformat(),
+            "draft": False, "body": "",
+        }
+
+        class BrokenApi:
+            def request(self, path):
+                if path == "/branches/main":
+                    return {"commit": {"sha": "a" * 40}}
+                raise RuntimeError("live Github check failed")
+
+            def paged(self, path):
+                if path.startswith("/pulls?state=open"):
+                    return [latest]
+                return []
+
+        with self.assertRaisesRegex(RuntimeError, "live Github check failed"):
+            coordinator.collect(BrokenApi(), {
+                "base_branch": "main", "required_checks": ["ci"],
+                "active_display_days": 3, "active_overlap_days": 7,
+            })
+
     def test_required_checks_pass(self):
         required = ["a", "b"]
         checks = [
