@@ -51,9 +51,25 @@ for argument in "$@"; do
     UAT_PREFLIGHT=(--preflight)
   fi
 done
-UAT_RESULT="$(python3 "$REPO_ROOT/tools/owner_uat_activation.py" \
-  --manifest "$REPO_ROOT/config/owner-uat-campaign.json" \
-  --source-revision "$REVISION" "${UAT_PREFLIGHT[@]}")"
+# The previously verified LKG predates the UAT manifest. The existing
+# production Release Manager rolls back through this candidate script with
+# IMAGE=rollback-current and REVISION=the LKG hash. The rollback image itself
+# must attest to exactly that revision; never import candidate UAT flags into
+# an old runtime and never require a manifest absent from that old source.
+if [ "$IMAGE" = "jason-runtime:rollback-current" ]; then
+  IMAGE_REVISION="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
+  if [[ ! "$REVISION" =~ ^[0-9a-f]{40}$ ]] || [ "$IMAGE_REVISION" != "$REVISION" ]; then
+    echo "DENIED: rollback image/source revision mismatch" >&2
+    exit 2
+  fi
+  UAT_RESULT="off|false|none"
+else
+  # Ordinary production activation stays byte-for-byte tied to its approved Git
+  # commit and the strict test-only campaign parser.
+  UAT_RESULT="$(python3 "$REPO_ROOT/tools/owner_uat_activation.py" \
+    --manifest "$REPO_ROOT/config/owner-uat-campaign.json" \
+    --source-revision "$REVISION" "${UAT_PREFLIGHT[@]}")"
+fi
 IFS='|' read -r OWNER_UAT_MODE OWNER_UAT_WORKER OWNER_UAT_SESSION <<< "$UAT_RESULT"
 if [ "$OWNER_UAT_SESSION" = "none" ]; then
   OWNER_UAT_SESSION=""

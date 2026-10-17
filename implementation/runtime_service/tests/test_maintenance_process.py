@@ -106,3 +106,19 @@ def test_maintenance_failure_is_logged_and_process_retries(monkeypatch, caplog):
     assert "Autonomy maintenance cycle failed" in caplog.text
     assert "controlled tick failure" in caplog.text
     assert "RuntimeError: controlled tick failure" in caplog.text
+
+
+def test_nonexecuting_owner_uat_has_exactly_one_maintenance_issuer(monkeypatch):
+    monkeypatch.setenv("JASON_OLLAMA_MODEL", "qwen3:1.7b")
+    monkeypatch.setenv("JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED", "false")
+    settings = RuntimeSettings.from_env()
+    pilot = replace(
+        settings, owner_uat_mode="nonexecuting_test_only",
+        owner_uat_worker_enabled=True, owner_uat_session_id="OwnerUAT20261017Pilot",
+    )
+    assert autonomy_maintenance_enabled(pilot) is True
+    serving = http_runtime_settings(pilot)
+    assert serving.owner_uat_mode == "nonexecuting_test_only"
+    assert serving.owner_uat_session_id == "OwnerUAT20261017Pilot"
+    assert serving.owner_uat_worker_enabled is False
+    assert autonomy_maintenance_enabled(serving) is False
