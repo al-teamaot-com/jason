@@ -2642,7 +2642,13 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
     tools_root = str(repo / "tools")
     if tools_root not in sys.path:
         sys.path.insert(0, tools_root)
-    from release_mobile_approval_consumer import consume_mobile_release_decisions
+    from release_mobile_approval_consumer import (
+        _install_repo_modules, consume_mobile_release_decisions,
+    )
+    # The host runner also operates from a lightweight systemd/unittest
+    # environment without PYTHONPATH. Install ONLY modules from the pinned
+    # release source before importing the shared runtime safety policy.
+    _install_repo_modules(Path(repo))
     from jason_runtime.owner_release_approval_containment import read_release_approval_containment
     release_teams_containment = read_release_approval_containment(state_root)
     # SECURITY: the default mobile approval database contains LIVE signed owner
