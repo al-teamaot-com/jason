@@ -4,16 +4,45 @@
 
 **Catalog snapshot:** 2026-10-17 · **Items categorized:** 37 · **Categories:** 8 · **Scope:** the current canonical TODO roadmap only. Items are listed **once**, by primary category; cross-cutting topics can use secondary tags in a future metadata-only enhancement.
 
-## Quick navigation
+## Category priority order — proposed scheduling policy
 
-- [Production & Reliability](#production--reliability) (3)
-- [Security & Governance](#security--governance) (4)
-- [Infrastructure & Engineering](#infrastructure--engineering) (2)
-- [Integrations & Connectors](#integrations--connectors) (9)
-- [MSP Operations & Playbooks](#msp-operations--playbooks) (5)
-- [Finance & Procurement](#finance--procurement) (4)
-- [New Features & User Experience](#new-features--user-experience) (7)
-- [Research, Knowledge & Improvement](#research-knowledge--improvement) (3)
+**This is a default ranking for comparable, eligible TODO work, not an absolute priority or new implementation authority.** A real P0 security incident, critical outage, client-impacting production defect, or explicit Owner commitment overrides category order; otherwise prioritize higher-impact work over cosmetic work.
+
+| Default rank | Category | Main consideration |
+| ---: | --- | --- |
+| 1 | [Production & Reliability](#production--reliability) | Operational availability, outage recovery, release integrity |
+| 2 | [Security & Governance](#security--governance) | Data protection, access control, compliance, authorization |
+| 3 | [MSP Operations & Playbooks](#msp-operations--playbooks) | Client service delivery, recurring operational failures |
+| 4 | [Finance & Procurement](#finance--procurement) | Billing accuracy, revenue, procurement and finance workflows |
+| 5 | [Infrastructure & Engineering](#infrastructure--engineering) | Worker capacity, delivery architecture, maintainability |
+| 6 | [Integrations & Connectors](#integrations--connectors) | External APIs, provider capabilities and coverage |
+| 7 | [New Features & User Experience](#new-features--user-experience) | Enhancements, user-facing experiences and interfaces |
+| 8 | [Research, Knowledge & Improvement](#research-knowledge--improvement) | Discovery, planning, knowledge improvements |
+
+**Cosmetic/UI polish** (font, color, spacing, title styling) is a low-impact subtype of `New Features & User Experience`, scheduled after functional, security, reliability and customer-critical work unless the Owner explicitly elevates it.
+
+### Scheduler decision order (future design; **not active**)
+
+1. **Immediate safety and live operational impact:** response to active incidents, security exposure, data loss, outages, critical regulatory/contractual deadlines, and existing P0 production repair under the current Support-first and owner priority rules.
+2. **Eligibility and authority:** choose only work approved and ready under existing authorization, client/tenant boundaries, capacity, dependencies and release gates. Blocked/research/proposed tasks cannot be admitted because they have a high category rank.
+3. **Explicit item priority and consequences:** retain existing P0-P3, Owner sequencing, actual severity, affected customers, financial/security impact and deadlines. P0 always dominates routine P2/P3 work irrespective of category.
+4. **Category preference within comparable eligible items:** use rank 1-8 above as a deterministic tie-breaker, giving security/governance and production reliability preference over cosmetic UI changes.
+5. **Dependency leverage and fairness:** account for foundational work that unblocks other tasks, bounded effort/aging, and avoid indefinite starvation while preserving support-first rules. Record why the next work item was chosen.
+
+**Example:** A critical tenant-isolation flaw outranks a title-color change. Conversely, a confirmed customer production outage outranks a low-impact security-documentation tidy-up. Neither decision should depend on assigning an item an inflated category.
+
+**Implementation gate:** To apply this policy to actual Jason engineering admission, add a separate test-backed change to the **existing** TODO engineering intake/scheduler; compare proposed selection versus existing order on a realistic read-only backlog snapshot and confirm active P0 jobs, worker claims, approvals, and dependencies remain unchanged. This index alone does **not** update live scheduling. Do not enable until the appropriate production/Teams stabilization and release authorization gates are satisfied.
+
+## Quick navigation (ranked)
+
+1. [Production & Reliability](#production--reliability) (3)
+2. [Security & Governance](#security--governance) (4)
+3. [MSP Operations & Playbooks](#msp-operations--playbooks) (5)
+4. [Finance & Procurement](#finance--procurement) (4)
+5. [Infrastructure & Engineering](#infrastructure--engineering) (2)
+6. [Integrations & Connectors](#integrations--connectors) (9)
+7. [New Features & User Experience](#new-features--user-experience) (7)
+8. [Research, Knowledge & Improvement](#research-knowledge--improvement) (3)
 
 ## Production & Reliability
 
@@ -35,6 +64,29 @@ Compliance, policies, authorization, and controlled capability retirement.
 | [TODO-GOV-002](./Project-Jason-TODO-and-Future-Ideas.md#todo-gov-002--capability-retirement-and-deprecation-process) | Capability retirement and deprecation process | P2 |
 | [TODO-GOV-003](./Project-Jason-TODO-and-Future-Ideas.md#todo-gov-003--formal-risk-taxonomy-for-requests-and-communications) | Formal risk taxonomy for requests and communications | P1 |
 | [TODO-GOV-005](./Project-Jason-TODO-and-Future-Ideas.md#todo-gov-005--deterministic-recurring-constitutional-and-compliance-certification) | Deterministic recurring constitutional and compliance certification | P1 |
+
+## MSP Operations & Playbooks
+
+Technician assistance, client support, ticket processing, and operational playbooks.
+
+| TODO | Work item | Priority |
+| --- | --- | --- |
+| [TODO-OPS-001](./Project-Jason-TODO-and-Future-Ideas.md#todo-ops-001--operational-resolution-memory-and-case-based-troubleshooting-reuse) | Operational Resolution Memory and case-based troubleshooting reuse | P1 |
+| [TODO-OPS-002](./Project-Jason-TODO-and-Future-Ideas.md#todo-ops-002--governed-backupiq-ticket-processing-playbook) | Governed BackupIQ ticket-processing playbook | P1 |
+| [TODO-OPS-004](./Project-Jason-TODO-and-Future-Ideas.md#todo-ops-004--governed-drmm-monitor-suppression-for-known-accepted-conditions) | Governed DRMM monitor suppression for known accepted conditions | P1 |
+| [TODO-OPS-005](./Project-Jason-TODO-and-Future-Ideas.md#todo-ops-005--client-securityposture-review) | Client Security/Posture Review | P1 |
+| [TODO-OPS-009](./Project-Jason-TODO-and-Future-Ideas.md#todo-ops-009--human-review-handoff-to-help-desk-i) | Human-review handoff to Help Desk I | P1 |
+
+## Finance & Procurement
+
+Quotes, purchasing, invoicing, accounting, contracts, and billing.
+
+| TODO | Work item | Priority |
+| --- | --- | --- |
+| [TODO-OPS-007](./Project-Jason-TODO-and-Future-Ideas.md#todo-ops-007--invoice-to-catalog-and-purchase-order-workflow) | Invoice-to-catalog and purchase-order workflow | P1 — implement before Duo Security API integration |
+| [TODO-OPS-008](./Project-Jason-TODO-and-Future-Ideas.md#todo-ops-008--governed-autotask-ticket-billingcharge-workflow) | Governed Autotask ticket billing/charge workflow | P1 |
+| [TODO-FIN-002](./Project-Jason-TODO-and-Future-Ideas.md#todo-fin-002--quickbooks-online-integration-with-provider-native-financial-authorization) | QuickBooks Online integration with provider-native financial authorization | P1 |
+| [TODO-CONN-015](./Project-Jason-TODO-and-Future-Ideas.md#todo-conn-015--governed-autotask-contract-readwrite-capability) | Governed Autotask contract read/write capability | P1 |
 
 ## Infrastructure & Engineering
 
@@ -60,29 +112,6 @@ External platforms, provider APIs, and governed data/action surfaces.
 | [TODO-CONN-013](./Project-Jason-TODO-and-Future-Ideas.md#todo-conn-013--governed-mailbox-evidence-and-approved-mailbox-lifecycle) | Governed mailbox evidence and approved-mailbox lifecycle | P1 |
 | [TODO-CONN-016](./Project-Jason-TODO-and-Future-Ideas.md#todo-conn-016--expand-governed-datto-edr-response-actions) | Expand governed Datto EDR response actions | P1 |
 | [TODO-CONN-017](./Project-Jason-TODO-and-Future-Ideas.md#todo-conn-017--governed-datto-rmm-monitor-policy-targeting-updates) | Governed Datto RMM monitor-policy targeting updates | P1 |
-
-## MSP Operations & Playbooks
-
-Technician assistance, client support, ticket processing, and operational playbooks.
-
-| TODO | Work item | Priority |
-| --- | --- | --- |
-| [TODO-OPS-001](./Project-Jason-TODO-and-Future-Ideas.md#todo-ops-001--operational-resolution-memory-and-case-based-troubleshooting-reuse) | Operational Resolution Memory and case-based troubleshooting reuse | P1 |
-| [TODO-OPS-002](./Project-Jason-TODO-and-Future-Ideas.md#todo-ops-002--governed-backupiq-ticket-processing-playbook) | Governed BackupIQ ticket-processing playbook | P1 |
-| [TODO-OPS-004](./Project-Jason-TODO-and-Future-Ideas.md#todo-ops-004--governed-drmm-monitor-suppression-for-known-accepted-conditions) | Governed DRMM monitor suppression for known accepted conditions | P1 |
-| [TODO-OPS-005](./Project-Jason-TODO-and-Future-Ideas.md#todo-ops-005--client-securityposture-review) | Client Security/Posture Review | P1 |
-| [TODO-OPS-009](./Project-Jason-TODO-and-Future-Ideas.md#todo-ops-009--human-review-handoff-to-help-desk-i) | Human-review handoff to Help Desk I | P1 |
-
-## Finance & Procurement
-
-Quotes, purchasing, invoicing, accounting, contracts, and billing.
-
-| TODO | Work item | Priority |
-| --- | --- | --- |
-| [TODO-OPS-007](./Project-Jason-TODO-and-Future-Ideas.md#todo-ops-007--invoice-to-catalog-and-purchase-order-workflow) | Invoice-to-catalog and purchase-order workflow | P1 — implement before Duo Security API integration |
-| [TODO-OPS-008](./Project-Jason-TODO-and-Future-Ideas.md#todo-ops-008--governed-autotask-ticket-billingcharge-workflow) | Governed Autotask ticket billing/charge workflow | P1 |
-| [TODO-FIN-002](./Project-Jason-TODO-and-Future-Ideas.md#todo-fin-002--quickbooks-online-integration-with-provider-native-financial-authorization) | QuickBooks Online integration with provider-native financial authorization | P1 |
-| [TODO-CONN-015](./Project-Jason-TODO-and-Future-Ideas.md#todo-conn-015--governed-autotask-contract-readwrite-capability) | Governed Autotask contract read/write capability | P1 |
 
 ## New Features & User Experience
 
@@ -123,6 +152,7 @@ These are cross-cutting **GitHub operational/support workstreams**, not addition
 ## Preservation and update rules
 
 1. **One governed backlog:** Categories are a view, not separate queues. Do not duplicate TODOs or create a new admission engine. Existing Support-first precedence remains intact.
+7. **Category rank has no execution authority:** Rankings are descriptive and must not silently rewrite P0-P3, alter item readiness, reshuffle an active worker, or activate a scheduler change. Changes to prioritization behavior require separate tests and governed admission.
 2. **No behavioral edits:** Do not change the canonical TODO headings, IDs, body text, priority, status, owner approvals, prerequisites, evidence, dependency gates, phase, or item ordering as part of categorization.
 3. **No silent authority changes:** A label or category can never move an item into `Planned` or `In progress` or authorize provider writes, merges, releases, or production activity.
 4. **Live status from source:** This navigation page intentionally does not copy mutable status values. Read each authoritative TODO entry, linked issue, and live production state before claiming work is complete/approved/blocked.
