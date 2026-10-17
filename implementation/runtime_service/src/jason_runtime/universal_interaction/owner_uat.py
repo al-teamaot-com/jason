@@ -14,7 +14,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
+from pathlib import Path
 import re
+import stat
 from typing import Any, Mapping
 
 from connectors.src.jason_connectors.approval_requests import (
@@ -257,6 +260,72 @@ class OwnerUatWorkflowSendAuthority:
         )
 
 
+@dataclass(frozen=True)
+class OwnerUatReleaseGate:
+    """No Teams card before root-verified exact-SHA release closeout.
+
+    The runtime can READ these existing managed release records, but never
+    transition release state or grant approval by reading them.
+    """
+    state_root: Path
+    source_revision: str
+
+    @staticmethod
+    def _private_json(path: Path, *, owner_uid: int) -> dict[str, Any]:
+        if path.is_symlink() or not path.is_file():
+            raise PermissionError("Owner UAT needs a regular protected release record")
+        info = path.stat()
+        if info.st_uid != owner_uid or not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+            raise PermissionError("Owner UAT release proof has insecure ownership/mode")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("Owner UAT release proof is malformed")
+        return data
+
+    def ready(self) -> bool:
+        sha = self.source_revision
+        if not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{40}", sha) is None:
+            return False
+        try:
+            uid = os.getuid()
+            release = self._private_json(
+                self.state_root / "records" / ("release-" + sha[:16] + ".json"),
+                owner_uid=uid,
+            )
+            protected = self._private_json(
+                self.state_root / "protected-readback" / "production-control-state.json",
+                owner_uid=uid,
+            )
+            candidate = release.get("release_candidate") or {}
+            production = release.get("production") or {}
+            ccc = production.get("ccc_post_mutation") or {}
+            lkg = (protected.get("last_known_good") or {}).get("manifest") or {}
+            return (
+                release.get("schema_version") == "2.0"
+                and release.get("release_id") == "release-" + sha[:16]
+                and release.get("state") == "closed"
+                and candidate.get("candidate_sha") == sha
+                and (release.get("owner_approval") or {}).get("candidate_sha") == sha
+                and (release.get("owner_approval") or {}).get("approved") is True
+                and production.get("live_sha") == sha
+                and production.get("host_revision") == sha
+                and production.get("runtime_revision") == sha
+                and production.get("mcp_revision") == sha
+                and production.get("release_manager_source_revision") == sha
+                and ccc.get("status") == "PASS"
+                and ccc.get("source_revision") == sha
+                and ccc.get("runtime_revision") == sha
+                and protected.get("schema_version") == "1.0"
+                and (protected.get("circuit_breaker") or {}).get("state") == "closed"
+                and lkg.get("revision") == sha
+                and lkg.get("runtime_revision") == sha
+                and lkg.get("mcp_revision") == sha
+                and lkg.get("host_revision") == sha
+            )
+        except (OSError, ValueError, TypeError, KeyError, PermissionError):
+            return False
+
+
 @dataclass
 class OwnerUatMaintenance:
     """Existing runtime maintenance cycle, one-shot per configured session.
@@ -267,9 +336,10 @@ class OwnerUatMaintenance:
     issuer: OwnerUatIssuer
     session_id: str
     enabled: bool = False
+    release_ready: Any = lambda: False
 
     def tick(self) -> bool:
-        if not self.enabled:
+        if not self.enabled or not self.release_ready():
             return False
         if not SESSION_ID.fullmatch(self.session_id) or len(self.session_id) > 88:
             raise ValueError("invalid bounded UAT campaign session")
