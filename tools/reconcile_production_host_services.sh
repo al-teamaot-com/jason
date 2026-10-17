@@ -567,6 +567,36 @@ else
 fi
 step_pass observability_reconciliation
 
+# The scheduled Grafana assurance can run while the production reconciler is
+# restarting the usage-attribution exporter. A genuine transient missing
+# Prometheus series leaves the assurance oneshot in systemd's failed state.
+# Re-execute the REAL checker only after exporters are verified and service
+# activation has completed; never reset-failed, mask, or ignore its result.
+step_start post_exporter_grafana_assurance
+if systemctl cat jason-grafana-assurance.service >/dev/null 2>&1; then
+  GRAFANA_REVALIDATION_PASS=0
+  for attempt in 1 2 3; do
+    if timeout --signal=TERM --kill-after=5s 20s \
+        systemctl start jason-grafana-assurance.service \
+        && [ "$(systemctl show jason-grafana-assurance.service -p Result --value)" = "success" ]; then
+      echo "GRAFANA_POST_EXPORTER_ASSURANCE=PASS attempt=$attempt"
+      GRAFANA_REVALIDATION_PASS=1
+      break
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      sleep 10
+    fi
+  done
+  if [ "$GRAFANA_REVALIDATION_PASS" -ne 1 ]; then
+    echo "ERROR: real Grafana assurance remains failed after exporter readiness" >&2
+    systemctl status jason-grafana-assurance.service --no-pager -l || true
+    exit 9
+  fi
+else
+  echo "GRAFANA_POST_EXPORTER_ASSURANCE=NOT_INSTALLED"
+fi
+step_pass post_exporter_grafana_assurance
+
 # Prove declared production desired-state convergence before host reconciliation
 # can report success. This catches unknown active units/containers, forbidden
 # developer execution paths, missing required surfaces, and rollback residue.
