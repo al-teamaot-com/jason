@@ -177,6 +177,28 @@ On **Approve**, Jason re-reads the current source registry and requires the exac
 
 A non-owner Microsoft/Jason identity fails authorization even if it can see or click the card. Teams remains transport/UI; configured Jason owner authority remains decisive.
 
+### Split-process callback readiness
+
+When `JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED=true`, Jason may run
+`PlaybookAutonomyReviewMaintenance` in its separate maintenance process.
+That worker creates and sends approval requests, but the HTTP-serving process
+must **still** register `PlaybookAutonomyApprovalInteractionFlow` inside
+`ApprovalInteractionDispatcher.fallback`. Otherwise, Teams can deliver a real
+owner click while Jason rejects it with HTTP 403,
+`approval_interaction_denied` / `approval flow is not configured`.
+
+The serving process must share the durable approval-request ledger while keeping
+the periodic review/sending worker disabled to prevent duplicate issuances.
+The internal `playbook_approval_ingress_enabled` composition setting preserves
+that split; it is not a new user permission or owner-approval bypass.
+
+Before accepting a live rollout, verify both processes: scheduled card
+issuance in maintenance only, authenticated owner click handling in HTTP,
+a terminal durable decision receipt and unchanged provider/device state for an
+inert pilot. A successful Teams delivery or button click alone is insufficient.
+The regression tests cover an unbound actor denial and an authorized owner
+decision using isolated SQLite state.
+
 ### Production settings
 
 - `JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED` — disabled by source default; explicitly enable in production after acceptance.
