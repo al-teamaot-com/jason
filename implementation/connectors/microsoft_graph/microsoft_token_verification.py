@@ -57,6 +57,14 @@ class MicrosoftTokenVerifier:
     clock: callable = lambda: datetime.now(timezone.utc)
 
     def verify(self, token: str) -> VerifiedMicrosoftPrincipal:
+        return self.verify_with_claims(token)[0]
+
+    def verify_with_claims(self, token: str) -> tuple[VerifiedMicrosoftPrincipal, Mapping[str, Any]]:
+        """Return principal and signature-verified claims in one cryptographic pass.
+
+        The claims are never returned unless signature, issuer, audience, tenant,
+        time window, and authentication assurance all pass validation.
+        """
         self.policy.validate()
         if not isinstance(token, str) or not token.strip():
             raise MicrosoftTokenVerificationError("Microsoft token is required")
@@ -108,7 +116,7 @@ class MicrosoftTokenVerifier:
             authentication_assurance=assurance,
         )
         principal.validate()
-        return principal
+        return principal, dict(claims)
 
     @staticmethod
     def _required_string(claims: Mapping[str, Any], name: str) -> str:
