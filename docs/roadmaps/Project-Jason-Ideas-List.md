@@ -26,12 +26,12 @@
 
 | Impact area | Ideas | Highest initial value |
 | --- | ---: | ---: |
-| [System & Reliability](#system-reliability) | 3 | 1 High |
-| [Usability & Technician Experience](#usability-technician-experience) | 5 | 2 High |
-| [Client Experience & Service](#client-experience-service) | 6 | 4 High |
-| [Security & Governance](#security-governance) | 1 | 1 High |
-| [Efficiency & Automation](#efficiency-automation) | 7 | 0 High |
-| [Business & Growth](#business-growth) | 22 | 9 High |
+| System & Reliability | 3 | 1 High |
+| Usability & Technician Experience | 5 | 2 High |
+| Client Experience & Service | 6 | 4 High |
+| Security & Governance | 1 | 1 High |
+| Efficiency & Automation | 7 | 0 High |
+| Business & Growth | 22 | 9 High |
 
 ## Browsable ideas by impact
 
