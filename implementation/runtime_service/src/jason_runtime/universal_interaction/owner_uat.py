@@ -63,6 +63,8 @@ def create_nonexecuting_approval(
     approval_id = APPROVAL_PREFIX + hashlib.sha256(
         ("owner-acceptance:1:" + session_id).encode("utf-8")
     ).hexdigest()[:32]
+    followup = session_id.endswith(".approve")
+    phase = "2/2: APPROVE" if followup else "1/2: DENY"
     return ApprovalRequest(
         approval_id=approval_id,
         request_id="owner-uat:" + session_id,
@@ -73,7 +75,7 @@ def create_nonexecuting_approval(
         expires_at=now + timedelta(seconds=TTL_SECONDS),
         authorized_approver_ids=(owner_identity_id,),
         presentation=ApprovalPresentation(
-            title="TEST ONLY: Jason owner approval in Teams",
+            title="TEST ONLY: Jason owner approval in Teams (" + phase + ")",
             summary=(
                 "This is a NONEXECUTING acceptance test. Choose Approve or "
                 "Deny to verify Teams authorization; no production, ticket, "
@@ -84,7 +86,7 @@ def create_nonexecuting_approval(
                 ("Session", session_id),
                 ("Impact", "None: records one test approval decision"),
                 ("Expires", (now + timedelta(seconds=TTL_SECONDS)).isoformat()),
-                ("Next action", "Confirm the button you personally clicked"),
+                ("Next action", "Click APPROVE (test only)" if followup else "Click DENY (test only)"),
             ),
         ),
         metadata={"test_only": "true", "execution_permitted": "false"},
@@ -269,12 +271,25 @@ class OwnerUatMaintenance:
     def tick(self) -> bool:
         if not self.enabled:
             return False
-        if not SESSION_ID.fullmatch(self.session_id):
-            raise ValueError("invalid bounded UAT session")
+        if not SESSION_ID.fullmatch(self.session_id) or len(self.session_id) > 88:
+            raise ValueError("invalid bounded UAT campaign session")
         candidate = create_nonexecuting_approval(
             session_id=self.session_id, now=self.issuer.clock()
         )
-        if self.issuer.requests.repository.get(candidate.approval_id) is not None:
+        first = self.issuer.requests.repository.get(candidate.approval_id)
+        if first is None:
+            self.issuer.issue(session_id=self.session_id)
+            return True
+        # The second card is contingent on the *verified* terminal DENY
+        # receipt from the real signed gateway. Never send both at once,
+        # infer a click from provider delivery, or resend ambiguous sends.
+        if first.status != ApprovalRequestStatus.DENIED:
             return False
-        self.issuer.issue(session_id=self.session_id)
+        followup_session = self.session_id + ".approve"
+        followup = create_nonexecuting_approval(
+            session_id=followup_session, now=self.issuer.clock()
+        )
+        if self.issuer.requests.repository.get(followup.approval_id) is not None:
+            return False
+        self.issuer.issue(session_id=followup_session)
         return True
