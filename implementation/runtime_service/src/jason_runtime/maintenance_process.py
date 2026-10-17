@@ -35,6 +35,7 @@ def http_runtime_settings(settings: RuntimeSettings) -> RuntimeSettings:
         autonomy_review_enabled=False,
         support_repair_autonomy_enabled=False,
         universal_approval_worker_enabled=False,
+        release_mobile_approval_worker_enabled=False,
     )
 
 

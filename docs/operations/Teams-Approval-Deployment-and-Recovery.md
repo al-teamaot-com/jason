@@ -258,3 +258,12 @@ is part of the owner-only callback pilot.
 - owner identities are drawn from the existing configured owner-approval identity set.
 
 Do not delete or edit a decided review record to obtain another approval prompt. A denied or changes-requested playbook must change materially and produce a new fingerprint before returning to owner review. Expired/cancelled requests may be regenerated.
+
+## Mobile release/CCC owner pilot
+
+A separate, **disabled-by-default** owner-only release/CCC mobile approval
+adapter is described in [Mobile Teams Release and CCC Approval](Mobile-Teams-Release-and-CCC-Approval.md).
+It reuses the authenticated Teams ingress and durable Jason decision ledger,
+requires fresh independent host verification before converting one decision
+into exact-SHA owner review records, and retains every release/CCC deployment
+gate. Source presence is not proof of production activation.

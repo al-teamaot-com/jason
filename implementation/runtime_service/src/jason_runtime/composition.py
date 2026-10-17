@@ -582,6 +582,14 @@ class RuntimeSettings:
     universal_approval_worker_enabled: bool = True
     universal_approval_db: Path = Path("/var/lib/jason/openclaw/universal-approvals.sqlite3")
     universal_approval_policy: Path = Path("/var/lib/jason/authority/universal-approval-policy.json")
+    # Separate, opt-in AOT owner-only release/CCC mobile pilot. This never
+    # borrows broad Datto/procurement owner roles or auto-enables Universal.
+    release_mobile_approval_mode: str = "off"
+    release_mobile_approval_worker_enabled: bool = True
+    release_mobile_approval_policy: Path = Path("/var/lib/jason/authority/mobile-release-approval-policy.json")
+    release_mobile_approval_db: Path = Path("/var/lib/jason/openclaw/mobile-release-approvals.sqlite3")
+    release_mobile_state_root: Path = Path("/var/lib/jason/openclaw/release-manager")
+    release_mobile_interval_seconds: int = 300
     host: str = "0.0.0.0"
     port: int = 8080
 
@@ -1036,6 +1044,25 @@ class RuntimeSettings:
             ).strip().casefold() in {"1", "true", "yes", "on"},
             universal_approval_db=Path(os.getenv("JASON_UNIVERSAL_APPROVAL_DB", "/var/lib/jason/openclaw/universal-approvals.sqlite3")),
             universal_approval_policy=Path(os.getenv("JASON_UNIVERSAL_APPROVAL_POLICY", "/var/lib/jason/authority/universal-approval-policy.json")),
+            release_mobile_approval_mode=os.getenv("JASON_RELEASE_MOBILE_APPROVAL_MODE", "off").strip().lower(),
+            release_mobile_approval_worker_enabled=os.getenv(
+                "JASON_RELEASE_MOBILE_APPROVAL_WORKER_ENABLED", "true"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            release_mobile_approval_policy=Path(os.getenv(
+                "JASON_RELEASE_MOBILE_APPROVAL_POLICY",
+                "/var/lib/jason/authority/mobile-release-approval-policy.json",
+            )),
+            release_mobile_approval_db=Path(os.getenv(
+                "JASON_RELEASE_MOBILE_APPROVAL_DB",
+                "/var/lib/jason/openclaw/mobile-release-approvals.sqlite3",
+            )),
+            release_mobile_state_root=Path(os.getenv(
+                "JASON_RELEASE_MOBILE_STATE_ROOT",
+                "/var/lib/jason/openclaw/release-manager",
+            )),
+            release_mobile_interval_seconds=int(os.getenv(
+                "JASON_RELEASE_MOBILE_INTERVAL_SECONDS", "300"
+            )),
             procurement_inventory_location_id=int(
                 os.getenv("JASON_PROCUREMENT_INVENTORY_LOCATION_ID", "1")
             ),
@@ -1048,6 +1075,10 @@ class RuntimeSettings:
     def validate(self) -> None:
         if self.universal_approval_mode not in {"off", "enforced"}:
             raise ValueError("JASON_UNIVERSAL_APPROVAL_MODE must be off or enforced")
+        if self.release_mobile_approval_mode not in {"off", "owner_only_pilot"}:
+            raise ValueError("JASON_RELEASE_MOBILE_APPROVAL_MODE must be off or owner_only_pilot")
+        if self.release_mobile_interval_seconds < 60:
+            raise ValueError("mobile release approval scans require at least a 60-second interval")
         if not self.ollama_model:
             raise ValueError("JASON_OLLAMA_MODEL is required")
         if self.procurement_inventory_location_id < 1:
@@ -2407,10 +2438,55 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
             actions=procurement_worker,
         )
 
+    release_mobile_flow = None
+    release_mobile_maintenance = None
+    if settings.release_mobile_approval_mode == "owner_only_pilot":
+        from .mobile_release_approval import (
+            MobileReleaseApprovalFlow, MobileReleaseApprovalMaintenance,
+            MobileReleaseOwnerAuthority, MobileReleaseSignedEvidenceStore,
+            read_mobile_release_policy,
+        )
+        from .universal_teams_approval import SignedTeamsApprovalEvidenceVerifier
+        owner_policy = read_mobile_release_policy(settings.release_mobile_approval_policy)
+        release_repo = SQLiteApprovalRequestRepository(settings.release_mobile_approval_db)
+        release_approval_service = ApprovalRequestService(
+            release_repo, MobileReleaseOwnerAuthority(settings.release_mobile_approval_policy),
+        )
+        release_mobile_flow = MobileReleaseApprovalFlow(
+            approvals=release_approval_service,
+            requests=release_repo,
+            policy_path=settings.release_mobile_approval_policy,
+            state_root=settings.release_mobile_state_root,
+            bindings=durable_bindings,
+            identities=SQLiteIdentityRepository(authority_store),
+            signed_verifier=SignedTeamsApprovalEvidenceVerifier(
+                authenticator=teams_authenticator,
+                allowed_machine_identities=settings.allowed_machine_identities,
+                allowed_approval_prefixes=("relapproval-",),
+            ),
+            signed_evidence=MobileReleaseSignedEvidenceStore(settings.release_mobile_approval_db),
+        )
+        if settings.release_mobile_approval_worker_enabled:
+            release_mobile_maintenance = MobileReleaseApprovalMaintenance(
+                enabled=True,
+                policy_path=settings.release_mobile_approval_policy,
+                state_root=settings.release_mobile_state_root,
+                requests=release_repo,
+                approvals=release_approval_service,
+                sender=TeamsGatewayPlaybookApprovalSender(
+                    gateway_url=settings.teams_gateway_internal_url,
+                    token_file=settings.teams_proactive_token_file,
+                    bindings=durable_bindings,
+                    owner_identity_ids=owner_policy.owner_identity_ids,
+                ),
+                interval_seconds=settings.release_mobile_interval_seconds,
+            )
+
     approval_interaction_flow = ApprovalInteractionDispatcher(
         procurement=procurement_approval_flow,
         fallback=playbook_approval_flow,
         universal=universal_approval_handler,
+        mobile_release=release_mobile_flow,
     )
 
     governed_ingress = GovernedOpenClawTeamsConversationIngress(
@@ -2549,6 +2625,7 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
             token_file=settings.teams_proactive_token_file,
         )
     autonomy_maintenance = CompositeAutonomyMaintenance(
+        release_mobile_maintenance,
         universal_plan_maintenance,
         universal_plan_status_maintenance,
         playbook_review_maintenance,

@@ -24,6 +24,7 @@ class SignedTeamsApprovalEvidenceVerifier:
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
     max_age_seconds: int = 120
     max_clock_skew_seconds: int = 60
+    allowed_approval_prefixes: tuple[str, ...] = ("planapproval-",)
 
     def parse(self, token: str) -> tuple[str, OpenClawTeamsConversationEnvelope]:
         if not isinstance(token, str) or len(token.encode('utf-8')) > 65536:
@@ -45,8 +46,11 @@ class SignedTeamsApprovalEvidenceVerifier:
         if (age < -self.max_clock_skew_seconds or age > self.max_age_seconds
                 or parsed.expires_at <= parsed.issued_at or now >= parsed.expires_at):
             raise PermissionError('Teams approval evidence expired or not yet valid')
-        if parsed.approval_submit is None or not parsed.approval_submit.approval_id.startswith('planapproval-'):
-            raise PermissionError('signed universal approval interaction required')
+        if (parsed.approval_submit is None or not any(
+                parsed.approval_submit.approval_id.startswith(prefix)
+                for prefix in self.allowed_approval_prefixes
+        )):
+            raise PermissionError('signed approval interaction is outside the configured route')
         if parsed.approval_submit.selections or parsed.documents:
             raise PermissionError('plan approval response cannot change reviewed plan material')
         return machine, parsed
