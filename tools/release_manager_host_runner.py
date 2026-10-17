@@ -47,6 +47,10 @@ MUTATION_ENV_OVERRIDES = {
     "JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED": "false",
     "JASON_UNIVERSAL_APPROVAL_MODE": "off",
     "JASON_UNIVERSAL_APPROVAL_WORKER_ENABLED": "false",
+    # Isolated preproduction must not issue real owner Teams cards or read
+    # live mobile release approvals even when production mode is enabled.
+    "JASON_RELEASE_MOBILE_APPROVAL_MODE": "off",
+    "JASON_RELEASE_MOBILE_APPROVAL_WORKER_ENABLED": "false",
 }
 
 CONTROLLER_SOURCE = Path(__file__).resolve()
@@ -2631,6 +2635,17 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
     policy = gate.load_json(repo / "config" / "release-manager-policy.json")
     if (policy.get("schedule") or {}).get("automatic_promotion_enabled") is not True:
         return False
+    # Mobile Teams owner decisions are checked independently against the
+    # registered gateway signature, active Entra/Jason owner binding, exact
+    # release manifest, 0600 versioned policy and durable single-use receipt.
+    # Disabled by default: no policy/ledger => no mobile authorization.
+    tools_root = str(repo / "tools")
+    if tools_root not in sys.path:
+        sys.path.insert(0, tools_root)
+    from release_mobile_approval_consumer import consume_mobile_release_decisions
+    consume_mobile_release_decisions(
+        repo=repo, state_root=state_root, approve_release=approve_release,
+    )
     consume_owner_approval_requests(repo, state_root)
     if not production_window_open():
         return False
@@ -2644,6 +2659,15 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
         # outage. No approval or queued release state is changed.
         print("RELEASE_MANAGER_AUTO_DEFERRED=authoritative_main_unavailable", flush=True)
         return False
+    # Cards are issued only for the exact release independently found at
+    # protected GitHub main and the still-matching live rollback baseline.
+    # A 5-minute signed-review offer eliminates stale historical approval spam.
+    offer_root = state_root / "mobile-release-offers"
+    if (Path("/var/lib/jason/authority/mobile-release-approval-policy.json").is_file()
+            and offer_root.is_dir()):
+        for old in offer_root.glob("release-*.json"):
+            if old.stem != record_id(main_sha):
+                old.unlink()
     superseded = 0
     for path in sorted(records.glob("*.json"), key=lambda item: item.stat().st_mtime):
         record = json.loads(path.read_text(encoding="utf-8"))
@@ -2686,6 +2710,21 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
             save_record(state_root, record)
             continue
 
+        if (Path("/var/lib/jason/authority/mobile-release-approval-policy.json").is_file()
+                and (record.get("owner_approval") or {}).get("approved") is not True
+                and record.get("risk_profile") == "normal"):
+            offer_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            offer = offer_root / (record_id(candidate_sha) + ".json")
+            atomic_json(offer, {
+                "schema_version": "1.0", "release_id": record_id(candidate_sha),
+                "candidate_sha": candidate_sha,
+                "manifest_sha256": hashlib.sha256(json.dumps(
+                    record["release_manifest"], sort_keys=True, separators=(",", ":"),
+                    ensure_ascii=False,
+                ).encode("utf-8")).hexdigest(),
+                "protected_main_sha": main_sha, "live_rollback_sha": current_sha,
+                "published_at": now(),
+            })
         result = production_gate_result(repo, record)
         if result.get("allowed") is True:
             # Close the TOCTOU gap between scanning the queue and opening the

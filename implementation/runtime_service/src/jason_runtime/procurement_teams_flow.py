@@ -3065,8 +3065,13 @@ class ApprovalInteractionDispatcher:
     procurement: ProcurementApprovalInteractionFlow | None
     fallback: Any | None
     universal: Any | None = None
+    mobile_release: Any | None = None
 
     def handle(self, *, approval_id: str, **kwargs):
+        if approval_id.startswith("relapproval-"):
+            if self.mobile_release is None:
+                raise PermissionError("mobile release approval flow is not configured")
+            return self.mobile_release.handle(approval_id=approval_id, **kwargs)
         # A bounded-plan intent must not fall through to another approval authority.
         if approval_id.startswith("planapproval-"):
             if self.universal is None:
