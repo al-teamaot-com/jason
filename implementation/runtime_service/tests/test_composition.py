@@ -249,6 +249,21 @@ def test_playbook_approve_callback_remains_live_when_maintenance_is_split(tmp_pa
     # provider action, production authority or real Teams message was touched.
     assert len(promotions.list_all()) == 1
 
+    # A second button delivery cannot reuse the already-consumed approval.
+    with pytest.raises(ValueError, match="no longer pending"):
+        dispatcher.handle(
+            approval_id=request.approval_id,
+            decision="approve",
+            microsoft_tenant_id="tenant-a",
+            microsoft_object_id="object-owner",
+            conversation_id="test-conversation",
+            channel_response_id="replayed-owner-message",
+            decided_at=now + timedelta(seconds=40),
+        )
+    assert len(promotions.list_all()) == 1
+    assert requests.accepted_decision(request.approval_id).channel_response_id == "owner-message"
+
+
 def test_procurement_web_profile_seeds_exact_aot_observe_authority(tmp_path, monkeypatch):
     monkeypatch.setenv(PROCUREMENT_WEB_READ_PROFILE_ENV, PROCUREMENT_WEB_READ_PROFILE)
     application = build_runtime_application(_settings(tmp_path))
