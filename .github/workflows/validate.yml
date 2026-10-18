@@ -203,6 +203,10 @@ jobs:
             tools/tests/test_reconcile_production_host_services.py
       - name: Test governed TODO engineering intake
         run: python3 -B -m unittest tools.tests.test_todo_engineering_intake
+      - name: Test owner-approved development recovery and legacy handoff
+        env:
+          PYTHONPATH: tools
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tools/tests/test_owner_approved_development_worker.py
       - name: Test TODO Release Manager bridge
         run: python3 -B -m unittest tools.tests.test_todo_release_bridge
       - name: Test TODO engineering host wiring
