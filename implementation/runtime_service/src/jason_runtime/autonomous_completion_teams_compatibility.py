@@ -8,12 +8,17 @@ recipient, delivery journal and provider transport remain authoritative.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Mapping
+
+from communication.audience.models import AudienceType, MessagePurpose
 
 from .autonomous_completion_notification import _render
 from .universal_interaction.contracts import Fact, Interaction, InteractionKind, VisualIntent
-from .universal_interaction.service import InteractionDelivery, UniversalInteractionService
+from .universal_interaction.service import (
+    AuthorizedRoute, InteractionDelivery, InteractionRejected, RouteAuthority,
+    UniversalInteractionService,
+)
 from .universal_interaction.teams import ExistingTeamsInteractionAdapter
 
 
@@ -122,6 +127,43 @@ def prepare_status_notice_preview(
 
 
 @dataclass(frozen=True)
+class ExistingOwnerStatusRouteGuard:
+    """Pin the current AOT owner route; delegate determines actual authority.
+
+    Never change the recipient just because a new renderer handles a message.
+    This is called *once* inside UniversalInteractionService dispatch.
+    """
+    delegate: RouteAuthority
+
+    def authorize(self, spec: Interaction) -> AuthorizedRoute:
+        if (spec.workflow != WORKFLOW
+                or spec.requester_identity_id != REQUESTER
+                or spec.organization_id != ORGANIZATION
+                or spec.client_id is not None
+                or spec.approval_id is not None
+                or spec.actions
+                or spec.kind not in (InteractionKind.NOTICE, InteractionKind.PROGRESS)):
+            raise InteractionRejected("status request is not approved for this migration")
+        route = self.delegate.authorize(spec)
+        expected_purpose = (
+            MessagePurpose.TICKET_UPDATE
+            if spec.kind is InteractionKind.PROGRESS and "ticket" in spec.title.casefold()
+            else MessagePurpose.OPERATIONAL
+        )
+        if (not isinstance(route, AuthorizedRoute)
+                or not route.allowed
+                or route.recipient_identity_id != RECIPIENT
+                or route.organization_id != ORGANIZATION
+                or route.client_id is not None
+                or route.audience_type is not AudienceType.EXECUTIVE
+                or route.purpose is not expected_purpose
+                or route.channels != ("teams",)
+                or not route.authorization_ref):
+            raise InteractionRejected("existing AOT owner Teams route was changed")
+        return route
+
+
+@dataclass(frozen=True)
 class GovernedAutonomyStatusInteractionPort:
     """Future single-sender integration seam; NEVER called by production yet.
 
@@ -144,4 +186,10 @@ class GovernedAutonomyStatusInteractionPort:
                 or preview.interaction.kind not in (InteractionKind.NOTICE, InteractionKind.PROGRESS)):
             raise PermissionError("canonical status route cannot broaden notification scope")
         # No transport is invoked outside this already-governed facade.
-        return self.interactions.dispatch(preview.interaction)
+        # One checked authority resolution inside the EXISTING UIS execution,
+        # not an authorization preflight plus a potentially changed route.
+        protected = replace(
+            self.interactions,
+            authority=ExistingOwnerStatusRouteGuard(self.interactions.authority),
+        )
+        return protected.dispatch(preview.interaction)
