@@ -175,3 +175,24 @@ def test_immutable_revision_alias_symlink_cannot_masquerade_as_different_sha(tmp
     alias.symlink_to(candidate, target_is_directory=True)
     with pytest.raises(mod.UnitDeltaError, match="exact immutable"):
         mod.pinned_release(alias, root)
+
+
+def test_unit_delta_cli_denies_unprivileged_execution(tmp_path):
+    import os
+    import subprocess
+    import sys
+    if os.geteuid() == 0:
+        pytest.skip("non-root denial exercised on the regular runner")
+    root, candidate, target, installed, user = setup_releases(tmp_path)
+    manifest(candidate)
+    manifest(target)
+    result = subprocess.run(
+        [
+            sys.executable, str(MODULE), "--release-root", str(root),
+            "--candidate", str(candidate), "--target", str(target),
+            "--scope", "system", "--installed-dir", str(installed),
+        ],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert "root host reconciliation is required" in result.stderr
