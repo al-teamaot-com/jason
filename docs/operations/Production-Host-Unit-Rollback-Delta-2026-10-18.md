@@ -38,6 +38,12 @@ systemd when required, and then proceeds with normal target source installation
 and the existing drift guard. Plan or removal errors fail closed. No source,
 tenant, provider, or endpoint permission is broadened.
 
+The release policy and change-risk classifier explicitly treat both the root
+host-reconciliation script and this new planner as PROTECTED CORE, requiring
+exact-source Owner approval even when general autonomous repair releases are
+permitted. The prior release policy omitted the root script from its explicit
+protected list; this gap must be repaired before allowing this PR to merge.
+
 This is limited to source-installed units proven to match the previous
 release. Manually modified/third-party units are NOT removed automatically and
 must remain an explicit blocker for examination. The fixed obsolete-unit
