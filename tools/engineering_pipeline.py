@@ -124,8 +124,12 @@ def blocked_critical_support(spool: Path, repo: Path) -> dict[str, Any] | None:
                     and not any(status in cells[3].casefold()
                                 for status in ("closed", "resolved", "reclassified"))):
                 critical.add(cells[1])
+        mismatches = state.get("support_state_mismatches", {})
+        not_open = set(mismatches.get("support_open_issue_not_open", [])) if isinstance(mismatches, dict) else set()
+        # A stale SUPPORT.md row never reopens a GitHub issue that is closed.
         blocked = sorted(item for item in critical
-                         if isinstance(items.get(item), dict)
+                         if item not in not_open
+                         and isinstance(items.get(item), dict)
                          and items[item].get("phase") in {"blocked", "escalated"})
         audit = state.get("admission_audit", {})
         missing = sorted(str(item) for item in audit.get("unadmitted_p0", [])) if isinstance(audit, dict) else []

@@ -68,12 +68,15 @@ class PipelineTests(unittest.TestCase):
         (repo / "SUPPORT.md").write_text(
             "| SUPPORT-OPS-054 | P0 | Open | Critical | evidence | acceptance |\n"
             "| SUPPORT-OPS-077 | P0 | Closed 2026-10-17 | Historical | evidence | acceptance |\n"
+            "| SUPPORT-OPS-088 | P0 | Open stale | Historical | evidence | acceptance |\n"
             "| SUPPORT-OPS-099 | P1 | Open | Routine | evidence | acceptance |\n"
         )
         (self.spool / "state.json").write_text(json.dumps({
             "items": {"SUPPORT-OPS-054": {"phase": "blocked"},
                       "SUPPORT-OPS-077": {"phase": "blocked"},
+                      "SUPPORT-OPS-088": {"phase": "blocked"},
                       "SUPPORT-OPS-099": {"phase": "blocked"}},
+            "support_state_mismatches": {"support_open_issue_not_open": ["SUPPORT-OPS-088"]},
             "admission_audit": {"unadmitted_p0": []},
         }))
         state = self.execute()

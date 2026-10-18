@@ -71,7 +71,10 @@ not a claim that the installed worker or production release is already updated.
 `critical_support_blocker` is a separate, read-only pipeline health field.
 The coordinator reads fetched `origin/main:SUPPORT.md` rather than trusting a
 locally checked-out developer branch, compares canonical P0 support rows with
-existing repair states, and records bounded blocked IDs/counts. Open P0 issues
+existing repair states, and records bounded blocked IDs/counts. The worker's
+`support_open_issue_not_open` mismatch evidence suppresses stale rows whose
+GitHub issue is actually closed; this health projection does not reopen them.
+Open P0 issues
 missing a canonical row are surfaced from the existing admission audit. When
 canonical source evidence is unavailable, health is degraded as
 `support_health_unknown` rather than guessed from stale source.
