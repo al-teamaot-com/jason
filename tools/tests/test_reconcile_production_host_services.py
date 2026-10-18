@@ -149,6 +149,44 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'timeout --signal=TERM --kill-after=5s 180s env JASON_REPO_ROOT=' in text
 
 
+def test_rollback_unit_delta_is_checked_before_immutable_host_revision_switch() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    planner = 'UNIT_DELTA_PLANNER="$RELEASE_DIR/tools/reconcile_managed_unit_delta.py"'
+    plan_system = '--scope system --installed-dir /etc/systemd/system'
+    plan_user = '--scope user --installed-dir /home/al/.config/systemd/user'
+    assert planner in text
+    assert plan_system in text
+    assert plan_user in text
+    assert 'PREVIOUS_HOST_RELEASE="$(readlink -f "$CURRENT_LINK"' in text
+    assert text.index("step_start release_owned_unit_delta") < text.index(
+        'ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"'
+    )
+    assert text.index(plan_system) < text.index('for unit in "${REMOVE_SYSTEM_UNITS[@]}"; do')
+    assert text.index(plan_user) < text.index('for unit in "${REMOVE_USER_UNITS[@]}"; do')
+    # Revalidate both candidate-only sets before any mutation.
+    assert text.index(plan_user) < text.index('for unit in "${REMOVE_SYSTEM_UNITS[@]}"; do')
+    assert 'rm -f -- "/etc/systemd/system/$unit"' in text
+    assert 'rm -f -- "/home/al/.config/systemd/user/$unit"' in text
+    assert 'systemctl disable --now "$unit"' in text
+    assert 'systemctl --user disable --now "$unit"' in text
+    assert 'cp -a "/etc/systemd/system/$unit" "$BACKUP_DIR/system-$unit.before"' in text
+    assert 'cp -a "/home/al/.config/systemd/user/$unit" "$BACKUP_DIR/user-$unit.before"' in text
+    assert "step_pass release_owned_unit_delta" in text
+    assert 'run_as_al systemctl --user daemon-reload' in text
+    assert text.index("step_pass release_owned_unit_delta") < text.index("step_start production_drift_guard")
+
+
+def test_rollback_unit_delta_planner_is_root_only_and_read_only() -> None:
+    planner = REPO_ROOT / "tools" / "reconcile_managed_unit_delta.py"
+    text = planner.read_text(encoding="utf-8")
+    assert 'if os.geteuid() != 0:' in text
+    assert "expected_installed" in text
+    assert "MAX_AUTO_REMOVALS = 8" in text
+    for forbidden in ("subprocess.run", "os.unlink", "shutil.rmtree", "systemctl"):
+        assert forbidden not in text
+    assert 'print(unit)' in text
+
+
 def test_reconciliation_fails_closed_without_root() -> None:
     revision = subprocess.run(
         ["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"],
