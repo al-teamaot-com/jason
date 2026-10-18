@@ -63,6 +63,17 @@ def test_parse_support_prioritizes_open_items_and_keeps_acceptance():
     assert parsed[0]['acceptance'] == 'acceptance 1'
 
 
+def test_distinct_rollback_and_toner_support_identities_in_canonical_source():
+    source = (MODULE.parents[1] / 'SUPPORT.md').read_text(encoding='utf-8')
+    rows = worker.parse_support(source)
+    rollback = [row for row in rows if row['id'] == 'SUPPORT-OPS-058']
+    assert len(rollback) == 1
+    assert 'issue #1101' in rollback[0]['status']
+    assert 'rollback' in rollback[0]['title'].lower()
+    assert not any(row['id'] == 'SUPPORT-OPS-051' for row in rows)
+    assert 'Closed 2026-10-07 — issue #1091' in source
+
+
 def test_repair_pr_requires_support_metadata():
     prs = [
         {'number': 10, 'body': '- Support item: SUPPORT-OPS-100\n- Release class: autonomous-repair-candidate'},
