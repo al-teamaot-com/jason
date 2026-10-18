@@ -802,8 +802,9 @@ def reconcile_exhausted_recovery_diagnostics(
             # A signed-in owner-approved item and the original worker error
             # remain required. Neither retry nor admission authority is granted.
             if (record.get('blocker_class') == 'internal_retry_exhausted'
-                    and isinstance(record.get('issue_number'), int)
+                    and type(record.get('issue_number')) is int
                     and record['issue_number'] > 0
+                    and item_id == f'DEV-{record["issue_number"]}'
                     and str(record.get('reason') or '').strip()):
                 from hashlib import sha256
                 import json

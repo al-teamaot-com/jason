@@ -1758,3 +1758,37 @@ def test_failed_diagnostic_without_verified_original_blocker_does_not_route(monk
     module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-1196'}, tmp_path)
     assert not list((tmp_path / 'development-recovery').rglob('*.json'))
     assert record['phase'] == 'blocked'
+
+
+def test_failed_diagnostic_requires_matching_canonical_issue_identity(monkeypatch, tmp_path):
+    record = {'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+              'issue_number': 1459, 'reason': 'HTTP 400 transport failure',
+              'recovery_diagnostic_request_id': 'request-123'}
+    state = {'items': {'DEV-1196': record}}
+    monkeypatch.setattr(module.support, 'reasoning_response', lambda spool, rid: {
+        'request_id': rid, 'status': 'failed', 'error_type': 'ConnectorTransportError'})
+    module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-1196'}, tmp_path)
+    module.reconcile_recovery_handoff_intake(state, {'DEV-1196'}, tmp_path)
+    assert record['phase'] == 'blocked'
+    assert 'recovery_handoff_id' not in record
+    assert 'recovery_handoff_intake' not in record
+    assert not list((tmp_path / 'development-recovery').rglob('*.json'))
+
+
+def test_failed_diagnostic_handoff_is_idempotent_and_preserves_retry_budget(monkeypatch, tmp_path):
+    record = {'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+              'issue_number': 1196, 'reason': 'HTTP 400 transport failure',
+              'self_recovery_attempts': 2,
+              'recovery_diagnostic_request_id': 'request-123'}
+    state = {'items': {'DEV-1196': record}}
+    monkeypatch.setattr(module.support, 'reasoning_response', lambda spool, rid: {
+        'request_id': rid, 'status': 'failed', 'error_type': 'ConnectorTransportError'})
+    module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-1196'}, tmp_path)
+    handoff = record['recovery_handoff_id']
+    at = record['recovery_diagnostic_result_at']
+    module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-1196'}, tmp_path)
+    assert record['recovery_handoff_id'] == handoff
+    assert record['recovery_diagnostic_result_at'] == at
+    assert record['self_recovery_attempts'] == 2
+    assert record['phase'] == 'blocked'
+    assert len(list((tmp_path / 'development-recovery' / 'handoffs').glob('*.json'))) == 1
