@@ -134,6 +134,7 @@ class ExistingOwnerStatusRouteGuard:
     This is called *once* inside UniversalInteractionService dispatch.
     """
     delegate: RouteAuthority
+    event_type: str
 
     def authorize(self, spec: Interaction) -> AuthorizedRoute:
         if (spec.workflow != WORKFLOW
@@ -147,8 +148,7 @@ class ExistingOwnerStatusRouteGuard:
         route = self.delegate.authorize(spec)
         expected_purpose = (
             MessagePurpose.TICKET_UPDATE
-            if spec.kind is InteractionKind.PROGRESS and "ticket" in spec.title.casefold()
-            else MessagePurpose.OPERATIONAL
+            if self.event_type == "ticket_status_updated" else MessagePurpose.OPERATIONAL
         )
         if (not isinstance(route, AuthorizedRoute)
                 or not route.allowed
@@ -190,6 +190,6 @@ class GovernedAutonomyStatusInteractionPort:
         # not an authorization preflight plus a potentially changed route.
         protected = replace(
             self.interactions,
-            authority=ExistingOwnerStatusRouteGuard(self.interactions.authority),
+            authority=ExistingOwnerStatusRouteGuard(self.interactions.authority, preview.event_type),
         )
         return protected.dispatch(preview.interaction)
