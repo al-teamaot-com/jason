@@ -443,11 +443,29 @@ def branch_name(item_id: str) -> str:
     return 'repair/' + item_id.casefold().replace('_', '-').replace('/', '-')
 
 
+def support_worktree_path(item_id: str, branch: str | None = None) -> Path:
+    # An exact failed-anchor incident may need a fresh, separately named
+    # worktree. Its previous partial proposal remains untouched for audit.
+    if re.fullmatch(SUPPORT_ID_PATTERN, item_id) is None:
+        raise WorkerError('invalid support identity for repair worktree')
+    normal = branch_name(item_id)
+    if branch and re.fullmatch(re.escape(normal) + r'-anchor-[0-9a-f]{12}', branch):
+        return Path('/home/al/jason-worktrees/support-repair') / branch.split('/')[-1]
+    return Path('/home/al/jason-worktrees/support-repair') / item_id.casefold()
+
+
 def ensure_worktree(repo: Path, item_id: str, branch: str | None = None) -> Path:
     root = Path('/home/al/jason-worktrees/support-repair')
+    if root.is_symlink():
+        raise WorkerError('repair worktree root must not be a symlink')
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    path = root / item_id.casefold()
+    path = support_worktree_path(item_id, branch)
+    if path.is_symlink():
+        raise WorkerError('repair worktree path is a symlink')
     if path.exists():
+        if (branch and branch != branch_name(item_id)
+                and run(['git', 'branch', '--show-current'], cwd=path) != branch):
+            raise WorkerError('recovery worktree does not match its pinned branch')
         return path
     run(['git', 'fetch', '--no-tags', 'origin', 'main'], cwd=repo)
     selected = branch or branch_name(item_id)
@@ -1493,6 +1511,232 @@ def readmit_recovered_reasoning(
     return resumed
 
 
+
+
+def original_partial_edits_match_known_proposal(
+    worktree: Path,
+    edits: list[Mapping[str, Any]],
+    dirty_paths: list[str],
+    failure: str,
+    gate,
+    policy: Mapping[str, Any],
+) -> bool:
+    """Replay original proposals in memory; never modify the old worktree.
+
+    Recovery is not permitted for a technician's unrelated modification,
+    even if it happened in the same path a model suggested changing.
+    """
+    originals: dict[str, str] = {}
+    staged: dict[str, str] = {}
+    failed_at_exact_anchor = False
+    for edit in edits:
+        if not isinstance(edit, Mapping):
+            return False
+        path = str(edit.get('path') or '')
+        old_text = str(edit.get('old_text') or '')
+        new_text = str(edit.get('new_text') or '')
+        loc = Path(path)
+        if (not path or loc.is_absolute() or '..' in loc.parts
+                or gate.path_denial_reason(path, dict(policy))):
+            return False
+        target = worktree / path
+        if target.is_symlink() or not target.is_file():
+            return False  # No new/untracked paths in this legacy replay.
+        if target.resolve() != worktree.resolve() / path:
+            return False
+        if path not in originals:
+            output = subprocess.run(
+                ['git', 'show', 'HEAD:' + path],
+                cwd=worktree, check=False, stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            if output.returncode or len(output.stdout) > 200000:
+                return False
+            try:
+                originals[path] = output.stdout.decode('utf-8')
+            except UnicodeDecodeError:
+                return False
+        before = staged.get(path, originals[path])
+        count = before.count(old_text) if old_text else 0
+        if count != 1:
+            failed_at_exact_anchor = (
+                failure == f'WorkerError: exact repair anchor must occur once in {path}; found {count}'
+            )
+            break
+        staged[path] = before.replace(old_text, new_text, 1)
+    if not failed_at_exact_anchor:
+        return False
+    actual_paths = set(dirty_paths)
+    expected_paths = {path for path, value in staged.items()
+                      if value != originals[path]}
+    if actual_paths != expected_paths:
+        return False
+    try:
+        return all(
+            (worktree / path).read_text(encoding='utf-8') == staged[path]
+            for path in actual_paths
+        )
+    except (OSError, UnicodeError):
+        return False
+
+
+def readmit_preserved_anchor_failure(
+    state: dict[str, Any],
+    eligible: list[dict[str, str]],
+    repo: Path,
+    spool: Path,
+    gate,
+    policy: Mapping[str, Any],
+    *,
+    max_active: int,
+) -> list[str]:
+    """Preserve a legacy partial repair and resume in a NEW clean worktree.
+
+    Only the original exact, successfully answered edit request can authorize
+    a one-time correction. No prior worktree is reset, stashed, or discarded.
+    The original partial diff is durably captured for later review.
+    """
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active_phases = {'diagnosing', 'implementing', 'ci_repair_needed', 'ci_repairing'}
+    active = sum(1 for value in records.values() if isinstance(value, Mapping)
+                 and value.get('phase') in active_phases)
+    slots = max(0, max(1, int(max_active)) - active)
+    resumed: list[str] = []
+    for item in eligible:
+        if slots <= 0:
+            break
+        item_id = str(item.get('id') or '')
+        record = records.get(item_id)
+        if not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        if record.get('anchor_preserved_recovery_id') or record.get('pr_number'):
+            continue
+        if int(record.get('proposal_retries') or 0) >= 2:
+            continue
+        reason = str(record.get('reason') or '')
+        if re.fullmatch(
+                r'WorkerError: exact repair anchor must occur once in [^\n;]{1,240}; found (?:0|[2-9][0-9]*)',
+                reason) is None:
+            continue
+        rid = str(record.get('reasoning_request_id') or '')
+        if re.fullmatch(r'[0-9a-f]{64}', rid) is None:
+            continue
+        response = reasoning_response(spool, rid)
+        if (not isinstance(response, Mapping)
+                or response.get('status') != 'succeeded'
+                or response.get('request_id') != rid
+                or response.get('kind') != 'edit_plan'
+                or response.get('support_item') != item_id):
+            continue
+        result = response.get('result')
+        if not isinstance(result, Mapping) or result.get('blocked_reason'):
+            continue
+        edits = result.get('edits')
+        if not isinstance(edits, list) or not edits or len(edits) > 12:
+            continue
+        original_branch = branch_name(item_id)
+        if record.get('branch') != original_branch:
+            continue  # Never replace a branch chosen by a technician.
+        old = support_worktree_path(item_id, original_branch)
+        if old.is_symlink() or not old.is_dir():
+            continue
+        if run(['git', 'rev-parse', '--show-toplevel'], cwd=old) != str(old.resolve()):
+            continue
+        if run(['git', 'branch', '--show-current'], cwd=old) != original_branch:
+            continue
+        # Confirm the dirty bytes are only tracked edits named by the original
+        # model proposal. Unknown, staged or untracked work remains human-held.
+        if run(['git', 'diff', '--cached', '--name-only'], cwd=old):
+            continue
+        if run(['git', 'ls-files', '--others', '--exclude-standard'], cwd=old):
+            continue
+        dirty_paths = run(['git', 'diff', '--name-only'], cwd=old).splitlines()
+        proposed_paths = {str(edit.get('path') or '') for edit in edits
+                          if isinstance(edit, Mapping)}
+        if (not dirty_paths or len(dirty_paths) > 12
+                or any(path not in proposed_paths
+                       or gate.path_denial_reason(path, dict(policy))
+                       for path in dirty_paths)):
+            continue
+        if not original_partial_edits_match_known_proposal(
+                old, edits, dirty_paths, reason, gate, policy):
+            continue
+        original_patch = run(['git', 'diff', '--binary'], cwd=old)
+        if not original_patch or len(original_patch) > 50000:
+            continue
+        old_head = run(['git', 'rev-parse', 'HEAD'], cwd=old)
+        if re.fullmatch(r'[0-9a-f]{40}', old_head) is None:
+            continue
+        recovery_branch = original_branch + '-anchor-' + rid[:12]
+        clean = ensure_worktree(repo, item_id, recovery_branch)
+        if (run(['git', 'status', '--porcelain', '--untracked-files=all'], cwd=clean)
+                or run(['git', 'rev-parse', 'HEAD'], cwd=clean)
+                     != run(['git', 'rev-parse', 'origin/main'], cwd=repo)):
+            continue  # No retry against stale or independently modified code.
+        paths = [str(edit.get('path') or '') for edit in edits
+                 if isinstance(edit, Mapping)]
+        paths.extend(str(path) for path in (result.get('test_paths') or []))
+        excerpt_terms = [
+            str(edit.get('old_text') or '')[:120]
+            for edit in edits if isinstance(edit, Mapping) and edit.get('old_text')
+        ]
+        excerpts = source_excerpts_for_paths(
+            clean, paths, gate, policy, terms=excerpt_terms,
+            limit=8, content_limit=14000)
+        if not excerpts:
+            continue
+        patch_sha = hashlib.sha256(original_patch.encode('utf-8')).hexdigest()
+        evidence_root = spool / 'recovery-evidence'
+        evidence_path = evidence_root / (rid + '.json')
+        immutable_evidence = {
+            'schema_version': 'jason.support-anchor-evidence.v1',
+            'support_item': item_id, 'failed_reasoning_request_id': rid,
+            'old_branch': original_branch, 'old_source_sha': old_head,
+            'original_patch_sha256': patch_sha,
+            'original_dirty_paths': dirty_paths,
+            'preserved_original_patch': original_patch,
+            'recovery_branch': recovery_branch,
+        }
+        if evidence_path.exists():
+            stored = json.loads(evidence_path.read_text(encoding='utf-8'))
+            if stored != immutable_evidence:
+                raise WorkerError('preserved anchor evidence conflicts with current source')
+        else:
+            atomic_json(evidence_path, immutable_evidence)
+        new_rid = queue_reasoning(
+            spool, kind='edit_plan', item=item,
+            context={
+                'validation_feedback': (
+                    'The original proposal failed exact anchor validation: '
+                    + reason[:340]
+                    + '. Its partially applied earlier source edits are preserved '
+                    'unchanged in the old isolated worktree. Correct the proposal '
+                    'using ONLY current clean source excerpts. Every old_text must '
+                    'occur once. Include an exact test edit. Do not reclassify '
+                    'SUPPORT-DEV as a DEV task or weaken any authority gate.'
+                ),
+                'retry_number': int(record.get('proposal_retries') or 0) + 1,
+                'preserved_patch_sha256': patch_sha,
+                'source_excerpts': excerpts,
+            },
+        )
+        if new_rid == rid:
+            continue
+        record.update({
+            'phase': 'implementing', 'branch': recovery_branch,
+            'anchor_preserved_recovery_id': rid,
+            'preserved_anchor_patch_sha256': patch_sha,
+            'preserved_anchor_source_sha': old_head,
+            'reasoning_request_id': new_rid,
+            'proposal_retries': int(record.get('proposal_retries') or 0) + 1,
+            'reason': 'bounded clean-worktree correction; old source preserved for audit',
+            'updated_at': now(),
+        })
+        resumed.append(item_id)
+        slots -= 1
+    return resumed
+
+
 def load_state(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {'schema_version': '1.0', 'items': {}}
@@ -1614,6 +1858,8 @@ def main() -> int:
 
     readmit_recovered_reasoning(state, support, spool, max_active=args.max_active)
     reassess_model_scope_blocks(state, support, spool, args.max_active)
+    readmit_preserved_anchor_failure(
+        state, support, repo, spool, gate, policy, max_active=args.max_active)
     selected = select_reconcile_ids(state, support, args.max_active)
 
     by_id = {item['id']: item for item in support}
