@@ -1,4 +1,5 @@
 import importlib.util
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -902,6 +903,52 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         )
         self.assertNotIn("/home/al/projects/jason", service)
 
+    def test_preprod_health_failure_records_safe_status_without_secret_logs(self):
+        from unittest.mock import Mock
+        inspect = {
+            "Status": "exited", "ExitCode": 17, "OOMKilled": False,
+            "Health": {"Status": "unhealthy"},
+            "SensitiveToken": "should_not_appear_in_exception",
+            "Config": {"Env": ["SENSITIVE=secret"]},
+        }
+        calls = []
+        def fake_exec(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[:2] == ["docker", "exec"]:
+                return Mock(returncode=1)
+            if cmd[:3] == ["docker", "inspect", "--format"]:
+                import json
+                return Mock(returncode=0, stdout=json.dumps(inspect))
+            raise AssertionError("unexpected command")
+        with (patch.object(runner.subprocess, "run", side_effect=fake_exec),
+              patch.object(runner.time, "sleep", return_value=None)):
+            with self.assertRaises(runner.ReleaseManagerError) as context:
+                runner.wait_health("jason-runtime-preprod-example", attempts=2)
+        message = str(context.exception)
+        self.assertIn("container_state=exited", message)
+        self.assertIn("exit_code=17", message)
+        self.assertIn("oom_killed=False", message)
+        self.assertIn("health=unhealthy", message)
+        self.assertNotIn("secret", message.lower())
+        self.assertEqual(len([x for x in calls if x[:2] == ["docker", "exec"]]), 2)
+
+    def test_preprod_health_failed_inspect_retains_failure_and_no_secrets(self):
+        from unittest.mock import Mock
+        def fake_exec(cmd, **kwargs):
+            if cmd[:2] == ["docker", "exec"]:
+                return Mock(returncode=1)
+            if cmd[:3] == ["docker", "inspect", "--format"]:
+                return Mock(returncode=1, stdout="sensitive-error-do-not-print")
+            raise AssertionError("unexpected command")
+        with (patch.object(runner.subprocess, "run", side_effect=fake_exec),
+              patch.object(runner.time, "sleep", return_value=None)):
+            with self.assertRaisesRegex(
+                runner.ReleaseManagerError,
+                "container_state=unavailable",
+            ) as context:
+                runner.wait_health("jason-runtime-preprod-example", attempts=1)
+        self.assertNotIn("sensitive", str(context.exception))
+
     def test_bounded_preprod_filters_only_event_history(self):
         names = (
             "orchestration-events.sqlite3\n"
@@ -915,6 +962,88 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             runner.bounded_preprod_openclaw_entries(names),
             ["authority.sqlite3", "governed-execution.sqlite3", "support-repair"],
         )
+
+    def test_preprod_preserves_sqlite_data_and_wal_but_skips_regenerable_shm(self):
+        names = (
+            "governed-execution.sqlite3\n"
+            "governed-execution.sqlite3-wal\n"
+            "governed-execution.sqlite3-shm\n"
+            "authority.sqlite3\n"
+            "authority.sqlite3-shm\n"
+            "authority.sqlite3-wal\n"
+            "not-sqlite-shm\n"
+            "governed-execution.sqlite3-shm-other\n"
+        )
+        result = runner.bounded_preprod_openclaw_entries(names)
+        self.assertEqual(
+            result,
+            [
+                "governed-execution.sqlite3",
+                "governed-execution.sqlite3-wal",
+                "authority.sqlite3",
+                "authority.sqlite3-wal",
+                "not-sqlite-shm",
+                "governed-execution.sqlite3-shm-other",
+            ],
+        )
+
+    def test_preprod_does_not_copy_ephemeral_shm_after_listing_to_docker_cp(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as td:
+            clone = Path(td) / "clone"
+            commands = []
+            def fake_run(cmd):
+                commands.append(cmd)
+                if cmd[:3] == ["docker", "exec", "jason-runtime"]:
+                    return (
+                        "governed-execution.sqlite3\n"
+                        "governed-execution.sqlite3-shm\n"
+                        "governed-execution.sqlite3-wal\n"
+                        "authority.sqlite3\n"
+                        "authority.sqlite3-shm"
+                    )
+                if cmd[:2] == ["docker", "cp"] and str(cmd[2]).endswith("-shm"):
+                    raise subprocess.CalledProcessError(1, cmd)
+                return ""
+            with (
+                patch.object(runner.shutil, "disk_usage", return_value=Mock(free=12 * 1024**3)),
+                patch.object(runner, "run", side_effect=fake_run),
+            ):
+                runner.copy_state_from_live_container("/var/lib/jason/openclaw", clone)
+            copied = [
+                str(cmd[2]).rsplit("/", 1)[-1]
+                for cmd in commands if cmd[:2] == ["docker", "cp"]
+            ]
+            self.assertEqual(
+                copied,
+                [
+                    "governed-execution.sqlite3",
+                    "governed-execution.sqlite3-wal",
+                    "authority.sqlite3",
+                ],
+            )
+            self.assertFalse(any(name.endswith("-shm") for name in copied))
+
+    def test_preprod_missing_sqlite_wal_remains_a_hard_clone_failure(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as td:
+            clone = Path(td) / "clone"
+            commands = []
+            def fake_run(cmd):
+                commands.append(cmd)
+                if cmd[:3] == ["docker", "exec", "jason-runtime"]:
+                    return "governed-execution.sqlite3\ngoverned-execution.sqlite3-wal"
+                if cmd[:2] == ["docker", "cp"] and str(cmd[2]).endswith("-wal"):
+                    raise subprocess.CalledProcessError(1, cmd)
+                return ""
+            with (
+                patch.object(runner.shutil, "disk_usage", return_value=Mock(free=12 * 1024**3)),
+                patch.object(runner, "run", side_effect=fake_run),
+            ):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    runner.copy_state_from_live_container("/var/lib/jason/openclaw", clone)
+            self.assertTrue(any(str(cmd[2]).endswith("-wal") for cmd in commands
+                                if cmd[:2] == ["docker", "cp"]))
 
     def test_bounded_preprod_refuses_unsafe_or_oversized_listing(self):
         for value in ("", "../escape\n", "a/b\n", "dup\ndup\n", "entry\n" * 257):

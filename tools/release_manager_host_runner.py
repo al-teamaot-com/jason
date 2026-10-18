@@ -1306,6 +1306,15 @@ _PREPROD_OPENCLAW_EXCLUDED = frozenset({
     "orchestration-events.sqlite3-wal",
     "orchestration-events.sqlite3-shm",
 })
+
+
+def _preprod_regenerable_sqlite_shm(name: str) -> bool:
+    # SQLite -shm files are transient WAL-index coordination state, not the
+    # database or committed transaction log. They can vanish after the source
+    # listing but before docker cp, or become invalid across container copies.
+    # Only exact top-level *.sqlite3-shm names are skipped; preserve sqlite3,
+    # sqlite3-wal, and all other production/authority files.
+    return name.endswith(".sqlite3-shm") and len(name) > len(".sqlite3-shm")
 _PREPROD_CLONE_MAX_BYTES = 4 * 1024**3
 _PREPROD_DISK_RESERVE_BYTES = 3 * 1024**3
 
@@ -1318,7 +1327,11 @@ def bounded_preprod_openclaw_entries(raw: str) -> list[str]:
     if any(not re.fullmatch(r"[A-Za-z0-9_.-]+", name) or name in {".", ".."}
            for name in entries) or len(set(entries)) != len(entries):
         raise ReleaseManagerError("unsafe preproduction OpenClaw state name")
-    return [name for name in entries if name not in _PREPROD_OPENCLAW_EXCLUDED]
+    return [
+        name for name in entries
+        if name not in _PREPROD_OPENCLAW_EXCLUDED
+        and not _preprod_regenerable_sqlite_shm(name)
+    ]
 
 
 def copy_state_from_live_container(
@@ -1502,6 +1515,43 @@ def create_preprod_container(
     return name, scratch
 
 
+def preprod_failure_state(name: str) -> str:
+    """Return narrowly bounded diagnostic fields, never container logs/env.
+
+    A rejected isolated health check currently deletes the test container;
+    preserve only its state/exit information for a safe actionable error.
+    """
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "--format", "{{json .State}}", name],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, timeout=5, check=False,
+        )
+        if result.returncode != 0:
+            return "container_state=unavailable"
+        record = json.loads(result.stdout)
+        if not isinstance(record, dict):
+            return "container_state=unavailable"
+        status = str(record.get("Status") or "unknown")
+        exit_code = record.get("ExitCode")
+        oom_killed = record.get("OOMKilled")
+        health = (record.get("Health") or {}).get("Status")
+        if status not in {"created", "running", "restarting", "exited", "dead", "paused"}:
+            status = "unknown"
+        if type(exit_code) is not int:
+            exit_code = "unknown"
+        if type(oom_killed) is not bool:
+            oom_killed = "unknown"
+        if health not in {None, "starting", "healthy", "unhealthy"}:
+            health = "unknown"
+        return (
+            f"container_state={status} exit_code={exit_code} "
+            f"oom_killed={oom_killed} health={health or 'none'}"
+        )
+    except (OSError, ValueError, TypeError, subprocess.TimeoutExpired):
+        return "container_state=unavailable"
+
+
 def wait_health(name: str, attempts: int = 30) -> None:
     script = (
         "import urllib.request; "
@@ -1518,7 +1568,10 @@ def wait_health(name: str, attempts: int = 30) -> None:
         if result.returncode == 0:
             return
         time.sleep(2)
-    raise ReleaseManagerError("pre-production candidate failed health acceptance")
+    raise ReleaseManagerError(
+        "pre-production candidate failed health acceptance: "
+        + preprod_failure_state(name)
+    )
 
 
 def verify_preprod_env(name: str, candidate_sha: str) -> None:
