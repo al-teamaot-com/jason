@@ -1792,3 +1792,91 @@ def test_failed_diagnostic_handoff_is_idempotent_and_preserves_retry_budget(monk
     assert record['self_recovery_attempts'] == 2
     assert record['phase'] == 'blocked'
     assert len(list((tmp_path / 'development-recovery' / 'handoffs').glob('*.json'))) == 1
+
+
+def test_preexisting_failed_diagnostic_backfills_support_once(monkeypatch, tmp_path):
+    # These are the durable DEV-1196/DEV-1500 states recorded before #1582
+    # was deployed. No development replay or new authorization is permitted.
+    created = []
+    monkeypatch.setattr(
+        module.support, 'reasoning_response',
+        lambda spool, rid: {'request_id': rid, 'status': 'failed',
+                            'error_type': 'ConnectorTransportError'},
+    )
+    monkeypatch.setattr(
+        module.support, 'ensure_support_issue',
+        lambda repo, item: created.append(item),
+    )
+    for issue in (1196, 1500):
+        record = {
+            'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+            'issue_number': issue, 'reason': 'development reasoning HTTP 400',
+            'self_recovery_attempts': 2,
+            'recovery_diagnostic_request_id': f'old-request-{issue}',
+            'recovery_diagnostic_result_status': 'failed',
+            'recovery_diagnostic_result_at': 'original-failure-time',
+        }
+        item_id = f'DEV-{issue}'
+        state = {'items': {item_id: record}}
+        root = tmp_path / str(issue)
+        for _ in range(2):
+            module.reconcile_exhausted_recovery_diagnostics(state, {item_id}, root)
+            module.reconcile_recovery_handoff_intake(state, {item_id}, root)
+            module.raise_exhausted_repair_support_issues(state, {item_id}, root)
+        handoffs = list((root / 'development-recovery' / 'handoffs').glob('*.json'))
+        assert len(handoffs) == 1
+        payload = module.support.json.loads(handoffs[0].read_text())
+        assert payload['admission_authority'] is False
+        assert payload['diagnostic_request_id'] == f'old-request-{issue}'
+        assert record['phase'] == 'blocked'
+        assert record['self_recovery_attempts'] == 2
+        assert record['recovery_diagnostic_result_at'] == 'original-failure-time'
+        assert record['recovery_diagnostic_result_status'] == 'failed'
+        assert record['recovery_support_issue_raised'] == f'SUPPORT-DEV-{issue}'
+    assert [x['id'] for x in created] == ['SUPPORT-DEV-1196', 'SUPPORT-DEV-1500']
+
+
+def test_preexisting_failed_diagnostic_backfill_rejects_untrusted_evidence(monkeypatch, tmp_path):
+    for index, response in enumerate((
+        None,
+        {'request_id': 'wrong-request', 'status': 'failed'},
+        {'request_id': 'old-request', 'status': 'succeeded'},
+        {'status': 'failed'},
+    )):
+        record = {
+            'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+            'issue_number': 1196, 'reason': 'HTTP transport failed',
+            'recovery_diagnostic_request_id': 'old-request',
+            'recovery_diagnostic_result_status': 'failed',
+            'recovery_diagnostic_result_at': 'original-failure-time',
+        }
+        monkeypatch.setattr(
+            module.support, 'reasoning_response',
+            lambda spool, rid, result=response: result,
+        )
+        root = tmp_path / str(index)
+        module.reconcile_exhausted_recovery_diagnostics(
+            {'items': {'DEV-1196': record}}, {'DEV-1196'}, root,
+        )
+        assert 'recovery_handoff_id' not in record
+        assert record['recovery_diagnostic_result_status'] == 'failed'
+        assert record['recovery_diagnostic_result_at'] == 'original-failure-time'
+        assert not list(root.rglob('*.json'))
+
+
+def test_preexisting_nonfailed_diagnostic_is_not_backfilled(monkeypatch, tmp_path):
+    record = {
+        'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+        'issue_number': 1196, 'reason': 'transport failed',
+        'recovery_diagnostic_request_id': 'old-request',
+        'recovery_diagnostic_result_status': 'succeeded',
+    }
+    monkeypatch.setattr(
+        module.support, 'reasoning_response',
+        lambda spool, rid: {'request_id': rid, 'status': 'succeeded'},
+    )
+    module.reconcile_exhausted_recovery_diagnostics(
+        {'items': {'DEV-1196': record}}, {'DEV-1196'}, tmp_path,
+    )
+    assert 'recovery_handoff_id' not in record
+    assert not list(tmp_path.rglob('*.json'))
