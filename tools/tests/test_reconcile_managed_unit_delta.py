@@ -196,3 +196,115 @@ def test_unit_delta_cli_denies_unprivileged_execution(tmp_path):
     )
     assert result.returncode != 0
     assert "root host reconciliation is required" in result.stderr
+
+
+def _fake_host_unit_delta_reconcile(tmp_path, *, fail_user=False):
+    """Execute actual release source cleanup block with only temporary fixtures.
+
+    No installed services are contacted: all systemd, timeout, runuser and
+    planner executions are stubs. File removals are redirected into tmp_path.
+    """
+    import os
+    import subprocess
+    import sys
+
+    host_script = (
+        Path(__file__).resolve().parents[1] / "reconcile_production_host_services.sh"
+    ).read_text(encoding="utf-8")
+    start = host_script.index("step_start release_owned_unit_delta")
+    end = host_script.index("step_pass release_owned_unit_delta", start)
+    block = host_script[start:end + len("step_pass release_owned_unit_delta")]
+
+    system = tmp_path / "systemd-system"
+    user = tmp_path / "systemd-user"
+    backup = tmp_path / "unit-backup"
+    candidate = tmp_path / "prior"
+    target = tmp_path / "target"
+    current = tmp_path / "current"
+    bin_dir = tmp_path / "bin"
+    log = tmp_path / "fake-systemctl.log"
+    for directory in (system, user, backup, candidate, target / "tools", bin_dir):
+        directory.mkdir(parents=True)
+    current.symlink_to(candidate, target_is_directory=True)
+    system_unit = "jason-new-monitor.timer"
+    user_unit = "jason-new-helper.service"
+    (system / system_unit).write_text("[Timer]\nOnCalendar=hourly\n")
+    (user / user_unit).write_text("[Service]\nExecStart=/bin/true\n")
+
+    planner = target / "tools/reconcile_managed_unit_delta.py"
+    planner.write_text(
+        "import os,sys\n"
+        "args=sys.argv\n"
+        "scope=args[args.index('--scope') + 1]\n"
+        "if scope=='user' and os.getenv('TEST_FAIL_USER')=='true':\n"
+        "  print('synthetic denied user plan',file=sys.stderr);sys.exit(9)\n"
+        f"print({system_unit!r} if scope=='system' else {user_unit!r})\n"
+    )
+    (bin_dir / "systemctl").write_text(
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$TEST_SYSTEMCTL_LOG\"\n"
+    )
+    (bin_dir / "timeout").write_text(
+        "#!/bin/sh\nshift 3\nexec \"$@\"\n"
+    )
+    (bin_dir / "runuser").write_text(
+        "#!/bin/sh\nwhile [ \"$#\" -gt 0 ]; do\n"
+        "  if [ \"$1\" = systemctl ]; then shift; exec \"$TEST_FAKE_BIN/systemctl\" \"$@\"; fi\n"
+        "  shift\ndone\nexit 99\n"
+    )
+    for filename in ("systemctl", "timeout", "runuser"):
+        (bin_dir / filename).chmod(0o755)
+
+    block = block.replace("/etc/systemd/system", str(system))
+    block = block.replace("/home/al/.config/systemd/user", str(user))
+    assert "/etc/systemd/system" not in block
+    assert "/home/al/.config/systemd/user" not in block
+    harness = (
+        'set -euo pipefail\n'
+        'step_start() { :; }\nstep_pass() { :; }\n'
+        f'CURRENT_LINK={str(current)!r}\n'
+        f'RELEASE_DIR={str(target)!r}\n'
+        f'BACKUP_DIR={str(backup)!r}\n'
+        'USER_XDG_RUNTIME_DIR=/fake\nUSER_DBUS_ADDRESS=/fake\n'
+        'run_as_al() { "$TEST_FAKE_BIN/systemctl" "$@"; }\n'
+        'CURRENT_UNIT=""\n'
+        + block + '\n'
+    )
+    env = os.environ.copy()
+    env.update({
+        "PATH": str(bin_dir) + os.pathsep + env["PATH"],
+        "TEST_FAKE_BIN": str(bin_dir),
+        "TEST_SYSTEMCTL_LOG": str(log),
+        "TEST_FAIL_USER": "true" if fail_user else "false",
+    })
+    result = subprocess.run(
+        ["bash", "-c", harness], env=env, capture_output=True, text=True,
+        check=False,
+    )
+    return result, system, user, backup, system_unit, user_unit, log
+
+
+def test_isolated_host_reconcile_actually_cleans_candidate_only_system_and_user_units(tmp_path):
+    result, system, user, backup, system_unit, user_unit, log = (
+        _fake_host_unit_delta_reconcile(tmp_path)
+    )
+    assert result.returncode == 0, result.stderr
+    assert not (system / system_unit).exists()
+    assert not (user / user_unit).exists()
+    assert (backup / ("system-" + system_unit + ".before")).exists()
+    assert (backup / ("user-" + user_unit + ".before")).exists()
+    lines = log.read_text().splitlines()
+    assert "disable --now " + system_unit in lines
+    assert "--user disable --now " + user_unit in lines
+    assert "daemon-reload" in lines
+    assert "systemctl --user daemon-reload" in lines
+
+
+def test_isolated_host_reconcile_does_not_mutate_if_user_plan_fails(tmp_path):
+    result, system, user, backup, system_unit, user_unit, log = (
+        _fake_host_unit_delta_reconcile(tmp_path, fail_user=True)
+    )
+    assert result.returncode != 0
+    assert "cannot verify previous-release user-unit delta" in result.stderr
+    assert (system / system_unit).exists()
+    assert (user / user_unit).exists()
+    assert not log.exists()
