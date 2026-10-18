@@ -163,3 +163,35 @@ def test_storage_read_is_in_existing_selfheal_detector(monkeypatch, tmp_path):
     failures, evidence = watchdog.detect(tmp_path)
     assert failures == ["host_storage_capacity_critical:root"]
     assert evidence["host_storage_capacity"]["mounts"]["root"]["state"] == "critical"
+
+
+def test_storage_incident_is_persisted_without_waking_autonomous_repair(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        watchdog, "run",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+    incident = resolver.correlate_failures(["host_storage_capacity_critical:root"])[0]
+    incident["priority"] = "P0"
+    path = watchdog.queue_resolution_incident(
+        tmp_path, incident, {"host_storage_capacity": {"mounts": {"root": {"available_gib": 20}}}},
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["family"] == "host_storage_capacity"
+    assert payload["priority"] == "P0"
+    assert payload["requires_owner_action"] is True
+    assert payload["repair_level"] == 3
+    assert calls == []  # no autonomous repair worker, restart or Docker prune
+
+
+def test_storage_escalation_requests_exact_scope_and_keeps_provider_permissions(tmp_path):
+    incident = resolver.correlate_failures(["host_storage_capacity_critical:root"])[0]
+    path = watchdog.write_incident_escalation(
+        tmp_path, incident=incident, attempts=2, actions=[],
+    )
+    body = json.loads(path.read_text(encoding="utf-8"))
+    assert "approve bounded" in body["owner_action"]
+    assert "Docker volumes" in body["owner_action"]
+    assert "rollback images" in body["owner_action"]
+    assert body["family"] == "host_storage_capacity"
+    assert body["state"] == "owner_action_required"
