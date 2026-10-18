@@ -507,6 +507,18 @@ class DevelopmentReleaseCoordinatorTests(unittest.TestCase):
         self.assertIn("Desired-state drift:** unknown (host evidence stale)", merged)
         self.assertIn("Production evidence freshness:** stale (60.0 minutes old", merged)
 
+    def test_production_header_only_preserves_free_text_below_release_attention(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 10, 18, 11, 5, tzinfo=timezone.utc)
+        host = self._board_observation("b" * 40, "2026-10-18T11:00:00+00:00", host=True)
+        main = self._board_observation("a" * 40, "2026-10-17T11:00:00+00:00")
+        main += "\n**Production revision:** unrelated prose in release discussion\n"
+        merged = coordinator.preserve_newer_host_board_observation(
+            main, host, now=now,
+        )
+        self.assertIn("**Production revision:** unrelated prose in release discussion", merged)
+        self.assertIn("Production revision:** `" + "b" * 40 + "`", merged)
+
     def test_board_never_trusts_unmarked_or_future_or_invalid_host_data(self):
         from datetime import datetime, timezone
         now = datetime(2026, 10, 18, 11, 5, tzinfo=timezone.utc)
