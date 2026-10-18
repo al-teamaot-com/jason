@@ -25,6 +25,7 @@ class SignedTeamsApprovalEvidenceVerifier:
     max_age_seconds: int = 120
     max_clock_skew_seconds: int = 60
     allowed_approval_prefixes: tuple[str, ...] = ("planapproval-",)
+    allowed_selection_keys: frozenset[str] = frozenset()
 
     def parse(self, token: str) -> tuple[str, OpenClawTeamsConversationEnvelope]:
         if not isinstance(token, str) or len(token.encode('utf-8')) > 65536:
@@ -51,8 +52,9 @@ class SignedTeamsApprovalEvidenceVerifier:
                 for prefix in self.allowed_approval_prefixes
         )):
             raise PermissionError('signed approval interaction is outside the configured route')
-        if parsed.approval_submit.selections or parsed.documents:
-            raise PermissionError('plan approval response cannot change reviewed plan material')
+        if (set(parsed.approval_submit.selections) - self.allowed_selection_keys
+                or parsed.documents):
+            raise PermissionError('signed approval response contains unreviewed card data')
         return machine, parsed
 
     def verify(self, token: str) -> VerifiedMicrosoftPrincipal:

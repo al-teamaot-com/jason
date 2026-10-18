@@ -38,6 +38,50 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                     "production_control_core",
                 )
 
+    def test_owner_release_approval_code_is_protected_control_core(self):
+        import json
+        policy = json.loads((ROOT / "config/release-manager-policy.json").read_text())
+        import fnmatch
+        names = (
+            "implementation/runtime_service/src/jason_runtime/mobile_release_approval.py",
+            "implementation/runtime_service/src/jason_runtime/universal_teams_approval.py",
+            "tools/release_mobile_approval_consumer.py",
+            "implementation/runtime_service/src/jason_runtime/playbook_autonomy_review.py",
+            "implementation/connectors/microsoft_graph/teams_approval_channel.py",
+        )
+        for name in names:
+            self.assertEqual(runner.classify_change_risk("feature", [name]), "production_control_core")
+            self.assertTrue(any(fnmatch.fnmatch(name, pat) for pat in policy["protected_core_globs"]))
+
+    def test_owner_approval_status_notice_does_not_imply_teams_card_or_release(self):
+        import inspect
+        source = inspect.getsource(runner.promote_eligible)
+        self.assertIn("STATUS ONLY - NOT AN APPROVAL CARD", source)
+        self.assertIn("BLOCKED: no actionable Teams approval is enabled", source)
+        self.assertIn("Only a separate", source)
+        self.assertIn("authenticated owner Approve click", source)
+        self.assertIn("this notice", source.casefold())
+        self.assertIn("owner_action=owner_instruction", source)
+        self.assertIn("if owner_teams_eligible:", source)
+
+    def test_live_owner_release_mode_does_not_trust_policy_file_alone(self):
+        expected = {"inspect": {"Config": {"Env": [
+            "SAFE_CONSOLE=silent",
+            "JASON_RELEASE_MOBILE_APPROVAL_MODE=owner_reviewed",
+        ]}}}
+        self.assertEqual(runner.live_release_mobile_approval_mode(expected), "owner_reviewed")
+        expected["inspect"]["Config"]["Env"][-1] = "JASON_RELEASE_MOBILE_APPROVAL_MODE=owner_only_pilot"
+        self.assertEqual(runner.live_release_mobile_approval_mode(expected), "owner_only_pilot")
+        for values in (
+            [], ["JASON_RELEASE_MOBILE_APPROVAL_MODE=off"],
+            ["JASON_RELEASE_MOBILE_APPROVAL_MODE=unexpected"],
+            ["JASON_RELEASE_MOBILE_APPROVAL_MODE=owner_reviewed"] * 2,
+        ):
+            self.assertEqual(
+                runner.live_release_mobile_approval_mode({"inspect": {"Config": {"Env": values}}}),
+                "off",
+            )
+
     def test_release_id_is_deterministic(self):
         self.assertEqual(runner.record_id(SHA_A), "release-" + "a" * 16)
 

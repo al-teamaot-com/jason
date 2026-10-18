@@ -605,6 +605,11 @@ def classify_change_risk(change_class: str, files: list[str]) -> str:
         or path in {
             "tools/reconcile_production_host_services.sh",
             "tools/reconcile_managed_unit_delta.py",
+            "tools/release_mobile_approval_consumer.py",
+            "implementation/runtime_service/src/jason_runtime/mobile_release_approval.py",
+            "implementation/runtime_service/src/jason_runtime/universal_teams_approval.py",
+            "implementation/runtime_service/src/jason_runtime/playbook_autonomy_review.py",
+            "implementation/connectors/microsoft_graph/teams_approval_channel.py",
         }
         or "release-host-reconcile" in path
         for path in paths
@@ -2636,6 +2641,25 @@ def authoritative_auto_promotion_head(repo: Path) -> str:
     return lines[0][0]
 
 
+def live_release_mobile_approval_mode(runtime: dict[str, Any]) -> str:
+    """Read only the trusted *running* container's release-approval mode.
+
+    A policy file upgraded on disk cannot activate new risk classes while
+    production is still running the older owner-only pilot. No other
+    env variables or secrets are included in output.
+    """
+    config = (runtime.get("inspect") or {}).get("Config") or {}
+    values = config.get("Env")
+    if not isinstance(values, list):
+        return "off"
+    selected = [str(value).split("=", 1)[1] for value in values
+                if isinstance(value, str)
+                and value.startswith("JASON_RELEASE_MOBILE_APPROVAL_MODE=")]
+    if len(selected) != 1:
+        return "off"
+    return selected[0] if selected[0] in {"owner_only_pilot", "owner_reviewed"} else "off"
+
+
 def promote_eligible(repo: Path, state_root: Path) -> bool:
     # Keep the required five-minute timer active, but do not allow it to
     # execute a production promotion while Owner has selected manual mode.
@@ -2658,6 +2682,7 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
     # release source before importing the shared runtime safety policy.
     _install_repo_modules(Path(repo))
     from jason_runtime.owner_release_approval_containment import read_release_approval_containment
+    from jason_runtime.mobile_release_approval import read_mobile_release_policy
     release_teams_containment = read_release_approval_containment(state_root)
     # SECURITY: the default mobile approval database contains LIVE signed owner
     # decisions. Isolated/preproduction release-manager state roots MUST never
@@ -2731,10 +2756,27 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
             save_record(state_root, record)
             continue
 
+        reviewed_policy_path = Path("/var/lib/jason/authority/mobile-release-approval-policy.json")
+        owner_teams_eligible = False
         if (not release_teams_containment.active
-                and Path("/var/lib/jason/authority/mobile-release-approval-policy.json").is_file()
-                and (record.get("owner_approval") or {}).get("approved") is not True
-                and record.get("risk_profile") == "normal"):
+                and reviewed_policy_path.is_file()
+                and (record.get("owner_approval") or {}).get("approved") is not True):
+            reviewed_policy = read_mobile_release_policy(reviewed_policy_path)
+            live_mode = live_release_mobile_approval_mode(live_runtime())
+            expected_mode = ("owner_only_pilot" if reviewed_policy.schema_version == "1.0"
+                             else "owner_reviewed")
+            requested_risk = str(record.get("risk_profile") or "unknown")
+            owner_teams_eligible = (
+                live_mode == expected_mode
+                and requested_risk in reviewed_policy.allowed_risk_profiles
+            )
+            if live_mode != expected_mode:
+                print("RELEASE_TEAMS_APPROVAL_UNAVAILABLE=runtime_mode_mismatch"
+                      + f" expected={expected_mode} active={live_mode}", flush=True)
+            elif requested_risk not in reviewed_policy.allowed_risk_profiles:
+                print("RELEASE_TEAMS_APPROVAL_UNAVAILABLE=reviewed_policy_excludes_risk"
+                      + f" risk={requested_risk}", flush=True)
+        if owner_teams_eligible:
             offer_root.mkdir(parents=True, exist_ok=True, mode=0o700)
             offer = offer_root / (record_id(candidate_sha) + ".json")
             atomic_json(offer, {
@@ -2779,11 +2821,28 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
             reason.strip().casefold() in owner_only_reasons for reason in reasons
         )
         if owner_only:
+            # An informational Teams message is NOT an approval card. Publish
+            # the actual lane/blocker rather than implying that a protected
+            # release can be approved through an ineligible channel.
+            if owner_teams_eligible:
+                owner_instruction = (
+                    "STATUS ONLY - NOT AN APPROVAL CARD. A signed Teams approval "
+                    "offer was published for the exact release. Only a separate "
+                    "authenticated owner Approve click can authorize it; "
+                    "delivery and a click must each be verified."
+                )
+            else:
+                owner_instruction = (
+                    "BLOCKED: no actionable Teams approval is enabled for "
+                    "this exact release risk under the running mode and "
+                    "reviewed policy. This notice is NOT an approval card. "
+                    "Existing exact-SHA owner authorization remains required."
+                )
             write_owner_notification_event(
                 state_root,
                 record,
                 "production_owner_action_required",
-                owner_action="Owner approval is required to promote this build to Production.",
+                owner_action=owner_instruction,
             )
             continue
         raise ReleaseManagerError(
