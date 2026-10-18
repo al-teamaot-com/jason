@@ -228,3 +228,23 @@ def test_tampered_preview_can_never_change_recipient():
     with pytest.raises(PermissionError, match="cannot broaden"):
         GovernedAutonomyStatusInteractionPort(uis).dispatch_prepared(item)
     assert channel.calls == [] and not journal.claimed
+
+
+@pytest.mark.parametrize("edit", [
+    "rewritten_summary", "false_success", "changed_card",
+])
+def test_tampered_preview_or_visual_intent_never_sends(edit):
+    original = preview(examples()[0][0])
+    if edit == "rewritten_summary":
+        changed = replace(original, interaction=replace(
+            original.interaction, summary="Unsupported completion claim"))
+    elif edit == "false_success":
+        changed = replace(original, interaction=replace(
+            original.interaction, visual_intent=VisualIntent.SUCCESS))
+    else:
+        changed = replace(original, canonical_card={
+            "type": "AdaptiveCard", "version": "1.5", "body": []})
+    uis, _, channel, journal = service()
+    with pytest.raises(PermissionError, match="differs from reviewed"):
+        GovernedAutonomyStatusInteractionPort(uis).dispatch_prepared(changed)
+    assert not journal.claimed and channel.calls == []
