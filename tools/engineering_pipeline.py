@@ -83,6 +83,44 @@ def stalled_approved_work(spool: Path) -> dict[str, Any] | None:
     return None
 
 
+
+def blocked_critical_support(spool: Path, repo: Path) -> dict[str, Any] | None:
+    """Surface already-blocked canonical P0 repairs without creating new authority.
+
+    Unadmitted P0 defects and exhausted P0 repairs must remain visible even if
+    scheduled worker commands exit successfully. This is a health projection,
+    not an instruction to bypass dependency, reasoning or release gates.
+    """
+    state_path = spool / "state.json"
+    support_path = repo / "SUPPORT.md"
+    if not state_path.exists() or not support_path.exists():
+        return None
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        if not isinstance(state, dict):
+            raise ValueError("invalid support state")
+        items = state.get("items", {})
+        if not isinstance(items, dict):
+            raise ValueError("invalid support items")
+        critical = set()
+        for line in support_path.read_text(encoding="utf-8").splitlines():
+            cells = [cell.strip() for cell in line.split("|")]
+            if len(cells) >= 4 and cells[2] == "P0" and cells[1].startswith("SUPPORT-"):
+                critical.add(cells[1])
+        blocked = sorted(item for item in critical
+                         if isinstance(items.get(item), dict)
+                         and items[item].get("phase") in {"blocked", "escalated"})
+        audit = state.get("admission_audit", {})
+        missing = sorted(str(item) for item in audit.get("unadmitted_p0", [])) if isinstance(audit, dict) else []
+        if blocked or missing:
+            return {"reason": "critical_support_stalled", "blocked_count": len(blocked),
+                    "blocked_items": blocked[:12], "unadmitted_count": len(missing),
+                    "unadmitted_items": missing[:12]}
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return {"reason": "support_health_unknown"}
+    return None
+
+
 def run_pipeline(
     *,
     scripts: Path,
@@ -137,15 +175,19 @@ def run_pipeline(
     failed = [name for name, item in state["stages"].items() if item["status"] != "succeeded"]
     state["finished_at"] = now()
     stalled = stalled_approved_work(spool) if not failed else None
-    state["status"] = "degraded" if failed or stalled else "healthy"
+    critical = blocked_critical_support(spool, repo) if not failed else None
+    state["status"] = "degraded" if failed or stalled or critical else "healthy"
     state["failed_or_skipped_stages"] = failed
     if stalled:
         state["operational_blocker"] = stalled
+    if critical:
+        state["critical_support_blocker"] = critical
     atomic_json(output, state)
     print("ENGINEERING_PIPELINE_RESULT " + json.dumps({
         "status": state["status"],
         "failed_or_skipped_stages": failed,
         "operational_blocker": stalled,
+        "critical_support_blocker": critical,
         "state_path": str(output),
     }, sort_keys=True), flush=True)
     return state

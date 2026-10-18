@@ -61,6 +61,49 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(state["status"], "degraded")
         self.assertEqual(pipeline.service_exit_code(state), 0)
 
+    def test_blocked_p0_support_degrades_successful_pipeline(self):
+        self.spool.mkdir(parents=True, exist_ok=True)
+        repo = self.base / "repo"
+        repo.mkdir(parents=True, exist_ok=True)
+        (repo / "SUPPORT.md").write_text(
+            "| SUPPORT-OPS-054 | P0 | Open | Critical | evidence | acceptance |\n"
+            "| SUPPORT-OPS-099 | P1 | Open | Routine | evidence | acceptance |\n"
+        )
+        (self.spool / "state.json").write_text(json.dumps({
+            "items": {"SUPPORT-OPS-054": {"phase": "blocked"},
+                      "SUPPORT-OPS-099": {"phase": "blocked"}},
+            "admission_audit": {"unadmitted_p0": []},
+        }))
+        state = self.execute()
+        self.assertEqual(state["status"], "degraded")
+        self.assertEqual(state["critical_support_blocker"]["blocked_items"], ["SUPPORT-OPS-054"])
+        self.assertEqual(state["failed_or_skipped_stages"], [])
+        self.assertEqual(pipeline.service_exit_code(state), 0)
+
+    def test_unadmitted_p0_is_visible_not_silently_healthy(self):
+        self.spool.mkdir(parents=True, exist_ok=True)
+        repo = self.base / "repo"
+        repo.mkdir(parents=True, exist_ok=True)
+        (repo / "SUPPORT.md").write_text("")
+        (self.spool / "state.json").write_text(json.dumps({
+            "items": {}, "admission_audit": {"unadmitted_p0": ["SUPPORT-OPS-888"]},
+        }))
+        state = self.execute()
+        self.assertEqual(state["critical_support_blocker"]["unadmitted_items"], ["SUPPORT-OPS-888"])
+        self.assertEqual(state["status"], "degraded")
+
+    def test_pending_p0_not_mistaken_for_stalled(self):
+        self.spool.mkdir(parents=True, exist_ok=True)
+        repo = self.base / "repo"
+        repo.mkdir(parents=True, exist_ok=True)
+        (repo / "SUPPORT.md").write_text(
+            "| SUPPORT-OPS-054 | P0 | Open | Critical | evidence | acceptance |\n")
+        (self.spool / "state.json").write_text(json.dumps({
+            "items": {"SUPPORT-OPS-054": {"phase": "diagnosing"}},
+            "admission_audit": {"unadmitted_p0": []},
+        }))
+        self.assertEqual(self.execute()["status"], "healthy")
+
     def test_healthy_pipeline_exits_successfully(self):
         state = self.execute()
         self.assertEqual(pipeline.service_exit_code(state), 0)
