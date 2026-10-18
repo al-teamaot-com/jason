@@ -38,6 +38,37 @@ def policy_file(tmp_path, **updates):
     return p
 
 
+HIGH_IMPACT_REVIEW = {
+    "owner_exact_sha_required": True,
+    "signed_teams_identity_required": True,
+    "independent_ccc_required": True,
+    "protected_release_gates_unchanged": True,
+}
+
+
+def reviewed_policy_file(tmp_path, **updates):
+    reviewed = {
+        "schema_version": "2.0",
+        "policy_mode": "owner_reviewed",
+        "allowed_risk_profiles": ["normal", "production_control_core"],
+        "ttl_seconds": 600,
+        "high_impact_review": HIGH_IMPACT_REVIEW,
+    }
+    reviewed.update(updates)
+    return policy_file(tmp_path, **reviewed)
+
+
+def mark_release_high_impact(root, risk="production_control_core"):
+    p = root / "records" / f"{RELEASE}.json"
+    record = json.loads(p.read_text(encoding="utf-8"))
+    record["risk_profile"] = risk
+    record["release_manifest"]["risk_profile"] = risk
+    record["release_manifest"]["changed_files"] = ["tools/release_manager_host_runner.py"]
+    p.write_text(json.dumps(record), encoding="utf-8")
+    p.chmod(0o600)
+    return p
+
+
 def release_record(tmp_path, **updates):
     root = tmp_path / "release-state"
     record_dir = root / "records"
@@ -115,6 +146,46 @@ def test_policy_rejects_broader_or_invalid_authority(tmp_path, updates):
         read_mobile_release_policy(policy_file(tmp_path, **updates))
 
 
+@pytest.mark.parametrize("overrides", [
+    {"schema_version": "1.0"},
+    {"policy_mode": "owner_only_pilot"},
+    {"owner_identity_ids": ["person-other"]},
+    {"allowed_risk_profiles": ["production_control_core"]},
+    {"allowed_risk_profiles": ["normal", "unknown"]},
+    {"allowed_risk_profiles": ["normal", "normal"]},
+    {"ttl_seconds": 1800},
+    {"ttl_seconds": True},
+    {"high_impact_review": {"owner_exact_sha_required": True}},
+    {"high_impact_review": {**HIGH_IMPACT_REVIEW, "independent_ccc_required": False}},
+    {"high_impact_review": {**HIGH_IMPACT_REVIEW, "new_authority": True}},
+])
+def test_explicit_high_risk_policy_requires_reviewed_v2_scope(tmp_path, overrides):
+    with pytest.raises((PermissionError, ValueError)):
+        read_mobile_release_policy(reviewed_policy_file(tmp_path, **overrides))
+
+
+def test_explicit_v2_protected_release_is_exact_signed_owner_only_request(tmp_path):
+    policy_path = reviewed_policy_file(tmp_path)
+    policy = read_mobile_release_policy(policy_path)
+    assert policy.schema_version == "2.0"
+    assert policy.allowed_risk_profiles == frozenset({"normal", "production_control_core"})
+    root, _ = release_record(tmp_path)
+    mark_release_high_impact(root)
+    verified = read_eligible_release(root, RELEASE, policy)
+    assert verified.risk_profile == "production_control_core"
+    request = create_mobile_release_request(verified, policy, now=NOW)
+    request.validate()
+    assert request.authorized_approver_ids == ("person-al",)
+    assert request.requested_by == "svc-jason-release-manager"
+    assert request.requested_mode == "release:" + SHA
+    assert request.metadata["owner_policy_sha256"] == policy.policy_sha256
+    assert "production_control_core" in repr(request.presentation.facts)
+    assert SHA in repr(request.presentation.facts)
+    assert ROLLBACK in repr(request.presentation.facts)
+    assert request.expires_at == NOW + timedelta(seconds=600)
+    assert read_mobile_release_policy(policy_path).policy_sha256 == policy.policy_sha256
+
+
 def test_policy_fails_closed_on_absence_symlink_or_insecure_mode(tmp_path):
     with pytest.raises(FileNotFoundError):
         read_mobile_release_policy(tmp_path / "missing.json")
@@ -172,9 +243,11 @@ class SimpleOwnerAuthority:
                 and client_id is None and capability == CAPABILITY and requested_mode == "release:" + SHA)
 
 
-def flow_fixture(tmp_path, *, decision="approve"):
-    path = policy_file(tmp_path)
+def flow_fixture(tmp_path, *, decision="approve", reviewed=False):
+    path = reviewed_policy_file(tmp_path) if reviewed else policy_file(tmp_path)
     root, record = release_record(tmp_path)
+    if reviewed:
+        mark_release_high_impact(root)
     policy = read_mobile_release_policy(path)
     req = create_mobile_release_request(read_eligible_release(root, RELEASE, policy), policy, now=NOW)
     repo = SQLiteApprovalRequestRepository(tmp_path / "requests.sqlite3")
@@ -184,7 +257,8 @@ def flow_fixture(tmp_path, *, decision="approve"):
     identities = SimpleNamespace(get=lambda k: SimpleNamespace(status="active", identity_id=k, organization_id="aot"))
     flow = MobileReleaseApprovalFlow(service, repo, path, root, bindings, identities,
                                      FakeVerifier(aid=req.approval_id, decision=decision, now=NOW),
-                                     MobileReleaseSignedEvidenceStore(tmp_path / "requests.sqlite3"))
+                                     MobileReleaseSignedEvidenceStore(tmp_path / "requests.sqlite3"),
+                                     required_policy_version="2.0" if reviewed else "1.0")
     return flow, req, repo, record
 
 
@@ -213,6 +287,45 @@ def test_signed_owner_click_consumed_once_without_mutating_release_or_ccc(tmp_pa
     assert not (tmp_path / "material-review.json").exists()
     with pytest.raises(PermissionError, match="already terminal"):
         click(flow, req)
+
+
+def test_reviewed_v2_owner_click_records_one_receipt_without_execution(tmp_path):
+    flow, req, repo, record = flow_fixture(tmp_path, reviewed=True)
+    before = record.read_bytes()
+    result = click(flow, req)
+    assert result["approval_status"] == "approved"
+    assert result["executed"] is False
+    assert repo.accepted_decision(req.approval_id).decided_by == "person-al"
+    assert repo.accepted_decision(req.approval_id).channel == "microsoft_teams"
+    assert record.read_bytes() == before
+    with pytest.raises(PermissionError):
+        click(flow, req)
+
+
+def test_reviewed_v2_changed_policy_cannot_consume_pending_click(tmp_path):
+    flow, req, repo, record = flow_fixture(tmp_path, reviewed=True)
+    flow.policy_path.write_text(flow.policy_path.read_text().replace(
+        '"ttl_seconds": 600', '"ttl_seconds": 900'
+    ), encoding="utf-8")
+    with pytest.raises(PermissionError, match="policy"):
+        click(flow, req)
+    assert repo.accepted_decision(req.approval_id) is None
+
+
+def test_reviewed_v2_mismatch_with_active_pilot_mode_denies_signed_vote(tmp_path):
+    flow, req, repo, record = flow_fixture(tmp_path, reviewed=True)
+    flow.required_policy_version = "1.0"
+    with pytest.raises(PermissionError, match="reviewed runtime mode"):
+        click(flow, req)
+    assert repo.get(req.approval_id).status == ApprovalRequestStatus.PENDING
+
+
+def test_reviewed_v2_wrong_actor_denied_even_when_risk_allowed(tmp_path):
+    flow, req, repo, record = flow_fixture(tmp_path, reviewed=True)
+    flow.bindings.find = lambda **kw: SimpleNamespace(status="active", jason_identity_id="person-other")
+    with pytest.raises(PermissionError, match="authorized owner"):
+        click(flow, req)
+    assert repo.accepted_decision(req.approval_id) is None
 
 
 def test_deny_is_terminal_without_release_authorization(tmp_path):
@@ -310,6 +423,45 @@ def test_owner_only_issuer_sends_exactly_one_actionable_card_no_spam(tmp_path):
     assert len(repo.list_all()) == 1
     assert len(sender.sent) == 1
     assert repo.get(request.approval_id).metadata["delivery_message_ids"] == "teams-message-one"
+
+
+def test_reviewed_v2_issuer_requires_matching_runtime_activation(tmp_path):
+    from jason_runtime.mobile_release_approval import (
+        MobileReleaseApprovalMaintenance, MobileReleaseOwnerAuthority,
+    )
+    policy_path = reviewed_policy_file(tmp_path)
+    root, _ = release_record(tmp_path)
+    mark_release_high_impact(root)
+    make_eligible_main_offer(root, policy_path)
+    repo = SQLiteApprovalRequestRepository(tmp_path / "requests.sqlite3")
+    approvals = ApprovalRequestService(repo, MobileReleaseOwnerAuthority(policy_path))
+
+    class Sender:
+        sent = []
+        def send(self, request):
+            self.sent.append(request)
+            return ("accepted:verified-transport-only",)
+
+    sender = Sender()
+    legacy = MobileReleaseApprovalMaintenance(
+        enabled=True, policy_path=policy_path, state_root=root, requests=repo,
+        approvals=approvals, sender=sender, clock=lambda: NOW,
+    )
+    with pytest.raises(PermissionError, match="reviewed runtime activation"):
+        legacy.tick()
+    assert repo.list_all() == () and sender.sent == []
+
+    activated = MobileReleaseApprovalMaintenance(
+        enabled=True, policy_path=policy_path, state_root=root, requests=repo,
+        approvals=approvals, sender=sender, clock=lambda: NOW,
+        required_policy_version="2.0",
+    )
+    assert activated.tick() is True
+    assert len(sender.sent) == 1
+    sent = sender.sent[0]
+    assert "production_control_core" in repr(sent.presentation.facts)
+    assert repo.get(sent.approval_id).status == ApprovalRequestStatus.PENDING
+    assert activated.tick() is False
 
 
 def test_owner_only_issuer_skips_unreviewed_core_release(tmp_path):

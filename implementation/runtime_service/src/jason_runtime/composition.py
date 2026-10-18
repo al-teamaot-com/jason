@@ -1085,8 +1085,8 @@ class RuntimeSettings:
     def validate(self) -> None:
         if self.universal_approval_mode not in {"off", "enforced"}:
             raise ValueError("JASON_UNIVERSAL_APPROVAL_MODE must be off or enforced")
-        if self.release_mobile_approval_mode not in {"off", "owner_only_pilot"}:
-            raise ValueError("JASON_RELEASE_MOBILE_APPROVAL_MODE must be off or owner_only_pilot")
+        if self.release_mobile_approval_mode not in {"off", "owner_only_pilot", "owner_reviewed"}:
+            raise ValueError("JASON_RELEASE_MOBILE_APPROVAL_MODE must be off, owner_only_pilot or owner_reviewed")
         if self.release_mobile_interval_seconds < 60:
             raise ValueError("mobile release approval scans require at least a 60-second interval")
         if self.owner_uat_mode not in {"off", "nonexecuting_test_only"}:
@@ -2459,7 +2459,7 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
 
     release_mobile_flow = None
     release_mobile_maintenance = None
-    if settings.release_mobile_approval_mode == "owner_only_pilot":
+    if settings.release_mobile_approval_mode in {"owner_only_pilot", "owner_reviewed"}:
         from .mobile_release_approval import (
             MobileReleaseApprovalFlow, MobileReleaseApprovalMaintenance,
             MobileReleaseOwnerAuthority, MobileReleaseSignedEvidenceStore,
@@ -2467,6 +2467,10 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         )
         from .universal_teams_approval import SignedTeamsApprovalEvidenceVerifier
         owner_policy = read_mobile_release_policy(settings.release_mobile_approval_policy)
+        expected_version = ("1.0" if settings.release_mobile_approval_mode == "owner_only_pilot"
+                            else "2.0")
+        if owner_policy.schema_version != expected_version:
+            raise PermissionError("active release approval mode and reviewed policy version do not match")
         release_repo = SQLiteApprovalRequestRepository(settings.release_mobile_approval_db)
         release_approval_service = ApprovalRequestService(
             release_repo, MobileReleaseOwnerAuthority(settings.release_mobile_approval_policy),
@@ -2484,6 +2488,7 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
                 allowed_approval_prefixes=("relapproval-",),
             ),
             signed_evidence=MobileReleaseSignedEvidenceStore(settings.release_mobile_approval_db),
+            required_policy_version=expected_version,
         )
         if settings.release_mobile_approval_worker_enabled:
             release_mobile_maintenance = MobileReleaseApprovalMaintenance(
@@ -2499,6 +2504,7 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
                     owner_identity_ids=owner_policy.owner_identity_ids,
                 ),
                 interval_seconds=settings.release_mobile_interval_seconds,
+                required_policy_version=expected_version,
             )
 
     # Owner acceptance: an explicitly gated, one-time NONEXECUTING Teams card.

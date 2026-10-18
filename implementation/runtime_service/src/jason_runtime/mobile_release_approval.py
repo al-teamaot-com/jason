@@ -50,6 +50,7 @@ class MobileReleasePolicy:
     allowed_risk_profiles: frozenset[str]
     ttl_seconds: int
     policy_sha256: str
+    schema_version: str = "1.0"
 
 
 def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
@@ -63,26 +64,52 @@ def read_mobile_release_policy(path: Path) -> MobileReleasePolicy:
     if len(raw) > 8192:
         raise PermissionError("mobile release policy too large")
     doc = json.loads(raw)
-    fields = {"schema_version", "organization_id", "policy_mode", "owner_identity_ids",
+    shared = {"schema_version", "organization_id", "policy_mode", "owner_identity_ids",
               "allowed_risk_profiles", "ttl_seconds", "capability"}
-    if (not isinstance(doc, dict) or set(doc) != fields
-            or doc["schema_version"] != "1.0"
+    # V1 remains *exactly* the approved normal-risk pilot. V2 is opt-in through
+    # a separate 0600 Owner-reviewed policy and an explicit runtime mode.
+    # A mere source deployment or updated allowed_risk_profiles cannot turn
+    # the already-running V1 pilot into protected release authority.
+    version = doc.get("schema_version") if isinstance(doc, dict) else None
+    if version == "1.0":
+        expected = shared
+        mode = "owner_only_pilot"
+    elif version == "2.0":
+        expected = shared | {"high_impact_review"}
+        mode = "owner_reviewed"
+    else:
+        raise PermissionError("unsupported versioned mobile release policy")
+    if (set(doc) != expected
             or doc["organization_id"] != "aot"
-            or doc["policy_mode"] != "owner_only_pilot"
+            or doc["policy_mode"] != mode
             or doc["capability"] != CAPABILITY
             or doc["owner_identity_ids"] != ["person-al"]):
-        raise PermissionError("mobile release approval policy is not an authorized owner-only pilot")
+        raise PermissionError("mobile release policy role, version or mode is not authorized")
     risks = doc["allowed_risk_profiles"]
     ttl = doc["ttl_seconds"]
     if (not isinstance(risks, list) or not risks or len(set(risks)) != len(risks)
             or any(not isinstance(risk, str) or risk not in RISK_LEVELS for risk in risks)
-            or type(ttl) is not int or not 300 <= ttl <= 1800):
+            or type(ttl) is not int or not 300 <= ttl <= (1800 if version == "1.0" else 900)):
         raise PermissionError("mobile release policy risk or TTL is invalid")
-    # A production-control-core policy upgrade requires an additional independent
-    # change approval; initial rollout cannot silently include sensitive classes.
-    if set(risks) != {"normal"}:
-        raise PermissionError("owner-only mobile pilot is limited to normal-risk releases")
-    return MobileReleasePolicy("aot", ("person-al",), frozenset(risks), ttl, digest(doc))
+    if version == "1.0":
+        if set(risks) != {"normal"}:
+            raise PermissionError("owner-only mobile pilot is limited to normal-risk releases")
+    else:
+        review = doc["high_impact_review"]
+        if (not isinstance(review, dict)
+                or review != {
+                    "owner_exact_sha_required": True,
+                    "signed_teams_identity_required": True,
+                    "independent_ccc_required": True,
+                    "protected_release_gates_unchanged": True,
+                } or "normal" not in risks):
+            raise PermissionError("high-impact Teams release policy requires explicit reviewed controls")
+        # A V2 policy authorizes *the channel*, never a class-wide standing
+        # release grant. Each approval remains a one-time, signed owner vote
+        # for a single immutable release and manifest; root gates still run.
+    return MobileReleasePolicy(
+        "aot", ("person-al",), frozenset(risks), ttl, digest(doc), version,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,6 +286,7 @@ class MobileReleaseApprovalFlow:
     identities: Any
     signed_verifier: Any
     signed_evidence: MobileReleaseSignedEvidenceStore
+    required_policy_version: str = "1.0"
 
     def handle(self, *, approval_id: str, decision: str, microsoft_tenant_id: str,
                microsoft_object_id: str, conversation_id: str, channel_response_id: str,
@@ -288,6 +316,8 @@ class MobileReleaseApprovalFlow:
         if identity is None or identity.status != "active" or identity.organization_id != "aot":
             raise PermissionError("mobile release approver identity not active in AOT")
         policy = read_mobile_release_policy(self.policy_path)
+        if policy.schema_version != self.required_policy_version:
+            raise PermissionError("Teams owner release policy changed without the reviewed runtime mode")
         if identity.identity_id not in policy.owner_identity_ids:
             raise PermissionError("mobile release actor is not the authorized owner")
         request = self.requests.get(approval_id)
@@ -383,6 +413,7 @@ class MobileReleaseApprovalMaintenance:
     interval_seconds: int = 300
     clock: Any = lambda: datetime.now(timezone.utc)
     _next_due: datetime | None = None
+    required_policy_version: str = "1.0"
 
     def tick(self) -> bool:
         if not self.enabled:
@@ -400,6 +431,8 @@ class MobileReleaseApprovalMaintenance:
             return False
         self._next_due = now + timedelta(seconds=self.interval_seconds)
         policy = read_mobile_release_policy(self.policy_path)
+        if policy.schema_version != self.required_policy_version:
+            raise PermissionError("Teams release policy changed without the reviewed runtime activation")
         paths = tuple(sorted((self.state_root / "mobile-release-offers").glob("release-*.json"),
                              key=lambda p: p.stat().st_mtime, reverse=True))[:20]
         existing_ids = {

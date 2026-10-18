@@ -783,3 +783,49 @@ def test_owner_uat_invalid_environment_modes_fail_closed(tmp_path):
     ):
         with pytest.raises(ValueError, match="UAT"):
             replace(settings, **bad).validate()
+
+
+def test_owner_reviewed_teams_release_mode_requires_exact_v2_policy(tmp_path):
+    import pytest
+    from implementation.runtime_service.tests.test_mobile_release_approval import (
+        policy_file, reviewed_policy_file,
+    )
+
+    v1 = policy_file(tmp_path)
+    mobile_db = tmp_path / "owner-approvals.sqlite3"
+    release_root = tmp_path / "release-state"
+    cfg = replace(
+        _settings(tmp_path),
+        release_mobile_approval_mode="owner_reviewed",
+        release_mobile_approval_policy=v1,
+        release_mobile_approval_db=mobile_db,
+        release_mobile_state_root=release_root,
+    )
+    cfg.validate()
+    with pytest.raises(PermissionError, match="mode and reviewed policy version"):
+        build_runtime_application(cfg)
+
+    v2 = reviewed_policy_file(tmp_path)
+    cfg = replace(cfg, release_mobile_approval_policy=v2)
+    app = build_runtime_application(cfg)
+    # A new Teams policy neither enables broad UTA nor issues a card by itself.
+    assert app is not None
+    assert cfg.universal_approval_mode == "off"
+    assert release_root.joinpath("mobile-release-offers").is_dir() is False
+
+
+def test_legacy_owner_pilot_refuses_silent_v2_risk_policy_upgrade(tmp_path):
+    import pytest
+    from implementation.runtime_service.tests.test_mobile_release_approval import (
+        reviewed_policy_file,
+    )
+    cfg = replace(
+        _settings(tmp_path),
+        release_mobile_approval_mode="owner_only_pilot",
+        release_mobile_approval_policy=reviewed_policy_file(tmp_path),
+        release_mobile_approval_db=tmp_path / "owner-pilot.sqlite3",
+        release_mobile_state_root=tmp_path / "release-state",
+    )
+    cfg.validate()
+    with pytest.raises(PermissionError, match="mode and reviewed policy version"):
+        build_runtime_application(cfg)
