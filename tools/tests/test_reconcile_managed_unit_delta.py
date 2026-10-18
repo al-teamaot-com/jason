@@ -167,3 +167,11 @@ def test_triggering_units_are_removed_before_services(tmp_path):
     assert mod.plan_unit_removals(candidate, target, installed, scope="system") == [
         "jason-new.path", "jason-new.timer", "jason-new.service"
     ]
+
+
+def test_immutable_revision_alias_symlink_cannot_masquerade_as_different_sha(tmp_path):
+    root, candidate, target, installed, user = setup_releases(tmp_path)
+    alias = root / ("c" * 40)
+    alias.symlink_to(candidate, target_is_directory=True)
+    with pytest.raises(mod.UnitDeltaError, match="exact immutable"):
+        mod.pinned_release(alias, root)

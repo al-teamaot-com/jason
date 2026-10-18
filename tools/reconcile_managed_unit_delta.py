@@ -95,12 +95,14 @@ def plan_unit_removals(
 
 
 def pinned_release(path: Path, release_root: Path) -> Path:
+    if path.is_symlink() or not SHA.fullmatch(path.name):
+        raise UnitDeltaError("release is not an exact immutable release-root child")
     try:
         root = release_root.resolve(strict=True)
         actual = path.resolve(strict=True)
     except (OSError, RuntimeError) as exc:
         raise UnitDeltaError("release is not an exact immutable release-root child") from exc
-    if actual.parent != root or not SHA.fullmatch(actual.name):
+    if actual.parent != root or actual.name != path.name:
         raise UnitDeltaError("release is not an exact immutable release-root child")
     return actual
 
