@@ -2486,6 +2486,8 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
                 authenticator=teams_authenticator,
                 allowed_machine_identities=settings.allowed_machine_identities,
                 allowed_approval_prefixes=("relapproval-",),
+                allowed_selection_keys=(frozenset({"card_challenge"}) if expected_version == "2.0"
+                                        else frozenset()),
             ),
             signed_evidence=MobileReleaseSignedEvidenceStore(settings.release_mobile_approval_db),
             required_policy_version=expected_version,

@@ -285,7 +285,11 @@ class TeamsGatewayPlaybookApprovalSender:
                 {
                     "type": "Action.Submit",
                     "title": title,
-                    "data": {"approval_id": card.approval_id, "decision": decision},
+                    "data": {
+                        "approval_id": card.approval_id, "decision": decision,
+                        **({"card_challenge": card.card_instance_challenge}
+                           if card.card_instance_challenge is not None else {}),
+                    },
                 }
                 for title, decision in actions
             ],

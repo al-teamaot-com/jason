@@ -98,3 +98,38 @@ Use separate labels for (a) source-coded, (b) GitHub CI/merged,
 Until step (g) **Protected-core approval via Teams: NOT OPERATIONAL.**
 Until independently verified universal plan routes pass all workflows,
 **Universal Teams Approver: NOT OPERATIONAL**, even if release-only lane passes.
+
+## Specific P0 #1553 signed callback provenance containment
+
+For v2 reviewed owner release requests, issuance generates a distinct
+cryptographically random 192-bit card-instance challenge using secrets.
+The private durable request stores the nonce and commitment; the existing
+Adaptive Card renderer includes it **only in Action.Submit data**, never
+visibly in a status message. The existing Node Teams gateway serializes
+the card challenge as a signed, bounded selection, and the existing
+signature verifier allows this exact key only on the v2 release lane.
+The SDK-verified Teams identity is still mandatory.
+
+The runtime callback must verify an exact challenge from the persisted
+request, its hash, the signed submit, the immutable policy and all role,
+tenant, expiration, decision and release fingerprints BEFORE recording
+any decision. The independent host consumer re-verifies the identical
+challenge inside the original signed envelope before any CCC material
+review or exact owner approval. A synthetic signed Teams callback with
+only approval_id + decision is insufficient for the v2 protected-core
+channel. A wrong challenge, old nonce, modified intent or replay fails
+closed. V1's historical pilot contract is unchanged.
+
+**Important limits:** This establishes knowledge of *one actual issued card
+payload*, not cryptographic proof of the actual Microsoft Graph message ID
+or the Owner's physical presence. Teams proactive delivery may still
+return only a synthetic accepted transport receipt. Existing Bot Framework
+channel identity alone does not prove human MFA or a real click, and the
+historical disputed 2026-10-17 #1553 approval remains unresolved.
+The root/security reviewer must separately evaluate channel provenance,
+message-instance correlation and whether elevated release approval needs
+additional delegated Entra/user-verified assurance. This source may not
+be activated for protected release authority until signed real-card
+testing plus Owner witnessed approval and security acceptance succeed.
+
+Unit/isolated tests are NOT that live proof.

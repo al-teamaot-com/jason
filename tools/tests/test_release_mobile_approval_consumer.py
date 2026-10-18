@@ -29,7 +29,7 @@ NOW = datetime.now(timezone.utc).replace(microsecond=0)  # avoid expired histori
 RID = "release-" + SHA[:16]
 
 
-def fixture(tmp_path, *, approve=True, reviewed=False):
+def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=None):
     from implementation.runtime_service.tests.test_mobile_release_approval import (
         policy_file, reviewed_policy_file, mark_release_high_impact, release_record,
     )
@@ -63,6 +63,7 @@ def fixture(tmp_path, *, approve=True, reviewed=False):
         authenticator=authenticator,
         allowed_machine_identities=frozenset({"svc-openclaw-gateway"}),
         allowed_approval_prefixes=("relapproval-",),
+        allowed_selection_keys=(frozenset({"card_challenge"}) if reviewed else frozenset()),
         clock=lambda: NOW,
     )
     bindings_db = tmp_path / "bindings.sqlite3"
@@ -94,16 +95,23 @@ def fixture(tmp_path, *, approve=True, reviewed=False):
         "message_id": "teams-response-1",
         "interaction": {
             "kind": "approval.submit", "approval_id": request.approval_id,
-            "decision": decision, "channel_response_id": "teams-response-1", "selections": {},
+            "decision": decision, "channel_response_id": "teams-response-1",
+            "selections": (
+                {"card_challenge": request.metadata["card_instance_challenge"]}
+                if reviewed else {}
+            ),
         },
         "key_id": "gateway-key",
     }
+    if card_selection_override is not None:
+        envelope["interaction"]["selections"] = card_selection_override
     envelope["signature"] = base64.b64encode(private.sign(canonical_signed_payload(envelope))).decode()
     args = {
         "approval_id": request.approval_id, "decision": decision,
         "microsoft_tenant_id": "tenant-a", "microsoft_object_id": "object-al",
         "conversation_id": "teams-owner-chat", "channel_response_id": "teams-response-1",
-        "decided_at": NOW, "signed_envelope": envelope, "selections": {},
+        "decided_at": NOW, "signed_envelope": envelope,
+        "selections": envelope["interaction"]["selections"],
     }
     opts = dict(
         repo=tmp_path, state_root=root, database=path, policy_file=policy_path, ccc_root=ccc,
@@ -166,6 +174,27 @@ def test_signed_protected_core_owner_approval_produces_one_exact_ccc_release_gra
     ).authentication_evidence_hash
     assert consume_mobile_release_decisions(**opts) == 0
     assert len(calls) == 1
+
+
+def test_signed_protected_core_click_without_issued_card_nonce_fails_closed(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, card_selection_override={},
+    )
+    # This envelope is genuinely signed and owner-bound, but would result from
+    # crafted activity.value instead of the originally issued V2 card.
+    with pytest.raises(PermissionError, match="card instance"):
+        flow.handle(**args)
+    assert repo.accepted_decision(request.approval_id) is None
+    assert not (opts["ccc_root"] / "material-review.json").exists()
+
+
+def test_signed_protected_core_wrong_card_nonce_fails_closed(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, card_selection_override={"card_challenge": "0" * 48},
+    )
+    with pytest.raises(PermissionError, match="card instance"):
+        flow.handle(**args)
+    assert repo.accepted_decision(request.approval_id) is None
 
 
 def test_signed_protected_core_deny_never_marks_material_ccc_or_owner_grant(tmp_path):

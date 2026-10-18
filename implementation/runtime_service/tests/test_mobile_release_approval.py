@@ -218,11 +218,11 @@ def test_unsafe_release_cannot_be_offered_to_phone(tmp_path, change):
 
 
 class FakeVerifier:
-    def __init__(self, *, aid, decision, now):
+    def __init__(self, *, aid, decision, now, selections=None):
         self.parsed = SimpleNamespace(
             approval_submit=SimpleNamespace(
                 approval_id=aid, decision=decision, channel_response_id="teams-response-1",
-                selections={},
+                selections=selections or {},
             ),
             issued_at=now, microsoft_tenant_id="tenant-a", microsoft_object_id="object-al",
             conversation_id="owner-chat", documents=(),
@@ -256,7 +256,11 @@ def flow_fixture(tmp_path, *, decision="approve", reviewed=False):
     bindings = SimpleNamespace(find=lambda **k: SimpleNamespace(status="active", jason_identity_id="person-al"))
     identities = SimpleNamespace(get=lambda k: SimpleNamespace(status="active", identity_id=k, organization_id="aot"))
     flow = MobileReleaseApprovalFlow(service, repo, path, root, bindings, identities,
-                                     FakeVerifier(aid=req.approval_id, decision=decision, now=NOW),
+                                     FakeVerifier(
+                                         aid=req.approval_id, decision=decision, now=NOW,
+                                         selections=({"card_challenge": req.metadata["card_instance_challenge"]}
+                                                     if reviewed else {}),
+                                     ),
                                      MobileReleaseSignedEvidenceStore(tmp_path / "requests.sqlite3"),
                                      required_policy_version="2.0" if reviewed else "1.0")
     return flow, req, repo, record
@@ -267,7 +271,8 @@ def click(flow, request, decision="approve", **updates):
         "approval_id": request.approval_id, "decision": decision,
         "microsoft_tenant_id": "tenant-a", "microsoft_object_id": "object-al",
         "conversation_id": "owner-chat", "channel_response_id": "teams-response-1",
-        "decided_at": NOW, "signed_envelope": {"signed": True}, "selections": {},
+        "decided_at": NOW, "signed_envelope": {"signed": True},
+        "selections": dict(flow.signed_verifier.parsed.approval_submit.selections),
     }
     args.update(updates)
     return flow.handle(**args)
@@ -287,6 +292,30 @@ def test_signed_owner_click_consumed_once_without_mutating_release_or_ccc(tmp_pa
     assert not (tmp_path / "material-review.json").exists()
     with pytest.raises(PermissionError, match="already terminal"):
         click(flow, req)
+
+
+def test_reviewed_v2_card_challenges_unique_for_each_issued_request(tmp_path):
+    policy_path = reviewed_policy_file(tmp_path)
+    policy = read_mobile_release_policy(policy_path)
+    root, _ = release_record(tmp_path)
+    mark_release_high_impact(root)
+    evidence = read_eligible_release(root, RELEASE, policy)
+    a = create_mobile_release_request(evidence, policy, now=NOW)
+    b = create_mobile_release_request(evidence, policy, now=NOW)
+    assert a.approval_id != b.approval_id
+    assert a.metadata["card_instance_challenge"] != b.metadata["card_instance_challenge"]
+    from hashlib import sha256
+    for request in (a, b):
+        proof = request.metadata["card_instance_challenge"]
+        assert request.metadata["card_instance_challenge_sha256"] == sha256(
+            proof.encode("ascii")
+        ).hexdigest()
+        roundtrip = create_mobile_release_request(
+            evidence, policy, now=NOW, card_challenge=proof,
+        )
+        assert roundtrip.metadata == request.metadata
+    with pytest.raises(PermissionError):
+        create_mobile_release_request(evidence, policy, now=NOW, card_challenge="bad")
 
 
 def test_reviewed_v2_owner_click_records_one_receipt_without_execution(tmp_path):

@@ -46,6 +46,8 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             "implementation/runtime_service/src/jason_runtime/mobile_release_approval.py",
             "implementation/runtime_service/src/jason_runtime/universal_teams_approval.py",
             "tools/release_mobile_approval_consumer.py",
+            "implementation/runtime_service/src/jason_runtime/playbook_autonomy_review.py",
+            "implementation/connectors/microsoft_graph/teams_approval_channel.py",
         )
         for name in names:
             self.assertEqual(runner.classify_change_risk("feature", [name]), "production_control_core")

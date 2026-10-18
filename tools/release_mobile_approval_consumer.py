@@ -6,8 +6,10 @@ No direct deploy, service restart, sudo, provider write or CCC PASS fabrication.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import sqlite3
 import stat
@@ -153,6 +155,8 @@ def consume_mobile_release_decisions(
         verifier = SignedTeamsApprovalEvidenceVerifier(
             authenticator=key_auth, allowed_machine_identities=frozenset({"svc-openclaw-gateway"}),
             allowed_approval_prefixes=(REQUEST_PREFIX,), clock=lambda: timestamp,
+            allowed_selection_keys=(frozenset({"card_challenge"})
+                                    if policy.schema_version == "2.0" else frozenset()),
         )
         token = json.dumps(signed, separators=(",", ":"), ensure_ascii=False)
         _, original = verifier.parse(token)
@@ -160,10 +164,19 @@ def consume_mobile_release_decisions(
         submit = original.approval_submit
         if (submit is None or submit.approval_id != approval_id or submit.decision != "approve"
                 or submit.channel_response_id != receipt.get("channel_response_id")
-                or original.issued_at != timestamp or submit.selections
+                or original.issued_at != timestamp
                 or original.documents
                 or principal.authentication_evidence_hash != evidence_sha):
             raise PermissionError("original signed Teams evidence does not match decision receipt")
+        if policy.schema_version == "2.0":
+            proof = request.metadata.get("card_instance_challenge")
+            if (type(proof) is not str or re.fullmatch(r"[0-9a-f]{48}", proof) is None
+                    or hashlib.sha256(proof.encode("ascii")).hexdigest()
+                        != request.metadata.get("card_instance_challenge_sha256")
+                    or dict(submit.selections) != {"card_challenge": proof}):
+                raise PermissionError("host attestation lacks original card-instance proof")
+        elif submit.selections:
+            raise PermissionError("legacy signed release cannot contain card changes")
         binding = bindings.find(microsoft_tenant_id=principal.tenant_id, microsoft_object_id=principal.object_id)
         if binding is None or binding.status != "active":
             raise PermissionError("mobile owner Entra binding has been revoked")
@@ -208,7 +221,11 @@ def consume_mobile_release_decisions(
             })
             continue
         candidate = read_eligible_release(state_root, release_id, policy)
-        expected = create_mobile_release_request(candidate, policy, now=request.requested_at)
+        expected = create_mobile_release_request(
+            candidate, policy, now=request.requested_at,
+            card_challenge=(request.metadata.get("card_instance_challenge")
+                            if policy.schema_version == "2.0" else None),
+        )
         if (request.metadata != {**expected.metadata, **{
                 key: value for key, value in request.metadata.items()
                 if key == "delivery_message_ids"}}

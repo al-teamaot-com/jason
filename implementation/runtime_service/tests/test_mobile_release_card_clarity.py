@@ -79,6 +79,51 @@ def test_teams_gateway_accepts_both_mobile_card_actions():
     assert all(not x["selections"] for x in values)
 
 
+def test_protected_release_card_instance_challenge_roundtrips_existing_gateway():
+    import re
+    from connectors.microsoft_graph.teams_approval_channel import render_approval_card
+    from implementation.runtime_service.tests.test_mobile_release_approval import (
+        reviewed_policy_file, release_record, mark_release_high_impact,
+    )
+    from jason_runtime.mobile_release_approval import (
+        read_mobile_release_policy, read_eligible_release, create_mobile_release_request,
+    )
+    from tempfile import TemporaryDirectory
+    with TemporaryDirectory() as d:
+        root = Path(d)
+        policy = read_mobile_release_policy(reviewed_policy_file(root))
+        release_root, _ = release_record(root)
+        mark_release_high_impact(release_root)
+        from implementation.runtime_service.tests.test_mobile_release_approval import RELEASE
+        evidence = read_eligible_release(release_root, RELEASE, policy)
+        request = create_mobile_release_request(evidence, policy)
+        proof = request.metadata["card_instance_challenge"]
+        assert re.fullmatch(r"[0-9a-f]{48}", proof)
+        card = render_approval_card(request)
+        rendered = TeamsGatewayPlaybookApprovalSender._adaptive_card(card)
+        assert all(x["data"]["card_challenge"] == proof for x in rendered["actions"])
+        # Nonce is in the invisible signed Action.Submit data, never in visible text.
+        assert proof not in json.dumps(rendered["body"])
+        assert [x["title"] for x in rendered["actions"]] == ["Approve", "Deny"]
+
+        module = Path(__file__).resolve().parents[3] / "infrastructure/jason-teams-gateway/approval-submit.mjs"
+        if not module.exists():
+            module = module.parent.parent.parent / "infrastructure/jason-teams-gateway/approval-submit.mjs"
+        script = (
+            "import { parseApprovalSubmit } from " + json.dumps(module.as_uri()) +
+            '; let s=""; for await (const c of process.stdin) s+=c;' +
+            " console.log(JSON.stringify(JSON.parse(s).map(parseApprovalSubmit)));"
+        )
+        parsed = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            input=json.dumps([x["data"] for x in rendered["actions"]]),
+            capture_output=True, text=True, check=True, timeout=12,
+        )
+        decisions = json.loads(parsed.stdout)
+        assert [v["decision"] for v in decisions] == ["approve", "deny"]
+        assert all(v["selections"] == {"card_challenge": proof} for v in decisions)
+
+
 def test_other_playbook_approval_cards_remain_unchanged():
     result = TeamsGatewayPlaybookApprovalSender._adaptive_card(
         card(capability="playbook.autonomy.promote", approval_id="pbautreq-test")

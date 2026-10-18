@@ -608,6 +608,8 @@ def classify_change_risk(change_class: str, files: list[str]) -> str:
             "tools/release_mobile_approval_consumer.py",
             "implementation/runtime_service/src/jason_runtime/mobile_release_approval.py",
             "implementation/runtime_service/src/jason_runtime/universal_teams_approval.py",
+            "implementation/runtime_service/src/jason_runtime/playbook_autonomy_review.py",
+            "implementation/connectors/microsoft_graph/teams_approval_channel.py",
         }
         or "release-host-reconcile" in path
         for path in paths

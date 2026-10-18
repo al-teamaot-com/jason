@@ -175,7 +175,8 @@ def read_eligible_release(state_root: Path, release_id: str, policy: MobileRelea
 
 
 def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleasePolicy,
-                                  *, now: datetime | None = None) -> ApprovalRequest:
+                                  *, now: datetime | None = None,
+                                  card_challenge: str | None = None) -> ApprovalRequest:
     instant = now or datetime.now(timezone.utc)
     if instant.tzinfo is None:
         raise ValueError("mobile approval clock must be timezone-aware")
@@ -186,6 +187,19 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
     shown = ", ".join(evidence.affected_files[:7]) or "(no files)"
     if len(evidence.affected_files) > 7:
         shown += f" (+{len(evidence.affected_files) - 7} more)"
+    # Each V2 card includes an unguessable, server-issued instance challenge.
+    # Its exact value is carried only by that card's Action.Submit and the
+    # private persisted request. Signed callback/host consumer BOTH verify it
+    # before accepting owner or CCC authority. A manufactured activity.value
+    # containing only approval_id and decision cannot satisfy this contract.
+    if policy.schema_version == "2.0":
+        challenge = card_challenge if card_challenge is not None else secrets.token_hex(24)
+        if type(challenge) is not str or re.fullmatch(r"[0-9a-f]{48}", challenge) is None:
+            raise PermissionError("reviewed release requires a valid card-instance challenge")
+    elif card_challenge is not None:
+        raise PermissionError("legacy release cannot supply a protected card challenge")
+    else:
+        challenge = None
     intent = {
         "release_id": evidence.release_id,
         "candidate_sha": evidence.candidate_sha,
@@ -225,7 +239,15 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
                 ("Manifest fingerprint", evidence.manifest_sha256),
             ),
         ),
-        metadata={**intent, "intent_sha256": digest(intent), "owner_policy_sha256": policy.policy_sha256},
+        metadata={
+            **intent, "intent_sha256": digest(intent), "owner_policy_sha256": policy.policy_sha256,
+            **({
+                "card_instance_challenge": challenge,
+                "card_instance_challenge_sha256": hashlib.sha256(
+                    challenge.encode("ascii")
+                ).hexdigest(),
+            } if challenge is not None else {}),
+        },
     )
 
 
@@ -293,7 +315,7 @@ class MobileReleaseApprovalFlow:
                decided_at: datetime, selections: Mapping[str, str] | None = None,
                signed_envelope: Mapping[str, Any] | None = None) -> dict[str, Any]:
         if (not approval_id.startswith(REQUEST_PREFIX) or signed_envelope is None
-                or selections or decision not in {"approve", "deny"}):
+                or decision not in {"approve", "deny"}):
             raise PermissionError("exact signed mobile release decision required")
         # Bounded emergency hold does not affect Teams chat or other workflows.
         read_release_approval_containment(self.state_root).require_can_issue()
@@ -306,7 +328,8 @@ class MobileReleaseApprovalFlow:
                 or parsed.conversation_id != conversation_id
                 or submit.channel_response_id != channel_response_id
                 or parsed.issued_at != decided_at
-                or parsed.documents or submit.selections):
+                or parsed.documents
+                or dict(submit.selections) != dict(selections or {})):
             raise PermissionError("Teams decision does not match signed immutable approval evidence")
         principal = self.signed_verifier.verify(token)
         binding = self.bindings.find(microsoft_tenant_id=principal.tenant_id, microsoft_object_id=principal.object_id)
@@ -333,7 +356,20 @@ class MobileReleaseApprovalFlow:
             raise PermissionError("mobile approval requester, role or policy has changed")
         release_id = request.metadata.get("release_id", "")
         current = read_eligible_release(self.state_root, release_id, policy)
-        expected = create_mobile_release_request(current, policy, now=request.requested_at)
+        if policy.schema_version == "2.0":
+            proof = request.metadata.get("card_instance_challenge")
+            if (type(proof) is not str or re.fullmatch(r"[0-9a-f]{48}", proof) is None
+                    or hashlib.sha256(proof.encode("ascii")).hexdigest()
+                        != request.metadata.get("card_instance_challenge_sha256")
+                    or dict(submit.selections) != {"card_challenge": proof}):
+                raise PermissionError("signed Teams decision is not bound to the issued card instance")
+            expected = create_mobile_release_request(
+                current, policy, now=request.requested_at, card_challenge=proof,
+            )
+        else:
+            if submit.selections:
+                raise PermissionError("legacy release approval cannot change immutable card material")
+            expected = create_mobile_release_request(current, policy, now=request.requested_at)
         # The issuer durably records the *transport receipt* after calling
         # TeamsGatewayPlaybookApprovalSender.send(). That single field cannot
         # appear in the immutable reviewed intent reconstructed above. Do not
