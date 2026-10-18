@@ -605,6 +605,7 @@ def classify_change_risk(change_class: str, files: list[str]) -> str:
         or path in {
             "tools/reconcile_production_host_services.sh",
             "tools/reconcile_managed_unit_delta.py",
+            "tools/release_exporter_port_guard.py",
             "tools/release_mobile_approval_consumer.py",
             "implementation/runtime_service/src/jason_runtime/mobile_release_approval.py",
             "implementation/runtime_service/src/jason_runtime/universal_teams_approval.py",

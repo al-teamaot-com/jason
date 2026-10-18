@@ -55,7 +55,12 @@ clear the breaker or mark deployment complete.
    Manager still imposes **420 seconds** on host request waiting. Other
    maintenance-service 120-second limits remain unchanged. A timed-out or
    nonzero health unit remains a hard reconcile failure.
-3. Regression covers unattributed-to-owned PID convergence, persistent
+3. The exporter PID attribution guard itself is explicitly categorized as
+   **protected production-control-core source**, enforced in the release
+   policy allowlist and risk classifier, with exact-SHA Owner-gate tests. A
+   future change to only the guard cannot silently qualify as a normal
+   release and bypass the constitutional core owner review.
+4. Regression covers unattributed-to-owned PID convergence, persistent
    unknown, immediate foreign/mixed-PID denial, original process isolation,
    known host-source ordering and timeout ceilings. Broad Release Manager,
    host and CCC unit tests must remain green before merge.

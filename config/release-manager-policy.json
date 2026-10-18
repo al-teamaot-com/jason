@@ -48,6 +48,7 @@
     "tools/install_release_host_reconciler.py",
     "tools/reconcile_production_host_services.sh",
     "tools/reconcile_managed_unit_delta.py",
+    "tools/release_exporter_port_guard.py",
     "tools/release_mobile_approval_consumer.py",
     "implementation/runtime_service/src/jason_runtime/mobile_release_approval.py",
     "implementation/runtime_service/src/jason_runtime/universal_teams_approval.py",
