@@ -1246,3 +1246,169 @@ def test_apply_edits_late_change_budget_rejection_has_no_side_effects(tmp_path):
         raise AssertionError('late over-budget change accepted')
     assert first.read_text(encoding='utf-8') == 'original\n'
     assert not (tmp_path / 'implementation/tests/test_example.py').exists()
+
+
+def _legacy_partial_anchor_fixture(tmp_path):
+    import subprocess
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    def git(*args, cwd=repo):
+        return subprocess.run(['git', *args], cwd=cwd, check=True,
+                              text=True, capture_output=True).stdout.strip()
+    git('init', '-q')
+    git('config', 'user.email', 'tests@example.invalid')
+    git('config', 'user.name', 'Test')
+    path = repo / 'implementation' / 'example.py'
+    path.parent.mkdir(parents=True)
+    path.write_text('existing = True\n', encoding='utf-8')
+    test = repo / 'implementation' / 'tests' / 'test_example.py'
+    test.parent.mkdir(parents=True)
+    test.write_text('def test_original():\n    assert True\n', encoding='utf-8')
+    git('add', '.')
+    git('commit', '-qm', 'baseline')
+    git('branch', '-M', 'main')
+    git('branch', 'origin/main', 'main')
+    original = tmp_path / 'original'
+    rid = 'b' * 64
+    item_id = 'SUPPORT-DEV-1196'
+    original_branch = worker.branch_name(item_id)
+    retry_branch = original_branch + '-anchor-' + rid[:12]
+    git('worktree', 'add', '-q', '-b', original_branch, str(original), 'main')
+    (original / 'implementation/example.py').write_text('existing = False\n', encoding='utf-8')
+    clean = tmp_path / 'clean'
+    git('worktree', 'add', '-q', '-b', retry_branch, str(clean), 'main')
+    spool = tmp_path / 'spool'
+    dest = spool / 'reasoning' / 'responses'
+    dest.mkdir(parents=True)
+    (dest / (rid + '.json')).write_text(json.dumps({
+        'request_id': rid, 'kind': 'edit_plan', 'support_item': item_id,
+        'status': 'succeeded', 'result': {
+            'blocked_reason': None,
+            'edits': [{'path':'implementation/example.py',
+                       'old_text':'existing = True', 'new_text':'existing = False'},
+                      {'path':'implementation/tests/test_example.py',
+                       'old_text':'unavailable anchor', 'new_text':'test change'}],
+            'test_paths': ['implementation/tests/test_example.py'],
+        },
+    }), encoding='utf-8')
+    record = {
+        'phase': 'blocked', 'branch': original_branch, 'proposal_retries': 0,
+        'reasoning_request_id': rid,
+        'reason': ('WorkerError: exact repair anchor must occur once in '
+                   'implementation/tests/test_example.py; found 0'),
+    }
+    return repo, original, clean, spool, rid, retry_branch, {'items': {item_id: record}}
+
+
+def test_preserve_legacy_partial_anchor_worktree_and_resume_clean(monkeypatch, tmp_path):
+    repo, old, clean, spool, rid, retry_branch, state = _legacy_partial_anchor_fixture(tmp_path)
+    record = state['items']['SUPPORT-DEV-1196']
+    path = lambda item, branch=None: clean if branch == retry_branch else old
+    monkeypatch.setattr(worker, 'support_worktree_path', path)
+    monkeypatch.setattr(worker, 'ensure_worktree', lambda repo, item, branch=None: clean)
+    monkeypatch.setattr(worker, 'source_excerpts_for_paths',
+                        lambda *a, **k: [{'path':'implementation/example.py',
+                                          'content':'existing = True'}])
+    requests = []
+    monkeypatch.setattr(worker, 'queue_reasoning',
+                        lambda spool, **kw: requests.append(kw) or 'c'*64)
+    supported = [{'id':'SUPPORT-DEV-1196', 'title':'Recovery',
+                  'evidence':'approved', 'acceptance':'tested'}]
+    original_content = (old / 'implementation/example.py').read_text()
+    resumed = worker.readmit_preserved_anchor_failure(
+        state, supported, repo, spool, Gate(), {}, max_active=2)
+    assert resumed == ['SUPPORT-DEV-1196']
+    assert (old / 'implementation/example.py').read_text() == original_content
+    assert (clean / 'implementation/example.py').read_text() == 'existing = True\n'
+    evidence = json.loads((spool / 'recovery-evidence' / (rid + '.json')).read_text())
+    assert evidence['support_item'] == 'SUPPORT-DEV-1196'
+    assert evidence['failed_reasoning_request_id'] == rid
+    assert 'existing = False' in evidence['preserved_original_patch']
+    assert record['preserved_anchor_patch_sha256'] == evidence['original_patch_sha256']
+    assert record['phase'] == 'implementing'
+    assert record['branch'] == retry_branch
+    assert record['reasoning_request_id'] == 'c'*64
+    assert record['proposal_retries'] == 1
+    assert requests[0]['kind'] == 'edit_plan'
+    assert 'SUPPORT-DEV' in requests[0]['context']['validation_feedback']
+    assert worker.readmit_preserved_anchor_failure(
+        state, supported, repo, spool, Gate(), {}, max_active=2) == []
+    assert len(requests) == 1
+
+
+def test_preserve_legacy_anchor_requires_original_proof(monkeypatch, tmp_path):
+    repo, old, clean, spool, rid, retry_branch, state = _legacy_partial_anchor_fixture(tmp_path)
+    record = state['items']['SUPPORT-DEV-1196']
+    monkeypatch.setattr(worker, 'support_worktree_path',
+                        lambda item, branch=None: old)
+    calls = []
+    monkeypatch.setattr(worker, 'ensure_worktree', lambda *a, **k: calls.append('worktree'))
+    monkeypatch.setattr(worker, 'queue_reasoning', lambda *a, **k: calls.append('request'))
+    eligible = [{'id':'SUPPORT-DEV-1196'}]
+    record['reasoning_request_id'] = 'd'*64
+    assert worker.readmit_preserved_anchor_failure(
+        state, eligible, repo, spool, Gate(), {}, max_active=2) == []
+    record['reasoning_request_id'] = rid
+    record['branch'] = 'repair/custom-overridden'
+    assert worker.readmit_preserved_anchor_failure(
+        state, eligible, repo, spool, Gate(), {}, max_active=2) == []
+    assert calls == []
+    assert (old / 'implementation/example.py').read_text() == 'existing = False\n'
+
+
+def test_preserve_legacy_anchor_fails_closed_for_unrelated_dirty_files(monkeypatch, tmp_path):
+    repo, old, clean, spool, rid, retry_branch, state = _legacy_partial_anchor_fixture(tmp_path)
+    target = old / 'implementation' / 'unknown.py'
+    target.write_text('untracked = True\n', encoding='utf-8')
+    monkeypatch.setattr(worker, 'support_worktree_path',
+                        lambda item, branch=None: old)
+    calls = []
+    monkeypatch.setattr(worker, 'ensure_worktree', lambda *a, **k: calls.append('worktree'))
+    monkeypatch.setattr(worker, 'queue_reasoning', lambda *a, **k: calls.append('request'))
+    assert worker.readmit_preserved_anchor_failure(
+        state, [{'id':'SUPPORT-DEV-1196'}], repo, spool, Gate(), {}, max_active=2) == []
+    assert calls == []
+    assert target.exists()
+    assert not (spool / 'recovery-evidence').exists()
+
+
+def test_recovery_worktree_path_requires_exact_item_and_branch_identity():
+    item = 'SUPPORT-DEV-1196'
+    branch = worker.branch_name(item) + '-anchor-' + 'f'*12
+    assert worker.support_worktree_path(item, branch).name == 'support-dev-1196-anchor-' + 'f'*12
+    assert worker.support_worktree_path(item).name == 'support-dev-1196'
+    assert worker.support_worktree_path(item, 'repair/something-else').name == 'support-dev-1196'
+    try:
+        worker.support_worktree_path('../outside', branch)
+    except worker.WorkerError as exc:
+        assert 'identity' in str(exc)
+    else:
+        raise AssertionError('unsafe support item path was accepted')
+
+
+def test_preserve_legacy_anchor_rejects_same_path_manual_tampering(monkeypatch, tmp_path):
+    repo, old, clean, spool, rid, retry_branch, state = _legacy_partial_anchor_fixture(tmp_path)
+    (old / 'implementation/example.py').write_text(
+        'existing = False\nmanual_addition = 1\n', encoding='utf-8')
+    monkeypatch.setattr(worker, 'support_worktree_path',
+                        lambda item, branch=None: old)
+    calls = []
+    monkeypatch.setattr(worker, 'ensure_worktree', lambda *args, **kw: calls.append('created'))
+    monkeypatch.setattr(worker, 'queue_reasoning', lambda *args, **kw: calls.append('queued'))
+    record = state['items']['SUPPORT-DEV-1196']
+    assert worker.readmit_preserved_anchor_failure(
+        state, [{'id':'SUPPORT-DEV-1196'}], repo, spool, Gate(), {}, max_active=2) == []
+    assert not calls
+    assert record['phase'] == 'blocked'
+    assert not (spool / 'recovery-evidence').exists()
+    assert 'manual_addition' in (old / 'implementation/example.py').read_text()
+
+
+def test_preserve_legacy_anchor_respects_capacity(monkeypatch, tmp_path):
+    repo, old, clean, spool, rid, retry_branch, state = _legacy_partial_anchor_fixture(tmp_path)
+    state['items']['SUPPORT-OPS-123'] = {'phase': 'diagnosing'}
+    monkeypatch.setattr(worker, 'ensure_worktree',
+                        lambda *args, **kw: (_ for _ in ()).throw(AssertionError('must not create')))
+    assert worker.readmit_preserved_anchor_failure(
+        state, [{'id':'SUPPORT-DEV-1196'}], repo, spool, Gate(), {}, max_active=1) == []
+    assert state['items']['SUPPORT-DEV-1196']['phase'] == 'blocked'
