@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "monitoring_mode": "read_only",
+  "explanation": "Five-minute existing self-heal watchdog; no automatic file/container/image cleanup",
+  "warning_used_percent": 80,
+  "critical_used_percent": 90,
+  "warning_available_gib": 30,
+  "critical_available_gib": 15,
+  "warning_inode_used_percent": 85,
+  "critical_inode_used_percent": 95,
+  "mounts": [
+    {
+      "id": "root",
+      "path": "/",
+      "must_be_mount": true
+    },
+    {
+      "id": "archive",
+      "path": "/srv/jason/archive",
+      "must_be_mount": true
+    }
+  ],
+  "protect": [
+    "running_containers",
+    "docker_volumes",
+    "rollback_images",
+    "authorization_records",
+    "git_worktrees",
+    "production_backups"
+  ],
+  "remediation": "ticket_or_owner_approval_required"
+}
