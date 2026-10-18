@@ -110,6 +110,27 @@ def test_support_dev_recovery_keeps_support_repair_prompts(tmp_path: Path):
         assert response['status'] == 'succeeded'
 
 
+def test_explicit_dev_edit_plan_retains_owner_approved_development_prompt(tmp_path: Path):
+    request_dir = tmp_path / 'reasoning' / 'requests'
+    request_dir.mkdir(parents=True)
+    payload = _request('edit_plan')
+    payload['support_item'] = 'DEV-1196'
+    payload['request_id'] = _request_id(payload)
+    (request_dir / f"{payload['request_id']}.json").write_text(
+        json.dumps(payload), encoding='utf-8'
+    )
+    client = Client()
+    worker = SupportRepairReasoningMaintenance(
+        structured_client=client, spool=tmp_path, interval_seconds=1
+    )
+    assert worker.tick() is True
+    assert len(client.calls) == 1
+    assert 'owner-approved development patch proposer' in client.calls[0]['system']
+    response = json.loads((tmp_path / 'reasoning' / 'responses' /
+                           f"{payload['request_id']}.json").read_text())
+    assert response['status'] == 'succeeded'
+
+
 def test_reasoning_maintenance_rejects_tampered_request(tmp_path: Path):
     request_dir = tmp_path / 'reasoning' / 'requests'
     request_dir.mkdir(parents=True)
