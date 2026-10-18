@@ -1,7 +1,12 @@
 {
   "schema_version": "1.0",
   "enabled": true,
-  "issue_numbers": [1440, 1493, 1458],
-  "directive": "Owner-approved sole discretionary development priority: Universal Teams Approval and required blockers. Critical support and safely completing active work remain allowed.",
+  "issue_numbers": [
+    1440,
+    1493,
+    1458,
+    1196
+  ],
+  "directive": "Owner-approved focused development: Universal Teams Approval and its required blockers remain primary. Also admit only P0 #1196 for the existing failed-diagnostic recovery handoff and acceptance; no general backlog intake. Critical support and safely completing active work remain allowed.",
   "authority_source": "https://github.com/al-teamaot-com/jason/issues/1440#issuecomment-6217970983"
 }

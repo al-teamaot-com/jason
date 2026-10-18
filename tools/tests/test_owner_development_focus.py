@@ -75,3 +75,18 @@ def test_ambiguous_owner_selection_fails_closed(monkeypatch,tmp_path):
     mocks(monkeypatch,payload())
     with pytest.raises(worker.support.WorkerError,match='ambiguous'):
         worker.reconcile_owner_selected_pull_requests(tmp_path,{'items':{}},[item(body='- Development pull request: #1518\n- Development pull request: #1514')])
+
+
+def test_canonical_owner_focus_admits_p0_recovery_without_opening_backlog():
+    import json
+    repo = Path(__file__).resolve().parents[2]
+    policy = json.loads((repo / 'config' / 'owner-approved-development-focus.json').read_text())
+    assert policy['schema_version'] == '1.0' and policy['enabled'] is True
+    assert {1440, 1458, 1493, 1196}.issubset(set(policy['issue_numbers']))
+    assert len(policy['issue_numbers']) == len(set(policy['issue_numbers']))
+    assert 1500 not in policy['issue_numbers']
+    selected = worker.apply_owner_development_focus(
+        {'items': {'DEV-1196': {'phase': 'blocked'}, 'DEV-1500': {'phase': 'blocked'}}},
+        [item(1196, body='owner-approved repair'), item(1500, body='unrelated P1')], policy,
+    )
+    assert [entry['issue_number'] for entry in selected] == [1196]
