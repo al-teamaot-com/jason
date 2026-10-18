@@ -92,6 +92,20 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(state["critical_support_blocker"]["unadmitted_items"], ["SUPPORT-OPS-888"])
         self.assertEqual(state["status"], "degraded")
 
+    def test_unavailable_authoritative_main_is_reported_unknown(self):
+        self.spool.mkdir(parents=True, exist_ok=True)
+        repo = self.base / "repo"
+        repo.mkdir(parents=True, exist_ok=True)
+        (repo / ".git").write_text("gitdir: /nonexistent/worktree")
+        (repo / "SUPPORT.md").write_text("| SUPPORT-OPS-054 | P0 | Open | X | e | a |\n")
+        (self.spool / "state.json").write_text(json.dumps({
+            "items": {"SUPPORT-OPS-054": {"phase": "blocked"}},
+            "admission_audit": {"unadmitted_p0": []},
+        }))
+        state = self.execute()
+        self.assertEqual(state["status"], "degraded")
+        self.assertEqual(state["critical_support_blocker"]["reason"], "support_health_unknown")
+
     def test_pending_p0_not_mistaken_for_stalled(self):
         self.spool.mkdir(parents=True, exist_ok=True)
         repo = self.base / "repo"

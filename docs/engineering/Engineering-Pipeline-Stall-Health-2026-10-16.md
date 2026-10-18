@@ -65,3 +65,19 @@ match CCC review/report identity before readmission. Four negative regressions
 failed before source reconciliation; all 123 targeted worker, focus, pipeline,
 reasoning and transport tests passed afterward. This is source-level evidence,
 not a claim that the installed worker or production release is already updated.
+
+## P0 support admission and blocked-repair projection (2026-10-18)
+
+`critical_support_blocker` is a separate, read-only pipeline health field.
+The coordinator reads fetched `origin/main:SUPPORT.md` rather than trusting a
+locally checked-out developer branch, compares canonical P0 support rows with
+existing repair states, and records bounded blocked IDs/counts. Open P0 issues
+missing a canonical row are surfaced from the existing admission audit. When
+canonical source evidence is unavailable, health is degraded as
+`support_health_unknown` rather than guessed from stale source.
+
+The health projector neither retries exhausted reasoning requests nor reopens
+issues. `failed_or_skipped_stages` still describes process execution failures;
+a successful systemd unit does not override `critical_support_stalled` or
+`approved_work_stalled`. Review and recovery remain under Jason's existing
+engagement, evidence, and protected release rules.

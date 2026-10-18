@@ -84,6 +84,21 @@ def stalled_approved_work(spool: Path) -> dict[str, Any] | None:
 
 
 
+def canonical_support_rows(repo: Path) -> str:
+    """Prefer the fetched authoritative main, never a dirty local topic branch."""
+    if (repo / ".git").exists():
+        result = subprocess.run(
+            ["git", "show", "origin/main:SUPPORT.md"], cwd=str(repo),
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, timeout=10, check=False,
+        )
+        if result.returncode or len(result.stdout) > 1_000_000:
+            raise ValueError("authoritative support source unavailable")
+        return result.stdout
+    # Isolated unit-test directories contain no Git metadata.
+    return (repo / "SUPPORT.md").read_text(encoding="utf-8")
+
+
 def blocked_critical_support(spool: Path, repo: Path) -> dict[str, Any] | None:
     """Surface already-blocked canonical P0 repairs without creating new authority.
 
@@ -92,8 +107,7 @@ def blocked_critical_support(spool: Path, repo: Path) -> dict[str, Any] | None:
     not an instruction to bypass dependency, reasoning or release gates.
     """
     state_path = spool / "state.json"
-    support_path = repo / "SUPPORT.md"
-    if not state_path.exists() or not support_path.exists():
+    if not state_path.exists():
         return None
     try:
         state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -103,7 +117,7 @@ def blocked_critical_support(spool: Path, repo: Path) -> dict[str, Any] | None:
         if not isinstance(items, dict):
             raise ValueError("invalid support items")
         critical = set()
-        for line in support_path.read_text(encoding="utf-8").splitlines():
+        for line in canonical_support_rows(repo).splitlines():
             cells = [cell.strip() for cell in line.split("|")]
             if len(cells) >= 4 and cells[2] == "P0" and cells[1].startswith("SUPPORT-"):
                 critical.add(cells[1])
@@ -116,7 +130,7 @@ def blocked_critical_support(spool: Path, repo: Path) -> dict[str, Any] | None:
             return {"reason": "critical_support_stalled", "blocked_count": len(blocked),
                     "blocked_items": blocked[:12], "unadmitted_count": len(missing),
                     "unadmitted_items": missing[:12]}
-    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+    except (OSError, TypeError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired):
         return {"reason": "support_health_unknown"}
     return None
 
