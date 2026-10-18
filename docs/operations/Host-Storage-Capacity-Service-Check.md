@@ -44,4 +44,10 @@ Any condition triggers an incident; critical takes precedence over warning. The 
 4. **Production readback:** verify installed canonical watchdog hash, timer active, one `host_storage_capacity` persisted incident with accurate mounts/available bytes and correct repair-level approval boundary, and no file or container deletion.
 5. **Recover and close:** after a **separately authorized** cleanup or storage relocation, rerun `df` and the watchdog; close only on actual capacity improvement, restored archive mount, and cleared detector evidence.
 
+### Verified capacity recovery (2026-10-18 ~09:15 EDT)
+
+Authorized production-safe cleanup on the Jason host pruned **only unused BuildKit build cache**, not Docker images, volumes, stopped containers, production releases or Git worktrees. Each builder retained at least a 2 GB BuildKit cache reserve. The initially attempted *age-filtered* prune returned zero. The explicit reclaimable-cache pass then reclaimed **9.272 GB** from `jason-builder` and **4.09 GB** from `jason-clean-builder`. Recheck: root capacity improved from 91% full / 21 GiB available to **86% / 33 GiB available**. Archive drive remained 5% utilized / 222 GiB available. Live runtime and MCP continued at the same approved SHA `ad11c311251254d38da2c1295aadd292daed20ef`, drift and Grafana assurance passed, root breaker stayed CLOSED. No host reboot, deployment, provider mutation or approval policy modification was performed.
+
+This is still above the planned 80% warning threshold: continue reversible/verified cleanup planning without touching running containers, rollback images, volumes, live worktrees or backups. A scheduled check is not production-activated by merging this document.
+
 Current cleanup work is independent of code: use read-only inventory to decide whether old build cache/images, logs or archived worktrees can be safely reclaimed; never treat the monitoring threshold as permission to delete.
