@@ -119,7 +119,10 @@ def blocked_critical_support(spool: Path, repo: Path) -> dict[str, Any] | None:
         critical = set()
         for line in canonical_support_rows(repo).splitlines():
             cells = [cell.strip() for cell in line.split("|")]
-            if len(cells) >= 4 and cells[2] == "P0" and cells[1].startswith("SUPPORT-"):
+            if (len(cells) >= 4 and cells[2] == "P0"
+                    and cells[1].startswith("SUPPORT-")
+                    and not any(status in cells[3].casefold()
+                                for status in ("closed", "resolved", "reclassified"))):
                 critical.add(cells[1])
         blocked = sorted(item for item in critical
                          if isinstance(items.get(item), dict)

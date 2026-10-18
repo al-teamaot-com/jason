@@ -67,10 +67,12 @@ class PipelineTests(unittest.TestCase):
         repo.mkdir(parents=True, exist_ok=True)
         (repo / "SUPPORT.md").write_text(
             "| SUPPORT-OPS-054 | P0 | Open | Critical | evidence | acceptance |\n"
+            "| SUPPORT-OPS-077 | P0 | Closed 2026-10-17 | Historical | evidence | acceptance |\n"
             "| SUPPORT-OPS-099 | P1 | Open | Routine | evidence | acceptance |\n"
         )
         (self.spool / "state.json").write_text(json.dumps({
             "items": {"SUPPORT-OPS-054": {"phase": "blocked"},
+                      "SUPPORT-OPS-077": {"phase": "blocked"},
                       "SUPPORT-OPS-099": {"phase": "blocked"}},
             "admission_audit": {"unadmitted_p0": []},
         }))
