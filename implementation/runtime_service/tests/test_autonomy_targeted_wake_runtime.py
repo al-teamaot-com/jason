@@ -197,3 +197,4 @@ def test_composite_maintenance_isolates_service_failure():
     assert composite.tick() is True
     assert first.calls == 1
     assert second.calls == 1
+    assert first.calls == 1 and second.calls == 1
