@@ -2218,7 +2218,12 @@ def test_ccc_precedes_mutation_and_postflight_precedes_closed_release():
     import inspect
     source = inspect.getsource(runner._deploy_production_locked)
     assert source.index('ccc_preflight = run_release_ccc_gate(') < source.index('gate_transition(repo, state_root, record, "production")')
-    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('runtime_deployed = True')
+    # The current controller marks the attempt *before* invoking the helper so
+    # rollback also covers a helper that partially mutates and then fails.
+    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('runtime_attempted = True')
+    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('mcp_attempted = True')
+    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('host_result = request_host_reconcile(')
+    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('manager_result = install_release_manager_from_current(')
     assert source.index('ccc_postflight = run_release_ccc_gate(') < source.index('gate_transition(repo, state_root, record, "production_verified")')
     assert source.index('ccc_postflight = run_release_ccc_gate(') < source.index('set_last_known_good(\n            state_root,\n            production_manifest')
 
