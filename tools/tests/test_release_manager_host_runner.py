@@ -31,6 +31,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         for path in (
             "tools/reconcile_production_host_services.sh",
             "tools/reconcile_managed_unit_delta.py",
+            "tools/release_exporter_port_guard.py",
         ):
             for change_class in ("support", "release_blocker", "todo", "feature"):
                 self.assertEqual(

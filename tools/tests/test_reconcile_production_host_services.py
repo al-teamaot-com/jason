@@ -142,9 +142,9 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'curl --connect-timeout 2 --max-time 15 -fsS' in text
     assert 'exporter verification failed on port $port after 3 bounded attempts' in text
     assert 'timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"' in text
-    assert 'timeout --signal=TERM --kill-after=5s 180s systemctl start "$unit"' in text
+    assert 'timeout --signal=TERM --kill-after=5s 240s systemctl start "$unit"' in text
     assert 'if [ "$unit" = "jason-openclaw-authority-health.service" ]; then' in text
-    assert text.index('timeout --signal=TERM --kill-after=5s 180s systemctl start "$unit"') < text.index('timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"')
+    assert text.index('timeout --signal=TERM --kill-after=5s 240s systemctl start "$unit"') < text.index('timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"')
     assert 'HOST_RECONCILE_FAILURE step=' in text
     assert 'timeout --signal=TERM --kill-after=5s 180s env JASON_REPO_ROOT=' in text
 
@@ -441,3 +441,15 @@ def test_exporter_activation_queues_nonblocking_start_and_waits_for_real_port_ow
     assert 'timeout --signal=TERM --kill-after=5s 15s systemctl restart --no-block "$unit"' in text
     assert text.index('systemctl start --no-block "$unit"') < text.index('ensure_owned_exporter "$unit"')
     assert text.index('ensure_owned_exporter "$unit"') < text.index('if [ "$(systemctl is-active "$unit")" != "active" ]')
+
+
+def test_authority_health_start_240s_fits_root_and_release_manager_deadlines():
+    text = RECONCILE.read_text(encoding="utf-8")
+    root_worker = (REPO_ROOT / "tools/release_host_reconcile_worker.py").read_text(encoding="utf-8")
+    manager = (REPO_ROOT / "tools/release_manager_host_runner.py").read_text(encoding="utf-8")
+    assert 'HOST_RECONCILE_TIMEOUT_SECONDS = 360' in root_worker
+    assert 'timeout_seconds: float = 420.0' in manager
+    assert 197 < 240 < 360 < 420
+    assert text.count('240s systemctl start "$unit"') == 1
+    assert 'if [ "$unit" = "jason-openclaw-authority-health.service" ]; then' in text
+    assert '120s systemctl start "$unit"' in text

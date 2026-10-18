@@ -390,9 +390,12 @@ timeout --signal=TERM --kill-after=5s 45s systemctl start "$PROVIDER_CANARY_SERV
 for unit in "${MAINTENANCE_SERVICES[@]}"; do
   CURRENT_UNIT="$unit"
   if [ "$unit" = "jason-openclaw-authority-health.service" ]; then
-    # The intact JKD-001 full-integrity check requires about 135s in
-    # production. Keep the check mandatory, but give it a bounded 180s.
-    timeout --signal=TERM --kill-after=5s 180s systemctl start "$unit"
+    # Verified JKD-001 full-integrity starts have taken 163-197 seconds;
+    # the old 180s terminated legitimate running checks and broke rollback.
+    # Allow up to 240s for this ONE mandatory check, while the root worker
+    # retains its independent 360s cap and Release Manager its 420s cap.
+    # Never bypass the health result or accept a timed-out systemctl job.
+    timeout --signal=TERM --kill-after=5s 240s systemctl start "$unit"
   else
     timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"
   fi
