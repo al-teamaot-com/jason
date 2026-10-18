@@ -186,6 +186,17 @@ class GovernedAutonomyStatusInteractionPort:
                 or preview.interaction.kind not in (InteractionKind.NOTICE, InteractionKind.PROGRESS)):
             raise PermissionError("canonical status route cannot broaden notification scope")
         # No transport is invoked outside this already-governed facade.
+        expected_kind, expected_visual, expected_color = _ALLOWED_STATUS[preview.event_type]
+        old_body = preview.legacy_card.get("body")
+        if (preview.interaction.kind is not expected_kind
+                or preview.interaction.visual_intent is not expected_visual
+                or not isinstance(old_body, list) or len(old_body) < 2
+                or preview.interaction.title != old_body[0].get("text")
+                or preview.interaction.summary != preview.legacy_text
+                or old_body[0].get("color") != expected_color
+                or preview.canonical_card
+                != ExistingTeamsInteractionAdapter.informational_card(preview.interaction)):
+            raise PermissionError("canonical status preview differs from reviewed legacy material")
         # One checked authority resolution inside the EXISTING UIS execution,
         # not an authorization preflight plus a potentially changed route.
         protected = replace(
