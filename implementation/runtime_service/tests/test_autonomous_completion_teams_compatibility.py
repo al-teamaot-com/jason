@@ -140,7 +140,7 @@ class Route:
 
 class Journal:
     def __init__(self):
-        self.claimed, self.accepted, self.uncertain = set(), [], []
+        self.claimed, self.accepted_receipts, self.uncertain_ids = set(), [], []
 
     def claim(self, spec, route):
         if spec.interaction_id in self.claimed:
@@ -148,10 +148,10 @@ class Journal:
         self.claimed.add(spec.interaction_id)
 
     def accepted(self, spec, receipt):
-        self.accepted.append(receipt)
+        self.accepted_receipts.append(receipt)
 
     def uncertain(self, spec):
-        self.uncertain.append(spec.interaction_id)
+        self.uncertain_ids.append(spec.interaction_id)
 
 
 class Adapter:
@@ -189,7 +189,7 @@ def test_canonical_single_sender_dispatch_uses_existing_service_and_claim():
     receipt = port.dispatch_prepared(prepared)
     assert receipt.state == "provider_accepted"
     assert receipt.message_id == "accepted:fixture"
-    assert len(channel.calls) == len(journal.accepted) == 1
+    assert len(channel.calls) == len(journal.accepted_receipts) == 1
     assert route.called == 1  # no pre-check / post-check route race
     with pytest.raises(InteractionRejected, match="already claimed"):
         port.dispatch_prepared(prepared)
