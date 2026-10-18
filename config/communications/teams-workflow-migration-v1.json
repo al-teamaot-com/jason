@@ -174,11 +174,11 @@
       "role": "notification_and_progress",
       "channel": "direct_gateway_http",
       "approval": "existing_governed_execution_plan",
-      "migration": "canonical_notices_via_existing_invoker_plan",
+      "migration": "shadow-only preview adapter for work_started, ticket_status_updated and work_completed; defer all other events and full Wave 2 source cutover",
       "wave": 2,
       "risk": "medium",
-      "rollout": "parity_only",
-      "notes": "Preserve exact canonical/provider plan fingerprint; no blind resend"
+      "rollout": "adapter_only",
+      "notes": "Source-only normalized Interaction v1 adapter under autonomous_completion_teams_compatibility.py; preserves legacy sender and fixed person-al recipient, historical execution-plan fingerprint and spool markers; no sender activation or client messages."
     },
     {
       "id": "universal_bounded_plan",
