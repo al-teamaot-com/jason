@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from issue_resolution_engine import acceptance_text, correlate_failures, update_recurrence_memory
+from jason_host_storage_health import storage_capacity_failures
 
 DEFAULT_ROOT = Path("/var/lib/jason/openclaw/self-heal")
 HEALTH_URL = "http://127.0.0.1:9467/metrics"
@@ -665,6 +666,13 @@ def detect(root: Path = DEFAULT_ROOT) -> tuple[list[str], dict[str, Any]]:
     convergence_failures, convergence_evidence = production_convergence_failures()
     evidence["production_convergence"] = convergence_evidence
     failures.extend(convergence_failures)
+
+    # Existing five-minute watchdog: independent root and archive capacity,
+    # with allocatable-space and inode headroom. Informational detection only;
+    # never triggers deletion, cache prune, container shutdown or provider write.
+    storage_failures, storage_evidence = storage_capacity_failures()
+    evidence["host_storage_capacity"] = storage_evidence
+    failures.extend(storage_failures)
 
     failed_units = failed_jason_user_units()
     evidence["failed_jason_user_units"] = failed_units
