@@ -189,3 +189,26 @@ def test_no_secondary_gateway_bot_or_approval_database_in_catalog():
             "second_bot", "raw_gateway_send", "new_approval_ledger",
             "unscoped_approval", "direct_execution",
         }
+
+
+def test_first_status_notice_preview_is_registered_but_not_live_wired():
+    data = inventory()
+    status = next(w for w in data["workflows"] if w["id"] == "autonomous_completion")
+    assert status["rollout"] == "adapter_only"
+    assert status["wave"] == 2  # Full workflow cutover remains separately gated.
+    module_path = RUNTIME / "autonomous_completion_teams_compatibility.py"
+    assert module_path.is_file()
+    adapter_source = module_path.read_text(encoding="utf-8")
+    assert "prepare_status_notice_preview" in adapter_source
+    assert "ExistingTeamsInteractionAdapter.informational_card" in adapter_source
+    assert "UniversalInteractionService" in adapter_source
+    assert '"work_started"' in adapter_source
+    assert '"ticket_status_updated"' in adapter_source
+    assert '"work_completed"' in adapter_source
+    assert "urlopen(" not in adapter_source
+    assert '"/internal/proactive/send"' not in adapter_source
+    # Source-only: no live composition, enrollment, or legacy invoker mutation.
+    composition = (RUNTIME / "composition.py").read_text(encoding="utf-8")
+    existing = (RUNTIME / "autonomous_completion_notification.py").read_text(encoding="utf-8")
+    assert "autonomous_completion_teams_compatibility" not in composition
+    assert "autonomous_completion_teams_compatibility" not in existing
