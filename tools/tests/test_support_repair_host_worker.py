@@ -1147,3 +1147,68 @@ def test_recovered_reasoning_respects_existing_active_worker_capacity(tmp_path):
     assert resumed == ['SUPPORT-OPS-2']
     assert state['items']['SUPPORT-OPS-3']['phase'] == 'blocked'
     assert state['items']['SUPPORT-OPS-4']['phase'] == 'blocked'
+
+def test_apply_edits_validates_all_anchors_before_any_writes(tmp_path):
+    first = tmp_path / 'implementation' / 'example.py'
+    second = tmp_path / 'implementation' / 'tests' / 'test_example.py'
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True)
+    first.write_text('source-old\n', encoding='utf-8')
+    second.write_text('test-old\n', encoding='utf-8')
+    try:
+        worker.apply_edits(tmp_path, [
+            {'path':'implementation/example.py', 'old_text':'source-old', 'new_text':'source-new'},
+            {'path':'implementation/tests/test_example.py', 'old_text':'missing-test-anchor', 'new_text':'test-new'},
+        ], Gate(), {'max_changed_lines':800,'max_changed_files':25})
+    except worker.WorkerError as exc:
+        assert 'occur once' in str(exc)
+    else:
+        raise AssertionError('missing later anchor was accepted')
+    assert first.read_text(encoding='utf-8') == 'source-old\n'
+    assert second.read_text(encoding='utf-8') == 'test-old\n'
+
+
+def test_apply_edits_preserves_sequential_same_file_replacements(tmp_path):
+    target = tmp_path / 'implementation' / 'example.py'
+    target.parent.mkdir(parents=True)
+    target.write_text('start\n', encoding='utf-8')
+    changed = worker.apply_edits(tmp_path, [
+        {'path':'implementation/example.py', 'old_text':'start', 'new_text':'middle'},
+        {'path':'implementation/example.py', 'old_text':'middle', 'new_text':'finish'},
+    ], Gate(), {'max_changed_lines':800,'max_changed_files':25})
+    assert changed == ['implementation/example.py']
+    assert target.read_text(encoding='utf-8') == 'finish\n'
+
+
+def test_bounded_anchor_retry_queues_feedback_only_on_clean_owned_worktree(monkeypatch, tmp_path):
+    requests = []
+    monkeypatch.setattr(worker, 'run', lambda args, **kw: '' if args == ['git','status','--porcelain'] else 'unexpected')
+    monkeypatch.setattr(worker, 'source_excerpts_for_paths', lambda *args, **kw: [{'path':'implementation/example.py','content':'source'}])
+    monkeypatch.setattr(worker, 'queue_reasoning', lambda spool, **kw: requests.append(kw) or 'new-request-1')
+    item = {'id':'SUPPORT-DEV-1196','title':'bounded repair','evidence':'approved','acceptance':'tests'}
+    record = {'phase':'implementing','reasoning_request_id':'previous','attempts':0,'proposal_retries':0}
+    edits = [{'path':'implementation/example.py','old_text':'not-there','new_text':'fix'}]
+    failure = worker.WorkerError('exact repair anchor must occur once in implementation/example.py; found 0')
+    assert worker.queue_bounded_anchor_correction(tmp_path,tmp_path,item,record,edits,['implementation/tests/test_example.py'],failure,Gate(),{}) is True
+    assert len(requests) == 1
+    assert requests[0]['kind'] == 'edit_plan'
+    assert requests[0]['context']['retry_number'] == 1
+    assert 'exact-text anchor' in requests[0]['context']['validation_feedback']
+    assert record['phase'] == 'implementing'
+    assert record['reasoning_request_id'] == 'new-request-1'
+    assert record['proposal_retries'] == 1 and record['attempts'] == 0
+
+
+def test_bounded_anchor_retry_fails_closed_on_dirty_or_exhausted_input(monkeypatch,tmp_path):
+    requests = []
+    monkeypatch.setattr(worker, 'run', lambda args, **kw: ' M implementation/example.py')
+    monkeypatch.setattr(worker, 'queue_reasoning', lambda *args, **kw: requests.append(True))
+    item = {'id':'SUPPORT-DEV-1196'}
+    record = {'proposal_retries':0,'reasoning_request_id':'original','phase':'implementing'}
+    failure = worker.WorkerError('exact repair anchor must occur once in implementation/example.py; found 0')
+    assert worker.queue_bounded_anchor_correction(tmp_path,tmp_path,item,record,[],[],failure,Gate(),{}) is False
+    record['proposal_retries'] = 2
+    assert worker.queue_bounded_anchor_correction(tmp_path,tmp_path,item,record,[],[],failure,Gate(),{}) is False
+    assert worker.queue_bounded_anchor_correction(tmp_path,tmp_path,item,record,[],[],worker.WorkerError('repair path denied by J-CHANGE-002'),Gate(),{}) is False
+    assert not requests
+    assert record['phase'] == 'implementing' and record['reasoning_request_id'] == 'original'
