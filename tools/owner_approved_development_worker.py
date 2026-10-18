@@ -751,18 +751,32 @@ def reconcile_exhausted_recovery_diagnostics(
         if record.get('phase') != 'blocked' or record.get('blocker_class') != 'internal_retry_exhausted':
             continue
         rid = str(record.get('recovery_diagnostic_request_id') or '')
-        if not rid or record.get('recovery_diagnostic_result_status'):
+        if not rid:
+            continue
+        # #1582 creates inert SUPPORT handoffs for freshly failed diagnostics,
+        # but older blocked items already persisted their failed status. Permit
+        # an evidence-verified, one-time backfill without resetting or retrying.
+        prior_status = str(record.get('recovery_diagnostic_result_status') or '')
+        if prior_status and (prior_status != 'failed' or record.get('recovery_handoff_id')):
             continue
         response = support.reasoning_response(spool, rid)
-        if response is None:
+        if not isinstance(response, Mapping):
             continue
+        if prior_status == 'failed':
+            # Historical failures require the stored response to match both
+            # original request ID and failure status exactly. Do not infer a
+            # request identity or use newly successful response as authority.
+            if (str(response.get('request_id') or '') != rid
+                    or str(response.get('status') or '') != 'failed'):
+                continue
         if str(response.get('request_id') or rid) != rid:
             record['recovery_diagnostic_result_status'] = 'invalid_request_id'
             record['recovery_next_action'] = 'Inspect mismatched diagnostic response; no automatic re-admission.'
             continue
         status = str(response.get('status') or 'unknown')
-        record['recovery_diagnostic_result_status'] = status
-        record['recovery_diagnostic_result_at'] = now()
+        if not prior_status:
+            record['recovery_diagnostic_result_status'] = status
+            record['recovery_diagnostic_result_at'] = now()
         if status == 'succeeded':
             result = response.get('result')
             if isinstance(result, Mapping):
