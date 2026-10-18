@@ -32,7 +32,16 @@
       "acknowledgement"
     ],
     "branding": "AOT Jason; one semantic template registry; no per-workflow arbitrary colors",
-    "authority_notice": "Template and color have no authority; immutable approval request is the only actionable source"
+    "authority_notice": "Template and color have no authority; immutable approval request is the only actionable source",
+    "legacy_card_renderer_sources": [
+      "implementation/connectors/microsoft_graph/openclaw_teams_approval_transport.py",
+      "implementation/connectors/microsoft_graph/teams_approval_delivery.py",
+      "implementation/runtime_service/src/jason_runtime/autonomous_completion_notification.py",
+      "implementation/runtime_service/src/jason_runtime/playbook_autonomy_review.py",
+      "implementation/runtime_service/src/jason_runtime/procurement_inventory_billing.py",
+      "implementation/runtime_service/src/jason_runtime/procurement_teams_flow.py",
+      "implementation/runtime_service/src/jason_runtime/universal_interaction/teams.py"
+    ]
   },
   "rollout_rules": {
     "source_only": true,
