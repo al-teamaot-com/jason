@@ -46,6 +46,8 @@
     "implementation/kernel/*",
     "tools/release_host_reconcile_worker.py",
     "tools/install_release_host_reconciler.py",
+    "tools/reconcile_production_host_services.sh",
+    "tools/reconcile_managed_unit_delta.py",
     "infrastructure/openclaw-operations/systemd/jason-release-host-reconcile.*"
   ],
   "priority": {

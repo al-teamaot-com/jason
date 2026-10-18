@@ -208,6 +208,76 @@ for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}" "${DEFERRED_MAIN
   fi
 done
 
+# During a rollback, candidate-added Jason units can be absent from the
+# previous immutable release manifest. Leaving them installed causes a real
+# desired-state drift failure even if runtime/MCP and the host SHA align.
+# Stage both plans before touching a unit. Compare exact candidate release
+# bytes and bounded, declared delta; unknown/unmanaged changes fail closed.
+step_start release_owned_unit_delta
+PREVIOUS_HOST_RELEASE="$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)"
+if [ -n "$PREVIOUS_HOST_RELEASE" ] && [ "$PREVIOUS_HOST_RELEASE" != "$RELEASE_DIR" ]; then
+  UNIT_DELTA_PLANNER="$RELEASE_DIR/tools/reconcile_managed_unit_delta.py"
+  if [ ! -f "$UNIT_DELTA_PLANNER" ]; then
+    echo "ERROR: immutable target release lacks the unit-delta safety planner" >&2
+    exit 9
+  fi
+  SYSTEM_UNIT_DELTA="$BACKUP_DIR/release-system-unit-delta.txt"
+  USER_UNIT_DELTA="$BACKUP_DIR/release-user-unit-delta.txt"
+  if ! /usr/bin/python3 "$UNIT_DELTA_PLANNER" \
+    --candidate "$PREVIOUS_HOST_RELEASE" --target "$RELEASE_DIR" \
+    --scope system --installed-dir /etc/systemd/system > "$SYSTEM_UNIT_DELTA"; then
+    echo "ERROR: cannot verify previous-release system-unit delta" >&2
+    exit 9
+  fi
+  if ! /usr/bin/python3 "$UNIT_DELTA_PLANNER" \
+    --candidate "$PREVIOUS_HOST_RELEASE" --target "$RELEASE_DIR" \
+    --scope user --installed-dir /home/al/.config/systemd/user > "$USER_UNIT_DELTA"; then
+    echo "ERROR: cannot verify previous-release user-unit delta" >&2
+    exit 9
+  fi
+
+  # Unit names are validated by the immutable Python planner before emission.
+  # Both system and user removals are part of this protected release transaction;
+  # they may not be run as a standalone clean-up task.
+  mapfile -t REMOVE_SYSTEM_UNITS < "$SYSTEM_UNIT_DELTA"
+  mapfile -t REMOVE_USER_UNITS < "$USER_UNIT_DELTA"
+  for unit in "${REMOVE_SYSTEM_UNITS[@]}"; do
+    CURRENT_UNIT="$unit"
+    cp -a "/etc/systemd/system/$unit" "$BACKUP_DIR/system-$unit.before"
+    timeout --signal=TERM --kill-after=5s 45s systemctl disable --now "$unit"
+    rm -f -- "/etc/systemd/system/$unit"
+    if [ -e "/etc/systemd/system/$unit" ]; then
+      echo "ERROR: candidate-only system unit not removed: $unit" >&2
+      exit 9
+    fi
+  done
+  for unit in "${REMOVE_USER_UNITS[@]}"; do
+    CURRENT_UNIT="$unit"
+    cp -a "/home/al/.config/systemd/user/$unit" "$BACKUP_DIR/user-$unit.before"
+    timeout --signal=TERM --kill-after=5s 45s \
+      runuser -u al -- env HOME=/home/al \
+      XDG_RUNTIME_DIR="$USER_XDG_RUNTIME_DIR" \
+      DBUS_SESSION_BUS_ADDRESS="$USER_DBUS_ADDRESS" \
+      PATH=/usr/local/bin:/usr/bin:/bin systemctl --user disable --now "$unit"
+    rm -f -- "/home/al/.config/systemd/user/$unit"
+    if [ -e "/home/al/.config/systemd/user/$unit" ]; then
+      echo "ERROR: candidate-only user unit not removed: $unit" >&2
+      exit 9
+    fi
+  done
+  if [ "${#REMOVE_SYSTEM_UNITS[@]}" -ne 0 ]; then
+    systemctl daemon-reload
+  fi
+  if [ "${#REMOVE_USER_UNITS[@]}" -ne 0 ]; then
+    run_as_al systemctl --user daemon-reload
+  fi
+  CURRENT_UNIT=""
+  echo "JASON_RELEASE_UNIT_DELTA_REMOVED=system:${#REMOVE_SYSTEM_UNITS[@]},user:${#REMOVE_USER_UNITS[@]}"
+else
+  echo "JASON_RELEASE_UNIT_DELTA_REMOVED=not_applicable"
+fi
+step_pass release_owned_unit_delta
+
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 
 for unit in "${EXPORTER_UNITS[@]}"; do

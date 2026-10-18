@@ -602,6 +602,10 @@ def classify_change_risk(change_class: str, files: list[str]) -> str:
     if any(
         path.startswith("tools/release_manager")
         or path == "config/release-manager-policy.json"
+        or path in {
+            "tools/reconcile_production_host_services.sh",
+            "tools/reconcile_managed_unit_delta.py",
+        }
         or "release-host-reconcile" in path
         for path in paths
     ):

@@ -27,6 +27,17 @@ SHA_B = "b" * 40
 
 
 class ReleaseManagerHostRunnerTests(unittest.TestCase):
+    def test_root_host_reconciliation_is_always_production_control_core(self):
+        for path in (
+            "tools/reconcile_production_host_services.sh",
+            "tools/reconcile_managed_unit_delta.py",
+        ):
+            for change_class in ("support", "release_blocker", "todo", "feature"):
+                self.assertEqual(
+                    runner.classify_change_risk(change_class, [path]),
+                    "production_control_core",
+                )
+
     def test_release_id_is_deterministic(self):
         self.assertEqual(runner.record_id(SHA_A), "release-" + "a" * 16)
 
