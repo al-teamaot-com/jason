@@ -48,6 +48,11 @@ python3 tools/development_release_coordinator.py \
   --token "$GITHUB_TOKEN" \
   --output "$CONTROL_BOARD_FILE"
 unset GITHUB_TOKEN
+# The board is advisory. Tag this specific production observation so that the
+# GitHub scheduled publisher cannot replace it with older unmerged main data.
+if [ "$MODE" = "production" ]; then
+  printf '\n%s\n' '<!-- jason-host-production-report:v1 -->' >> "$CONTROL_BOARD_FILE"
+fi
 gh issue edit 526 --repo al-teamaot-com/jason --body-file "$CONTROL_BOARD_FILE" >/dev/null
 echo "CONTROL_BOARD_PUBLICATION=PASS"
 

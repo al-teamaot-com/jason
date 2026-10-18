@@ -349,6 +349,20 @@ class DevelopmentReleaseCoordinatorTests(unittest.TestCase):
         self.assertEqual(view["status"], "revalidation_required")
         self.assertEqual(view["freshness"], "missing_timestamp")
 
+    def test_future_or_naive_production_timestamps_cannot_claim_green(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 10, 18, 11, 0, tzinfo=timezone.utc)
+        for observed, expected_reason in (
+            ("2026-10-18T12:00:00+00:00", "future_timestamp"),
+            ("2026-10-18T10:59:00", "invalid_timezone"),
+        ):
+            view = coordinator.production_health_view(
+                {"status": "aligned_and_healthy", "observed_at": observed},
+                max_age_minutes=30, now=now,
+            )
+            self.assertEqual(view["status"], "revalidation_required")
+            self.assertEqual(view["freshness"], expected_reason)
+
     def test_release_control_view_surfaces_breaker_lock_queue_and_lkg(self):
         import json
         import tempfile
@@ -440,6 +454,105 @@ class DevelopmentReleaseCoordinatorTests(unittest.TestCase):
         self.assertIn("Last-known-good release:** release-good", rendered)
         self.assertIn("Current complete production manifest:** " + "b" * 40, rendered)
         self.assertIn("Desired-state drift:** pass (0 problem(s))", rendered)
+
+    def _board_observation(self, revision: str, observed_at: str, *, host: bool = False):
+        lines = [
+            "# Jason Development & Release Control Board",
+            "**Generated:** 2026-10-18T11:02:00+00:00  ",
+            "**Current main:** `mainsha`  ",
+            f"**Production revision:** `{revision}`  ",
+            "**Production health:** aligned_and_healthy  ",
+            f"**Production evidence observed:** {observed_at}  ",
+            "**Production evidence freshness:** fresh (1.0 minutes old)  ",
+            "**Production circuit breaker:** closed  ",
+            "**Production lock owner:** none  ",
+            "**Active production transaction:** none  ",
+            "**Queued production candidates:** none  ",
+            "**Last-known-good release:** release-good  ",
+            f"**Last-known-good revision:** {revision}  ",
+            f"**Current complete production manifest:** {revision}  ",
+            "**Desired-state drift:** pass (0 problem(s))  ",
+            "## Release attention",
+            "Current PRs and blockers",
+        ]
+        if host:
+            lines.append(coordinator.HOST_PRODUCTION_REPORT_MARKER)
+        return "\n".join(lines) + "\n"
+
+    def test_scheduled_board_keeps_newer_host_observation(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 10, 18, 11, 5, tzinfo=timezone.utc)
+        host = self._board_observation("b" * 40, "2026-10-18T11:00:00+00:00", host=True)
+        main = self._board_observation("a" * 40, "2026-10-17T11:00:00+00:00")
+        merged = coordinator.preserve_newer_host_board_observation(
+            main, host, now=now, max_age_minutes=30,
+        )
+        self.assertIn("Production revision:** `" + "b" * 40 + "`", merged)
+        self.assertIn("Production circuit breaker:** closed", merged)
+        self.assertIn("Production evidence freshness:** fresh host observation (5.0 minutes old)", merged)
+        self.assertIn("## Release attention\nCurrent PRs and blockers", merged)
+        self.assertIn(coordinator.HOST_PRODUCTION_REPORT_MARKER, merged)
+
+    def test_previous_host_evidence_expires_even_when_repo_stale(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 10, 18, 12, 0, tzinfo=timezone.utc)
+        host = self._board_observation("b" * 40, "2026-10-18T11:00:00+00:00", host=True)
+        main = self._board_observation("a" * 40, "2026-10-17T11:00:00+00:00")
+        merged = coordinator.preserve_newer_host_board_observation(
+            main, host, now=now, max_age_minutes=30,
+        )
+        self.assertIn("Production revision:** `" + "b" * 40 + "`", merged)
+        self.assertIn("Production health:** revalidation_required", merged)
+        self.assertIn("Production circuit breaker:** unknown (host evidence stale)", merged)
+        self.assertIn("Desired-state drift:** unknown (host evidence stale)", merged)
+        self.assertIn("Production evidence freshness:** stale (60.0 minutes old", merged)
+
+    def test_board_never_trusts_unmarked_or_future_or_invalid_host_data(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 10, 18, 11, 5, tzinfo=timezone.utc)
+        main = self._board_observation("a" * 40, "2026-10-17T11:00:00+00:00")
+        unmarked = self._board_observation("b" * 40, "2026-10-18T11:00:00+00:00")
+        future = self._board_observation("b" * 40, "2026-10-18T12:00:00+00:00", host=True)
+        invalid = self._board_observation("wrong", "2026-10-18T11:00:00+00:00", host=True)
+        for previous in (unmarked, future, invalid):
+            self.assertEqual(
+                coordinator.preserve_newer_host_board_observation(main, previous, now=now),
+                main,
+            )
+
+    def test_newer_main_observation_supersedes_host_marker(self):
+        from datetime import datetime, timezone
+        now = datetime(2026, 10, 18, 11, 15, tzinfo=timezone.utc)
+        main = self._board_observation("a" * 40, "2026-10-18T11:12:00+00:00")
+        host = self._board_observation("b" * 40, "2026-10-18T11:00:00+00:00", host=True)
+        self.assertEqual(
+            coordinator.preserve_newer_host_board_observation(main, host, now=now),
+            main,
+        )
+
+    def test_publish_preserves_newer_host_without_changing_release_authority(self):
+        from unittest.mock import patch
+        class FakeApi:
+            token = "fake-token"
+            def __init__(self, previous):
+                self.previous = previous
+                self.writes = []
+            def request(self, path, method="GET", payload=None):
+                if method == "GET":
+                    return {"body": self.previous}
+                self.writes.append((path, payload))
+                return {}
+        host = self._board_observation("b" * 40, "2026-10-18T11:00:00+00:00", host=True)
+        main = self._board_observation("a" * 40, "2026-10-17T11:00:00+00:00")
+        api = FakeApi(host)
+        from datetime import datetime, timezone
+        coordinator.publish(
+            api, 526, main,
+            now=datetime(2026, 10, 18, 11, 5, tzinfo=timezone.utc),
+        )
+        self.assertEqual(len(api.writes), 1)
+        self.assertEqual(api.writes[0][0], "/issues/526")
+        self.assertIn("Production revision:** `" + "b" * 40 + "`", api.writes[0][1]["body"])
 
     def test_sensitive_overlap_paths(self):
         self.assertTrue(coordinator.sensitive("implementation/runtime/app.py"))
