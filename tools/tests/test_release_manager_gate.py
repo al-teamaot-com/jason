@@ -164,6 +164,8 @@ class ReleaseManagerGateTests(unittest.TestCase):
             "tools/reconcile_production_host_services.sh",
             "tools/reconcile_managed_unit_delta.py",
             "tools/release_exporter_port_guard.py",
+            "infrastructure/jason-runtime/Dockerfile",
+            ".dockerignore",
         ):
             record = {
                 "state": "production_eligible",

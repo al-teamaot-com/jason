@@ -41,6 +41,8 @@
     "tools/install_release_manager*.py",
     "infrastructure/openclaw-operations/systemd/user/jason-release-manager.*",
     "infrastructure/jason-runtime/production-deploy.sh",
+    "infrastructure/jason-runtime/Dockerfile",
+    ".dockerignore",
     "tools/deploy_live_container.py",
     "implementation/orchestrator/*",
     "implementation/kernel/*",

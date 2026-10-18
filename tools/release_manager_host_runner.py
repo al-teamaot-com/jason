@@ -602,6 +602,7 @@ def classify_change_risk(change_class: str, files: list[str]) -> str:
     if any(
         path.startswith("tools/release_manager")
         or path == "config/release-manager-policy.json"
+        or path in {".dockerignore", "infrastructure/jason-runtime/Dockerfile"}
         or path in {
             "tools/reconcile_production_host_services.sh",
             "tools/reconcile_managed_unit_delta.py",
@@ -1066,6 +1067,20 @@ def build_candidate(repo: Path, state_root: Path, candidate_sha: str) -> tuple[s
                 str(path),
             ]
         )
+        # A Docker build can succeed even when a restrictive Git release
+        # worktree leaves Python sources root-only in the resulting image.
+        # Test the exact built artifact as the production UID/GID before a
+        # preproduction state copy. No network, state mounts, secrets, or
+        # provider connectors are available to this import-only smoke.
+        run([
+            "timeout", "--signal=TERM", "--kill-after=5s", "45s",
+            "docker", "run", "--rm", "--pull", "never",
+            "--network", "none", "--read-only",
+            "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+            "--pids-limit", "64", "--memory", "256m",
+            "--user", "1000:1000", "--entrypoint", "python", tag,
+            "-c", "from usage_ledger.ledger import SQLiteUsageLedger; import jason_runtime.main",
+        ])
         return tag, image_id(tag)
     finally:
         remove_worktree(repo, path)

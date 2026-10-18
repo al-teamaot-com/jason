@@ -40,6 +40,20 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                     "production_control_core",
                 )
 
+    def test_runtime_image_and_build_context_are_protected_core(self):
+        import fnmatch
+        import json
+        policy = json.loads((ROOT / "config/release-manager-policy.json").read_text())
+        for path in ("infrastructure/jason-runtime/Dockerfile", ".dockerignore"):
+            self.assertEqual(
+                runner.classify_change_risk("feature", [path]),
+                "production_control_core",
+            )
+            self.assertTrue(
+                any(fnmatch.fnmatch(path, pattern)
+                    for pattern in policy["protected_core_globs"])
+            )
+
     def test_owner_release_approval_code_is_protected_control_core(self):
         import json
         policy = json.loads((ROOT / "config/release-manager-policy.json").read_text())
@@ -83,6 +97,59 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 runner.live_release_mobile_approval_mode({"inspect": {"Config": {"Env": values}}}),
                 "off",
             )
+
+    def test_runtime_candidate_build_requires_nonroot_offline_import_smoke(self):
+        from unittest.mock import call
+        repo = Path("/tmp/jason-source")
+        state = Path("/tmp/jason-preproduction")
+        checkout = state / "private-git-worktree"
+        tag = "jason-runtime:release-" + SHA_A[:12]
+        with (patch.object(runner, "worktree", return_value=checkout) as worktree,
+              patch.object(runner, "run") as invoke,
+              patch.object(runner, "image_id", return_value="sha256:verified") as image,
+              patch.object(runner, "remove_worktree") as cleanup):
+            actual = runner.build_candidate(repo, state, SHA_A)
+        self.assertEqual(actual, (tag, "sha256:verified"))
+        worktree.assert_called_once_with(repo, state, SHA_A)
+        cleanup.assert_called_once_with(repo, checkout)
+        image.assert_called_once_with(tag)
+        commands = [entry.args[0] for entry in invoke.call_args_list]
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands[0][:2], ["docker", "build"])
+        self.assertEqual(commands[0][-1], str(checkout))
+        smoke = commands[1]
+        self.assertEqual(smoke[:5], ["timeout", "--signal=TERM", "--kill-after=5s",
+                                     "45s", "docker"])
+        self.assertIn("--network", smoke)
+        self.assertEqual(smoke[smoke.index("--network") + 1], "none")
+        self.assertIn("--read-only", smoke)
+        self.assertIn("--cap-drop", smoke)
+        self.assertEqual(smoke[smoke.index("--cap-drop") + 1], "ALL")
+        self.assertEqual(smoke[smoke.index("--user") + 1], "1000:1000")
+        self.assertEqual(smoke[smoke.index("--entrypoint") + 1], "python")
+        self.assertIn("from usage_ledger.ledger import SQLiteUsageLedger", smoke[-1])
+        self.assertIn("import jason_runtime.main", smoke[-1])
+        self.assertEqual(smoke[-2], "-c")
+        self.assertEqual(smoke[-3], tag)
+
+    def test_failed_runtime_import_smoke_cannot_admit_candidate(self):
+        repo = Path("/tmp/jason-source")
+        state = Path("/tmp/jason-preproduction")
+        checkout = state / "private-git-worktree"
+        build = None
+        with (patch.object(runner, "worktree", return_value=checkout),
+              patch.object(runner, "run") as invoke,
+              patch.object(runner, "image_id") as image,
+              patch.object(runner, "remove_worktree") as cleanup):
+            invoke.side_effect = [
+                None,
+                subprocess.CalledProcessError(1, ["docker", "run"]),
+            ]
+            with self.assertRaises(subprocess.CalledProcessError):
+                runner.build_candidate(repo, state, SHA_A)
+        self.assertEqual(invoke.call_count, 2)
+        image.assert_not_called()
+        cleanup.assert_called_once_with(repo, checkout)
 
     def test_release_id_is_deterministic(self):
         self.assertEqual(runner.record_id(SHA_A), "release-" + "a" * 16)
