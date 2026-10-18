@@ -27,8 +27,8 @@ def manifest(*, enabled=True):
         "requester_identity_id": "svc-jason-acceptance-test",
         "capability": "interaction.owner.acceptance.record",
         "execution_permitted": False,
-        "session_id": "OwnerUAT20261017Pilot",
-        "expires_at": "2026-10-19T00:00:00Z",
+        "session_id": "OwnerUAT20261018Retry01",
+        "expires_at": "2026-10-19T20:00:00Z",
     }
 
 
@@ -49,7 +49,7 @@ def test_off_by_default_and_preproduction_inert(tmp_path):
 def test_exact_bounded_nonexecuting_campaign(tmp_path):
     path = write(tmp_path, manifest())
     assert activation.activate_from_manifest(path, now=NOW) == (
-        "nonexecuting_test_only|true|OwnerUAT20261017Pilot"
+        "nonexecuting_test_only|true|OwnerUAT20261018Retry01"
     )
     assert activation.activate_from_manifest(path, now=NOW + timedelta(days=2)) == activation.OFF
 
