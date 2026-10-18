@@ -1513,6 +1513,147 @@ def readmit_recovered_reasoning(
 
 
 
+def verified_later_reasoning_success(
+    spool: Path, *, failed_rid: str, item_id: str, kind: str,
+    max_proof_age_hours: int = 12,
+) -> tuple[dict[str, Any], str] | None:
+    """Require newer, independent, same-schema success before one transport retry.
+
+    This only reads the protected reasoning spool; it does not retry the failed
+    response, assert provider billing recovery, or authorize code/provider writes.
+    HTTP 400 receives the additional safeguard of an equal-or-larger successfully
+    handled request of the same kind. Known billing/authority errors never qualify.
+    """
+    if re.fullmatch(r'[0-9a-f]{64}', failed_rid) is None:
+        return None
+    req_path = spool / 'reasoning' / 'requests' / (failed_rid + '.json')
+    response_dir = spool / 'reasoning' / 'responses'
+    if not req_path.is_file() or not response_dir.is_dir():
+        return None
+    try:
+        if req_path.stat().st_size > 200_000:
+            return None
+        request = json.loads(req_path.read_text(encoding='utf-8'))
+        failure = reasoning_response(spool, failed_rid)
+        if (not isinstance(request, dict) or request_id(request) != failed_rid
+                or request.get('request_id') != failed_rid
+                or request.get('support_item') != item_id or request.get('kind') != kind
+                or not isinstance(request.get('context'), dict)
+                or not isinstance(failure, Mapping) or failure.get('status') != 'failed'
+                or failure.get('error_type') != 'ConnectorTransportError'
+                or failure.get('provider_error_code')
+                or failure.get('primary_provider_error_code')
+                or failure.get('required_owner_action')):
+            return None
+        error = str(failure.get('error') or '')
+        if error not in {'HTTP transport failed', 'HTTP transport failed with status 400'}:
+            return None
+        failed_at = datetime.fromisoformat(str(failure.get('completed_at') or '').replace('Z', '+00:00'))
+        if failed_at.tzinfo is None:
+            return None
+        current = datetime.now(timezone.utc)
+        if failed_at > current:
+            return None
+        original_size = req_path.stat().st_size
+        candidates = sorted(response_dir.glob('*.json'), key=lambda path: path.stat().st_mtime, reverse=True)[:128]
+        for candidate in candidates:
+            if candidate.stem == failed_rid or re.fullmatch(r'[0-9a-f]{64}', candidate.stem) is None:
+                continue
+            try:
+                if candidate.stat().st_size > 200_000:
+                    continue
+                proof = json.loads(candidate.read_text(encoding='utf-8'))
+                if (not isinstance(proof, dict) or proof.get('status') != 'succeeded'
+                        or proof.get('request_id') != candidate.stem
+                        or proof.get('kind') != kind or not isinstance(proof.get('result'), dict)):
+                    continue
+                at = datetime.fromisoformat(str(proof.get('completed_at') or '').replace('Z', '+00:00'))
+                if (at.tzinfo is None or at <= failed_at
+                        or not 0 <= (current - at).total_seconds() <= max_proof_age_hours * 3600):
+                    continue
+                source = spool / 'reasoning' / 'requests' / candidate.name
+                if not source.is_file() or source.stat().st_size > 200_000:
+                    continue
+                probe_request = json.loads(source.read_text(encoding='utf-8'))
+                if (not isinstance(probe_request, dict)
+                        or probe_request.get('request_id') != candidate.stem
+                        or request_id(probe_request) != candidate.stem
+                        or probe_request.get('kind') != kind):
+                    continue
+                if error.endswith('status 400') and source.stat().st_size < original_size:
+                    continue
+                return request, candidate.stem
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                continue
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+    return None
+
+
+def readmit_after_verified_transport_recovery(
+    state: dict[str, Any], eligible: list[dict[str, str]], spool: Path,
+    *, max_active: int,
+) -> list[str]:
+    """Queue ONE new scoped support diagnostic after independently proven recovery.
+
+    Never overwrite historical failed responses, clear original retry counters,
+    re-admit a closed/non-P0 issue, or bypass a pending governed repair handoff.
+    """
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active = sum(1 for record in records.values() if isinstance(record, Mapping)
+                 and record.get('phase') in {'diagnosing', 'implementing', 'ci_repair_needed', 'ci_repairing'})
+    slots = max(0, max(1, int(max_active)) - active)
+    resumed: list[str] = []
+    for item in eligible:
+        if not slots:
+            break
+        if item.get('priority') != 'P0':
+            continue
+        record = records.get(item['id'])
+        if not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        handoff = record.get('recovery_handoff_intake')
+        if (record.get('provider_recovery_requeue_id') or record.get('pr_number')
+                or record.get('blocker_class') in {'external_authority', 'blocked_by_dependency'}
+                or (isinstance(handoff, Mapping) and handoff.get('status') == 'awaiting_governed_repair')):
+            continue
+        reason = str(record.get('reason') or '')
+        if reason == 'edit reasoning failed: HTTP transport failed with status 400':
+            kind, phase = 'edit_plan', 'implementing'
+        elif reason == 'reasoning request failed: HTTP transport failed':
+            kind, phase = 'search_plan', 'diagnosing'
+        else:
+            continue
+        failed_id = str(record.get('reasoning_request_id') or '')
+        verified = verified_later_reasoning_success(
+            spool, failed_rid=failed_id, item_id=item['id'], kind=kind,
+        )
+        if verified is None:
+            continue
+        original, proof_id = verified
+        context = dict(original['context'])
+        if 'verified_transport_recovery' in context:
+            continue  # Never recursively requeue an already retried request.
+        context['verified_transport_recovery'] = {
+            'failed_request_id': failed_id, 'newer_success_id': proof_id,
+            'retry_limit': 1, 'purpose': 'bounded_same_schema_provider_recovery',
+        }
+        new_id = queue_reasoning(spool, kind=kind, item=item, context=context)
+        if new_id == failed_id:
+            continue
+        record.update({
+            'phase': phase, 'reason': 'One bounded new request after verified reasoning transport recovery.',
+            'provider_recovery_original_failure_id': failed_id,
+            'provider_recovery_proof_id': proof_id,
+            'provider_recovery_requeue_id': new_id,
+            'reasoning_request_id': new_id,
+            'updated_at': now(),
+        })
+        resumed.append(item['id'])
+        slots -= 1
+    return resumed
+
+
 def original_partial_edits_match_known_proposal(
     worktree: Path,
     edits: list[Mapping[str, Any]],
@@ -1857,6 +1998,7 @@ def main() -> int:
     policy = gate.load_json(repo / 'config' / 'autonomous-repair-release-policy.json')
 
     readmit_recovered_reasoning(state, support, spool, max_active=args.max_active)
+    readmit_after_verified_transport_recovery(state, support, spool, max_active=args.max_active)
     reassess_model_scope_blocks(state, support, spool, args.max_active)
     readmit_preserved_anchor_failure(
         state, support, repo, spool, gate, policy, max_active=args.max_active)

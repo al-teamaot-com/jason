@@ -84,3 +84,21 @@ issues. `failed_or_skipped_stages` still describes process execution failures;
 a successful systemd unit does not override `critical_support_stalled` or
 `approved_work_stalled`. Review and recovery remain under Jason's existing
 engagement, evidence, and protected release rules.
+
+## Single verified reasoning transport readmission (2026-10-18)
+
+The P0 support worker may generate one **new** deterministic reasoning request
+only if a prior blocked transport response is still verified as failed, the
+original request fingerprint matches, and a newer successful request of the
+**same schema/kind** is independently present in the protected reasoning spool.
+For historical HTTP 400 results, the successful request must be at least as
+large as the failing one. A fresh success is evidence of transport viability,
+not proof of billing/account recovery or a successful code repair. Known
+billing/authorization errors and admitted governed repair handoffs are excluded.
+
+The fresh request adds a recovery-evidence binding to its context, so it is not
+a blind replay. It preserves the original failed request, original attempt
+budget and immutable audit history, cannot requeue recursively, and remains
+subject to P0 eligibility, two-item support capacity, J-CHANGE-002 exact edits,
+regression tests, protected CI and separate production owner/CCC authority.
+An invalid, stale or missing proof leaves the existing blocked record intact.
