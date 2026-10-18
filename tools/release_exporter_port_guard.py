@@ -74,18 +74,31 @@ def verify(mode: str, unit: str, timeout_seconds: float = 12.0) -> None:
         else:
             pid = main_pid(unit)
             if observed and pid > 0:
-                if any(not owners or set(owners) != {pid} for _, owners in observed):
+                # The kernel's ss PID attribution can briefly lag a newly
+                # activated listener even while systemd has its real MainPID.
+                # A *known foreign* owner is a hard failure. An uninspectable
+                # socket is never accepted as owned; bound an additional
+                # read until ALL listener PID sets equal the systemd MainPID.
+                # This keeps fail-closed ownership without a false first-
+                # sample failure at the exact systemd/socket startup race.
+                if any(owners and set(owners) != {pid} for _, owners in observed):
                     raise RuntimeError(
-                        f"{unit} port {port} is owned by a different/unknown "
-                        f"process: systemd MainPID={pid}; sockets={observed!r}"
+                        f"{unit} port {port} is owned by a different process: "
+                        f"systemd MainPID={pid}; sockets={observed!r}"
                     )
-                return
-            if observed:
+                if not any(not owners for _, owners in observed):
+                    return
+                last = (
+                    f"{unit} port {port} still has unattributed listener(s): "
+                    f"systemd MainPID={pid}; sockets={observed!r}"
+                )
+            elif observed:
                 raise RuntimeError(
                     f"{unit} port {port} is occupied but systemd has no "
                     f"valid MainPID: {observed!r}"
                 )
-            last = f"{unit} port {port} has no listening owner (MainPID={pid})"
+            else:
+                last = f"{unit} port {port} has no listening owner (MainPID={pid})"
         if time.monotonic() >= end:
             raise RuntimeError(f"bounded exporter {mode} check failed: {last}")
         time.sleep(0.25)
