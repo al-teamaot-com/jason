@@ -916,10 +916,18 @@ def changed_files(worktree: Path) -> list[str]:
 
 
 def apply_edits(worktree: Path, edits: list[Mapping[str, Any]], gate, policy: Mapping[str, Any]) -> list[str]:
+    """Prevalidate all bounded anchors before any source-file mutation.
+
+    A late invalid regression-test anchor must not leave earlier source edits
+    partially written in the isolated worktree. Consecutive edits to one file
+    still operate on the staged replacement, never on unvalidated disk writes.
+    """
     if not edits or len(edits) > 12:
         raise WorkerError('repair proposal must contain between 1 and 12 edits')
     touched: list[str] = []
+    pending: dict[str, tuple[Path, str]] = {}
     total_delta = 0
+    root = worktree.resolve()
     for edit in edits:
         path = str(edit.get('path') or '').strip()
         old = str(edit.get('old_text') or '')
@@ -930,16 +938,23 @@ def apply_edits(worktree: Path, edits: list[Mapping[str, Any]], gate, policy: Ma
         if denial:
             raise WorkerError('repair path denied by J-CHANGE-002: ' + denial)
         target = worktree / path
-        root = worktree.resolve()
         parent = target.parent.resolve()
         if parent != root and root not in parent.parents:
             raise WorkerError('invalid repair path')
-        if target.exists():
+        if path in pending:
+            text = pending[path][1]
+            exists = True
+        elif target.exists():
             if not target.is_file():
                 raise WorkerError(f'repair path is not a file: {path}')
+            text = target.read_text(encoding='utf-8')
+            exists = True
+        else:
+            text = ''
+            exists = False
+        if exists:
             if old == '':
                 raise WorkerError(f'new-file repair path already exists: {path}')
-            text = target.read_text(encoding='utf-8')
             count = text.count(old)
             if count != 1:
                 raise WorkerError(f'exact repair anchor must occur once in {path}; found {count}')
@@ -947,17 +962,81 @@ def apply_edits(worktree: Path, edits: list[Mapping[str, Any]], gate, policy: Ma
         else:
             if old != '':
                 raise WorkerError(f'repair path does not exist: {path}')
-            target.parent.mkdir(parents=True, exist_ok=True)
             replacement = new
         total_delta += old.count('\n') + new.count('\n') + 2
         if total_delta > int(policy.get('max_changed_lines', 800)):
             raise WorkerError('proposed repair exceeds changed-line boundary')
-        target.write_text(replacement, encoding='utf-8')
+        pending[path] = (target, replacement)
         if path not in touched:
             touched.append(path)
-    if len(touched) > int(policy.get('max_changed_files', 25)):
-        raise WorkerError('proposed repair exceeds changed-file boundary')
+        if len(touched) > int(policy.get('max_changed_files', 25)):
+            raise WorkerError('proposed repair exceeds changed-file boundary')
+    # Nothing is written until every path, anchor, and size gate has passed.
+    for path in touched:
+        target, replacement = pending[path]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(replacement, encoding='utf-8')
     return touched
+
+
+def queue_bounded_anchor_correction(
+    spool: Path,
+    worktree: Path,
+    item: Mapping[str, str],
+    record: dict[str, Any],
+    edits: list[Mapping[str, Any]],
+    test_paths: list[str],
+    failure: WorkerError,
+    gate,
+    policy: Mapping[str, Any],
+) -> bool:
+    """Retry an invalid exact anchor at most twice with fresh governed source.
+
+    An already-dirty worktree must stop for review: it might contain prior
+    partial edits and must never be silently reset or folded into a retry.
+    Denied paths, missing authority, and test failures are not anchor retries.
+    """
+    detail = str(failure)
+    if not detail.startswith('exact repair anchor must occur once in '):
+        return False
+    attempts = int(record.get('proposal_retries') or 0)
+    if attempts >= 2:
+        return False
+    if run(['git', 'status', '--porcelain'], cwd=worktree).strip():
+        return False
+    paths = [str(edit.get('path') or '').strip() for edit in edits]
+    paths.extend(str(path).strip() for path in test_paths)
+    excerpts = source_excerpts_for_paths(
+        worktree, paths, gate, policy, limit=8, content_limit=14000,
+    )
+    if not excerpts:
+        return False
+    request_id = queue_reasoning(
+        spool, kind='edit_plan', item=item,
+        context={
+            'validation_feedback': (
+                'The bounded host validator rejected an exact-text anchor: '
+                + detail[:350]
+                + '. Use only fresh eligible source excerpts. Every old_text '
+                'must appear exactly once, and the proposal must edit a '
+                'declared regression test. Never weaken the path or authority gate.'
+            ),
+            'retry_number': attempts + 1,
+            'source_excerpts': excerpts,
+        },
+    )
+    if request_id == str(record.get('reasoning_request_id') or ''):
+        return False
+    record.update({
+        'phase': 'implementing',
+        'reasoning_request_id': request_id,
+        'proposal_retries': attempts + 1,
+        'last_anchor_failure': detail[:350],
+        'reason': 'bounded exact-anchor correction queued; no edits applied',
+        'updated_at': now(),
+    })
+    return True
+
 
 
 def proposed_test_edits(
@@ -1836,7 +1915,15 @@ def main() -> int:
                         'updated_at': now(),
                     })
                     continue
-                apply_edits(worktree, edits, gate, policy)
+                try:
+                    apply_edits(worktree, edits, gate, policy)
+                except WorkerError as exc:
+                    if queue_bounded_anchor_correction(
+                        spool, worktree, item, record, edits, test_paths,
+                        exc, gate, policy,
+                    ):
+                        continue
+                    raise
                 tests = validate_patch(worktree, test_paths, gate, policy)
                 number = commit_and_pr(repo, worktree, item, tests[0])
                 record.update({
