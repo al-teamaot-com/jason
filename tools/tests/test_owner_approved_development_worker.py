@@ -1880,3 +1880,25 @@ def test_preexisting_nonfailed_diagnostic_is_not_backfilled(monkeypatch, tmp_pat
     )
     assert 'recovery_handoff_id' not in record
     assert not list(tmp_path.rglob('*.json'))
+
+
+def test_preexisting_failed_diagnostic_backfill_requires_matching_issue_identity(monkeypatch, tmp_path):
+    # Even exact old error receipts must not repair a different issue.
+    record = {
+        'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+        'issue_number': 1500, 'reason': 'HTTP transport failed',
+        'recovery_diagnostic_request_id': 'old-request',
+        'recovery_diagnostic_result_status': 'failed',
+        'recovery_diagnostic_result_at': 'original-failure-time',
+    }
+    monkeypatch.setattr(
+        module.support, 'reasoning_response',
+        lambda spool, rid: {'request_id': rid, 'status': 'failed'},
+    )
+    module.reconcile_exhausted_recovery_diagnostics(
+        {'items': {'DEV-1196': record}}, {'DEV-1196'}, tmp_path,
+    )
+    assert record['phase'] == 'blocked'
+    assert record['recovery_diagnostic_result_status'] == 'failed'
+    assert 'recovery_handoff_id' not in record
+    assert not list(tmp_path.rglob('*.json'))
