@@ -796,6 +796,31 @@ def reconcile_exhausted_recovery_diagnostics(
                 'Diagnostic reasoning failed; route to support with request ID and original blocker. '
                 'Do not restart retries or bypass dependencies.'
             )
+            # A failed diagnostic cannot be a prerequisite to repairing the
+            # diagnostic service itself. Preserve the original failed response;
+            # make a deterministic, non-executing support handoff instead.
+            # A signed-in owner-approved item and the original worker error
+            # remain required. Neither retry nor admission authority is granted.
+            if (record.get('blocker_class') == 'internal_retry_exhausted'
+                    and isinstance(record.get('issue_number'), int)
+                    and record['issue_number'] > 0
+                    and str(record.get('reason') or '').strip()):
+                from hashlib import sha256
+                import json
+                handoff = {
+                    'schema': 'jason.development-recovery-handoff.v1',
+                    'source_item': item_id,
+                    'diagnostic_request_id': rid,
+                    'original_blocker': str(record['reason'])[:1800],
+                    'diagnosis': 'Diagnostic reasoning unavailable; deterministic support review required.',
+                    'required_gate': 'authorized_repair_and_production_acceptance',
+                    'admission_authority': False,
+                }
+                handoff_id = sha256(json.dumps(handoff, sort_keys=True).encode()).hexdigest()
+                handoff_path = spool / 'development-recovery' / 'handoffs' / f'{handoff_id}.json'
+                if not handoff_path.exists():
+                    support.atomic_json(handoff_path, handoff)
+                record['recovery_handoff_id'] = handoff_id
 
 
 def reconcile_recovery_handoff_intake(
