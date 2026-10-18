@@ -1212,3 +1212,37 @@ def test_bounded_anchor_retry_fails_closed_on_dirty_or_exhausted_input(monkeypat
     assert worker.queue_bounded_anchor_correction(tmp_path,tmp_path,item,record,[],[],worker.WorkerError('repair path denied by J-CHANGE-002'),Gate(),{}) is False
     assert not requests
     assert record['phase'] == 'implementing' and record['reasoning_request_id'] == 'original'
+
+
+def test_apply_edits_late_denied_path_has_no_side_effects(tmp_path):
+    first = tmp_path / 'implementation' / 'example.py'
+    first.parent.mkdir(parents=True)
+    first.write_text('original\n', encoding='utf-8')
+    try:
+        worker.apply_edits(tmp_path, [
+            {'path':'implementation/example.py', 'old_text':'original', 'new_text':'changed'},
+            {'path':'implementation/connectors/secret.py', 'old_text':'', 'new_text':'denied'},
+        ], Gate(), {'max_changed_lines':800,'max_changed_files':25})
+    except worker.WorkerError as exc:
+        assert 'denied' in str(exc)
+    else:
+        raise AssertionError('late denied path accepted')
+    assert first.read_text(encoding='utf-8') == 'original\n'
+    assert not (tmp_path / 'implementation/connectors/secret.py').exists()
+
+
+def test_apply_edits_late_change_budget_rejection_has_no_side_effects(tmp_path):
+    first = tmp_path / 'implementation' / 'example.py'
+    first.parent.mkdir(parents=True)
+    first.write_text('original\n', encoding='utf-8')
+    try:
+        worker.apply_edits(tmp_path, [
+            {'path':'implementation/example.py', 'old_text':'original', 'new_text':'changed'},
+            {'path':'implementation/tests/test_example.py', 'old_text':'', 'new_text':'one\ntwo\nthree'},
+        ], Gate(), {'max_changed_lines':4,'max_changed_files':25})
+    except worker.WorkerError as exc:
+        assert 'changed-line boundary' in str(exc)
+    else:
+        raise AssertionError('late over-budget change accepted')
+    assert first.read_text(encoding='utf-8') == 'original\n'
+    assert not (tmp_path / 'implementation/tests/test_example.py').exists()
