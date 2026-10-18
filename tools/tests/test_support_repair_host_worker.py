@@ -1148,6 +1148,98 @@ def test_recovered_reasoning_respects_existing_active_worker_capacity(tmp_path):
     assert state['items']['SUPPORT-OPS-3']['phase'] == 'blocked'
     assert state['items']['SUPPORT-OPS-4']['phase'] == 'blocked'
 
+def _transport_recovery_fixture(tmp_path, *, error='HTTP transport failed with status 400',
+                                bigger_proof=True, proof_kind='edit_plan', billing=False):
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    target = {'id':'SUPPORT-OPS-054', 'priority':'P0', 'title':'Fix support intake',
+              'evidence':'e', 'acceptance':'a'}
+    proof = {'id':'SUPPORT-DEV-1196', 'priority':'P0', 'title':'Other verified response',
+             'evidence':'e', 'acceptance':'a'}
+    failed = worker.queue_reasoning(
+        tmp_path, kind='edit_plan', item=target,
+        context={'source_excerpts': ['X' * 3000]},
+    )
+    good = worker.queue_reasoning(
+        tmp_path, kind=proof_kind, item=proof,
+        context={'source_excerpts': ['Y' * (4000 if bigger_proof else 50)]},
+    )
+    out = tmp_path / 'reasoning' / 'responses'
+    out.mkdir(parents=True, exist_ok=True)
+    failure = {'request_id': failed, 'status':'failed',
+               'error_type':'ConnectorTransportError', 'error':error,
+               'completed_at':(now-timedelta(hours=2)).isoformat()}
+    if billing:
+        failure['provider_error_code'] = 'credit_balance_exhausted'
+    (out / (failed+'.json')).write_text(worker.json.dumps(failure))
+    (out / (good+'.json')).write_text(worker.json.dumps({
+        'request_id':good, 'kind':proof_kind, 'support_item':proof['id'],
+        'status':'succeeded', 'completed_at':(now-timedelta(minutes=2)).isoformat(),
+        'result': {'summary':'verified non-executing result', 'edits':[]},
+    }))
+    record = {'phase':'blocked','reason':'edit reasoning failed: '+error,
+              'reasoning_request_id':failed,'self_recovery_attempts':2}
+    return target, failed, good, record
+
+
+def test_verified_newer_larger_edit_response_allows_one_distinct_p0_readmission(tmp_path):
+    target, failed, proof, record = _transport_recovery_fixture(tmp_path)
+    state={'items':{target['id']:record}}
+    assert worker.readmit_after_verified_transport_recovery(state,[target],tmp_path,max_active=2)==[target['id']]
+    assert record['phase']=='implementing'
+    assert record['provider_recovery_original_failure_id']==failed
+    assert record['provider_recovery_proof_id']==proof
+    assert record['reasoning_request_id'] != failed
+    assert record['self_recovery_attempts']==2
+    new = worker.json.loads((tmp_path/'reasoning'/'requests'/(record['reasoning_request_id']+'.json')).read_text())
+    assert new['context']['verified_transport_recovery']['retry_limit']==1
+    assert worker.reasoning_response(tmp_path,failed)['status']=='failed'
+    # Even if a later response fails, the one-shot evidence cannot re-admit again.
+    record['phase']='blocked'
+    record['reason']='edit reasoning failed: HTTP transport failed with status 400'
+    assert worker.readmit_after_verified_transport_recovery(state,[target],tmp_path,max_active=2)==[]
+
+
+def test_transport_recovery_rejects_smaller_proof_and_known_billing(tmp_path):
+    for name, kw in [('small',{'bigger_proof':False}),('billing',{'billing':True})]:
+        root=tmp_path/name
+        target, failed, _, record = _transport_recovery_fixture(root,**kw)
+        state={'items':{target['id']:record}}
+        assert worker.verified_later_reasoning_success(root,failed_rid=failed,
+                         item_id=target['id'],kind='edit_plan') is None
+        assert worker.readmit_after_verified_transport_recovery(state,[target],root,max_active=2)==[]
+        assert record['phase']=='blocked'
+
+
+def test_transport_recovery_rejects_wrong_kind_closed_priority_and_full_capacity(tmp_path):
+    target,failed,_,record=_transport_recovery_fixture(tmp_path,proof_kind='search_plan')
+    assert worker.verified_later_reasoning_success(tmp_path,failed_rid=failed,
+                   item_id=target['id'],kind='edit_plan') is None
+    assert worker.readmit_after_verified_transport_recovery(
+        {'items':{target['id']:record}},[target],tmp_path,max_active=2)==[]
+    target2,_,_,record2=_transport_recovery_fixture(tmp_path/'second')
+    target2['priority']='P1'
+    assert worker.readmit_after_verified_transport_recovery(
+        {'items':{target2['id']:record2}},[target2],tmp_path/'second',max_active=2)==[]
+    target2['priority']='P0'
+    assert worker.readmit_after_verified_transport_recovery(
+        {'items':{target2['id']:record2,'SUPPORT-OPS-1':{'phase':'diagnosing'}}},
+        [target2],tmp_path/'second',max_active=1)==[]
+
+
+def test_transport_recovery_rejects_untrusted_mismatch_and_pending_governed_repair(tmp_path):
+    target,failed,_,record=_transport_recovery_fixture(tmp_path)
+    record['recovery_handoff_intake']={'status':'awaiting_governed_repair'}
+    assert worker.readmit_after_verified_transport_recovery(
+        {'items':{target['id']:record}},[target],tmp_path,max_active=2)==[]
+    del record['recovery_handoff_intake']
+    source=tmp_path/'reasoning'/'requests'/(failed+'.json')
+    mutated=worker.json.loads(source.read_text());mutated['context']['source_excerpts']=['tampered']
+    source.write_text(worker.json.dumps(mutated))
+    assert worker.verified_later_reasoning_success(tmp_path,failed_rid=failed,
+                   item_id=target['id'],kind='edit_plan') is None
+
+
 def test_apply_edits_validates_all_anchors_before_any_writes(tmp_path):
     first = tmp_path / 'implementation' / 'example.py'
     second = tmp_path / 'implementation' / 'tests' / 'test_example.py'
