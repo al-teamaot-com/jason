@@ -2229,6 +2229,63 @@ def run_release_ccc_gate(
 
 
 
+# Recovery of a script that started but returned nonzero must not assume the
+# subordinate deploy_live_container.py successfully restored everything. Its
+# best-effort Docker rename/start and tag restoration intentionally use
+# check=False; a preflight error, however, may leave the baseline untouched.
+# Pin only these two known image surfaces and verified LKG image IDs.
+_ROLLBACK_SURFACE_TAGS = {
+    "runtime": ("jason-runtime:rollback-current", "jason-runtime:production"),
+    "mcp": ("jason-mcp:rollback-current", "jason-mcp:production"),
+}
+
+
+def rollback_surface_is_verified(
+    surface: str, rollback_sha: str, baseline_manifest: dict[str, Any],
+) -> bool:
+    if surface not in _ROLLBACK_SURFACE_TAGS:
+        raise ReleaseManagerError("unsupported rollback surface")
+    expected_id = str(baseline_manifest[f"{surface}_image_id"])
+    try:
+        current = live_runtime() if surface == "runtime" else live_mcp()
+        production_tag = _ROLLBACK_SURFACE_TAGS[surface][1]
+        return (
+            current["revision"] == rollback_sha
+            and current["image_id"] == expected_id
+            and image_id(production_tag) == expected_id
+        )
+    except (KeyError, ValueError, ReleaseManagerError, subprocess.CalledProcessError, OSError):
+        # Unreadable state is not a proof of successful rollback.
+        return False
+
+
+def pin_exact_rollback_image(
+    surface: str, baseline_manifest: dict[str, Any],
+) -> None:
+    """Repair only a stale rollback-current tag from immutable LKG evidence.
+
+    A failed forward deploy may occur before the helper retags rollback-current,
+    leaving the *previous-previous* image. Never use that stale alias to
+    restore a release with a different exact rollback SHA.
+    """
+    if surface not in _ROLLBACK_SURFACE_TAGS:
+        raise ReleaseManagerError("unsupported rollback surface")
+    expected_id = str(baseline_manifest[f"{surface}_image_id"])
+    if re.fullmatch(r"sha256:[a-f0-9]{64}", expected_id) is None:
+        raise ReleaseManagerError("verified immutable rollback image ID is invalid")
+    rollback_tag = _ROLLBACK_SURFACE_TAGS[surface][0]
+    try:
+        existing = image_id(rollback_tag)
+    except (ReleaseManagerError, subprocess.CalledProcessError, OSError):
+        existing = None
+    if existing != expected_id:
+        # This controlled Docker tag operation is within the already
+        # owner-authorized, exclusive Production Manager rollback transaction.
+        run(["docker", "tag", expected_id, rollback_tag])
+        if image_id(rollback_tag) != expected_id:
+            raise ReleaseManagerError("pinned rollback image tag readback mismatch")
+
+
 def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
     if record.get("state") != "production_eligible":
         raise ReleaseManagerError("release is not Production Eligible")
@@ -2328,26 +2385,28 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     if candidate_quickbooks_profile is not None:
         env["JASON_QUICKBOOKS_READ_PROFILE"] = candidate_quickbooks_profile
 
-    runtime_deployed = False
-    mcp_deployed = False
+    runtime_attempted = False
+    mcp_attempted = False
     host_attempted = False
     release_manager_installed = False
 
     try:
+        # Mark *attempt* BEFORE executing the helper. A failed helper may have
+        # already stopped/renamed/replaced live state before returning nonzero.
+        runtime_attempted = True
         runtime_output = run(
             [str(runtime_script)],
             cwd=deploy_worktree,
             env=env,
         )
-        runtime_deployed = True
         wait_live_runtime()
 
+        mcp_attempted = True
         mcp_output = run(
             [str(mcp_script)],
             cwd=deploy_worktree,
             env=env,
         )
-        mcp_deployed = True
         if worker_enrollment.live_diagnostic_uid(output) != candidate_worker_uid:
             raise ReleaseManagerError("diagnostic worker enrollment failed dual-plane readback")
         if live_mcp()["revision"] != candidate_sha:
@@ -2470,42 +2529,61 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         rollback_env[worker_enrollment.ENV_NAME] = previous_worker_uid
 
         rollback_errors: list[str] = []
+        recovery_steps = {"mcp": "not_attempted", "host": "not_attempted",
+                          "manager": "not_attempted", "runtime": "not_attempted"}
 
-        # Reverse the forward transaction in dependency order. Host reconciliation
-        # requires MCP to already report the requested release revision.
-        if mcp_deployed:
+        # Reverse the forward transaction in dependency order. A script can
+        # return nonzero AFTER mutating production; do not trust its exit code
+        # or its best-effort internal rollback as proof. A healthy, exact-LKG
+        # surface need not be restarted merely because preflight failed.
+        if mcp_attempted:
             try:
-                run([str(mcp_script)], cwd=deploy_worktree, env=rollback_env)
-                if live_mcp()["revision"] != rollback_sha:
-                    raise ReleaseManagerError(
-                        "MCP rollback revision does not match recorded rollback SHA"
-                    )
+                if rollback_surface_is_verified("mcp", rollback_sha, baseline_manifest):
+                    recovery_steps["mcp"] = "already_verified_at_baseline"
+                else:
+                    recovery_steps["mcp"] = "restoration_attempted"
+                    pin_exact_rollback_image("mcp", baseline_manifest)
+                    run([str(mcp_script)], cwd=deploy_worktree, env=rollback_env)
+                    if not rollback_surface_is_verified("mcp", rollback_sha, baseline_manifest):
+                        raise ReleaseManagerError("MCP rollback image/alias/live revision is not verified")
+                    recovery_steps["mcp"] = "restored_and_verified"
             except Exception as exc:
+                recovery_steps["mcp"] = "unverified"
                 rollback_errors.append("mcp=" + type(exc).__name__ + ":" + str(exc)[:200])
 
         if host_attempted:
             try:
+                recovery_steps["host"] = "restoration_attempted"
                 request_host_reconcile(state_root, rollback_sha)
+                recovery_steps["host"] = "reconciled_baseline"
             except Exception as exc:
+                recovery_steps["host"] = "unverified"
                 rollback_errors.append("host=" + type(exc).__name__ + ":" + str(exc)[:200])
 
         if release_manager_installed or host_attempted:
             try:
+                recovery_steps["manager"] = "restoration_attempted"
                 install_release_manager_from_current(rollback_sha)
+                recovery_steps["manager"] = "reconciled_baseline"
             except Exception as exc:
+                recovery_steps["manager"] = "unverified"
                 rollback_errors.append(
                     "release_manager=" + type(exc).__name__ + ":" + str(exc)[:200]
                 )
 
-        if runtime_deployed:
+        if runtime_attempted:
             try:
-                run([str(runtime_script)], cwd=deploy_worktree, env=rollback_env)
-                rollback_live = wait_live_runtime()
-                if rollback_live["revision"] != rollback_sha:
-                    raise ReleaseManagerError(
-                        "runtime rollback revision does not match recorded rollback SHA"
-                    )
+                if rollback_surface_is_verified("runtime", rollback_sha, baseline_manifest):
+                    recovery_steps["runtime"] = "already_verified_at_baseline"
+                else:
+                    recovery_steps["runtime"] = "restoration_attempted"
+                    pin_exact_rollback_image("runtime", baseline_manifest)
+                    run([str(runtime_script)], cwd=deploy_worktree, env=rollback_env)
+                    if not rollback_surface_is_verified("runtime", rollback_sha, baseline_manifest):
+                        raise ReleaseManagerError("runtime rollback image/alias/health is not verified")
+                    recovery_steps["runtime"] = "restored_and_verified"
             except Exception as exc:
+                recovery_steps["runtime"] = "unverified"
                 rollback_errors.append(
                     "runtime=" + type(exc).__name__ + ":" + str(exc)[:200]
                 )
@@ -2513,8 +2591,18 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         rollback_ok = False
         if not rollback_errors:
             try:
+                # Read-only, full-manifest verification includes runtime health,
+                # exact immutable image IDs, MCP, host, controller and timers.
+                # Do not reinstall/restart an unchanged controller a second
+                # time just to verify it.
                 live_production_alignment(rollback_sha)
-                install_release_manager_from_current(rollback_sha)
+                verified_manifest = capture_production_manifest(rollback_sha)
+                if verified_manifest.get("complete") is not True:
+                    raise ReleaseManagerError("rollback baseline manifest is incomplete")
+                for surface in ("runtime", "mcp"):
+                    if (verified_manifest[f"{surface}_image_id"]
+                            != baseline_manifest[f"{surface}_image_id"]):
+                        raise ReleaseManagerError("rollback image ID differs from pinned LKG")
                 rollback_ok = True
             except Exception as exc:
                 rollback_errors.append(
@@ -2527,6 +2615,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "message": str(error)[:700],
             "rollback_verified": rollback_ok,
             "rollback_errors": rollback_errors,
+            "rollback_actions": recovery_steps,
         }
         record["state"] = "rolled_back" if rollback_ok else "failed"
         record.setdefault("history", []).append(
