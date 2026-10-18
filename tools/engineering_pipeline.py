@@ -83,6 +83,65 @@ def stalled_approved_work(spool: Path) -> dict[str, Any] | None:
     return None
 
 
+
+def canonical_support_rows(repo: Path) -> str:
+    """Prefer the fetched authoritative main, never a dirty local topic branch."""
+    if (repo / ".git").exists():
+        result = subprocess.run(
+            ["git", "show", "origin/main:SUPPORT.md"], cwd=str(repo),
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, timeout=10, check=False,
+        )
+        if result.returncode or len(result.stdout) > 1_000_000:
+            raise ValueError("authoritative support source unavailable")
+        return result.stdout
+    # Isolated unit-test directories contain no Git metadata.
+    return (repo / "SUPPORT.md").read_text(encoding="utf-8")
+
+
+def blocked_critical_support(spool: Path, repo: Path) -> dict[str, Any] | None:
+    """Surface already-blocked canonical P0 repairs without creating new authority.
+
+    Unadmitted P0 defects and exhausted P0 repairs must remain visible even if
+    scheduled worker commands exit successfully. This is a health projection,
+    not an instruction to bypass dependency, reasoning or release gates.
+    """
+    state_path = spool / "state.json"
+    if not state_path.exists():
+        return None
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        if not isinstance(state, dict):
+            raise ValueError("invalid support state")
+        items = state.get("items", {})
+        if not isinstance(items, dict):
+            raise ValueError("invalid support items")
+        critical = set()
+        for line in canonical_support_rows(repo).splitlines():
+            cells = [cell.strip() for cell in line.split("|")]
+            if (len(cells) >= 4 and cells[2] == "P0"
+                    and cells[1].startswith("SUPPORT-")
+                    and not any(status in cells[3].casefold()
+                                for status in ("closed", "resolved", "reclassified"))):
+                critical.add(cells[1])
+        mismatches = state.get("support_state_mismatches", {})
+        not_open = set(mismatches.get("support_open_issue_not_open", [])) if isinstance(mismatches, dict) else set()
+        # A stale SUPPORT.md row never reopens a GitHub issue that is closed.
+        blocked = sorted(item for item in critical
+                         if item not in not_open
+                         and isinstance(items.get(item), dict)
+                         and items[item].get("phase") in {"blocked", "escalated"})
+        audit = state.get("admission_audit", {})
+        missing = sorted(str(item) for item in audit.get("unadmitted_p0", [])) if isinstance(audit, dict) else []
+        if blocked or missing:
+            return {"reason": "critical_support_stalled", "blocked_count": len(blocked),
+                    "blocked_items": blocked[:12], "unadmitted_count": len(missing),
+                    "unadmitted_items": missing[:12]}
+    except (OSError, TypeError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired):
+        return {"reason": "support_health_unknown"}
+    return None
+
+
 def run_pipeline(
     *,
     scripts: Path,
@@ -137,15 +196,19 @@ def run_pipeline(
     failed = [name for name, item in state["stages"].items() if item["status"] != "succeeded"]
     state["finished_at"] = now()
     stalled = stalled_approved_work(spool) if not failed else None
-    state["status"] = "degraded" if failed or stalled else "healthy"
+    critical = blocked_critical_support(spool, repo) if not failed else None
+    state["status"] = "degraded" if failed or stalled or critical else "healthy"
     state["failed_or_skipped_stages"] = failed
     if stalled:
         state["operational_blocker"] = stalled
+    if critical:
+        state["critical_support_blocker"] = critical
     atomic_json(output, state)
     print("ENGINEERING_PIPELINE_RESULT " + json.dumps({
         "status": state["status"],
         "failed_or_skipped_stages": failed,
         "operational_blocker": stalled,
+        "critical_support_blocker": critical,
         "state_path": str(output),
     }, sort_keys=True), flush=True)
     return state
