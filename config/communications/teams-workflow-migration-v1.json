@@ -1,0 +1,220 @@
+{
+  "schema_version": "1.0",
+  "status": "source_inventory_only_not_runtime_configuration",
+  "owning_adr": "docs/decisions/ADR-013-Separate-Communications-and-Approval-Services.md",
+  "governing_adr": "docs/decisions/ADR-012-Canonical-Teams-Communication-Service.md",
+  "canonical": {
+    "interaction_contract": "implementation/runtime_service/src/jason_runtime/universal_interaction/contracts.py",
+    "interaction_orchestration": "implementation/runtime_service/src/jason_runtime/universal_interaction/service.py",
+    "teams_adapter": "implementation/runtime_service/src/jason_runtime/universal_interaction/teams.py",
+    "teams_transport": "implementation/runtime_service/src/jason_runtime/teams_communication_service.py",
+    "gateway": "infrastructure/jason-teams-gateway/index.mjs",
+    "approval_service": "implementation/connectors/src/jason_connectors/approval_requests.py",
+    "approval_dispatcher": "implementation/runtime_service/src/jason_runtime/procurement_teams_flow.py",
+    "identity_policy": "implementation/communication/audience/engine.py"
+  },
+  "presentation": {
+    "adaptive_card_version": "1.5",
+    "semantic_colors": {
+      "information": "Accent",
+      "action_required": "Warning",
+      "caution": "Warning",
+      "critical": "Attention",
+      "success": "Good"
+    },
+    "templates": [
+      "notice",
+      "progress",
+      "incident",
+      "human_action_required",
+      "approval",
+      "questionnaire",
+      "acknowledgement"
+    ],
+    "branding": "AOT Jason; one semantic template registry; no per-workflow arbitrary colors",
+    "authority_notice": "Template and color have no authority; immutable approval request is the only actionable source",
+    "legacy_card_renderer_sources": [
+      "implementation/connectors/microsoft_graph/openclaw_teams_approval_transport.py",
+      "implementation/connectors/microsoft_graph/teams_approval_delivery.py",
+      "implementation/runtime_service/src/jason_runtime/autonomous_completion_notification.py",
+      "implementation/runtime_service/src/jason_runtime/playbook_autonomy_review.py",
+      "implementation/runtime_service/src/jason_runtime/procurement_inventory_billing.py",
+      "implementation/runtime_service/src/jason_runtime/procurement_teams_flow.py",
+      "implementation/runtime_service/src/jason_runtime/universal_interaction/teams.py"
+    ]
+  },
+  "rollout_rules": {
+    "source_only": true,
+    "no_runtime_feature_auto_activation": true,
+    "deploy_requires_existing_exact_sha_owner_approval": true,
+    "one_test_workflow_at_a_time": true,
+    "no_direct_provider_or_execution_bypass": true,
+    "no_automatic_retry_on_unknown_send": true,
+    "tenant_and_client_boundary_required": true,
+    "approval_callback_must_use_existing_signed_dispatcher": true,
+    "legacy_retirement_requires_zero_live_consumers": true
+  },
+  "direct_gateway_http_exceptions": [
+    "implementation/runtime_service/src/jason_runtime/teams_message_send.py",
+    "implementation/runtime_service/src/jason_runtime/autonomous_completion_notification.py",
+    "implementation/mcp_service/src/jason_mcp/server.py"
+  ],
+  "workflows": [
+    {
+      "id": "signed_teams_conversation",
+      "source": "implementation/orchestrator/teams_conversation_flow.py",
+      "role": "conversation",
+      "channel": "signed_gateway_ingress_and_existing_reply",
+      "approval": "routed_by_dispatcher",
+      "migration": "preserve_inbound_route_normalize_reply_templates",
+      "wave": 0,
+      "risk": "high",
+      "rollout": "existing_production",
+      "notes": "Do not replace signed ADR-009 envelope/replay/identity controls"
+    },
+    {
+      "id": "governed_staff_messages",
+      "source": "implementation/runtime_service/src/jason_runtime/teams_message_send.py",
+      "role": "notification",
+      "channel": "canonical_post_existing_gateway",
+      "approval": "separate_governed_send_capability",
+      "migration": "wrap_existing_invoker_with_interaction_facade",
+      "wave": 1,
+      "risk": "medium",
+      "rollout": "adapter_only",
+      "notes": "Must preserve execution-plan fingerprint and single send claim"
+    },
+    {
+      "id": "owner_nonexecuting_uat",
+      "source": "implementation/runtime_service/src/jason_runtime/universal_interaction/owner_uat.py",
+      "role": "approval_test",
+      "channel": "existing_universal_interaction",
+      "approval": "existing_approval_request_service",
+      "migration": "retain_as_regression_fixture",
+      "wave": 0,
+      "risk": "low",
+      "rollout": "accepted_test_only",
+      "notes": "Deny then Approve accepted; cannot grant provider execution"
+    },
+    {
+      "id": "playbook_autonomy_review",
+      "source": "implementation/runtime_service/src/jason_runtime/playbook_autonomy_review.py",
+      "role": "approval",
+      "channel": "shared_existing_gateway_transport",
+      "approval": "existing_approval_request_service",
+      "migration": "adapter_to_canonical_approval_presentation",
+      "wave": 2,
+      "risk": "high",
+      "rollout": "parity_only",
+      "notes": "Persisted owner review and promotion gates remain authoritative"
+    },
+    {
+      "id": "production_release_approval",
+      "source": "implementation/runtime_service/src/jason_runtime/mobile_release_approval.py",
+      "role": "approval",
+      "channel": "shared_playbook_sender",
+      "approval": "existing_approval_request_service",
+      "migration": "adapter_to_canonical_approval_presentation",
+      "wave": 4,
+      "risk": "critical",
+      "rollout": "parity_only",
+      "notes": "Preserve exact SHA, protected host, CCC, rollback, and disputed callback #1553"
+    },
+    {
+      "id": "procurement_teams_forms",
+      "source": "implementation/runtime_service/src/jason_runtime/procurement_teams_flow.py",
+      "role": "questionnaire",
+      "channel": "existing_signed_reply_cards",
+      "approval": "separate_procurement_review_policy",
+      "migration": "registered_questionnaire_renderer",
+      "wave": 3,
+      "risk": "high",
+      "rollout": "parity_only",
+      "notes": "Retain invoice attachment/line items, vendor, ticket, UDF thresholds"
+    },
+    {
+      "id": "procurement_approval",
+      "source": "implementation/runtime_service/src/jason_runtime/procurement_teams_flow.py",
+      "role": "approval",
+      "channel": "shared_playbook_sender",
+      "approval": "existing_approval_request_service",
+      "migration": "adapter_to_canonical_approval_presentation",
+      "wave": 3,
+      "risk": "high",
+      "rollout": "parity_only",
+      "notes": "Preserve per-person spend authority; no invoice/PO execution from click"
+    },
+    {
+      "id": "mcp_invoice_review",
+      "source": "implementation/mcp_service/src/jason_mcp/server.py",
+      "role": "questionnaire",
+      "channel": "direct_gateway_http",
+      "approval": "procurement_policy_and_existing_approval_request_service",
+      "migration": "governed_existing_teams_gateway_adapter",
+      "wave": 3,
+      "risk": "high",
+      "rollout": "parity_only",
+      "notes": "Direct HTTP bypass candidate; preserve authenticated ChatGPT identity and durable submission"
+    },
+    {
+      "id": "billing_disposition",
+      "source": "implementation/runtime_service/src/jason_runtime/procurement_billing_audit_maintenance.py",
+      "role": "notification_and_questionnaire",
+      "channel": "shared_existing_gateway_transport",
+      "approval": "existing_business_action_gates",
+      "migration": "notice_and_registered_questionnaire_adapters",
+      "wave": 2,
+      "risk": "high",
+      "rollout": "parity_only",
+      "notes": "Keep technician/Lori routing, company/device/accounting evidence"
+    },
+    {
+      "id": "autonomous_completion",
+      "source": "implementation/runtime_service/src/jason_runtime/autonomous_completion_notification.py",
+      "role": "notification_and_progress",
+      "channel": "direct_gateway_http",
+      "approval": "existing_governed_execution_plan",
+      "migration": "canonical_notices_via_existing_invoker_plan",
+      "wave": 2,
+      "risk": "medium",
+      "rollout": "parity_only",
+      "notes": "Preserve exact canonical/provider plan fingerprint; no blind resend"
+    },
+    {
+      "id": "universal_bounded_plan",
+      "source": "implementation/runtime_service/src/jason_runtime/universal_teams_approval.py",
+      "role": "approval",
+      "channel": "existing_signed_dispatcher",
+      "approval": "existing_plan_approval_service",
+      "migration": "defer_high_impact_activation",
+      "wave": 4,
+      "risk": "critical",
+      "rollout": "source_only",
+      "notes": "JASON_UNIVERSAL_APPROVAL_MODE remains off; no premature enable"
+    },
+    {
+      "id": "legacy_graph_approval_channel",
+      "source": "implementation/connectors/microsoft_graph/teams_approval_delivery.py",
+      "role": "legacy_approval_transport",
+      "channel": "graph_channel_adapter",
+      "approval": "existing_approval_request_service",
+      "migration": "inventory_consumers_retire_only_after_parity",
+      "wave": 4,
+      "risk": "high",
+      "rollout": "unknown_usage",
+      "notes": "Separate adapter in source; no evidence it is active, never decommission blind"
+    },
+    {
+      "id": "legacy_openclaw_approval_channel",
+      "source": "implementation/connectors/microsoft_graph/openclaw_teams_approval_transport.py",
+      "role": "legacy_approval_transport",
+      "channel": "openclaw_adapter",
+      "approval": "existing_approval_request_service",
+      "migration": "inventory_consumers_retire_only_after_parity",
+      "wave": 4,
+      "risk": "high",
+      "rollout": "unknown_usage",
+      "notes": "Validate live callers before retirement"
+    }
+  ]
+}
