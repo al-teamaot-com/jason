@@ -2853,3 +2853,136 @@ def test_preprod_nested_bad_listing_never_copies_any_release_state(tmp_path):
                 "/var/lib/jason/openclaw", tmp_path / "clone",
             )
     assert copied == []
+
+
+def test_scheduled_release_mobile_sqlite_busy_defers_without_failures_or_approvals(
+    tmp_path, capsys
+):
+    """Only typed contention is a retryable deferral; no production work happens."""
+    from types import SimpleNamespace
+    from release_mobile_approval_consumer import MobileReleaseEvidenceBusy
+    root = tmp_path
+    (root / "records").mkdir()
+    with (
+        patch.object(runner, "DEFAULT_STATE", root),
+        patch.object(runner.gate, "load_json", return_value={
+            "schedule": {"automatic_promotion_enabled": True},
+        }),
+        patch(
+            "jason_runtime.owner_release_approval_containment.read_release_approval_containment",
+            return_value=SimpleNamespace(active=False),
+        ),
+        patch(
+            "release_mobile_approval_consumer.consume_mobile_release_decisions",
+            side_effect=MobileReleaseEvidenceBusy("owner identity evidence database busy"),
+        ),
+        patch.object(runner, "consume_owner_approval_requests") as consume_other,
+        patch.object(runner, "deploy_production") as deploy,
+    ):
+        assert runner.promote_eligible(ROOT, root) is False
+    assert "RELEASE_MANAGER_AUTO_DEFERRED=signed_owner_evidence_busy" in capsys.readouterr().out
+    consume_other.assert_not_called()
+    deploy.assert_not_called()
+
+
+def _ccc_exact_missing_owner_review_report():
+    report = _ccc_test_report()
+    for check in report["checks"]:
+        if check["check_id"] == "material-change-owner-review":
+            check["status"] = "NOT_PROVEN"
+            check["detail"] = (
+                "Material change requires an exact owner review record for this source revision."
+            )
+            check["evidence"] = {"paths": list(report["material_changes"])}
+    return report
+
+
+def test_ccc_attested_missing_material_review_is_a_typed_predeploy_wait():
+    import pytest
+    report = _ccc_exact_missing_owner_review_report()
+    with pytest.raises(runner.CCCMaterialReviewRequired, match="exact-owner material review"):
+        runner.verify_release_ccc_report(
+            report, candidate_sha=SHA_A, runtime_sha=SHA_B, before_mutation=True,
+        )
+    # Explicit/manual postflight never treats the missing approval as certified.
+    with pytest.raises(runner.ReleaseManagerError, match="post-mutation CCC"):
+        runner.verify_release_ccc_report(
+            report, candidate_sha=SHA_A, runtime_sha=SHA_B, before_mutation=False,
+        )
+
+
+def test_missing_material_review_must_be_exact_checker_attested_and_no_other_failure():
+    import copy
+    import pytest
+    base = _ccc_exact_missing_owner_review_report()
+    variants = []
+    tampered_detail = copy.deepcopy(base)
+    for check in tampered_detail["checks"]:
+        if check["check_id"] == "material-change-owner-review":
+            check["detail"] = "review was rejected or different reason"
+    variants.append(tampered_detail)
+    tampered_paths = copy.deepcopy(base)
+    for check in tampered_paths["checks"]:
+        if check["check_id"] == "material-change-owner-review":
+            check["evidence"]["paths"] = ["other.py"]
+    variants.append(tampered_paths)
+    missing_paths = copy.deepcopy(base)
+    missing_paths["material_changes"] = []
+    variants.append(missing_paths)
+    another_failed = copy.deepcopy(base)
+    for check in another_failed["checks"]:
+        if check["check_id"] == "systemd-failed-units":
+            check["status"] = "FAIL"
+    variants.append(another_failed)
+    malformed_status = copy.deepcopy(base)
+    malformed_status["status"] = "PASS"
+    variants.append(malformed_status)
+    for report in variants:
+        with pytest.raises(runner.ReleaseManagerError) as exc:
+            runner.verify_release_ccc_report(
+                report, candidate_sha=SHA_A, runtime_sha=SHA_B,
+                before_mutation=True,
+            )
+        assert not isinstance(exc.value, runner.CCCMaterialReviewRequired)
+
+
+def test_scheduled_promotion_defers_exact_material_owner_review_without_deploying(
+    tmp_path, capsys
+):
+    record = {
+        "release_id": runner.record_id(SHA_A),
+        "state": "production_eligible",
+        "rollback_sha": SHA_B,
+        "risk_profile": "production_control_core",
+        "release_candidate": {"candidate_sha": SHA_A},
+        "owner_approval": {"approved": True, "candidate_sha": SHA_A},
+    }
+    (tmp_path / "records").mkdir()
+    runner.atomic_json(tmp_path / "records" / (record["release_id"] + ".json"), record)
+    with (
+        patch.object(runner.gate, "load_json", return_value={
+            "schedule": {"automatic_promotion_enabled": True},
+        }),
+        patch.object(runner, "consume_owner_approval_requests"),
+        patch.object(runner, "production_window_open", return_value=True),
+        patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
+        patch.object(runner, "live_runtime", return_value={"revision": SHA_B}),
+        patch.object(runner, "live_production_alignment", return_value={}),
+        patch.object(runner, "reconcile_stopped_rollback_retention"),
+        patch.object(runner, "production_gate_result", return_value={
+            "allowed": True, "protected_core": True, "reasons": [],
+        }),
+        patch.object(
+            runner, "deploy_production",
+            side_effect=runner.CCCMaterialReviewRequired(
+                "pre-mutation CCC requires independently recorded exact-owner material review"
+            ),
+        ) as deploy,
+    ):
+        assert runner.promote_eligible(ROOT, tmp_path) is False
+    deploy.assert_called_once()
+    assert "RELEASE_MANAGER_AUTO_DEFERRED=ccc_exact_material_owner_review_required" in capsys.readouterr().out
+    saved = runner.load_record(tmp_path, record["release_id"])
+    assert saved["state"] == "production_eligible"
+    assert saved["owner_approval"] == record["owner_approval"]
+    assert saved["rollback_sha"] == SHA_B
