@@ -1515,3 +1515,141 @@ def test_preserve_legacy_anchor_respects_capacity(monkeypatch, tmp_path):
     assert worker.readmit_preserved_anchor_failure(
         state, [{'id':'SUPPORT-DEV-1196'}], repo, spool, Gate(), {}, max_active=1) == []
     assert state['items']['SUPPORT-DEV-1196']['phase'] == 'blocked'
+
+
+def _gap_recovery_fixture(tmp_path, monkeypatch):
+    class AllowRead:
+        def path_denial_reason(self, path, policy):
+            return None
+    source = tmp_path / 'fresh'
+    for path in (
+        'tools/support_repair_host_worker.py',
+        'tools/tests/test_support_repair_host_worker.py',
+        'tools/engineering_pipeline.py',
+        'tools/tests/test_engineering_pipeline.py',
+    ):
+        target = source / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            'def audit_support_admission():\n    return "support issue admission"\n'
+            'def eligible_support_items():\n    return True\n',
+            encoding='utf-8',
+        )
+    item = {
+        'id': 'SUPPORT-OPS-054', 'priority': 'P0',
+        'title': 'GitHub P0 support issues excluded from admission',
+        'evidence': 'Reconcile open SUPPORT issue state with canonical rows',
+        'acceptance': 'Prove unmatched P0 support issues have dispositions',
+    }
+    reason = 'Missing exact source excerpt for support issue admission implementation.'
+    rid = worker.queue_reasoning(
+        tmp_path, kind='edit_plan', item=item,
+        context={'diagnosis': 'original search omitted host source', 'source_excerpts': []},
+    )
+    responses = tmp_path / 'reasoning' / 'responses'
+    responses.mkdir(parents=True, exist_ok=True)
+    (responses / (rid + '.json')).write_text(worker.json.dumps({
+        'request_id': rid, 'status': 'succeeded', 'kind': 'edit_plan',
+        'support_item': item['id'], 'result': {'blocked_reason': reason},
+    }))
+    record = {
+        'phase': 'blocked', 'reason': reason, 'reasoning_request_id': rid,
+        'branch': worker.branch_name(item['id']), 'self_recovery_attempts': 2,
+    }
+    branch = worker.branch_name(item['id']) + '-context-' + rid[:12]
+    sha = 'a' * 40
+    monkeypatch.setattr(worker, 'ensure_worktree', lambda repo, item_id, requested: source)
+    def fake_run(args, *, cwd=None, **kwargs):
+        if args[:3] == ['git', 'branch', '--show-current']:
+            return branch
+        if args[:3] == ['git', 'status', '--porcelain']:
+            return ''
+        if args[:3] == ['git', 'rev-parse', 'HEAD']:
+            return sha
+        if args[:3] == ['git', 'rev-parse', 'origin/main']:
+            return sha
+        raise AssertionError(args)
+    monkeypatch.setattr(worker, 'run', fake_run)
+    return item, record, AllowRead(), sha, rid
+
+
+def test_p0_source_gap_recovers_once_with_exact_code_and_test(tmp_path, monkeypatch):
+    item, record, gate, sha, original = _gap_recovery_fixture(tmp_path, monkeypatch)
+    state = {'items': {item['id']: record}}
+    assert worker.readmit_missing_support_source_context(
+        state, [item], tmp_path, tmp_path, gate, {}, max_active=2
+    ) == [item['id']]
+    assert record['phase'] == 'implementing'
+    assert record['source_context_recovery_original_id'] == original
+    assert record['source_context_recovery_revision'] == sha
+    assert record['reasoning_request_id'] != original
+    assert record['self_recovery_attempts'] == 2
+    assert worker.support_worktree_path(item['id'], record['branch']).name.endswith(
+        '-context-' + original[:12]
+    )
+    request_path = (tmp_path / 'reasoning' / 'requests' /
+                    (record['reasoning_request_id'] + '.json'))
+    request = worker.json.loads(request_path.read_text())
+    assert request['context']['source_context_recovery']['retry_limit'] == 1
+    assert request['context']['source_context_recovery']['previous_request_id'] == original
+    assert [x['path'] for x in request['context']['source_excerpts']] == [
+        'tools/support_repair_host_worker.py',
+        'tools/tests/test_support_repair_host_worker.py',
+        'tools/engineering_pipeline.py',
+        'tools/tests/test_engineering_pipeline.py',
+    ]
+    assert 'audit_support_admission' in request['context']['source_excerpts'][0]['content']
+    assert worker.reasoning_response(tmp_path, original)['status'] == 'succeeded'
+    record['phase'] = 'blocked'
+    assert worker.readmit_missing_support_source_context(
+        state, [item], tmp_path, tmp_path, gate, {}, max_active=2
+    ) == []
+
+
+def test_p0_source_gap_rejects_wrong_response_identity(tmp_path, monkeypatch):
+    item, record, gate, _, rid = _gap_recovery_fixture(tmp_path, monkeypatch)
+    path = tmp_path / 'reasoning' / 'responses' / (rid + '.json')
+    response = worker.json.loads(path.read_text())
+    response['support_item'] = 'SUPPORT-OPS-OTHER'
+    path.write_text(worker.json.dumps(response))
+    assert worker.readmit_missing_support_source_context(
+        {'items': {item['id']: record}}, [item], tmp_path, tmp_path,
+        gate, {}, max_active=2
+    ) == []
+    assert record['phase'] == 'blocked'
+
+
+def test_p0_source_gap_rejects_unapproved_or_full_capacity(tmp_path, monkeypatch):
+    item, record, gate, _, _ = _gap_recovery_fixture(tmp_path, monkeypatch)
+    state = {'items': {item['id']: record}}
+    item['priority'] = 'P1'
+    assert worker.readmit_missing_support_source_context(
+        state, [item], tmp_path, tmp_path, gate, {}, max_active=2
+    ) == []
+    item['priority'] = 'P0'
+    state['items']['OTHER'] = {'phase': 'implementing'}
+    assert worker.readmit_missing_support_source_context(
+        state, [item], tmp_path, tmp_path, gate, {}, max_active=1
+    ) == []
+    del state['items']['OTHER']
+    item.update(title='Printer driver update', evidence='Printer offline',
+                acceptance='Installed driver verified')
+    assert worker.readmit_missing_support_source_context(
+        state, [item], tmp_path, tmp_path, gate, {}, max_active=2
+    ) == []
+    assert record.get('source_context_recovery_request_id') is None
+
+
+def test_p0_source_gap_rejects_dirty_worktree(tmp_path, monkeypatch):
+    item, record, gate, _, _ = _gap_recovery_fixture(tmp_path, monkeypatch)
+    prior = worker.run
+    def dirty_run(args, **kwargs):
+        if args[:3] == ['git', 'status', '--porcelain']:
+            return ' M tools/support_repair_host_worker.py'
+        return prior(args, **kwargs)
+    monkeypatch.setattr(worker, 'run', dirty_run)
+    assert worker.readmit_missing_support_source_context(
+        {'items': {item['id']: record}}, [item], tmp_path, tmp_path,
+        gate, {}, max_active=2
+    ) == []
+    assert record['phase'] == 'blocked'
