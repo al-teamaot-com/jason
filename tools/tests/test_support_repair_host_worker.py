@@ -1653,3 +1653,29 @@ def test_p0_source_gap_rejects_dirty_worktree(tmp_path, monkeypatch):
         gate, {}, max_active=2
     ) == []
     assert record['phase'] == 'blocked'
+
+
+def test_p0_source_gap_rejects_stale_branch_identity(tmp_path, monkeypatch):
+    item, record, gate, _, _ = _gap_recovery_fixture(tmp_path, monkeypatch)
+    original_run = worker.run
+    def stale_run(args, **kwargs):
+        if args[:3] == ['git', 'rev-parse', 'HEAD']:
+            return 'b' * 40
+        return original_run(args, **kwargs)
+    monkeypatch.setattr(worker, 'run', stale_run)
+    assert worker.readmit_missing_support_source_context(
+        {'items': {item['id']: record}}, [item], tmp_path, tmp_path,
+        gate, {}, max_active=2
+    ) == []
+    assert record['reason'].startswith('Missing exact source excerpt')
+    assert record.get('source_context_recovery_request_id') is None
+
+
+def test_p0_source_gap_rejects_disagreeing_original_reason(tmp_path, monkeypatch):
+    item, record, gate, _, _ = _gap_recovery_fixture(tmp_path, monkeypatch)
+    record['reason'] = 'Missing exact source excerpt for a different subsystem'
+    assert worker.readmit_missing_support_source_context(
+        {'items': {item['id']: record}}, [item], tmp_path, tmp_path,
+        gate, {}, max_active=2
+    ) == []
+    assert record.get('source_context_recovery_request_id') is None
