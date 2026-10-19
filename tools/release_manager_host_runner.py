@@ -3014,6 +3014,42 @@ def live_release_mobile_approval_mode(runtime: dict[str, Any]) -> str:
     return selected[0] if selected[0] in {"owner_only_pilot", "owner_reviewed"} else "off"
 
 
+def signed_owner_offer_purpose(
+    record: dict[str, Any], candidate_sha: str, reviewed_policy: Any,
+    live_mode: str, *, ccc_root: Path,
+) -> str | None:
+    """Return narrow actionable Teams purpose or None. No authority mutation.
+
+    V1 remains normal-risk and can only offer a full unapproved release.
+    V2 can offer a CCC-only card for an ALREADY approved exact release whose
+    separately authenticated CCC material review is missing. A fully reviewed
+    release gets no redundant card. Neither case certifies CCC or deploys.
+    """
+    expected_mode = ("owner_only_pilot" if reviewed_policy.schema_version == "1.0"
+                     else "owner_reviewed")
+    if live_mode != expected_mode:
+        return None
+    if str(record.get("risk_profile") or "unknown") not in reviewed_policy.allowed_risk_profiles:
+        return None
+    owner = record.get("owner_approval") or {}
+    if owner.get("approved") is not True:
+        return "release_and_ccc"
+    if (reviewed_policy.schema_version != "2.0"
+            or owner.get("candidate_sha") != candidate_sha):
+        return None
+    named = ccc_root / ("material-review-" + candidate_sha[:16] + ".json")
+    if named.is_file():
+        prior = json.loads(named.read_text(encoding="utf-8"))
+        if (prior.get("source_revision") == candidate_sha
+                and prior.get("recorded_by") == "person-al"
+                and prior.get("status") == "approved"):
+            return None
+        # A conflicting stored review is an authority problem, not an
+        # invitation to issue a new card that would overwrite audit evidence.
+        raise ReleaseManagerError("existing CCC material review conflicts with exact release")
+    return "ccc_material_review_only"
+
+
 def promote_eligible(repo: Path, state_root: Path) -> bool:
     # Keep the required five-minute timer active, but do not allow it to
     # execute a production promotion while Owner has selected manual mode.
@@ -3123,17 +3159,18 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
         reviewed_policy_path = Path("/var/lib/jason/authority/mobile-release-approval-policy.json")
         owner_teams_eligible = False
         if (not release_teams_containment.active
-                and reviewed_policy_path.is_file()
-                and (record.get("owner_approval") or {}).get("approved") is not True):
+                and reviewed_policy_path.is_file()):
             reviewed_policy = read_mobile_release_policy(reviewed_policy_path)
             live_mode = live_release_mobile_approval_mode(live_runtime())
             expected_mode = ("owner_only_pilot" if reviewed_policy.schema_version == "1.0"
                              else "owner_reviewed")
             requested_risk = str(record.get("risk_profile") or "unknown")
-            owner_teams_eligible = (
-                live_mode == expected_mode
-                and requested_risk in reviewed_policy.allowed_risk_profiles
+            purpose = signed_owner_offer_purpose(
+                record, candidate_sha, reviewed_policy, live_mode,
+                ccc_root=Path("/var/lib/jason/ccc"),
             )
+            owner_teams_eligible = purpose is not None
+            review_only = purpose == "ccc_material_review_only"
             if live_mode != expected_mode:
                 print("RELEASE_TEAMS_APPROVAL_UNAVAILABLE=runtime_mode_mismatch"
                       + f" expected={expected_mode} active={live_mode}", flush=True)
@@ -3151,6 +3188,7 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
                     ensure_ascii=False,
                 ).encode("utf-8")).hexdigest(),
                 "protected_main_sha": main_sha, "live_rollback_sha": current_sha,
+                **({"review_only": True} if review_only else {}),
                 "published_at": now(),
             })
         result = production_gate_result(repo, record)
