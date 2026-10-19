@@ -2733,3 +2733,123 @@ def test_automatic_promotion_does_not_swallow_other_release_denials(tmp_path):
     ):
         with pytest.raises(runner.ReleaseManagerError, match="systemd-failed-units"):
             runner.promote_eligible(ROOT, tmp_path)
+
+
+def test_preprod_release_manager_clone_keeps_critical_records_and_excludes_build_caches():
+    names = (
+        "preprod\nworktrees\nrecords\nprotected-readback\n"
+        "production-control-state.json\nowner-notification-events\n"
+        "mobile-release-decisions-processed\nproduction-drift.json\n"
+    )
+    result = runner.bounded_preprod_release_manager_entries(names)
+    assert "preprod" not in result
+    assert "worktrees" not in result
+    for required in (
+        "records", "protected-readback", "production-control-state.json",
+        "owner-notification-events", "mobile-release-decisions-processed",
+        "production-drift.json",
+    ):
+        assert required in result
+
+
+def test_preprod_release_manager_clone_refuses_missing_or_unsafe_evidence():
+    import pytest
+    for listing in (
+        "preprod\nworktrees\nrecords\nproduction-control-state.json",
+        "preprod\nworktrees\nprotected-readback\nproduction-control-state.json",
+        "records\nprotected-readback\nbad/escape\nproduction-control-state.json",
+        "records\nprotected-readback\nproduction-control-state.json\n../unsafe",
+        "records\nprotected-readback\nproduction-control-state.json\nrecords",
+    ):
+        with pytest.raises(runner.ReleaseManagerError):
+            runner.bounded_preprod_release_manager_entries(listing)
+
+
+def test_preprod_copy_excludes_recursive_scratch_only_from_operational_records(tmp_path):
+    from unittest.mock import Mock
+    calls = []
+    def fake_run(command):
+        calls.append(command)
+        if command[:3] == ["docker", "exec", "jason-runtime"]:
+            if "/openclaw/release-manager" in command[-1]:
+                return (
+                    "preprod\nworktrees\nrecords\nprotected-readback\n"
+                    "production-control-state.json\nowner-notification-events\n"
+                    "mobile-release-decisions-processed\n"
+                )
+            return "release-manager\nreflection.sqlite3\nsupport-repair\n"
+        return ""
+    with (
+        patch.object(runner.shutil, "disk_usage",
+                     return_value=Mock(free=12 * 1024**3)),
+        patch.object(runner, "run", side_effect=fake_run),
+    ):
+        runner.copy_state_from_live_container(
+            "/var/lib/jason/openclaw", tmp_path / "clone",
+        )
+    copied = [command[2] for command in calls if command[:2] == ["docker", "cp"]]
+    assert any(path.endswith("/release-manager/records") for path in copied)
+    assert any(path.endswith("/release-manager/protected-readback") for path in copied)
+    assert any(path.endswith("/release-manager/production-control-state.json")
+               for path in copied)
+    assert any(path.endswith("/release-manager/owner-notification-events")
+               for path in copied)
+    assert any(path.endswith("/release-manager/mobile-release-decisions-processed")
+               for path in copied)
+    assert any(path.endswith("/reflection.sqlite3") for path in copied)
+    assert any(path.endswith("/support-repair") for path in copied)
+    assert not any(path.endswith("/release-manager/preprod") for path in copied)
+    assert not any(path.endswith("/release-manager/worktrees") for path in copied)
+    assert not (tmp_path / "clone/release-manager/preprod").exists()
+    assert not (tmp_path / "clone/release-manager/worktrees").exists()
+
+
+def test_preprod_nested_copy_enforces_original_size_and_reserve_limits(tmp_path):
+    from unittest.mock import Mock
+    import pytest
+    copied = []
+    def fake_run(command):
+        if command[:3] == ["docker", "exec", "jason-runtime"]:
+            if "/openclaw/release-manager" in command[-1]:
+                return "records\nprotected-readback\nproduction-control-state.json"
+            return "release-manager"
+        if command[:2] == ["docker", "cp"]:
+            copied.append(command[2])
+        return ""
+    with (
+        patch.object(runner.shutil, "disk_usage",
+                     side_effect=[Mock(free=8 * 1024**3),
+                                  Mock(free=2 * 1024**3)]),
+        patch.object(runner, "run", side_effect=fake_run),
+    ):
+        with pytest.raises(runner.ReleaseManagerError,
+                               match="bounded disk capacity"):
+            runner.copy_state_from_live_container(
+                "/var/lib/jason/openclaw", tmp_path / "clone",
+            )
+    assert len(copied) == 1
+    assert copied[0].endswith("/release-manager/records")
+
+
+def test_preprod_nested_bad_listing_never_copies_any_release_state(tmp_path):
+    from unittest.mock import Mock
+    import pytest
+    copied = []
+    def fake_run(command):
+        if command[:3] == ["docker", "exec", "jason-runtime"]:
+            if "/openclaw/release-manager" in command[-1]:
+                return "records\nprotected-readback\nproduction-control-state.json\n../escape"
+            return "release-manager"
+        if command[:2] == ["docker", "cp"]:
+            copied.append(command[2])
+        return ""
+    with (
+        patch.object(runner.shutil, "disk_usage",
+                     return_value=Mock(free=12 * 1024**3)),
+        patch.object(runner, "run", side_effect=fake_run),
+    ):
+        with pytest.raises(runner.ReleaseManagerError):
+            runner.copy_state_from_live_container(
+                "/var/lib/jason/openclaw", tmp_path / "clone",
+            )
+    assert copied == []
