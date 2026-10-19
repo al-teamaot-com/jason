@@ -102,3 +102,19 @@ budget and immutable audit history, cannot requeue recursively, and remains
 subject to P0 eligibility, two-item support capacity, J-CHANGE-002 exact edits,
 regression tests, protected CI and separate production owner/CCC authority.
 An invalid, stale or missing proof leaves the existing blocked record intact.
+
+## Verified source-context readmission for P0 support admission (2026-10-19)
+
+When a verified P0 support issue-admission repair reports missing exact source
+excerpts, the native support worker may produce one new bounded request from
+reviewed source files and regression tests. It uses an isolated clean worktree
+created from the latest fetched main revision under a distinct -context- branch.
+The previous worktree and original successful-but-blocked response stay intact.
+
+The worker verifies the canonical support ID, P0 eligibility, completed prior
+edit-plan response, original request fingerprint, exact missing-source reason,
+source and test path eligibility, current worktree revision and worker capacity.
+New request input binds the original request and source revision. It does not
+modify provider records, waive governance, reset the retry budget or authorize a
+production deployment. Ordinary J-CHANGE-002, test, CI, owner and CCC release
+controls remain mandatory. A missing prerequisite fails closed.

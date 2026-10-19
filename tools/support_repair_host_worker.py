@@ -449,7 +449,7 @@ def support_worktree_path(item_id: str, branch: str | None = None) -> Path:
     if re.fullmatch(SUPPORT_ID_PATTERN, item_id) is None:
         raise WorkerError('invalid support identity for repair worktree')
     normal = branch_name(item_id)
-    if branch and re.fullmatch(re.escape(normal) + r'-anchor-[0-9a-f]{12}', branch):
+    if branch and re.fullmatch(re.escape(normal) + r'-(?:anchor|context)-[0-9a-f]{12}', branch):
         return Path('/home/al/jason-worktrees/support-repair') / branch.split('/')[-1]
     return Path('/home/al/jason-worktrees/support-repair') / item_id.casefold()
 
@@ -1721,6 +1721,143 @@ def original_partial_edits_match_known_proposal(
         return False
 
 
+def verified_support_context_recipe(item: Mapping[str, str]) -> tuple[list[str], list[str]] | None:
+    """Select audited repository sources from the approved support scope.
+
+    Never accept arbitrary file paths from a model's blocked explanation.
+    Unknown issue classes fail closed until their exact source recipe is reviewed.
+    """
+    summary = ' '.join(str(item.get(key) or '') for key in ('title', 'evidence', 'acceptance')).casefold()
+    if ('support' in summary and 'issue' in summary
+            and ('admission' in summary or 'reconcil' in summary)
+            and ('p0' in summary or 'priority' in summary)):
+        return (
+            ['tools/support_repair_host_worker.py',
+             'tools/tests/test_support_repair_host_worker.py',
+             'tools/engineering_pipeline.py',
+             'tools/tests/test_engineering_pipeline.py'],
+            ['audit_support_admission', 'eligible_support_items',
+             'support_id_from_title', 'support_state_mismatches',
+             'blocked_critical_support', 'unadmitted_p0'],
+        )
+    return None
+
+
+def readmit_missing_support_source_context(
+    state: dict[str, Any], eligible: list[dict[str, str]],
+    repo: Path, spool: Path, gate, policy: Mapping[str, Any],
+    *, max_active: int,
+) -> list[str]:
+    """One scoped context re-evaluation, never a blind failed-request replay.
+
+    The new request is authorized solely to analyze read-only source excerpts.
+    Its normal edits, validation, protected CI and deployment gates still apply.
+    Old worktrees and retry counters are preserved; a clean current-main
+    worktree is created under a distinct bounded branch before re-admission.
+    """
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active_phases = {'diagnosing', 'implementing', 'ci_repair_needed', 'ci_repairing'}
+    active = sum(1 for record in records.values()
+                 if isinstance(record, Mapping) and record.get('phase') in active_phases)
+    slots = max(0, max(1, int(max_active)) - active)
+    resumed: list[str] = []
+    for item in eligible:
+        if not slots:
+            break
+        item_id = str(item.get('id') or '')
+        record = records.get(item_id)
+        if (item.get('priority') != 'P0' or not isinstance(record, dict)
+                or record.get('phase') != 'blocked' or record.get('pr_number')
+                or record.get('source_context_recovery_request_id')):
+            continue
+        reason = str(record.get('reason') or '')
+        lowered = reason.casefold()
+        if (not ('source excerpt' in lowered and
+                 ('missing' in lowered or 'not provided' in lowered
+                  or 'not available' in lowered or 'not supplied' in lowered))
+                or any(word in lowered for word in (
+                    'permission denied', 'access denied', 'authorization denied',
+                    'credential required', 'authority required', 'secret required'))):
+            continue
+        recipe = verified_support_context_recipe(item)
+        if recipe is None:
+            continue
+        previous_id = str(record.get('reasoning_request_id') or '')
+        if re.fullmatch(r'[0-9a-f]{64}', previous_id) is None:
+            continue
+        try:
+            original_path = spool / 'reasoning' / 'requests' / (previous_id + '.json')
+            if not original_path.is_file() or original_path.stat().st_size > 200000:
+                continue
+            original = json.loads(original_path.read_text(encoding='utf-8'))
+            response = reasoning_response(spool, previous_id)
+            if (not isinstance(original, dict)
+                    or original.get('request_id') != previous_id
+                    or request_id(original) != previous_id
+                    or original.get('kind') != 'edit_plan'
+                    or original.get('support_item') != item_id
+                    or not isinstance(response, Mapping)
+                    or response.get('status') != 'succeeded'
+                    or response.get('request_id') != previous_id
+                    or response.get('kind') != 'edit_plan'
+                    or response.get('support_item') != item_id
+                    or not isinstance(response.get('result'), Mapping)
+                    or response['result'].get('blocked_reason') != reason):
+                continue
+            branch = branch_name(item_id) + '-context-' + previous_id[:12]
+            fresh = ensure_worktree(repo, item_id, branch)
+            if (run(['git', 'branch', '--show-current'], cwd=fresh) != branch
+                    or run(['git', 'status', '--porcelain', '--untracked-files=all'], cwd=fresh)
+                    or run(['git', 'rev-parse', 'HEAD'], cwd=fresh)
+                       != run(['git', 'rev-parse', 'origin/main'], cwd=repo)):
+                continue
+            paths, symbols = recipe
+            excerpts = source_excerpts_for_paths(
+                fresh, paths, gate, policy, terms=symbols,
+                limit=4, content_limit=12000,
+            )
+            if (len(excerpts) < 2
+                    or excerpts[0]['path'] != paths[0]
+                    or excerpts[1]['path'] != paths[1]):
+                continue
+            head = run(['git', 'rev-parse', 'HEAD'], cwd=fresh)
+            request = queue_reasoning(
+                spool, kind='edit_plan', item=item,
+                context={
+                    'source_context_recovery': {
+                        'previous_request_id': previous_id,
+                        'source_revision': head, 'retry_limit': 1,
+                        'reason': 'model_reported_missing_source',
+                    },
+                    'validation_feedback': (
+                        'A verified previous edit proposal was blocked because its '
+                        'source excerpts omitted this approved support subsystem. '
+                        'Use only the newly provided exact current-source excerpts. '
+                        'Preserve existing governance and admission rules; return '
+                        'an evidence-backed blocked_reason if an exact safe edit '
+                        'and regression test cannot be formed.'
+                    ),
+                    'source_excerpts': excerpts,
+                },
+            )
+            if request == previous_id:
+                continue
+            record.update({
+                'phase': 'implementing', 'branch': branch,
+                'reasoning_request_id': request,
+                'source_context_recovery_request_id': request,
+                'source_context_recovery_original_id': previous_id,
+                'source_context_recovery_revision': head,
+                'reason': 'One bounded source-context recovery request queued; old worktree preserved.',
+                'updated_at': now(),
+            })
+            resumed.append(item_id)
+            slots -= 1
+        except (WorkerError, OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue  # No authorization or state mutation on missing evidence.
+    return resumed
+
+
 def readmit_preserved_anchor_failure(
     state: dict[str, Any],
     eligible: list[dict[str, str]],
@@ -1999,6 +2136,9 @@ def main() -> int:
 
     readmit_recovered_reasoning(state, support, spool, max_active=args.max_active)
     readmit_after_verified_transport_recovery(state, support, spool, max_active=args.max_active)
+    readmit_missing_support_source_context(
+        state, support, repo, spool, gate, policy, max_active=args.max_active,
+    )
     reassess_model_scope_blocks(state, support, spool, args.max_active)
     readmit_preserved_anchor_failure(
         state, support, repo, spool, gate, policy, max_active=args.max_active)
