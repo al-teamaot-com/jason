@@ -1679,3 +1679,171 @@ def test_p0_source_gap_rejects_disagreeing_original_reason(tmp_path, monkeypatch
         gate, {}, max_active=2
     ) == []
     assert record.get('source_context_recovery_request_id') is None
+
+
+def _starved_evidence_fixture(tmp_path, monkeypatch, *, upgrade=True, miss_exact_read=True):
+    import subprocess
+    repo = tmp_path / 'repo'
+    repo.mkdir(parents=True)
+    paths = {
+        'tools/support_repair_host_worker.py':
+            'def audit_support_admission():\n    return "persist P0 unmatched"\n'
+            'def open_support_issue_records():\n    return {"1301": "open"}\n',
+        'tools/tests/test_support_repair_host_worker.py':
+            'def test_p0_disposition():\n    assert True\n',
+        'tools/engineering_evidence_tools.py':
+            'def execute_tools():\n    return "broad_search_first"\n',
+        'tools/unrelated.py': 'def unrelated():\n    return True\n',
+    }
+    for name, content in paths.items():
+        target = repo / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+    def git(*args):
+        return subprocess.run(['git', *args], cwd=repo, text=True,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              check=True).stdout.strip()
+    git('init', '-b', 'main')
+    git('config', 'user.name', 'Tests')
+    git('config', 'user.email', 'test@example.invalid')
+    git('add', '.')
+    git('commit', '-m', 'old evidence executor')
+    old_revision = git('rev-parse', 'HEAD')
+    if upgrade:
+        tool = repo / 'tools/engineering_evidence_tools.py'
+        tool.write_text('def execute_tools():\n    return "explicit_read_first"\n')
+        git('add', '.')
+        git('commit', '-m', 'new ordered evidence executor')
+    current = git('rev-parse', 'HEAD')
+    git('update-ref', 'refs/remotes/origin/main', current)
+
+    item = {
+        'id': 'SUPPORT-OPS-054', 'priority': 'P0',
+        'title': 'GitHub P0 support issue admission reconciliation',
+        'evidence': 'Persist dispositions for unmatched P0 SUPPORT issue',
+        'acceptance': 'prove issue 1301 diagnosed or explicitly blocked',
+    }
+    spool = tmp_path / 'spool'
+    def put(context, requests):
+        rid = worker.queue_reasoning(spool, kind='edit_plan', item=item, context=context)
+        target = spool / 'reasoning/responses' / (rid + '.json')
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps({
+            'request_id': rid, 'status':'succeeded', 'kind':'edit_plan',
+            'support_item':item['id'],
+            'result': {'summary':'additional source required',
+                       'edits':[], 'blocked_reason':None,
+                       'evidence_requests':requests},
+        }))
+        return rid
+    first = put(
+        {'source_excerpts':[{'path':'tools/support_repair_host_worker.py','content':'old'}]},
+        [{'tool':'read_source', 'path':'tools/support_repair_host_worker.py', 'query':None},
+         {'tool':'search_source','query':'audit_support_admission open_support_issue_records','path':None}],
+    )
+    second = put(
+        {'previous_reasoning_request_id':first,
+         'source_excerpts':[{'path':('tools/unrelated.py' if miss_exact_read
+                                   else 'tools/support_repair_host_worker.py'),
+                             'content':'unrelated broad search'}]},
+        [{'tool':'search_source','query':'open_support_issue_records worker admission','path':None}],
+    )
+    third = put(
+        {'previous_reasoning_request_id':second,
+         'source_excerpts':[{'path':'tools/unrelated.py','content':'unrelated broad search'}]},
+        [{'tool':'read_source','query':None,'path':'tools/support_repair_host_worker.py'}],
+    )
+    branch = worker.branch_name(item['id']) + '-evidence-' + third[:12]
+    git('checkout', '-b', branch)
+    monkeypatch.setattr(worker, 'ensure_worktree',
+                        lambda source, identity, requested: repo)
+    record = {
+        'phase':'blocked',
+        'reason':'EvidenceToolError: source evidence turn budget exhausted',
+        'reasoning_request_id':third,
+        'branch':'repair/support-ops-054-context-original',
+        'evidence_turn_count':2,
+        'evidence_source_revision':old_revision,
+        'self_recovery_attempts':2,
+    }
+    class AllowGate:
+        def path_denial_reason(self, path, policy):
+            return None
+    return repo, spool, item, record, AllowGate(), first, third
+
+
+def test_starved_exact_read_recovers_once_on_real_new_executor_revision(tmp_path, monkeypatch):
+    repo, spool, item, record, gate, first, last = _starved_evidence_fixture(
+        tmp_path, monkeypatch)
+    state = {'items':{item['id']:record}}
+    assert worker.readmit_verified_evidence_starvation_after_upgrade(
+        state,[item],repo,spool,gate,{},max_active=2) == [item['id']]
+    assert record['phase'] == 'implementing'
+    assert record['evidence_turn_count'] == 2
+    assert record['self_recovery_attempts'] == 2
+    assert record['reasoning_request_id'] != last
+    assert record['evidence_upgrade_original_request_id'] == last
+    assert record['branch'].endswith('-evidence-' + last[:12])
+    assert worker.support_worktree_path(item['id'],record['branch']).name.endswith(
+        '-evidence-' + last[:12])
+    new = json.loads((spool/'reasoning/requests'/
+                      (record['reasoning_request_id']+'.json')).read_text())
+    assert new['context']['evidence_starvation_recovery']['retry_limit'] == 1
+    assert new['context']['evidence_starvation_recovery']['previous_request_id'] == last
+    assert new['context']['source_excerpts'][0]['path'] == 'tools/support_repair_host_worker.py'
+    assert 'def audit_support_admission' in new['context']['source_excerpts'][0]['content']
+    assert 'tools/tests/test_support_repair_host_worker.py' in [
+        entry['path'] for entry in new['context']['source_excerpts']]
+    assert worker.reasoning_response(spool,first)['status'] == 'succeeded'
+    record['phase']='blocked'
+    record['reason']='EvidenceToolError: source evidence turn budget exhausted'
+    assert worker.readmit_verified_evidence_starvation_after_upgrade(
+        state,[item],repo,spool,gate,{},max_active=2) == []
+
+
+def test_no_worker_revision_upgrade_cannot_readmit_starved_source(tmp_path,monkeypatch):
+    repo,spool,item,record,gate,_,_= _starved_evidence_fixture(
+        tmp_path,monkeypatch,upgrade=False)
+    assert worker.readmit_verified_evidence_starvation_after_upgrade(
+        {'items':{item['id']:record}},[item],repo,spool,gate,{},max_active=2)==[]
+    assert record['phase']=='blocked'
+
+
+def test_no_proof_of_a_starved_exact_read_prevents_replay(tmp_path,monkeypatch):
+    repo,spool,item,record,gate,_,_= _starved_evidence_fixture(
+        tmp_path,monkeypatch,miss_exact_read=False)
+    assert worker.readmit_verified_evidence_starvation_after_upgrade(
+        {'items':{item['id']:record}},[item],repo,spool,gate,{},max_active=2)==[]
+    assert not record.get('evidence_upgrade_recovery_request_id')
+
+
+def test_starved_recovery_respects_p0_authority_and_worker_capacity(tmp_path,monkeypatch):
+    repo,spool,item,record,gate,_,_= _starved_evidence_fixture(tmp_path,monkeypatch)
+    item['priority']='P1'
+    assert worker.readmit_verified_evidence_starvation_after_upgrade(
+        {'items':{item['id']:record}},[item],repo,spool,gate,{},max_active=2)==[]
+    item['priority']='P0'
+    assert worker.readmit_verified_evidence_starvation_after_upgrade(
+        {'items':{item['id']:record,'SUPPORT-OPS-012':{'phase':'diagnosing'}}},
+        [item],repo,spool,gate,{},max_active=1)==[]
+    assert not record.get('evidence_upgrade_recovery_request_id')
+
+
+def test_tampered_prior_response_cannot_authorize_context_recovery(tmp_path,monkeypatch):
+    repo,spool,item,record,gate,first,last=_starved_evidence_fixture(tmp_path,monkeypatch)
+    response_path=spool/'reasoning/responses'/(first+'.json')
+    response=json.loads(response_path.read_text())
+    response['support_item']='SUPPORT-OPS-999'
+    response_path.write_text(json.dumps(response))
+    assert worker.readmit_verified_evidence_starvation_after_upgrade(
+        {'items':{item['id']:record}},[item],repo,spool,gate,{},max_active=2)==[]
+    assert record['phase']=='blocked'
+
+
+def test_starved_recovery_cannot_take_over_pending_governed_repair_handoff(tmp_path,monkeypatch):
+    repo,spool,item,record,gate,_,_=_starved_evidence_fixture(tmp_path,monkeypatch)
+    record['recovery_handoff_intake']={'status':'awaiting_governed_repair'}
+    assert worker.readmit_verified_evidence_starvation_after_upgrade(
+        {'items':{item['id']:record}},[item],repo,spool,gate,{},max_active=2)==[]
+    assert record['phase']=='blocked'
+    assert record.get('evidence_upgrade_recovery_request_id') is None

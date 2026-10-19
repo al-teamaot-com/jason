@@ -93,3 +93,13 @@ def test_supervisor_does_not_turn_genuine_authority_hold_into_recovery():
     assert supervisor.classify(phase, "Do not begin until prerequisite fixed", lane="approved_todo")[0] == "dependency_hold"
     assert supervisor.classify(phase, "Owner approval required", lane="approved_todo")[0] == "human_authority"
     assert supervisor.classify("pr_ready", "", lane="development")[0] == "integration_review"
+
+
+def test_evidence_budget_exhaustion_reports_actionable_verified_upgrade_not_generic_triage():
+    from engineering_supervisor import classify
+    category, action = classify(
+        "blocked", "EvidenceToolError: source evidence turn budget exhausted",
+        lane="support",
+    )
+    assert category == "recoverable_source"
+    assert action == "native_worker_verify_source_upgrade_or_escalate"

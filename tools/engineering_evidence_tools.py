@@ -120,12 +120,25 @@ def execute_tools(
         if name == "search_source":
             if not isinstance(query, str) or not 3 <= len(query.strip()) <= 100 or path:
                 raise EvidenceToolError("invalid source search")
-        elif not isinstance(path, str) or query or not _safe_path(worktree, path, gate, repair_policy):
-            raise EvidenceToolError("source path not authorized")
+        else:
+            if not isinstance(path, str) or not _safe_path(worktree, path, gate, repair_policy):
+                raise EvidenceToolError("source path not authorized")
+            # Optional symbol name centers a bounded exact-source excerpt.
+            # No model-supplied shell, line expression or free-text selector.
+            if query is not None and (
+                not isinstance(query, str)
+                or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{2,79}", query) is None
+            ):
+                raise EvidenceToolError("invalid exact source symbol")
     excerpts: list[dict[str, str]] = []
     receipts: list[dict[str, str]] = []
     seen: set[str] = set()
-    for request in requests:
+    # An explicit file read must never be starved by broad search hits.
+    # Keep the original relative order within each tool kind.
+    ordered = sorted(enumerate(requests), key=lambda pair: (
+        0 if pair[1]["tool"] == "read_source" else 1, pair[0],
+    ))
+    for _, request in ordered:
         name = request["tool"]
         query, path = request.get("query"), request.get("path")
         if name == "search_source":
@@ -133,8 +146,16 @@ def execute_tools(
         else:
             candidates = support.source_excerpts_for_paths(
                 worktree, [path], gate, repair_policy,
+                terms=[query] if query else None,
                 limit=1, content_limit=policy["max_source_chars"],
             )
+        # A single broad repository search can never consume all slots.
+        # Explicit reads have already been processed, and each search gets
+        # at most two distinct authorized hits.
+        request_limit = (
+            1 if name == "read_source" else
+            min(2, policy["max_sources_per_turn"] - len(excerpts))
+        )
         admitted = 0
         for entry in candidates:
             source = str(entry.get("path") or "")
@@ -150,7 +171,7 @@ def execute_tools(
                 "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
             })
             admitted += 1
-            if len(excerpts) >= policy["max_sources_per_turn"]:
+            if admitted >= request_limit or len(excerpts) >= policy["max_sources_per_turn"]:
                 break
         if admitted == 0:
             receipts.append({"tool": name, "path": "", "sha256": ""})

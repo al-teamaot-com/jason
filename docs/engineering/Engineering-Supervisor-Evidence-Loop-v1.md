@@ -68,3 +68,37 @@ native worker-triggered readmission with authoritative proof, bounded iterative
 test-feedback tools, Teams escalations only for human-actionable holds, and a
 production acceptance run on a real P0 item. Do not enable arbitrary process
 execution in the reasoning service or bypass the release manager.
+
+## October 19 explicit-read starvation incident and controlled recovery
+
+The first live P0 exercise showed that source discovery still could become
+unproductive: SUPPORT-OPS-054 explicitly requested
+tools/support_repair_host_worker.py, but two broad source searches consumed
+the response capacity first. The requested file was missing from the next
+reasoning context. Later searches occupied additional turns and the worker
+exhausted its two-turn evidence budget. The generic supervisor correctly
+detected the resulting stall but could not itself reopen authority.
+
+The corrected evidence executor now validates the whole batch of requests
+before any read, then prioritizes authorized read_source requests in their
+original relative order, limiting each broad search to two matching files.
+Exact file reads may include a bounded Python function-name query to select a
+relevant excerpt without returning entire modules or executing model text.
+Every path remains tracked, within the isolated worktree and J-CHANGE-002
+path gate; denied or unknown tools fail closed.
+
+The cumulative per-item evidence budget is raised from two to four turns,
+without clearing history. A separate P0-only recovery may queue ONE fresh
+edit-plan when the original content-addressed request chain proves an exact
+read was starved, the previous host code blob differs from fetched main, a
+new clean worktree exists at that exact revision, and the missing source and
+test files pass the host path gate. It preserves old request/response data,
+the original exhausted-turn counter, existing owner/governed handoffs, the
+two-active-repair cap and exact-SHA deployment gates. It never blindly replays
+an old request, increases authority, or marks a job resolved without proof.
+
+A second evidence starvation cannot invoke this recovery again. Unverified
+or out-of-scope jobs remain blocked with a distinct next action for review.
+Live acceptance requires recording SUPPORT-OPS-054 as actively diagnosing or
+implementing on the corrected worker revision, then observing a code/test PR,
+verified existing repair, or explicit evidence-backed terminal disposition.

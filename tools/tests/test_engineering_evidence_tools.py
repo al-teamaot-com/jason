@@ -102,18 +102,21 @@ def test_tracked_source_is_read_and_follow_up_is_content_addressed(tmp_path):
     assert git(repo, "status", "--porcelain") == ""
 
 
-def test_two_evidence_turns_are_possible_but_third_fails_closed(tmp_path):
+def test_four_evidence_turns_are_possible_but_fifth_fails_closed(tmp_path):
     repo, spool, item, record = setup_session(tmp_path)
-    requests = [{"tool": "read_source", "path": "tools/source.py", "query": None}]
-    assert call(repo, spool, item, record, requests)
-    first = record["reasoning_request_id"]
-    assert call(repo, spool, item, record, [
-        {"tool": "read_source", "path": "tools/test_source.py", "query": None},
-    ])
-    assert record["reasoning_request_id"] != first
+    previous = record["reasoning_request_id"]
+    for index in range(4):
+        path = "tools/source.py" if index % 2 == 0 else "tools/test_source.py"
+        assert call(repo, spool, item, record, [
+            {"tool": "read_source", "path": path, "query": None},
+        ])
+        assert record["reasoning_request_id"] != previous
+        previous = record["reasoning_request_id"]
     with pytest.raises(evidence.EvidenceToolError, match="budget exhausted"):
-        call(repo, spool, item, record, requests)
-    assert record["evidence_turn_count"] == 2
+        call(repo, spool, item, record, [
+            {"tool": "read_source", "path": "tools/source.py", "query": None},
+        ])
+    assert record["evidence_turn_count"] == 4
 
 
 @pytest.mark.parametrize("requests", [
@@ -258,3 +261,54 @@ def test_missing_source_context_from_untrusted_prior_request_is_not_carried_forw
                         (record["reasoning_request_id"] + ".json")).read_text())
     assert "invented old content" not in json.dumps(fresh["context"]["source_excerpts"])
     assert "def test_admission()" in json.dumps(fresh["context"]["source_excerpts"])
+
+
+def test_explicit_read_is_served_before_searches_that_fill_result_slots(tmp_path, monkeypatch):
+    repo, spool, item, record = setup_session(tmp_path)
+    candidates = []
+    for index in range(9):
+        path = repo / f"tools/search_{index}.py"
+        path.write_text("def noisy_search_match(): pass\n")
+        candidates.append({"path": f"tools/search_{index}.py", "content": "noisy search"})
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "tracked search noise")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    monkeypatch.setattr(support, "safe_search", lambda *a, **kw: candidates)
+    assert call(repo, spool, item, record, [
+        {"tool": "search_source", "query": "find admission", "path": None},
+        {"tool": "search_source", "query": "find support", "path": None},
+        {"tool": "read_source", "path": "tools/source.py", "query": None},
+    ])
+    new = json.loads((spool / "reasoning" / "requests" /
+                      (record["reasoning_request_id"] + ".json")).read_text())
+    paths = [entry["path"] for entry in new["context"]["source_excerpts"]]
+    assert paths[0] == "tools/source.py"
+    assert sum(path.startswith("tools/search_") for path in paths) <= 4
+    assert record["evidence_last_receipts"][0]["path"] == "tools/source.py"
+
+
+def test_exact_symbol_read_finds_function_beyond_plain_file_preview(tmp_path):
+    repo, spool, item, record = setup_session(tmp_path)
+    path = repo / "tools/source.py"
+    path.write_text("a = 2\n" * 4000 +
+                    "def audit_support_admission():\n    return 'real target code'\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "large source with target function")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    assert call(repo, spool, item, record, [
+        {"tool": "read_source", "path": "tools/source.py",
+         "query": "audit_support_admission"},
+    ])
+    req = json.loads((spool / "reasoning/requests" /
+                      (record["reasoning_request_id"] + ".json")).read_text())
+    assert "def audit_support_admission" in req["context"]["source_excerpts"][0]["content"]
+    assert "real target code" in req["context"]["source_excerpts"][0]["content"]
+
+
+def test_malformed_symbol_read_is_rejected(tmp_path):
+    repo, spool, item, record = setup_session(tmp_path)
+    with pytest.raises(evidence.EvidenceToolError, match="invalid exact source symbol"):
+        call(repo, spool, item, record, [
+            {"tool": "read_source", "path": "tools/source.py",
+             "query": "$(cat /etc/passwd)"},
+        ])

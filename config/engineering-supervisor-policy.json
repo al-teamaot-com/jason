@@ -1,7 +1,7 @@
 {
   "schema_version": "1.0",
   "enabled": true,
-  "max_evidence_turns_per_item": 2,
+  "max_evidence_turns_per_item": 4,
   "max_tool_requests_per_turn": 3,
   "max_sources_per_turn": 8,
   "max_source_chars": 14000,
