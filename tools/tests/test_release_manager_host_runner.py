@@ -2134,7 +2134,13 @@ def test_ccc_preflight_rejects_any_other_not_proven_or_failure():
         for item in report['checks']:
             if item['check_id'] == check:
                 item['status'] = status
-        with pytest.raises(runner.ReleaseManagerError, match='pre-mutation CCC denied'):
+        error_type = (runner.CCCCheckerUpgradeRequired
+                      if check == 'checker-currentness'
+                      else runner.ReleaseManagerError)
+        error_message = ('checker upgrade'
+                         if check == 'checker-currentness'
+                         else 'pre-mutation CCC denied')
+        with pytest.raises(error_type, match=error_message):
             runner.verify_release_ccc_report(
                 report, candidate_sha=SHA_A, runtime_sha=SHA_B, before_mutation=True,
             )
@@ -2595,3 +2601,135 @@ def test_ccc_provider_retry_requires_distinct_checker_run_ids(tmp_path):
                                         ccc_runner=ccc, ccc_config=config, latest=latest)
     assert proc.call_count == 2
     assert sleep.call_count == 1
+
+
+def test_preflight_exact_outdated_checker_is_a_distinct_upgrade_prerequisite():
+    import pytest
+    for alignment_unproven in (True, False):
+        report = _ccc_test_report()
+        report["status"] = "NOT_PROVEN"
+        for check in report["checks"]:
+            if check["check_id"] == "checker-currentness":
+                check["status"] = "NOT_PROVEN"
+            if check["check_id"] == "runtime-source-alignment":
+                check["status"] = "NOT_PROVEN" if alignment_unproven else "PASS"
+        with pytest.raises(runner.CCCCheckerUpgradeRequired, match="checker upgrade"):
+            runner.verify_release_ccc_report(
+                report, candidate_sha=SHA_A, runtime_sha=SHA_B,
+                before_mutation=True,
+            )
+
+
+def test_preflight_checker_deferral_never_masks_other_ccc_failures():
+    import copy
+    import pytest
+    original = _ccc_test_report()
+    for entry in original["checks"]:
+        if entry["check_id"] == "checker-currentness":
+            entry["status"] = "NOT_PROVEN"
+    variants = []
+    other_failure = copy.deepcopy(original)
+    for check in other_failure["checks"]:
+        if check["check_id"] == "systemd-failed-units":
+            check["status"] = "FAIL"
+    variants.append(other_failure)
+    owner_gap = copy.deepcopy(original)
+    for check in owner_gap["checks"]:
+        if check["check_id"] == "material-change-owner-review":
+            check["status"] = "NOT_PROVEN"
+    variants.append(owner_gap)
+    unexpected = copy.deepcopy(original)
+    for check in unexpected["checks"]:
+        if check["check_id"] == "governed-provider-boundary-canaries":
+            check["status"] = "NOT_PROVEN"
+    variants.append(unexpected)
+    false_pass = copy.deepcopy(original)
+    false_pass["status"] = "PASS"
+    variants.append(false_pass)
+    wrong_sha = copy.deepcopy(original)
+    wrong_sha["source_revision"] = SHA_B
+    variants.append(wrong_sha)
+    for report in variants:
+        with pytest.raises(runner.ReleaseManagerError) as error:
+            runner.verify_release_ccc_report(
+                report, candidate_sha=SHA_A, runtime_sha=SHA_B,
+                before_mutation=True,
+            )
+        assert not isinstance(error.value, runner.CCCCheckerUpgradeRequired)
+    with pytest.raises(runner.ReleaseManagerError) as error:
+        runner.verify_release_ccc_report(
+            original, candidate_sha=SHA_A, runtime_sha=SHA_B,
+            before_mutation=False,
+        )
+    assert not isinstance(error.value, runner.CCCCheckerUpgradeRequired)
+
+
+def test_automatic_promotion_defers_checker_upgrade_without_failing_service(tmp_path, capsys):
+    record = {
+        "release_id": runner.record_id(SHA_A),
+        "state": "production_eligible",
+        "rollback_sha": SHA_B,
+        "risk_profile": "production_control_core",
+        "release_candidate": {"candidate_sha": SHA_A},
+        "owner_approval": {"approved": True, "candidate_sha": SHA_A},
+    }
+    (tmp_path / "records").mkdir()
+    runner.atomic_json(tmp_path / "records" / (record["release_id"] + ".json"), record)
+    with (
+        patch.object(runner.gate, "load_json", return_value={
+            "schedule": {"automatic_promotion_enabled": True},
+        }),
+        patch.object(runner, "consume_owner_approval_requests"),
+        patch.object(runner, "production_window_open", return_value=True),
+        patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
+        patch.object(runner, "live_runtime", return_value={"revision": SHA_B}),
+        patch.object(runner, "live_production_alignment", return_value={}),
+        patch.object(runner, "reconcile_stopped_rollback_retention"),
+        patch.object(runner, "production_gate_result", return_value={
+            "allowed": True, "protected_core": True, "reasons": [],
+        }),
+        patch.object(runner, "deploy_production",
+                     side_effect=runner.CCCCheckerUpgradeRequired(
+                         "independently certified checker upgrade required"
+                     )) as deploy,
+    ):
+        assert runner.promote_eligible(ROOT, tmp_path) is False
+    deploy.assert_called_once()
+    log = capsys.readouterr().out
+    assert "RELEASE_MANAGER_AUTO_DEFERRED=ccc_checker_upgrade_required" in log
+    assert SHA_A in log
+    saved = runner.load_record(tmp_path, record["release_id"])
+    assert saved["state"] == "production_eligible"
+    assert saved["owner_approval"] == record["owner_approval"]
+    assert saved["rollback_sha"] == SHA_B
+
+
+def test_automatic_promotion_does_not_swallow_other_release_denials(tmp_path):
+    import pytest
+    record = {
+        "release_id": runner.record_id(SHA_A),
+        "state": "production_eligible", "rollback_sha": SHA_B,
+        "release_candidate": {"candidate_sha": SHA_A},
+    }
+    (tmp_path / "records").mkdir()
+    runner.atomic_json(tmp_path / "records" / (record["release_id"] + ".json"), record)
+    with (
+        patch.object(runner.gate, "load_json", return_value={
+            "schedule": {"automatic_promotion_enabled": True},
+        }),
+        patch.object(runner, "consume_owner_approval_requests"),
+        patch.object(runner, "production_window_open", return_value=True),
+        patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
+        patch.object(runner, "live_runtime", return_value={"revision": SHA_B}),
+        patch.object(runner, "live_production_alignment", return_value={}),
+        patch.object(runner, "reconcile_stopped_rollback_retention"),
+        patch.object(runner, "production_gate_result", return_value={
+            "allowed": True, "protected_core": True, "reasons": [],
+        }),
+        patch.object(runner, "deploy_production",
+                     side_effect=runner.ReleaseManagerError(
+                         "pre-mutation CCC denied: systemd-failed-units"
+                     )),
+    ):
+        with pytest.raises(runner.ReleaseManagerError, match="systemd-failed-units"):
+            runner.promote_eligible(ROOT, tmp_path)

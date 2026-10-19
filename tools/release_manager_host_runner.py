@@ -79,6 +79,14 @@ class ReleaseManagerBusy(ReleaseManagerError):
     pass
 
 
+class CCCCheckerUpgradeRequired(ReleaseManagerError):
+    """A valid pre-mutation CCC report requires a separately authorized upgrade.
+
+    This is a scheduled-release deferral, never permission to advance without
+    current checker certification. Explicit/manual promote still raises.
+    """
+
+
 def acquire_production_transaction_lock(
     repo: Path,
     state_root: Path,
@@ -2120,6 +2128,24 @@ def verify_release_ccc_report(
         expected = {"runtime-source-alignment": "NOT_PROVEN"}
         if not (report.get("status") == "PASS" and not exceptional or
                 report.get("status") == "NOT_PROVEN" and exceptional == expected):
+            # Report schema, exact source/runtime identities and all required
+            # checks were validated above. A *sole* known checker-currentness
+            # gap is an operational upgrade prerequisite, not a failed
+            # deployment. No production state has been mutated at this gate.
+            upgrade_only = (
+                report.get("status") == "NOT_PROVEN"
+                and exceptional in (
+                    {"checker-currentness": "NOT_PROVEN"},
+                    {
+                        "checker-currentness": "NOT_PROVEN",
+                        "runtime-source-alignment": "NOT_PROVEN",
+                    },
+                )
+            )
+            if upgrade_only:
+                raise CCCCheckerUpgradeRequired(
+                    "pre-mutation CCC requires independently certified checker upgrade"
+                )
             raise ReleaseManagerError("pre-mutation CCC denied: " + str(exceptional)[:300])
         mode = "candidate_transition" if exceptional else "aligned"
     else:
@@ -3052,6 +3078,18 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
             try:
                 deploy_production(repo, state_root, record)
             except ReleaseManagerBusy:
+                return False
+            except CCCCheckerUpgradeRequired:
+                # Only the unattended timer treats this *narrowly classified*
+                # pre-mutation report as an operational wait, not a failed
+                # systemd unit. Do not touch owner approval, checker policy,
+                # release eligibility, protected state, or rollback surfaces.
+                # The explicit 'promote' action continues to fail closed.
+                print(
+                    "RELEASE_MANAGER_AUTO_DEFERRED=ccc_checker_upgrade_required"
+                    + f" candidate={candidate_sha} release_id={record['release_id']}",
+                    flush=True,
+                )
                 return False
             return True
         reasons = [str(value) for value in result.get("reasons") or []]
