@@ -1838,3 +1838,12 @@ def test_tampered_prior_response_cannot_authorize_context_recovery(tmp_path,monk
     assert worker.readmit_verified_evidence_starvation_after_upgrade(
         {'items':{item['id']:record}},[item],repo,spool,gate,{},max_active=2)==[]
     assert record['phase']=='blocked'
+
+
+def test_starved_recovery_cannot_take_over_pending_governed_repair_handoff(tmp_path,monkeypatch):
+    repo,spool,item,record,gate,_,_=_starved_evidence_fixture(tmp_path,monkeypatch)
+    record['recovery_handoff_intake']={'status':'awaiting_governed_repair'}
+    assert worker.readmit_verified_evidence_starvation_after_upgrade(
+        {'items':{item['id']:record}},[item],repo,spool,gate,{},max_active=2)==[]
+    assert record['phase']=='blocked'
+    assert record.get('evidence_upgrade_recovery_request_id') is None
