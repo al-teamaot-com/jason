@@ -43,6 +43,8 @@ ROOT_HOST_RECONCILER = Path("/usr/local/lib/jason/release_host_reconcile_worker.
 SCHEDULED_ARTIFACTS = (
     ("support_repair_worker", "tools/support_repair_host_worker.py", Path.home() / ".local/lib/jason/support_repair_host_worker.py"),
     ("owner_approved_development_worker", "tools/owner_approved_development_worker.py", Path.home() / ".local/lib/jason/owner_approved_development_worker.py"),
+    ("engineering_supervisor", "tools/engineering_supervisor.py", Path.home() / ".local/lib/jason/engineering_supervisor.py"),
+    ("engineering_evidence_tools", "tools/engineering_evidence_tools.py", Path.home() / ".local/lib/jason/engineering_evidence_tools.py"),
     ("todo_engineering_intake", "tools/todo_engineering_intake.py", Path.home() / ".local/lib/jason/todo_engineering_intake.py"),
     ("todo_release_bridge", "tools/todo_release_bridge.py", Path.home() / ".local/lib/jason/todo_release_bridge.py"),
     ("self_heal_watchdog", "tools/jason_self_heal_watchdog.py", Path.home() / ".local/lib/jason/jason_self_heal_watchdog.py"),

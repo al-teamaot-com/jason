@@ -45,6 +45,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual([c[0] for c in self.calls], [
             "support_repair_host_worker", "todo_engineering_intake",
             "owner_approved_development_worker", "todo_release_bridge",
+            "engineering_supervisor",
         ])
         self.assertEqual(self.state_file(), state)
         self.assertTrue(all(c["status"] == "succeeded" for c in state["stages"].values()))
@@ -161,6 +162,7 @@ class PipelineTests(unittest.TestCase):
         state = self.execute(failed={"support_repair_host_worker"})
         self.assertEqual([c[0] for c in self.calls], [
             "support_repair_host_worker", "todo_release_bridge",
+            "engineering_supervisor",
         ])
         self.assertEqual(state["status"], "degraded")
         self.assertEqual(state["stages"]["todo_intake"]["status"], "skipped_dependency")
@@ -173,6 +175,7 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual([c[0] for c in self.calls], [
             "support_repair_host_worker", "todo_engineering_intake",
             "owner_approved_development_worker", "todo_release_bridge",
+            "engineering_supervisor",
         ])
         self.assertEqual(state["status"], "degraded")
         self.assertEqual(state["stages"]["development"]["status"], "succeeded")
@@ -196,7 +199,7 @@ class PipelineTests(unittest.TestCase):
 
     def test_release_bridge_receives_authoritative_release_state(self):
         self.execute()
-        bridge = self.calls[-1][1]
+        bridge = next(call[1] for call in self.calls if call[0] == "todo_release_bridge")
         self.assertEqual(bridge[bridge.index("--release-state")+1], str(self.base / "releases"))
 
     def test_durable_report_restricts_permissions(self):

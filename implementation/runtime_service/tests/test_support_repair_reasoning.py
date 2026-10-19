@@ -393,3 +393,33 @@ def test_quota_failure_without_fallback_is_not_mislabeled_network_error(tmp_path
     response=json.loads((tmp_path/'reasoning'/'responses'/(request['request_id']+'.json')).read_text())
     assert response['required_owner_action']=='review_project_spend_limit'
     assert response['retryable'] is False
+
+
+def test_engineering_edit_schema_exposes_bounded_read_only_tool_requests():
+    from jason_runtime.support_repair_reasoning import _edit_schema
+    schema = _edit_schema()
+    assert schema['additionalProperties'] is False
+    assert 'evidence_requests' in schema['required']
+    requests = schema['properties']['evidence_requests']
+    assert requests['maxItems'] == 3
+    props = requests['items']
+    assert props['additionalProperties'] is False
+    assert set(props['required']) == {'tool', 'query', 'path'}
+    assert props['properties']['tool']['enum'] == ['search_source', 'read_source']
+
+
+def test_engineering_edit_prompt_requests_source_evidence_instead_of_guessing(tmp_path: Path):
+    client = Client()
+    request_dir = tmp_path / 'reasoning' / 'requests'
+    request_dir.mkdir(parents=True)
+    request = _request('edit_plan')
+    path = request_dir / (request['request_id'] + '.json')
+    path.write_text(json.dumps(request))
+    worker = SupportRepairReasoningMaintenance(
+        structured_client=client, spool=tmp_path, interval_seconds=1,
+    )
+    assert worker.tick() is True
+    assert len(client.calls) == 1
+    assert 'read-only evidence_requests' in client.calls[0]['system']
+    assert 'read_source' in client.calls[0]['system']
+    assert 'Do not' in client.calls[0]['system']

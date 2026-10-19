@@ -102,8 +102,22 @@ def _edit_schema() -> dict[str, Any]:
     return {
         'type': 'object',
         'additionalProperties': False,
-        'required': ['summary', 'edits', 'test_paths', 'blocked_reason'],
+        'required': ['summary', 'edits', 'test_paths', 'blocked_reason', 'evidence_requests'],
         'properties': {
+            'evidence_requests': {
+                'type': 'array', 'maxItems': 3,
+                'items': {
+                    'type': 'object', 'additionalProperties': False,
+                    'required': ['tool', 'query', 'path'],
+                    'properties': {
+                        'tool': {'type': 'string', 'enum': ['search_source', 'read_source']},
+                        'query': {'anyOf': [{'type': 'string', 'minLength': 3, 'maxLength': 100},
+                                           {'type': 'null'}]},
+                        'path': {'anyOf': [{'type': 'string', 'minLength': 1, 'maxLength': 240},
+                                          {'type': 'null'}]},
+                    },
+                },
+            },
             'summary': {'type': 'string', 'maxLength': 1600},
             'edits': {
                 'type': 'array',
@@ -212,7 +226,11 @@ class SupportRepairReasoningMaintenance:
                     'Return exact-text replacements; do not invent unseen surrounding code. '
                     'Implement the smallest complete change plus regression tests. '
                     'Do not add credentials, broaden authority beyond the issue, weaken security/governance, bypass existing controls, or perform deployment. '
-                    'If a safe exact replacement cannot be formed from supplied excerpts, set blocked_reason and return no edits.'
+                    'If additional repository source is needed, request up to three read-only evidence_requests instead of guessing or blocking: '
+                    'search_source with query and null path, or read_source with path and null query. '
+                    'In a tool request turn return empty edits/test_paths and null blocked_reason. '
+                    'The independent governed host checks every path and tool. Return an empty evidence_requests array for final edits or a real blocker. '
+                    'If a safe exact replacement still cannot be formed after tool evidence, set blocked_reason and return no edits.'
                 )
             else:
                 system = (
@@ -220,7 +238,11 @@ class SupportRepairReasoningMaintenance:
                     'Use only the supplied repository excerpts and failure evidence. '
                     'Return exact-text replacements; do not invent unseen surrounding code. '
                     'Prefer the smallest repair plus regression test. Do not modify governance, authority, security, credentials, dependencies, workflows, deployment, or infrastructure. '
-                    'If a safe exact replacement cannot be formed from supplied excerpts, set blocked_reason and return no edits.'
+                    'If source context is insufficient, return up to three read-only evidence_requests: '
+                    'search_source(query with null path) or read_source(path with null query). '
+                    'Do not request commands or provider operations. For tool requests return empty edits/test_paths and null blocked_reason; '
+                    'for final edits or a genuine block return an empty evidence_requests array. '
+                    'Do not invent unseen code, and do not weaken governance.'
                 )
             schema = _edit_schema()
         else:

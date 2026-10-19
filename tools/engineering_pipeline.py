@@ -36,6 +36,9 @@ STAGES = (
     # Read/reconciliation of durable work state must not be suppressed by earlier
     # GitHub or reasoning failures. This stage retains its own governed gates.
     Stage("release_bridge", "todo_release_bridge.py"),
+    # Independent read-only supervisor records actionable/internal versus
+    # genuine external gates even if a prior worker stage fails.
+    Stage("engineering_supervisor", "engineering_supervisor.py"),
 )
 
 
