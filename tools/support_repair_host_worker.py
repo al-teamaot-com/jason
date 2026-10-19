@@ -2193,6 +2193,154 @@ def resume_verified_recovery_interrupted_by_rollback(
     return resumed
 
 
+def readmit_verified_malformed_source_symbol_after_upgrade(
+    state: dict[str, Any], eligible: list[dict[str, str]],
+    repo: Path, spool: Path, gate, policy: Mapping[str, Any],
+    *, max_active: int,
+) -> list[str]:
+    """Repair a precisely attested P0 source-read selector after tool upgrade.
+
+    Only the previously successful model response, the same clean pinned
+    read-only worktree and a source-version change to the evidence executor
+    can authorize one new source-evidence turn. The new executor independently
+    validates every request before reading; old model output is never treated
+    as edits, approval or a shell operation.
+    """
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active = sum(1 for entry in records.values() if isinstance(entry, Mapping)
+                 and entry.get('phase') in {'diagnosing', 'implementing',
+                                            'ci_repair_needed', 'ci_repairing'})
+    slots = max(0, max(1, int(max_active)) - active)
+    resumed: list[str] = []
+    for item in eligible:
+        if not slots:
+            break
+        item_id = str(item.get('id') or '')
+        record = records.get(item_id)
+        if (item.get('priority') != 'P0' or not isinstance(record, dict)
+                or record.get('phase') != 'blocked'
+                or record.get('reason') != 'EvidenceToolError: invalid exact source symbol'
+                or record.get('symbol_read_recovery_request_id')
+                or record.get('pr_number')
+                or record.get('blocker_class') in {'external_authority', 'blocked_by_dependency'}
+                or (isinstance(record.get('recovery_handoff_intake'), Mapping)
+                    and record['recovery_handoff_intake'].get('status') == 'awaiting_governed_repair')
+                or type(record.get('evidence_turn_count')) is not int
+                or not 0 <= record['evidence_turn_count'] < 4):
+            continue
+        prior_id = str(record.get('reasoning_request_id') or '')
+        original_id = str(record.get('interrupted_recovery_original_request_id') or '')
+        old_sha = str(record.get('interrupted_recovery_source_revision') or '')
+        old_branch = str(record.get('branch') or '')
+        if (not re.fullmatch(r'[0-9a-f]{64}', prior_id)
+                or not re.fullmatch(r'[0-9a-f]{64}', original_id)
+                or not re.fullmatch(r'[0-9a-f]{40}', old_sha)
+                or record.get('interrupted_recovery_request_id') != prior_id
+                or old_branch != branch_name(item_id) + '-context-' + original_id[:12]):
+            continue
+        try:
+            head = run(['git', 'rev-parse', 'origin/main'], cwd=repo)
+            if not re.fullmatch(r'[0-9a-f]{40}', head) or head == old_sha:
+                continue
+            old_blob = run(['git', 'rev-parse',
+                            f'{old_sha}:tools/engineering_evidence_tools.py'], cwd=repo)
+            new_blob = run(['git', 'rev-parse',
+                            f'{head}:tools/engineering_evidence_tools.py'], cwd=repo)
+            if old_blob == new_blob:
+                continue
+            original = support_worktree_path(item_id, old_branch)
+            if (not original.is_dir() or original.is_symlink()
+                    or run(['git', 'branch', '--show-current'], cwd=original) != old_branch
+                    or run(['git', 'rev-parse', 'HEAD'], cwd=original) != old_sha
+                    or run(['git', 'status', '--porcelain', '--untracked-files=all'],
+                           cwd=original)):
+                continue
+            request_path = spool / 'reasoning' / 'requests' / (prior_id + '.json')
+            if not request_path.is_file() or request_path.stat().st_size > 250000:
+                continue
+            request = json.loads(request_path.read_text(encoding='utf-8'))
+            response = reasoning_response(spool, prior_id)
+            if (not isinstance(request, Mapping)
+                    or request.get('request_id') != prior_id
+                    or request_id(request) != prior_id
+                    or request.get('kind') != 'edit_plan'
+                    or request.get('support_item') != item_id
+                    or not isinstance(request.get('context'), Mapping)
+                    or not isinstance(response, Mapping)
+                    or response.get('status') != 'succeeded'
+                    or response.get('request_id') != prior_id
+                    or response.get('kind') != 'edit_plan'
+                    or response.get('support_item') != item_id
+                    or not isinstance(response.get('result'), Mapping)):
+                continue
+            ancestry = request['context'].get('verified_rollback_interruption')
+            if (not isinstance(ancestry, Mapping)
+                    or ancestry.get('previous_request_id') != original_id
+                    or ancestry.get('new_source_revision') != old_sha
+                    or ancestry.get('retry_limit') != 1):
+                continue
+            result = response['result']
+            source_calls = result.get('evidence_requests')
+            if (result.get('blocked_reason') or result.get('edits')
+                    or result.get('test_paths')
+                    or not isinstance(source_calls, list)
+                    or not 1 <= len(source_calls) <= 3):
+                continue
+            malformed: list[Mapping[str, Any]] = []
+            for action in source_calls:
+                if not isinstance(action, Mapping):
+                    continue
+                if action.get('tool') == 'read_source':
+                    q = action.get('query')
+                    if (isinstance(q, str)
+                            and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{2,79}', q) is None):
+                        malformed.append(action)
+            if len(malformed) != 1:
+                continue
+            branch = branch_name(item_id) + '-context-' + prior_id[:12]
+            worktree = ensure_worktree(repo, item_id, branch)
+            if (run(['git', 'branch', '--show-current'], cwd=worktree) != branch
+                    or run(['git', 'rev-parse', 'HEAD'], cwd=worktree) != head
+                    or run(['git', 'status', '--porcelain', '--untracked-files=all'],
+                           cwd=worktree)):
+                continue
+            # The repaired parser must validate the exact previously rejected
+            # selector. It cannot normalize tool names, paths, shell commands,
+            # or any hidden extras supplied by the model.
+            validated = engineering_evidence_tools.exact_source_symbols(
+                malformed[0].get('query')
+            )
+            if (len(validated) != 2
+                    or not engineering_evidence_tools._safe_path(
+                        worktree, str(malformed[0].get('path')), gate, policy)):
+                continue
+            next_record = dict(record)
+            ok = engineering_evidence_tools.continue_evidence_session(
+                response_result=result, record=next_record, item=item, spool=spool,
+                worktree=worktree, repo=repo, gate=gate,
+                repair_policy=policy, support=sys.modules[__name__],
+                queue_reasoning=queue_reasoning, context_base=request['context'],
+            )
+            if not ok or next_record.get('reasoning_request_id') == prior_id:
+                continue
+            record.update(next_record)
+            record.update({
+                'phase': 'implementing',
+                'branch': branch,
+                'reason': 'Pinned invalid source symbol corrected by approved read-only evidence tool.',
+                'symbol_read_recovery_request_id': next_record['reasoning_request_id'],
+                'symbol_read_recovery_original_request_id': prior_id,
+                'symbol_read_recovery_source_revision': head,
+                'updated_at': now(),
+            })
+            resumed.append(item_id)
+            slots -= 1
+        except (WorkerError, engineering_evidence_tools.EvidenceToolError,
+                OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+    return resumed
+
+
 def readmit_preserved_anchor_failure(
     state: dict[str, Any],
     eligible: list[dict[str, str]],
@@ -2478,6 +2626,9 @@ def main() -> int:
         state, support, repo, spool, gate, policy, max_active=args.max_active,
     )
     resume_verified_recovery_interrupted_by_rollback(
+        state, support, repo, spool, gate, policy, max_active=args.max_active,
+    )
+    readmit_verified_malformed_source_symbol_after_upgrade(
         state, support, repo, spool, gate, policy, max_active=args.max_active,
     )
     reassess_model_scope_blocks(state, support, spool, args.max_active)
