@@ -312,3 +312,81 @@ def test_malformed_symbol_read_is_rejected(tmp_path):
             {"tool": "read_source", "path": "tools/source.py",
              "query": "$(cat /etc/passwd)"},
         ])
+
+
+def test_two_explicit_source_symbol_prefixes_support_benign_model_prose(tmp_path):
+    repo, spool, item, record = setup_session(tmp_path)
+    path = repo / "tools/source.py"
+    path.write_text(
+        "filler = 1\n" * 2000
+        + "def support_id_from_title():\n    return 'pinned admission code'\n"
+        + "def sync_support_lifecycle_notification():\n    return 'pinned audit code'\n"
+    )
+    git(repo, "add", ".")
+    git(repo, "commit", "-m", "symbol fixtures")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    assert call(repo, spool, item, record, [
+        {"tool": "read_source", "path": "tools/source.py",
+         "query": "support_id_from_title, sync_support_lifecycle_notification, admission state reconciliation, and any "},
+    ])
+    request = json.loads((spool / "reasoning/requests" /
+                          (record["reasoning_request_id"] + ".json")).read_text())
+    excerpt = request["context"]["source_excerpts"][0]
+    assert excerpt["path"] == "tools/source.py"
+    assert "pinned admission code" in excerpt["content"]
+    assert "pinned audit code" in excerpt["content"]
+    assert len(excerpt["content"]) <= 14000
+    assert record["evidence_turn_count"] == 1
+    assert record["evidence_last_receipts"][0]["sha256"]
+
+
+def test_symbol_prefix_parser_only_emits_exact_identifier_tokens():
+    assert evidence.exact_source_symbols("audit_support_admission") == ["audit_support_admission"]
+    assert evidence.exact_source_symbols(None) == []
+    assert evidence.exact_source_symbols(
+        "support_id_from_title, sync_support_lifecycle_notification, admission state reconciliation, and any "
+    ) == ["support_id_from_title", "sync_support_lifecycle_notification"]
+
+
+@pytest.mark.parametrize("query", [
+    "$(cat /etc/passwd)",
+    "audit_support_admission, read_current, $(touch /tmp/never)",
+    "audit_support_admission, read_current, ../../../etc/passwd",
+    "audit_support_admission, read_current; rm -rf /",
+    "audit_support_admission, read_current\n$(whoami)",
+    "audit_support_admission, read_current, `whoami`",
+    "read a source function", "just prose with no exact names",
+    "audit_support_admission, read_current, a b c d " + "long text " * 22,
+    "same_name, same_name, nothing",
+    "some_symbol, ???",
+    "one_symbol, ",
+    123,
+])
+def test_symbol_prefix_parser_rejects_commands_paths_arbitrary_prose(query):
+    with pytest.raises(evidence.EvidenceToolError, match="invalid exact source symbol"):
+        evidence.exact_source_symbols(query)
+
+
+def test_malformed_symbol_among_valid_read_requests_never_leaks_source(tmp_path):
+    repo, spool, item, record = setup_session(tmp_path)
+    initial_id = record["reasoning_request_id"]
+    with pytest.raises(evidence.EvidenceToolError, match="invalid exact source symbol"):
+        call(repo, spool, item, record, [
+            {"tool": "read_source", "path": "tools/source.py", "query": None},
+            {"tool": "read_source", "path": "tools/source.py",
+             "query": "audit_support_admission, valid_next, $(cat /etc/passwd)"},
+        ])
+    assert record["reasoning_request_id"] == initial_id
+    assert not record.get("evidence_last_receipts")
+
+
+def test_multi_symbol_prose_requires_real_definitions_in_safe_tracked_path(tmp_path):
+    repo, spool, item, record = setup_session(tmp_path)
+    prior_id = record["reasoning_request_id"]
+    with pytest.raises(evidence.EvidenceToolError, match="invalid exact source symbol"):
+        call(repo, spool, item, record, [
+            {"tool": "read_source", "path": "tools/source.py",
+             "query": "please, send, this is harmless looking prose"},
+        ])
+    assert record["reasoning_request_id"] == prior_id
+    assert not record.get("evidence_last_receipts")

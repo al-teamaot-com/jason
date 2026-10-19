@@ -88,6 +88,35 @@ def _safe_path(worktree: Path, path: str, gate, repair_policy: Mapping[str, Any]
     return listed.returncode == 0 and listed.stdout.strip() == path
 
 
+def exact_source_symbols(query: Any) -> list[str]:
+    """Bounded selector for one symbol or two leading comma-separated symbols.
+
+    Some constrained model responses put two valid function identifiers first
+    and then an English description. Accept ONLY that deterministic identifier
+    prefix and discard the description, never using it as a source selector.
+    Shell syntax, control characters, paths and arbitrary prose still fail
+    closed. The source path itself must separately pass the tracked-file gate.
+    """
+    if query is None:
+        return []
+    if not isinstance(query, str):
+        raise EvidenceToolError("invalid exact source symbol")
+    if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{2,79}", query):
+        return [query]
+    if not 7 <= len(query) <= 160 or re.fullmatch(r"[A-Za-z0-9_ ,]{7,160}", query) is None:
+        raise EvidenceToolError("invalid exact source symbol")
+    parts = query.split(",")
+    if not 2 <= len(parts) <= 4:
+        raise EvidenceToolError("invalid exact source symbol")
+    prefix = [parts[0].strip(), parts[1].strip()]
+    if (prefix[0] == prefix[1] or
+            any(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{2,79}", part) is None
+                for part in prefix)):
+        raise EvidenceToolError("invalid exact source symbol")
+    # Remaining plain-language tail is NOT a query, path, code or command.
+    return prefix
+
+
 def execute_tools(
     *,
     worktree: Path,
@@ -101,6 +130,8 @@ def execute_tools(
 
     Search uses the existing J-CHANGE-002-filtered repository search. Exact
     read_source has additional path traversal, symlink, and containment gates.
+    Two explicitly prefixed symbol names are allowed, but tail prose is never
+    passed to a search or source selector.
     Any unrecognized request fails closed instead of silently dropping it.
     """
     if (not isinstance(requests, list) or not requests
@@ -123,13 +154,23 @@ def execute_tools(
         else:
             if not isinstance(path, str) or not _safe_path(worktree, path, gate, repair_policy):
                 raise EvidenceToolError("source path not authorized")
-            # Optional symbol name centers a bounded exact-source excerpt.
-            # No model-supplied shell, line expression or free-text selector.
-            if query is not None and (
-                not isinstance(query, str)
-                or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{2,79}", query) is None
-            ):
-                raise EvidenceToolError("invalid exact source symbol")
+            # Parse only bounded identifier tokens; any trailing prose in
+            # the two-symbol form is discarded, never passed as a selector.
+            symbols = exact_source_symbols(query)
+            if len(symbols) == 2:
+                # Unlike a single exact identifier, a prose-contaminated
+                # multi-symbol hint is admitted only when both names are
+                # independently present as real definitions in the same
+                # already-authorized, Git-tracked source path.
+                try:
+                    contents = (worktree / path).read_text(encoding="utf-8")
+                except (OSError, UnicodeError) as exc:
+                    raise EvidenceToolError("invalid exact source symbol") from exc
+                if not all(re.search(
+                    r"(?m)^\s*(?:async\s+)?(?:def|class)\s+"
+                    + re.escape(symbol) + r"\b", contents,
+                ) for symbol in symbols):
+                    raise EvidenceToolError("invalid exact source symbol")
     excerpts: list[dict[str, str]] = []
     receipts: list[dict[str, str]] = []
     seen: set[str] = set()
@@ -146,7 +187,7 @@ def execute_tools(
         else:
             candidates = support.source_excerpts_for_paths(
                 worktree, [path], gate, repair_policy,
-                terms=[query] if query else None,
+                terms=exact_source_symbols(query) or None,
                 limit=1, content_limit=policy["max_source_chars"],
             )
         # A single broad repository search can never consume all slots.

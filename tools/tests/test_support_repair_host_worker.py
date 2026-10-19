@@ -1985,3 +1985,232 @@ def test_verified_rollback_interruption_denies_wrong_branch_or_source_revision(t
     assert worker.resume_verified_recovery_interrupted_by_rollback(
         {'items': {item['id']: record}}, [item], repo, spool, gate, {}, max_active=2,
     ) == []
+
+
+def _invalid_symbol_recovery_fixture(tmp_path, monkeypatch, *, upgrade=True):
+    import sys
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "config").mkdir()
+    src = Path(__file__).resolve().parents[2] / "config/engineering-supervisor-policy.json"
+    (repo / "config/engineering-supervisor-policy.json").write_text(src.read_text())
+    files = {
+        "tools/support_repair_host_worker.py": (
+            "def support_id_from_title():\n    return 'source admission logic'\n"
+            "def sync_support_lifecycle_notification():\n    return 'source lifecycle logic'\n"
+        ),
+        "tools/tests/test_support_repair_host_worker.py":
+            "def test_support_id():\n    assert True\n",
+        "tools/engineering_evidence_tools.py":
+            "def old_exact_selector():\n    return 'requires one symbol'\n",
+    }
+    for name, content in files.items():
+        p = repo / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content)
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=repo, check=True, text=True,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout.strip()
+
+    git("init", "-b", "main")
+    git("config", "user.name", "Fixture")
+    git("config", "user.email", "fixture@example.invalid")
+    git("add", ".")
+    git("commit", "-m", "old strict exact symbol parser")
+    old_sha = git("rev-parse", "HEAD")
+    original_id = "b" * 64
+    item = {"id": "SUPPORT-OPS-054", "priority": "P0",
+            "title": "Support P0 issue admission",
+            "evidence": "GitHub support issue missing from registry",
+            "acceptance": "issue admitted or explicit verified blocker"}
+    old_branch = worker.branch_name(item["id"]) + "-context-" + original_id[:12]
+    git("branch", old_branch)
+    old_path = tmp_path / "old-verified"
+    git("worktree", "add", str(old_path), old_branch)
+    if upgrade:
+        (repo / "tools/engineering_evidence_tools.py").write_text(
+            "def exact_source_symbols():\n    return 'two bounded selectors'\n")
+        git("add", ".")
+        git("commit", "-m", "bounded source-symbol reader")
+    head = git("rev-parse", "HEAD")
+    git("update-ref", "refs/remotes/origin/main", head)
+    spool = tmp_path / "spool"
+    previous_id = worker.queue_reasoning(spool, kind="edit_plan", item=item, context={
+        "verified_rollback_interruption": {
+            "previous_request_id": original_id,
+            "new_source_revision": old_sha,
+            "retry_limit": 1,
+        },
+        "source_excerpts": [{"path": "tools/tests/test_support_repair_host_worker.py",
+                             "content": "previous potentially stale test bytes"}],
+    })
+    response = spool / "reasoning/responses" / (previous_id + ".json")
+    response.parent.mkdir(parents=True, exist_ok=True)
+    response.write_text(json.dumps({
+        "status": "succeeded", "request_id": previous_id,
+        "kind": "edit_plan", "support_item": item["id"],
+        "result": {
+            "summary": "Need source symbols",
+            "blocked_reason": None, "edits": [], "test_paths": [],
+            "evidence_requests": [
+                {"tool": "read_source", "path": "tools/support_repair_host_worker.py",
+                 "query": "support_id_from_title, sync_support_lifecycle_notification, admission state reconciliation, and any "},
+                {"tool": "search_source", "path": None,
+                 "query": "SUPPORT issue admission persistence"},
+            ],
+        },
+    }))
+    record = {
+        "phase": "blocked", "reason": "EvidenceToolError: invalid exact source symbol",
+        "branch": old_branch, "reasoning_request_id": previous_id,
+        "interrupted_recovery_original_request_id": original_id,
+        "interrupted_recovery_request_id": previous_id,
+        "interrupted_recovery_source_revision": old_sha, "evidence_turn_count": 2,
+    }
+    new_branch = worker.branch_name(item["id"]) + "-context-" + previous_id[:12]
+    fresh = tmp_path / "fresh-verified"
+    original_locator = worker.support_worktree_path
+    def lookup(item_id, branch=None):
+        if branch == old_branch:
+            return old_path
+        if branch == new_branch:
+            return fresh
+        return original_locator(item_id, branch)
+    def make_worktree(source, item_id, branch):
+        assert item_id == item["id"] and branch == new_branch
+        if not fresh.is_dir():
+            git("worktree", "add", "-b", branch, str(fresh), "origin/main")
+        return fresh
+    monkeypatch.setattr(worker, "ensure_worktree", make_worktree)
+    monkeypatch.setattr(worker, "support_worktree_path", lookup)
+    monkeypatch.setitem(sys.modules, worker.__name__, worker)
+    class Gate:
+        def path_denial_reason(self, path, policy):
+            return "denied" if "secrets" in path else None
+    return repo, spool, item, record, Gate(), previous_id, old_path, fresh
+
+
+def test_verified_bad_symbol_readmission_is_once_and_source_pinned(tmp_path, monkeypatch):
+    repo, spool, item, record, gate, previous_id, old, fresh = (
+        _invalid_symbol_recovery_fixture(tmp_path, monkeypatch)
+    )
+    state = {"items": {item["id"]: record}}
+    assert worker.readmit_verified_malformed_source_symbol_after_upgrade(
+        state, [item], repo, spool, gate, {}, max_active=2
+    ) == [item["id"]]
+    assert record["phase"] == "implementing"
+    assert record["evidence_turn_count"] == 3
+    assert record["symbol_read_recovery_original_request_id"] == previous_id
+    assert record["symbol_read_recovery_request_id"] == record["reasoning_request_id"]
+    assert record["interrupted_recovery_request_id"] == previous_id
+    req = json.loads((spool / "reasoning/requests" /
+                      (record["reasoning_request_id"] + ".json")).read_text())
+    assert req["context"]["previous_reasoning_request_id"] == previous_id
+    assert req["context"]["pinned_source_revision"] == worker.run(
+        ["git", "rev-parse", "origin/main"], cwd=repo)
+    assert req["context"]["read_only_tool_receipts"]
+    combined = json.dumps(req["context"]["source_excerpts"])
+    assert "source admission logic" in combined
+    assert "source lifecycle logic" in combined
+    assert "previous potentially stale test bytes" not in combined
+    assert not worker.run(["git", "status", "--porcelain"], cwd=old)
+    assert not worker.run(["git", "status", "--porcelain"], cwd=fresh)
+    record.update({"phase": "blocked",
+                   "reason": "EvidenceToolError: invalid exact source symbol"})
+    assert worker.readmit_verified_malformed_source_symbol_after_upgrade(
+        state, [item], repo, spool, gate, {}, max_active=2
+    ) == []
+
+
+def test_invalid_symbol_readmission_denies_modified_response(tmp_path, monkeypatch):
+    repo, spool, item, record, gate, prior, old, fresh = (
+        _invalid_symbol_recovery_fixture(tmp_path, monkeypatch)
+    )
+    p = spool / "reasoning/responses" / (prior + ".json")
+    data = json.loads(p.read_text())
+    data["support_item"] = "SUPPORT-OPS-999"
+    p.write_text(json.dumps(data))
+    assert worker.readmit_verified_malformed_source_symbol_after_upgrade(
+        {"items": {item["id"]: record}}, [item], repo, spool, gate, {}, max_active=2
+    ) == []
+    assert not fresh.exists() and record["phase"] == "blocked"
+
+
+def test_invalid_symbol_readmission_denies_dirty_old_worktree(tmp_path, monkeypatch):
+    repo, spool, item, record, gate, prior, old, fresh = (
+        _invalid_symbol_recovery_fixture(tmp_path, monkeypatch)
+    )
+    (old / "tools" / "untracked-secret.txt").write_text("credentials")
+    assert worker.readmit_verified_malformed_source_symbol_after_upgrade(
+        {"items": {item["id"]: record}}, [item], repo, spool, gate, {}, max_active=2
+    ) == []
+    assert not fresh.exists()
+
+
+def test_invalid_symbol_readmission_denies_no_source_upgrade(tmp_path, monkeypatch):
+    repo, spool, item, record, gate, prior, old, fresh = (
+        _invalid_symbol_recovery_fixture(tmp_path, monkeypatch, upgrade=False)
+    )
+    assert worker.readmit_verified_malformed_source_symbol_after_upgrade(
+        {"items": {item["id"]: record}}, [item], repo, spool, gate, {}, max_active=2
+    ) == []
+    assert not fresh.exists()
+
+
+def test_invalid_symbol_readmission_honors_capacity_budget_authority(tmp_path, monkeypatch):
+    repo, spool, item, record, gate, prior, old, fresh = (
+        _invalid_symbol_recovery_fixture(tmp_path, monkeypatch)
+    )
+    state = {"items": {item["id"]: record,
+                       "SUPPORT-OPS-100": {"phase": "implementing"}}}
+    assert worker.readmit_verified_malformed_source_symbol_after_upgrade(
+        state, [item], repo, spool, gate, {}, max_active=1
+    ) == []
+    record["evidence_turn_count"] = 4
+    assert worker.readmit_verified_malformed_source_symbol_after_upgrade(
+        {"items": {item["id"]: record}}, [item], repo, spool, gate, {}, max_active=2
+    ) == []
+    record["evidence_turn_count"] = 2
+    record["blocker_class"] = "external_authority"
+    assert worker.readmit_verified_malformed_source_symbol_after_upgrade(
+        {"items": {item["id"]: record}}, [item], repo, spool, gate, {}, max_active=2
+    ) == []
+    assert not fresh.exists()
+
+
+def test_invalid_symbol_readmission_denies_command_in_source_selector(tmp_path, monkeypatch):
+    repo, spool, item, record, gate, prior, old, fresh = (
+        _invalid_symbol_recovery_fixture(tmp_path, monkeypatch)
+    )
+    p = spool / "reasoning/responses" / (prior + ".json")
+    data = json.loads(p.read_text())
+    data["result"]["evidence_requests"][0]["query"] = (
+        "support_id_from_title, sync_support_lifecycle_notification, $(rm -rf /)"
+    )
+    p.write_text(json.dumps(data))
+    assert worker.readmit_verified_malformed_source_symbol_after_upgrade(
+        {"items": {item["id"]: record}}, [item], repo, spool, gate, {}, max_active=2
+    ) == []
+    assert record.get("symbol_read_recovery_request_id") is None
+
+
+def test_invalid_symbol_readmission_denies_changed_ancestry(tmp_path, monkeypatch):
+    repo, spool, item, record, gate, prior, old, fresh = (
+        _invalid_symbol_recovery_fixture(tmp_path, monkeypatch)
+    )
+    record["interrupted_recovery_original_request_id"] = "c" * 64
+    assert worker.readmit_verified_malformed_source_symbol_after_upgrade(
+        {"items": {item["id"]: record}}, [item], repo, spool, gate, {}, max_active=2
+    ) == []
+    assert not fresh.exists()
+
+
+def test_symbol_blocker_supervisor_classifies_native_verified_path():
+    from engineering_supervisor import classify
+    kind, next_action = classify(
+        "blocked", "EvidenceToolError: invalid exact source symbol",
+        lane="support",
+    )
+    assert kind == "recoverable_source"
+    assert next_action == "native_worker_verify_symbol_parser_upgrade_or_escalate"
