@@ -227,3 +227,34 @@ def test_search_evidence_and_missing_match(monkeypatch, tmp_path):
         call(repo2, spool2, item2, record2, [
             {"tool": "search_source", "query": "unmatched", "path": None},
         ])
+
+
+def test_dirty_local_policy_cannot_broaden_fetched_main_tool_authority(tmp_path):
+    repo, spool, item, record = setup_session(tmp_path)
+    policy = repo / "config/engineering-supervisor-policy.json"
+    current = json.loads(policy.read_text())
+    current["allowed_read_tools"].append("execute_shell")
+    policy.write_text(json.dumps(current))
+    # The policy loader reads the fetched immutable origin/main object, not
+    # the developer's dirty checkout (which has broadened the allowed list).
+    loaded = evidence.load_policy(repo)
+    assert loaded["allowed_read_tools"] == ["search_source", "read_source"]
+
+
+def test_missing_source_context_from_untrusted_prior_request_is_not_carried_forward(tmp_path):
+    repo, spool, item, record = setup_session(tmp_path)
+    old = record["reasoning_request_id"]
+    path = spool / "reasoning/requests" / (old + ".json")
+    prior = json.loads(path.read_text())
+    prior["context"]["source_excerpts"][0]["content"] = "invented old content"
+    prior["request_id"] = support.request_id(prior)
+    rewritten = spool / "reasoning/requests" / (prior["request_id"] + ".json")
+    rewritten.write_text(json.dumps(prior))
+    record["reasoning_request_id"] = prior["request_id"]
+    assert call(repo, spool, item, record, [
+        {"tool": "read_source", "path": "tools/source.py", "query": None},
+    ])
+    fresh = json.loads((spool / "reasoning/requests" /
+                        (record["reasoning_request_id"] + ".json")).read_text())
+    assert "invented old content" not in json.dumps(fresh["context"]["source_excerpts"])
+    assert "def test_admission()" in json.dumps(fresh["context"]["source_excerpts"])
