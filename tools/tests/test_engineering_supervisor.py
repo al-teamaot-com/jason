@@ -103,3 +103,13 @@ def test_evidence_budget_exhaustion_reports_actionable_verified_upgrade_not_gene
     )
     assert category == "recoverable_source"
     assert action == "native_worker_verify_source_upgrade_or_escalate"
+
+
+def test_rollback_worktree_mismatch_is_recoverable_only_by_native_verified_worker():
+    from engineering_supervisor import classify
+    category, action = classify(
+        'blocked', 'WorkerError: recovery worktree does not match its pinned branch',
+        lane='support',
+    )
+    assert category == 'recoverable_source'
+    assert action == 'native_worker_verify_rollback_interruption_or_escalate'

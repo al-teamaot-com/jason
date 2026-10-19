@@ -23,7 +23,7 @@ import time
 import urllib.request
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from uuid import uuid4
 
 import release_manager_gate as gate
@@ -2136,10 +2136,70 @@ def verify_release_ccc_report(
 
 
 # Keep the CCC itself authoritative. The only permitted bounded retry is an
-# independently refreshed post-deployment checker report whose *sole* failing
-# check is a transient Prometheus scrape gap while host units settle. Each
-# report remains subject to exact SHA, complete checks and freshness proofs.
+# independently refreshed post-deployment checker report whose sole failing
+# check is an approved bounded transient monitoring failure or an exact,
+# read-only provider exception. Neither failing report is accepted as PASS.
+# Every report remains subject to exact SHA, required checks and freshness.
 CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS = (15, 20, 25)
+# A live, governed provider read may briefly raise at provider initialization
+# or transport level. These are never PASS. Two fresh *full* CCC reruns are
+# allowed only for the specific reviewed read canaries, with unchanged exact
+# source/runtime identity, all other gates passing, and new report identifiers.
+CCC_POSTFLIGHT_PROVIDER_EXCEPTION_RETRY_DELAYS = (10, 15)
+CCC_RETRYABLE_READ_CANARIES = {
+    "datto_edr": "endpoint.security.status.read",
+    "dnsfilter": "dns.protection.organization.read",
+}
+
+
+def retryable_ccc_provider_exceptions(report: Mapping[str, Any]) -> bool:
+    """Classify only named exception records, never auth/denial/data failures."""
+    if report.get("status") != "FAIL":
+        return False
+    checks = report.get("checks")
+    if not isinstance(checks, list):
+        return False
+    failed = [check for check in checks
+              if isinstance(check, Mapping) and check.get("status") != "PASS"]
+    if (len(failed) != 1
+            or failed[0].get("check_id") != "governed-provider-boundary-canaries"
+            or failed[0].get("status") != "FAIL"):
+        return False
+    evidence = failed[0].get("evidence")
+    if not isinstance(evidence, Mapping):
+        return False
+    failures = evidence.get("failures")
+    results = evidence.get("results")
+    expected_count = evidence.get("expected_canary_count")
+    if (not isinstance(failures, list) or not 1 <= len(failures) <= 2
+            or not isinstance(results, list)
+            or type(expected_count) is not int or not 4 <= expected_count <= 25
+            or len(results) != expected_count):
+        return False
+    names = [row.get("name") for row in results if isinstance(row, Mapping)]
+    if len(names) != len(results) or len(set(names)) != len(names):
+        return False
+    seen: set[str] = set()
+    for entry in failures:
+        if not isinstance(entry, Mapping):
+            return False
+        name = entry.get("name")
+        expected = entry.get("expected")
+        if (not isinstance(name, str) or name not in CCC_RETRYABLE_READ_CANARIES
+                or name in seen
+                or entry.get("status") != "exception"
+                or entry.get("expected_status") != "succeeded"
+                or not isinstance(expected, Mapping)
+                or expected.get("expected_status") != "succeeded"
+                or expected.get("name") != name
+                or expected.get("capability") != CCC_RETRYABLE_READ_CANARIES[name]
+                or expected.get("expected_provider") != name):
+            return False
+        seen.add(name)
+    indexed = [entry for entry in results if isinstance(entry, Mapping)
+               and entry.get("name") in seen]
+    return (len(indexed) == len(seen)
+            and all(entry.get("status") == "exception" for entry in indexed))
 
 
 def run_release_ccc_gate(
@@ -2157,7 +2217,10 @@ def run_release_ccc_gate(
     if not ccc_runner.is_file() or not ccc_config.is_file():
         raise ReleaseManagerError("independent CCC checker/config unavailable")
     failed_monitoring_runs: list[str] = []
-    for attempt in range(len(CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS) + 1):
+    failed_provider_runs: list[str] = []
+    max_runs = (1 + len(CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS)
+                + len(CCC_POSTFLIGHT_PROVIDER_EXCEPTION_RETRY_DELAYS))
+    for _ in range(max_runs):
         started = datetime.now(timezone.utc)
         try:
             completed = subprocess.run(
@@ -2204,28 +2267,52 @@ def run_release_ccc_gate(
                 and nonpassing == [("prometheus-targets", "FAIL")]
                 and completed.returncode != 0
             )
-            if transient and attempt < len(CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS):
+            provider_exception = (
+                not before_mutation
+                and str(exc) == "post-mutation CCC did not certify exact live candidate"
+                and completed.returncode != 0
+                and retryable_ccc_provider_exceptions(report)
+            )
+            if transient and len(failed_monitoring_runs) < len(CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS):
                 run_id = str(report["run_id"])
-                if run_id in failed_monitoring_runs:
+                if run_id in failed_monitoring_runs or run_id in failed_provider_runs:
                     raise ReleaseManagerError("CCC repeated a prior monitoring report")
+                retry_index = len(failed_monitoring_runs)
                 failed_monitoring_runs.append(run_id)
                 print(
                     f"CCC_MONITORING_TRANSIENT=RECHECK run_id={run_id} "
-                    f"attempt={attempt + 1}",
+                    f"attempt={retry_index + 1}",
                     flush=True,
                 )
-                time.sleep(CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS[attempt])
+                time.sleep(CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS[retry_index])
+                continue
+            if provider_exception and len(failed_provider_runs) < len(CCC_POSTFLIGHT_PROVIDER_EXCEPTION_RETRY_DELAYS):
+                run_id = str(report["run_id"])
+                if run_id in failed_monitoring_runs or run_id in failed_provider_runs:
+                    raise ReleaseManagerError("CCC repeated a prior provider canary report")
+                retry_index = len(failed_provider_runs)
+                failed_provider_runs.append(run_id)
+                print(
+                    f"CCC_PROVIDER_CANARY_EXCEPTION=RECHECK run_id={run_id} "
+                    f"attempt={retry_index + 1}",
+                    flush=True,
+                )
+                time.sleep(CCC_POSTFLIGHT_PROVIDER_EXCEPTION_RETRY_DELAYS[retry_index])
                 continue
             raise
         if completed.returncode != 0 and evidence["status"] == "PASS":
             raise ReleaseManagerError("independent CCC process failed despite PASS report")
-        if failed_monitoring_runs:
-            if str(evidence["run_id"]) in failed_monitoring_runs:
+        if failed_monitoring_runs or failed_provider_runs:
+            if str(evidence["run_id"]) in (*failed_monitoring_runs, *failed_provider_runs):
                 raise ReleaseManagerError("CCC reused an earlier failed report identifier")
+        if failed_monitoring_runs:
             evidence["transient_monitoring_retries"] = len(failed_monitoring_runs)
             evidence["failed_monitoring_run_ids"] = failed_monitoring_runs
+        if failed_provider_runs:
+            evidence["transient_provider_exception_retries"] = len(failed_provider_runs)
+            evidence["failed_provider_exception_run_ids"] = failed_provider_runs
         return evidence
-    raise ReleaseManagerError("independent CCC monitoring check never certified")
+    raise ReleaseManagerError("independent CCC postflight checks never certified")
 
 
 
