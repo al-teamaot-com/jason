@@ -39,6 +39,9 @@ STAGES = (
     # Independent read-only supervisor records actionable/internal versus
     # genuine external gates even if a prior worker stage fails.
     Stage("engineering_supervisor", "engineering_supervisor.py"),
+    # Revalidation is an *intent* to the independently privileged root worker.
+    # It never grants release approval and never closes the breaker locally.
+    Stage("release_breaker_recovery", "release_breaker_recovery_manager.py"),
 )
 
 
@@ -176,7 +179,7 @@ def run_pipeline(
                 sys.executable, str(scripts / stage.script),
                 "--repo", str(repo), "--spool", str(spool), *stage.args,
             ]
-            if stage.name == "release_bridge":
+            if stage.name in {"release_bridge", "release_breaker_recovery"}:
                 command += ["--release-state", str(release_state)]
             print(f"ENGINEERING_STAGE_START name={stage.name}", flush=True)
             try:

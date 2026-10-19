@@ -25,6 +25,23 @@ DRIFT_CONFIG=Path('/etc/jason/release-readback-recovery/production-desired-state
 DRIFT_EVALUATOR=Path('/opt/jason/current/tools/production_drift_guard.py')
 SHA=re.compile(r'[0-9a-f]{40}\Z')
 RID=re.compile(r'[0-9a-f]{32}\Z')
+PROTECTED_LKG_FIELDS=(
+    'revision', 'runtime_revision', 'runtime_image_id',
+    'mcp_revision', 'mcp_image_id', 'host_revision', 'host_release',
+    'release_manager_source_revision', 'desired_state_policy_digest',
+    'scheduled_control_units',
+)
+
+
+def verify_immutable_lkg_fingerprint(recorded: dict, observed: dict) -> None:
+    if recorded.get('complete') is not True or observed.get('complete') is not True:
+        raise ValueError('incomplete independent baseline verification')
+    for key in PROTECTED_LKG_FIELDS:
+        left, right = recorded.get(key), observed.get(key)
+        if left is None or right is None or left != right:
+            raise ValueError('immutable last-known-good mismatch: ' + key)
+
+
 
 
 def protected_read(path: Path) -> dict:
@@ -125,6 +142,7 @@ def apply_transition(req: dict, state: dict) -> dict:
         if last.get('manifest',{}).get('revision')!=revision:
             raise ValueError('last known good revision mismatch')
         manifest=verify_health(revision)
+        verify_immutable_lkg_fingerprint(last['manifest'],manifest)
         state['last_revalidation']=manifest
     else:
         release_id=str(req.get('release_id') or '')

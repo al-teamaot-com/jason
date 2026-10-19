@@ -9,12 +9,47 @@ s=importlib.util.spec_from_file_location('release_control_transition_worker',p)
 m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
 REV='a'*40
 
+
+def verified_lkg():
+    return {
+        'complete': True, 'revision': REV, 'runtime_revision': REV,
+        'runtime_image_id':'sha256:' + 'b'*64,
+        'mcp_revision':REV, 'mcp_image_id':'sha256:' + 'c'*64,
+        'host_revision':REV, 'host_release':'/opt/jason/releases/' + REV,
+        'release_manager_source_revision':REV,
+        'desired_state_policy_digest':'sha256:' + 'd'*64,
+        'scheduled_control_units':{'jason-release-manager.timer':'active'},
+    }
+
+
 def test_revalidation_requires_exact_root_evidence():
-    state={'schema_version':'1.0','last_known_good':{'manifest':{'revision':REV}},'circuit_breaker':{'state':'open'}}
-    with patch.object(m,'verify_drift'),patch.object(m,'verify_health',return_value={'revision':REV,'complete':True}):
+    baseline=verified_lkg()
+    state={'schema_version':'1.0','last_known_good':{'manifest':baseline},'circuit_breaker':{'state':'open'}}
+    with patch.object(m,'verify_drift'),patch.object(m,'verify_health',return_value=baseline.copy()):
         output=m.apply_transition({'action':'revalidate','revision':REV},state)
     assert output['circuit_breaker']['state']=='closed'
     assert output['last_revalidation']['revision']==REV
+
+
+def test_revalidation_rejects_changed_lkg_image_id_or_policy_or_unit():
+    baseline=verified_lkg()
+    for key in ('runtime_image_id','mcp_image_id','desired_state_policy_digest','scheduled_control_units'):
+        other=baseline.copy()
+        other[key] = {'jason-release-manager.timer':'inactive'} if key == 'scheduled_control_units' else 'sha256:' + 'f'*64
+        state={'schema_version':'1.0','last_known_good':{'manifest':baseline.copy()},'circuit_breaker':{'state':'open'}}
+        with patch.object(m,'verify_drift'),patch.object(m,'verify_health',return_value=other):
+            with pytest.raises(ValueError,match='immutable last-known-good mismatch'):
+                m.apply_transition({'action':'revalidate','revision':REV},state)
+        assert state['circuit_breaker']['state']=='open'
+
+
+def test_revalidation_rejects_baseline_missing_image_proof():
+    baseline=verified_lkg()
+    del baseline['runtime_image_id']
+    state={'schema_version':'1.0','last_known_good':{'manifest':baseline},'circuit_breaker':{'state':'open'}}
+    with patch.object(m,'verify_drift'),patch.object(m,'verify_health',return_value=verified_lkg()):
+        with pytest.raises(ValueError,match='immutable last-known-good mismatch'):
+            m.apply_transition({'action':'revalidate','revision':REV},state)
 
 
 def test_revalidation_rejects_revision_mismatch():
