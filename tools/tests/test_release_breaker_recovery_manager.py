@@ -324,3 +324,57 @@ def test_temporary_release_source_mismatch_is_visible_hold_not_failed_user_unit(
                         lambda *args: pytest.fail("root must not be called on mismatched LKG"))
     assert recovery.main()==0
     assert not (spool/"release-breaker-recovery-state.json").exists()
+
+
+def test_closed_precommissioned_breaker_never_creates_failed_worker_unit(tmp_path, monkeypatch):
+    """No LKG yet on a new install is safe if the protected breaker is closed."""
+    repo=tmp_path/"repo";repo.mkdir()
+    root=tmp_path/"release"/"protected-readback";root.mkdir(parents=True)
+    (root/"production-control-state.json").write_text(json.dumps({
+        "schema_version":"1.0","circuit_breaker":{"state":"closed"},
+        "last_known_good":None,
+    }))
+    (root/"production-drift.json").write_text(json.dumps({
+        "schema_version":"1.0","status":"pass","problems":[],
+        "observed_at":NOW.isoformat(),
+    }))
+    spool=tmp_path/"spool";spool.mkdir()
+    monkeypatch.setattr(recovery,"utcnow",lambda:NOW)
+    monkeypatch.setattr(recovery,"native_root_transition",
+                        lambda *args:pytest.fail("closed breaker must not request root"))
+    monkeypatch.setattr(recovery,"load_pinned_policy",
+                        lambda *args:pytest.fail("closed breaker does not need policy"))
+    monkeypatch.setattr(sys,"argv",["recovery","--repo",str(repo),
+                                   "--spool",str(spool),"--release-state",str(root.parent)])
+    assert recovery.main()==0
+    tracker=json.loads((spool/"release-breaker-recovery-state.json").read_text())
+    assert tracker["status"]=="already_closed"
+    assert tracker["next_action"]=="none"
+
+
+def test_closed_breaker_preserves_recovery_attempt_receipt(tmp_path, monkeypatch):
+    repo=tmp_path/"repo";repo.mkdir()
+    root=tmp_path/"release"/"protected-readback";root.mkdir(parents=True)
+    (root/"production-control-state.json").write_text(json.dumps({
+        "schema_version":"1.0","circuit_breaker":{
+            "state":"closed","reason":"root_verified_revalidate",
+            "revalidated_revision":SHA},
+        "last_known_good":{"manifest":{"revision":SHA,"complete":True}},
+    }))
+    (root/"production-drift.json").write_text(json.dumps({
+        "schema_version":"1.0","status":"pass","problems":[],
+        "observed_at":NOW.isoformat(),
+    }))
+    spool=tmp_path/"spool";spool.mkdir()
+    receipt={"revision":SHA,"requested_at":NOW.isoformat(),
+             "result":"root_verified_closed"}
+    (spool/"release-breaker-recovery-state.json").write_text(json.dumps({
+        "schema_version":"1.0","last_revalidation_attempt":receipt,
+    }))
+    monkeypatch.setattr(sys,"argv",["recovery","--repo",str(repo),
+                                   "--spool",str(spool),"--release-state",str(root.parent)])
+    monkeypatch.setattr(recovery,"utcnow",lambda:NOW)
+    assert recovery.main()==0
+    data=json.loads((spool/"release-breaker-recovery-state.json").read_text())
+    assert data["last_revalidation_attempt"]==receipt
+    assert data["status"]=="already_closed"
