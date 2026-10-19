@@ -1340,6 +1340,13 @@ def _preprod_regenerable_sqlite_shm(name: str) -> bool:
     return name.endswith(".sqlite3-shm") and len(name) > len(".sqlite3-shm")
 _PREPROD_CLONE_MAX_BYTES = 4 * 1024**3
 _PREPROD_DISK_RESERVE_BYTES = 3 * 1024**3
+# These are recursively nested *snapshots/build trees*, not operational
+# release/approval state. Re-cloning them multiplies prior preprod snapshots
+# and can exceed the bounded isolation disk budget even on a healthy host.
+_PREPROD_RELEASE_SCRATCH_EXCLUDED = frozenset({"preprod", "worktrees"})
+_PREPROD_REQUIRED_RELEASE_RECORDS = frozenset({
+    "records", "protected-readback", "production-control-state.json",
+})
 
 
 def bounded_preprod_openclaw_entries(raw: str) -> list[str]:
@@ -1355,6 +1362,17 @@ def bounded_preprod_openclaw_entries(raw: str) -> list[str]:
         if name not in _PREPROD_OPENCLAW_EXCLUDED
         and not _preprod_regenerable_sqlite_shm(name)
     ]
+
+
+def bounded_preprod_release_manager_entries(raw: str) -> list[str]:
+    """Copy operational release evidence but not stale isolated/build caches."""
+    # Reuse the exact same bounded container-name and traversal validation as
+    # the OpenClaw top level. Missing protected evidence fails closed.
+    names = bounded_preprod_openclaw_entries(raw)
+    if not _PREPROD_REQUIRED_RELEASE_RECORDS.issubset(names):
+        raise ReleaseManagerError("preproduction release-manager critical state missing")
+    return [name for name in names
+            if name not in _PREPROD_RELEASE_SCRATCH_EXCLUDED]
 
 
 def copy_state_from_live_container(
@@ -1376,12 +1394,35 @@ def copy_state_from_live_container(
             "docker", "exec", "jason-runtime", "python", "-c",
             "import os; print('\\n'.join(sorted(os.listdir('/var/lib/jason/openclaw'))))",
         ]))
-        for name in names:
-            run(["docker", "cp", f"jason-runtime:{container_path}/{name}", str(destination / name)])
+        def guarded_copy(source: str, target: Path) -> None:
+            run(["docker", "cp", f"jason-runtime:{source}", str(target)])
             free_now = shutil.disk_usage(destination).free
             if (free_now < _PREPROD_DISK_RESERVE_BYTES
                     or free_at_start - free_now > _PREPROD_CLONE_MAX_BYTES):
                 raise ReleaseManagerError("isolated preproduction state exceeded bounded disk capacity")
+
+        for name in names:
+            if name == "release-manager":
+                # Do not recursively copy previous preprod snapshots and
+                # Git worktree caches nested inside the release-manager
+                # operational directory. Preserve every other bounded entry,
+                # including release records, approvals and protected readback.
+                nested = bounded_preprod_release_manager_entries(run([
+                    "docker", "exec", "jason-runtime", "python", "-c",
+                    "import os; print('\\n'.join(sorted(os.listdir('/var/lib/jason/openclaw/release-manager'))))",
+                ]))
+                target = destination / name
+                target.mkdir(mode=0o700)
+                for child in nested:
+                    guarded_copy(container_path + "/" + name + "/" + child,
+                                 target / child)
+            else:
+                guarded_copy(container_path + "/" + name, destination / name)
+        if (destination / "release-manager").is_dir() and any(
+            (destination / "release-manager" / name).exists()
+            for name in _PREPROD_RELEASE_SCRATCH_EXCLUDED
+        ):
+            raise ReleaseManagerError("preproduction release cache isolation failed")
         if any((destination / name).exists() for name in _PREPROD_OPENCLAW_EXCLUDED):
             raise ReleaseManagerError("excluded production event journal was copied")
         # Runtime startup initializes a fresh isolated orchestration journal.
