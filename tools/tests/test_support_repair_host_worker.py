@@ -63,6 +63,17 @@ def test_parse_support_prioritizes_open_items_and_keeps_acceptance():
     assert parsed[0]['acceptance'] == 'acceptance 1'
 
 
+def test_distinct_rollback_and_toner_support_identities_in_canonical_source():
+    source = (MODULE.parents[1] / 'SUPPORT.md').read_text(encoding='utf-8')
+    rows = worker.parse_support(source)
+    rollback = [row for row in rows if row['id'] == 'SUPPORT-OPS-058']
+    assert len(rollback) == 1
+    assert 'issue #1101' in rollback[0]['status']
+    assert 'rollback' in rollback[0]['title'].lower()
+    assert not any(row['id'] == 'SUPPORT-OPS-051' for row in rows)
+    assert 'Closed 2026-10-07 — issue #1091' in source
+
+
 def test_repair_pr_requires_support_metadata():
     prs = [
         {'number': 10, 'body': '- Support item: SUPPORT-OPS-100\n- Release class: autonomous-repair-candidate'},
@@ -1089,3 +1100,418 @@ def test_scope_review_chooses_one_p0_before_lower_priority(tmp_path):
     assert items['SUPPORT-OPS-400']['phase'] == 'diagnosing'
     assert items['SUPPORT-OPS-401']['phase'] == 'blocked'
     assert worker.reassess_model_scope_blocks(state, priority, tmp_path, 1) == []
+
+
+def test_recovered_edit_reasoning_readmits_only_verified_exact_request(tmp_path):
+    import json
+    rid = 'a' * 64
+    response_dir = tmp_path / 'reasoning' / 'responses'
+    response_dir.mkdir(parents=True)
+    (response_dir / f'{rid}.json').write_text(json.dumps({
+        'status': 'succeeded', 'request_id': rid, 'kind': 'edit_plan',
+        'support_item': 'SUPPORT-OPS-123', 'result': {'edits': []},
+    }))
+    record = {'phase': 'blocked', 'reason': 'edit reasoning failed: HTTP transport failed with status 400',
+              'reasoning_request_id': rid}
+    state = {'items': {'SUPPORT-OPS-123': record}}
+    eligible = [{'id': 'SUPPORT-OPS-123'}]
+    assert worker.readmit_recovered_reasoning(state, eligible, tmp_path, max_active=2) == ['SUPPORT-OPS-123']
+    assert record['phase'] == 'implementing'
+    assert worker.readmit_recovered_reasoning(state, eligible, tmp_path, max_active=2) == []
+
+
+def test_recovery_rejects_mismatched_reasoning_reply(tmp_path):
+    import json
+    rid = 'b' * 64
+    response_dir = tmp_path / 'reasoning' / 'responses'
+    response_dir.mkdir(parents=True)
+    (response_dir / f'{rid}.json').write_text(json.dumps({
+        'status': 'succeeded', 'request_id': rid, 'kind': 'edit_plan',
+        'support_item': 'SUPPORT-OPS-OTHER', 'result': {},
+    }))
+    state = {'items': {'SUPPORT-OPS-123': {'phase': 'blocked',
+        'reason': 'edit reasoning failed: HTTP transport failed with status 400',
+        'reasoning_request_id': rid}}}
+    assert worker.readmit_recovered_reasoning(state, [{'id': 'SUPPORT-OPS-123'}], tmp_path,
+                                                max_active=2) == []
+
+
+def test_recovered_reasoning_respects_existing_active_worker_capacity(tmp_path):
+    import json
+    root = tmp_path / 'reasoning' / 'responses'
+    root.mkdir(parents=True)
+    state = {'items': {'SUPPORT-OPS-1': {'phase': 'diagnosing'}}}
+    eligible = []
+    for index, letter in enumerate('abc', start=2):
+        rid = letter * 64
+        item_id = f'SUPPORT-OPS-{index}'
+        (root / f'{rid}.json').write_text(json.dumps({
+            'status': 'succeeded', 'request_id': rid, 'kind': 'edit_plan',
+            'support_item': item_id, 'result': {'edits': []},
+        }))
+        state['items'][item_id] = {
+            'phase': 'blocked', 'reason': 'edit reasoning failed: HTTP transport failed with status 400',
+            'reasoning_request_id': rid,
+        }
+        eligible.append({'id': item_id})
+    resumed = worker.readmit_recovered_reasoning(state, eligible, tmp_path, max_active=2)
+    assert resumed == ['SUPPORT-OPS-2']
+    assert state['items']['SUPPORT-OPS-3']['phase'] == 'blocked'
+    assert state['items']['SUPPORT-OPS-4']['phase'] == 'blocked'
+
+def _transport_recovery_fixture(tmp_path, *, error='HTTP transport failed with status 400',
+                                bigger_proof=True, proof_kind='edit_plan', billing=False):
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    target = {'id':'SUPPORT-OPS-054', 'priority':'P0', 'title':'Fix support intake',
+              'evidence':'e', 'acceptance':'a'}
+    proof = {'id':'SUPPORT-DEV-1196', 'priority':'P0', 'title':'Other verified response',
+             'evidence':'e', 'acceptance':'a'}
+    failed = worker.queue_reasoning(
+        tmp_path, kind='edit_plan', item=target,
+        context={'source_excerpts': ['X' * 3000]},
+    )
+    good = worker.queue_reasoning(
+        tmp_path, kind=proof_kind, item=proof,
+        context={'source_excerpts': ['Y' * (4000 if bigger_proof else 50)]},
+    )
+    out = tmp_path / 'reasoning' / 'responses'
+    out.mkdir(parents=True, exist_ok=True)
+    failure = {'request_id': failed, 'status':'failed',
+               'error_type':'ConnectorTransportError', 'error':error,
+               'completed_at':(now-timedelta(hours=2)).isoformat()}
+    if billing:
+        failure['provider_error_code'] = 'credit_balance_exhausted'
+    (out / (failed+'.json')).write_text(worker.json.dumps(failure))
+    (out / (good+'.json')).write_text(worker.json.dumps({
+        'request_id':good, 'kind':proof_kind, 'support_item':proof['id'],
+        'status':'succeeded', 'completed_at':(now-timedelta(minutes=2)).isoformat(),
+        'result': {'summary':'verified non-executing result', 'edits':[]},
+    }))
+    record = {'phase':'blocked','reason':'edit reasoning failed: '+error,
+              'reasoning_request_id':failed,'self_recovery_attempts':2}
+    return target, failed, good, record
+
+
+def test_verified_newer_larger_edit_response_allows_one_distinct_p0_readmission(tmp_path):
+    target, failed, proof, record = _transport_recovery_fixture(tmp_path)
+    state={'items':{target['id']:record}}
+    assert worker.readmit_after_verified_transport_recovery(state,[target],tmp_path,max_active=2)==[target['id']]
+    assert record['phase']=='implementing'
+    assert record['provider_recovery_original_failure_id']==failed
+    assert record['provider_recovery_proof_id']==proof
+    assert record['reasoning_request_id'] != failed
+    assert record['self_recovery_attempts']==2
+    new = worker.json.loads((tmp_path/'reasoning'/'requests'/(record['reasoning_request_id']+'.json')).read_text())
+    assert new['context']['verified_transport_recovery']['retry_limit']==1
+    assert worker.reasoning_response(tmp_path,failed)['status']=='failed'
+    # Even if a later response fails, the one-shot evidence cannot re-admit again.
+    record['phase']='blocked'
+    record['reason']='edit reasoning failed: HTTP transport failed with status 400'
+    assert worker.readmit_after_verified_transport_recovery(state,[target],tmp_path,max_active=2)==[]
+
+
+def test_transport_recovery_rejects_smaller_proof_and_known_billing(tmp_path):
+    for name, kw in [('small',{'bigger_proof':False}),('billing',{'billing':True})]:
+        root=tmp_path/name
+        target, failed, _, record = _transport_recovery_fixture(root,**kw)
+        state={'items':{target['id']:record}}
+        assert worker.verified_later_reasoning_success(root,failed_rid=failed,
+                         item_id=target['id'],kind='edit_plan') is None
+        assert worker.readmit_after_verified_transport_recovery(state,[target],root,max_active=2)==[]
+        assert record['phase']=='blocked'
+
+
+def test_transport_recovery_rejects_wrong_kind_closed_priority_and_full_capacity(tmp_path):
+    target,failed,_,record=_transport_recovery_fixture(tmp_path,proof_kind='search_plan')
+    assert worker.verified_later_reasoning_success(tmp_path,failed_rid=failed,
+                   item_id=target['id'],kind='edit_plan') is None
+    assert worker.readmit_after_verified_transport_recovery(
+        {'items':{target['id']:record}},[target],tmp_path,max_active=2)==[]
+    target2,_,_,record2=_transport_recovery_fixture(tmp_path/'second')
+    target2['priority']='P1'
+    assert worker.readmit_after_verified_transport_recovery(
+        {'items':{target2['id']:record2}},[target2],tmp_path/'second',max_active=2)==[]
+    target2['priority']='P0'
+    assert worker.readmit_after_verified_transport_recovery(
+        {'items':{target2['id']:record2,'SUPPORT-OPS-1':{'phase':'diagnosing'}}},
+        [target2],tmp_path/'second',max_active=1)==[]
+
+
+def test_transport_recovery_rejects_untrusted_mismatch_and_pending_governed_repair(tmp_path):
+    target,failed,_,record=_transport_recovery_fixture(tmp_path)
+    record['recovery_handoff_intake']={'status':'awaiting_governed_repair'}
+    assert worker.readmit_after_verified_transport_recovery(
+        {'items':{target['id']:record}},[target],tmp_path,max_active=2)==[]
+    del record['recovery_handoff_intake']
+    source=tmp_path/'reasoning'/'requests'/(failed+'.json')
+    mutated=worker.json.loads(source.read_text());mutated['context']['source_excerpts']=['tampered']
+    source.write_text(worker.json.dumps(mutated))
+    assert worker.verified_later_reasoning_success(tmp_path,failed_rid=failed,
+                   item_id=target['id'],kind='edit_plan') is None
+
+
+def test_apply_edits_validates_all_anchors_before_any_writes(tmp_path):
+    first = tmp_path / 'implementation' / 'example.py'
+    second = tmp_path / 'implementation' / 'tests' / 'test_example.py'
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True)
+    first.write_text('source-old\n', encoding='utf-8')
+    second.write_text('test-old\n', encoding='utf-8')
+    try:
+        worker.apply_edits(tmp_path, [
+            {'path':'implementation/example.py', 'old_text':'source-old', 'new_text':'source-new'},
+            {'path':'implementation/tests/test_example.py', 'old_text':'missing-test-anchor', 'new_text':'test-new'},
+        ], Gate(), {'max_changed_lines':800,'max_changed_files':25})
+    except worker.WorkerError as exc:
+        assert 'occur once' in str(exc)
+    else:
+        raise AssertionError('missing later anchor was accepted')
+    assert first.read_text(encoding='utf-8') == 'source-old\n'
+    assert second.read_text(encoding='utf-8') == 'test-old\n'
+
+
+def test_apply_edits_preserves_sequential_same_file_replacements(tmp_path):
+    target = tmp_path / 'implementation' / 'example.py'
+    target.parent.mkdir(parents=True)
+    target.write_text('start\n', encoding='utf-8')
+    changed = worker.apply_edits(tmp_path, [
+        {'path':'implementation/example.py', 'old_text':'start', 'new_text':'middle'},
+        {'path':'implementation/example.py', 'old_text':'middle', 'new_text':'finish'},
+    ], Gate(), {'max_changed_lines':800,'max_changed_files':25})
+    assert changed == ['implementation/example.py']
+    assert target.read_text(encoding='utf-8') == 'finish\n'
+
+
+def test_bounded_anchor_retry_queues_feedback_only_on_clean_owned_worktree(monkeypatch, tmp_path):
+    requests = []
+    monkeypatch.setattr(worker, 'run', lambda args, **kw: '' if args == ['git','status','--porcelain'] else 'unexpected')
+    monkeypatch.setattr(worker, 'source_excerpts_for_paths', lambda *args, **kw: [{'path':'implementation/example.py','content':'source'}])
+    monkeypatch.setattr(worker, 'queue_reasoning', lambda spool, **kw: requests.append(kw) or 'new-request-1')
+    item = {'id':'SUPPORT-DEV-1196','title':'bounded repair','evidence':'approved','acceptance':'tests'}
+    record = {'phase':'implementing','reasoning_request_id':'previous','attempts':0,'proposal_retries':0}
+    edits = [{'path':'implementation/example.py','old_text':'not-there','new_text':'fix'}]
+    failure = worker.WorkerError('exact repair anchor must occur once in implementation/example.py; found 0')
+    assert worker.queue_bounded_anchor_correction(tmp_path,tmp_path,item,record,edits,['implementation/tests/test_example.py'],failure,Gate(),{}) is True
+    assert len(requests) == 1
+    assert requests[0]['kind'] == 'edit_plan'
+    assert requests[0]['context']['retry_number'] == 1
+    assert 'exact-text anchor' in requests[0]['context']['validation_feedback']
+    assert record['phase'] == 'implementing'
+    assert record['reasoning_request_id'] == 'new-request-1'
+    assert record['proposal_retries'] == 1 and record['attempts'] == 0
+
+
+def test_bounded_anchor_retry_fails_closed_on_dirty_or_exhausted_input(monkeypatch,tmp_path):
+    requests = []
+    monkeypatch.setattr(worker, 'run', lambda args, **kw: ' M implementation/example.py')
+    monkeypatch.setattr(worker, 'queue_reasoning', lambda *args, **kw: requests.append(True))
+    item = {'id':'SUPPORT-DEV-1196'}
+    record = {'proposal_retries':0,'reasoning_request_id':'original','phase':'implementing'}
+    failure = worker.WorkerError('exact repair anchor must occur once in implementation/example.py; found 0')
+    assert worker.queue_bounded_anchor_correction(tmp_path,tmp_path,item,record,[],[],failure,Gate(),{}) is False
+    record['proposal_retries'] = 2
+    assert worker.queue_bounded_anchor_correction(tmp_path,tmp_path,item,record,[],[],failure,Gate(),{}) is False
+    assert worker.queue_bounded_anchor_correction(tmp_path,tmp_path,item,record,[],[],worker.WorkerError('repair path denied by J-CHANGE-002'),Gate(),{}) is False
+    assert not requests
+    assert record['phase'] == 'implementing' and record['reasoning_request_id'] == 'original'
+
+
+def test_apply_edits_late_denied_path_has_no_side_effects(tmp_path):
+    first = tmp_path / 'implementation' / 'example.py'
+    first.parent.mkdir(parents=True)
+    first.write_text('original\n', encoding='utf-8')
+    try:
+        worker.apply_edits(tmp_path, [
+            {'path':'implementation/example.py', 'old_text':'original', 'new_text':'changed'},
+            {'path':'implementation/connectors/secret.py', 'old_text':'', 'new_text':'denied'},
+        ], Gate(), {'max_changed_lines':800,'max_changed_files':25})
+    except worker.WorkerError as exc:
+        assert 'denied' in str(exc)
+    else:
+        raise AssertionError('late denied path accepted')
+    assert first.read_text(encoding='utf-8') == 'original\n'
+    assert not (tmp_path / 'implementation/connectors/secret.py').exists()
+
+
+def test_apply_edits_late_change_budget_rejection_has_no_side_effects(tmp_path):
+    first = tmp_path / 'implementation' / 'example.py'
+    first.parent.mkdir(parents=True)
+    first.write_text('original\n', encoding='utf-8')
+    try:
+        worker.apply_edits(tmp_path, [
+            {'path':'implementation/example.py', 'old_text':'original', 'new_text':'changed'},
+            {'path':'implementation/tests/test_example.py', 'old_text':'', 'new_text':'one\ntwo\nthree'},
+        ], Gate(), {'max_changed_lines':4,'max_changed_files':25})
+    except worker.WorkerError as exc:
+        assert 'changed-line boundary' in str(exc)
+    else:
+        raise AssertionError('late over-budget change accepted')
+    assert first.read_text(encoding='utf-8') == 'original\n'
+    assert not (tmp_path / 'implementation/tests/test_example.py').exists()
+
+
+def _legacy_partial_anchor_fixture(tmp_path):
+    import subprocess
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    def git(*args, cwd=repo):
+        return subprocess.run(['git', *args], cwd=cwd, check=True,
+                              text=True, capture_output=True).stdout.strip()
+    git('init', '-q')
+    git('config', 'user.email', 'tests@example.invalid')
+    git('config', 'user.name', 'Test')
+    path = repo / 'implementation' / 'example.py'
+    path.parent.mkdir(parents=True)
+    path.write_text('existing = True\n', encoding='utf-8')
+    test = repo / 'implementation' / 'tests' / 'test_example.py'
+    test.parent.mkdir(parents=True)
+    test.write_text('def test_original():\n    assert True\n', encoding='utf-8')
+    git('add', '.')
+    git('commit', '-qm', 'baseline')
+    git('branch', '-M', 'main')
+    git('branch', 'origin/main', 'main')
+    original = tmp_path / 'original'
+    rid = 'b' * 64
+    item_id = 'SUPPORT-DEV-1196'
+    original_branch = worker.branch_name(item_id)
+    retry_branch = original_branch + '-anchor-' + rid[:12]
+    git('worktree', 'add', '-q', '-b', original_branch, str(original), 'main')
+    (original / 'implementation/example.py').write_text('existing = False\n', encoding='utf-8')
+    clean = tmp_path / 'clean'
+    git('worktree', 'add', '-q', '-b', retry_branch, str(clean), 'main')
+    spool = tmp_path / 'spool'
+    dest = spool / 'reasoning' / 'responses'
+    dest.mkdir(parents=True)
+    (dest / (rid + '.json')).write_text(json.dumps({
+        'request_id': rid, 'kind': 'edit_plan', 'support_item': item_id,
+        'status': 'succeeded', 'result': {
+            'blocked_reason': None,
+            'edits': [{'path':'implementation/example.py',
+                       'old_text':'existing = True', 'new_text':'existing = False'},
+                      {'path':'implementation/tests/test_example.py',
+                       'old_text':'unavailable anchor', 'new_text':'test change'}],
+            'test_paths': ['implementation/tests/test_example.py'],
+        },
+    }), encoding='utf-8')
+    record = {
+        'phase': 'blocked', 'branch': original_branch, 'proposal_retries': 0,
+        'reasoning_request_id': rid,
+        'reason': ('WorkerError: exact repair anchor must occur once in '
+                   'implementation/tests/test_example.py; found 0'),
+    }
+    return repo, original, clean, spool, rid, retry_branch, {'items': {item_id: record}}
+
+
+def test_preserve_legacy_partial_anchor_worktree_and_resume_clean(monkeypatch, tmp_path):
+    repo, old, clean, spool, rid, retry_branch, state = _legacy_partial_anchor_fixture(tmp_path)
+    record = state['items']['SUPPORT-DEV-1196']
+    path = lambda item, branch=None: clean if branch == retry_branch else old
+    monkeypatch.setattr(worker, 'support_worktree_path', path)
+    monkeypatch.setattr(worker, 'ensure_worktree', lambda repo, item, branch=None: clean)
+    monkeypatch.setattr(worker, 'source_excerpts_for_paths',
+                        lambda *a, **k: [{'path':'implementation/example.py',
+                                          'content':'existing = True'}])
+    requests = []
+    monkeypatch.setattr(worker, 'queue_reasoning',
+                        lambda spool, **kw: requests.append(kw) or 'c'*64)
+    supported = [{'id':'SUPPORT-DEV-1196', 'title':'Recovery',
+                  'evidence':'approved', 'acceptance':'tested'}]
+    original_content = (old / 'implementation/example.py').read_text()
+    resumed = worker.readmit_preserved_anchor_failure(
+        state, supported, repo, spool, Gate(), {}, max_active=2)
+    assert resumed == ['SUPPORT-DEV-1196']
+    assert (old / 'implementation/example.py').read_text() == original_content
+    assert (clean / 'implementation/example.py').read_text() == 'existing = True\n'
+    evidence = json.loads((spool / 'recovery-evidence' / (rid + '.json')).read_text())
+    assert evidence['support_item'] == 'SUPPORT-DEV-1196'
+    assert evidence['failed_reasoning_request_id'] == rid
+    assert 'existing = False' in evidence['preserved_original_patch']
+    assert record['preserved_anchor_patch_sha256'] == evidence['original_patch_sha256']
+    assert record['phase'] == 'implementing'
+    assert record['branch'] == retry_branch
+    assert record['reasoning_request_id'] == 'c'*64
+    assert record['proposal_retries'] == 1
+    assert requests[0]['kind'] == 'edit_plan'
+    assert 'SUPPORT-DEV' in requests[0]['context']['validation_feedback']
+    assert worker.readmit_preserved_anchor_failure(
+        state, supported, repo, spool, Gate(), {}, max_active=2) == []
+    assert len(requests) == 1
+
+
+def test_preserve_legacy_anchor_requires_original_proof(monkeypatch, tmp_path):
+    repo, old, clean, spool, rid, retry_branch, state = _legacy_partial_anchor_fixture(tmp_path)
+    record = state['items']['SUPPORT-DEV-1196']
+    monkeypatch.setattr(worker, 'support_worktree_path',
+                        lambda item, branch=None: old)
+    calls = []
+    monkeypatch.setattr(worker, 'ensure_worktree', lambda *a, **k: calls.append('worktree'))
+    monkeypatch.setattr(worker, 'queue_reasoning', lambda *a, **k: calls.append('request'))
+    eligible = [{'id':'SUPPORT-DEV-1196'}]
+    record['reasoning_request_id'] = 'd'*64
+    assert worker.readmit_preserved_anchor_failure(
+        state, eligible, repo, spool, Gate(), {}, max_active=2) == []
+    record['reasoning_request_id'] = rid
+    record['branch'] = 'repair/custom-overridden'
+    assert worker.readmit_preserved_anchor_failure(
+        state, eligible, repo, spool, Gate(), {}, max_active=2) == []
+    assert calls == []
+    assert (old / 'implementation/example.py').read_text() == 'existing = False\n'
+
+
+def test_preserve_legacy_anchor_fails_closed_for_unrelated_dirty_files(monkeypatch, tmp_path):
+    repo, old, clean, spool, rid, retry_branch, state = _legacy_partial_anchor_fixture(tmp_path)
+    target = old / 'implementation' / 'unknown.py'
+    target.write_text('untracked = True\n', encoding='utf-8')
+    monkeypatch.setattr(worker, 'support_worktree_path',
+                        lambda item, branch=None: old)
+    calls = []
+    monkeypatch.setattr(worker, 'ensure_worktree', lambda *a, **k: calls.append('worktree'))
+    monkeypatch.setattr(worker, 'queue_reasoning', lambda *a, **k: calls.append('request'))
+    assert worker.readmit_preserved_anchor_failure(
+        state, [{'id':'SUPPORT-DEV-1196'}], repo, spool, Gate(), {}, max_active=2) == []
+    assert calls == []
+    assert target.exists()
+    assert not (spool / 'recovery-evidence').exists()
+
+
+def test_recovery_worktree_path_requires_exact_item_and_branch_identity():
+    item = 'SUPPORT-DEV-1196'
+    branch = worker.branch_name(item) + '-anchor-' + 'f'*12
+    assert worker.support_worktree_path(item, branch).name == 'support-dev-1196-anchor-' + 'f'*12
+    assert worker.support_worktree_path(item).name == 'support-dev-1196'
+    assert worker.support_worktree_path(item, 'repair/something-else').name == 'support-dev-1196'
+    try:
+        worker.support_worktree_path('../outside', branch)
+    except worker.WorkerError as exc:
+        assert 'identity' in str(exc)
+    else:
+        raise AssertionError('unsafe support item path was accepted')
+
+
+def test_preserve_legacy_anchor_rejects_same_path_manual_tampering(monkeypatch, tmp_path):
+    repo, old, clean, spool, rid, retry_branch, state = _legacy_partial_anchor_fixture(tmp_path)
+    (old / 'implementation/example.py').write_text(
+        'existing = False\nmanual_addition = 1\n', encoding='utf-8')
+    monkeypatch.setattr(worker, 'support_worktree_path',
+                        lambda item, branch=None: old)
+    calls = []
+    monkeypatch.setattr(worker, 'ensure_worktree', lambda *args, **kw: calls.append('created'))
+    monkeypatch.setattr(worker, 'queue_reasoning', lambda *args, **kw: calls.append('queued'))
+    record = state['items']['SUPPORT-DEV-1196']
+    assert worker.readmit_preserved_anchor_failure(
+        state, [{'id':'SUPPORT-DEV-1196'}], repo, spool, Gate(), {}, max_active=2) == []
+    assert not calls
+    assert record['phase'] == 'blocked'
+    assert not (spool / 'recovery-evidence').exists()
+    assert 'manual_addition' in (old / 'implementation/example.py').read_text()
+
+
+def test_preserve_legacy_anchor_respects_capacity(monkeypatch, tmp_path):
+    repo, old, clean, spool, rid, retry_branch, state = _legacy_partial_anchor_fixture(tmp_path)
+    state['items']['SUPPORT-OPS-123'] = {'phase': 'diagnosing'}
+    monkeypatch.setattr(worker, 'ensure_worktree',
+                        lambda *args, **kw: (_ for _ in ()).throw(AssertionError('must not create')))
+    assert worker.readmit_preserved_anchor_failure(
+        state, [{'id':'SUPPORT-DEV-1196'}], repo, spool, Gate(), {}, max_active=1) == []
+    assert state['items']['SUPPORT-DEV-1196']['phase'] == 'blocked'

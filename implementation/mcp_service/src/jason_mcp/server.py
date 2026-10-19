@@ -134,8 +134,11 @@ from jason_runtime.resolution_memory_runtime import (
 from jason_runtime.datto_component_scope import (
     DATTO_AD_HOC_POWERSHELL_NAME,
     DATTO_AD_HOC_POWERSHELL_UID,
+    DATTO_AD_HOC_LINUX_SHELL_NAME,
+    DATTO_AD_HOC_LINUX_SHELL_UID,
     DATTO_EXECUTION_COMPONENTS_JSON_ENV,
     DATTO_APPROVAL_MODE_PER_RUN,
+    DattoApprovedComponent,
     configured_datto_components,
     effective_datto_component_approval_mode,
     resolve_datto_component,
@@ -3212,6 +3215,30 @@ def _direct_ticket_update_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
     return {"payload": {"id": ticket_id, **payload}}
 
 
+def _active_datto_execution_components():
+    """Combine the existing catalog with one separately enrolled per-run worker.
+
+    The worker enrollment is operator-managed; callers cannot supply it.
+    This does not change the existing Desktop pilot or standing-safe catalog.
+    """
+    components = configured_datto_components()
+    worker_uid = os.environ.get(
+        "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
+    ).strip()
+    if worker_uid and not any(
+        component.uid == DATTO_AD_HOC_LINUX_SHELL_UID
+        or component.name.casefold() == DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
+        for component in components
+    ):
+        components = (*components, DattoApprovedComponent(
+            uid=DATTO_AD_HOC_LINUX_SHELL_UID,
+            name=DATTO_AD_HOC_LINUX_SHELL_NAME,
+            approval_mode=DATTO_APPROVAL_MODE_PER_RUN,
+            approval_source="separate_worker_enrollment",
+        ))
+    return components
+
+
 def _canonicalize_governed_action_arguments(
     capability_name: str,
     arguments: Mapping[str, Any] | None,
@@ -3473,9 +3500,12 @@ def _canonicalize_governed_action_arguments(
         ).strip(),
     }
 
-    components = configured_datto_components()
+    components = _active_datto_execution_components()
+    worker_uid = os.environ.get(
+        "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
+    ).strip()
 
-    if not all(expected.values()) or not components:
+    if (not all(expected.values()) or not components) and not worker_uid:
         raise ValueError(
             "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INCOMPLETE"
         )
@@ -3500,18 +3530,9 @@ def _canonicalize_governed_action_arguments(
         raw.get("allowlist_name") or ""
     ).strip()
 
-    if (
-        supplied_allowlist
-        and supplied_allowlist != expected["allowlist_name"]
-    ):
-        raise ValueError(
-            "DATTO_COMPONENT_ALLOWLIST_MISMATCH"
-        )
-
-    # device_class is server-controlled policy metadata. Caller/model-provided
-    # class labels are deliberately ignored. Exact endpoint identity and active
-    # managed state are independently verified above.
-    supplied_class = expected["device_class"]
+    # The effective allowlist and target class are derived below from the
+    # exact live component and server-managed worker enrollment, never from
+    # caller-supplied policy labels.
 
     supplied_component_uid = str(
         raw.get("component_uid")
@@ -3591,12 +3612,42 @@ def _canonicalize_governed_action_arguments(
             "DATTO_COMPONENT_VARIABLES_INVALID"
         )
 
+    # Arbitrary Linux shell execution is a separately enrolled worker
+    # capability, not a general permission on every managed endpoint.
+    # The configured allowlist is operator-controlled, never caller-supplied.
+    if (
+        selected_component.uid == DATTO_AD_HOC_LINUX_SHELL_UID
+        or selected_component.name.casefold()
+        == DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
+    ):
+        if (
+            selected_component.uid != DATTO_AD_HOC_LINUX_SHELL_UID
+            or selected_component.name.casefold()
+            != DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
+        ):
+            raise ValueError("DATTO_LINUX_SHELL_COMPONENT_IDENTITY_MISMATCH")
+        approved_worker = os.environ.get(
+            "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
+        ).strip()
+        if not approved_worker or requested_device != approved_worker:
+            raise ValueError("DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED")
+        effective_allowlist = "aot-approved-linux-worker"
+        effective_class = "Server"
+    else:
+        if not all(expected.values()) or not configured_datto_components():
+            raise ValueError("DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INCOMPLETE")
+        effective_allowlist = expected["allowlist_name"]
+        effective_class = expected["device_class"]
+
+    if supplied_allowlist and supplied_allowlist != effective_allowlist:
+        raise ValueError("DATTO_COMPONENT_ALLOWLIST_MISMATCH")
+
     # Only exact server-resolved component identity and provider-neutral values
     # required by the runtime are forwarded. The model cannot widen the set.
     return {
-        "allowlist_name": expected["allowlist_name"],
+        "allowlist_name": effective_allowlist,
         "device_uid": requested_device,
-        "device_class": expected["device_class"],
+        "device_class": effective_class,
         "component_uid": selected_component.uid,
         "component_name": selected_component.name,
         "variables": dict(variables),
@@ -3664,7 +3715,7 @@ def _governed_execute(
     if capability_name == "automation.component.execute":
         try:
             selected_component = resolve_datto_component(
-                configured_datto_components(),
+                _active_datto_execution_components(),
                 component_uid=canonical_arguments.get("component_uid"),
                 component_name=canonical_arguments.get("component_name"),
                 catalog_verified=True,

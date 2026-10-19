@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 from datetime import datetime, timedelta, timezone
@@ -13,6 +14,23 @@ from connectors.core.contracts import ConnectorTransportError
 
 DEFAULT_SPOOL = Path('/var/lib/jason/openclaw/support-repair')
 _ALLOWED_KINDS = {'search_plan', 'edit_plan', 'acceptance_review'}
+_BILLING_ERRORS = {
+    'credit_balance_exhausted': 'restore_provider_credits',
+    'organization_spend_limit_exceeded': 'review_organization_spend_limit',
+    'project_spend_limit_exceeded': 'review_project_spend_limit',
+    'organization_usage_limit_exceeded': 'review_provider_usage_limit',
+    'insufficient_quota': 'review_provider_billing_or_quota',
+}
+logger = logging.getLogger(__name__)
+
+
+def _billing_blocker(exc: BaseException) -> str | None:
+    if not isinstance(exc, ConnectorTransportError):
+        return None
+    code = exc.provider_error_code
+    if code in _BILLING_ERRORS:
+        return code
+    return 'insufficient_quota' if exc.provider_error_type == 'insufficient_quota' else None
 
 
 def _now() -> str:
@@ -128,6 +146,7 @@ class SupportRepairReasoningMaintenance:
         self.interval_seconds = int(interval_seconds)
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.next_due_at: datetime | None = None
+        self.attempt_diagnostics: dict[str, Any] = {}
 
     def _validate_request(self, raw: Mapping[str, Any]) -> dict[str, Any]:
         kind = str(raw.get('kind') or '').strip()
@@ -152,6 +171,7 @@ class SupportRepairReasoningMaintenance:
         return payload | {'request_id': expected}
 
     def _complete(self, request: Mapping[str, Any]) -> Mapping[str, Any]:
+        self.attempt_diagnostics = {}
         kind = str(request['kind'])
         context = request.get('context') or {}
         is_development = str(request['support_item']).startswith('DEV-')
@@ -231,15 +251,44 @@ class SupportRepairReasoningMaintenance:
                 max_output_tokens=4096,
             )
         except ConnectorTransportError as exc:
+            billing = _billing_blocker(exc)
+            if billing:
+                self.attempt_diagnostics = {
+                    'primary_provider_error_code': billing,
+                    'primary_http_status': exc.status_code,
+                    'required_owner_action': _BILLING_ERRORS[billing],
+                }
+                logger.error('REASONING_DEPENDENCY_BLOCKED code=%s action=%s',
+                             billing, _BILLING_ERRORS[billing])
             transient = exc.status_code is None or exc.status_code in {408, 425, 429, 500, 502, 503, 504}
-            if self.fallback_structured_client is None or not transient:
+            # Patch-plan HTTP 400 is a non-retriable hosted request rejection, but
+            # the existing isolated local model can independently propose edits.
+            # This does not repeat the rejected hosted request or bypass host-side
+            # exact-text validation, tests, approval, or release governance.
+            local_patch_fallback = kind == 'edit_plan' and exc.status_code == 400
+            if self.fallback_structured_client is None or not (transient or local_patch_fallback):
                 raise
-            return self.fallback_structured_client.complete(
-                system=system,
-                user=user,
-                schema=schema,
-                max_output_tokens=1024,
-            )
+            try:
+                result = self.fallback_structured_client.complete(
+                    system=system, user=user, schema=schema, max_output_tokens=1024)
+                self.attempt_diagnostics['fallback_status'] = 'succeeded'
+                return result
+            except Exception as fallback_error:
+                self.attempt_diagnostics['fallback_status'] = 'failed'
+                self.attempt_diagnostics['fallback_error_type'] = type(fallback_error).__name__
+                if billing:
+                    # A slow or broken fallback must never overwrite an actionable
+                    # primary billing/credit error with generic network failure.
+                    raise exc from fallback_error
+                raise
+
+    @staticmethod
+    def _request_kind_from_file(path: Path) -> str:
+        try:
+            raw = json.loads(path.read_text(encoding='utf-8'))
+            return str(raw.get('kind') or '') if isinstance(raw, Mapping) else ''
+        except (OSError, ValueError, json.JSONDecodeError):
+            return ''
 
     def tick(self) -> bool:
         current = self.now()
@@ -263,6 +312,8 @@ class SupportRepairReasoningMaintenance:
                 return False
             if not isinstance(prior, Mapping) or prior.get('status') != 'failed':
                 return False
+            if prior.get('retryable') is False or prior.get('primary_provider_error_code') in _BILLING_ERRORS:
+                return False
             attempts = int(prior.get('attempts') or 0)
             error = str(prior.get('error') or '')
             transient = (
@@ -271,6 +322,8 @@ class SupportRepairReasoningMaintenance:
                     'status 429' in error
                     or any(f'status {code}' in error for code in (408, 425, 500, 502, 503, 504))
                     or 'status ' not in error
+                    or ('status 400' in error and self.fallback_structured_client is not None
+                        and self._request_kind_from_file(path) == 'edit_plan')
                 )
             )
             fallback_budget_mismatch = (
@@ -294,6 +347,7 @@ class SupportRepairReasoningMaintenance:
                         prior_attempts = int(prior_payload.get('attempts') or 0)
                 except (OSError, ValueError, json.JSONDecodeError):
                     prior_attempts = 0
+            self.attempt_diagnostics = {}
             try:
                 raw = json.loads(path.read_text(encoding='utf-8'))
                 if not isinstance(raw, Mapping):
@@ -313,10 +367,24 @@ class SupportRepairReasoningMaintenance:
                     'status': 'failed',
                     'request_id': path.stem,
                     'error_type': type(exc).__name__,
+                    'transport_failure_code': (
+                        exc.provider_error_code
+                        if isinstance(exc, ConnectorTransportError) and exc.provider_error_code in {
+                            'DNS_RESOLUTION', 'NETWORK_TIMEOUT', 'TLS_FAILURE',
+                            'CONNECTION_REFUSED', 'NETWORK_UNREACHABLE',
+                            'NETWORK_IO_FAILURE',
+                        }
+                        else None
+                    ),
                     'error': str(exc)[:800],
                     'attempts': prior_attempts + 1,
                     'completed_at': _now(),
                 }
+            payload.update(self.attempt_diagnostics)
+            billing = payload.get('primary_provider_error_code')
+            if payload['status'] == 'failed' and billing in _BILLING_ERRORS:
+                payload['retryable'] = False
+                payload['error'] = 'Hosted reasoning blocked: '+billing+'; Owner action: '+_BILLING_ERRORS[billing]
             _atomic_json(response_path, payload)
             processed = True
         return processed

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from issue_resolution_engine import acceptance_text, correlate_failures, update_recurrence_memory
+from jason_host_storage_health import storage_capacity_failures
 
 DEFAULT_ROOT = Path("/var/lib/jason/openclaw/self-heal")
 HEALTH_URL = "http://127.0.0.1:9467/metrics"
@@ -267,7 +268,13 @@ def production_convergence_failures(
     automatic_window = production.get("automatic_window") if isinstance(production.get("automatic_window"), Mapping) else {}
     evidence["release_manager_policy_schedule"] = dict(schedule)
     evidence["development_release_automatic_window"] = dict(automatic_window)
-    if str(schedule.get("mode") or "").casefold() != "continuous_24x7":
+    # The production policy explicitly records the AOT owner's 24x7
+    # authorization. Both the canonical mode and this exact owner-approved
+    # mode denote continuous operation, not a legacy daily window.
+    if str(schedule.get("mode") or "").casefold() not in {
+        "continuous_24x7",
+        "continuous_24x7_owner_approved",
+    }:
         failures.append("production_convergence_intent_contradiction:release_policy_not_24x7")
     if "daily_window_local" in schedule:
         failures.append("production_convergence_intent_contradiction:legacy_daily_window_present")
@@ -460,8 +467,12 @@ def autonomy_behavior_anomalies(
             failures.append(f"autonomy_invariant_violation:eligible_gt_evaluated:{cycle}")
         if numeric["selected"] > numeric["eligible"]:
             failures.append(f"autonomy_invariant_violation:selected_gt_eligible:{cycle}")
-        if numeric["selected"] > numeric["active_slots"]:
-            failures.append(f"autonomy_invariant_violation:selected_gt_active_slots:{cycle}")
+        # active_slots is the currently occupied slot count at scan
+        # completion, not admission capacity at decision time. Successfully
+        # started work can finish or move to WAITING in this scan. Comparing
+        # selected starts to post-scan occupancy creates false P0 incidents.
+        # The true admission bound remains enforced at each _admit() and
+        # preserved in the worker's own max_active_work_items checks.
 
     # Generic behavioral baseline: compare recent selection efficiency with Jason's
     # own older healthy-looking cycles instead of hard-coding a particular failure.
@@ -656,6 +667,13 @@ def detect(root: Path = DEFAULT_ROOT) -> tuple[list[str], dict[str, Any]]:
     evidence["production_convergence"] = convergence_evidence
     failures.extend(convergence_failures)
 
+    # Existing five-minute watchdog: independent root and archive capacity,
+    # with allocatable-space and inode headroom. Informational detection only;
+    # never triggers deletion, cache prune, container shutdown or provider write.
+    storage_failures, storage_evidence = storage_capacity_failures()
+    evidence["host_storage_capacity"] = storage_evidence
+    failures.extend(storage_failures)
+
     failed_units = failed_jason_user_units()
     evidence["failed_jason_user_units"] = failed_units
     for unit in failed_units:
@@ -773,7 +791,10 @@ def queue_resolution_incident(root: Path, incident: Mapping[str, Any], evidence:
     }
     path = root / "incidents" / f"{fp}.json"
     atomic_json(path, payload)
-    run(["systemctl", "--user", "start", "--no-block", "jason-support-repair-worker.service"], timeout=10)
+    # Disk capacity is an owner-reviewed host-maintenance decision, not a
+    # grant to the engineering worker to remove caches or rollback artifacts.
+    if str(incident.get("family")) != "host_storage_capacity":
+        run(["systemctl", "--user", "start", "--no-block", "jason-support-repair-worker.service"], timeout=10)
     return path
 
 
@@ -790,7 +811,14 @@ def write_incident_escalation(root: Path, *, incident: Mapping[str, Any], attemp
         "degraded_function": str(incident.get("title") or ", ".join(symptoms))[:240],
         "evidence_summary": "; ".join(symptoms)[:600],
         "attempt_summary": ("; ".join(actions) or "bounded automatic recovery produced no safe action")[:600],
-        "owner_action": "A genuine authority or disruptive-action boundary remains; review only that specific blocked action.",
+        "owner_action": (
+            "Review root/archive capacity, then explicitly approve bounded storage "
+            "cleanup or relocation. Preserve running containers, active worktrees, "
+            "Docker volumes, immutable rollback images, backups and approval data; "
+            "require independent free-space readback."
+            if str(incident.get("family")) == "host_storage_capacity"
+            else "A genuine authority or disruptive-action boundary remains; review only that specific blocked action."
+        ),
         "repair_level": int(repair.get("level") or 4),
         "repair_class": str(repair.get("name") or "external_or_authority_blocker"),
         "attempts": attempts,

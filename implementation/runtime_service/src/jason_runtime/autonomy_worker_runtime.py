@@ -2351,10 +2351,12 @@ class OperationalAutonomyMaintenance:
             1 for state, reason, _, _ in classifications.values()
             if state == "not_actionable" and reason == "existing_technician_activity"
         )
-        eligible_count = sum(
-            1 for state, _, _, _ in classifications.values()
-            if state == "eligible_now"
-        )
+        # Eligibility is an admission candidate count, not a count of
+        # tickets STILL marked eligible after _advance(). A ticket can be
+        # selected and immediately complete, block, or enter a waiting
+        # state during this very scan. Snapshot metrics must preserve the
+        # population that was eligible at scan decision time.
+        eligible_count = len(eligible)
 
         trace = getattr(self.queue_source, "last_trace", None)
         scanned_at = datetime.now(timezone.utc).isoformat()
@@ -2378,6 +2380,8 @@ class OperationalAutonomyMaintenance:
             unsupported=unsupported,
             governance_blocked=governance_blocked,
             assigned_elsewhere=assigned_elsewhere,
+            # Observed occupancy at scan end; not admission capacity at start.
+            # Some started work has already advanced into terminal/waiting.
             active_slots=len(self.store.list_open()),
             selected=started,
             waiting_device=waiting_device,

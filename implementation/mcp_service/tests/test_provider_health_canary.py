@@ -32,3 +32,20 @@ def test_connector_authorization_denied_is_bounded_authority_error_class():
         )
         == "authority_denied"
     )
+
+
+def test_unknown_provider_failure_is_sanitized_to_bounded_execution_failure():
+    assert _error_class(
+        status="failed",
+        error_code="REMOTE_UNEXPECTED_BACKEND_CODE_UNKNOWN_4251",
+        reason_codes=("invocation_failure",),
+    ) == "execution_failed"
+
+
+def test_empty_provider_failure_is_still_bounded_execution_failure():
+    assert _error_class(status="failed", error_code=None, reason_codes=()) == "execution_failed"
+
+
+def test_known_unavailability_and_timeout_classes_are_preserved():
+    assert _error_class(status="failed", error_code="PROVIDER_UNAVAILABLE", reason_codes=()) == "provider_unavailable"
+    assert _error_class(status="failed", error_code="TIMEOUT", reason_codes=()) == "timeout"

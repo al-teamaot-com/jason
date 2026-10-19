@@ -448,13 +448,20 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str, dict[str, Any]]:
             )
             return event, text, card
         owner_action = _bounded(arguments.get("owner_action"), "owner_action", 300)
+        # This card is a status/fallback, NOT an authorization mechanism.
+        # An actionable Production + CCC card may be sent to the same chat
+        # shortly before this notice. Make the difference unmistakable
+        # rather than showing an "owner action required" card with no buttons.
         text = (
-            f"Jason needs owner action for {work_id}: {description} "
-            f"Owner action: {owner_action}."
+            f"STATUS ONLY (no approval buttons) for {work_id}: {description}. "
+            f"Owner action: {owner_action} "
+            "Use the separate Production + CCC approval card if present."
         )
         card = _adaptive_card(
-            title="Jason owner action required",
-            summary=description,
+            title="Production status only - NOT an approval card",
+            summary=(description +
+                     " This status card has no approval buttons. Use the separate "
+                     "Production + CCC approval card if present."),
             color="Attention",
             facts=(
                 ("Build", work_id),

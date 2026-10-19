@@ -443,11 +443,29 @@ def branch_name(item_id: str) -> str:
     return 'repair/' + item_id.casefold().replace('_', '-').replace('/', '-')
 
 
+def support_worktree_path(item_id: str, branch: str | None = None) -> Path:
+    # An exact failed-anchor incident may need a fresh, separately named
+    # worktree. Its previous partial proposal remains untouched for audit.
+    if re.fullmatch(SUPPORT_ID_PATTERN, item_id) is None:
+        raise WorkerError('invalid support identity for repair worktree')
+    normal = branch_name(item_id)
+    if branch and re.fullmatch(re.escape(normal) + r'-anchor-[0-9a-f]{12}', branch):
+        return Path('/home/al/jason-worktrees/support-repair') / branch.split('/')[-1]
+    return Path('/home/al/jason-worktrees/support-repair') / item_id.casefold()
+
+
 def ensure_worktree(repo: Path, item_id: str, branch: str | None = None) -> Path:
     root = Path('/home/al/jason-worktrees/support-repair')
+    if root.is_symlink():
+        raise WorkerError('repair worktree root must not be a symlink')
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    path = root / item_id.casefold()
+    path = support_worktree_path(item_id, branch)
+    if path.is_symlink():
+        raise WorkerError('repair worktree path is a symlink')
     if path.exists():
+        if (branch and branch != branch_name(item_id)
+                and run(['git', 'branch', '--show-current'], cwd=path) != branch):
+            raise WorkerError('recovery worktree does not match its pinned branch')
         return path
     run(['git', 'fetch', '--no-tags', 'origin', 'main'], cwd=repo)
     selected = branch or branch_name(item_id)
@@ -916,10 +934,18 @@ def changed_files(worktree: Path) -> list[str]:
 
 
 def apply_edits(worktree: Path, edits: list[Mapping[str, Any]], gate, policy: Mapping[str, Any]) -> list[str]:
+    """Prevalidate all bounded anchors before any source-file mutation.
+
+    A late invalid regression-test anchor must not leave earlier source edits
+    partially written in the isolated worktree. Consecutive edits to one file
+    still operate on the staged replacement, never on unvalidated disk writes.
+    """
     if not edits or len(edits) > 12:
         raise WorkerError('repair proposal must contain between 1 and 12 edits')
     touched: list[str] = []
+    pending: dict[str, tuple[Path, str]] = {}
     total_delta = 0
+    root = worktree.resolve()
     for edit in edits:
         path = str(edit.get('path') or '').strip()
         old = str(edit.get('old_text') or '')
@@ -930,16 +956,23 @@ def apply_edits(worktree: Path, edits: list[Mapping[str, Any]], gate, policy: Ma
         if denial:
             raise WorkerError('repair path denied by J-CHANGE-002: ' + denial)
         target = worktree / path
-        root = worktree.resolve()
         parent = target.parent.resolve()
         if parent != root and root not in parent.parents:
             raise WorkerError('invalid repair path')
-        if target.exists():
+        if path in pending:
+            text = pending[path][1]
+            exists = True
+        elif target.exists():
             if not target.is_file():
                 raise WorkerError(f'repair path is not a file: {path}')
+            text = target.read_text(encoding='utf-8')
+            exists = True
+        else:
+            text = ''
+            exists = False
+        if exists:
             if old == '':
                 raise WorkerError(f'new-file repair path already exists: {path}')
-            text = target.read_text(encoding='utf-8')
             count = text.count(old)
             if count != 1:
                 raise WorkerError(f'exact repair anchor must occur once in {path}; found {count}')
@@ -947,17 +980,81 @@ def apply_edits(worktree: Path, edits: list[Mapping[str, Any]], gate, policy: Ma
         else:
             if old != '':
                 raise WorkerError(f'repair path does not exist: {path}')
-            target.parent.mkdir(parents=True, exist_ok=True)
             replacement = new
         total_delta += old.count('\n') + new.count('\n') + 2
         if total_delta > int(policy.get('max_changed_lines', 800)):
             raise WorkerError('proposed repair exceeds changed-line boundary')
-        target.write_text(replacement, encoding='utf-8')
+        pending[path] = (target, replacement)
         if path not in touched:
             touched.append(path)
-    if len(touched) > int(policy.get('max_changed_files', 25)):
-        raise WorkerError('proposed repair exceeds changed-file boundary')
+        if len(touched) > int(policy.get('max_changed_files', 25)):
+            raise WorkerError('proposed repair exceeds changed-file boundary')
+    # Nothing is written until every path, anchor, and size gate has passed.
+    for path in touched:
+        target, replacement = pending[path]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(replacement, encoding='utf-8')
     return touched
+
+
+def queue_bounded_anchor_correction(
+    spool: Path,
+    worktree: Path,
+    item: Mapping[str, str],
+    record: dict[str, Any],
+    edits: list[Mapping[str, Any]],
+    test_paths: list[str],
+    failure: WorkerError,
+    gate,
+    policy: Mapping[str, Any],
+) -> bool:
+    """Retry an invalid exact anchor at most twice with fresh governed source.
+
+    An already-dirty worktree must stop for review: it might contain prior
+    partial edits and must never be silently reset or folded into a retry.
+    Denied paths, missing authority, and test failures are not anchor retries.
+    """
+    detail = str(failure)
+    if not detail.startswith('exact repair anchor must occur once in '):
+        return False
+    attempts = int(record.get('proposal_retries') or 0)
+    if attempts >= 2:
+        return False
+    if run(['git', 'status', '--porcelain'], cwd=worktree).strip():
+        return False
+    paths = [str(edit.get('path') or '').strip() for edit in edits]
+    paths.extend(str(path).strip() for path in test_paths)
+    excerpts = source_excerpts_for_paths(
+        worktree, paths, gate, policy, limit=8, content_limit=14000,
+    )
+    if not excerpts:
+        return False
+    request_id = queue_reasoning(
+        spool, kind='edit_plan', item=item,
+        context={
+            'validation_feedback': (
+                'The bounded host validator rejected an exact-text anchor: '
+                + detail[:350]
+                + '. Use only fresh eligible source excerpts. Every old_text '
+                'must appear exactly once, and the proposal must edit a '
+                'declared regression test. Never weaken the path or authority gate.'
+            ),
+            'retry_number': attempts + 1,
+            'source_excerpts': excerpts,
+        },
+    )
+    if request_id == str(record.get('reasoning_request_id') or ''):
+        return False
+    record.update({
+        'phase': 'implementing',
+        'reasoning_request_id': request_id,
+        'proposal_retries': attempts + 1,
+        'last_anchor_failure': detail[:350],
+        'reason': 'bounded exact-anchor correction queued; no edits applied',
+        'updated_at': now(),
+    })
+    return True
+
 
 
 def proposed_test_edits(
@@ -1367,6 +1464,420 @@ def reassess_model_scope_blocks(
     return resumed
 
 
+
+def readmit_recovered_reasoning(
+    state: dict[str, Any], eligible: list[dict[str, str]], spool: Path,
+    *, max_active: int,
+) -> list[str]:
+    """Resume at most available repair slots after exact failed reasoning recovers.
+
+    No new request, approval, provider write, or source patch is authorized here.
+    The existing implementation and independent acceptance gates remain mandatory.
+    """
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active = sum(1 for record in records.values() if isinstance(record, Mapping)
+                 and record.get('phase') in {'diagnosing', 'implementing', 'ci_repair_needed', 'ci_repairing'})
+    slots = max(0, max(1, int(max_active)) - active)
+    resumed: list[str] = []
+    for item in eligible:
+        if slots == 0:
+            break
+        record = records.get(item['id'])
+        if not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        reason = str(record.get('reason') or '')
+        if reason.startswith('edit reasoning failed: HTTP transport failed'):
+            phase, expected_kind = 'implementing', 'edit_plan'
+        elif reason.startswith('reasoning request failed: HTTP transport failed'):
+            phase, expected_kind = 'diagnosing', 'search_plan'
+        else:
+            continue
+        rid = str(record.get('reasoning_request_id') or '')
+        if not re.fullmatch(r'[a-f0-9]{64}', rid):
+            continue
+        response = reasoning_response(spool, rid)
+        if not isinstance(response, Mapping) or response.get('status') != 'succeeded':
+            continue
+        if response.get('request_id') != rid or response.get('kind') != expected_kind:
+            continue
+        if response.get('support_item') != item['id']:
+            continue
+        if record.get('reasoning_recovered_request_id') == rid:
+            continue
+        record.update({'phase': phase, 'reason': 'Re-admitted after exact reasoning request recovered.',
+                       'reasoning_recovered_request_id': rid, 'updated_at': now()})
+        resumed.append(item['id'])
+        slots -= 1
+    return resumed
+
+
+
+
+def verified_later_reasoning_success(
+    spool: Path, *, failed_rid: str, item_id: str, kind: str,
+    max_proof_age_hours: int = 12,
+) -> tuple[dict[str, Any], str] | None:
+    """Require newer, independent, same-schema success before one transport retry.
+
+    This only reads the protected reasoning spool; it does not retry the failed
+    response, assert provider billing recovery, or authorize code/provider writes.
+    HTTP 400 receives the additional safeguard of an equal-or-larger successfully
+    handled request of the same kind. Known billing/authority errors never qualify.
+    """
+    if re.fullmatch(r'[0-9a-f]{64}', failed_rid) is None:
+        return None
+    req_path = spool / 'reasoning' / 'requests' / (failed_rid + '.json')
+    response_dir = spool / 'reasoning' / 'responses'
+    if not req_path.is_file() or not response_dir.is_dir():
+        return None
+    try:
+        if req_path.stat().st_size > 200_000:
+            return None
+        request = json.loads(req_path.read_text(encoding='utf-8'))
+        failure = reasoning_response(spool, failed_rid)
+        if (not isinstance(request, dict) or request_id(request) != failed_rid
+                or request.get('request_id') != failed_rid
+                or request.get('support_item') != item_id or request.get('kind') != kind
+                or not isinstance(request.get('context'), dict)
+                or not isinstance(failure, Mapping) or failure.get('status') != 'failed'
+                or failure.get('error_type') != 'ConnectorTransportError'
+                or failure.get('provider_error_code')
+                or failure.get('primary_provider_error_code')
+                or failure.get('required_owner_action')):
+            return None
+        error = str(failure.get('error') or '')
+        if error not in {'HTTP transport failed', 'HTTP transport failed with status 400'}:
+            return None
+        failed_at = datetime.fromisoformat(str(failure.get('completed_at') or '').replace('Z', '+00:00'))
+        if failed_at.tzinfo is None:
+            return None
+        current = datetime.now(timezone.utc)
+        if failed_at > current:
+            return None
+        original_size = req_path.stat().st_size
+        candidates = sorted(response_dir.glob('*.json'), key=lambda path: path.stat().st_mtime, reverse=True)[:128]
+        for candidate in candidates:
+            if candidate.stem == failed_rid or re.fullmatch(r'[0-9a-f]{64}', candidate.stem) is None:
+                continue
+            try:
+                if candidate.stat().st_size > 200_000:
+                    continue
+                proof = json.loads(candidate.read_text(encoding='utf-8'))
+                if (not isinstance(proof, dict) or proof.get('status') != 'succeeded'
+                        or proof.get('request_id') != candidate.stem
+                        or proof.get('kind') != kind or not isinstance(proof.get('result'), dict)):
+                    continue
+                at = datetime.fromisoformat(str(proof.get('completed_at') or '').replace('Z', '+00:00'))
+                if (at.tzinfo is None or at <= failed_at
+                        or not 0 <= (current - at).total_seconds() <= max_proof_age_hours * 3600):
+                    continue
+                source = spool / 'reasoning' / 'requests' / candidate.name
+                if not source.is_file() or source.stat().st_size > 200_000:
+                    continue
+                probe_request = json.loads(source.read_text(encoding='utf-8'))
+                if (not isinstance(probe_request, dict)
+                        or probe_request.get('request_id') != candidate.stem
+                        or request_id(probe_request) != candidate.stem
+                        or probe_request.get('kind') != kind):
+                    continue
+                if error.endswith('status 400') and source.stat().st_size < original_size:
+                    continue
+                return request, candidate.stem
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                continue
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return None
+    return None
+
+
+def readmit_after_verified_transport_recovery(
+    state: dict[str, Any], eligible: list[dict[str, str]], spool: Path,
+    *, max_active: int,
+) -> list[str]:
+    """Queue ONE new scoped support diagnostic after independently proven recovery.
+
+    Never overwrite historical failed responses, clear original retry counters,
+    re-admit a closed/non-P0 issue, or bypass a pending governed repair handoff.
+    """
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active = sum(1 for record in records.values() if isinstance(record, Mapping)
+                 and record.get('phase') in {'diagnosing', 'implementing', 'ci_repair_needed', 'ci_repairing'})
+    slots = max(0, max(1, int(max_active)) - active)
+    resumed: list[str] = []
+    for item in eligible:
+        if not slots:
+            break
+        if item.get('priority') != 'P0':
+            continue
+        record = records.get(item['id'])
+        if not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        handoff = record.get('recovery_handoff_intake')
+        if (record.get('provider_recovery_requeue_id') or record.get('pr_number')
+                or record.get('blocker_class') in {'external_authority', 'blocked_by_dependency'}
+                or (isinstance(handoff, Mapping) and handoff.get('status') == 'awaiting_governed_repair')):
+            continue
+        reason = str(record.get('reason') or '')
+        if reason == 'edit reasoning failed: HTTP transport failed with status 400':
+            kind, phase = 'edit_plan', 'implementing'
+        elif reason == 'reasoning request failed: HTTP transport failed':
+            kind, phase = 'search_plan', 'diagnosing'
+        else:
+            continue
+        failed_id = str(record.get('reasoning_request_id') or '')
+        verified = verified_later_reasoning_success(
+            spool, failed_rid=failed_id, item_id=item['id'], kind=kind,
+        )
+        if verified is None:
+            continue
+        original, proof_id = verified
+        context = dict(original['context'])
+        if 'verified_transport_recovery' in context:
+            continue  # Never recursively requeue an already retried request.
+        context['verified_transport_recovery'] = {
+            'failed_request_id': failed_id, 'newer_success_id': proof_id,
+            'retry_limit': 1, 'purpose': 'bounded_same_schema_provider_recovery',
+        }
+        new_id = queue_reasoning(spool, kind=kind, item=item, context=context)
+        if new_id == failed_id:
+            continue
+        record.update({
+            'phase': phase, 'reason': 'One bounded new request after verified reasoning transport recovery.',
+            'provider_recovery_original_failure_id': failed_id,
+            'provider_recovery_proof_id': proof_id,
+            'provider_recovery_requeue_id': new_id,
+            'reasoning_request_id': new_id,
+            'updated_at': now(),
+        })
+        resumed.append(item['id'])
+        slots -= 1
+    return resumed
+
+
+def original_partial_edits_match_known_proposal(
+    worktree: Path,
+    edits: list[Mapping[str, Any]],
+    dirty_paths: list[str],
+    failure: str,
+    gate,
+    policy: Mapping[str, Any],
+) -> bool:
+    """Replay original proposals in memory; never modify the old worktree.
+
+    Recovery is not permitted for a technician's unrelated modification,
+    even if it happened in the same path a model suggested changing.
+    """
+    originals: dict[str, str] = {}
+    staged: dict[str, str] = {}
+    failed_at_exact_anchor = False
+    for edit in edits:
+        if not isinstance(edit, Mapping):
+            return False
+        path = str(edit.get('path') or '')
+        old_text = str(edit.get('old_text') or '')
+        new_text = str(edit.get('new_text') or '')
+        loc = Path(path)
+        if (not path or loc.is_absolute() or '..' in loc.parts
+                or gate.path_denial_reason(path, dict(policy))):
+            return False
+        target = worktree / path
+        if target.is_symlink() or not target.is_file():
+            return False  # No new/untracked paths in this legacy replay.
+        if target.resolve() != worktree.resolve() / path:
+            return False
+        if path not in originals:
+            output = subprocess.run(
+                ['git', 'show', 'HEAD:' + path],
+                cwd=worktree, check=False, stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            if output.returncode or len(output.stdout) > 200000:
+                return False
+            try:
+                originals[path] = output.stdout.decode('utf-8')
+            except UnicodeDecodeError:
+                return False
+        before = staged.get(path, originals[path])
+        count = before.count(old_text) if old_text else 0
+        if count != 1:
+            failed_at_exact_anchor = (
+                failure == f'WorkerError: exact repair anchor must occur once in {path}; found {count}'
+            )
+            break
+        staged[path] = before.replace(old_text, new_text, 1)
+    if not failed_at_exact_anchor:
+        return False
+    actual_paths = set(dirty_paths)
+    expected_paths = {path for path, value in staged.items()
+                      if value != originals[path]}
+    if actual_paths != expected_paths:
+        return False
+    try:
+        return all(
+            (worktree / path).read_text(encoding='utf-8') == staged[path]
+            for path in actual_paths
+        )
+    except (OSError, UnicodeError):
+        return False
+
+
+def readmit_preserved_anchor_failure(
+    state: dict[str, Any],
+    eligible: list[dict[str, str]],
+    repo: Path,
+    spool: Path,
+    gate,
+    policy: Mapping[str, Any],
+    *,
+    max_active: int,
+) -> list[str]:
+    """Preserve a legacy partial repair and resume in a NEW clean worktree.
+
+    Only the original exact, successfully answered edit request can authorize
+    a one-time correction. No prior worktree is reset, stashed, or discarded.
+    The original partial diff is durably captured for later review.
+    """
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active_phases = {'diagnosing', 'implementing', 'ci_repair_needed', 'ci_repairing'}
+    active = sum(1 for value in records.values() if isinstance(value, Mapping)
+                 and value.get('phase') in active_phases)
+    slots = max(0, max(1, int(max_active)) - active)
+    resumed: list[str] = []
+    for item in eligible:
+        if slots <= 0:
+            break
+        item_id = str(item.get('id') or '')
+        record = records.get(item_id)
+        if not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        if record.get('anchor_preserved_recovery_id') or record.get('pr_number'):
+            continue
+        if int(record.get('proposal_retries') or 0) >= 2:
+            continue
+        reason = str(record.get('reason') or '')
+        if re.fullmatch(
+                r'WorkerError: exact repair anchor must occur once in [^\n;]{1,240}; found (?:0|[2-9][0-9]*)',
+                reason) is None:
+            continue
+        rid = str(record.get('reasoning_request_id') or '')
+        if re.fullmatch(r'[0-9a-f]{64}', rid) is None:
+            continue
+        response = reasoning_response(spool, rid)
+        if (not isinstance(response, Mapping)
+                or response.get('status') != 'succeeded'
+                or response.get('request_id') != rid
+                or response.get('kind') != 'edit_plan'
+                or response.get('support_item') != item_id):
+            continue
+        result = response.get('result')
+        if not isinstance(result, Mapping) or result.get('blocked_reason'):
+            continue
+        edits = result.get('edits')
+        if not isinstance(edits, list) or not edits or len(edits) > 12:
+            continue
+        original_branch = branch_name(item_id)
+        if record.get('branch') != original_branch:
+            continue  # Never replace a branch chosen by a technician.
+        old = support_worktree_path(item_id, original_branch)
+        if old.is_symlink() or not old.is_dir():
+            continue
+        if run(['git', 'rev-parse', '--show-toplevel'], cwd=old) != str(old.resolve()):
+            continue
+        if run(['git', 'branch', '--show-current'], cwd=old) != original_branch:
+            continue
+        # Confirm the dirty bytes are only tracked edits named by the original
+        # model proposal. Unknown, staged or untracked work remains human-held.
+        if run(['git', 'diff', '--cached', '--name-only'], cwd=old):
+            continue
+        if run(['git', 'ls-files', '--others', '--exclude-standard'], cwd=old):
+            continue
+        dirty_paths = run(['git', 'diff', '--name-only'], cwd=old).splitlines()
+        proposed_paths = {str(edit.get('path') or '') for edit in edits
+                          if isinstance(edit, Mapping)}
+        if (not dirty_paths or len(dirty_paths) > 12
+                or any(path not in proposed_paths
+                       or gate.path_denial_reason(path, dict(policy))
+                       for path in dirty_paths)):
+            continue
+        if not original_partial_edits_match_known_proposal(
+                old, edits, dirty_paths, reason, gate, policy):
+            continue
+        original_patch = run(['git', 'diff', '--binary'], cwd=old)
+        if not original_patch or len(original_patch) > 50000:
+            continue
+        old_head = run(['git', 'rev-parse', 'HEAD'], cwd=old)
+        if re.fullmatch(r'[0-9a-f]{40}', old_head) is None:
+            continue
+        recovery_branch = original_branch + '-anchor-' + rid[:12]
+        clean = ensure_worktree(repo, item_id, recovery_branch)
+        if (run(['git', 'status', '--porcelain', '--untracked-files=all'], cwd=clean)
+                or run(['git', 'rev-parse', 'HEAD'], cwd=clean)
+                     != run(['git', 'rev-parse', 'origin/main'], cwd=repo)):
+            continue  # No retry against stale or independently modified code.
+        paths = [str(edit.get('path') or '') for edit in edits
+                 if isinstance(edit, Mapping)]
+        paths.extend(str(path) for path in (result.get('test_paths') or []))
+        excerpt_terms = [
+            str(edit.get('old_text') or '')[:120]
+            for edit in edits if isinstance(edit, Mapping) and edit.get('old_text')
+        ]
+        excerpts = source_excerpts_for_paths(
+            clean, paths, gate, policy, terms=excerpt_terms,
+            limit=8, content_limit=14000)
+        if not excerpts:
+            continue
+        patch_sha = hashlib.sha256(original_patch.encode('utf-8')).hexdigest()
+        evidence_root = spool / 'recovery-evidence'
+        evidence_path = evidence_root / (rid + '.json')
+        immutable_evidence = {
+            'schema_version': 'jason.support-anchor-evidence.v1',
+            'support_item': item_id, 'failed_reasoning_request_id': rid,
+            'old_branch': original_branch, 'old_source_sha': old_head,
+            'original_patch_sha256': patch_sha,
+            'original_dirty_paths': dirty_paths,
+            'preserved_original_patch': original_patch,
+            'recovery_branch': recovery_branch,
+        }
+        if evidence_path.exists():
+            stored = json.loads(evidence_path.read_text(encoding='utf-8'))
+            if stored != immutable_evidence:
+                raise WorkerError('preserved anchor evidence conflicts with current source')
+        else:
+            atomic_json(evidence_path, immutable_evidence)
+        new_rid = queue_reasoning(
+            spool, kind='edit_plan', item=item,
+            context={
+                'validation_feedback': (
+                    'The original proposal failed exact anchor validation: '
+                    + reason[:340]
+                    + '. Its partially applied earlier source edits are preserved '
+                    'unchanged in the old isolated worktree. Correct the proposal '
+                    'using ONLY current clean source excerpts. Every old_text must '
+                    'occur once. Include an exact test edit. Do not reclassify '
+                    'SUPPORT-DEV as a DEV task or weaken any authority gate.'
+                ),
+                'retry_number': int(record.get('proposal_retries') or 0) + 1,
+                'preserved_patch_sha256': patch_sha,
+                'source_excerpts': excerpts,
+            },
+        )
+        if new_rid == rid:
+            continue
+        record.update({
+            'phase': 'implementing', 'branch': recovery_branch,
+            'anchor_preserved_recovery_id': rid,
+            'preserved_anchor_patch_sha256': patch_sha,
+            'preserved_anchor_source_sha': old_head,
+            'reasoning_request_id': new_rid,
+            'proposal_retries': int(record.get('proposal_retries') or 0) + 1,
+            'reason': 'bounded clean-worktree correction; old source preserved for audit',
+            'updated_at': now(),
+        })
+        resumed.append(item_id)
+        slots -= 1
+    return resumed
+
+
 def load_state(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {'schema_version': '1.0', 'items': {}}
@@ -1486,7 +1997,11 @@ def main() -> int:
     gate = load_gate(repo)
     policy = gate.load_json(repo / 'config' / 'autonomous-repair-release-policy.json')
 
+    readmit_recovered_reasoning(state, support, spool, max_active=args.max_active)
+    readmit_after_verified_transport_recovery(state, support, spool, max_active=args.max_active)
     reassess_model_scope_blocks(state, support, spool, args.max_active)
+    readmit_preserved_anchor_failure(
+        state, support, repo, spool, gate, policy, max_active=args.max_active)
     selected = select_reconcile_ids(state, support, args.max_active)
 
     by_id = {item['id']: item for item in support}
@@ -1788,7 +2303,15 @@ def main() -> int:
                         'updated_at': now(),
                     })
                     continue
-                apply_edits(worktree, edits, gate, policy)
+                try:
+                    apply_edits(worktree, edits, gate, policy)
+                except WorkerError as exc:
+                    if queue_bounded_anchor_correction(
+                        spool, worktree, item, record, edits, test_paths,
+                        exc, gate, policy,
+                    ):
+                        continue
+                    raise
                 tests = validate_patch(worktree, test_paths, gate, policy)
                 number = commit_and_pr(repo, worktree, item, tests[0])
                 record.update({

@@ -70,6 +70,7 @@ python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-mcp-pilot   -
   --set-env JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH="$QBO_ACTIVE_SECRET_CONTAINER" \
   --set-env JASON_QUICKBOOKS_OAUTH_DB="$QBO_ACTIVE_DB" \
   --set-env "JASON_QUICKBOOKS_READ_PROFILE=$QUICKBOOKS_READ_PROFILE" \
+  --set-env "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID=${JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID:-}" \
   --add-readonly-bind "$QBO_DEV_ROLE_HOST:/run/jason-secrets/openbao/quickbooks-development/role_id" \
   --add-readonly-bind "$QBO_DEV_SECRET_HOST:/run/jason-secrets/openbao/quickbooks-development/secret_id" \
   "${QBO_PROD_ARGS[@]}" \

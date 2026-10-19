@@ -208,6 +208,76 @@ for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}" "${DEFERRED_MAIN
   fi
 done
 
+# During a rollback, candidate-added Jason units can be absent from the
+# previous immutable release manifest. Leaving them installed causes a real
+# desired-state drift failure even if runtime/MCP and the host SHA align.
+# Stage both plans before touching a unit. Compare exact candidate release
+# bytes and bounded, declared delta; unknown/unmanaged changes fail closed.
+step_start release_owned_unit_delta
+PREVIOUS_HOST_RELEASE="$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)"
+if [ -n "$PREVIOUS_HOST_RELEASE" ] && [ "$PREVIOUS_HOST_RELEASE" != "$RELEASE_DIR" ]; then
+  UNIT_DELTA_PLANNER="$RELEASE_DIR/tools/reconcile_managed_unit_delta.py"
+  if [ ! -f "$UNIT_DELTA_PLANNER" ]; then
+    echo "ERROR: immutable target release lacks the unit-delta safety planner" >&2
+    exit 9
+  fi
+  SYSTEM_UNIT_DELTA="$BACKUP_DIR/release-system-unit-delta.txt"
+  USER_UNIT_DELTA="$BACKUP_DIR/release-user-unit-delta.txt"
+  if ! /usr/bin/python3 "$UNIT_DELTA_PLANNER" \
+    --candidate "$PREVIOUS_HOST_RELEASE" --target "$RELEASE_DIR" \
+    --scope system --installed-dir /etc/systemd/system > "$SYSTEM_UNIT_DELTA"; then
+    echo "ERROR: cannot verify previous-release system-unit delta" >&2
+    exit 9
+  fi
+  if ! /usr/bin/python3 "$UNIT_DELTA_PLANNER" \
+    --candidate "$PREVIOUS_HOST_RELEASE" --target "$RELEASE_DIR" \
+    --scope user --installed-dir /home/al/.config/systemd/user > "$USER_UNIT_DELTA"; then
+    echo "ERROR: cannot verify previous-release user-unit delta" >&2
+    exit 9
+  fi
+
+  # Unit names are validated by the immutable Python planner before emission.
+  # Both system and user removals are part of this protected release transaction;
+  # they may not be run as a standalone clean-up task.
+  mapfile -t REMOVE_SYSTEM_UNITS < "$SYSTEM_UNIT_DELTA"
+  mapfile -t REMOVE_USER_UNITS < "$USER_UNIT_DELTA"
+  for unit in "${REMOVE_SYSTEM_UNITS[@]}"; do
+    CURRENT_UNIT="$unit"
+    cp -a "/etc/systemd/system/$unit" "$BACKUP_DIR/system-$unit.before"
+    timeout --signal=TERM --kill-after=5s 45s systemctl disable --now "$unit"
+    rm -f -- "/etc/systemd/system/$unit"
+    if [ -e "/etc/systemd/system/$unit" ]; then
+      echo "ERROR: candidate-only system unit not removed: $unit" >&2
+      exit 9
+    fi
+  done
+  for unit in "${REMOVE_USER_UNITS[@]}"; do
+    CURRENT_UNIT="$unit"
+    cp -a "/home/al/.config/systemd/user/$unit" "$BACKUP_DIR/user-$unit.before"
+    timeout --signal=TERM --kill-after=5s 45s \
+      runuser -u al -- env HOME=/home/al \
+      XDG_RUNTIME_DIR="$USER_XDG_RUNTIME_DIR" \
+      DBUS_SESSION_BUS_ADDRESS="$USER_DBUS_ADDRESS" \
+      PATH=/usr/local/bin:/usr/bin:/bin systemctl --user disable --now "$unit"
+    rm -f -- "/home/al/.config/systemd/user/$unit"
+    if [ -e "/home/al/.config/systemd/user/$unit" ]; then
+      echo "ERROR: candidate-only user unit not removed: $unit" >&2
+      exit 9
+    fi
+  done
+  if [ "${#REMOVE_SYSTEM_UNITS[@]}" -ne 0 ]; then
+    systemctl daemon-reload
+  fi
+  if [ "${#REMOVE_USER_UNITS[@]}" -ne 0 ]; then
+    run_as_al systemctl --user daemon-reload
+  fi
+  CURRENT_UNIT=""
+  echo "JASON_RELEASE_UNIT_DELTA_REMOVED=system:${#REMOVE_SYSTEM_UNITS[@]},user:${#REMOVE_USER_UNITS[@]}"
+else
+  echo "JASON_RELEASE_UNIT_DELTA_REMOVED=not_applicable"
+fi
+step_pass release_owned_unit_delta
+
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 
 for unit in "${EXPORTER_UNITS[@]}"; do
@@ -254,10 +324,59 @@ for unit in "${EXPORTER_UNITS[@]}"; do
 done
 # systemctl active does not prove that a freshly started Python exporter won
 # its socket. Require matching listening socket owner and systemd MainPID.
+# The privileged host may transiently lose its D-Bus connection while services
+# are being activated. Recover only the bounded case where the *approved*
+# exporter owns no process AND its socket is genuinely free; never retry an
+# unknown/foreign listener, unexpected ownership, or missing MainPID evidence.
+ensure_owned_exporter() {
+  local unit="$1"
+  local check_output
+  local attempt
+  # A start --no-block may remain queued during host-wide systemd activity.
+  # Preserve a hard four-probe bound (4 x 30s), with no acceptance unless the
+  # independent socket/MainPID ownership check actually passes.
+  for attempt in 1 2 3 4; do
+    if check_output="$(/usr/bin/python3 "$PORT_GUARD" --mode owned --unit "$unit" --timeout-seconds 30 2>&1)"; then
+      printf '%s\n' "$check_output"
+      return 0
+    fi
+    printf '%s\n' "$check_output" >&2
+    # This is the only bounded transient eligible for automatic recovery:
+    # no socket owner, and systemd explicitly reported MainPID=0. All other
+    # failures go through protected rollback, unchanged.
+    if [[ "$check_output" != *"has no listening owner (MainPID=0)"* ]] || [ "$attempt" -eq 4 ]; then
+      echo "EXPORTER_OWNERSHIP_RECONCILIATION=FAIL unit=$unit attempt=$attempt" >&2
+      return 1
+    fi
+    /usr/bin/python3 "$PORT_GUARD" --mode free --unit "$unit" --timeout-seconds 4
+    # Do not continually restart an in-flight systemd activation job; doing
+    # so can prolong a slow but legitimate start until after release rollback.
+    # Query the real queue. Failed/unknown queue reads must fail closed.
+    local queued_job
+    if ! queued_job="$(timeout --signal=TERM --kill-after=5s 15s systemctl show "$unit" --property=Job --value)"; then
+      echo "EXPORTER_OWNERSHIP_RECONCILIATION=FAIL unit=$unit reason=job_read_failed" >&2
+      return 1
+    fi
+    if [ -n "$queued_job" ]; then
+      echo "EXPORTER_OWNERSHIP_RECONCILIATION=WAIT unit=$unit attempt=$attempt" >&2
+    else
+      echo "EXPORTER_OWNERSHIP_RECONCILIATION=RETRY unit=$unit attempt=$attempt" >&2
+      timeout --signal=TERM --kill-after=5s 15s systemctl restart --no-block "$unit"
+    fi
+    sleep 3
+  done
+}
 for unit in "${EXPORTER_UNITS[@]}"; do
   CURRENT_UNIT="$unit"
-  systemctl enable --now "$unit"
-  /usr/bin/python3 "$PORT_GUARD" --mode owned --unit "$unit" --timeout-seconds 12
+  # Enabling and starting are separate bounded operations. The old
+  # systemctl enable --now waited synchronously on a systemd start job and
+  # timed out during D-Bus pressure even though the service then started.
+  # Queue the job nonblocking and require the independent PID/socket guard
+  # to prove the exporter actually owns its listener. No systemctl success
+  # response alone can make an exporter count as healthy.
+  timeout --signal=TERM --kill-after=5s 15s systemctl enable "$unit"
+  timeout --signal=TERM --kill-after=5s 15s systemctl start --no-block "$unit"
+  ensure_owned_exporter "$unit"
 done
 CURRENT_UNIT=""
 for timer in "${MAINTENANCE_TIMERS[@]}"; do
@@ -271,9 +390,12 @@ timeout --signal=TERM --kill-after=5s 45s systemctl start "$PROVIDER_CANARY_SERV
 for unit in "${MAINTENANCE_SERVICES[@]}"; do
   CURRENT_UNIT="$unit"
   if [ "$unit" = "jason-openclaw-authority-health.service" ]; then
-    # The intact JKD-001 full-integrity check requires about 135s in
-    # production. Keep the check mandatory, but give it a bounded 180s.
-    timeout --signal=TERM --kill-after=5s 180s systemctl start "$unit"
+    # Verified JKD-001 full-integrity starts have taken 163-197 seconds;
+    # the old 180s terminated legitimate running checks and broke rollback.
+    # Allow up to 240s for this ONE mandatory check, while the root worker
+    # retains its independent 360s cap and Release Manager its 420s cap.
+    # Never bypass the health result or accept a timed-out systemctl job.
+    timeout --signal=TERM --kill-after=5s 240s systemctl start "$unit"
   else
     timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"
   fi
@@ -517,6 +639,36 @@ else
   echo "JASON_OBSERVABILITY_RECONCILIATION=UNCHANGED"
 fi
 step_pass observability_reconciliation
+
+# The scheduled Grafana assurance can run while the production reconciler is
+# restarting the usage-attribution exporter. A genuine transient missing
+# Prometheus series leaves the assurance oneshot in systemd's failed state.
+# Re-execute the REAL checker only after exporters are verified and service
+# activation has completed; never reset-failed, mask, or ignore its result.
+step_start post_exporter_grafana_assurance
+if systemctl cat jason-grafana-assurance.service >/dev/null 2>&1; then
+  GRAFANA_REVALIDATION_PASS=0
+  for attempt in 1 2 3; do
+    if timeout --signal=TERM --kill-after=5s 20s \
+        systemctl start jason-grafana-assurance.service \
+        && [ "$(systemctl show jason-grafana-assurance.service -p Result --value)" = "success" ]; then
+      echo "GRAFANA_POST_EXPORTER_ASSURANCE=PASS attempt=$attempt"
+      GRAFANA_REVALIDATION_PASS=1
+      break
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      sleep 10
+    fi
+  done
+  if [ "$GRAFANA_REVALIDATION_PASS" -ne 1 ]; then
+    echo "ERROR: real Grafana assurance remains failed after exporter readiness" >&2
+    systemctl status jason-grafana-assurance.service --no-pager -l || true
+    exit 9
+  fi
+else
+  echo "GRAFANA_POST_EXPORTER_ASSURANCE=NOT_INSTALLED"
+fi
+step_pass post_exporter_grafana_assurance
 
 # Prove declared production desired-state convergence before host reconciliation
 # can report success. This catches unknown active units/containers, forbidden

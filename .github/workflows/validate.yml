@@ -116,14 +116,30 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
       - name: Install runtime test dependencies
         run: |
           python -m pip install --upgrade pip pytest
           python -m pip install ./implementation ./implementation/connectors/openclaw ./implementation/runtime_service
+      - name: Test Owner-selected engineering continuity
+        run: PYTHONPATH=tools python -m pytest tools/tests/test_owner_development_focus.py -q
       - name: Compile runtime composition
         run: python -m compileall -q implementation/runtime_service/src implementation/runtime_service/tests
       - name: Test governed runtime composition
         run: python -m pytest implementation/runtime_service/tests -q
+      - name: Test universal approval trust and persistence boundaries
+        run: >-
+          python -m pytest -q
+          implementation/connectors/tests/test_atomic_approval_decisions.py
+          implementation/connectors/tests/test_approval_requests.py
+          implementation/connectors/tests/test_teams_approval_ingress.py
+          implementation/orchestrator/tests/test_approval_resume.py
+          implementation/orchestrator/tests/test_teams_approval_flow.py
+          implementation/orchestrator/tests/test_teams_plan_request_repository.py
+          implementation/orchestrator/tests/test_teams_request_factory.py
+          implementation/connectors/openclaw/tests/test_conversation_ingress.py
 
   reflect-001:
     runs-on: ubuntu-latest
@@ -176,8 +192,21 @@ jobs:
         run: python3 -B -m unittest tools.tests.test_release_manager_gate
       - name: Test production Release Manager host runner
         run: python3 -B -m unittest tools.tests.test_release_manager_host_runner
+      - name: Install isolated rollback regression dependencies
+        run: python3 -m pip install --upgrade pytest
+      - name: Require atomic production rollback and root-host fault-injection acceptance
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q \
+            tools/tests/test_release_manager_atomic_surfaces.py \
+            tools/tests/test_release_host_reconciler_contract.py \
+            tools/tests/test_release_exporter_port_guard.py \
+            tools/tests/test_reconcile_production_host_services.py
       - name: Test governed TODO engineering intake
         run: python3 -B -m unittest tools.tests.test_todo_engineering_intake
+      - name: Test owner-approved development recovery and legacy handoff
+        env:
+          PYTHONPATH: tools
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tools/tests/test_owner_approved_development_worker.py
       - name: Test TODO Release Manager bridge
         run: python3 -B -m unittest tools.tests.test_todo_release_bridge
       - name: Test TODO engineering host wiring

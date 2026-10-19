@@ -760,7 +760,7 @@ def test_development_does_not_defer_permission_denial(monkeypatch, tmp_path):
         module.main()
 
 
-def test_verified_ccc_owner_review_readmits_once(tmp_path):
+def test_verified_ccc_owner_review_readmits_once(monkeypatch, tmp_path):
     import json
     from datetime import datetime, timezone
     sha = 'e' * 40
@@ -772,16 +772,110 @@ def test_verified_ccc_owner_review_readmits_once(tmp_path):
     review.write_text(json.dumps({'status': 'approved', 'source_revision': sha}))
     drift.write_text(json.dumps({'status': 'pass', 'problems': [], 'observed_at': datetime.now(timezone.utc).isoformat()}))
     (folder / 'ccc-report.json').write_text(json.dumps({'status': 'PASS', 'source_revision': sha, 'runtime_revision': sha, 'checks': [{'status': 'PASS'}]}))
+    observed_repositories = []
+    def capture_verified_repository(repo):
+        observed_repositories.append(repo)
+        assert repo == tmp_path
+        return {'production': {'revision': sha}}
+    monkeypatch.setattr(module.support, 'production_state_from_main', capture_verified_repository)
+    # Reproduce installation outside a Git checkout: __file__ must never
+    # control the production-state readback repository.
+    monkeypatch.setattr(module, '__file__', '/home/al/.local/lib/jason/owner_approved_development_worker.py')
     original = 'Exact owner-approved CCC material-change review for the current production SHA is required and not yet authorized.'
     state = {'items': {'DEV-1237': {'phase': 'blocked', 'reason': original}}}
-    kwargs = dict(review_path=review, report_root=reports, drift_path=drift)
+    kwargs = dict(source_repo=tmp_path, review_path=review, report_root=reports, drift_path=drift)
     assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, **kwargs) == 1
     assert state['items']['DEV-1237']['phase'] == 'diagnosing'
+    assert observed_repositories == [tmp_path]
     state['items']['DEV-1237'].update(phase='blocked', reason=original)
     assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, **kwargs) == 0
     state['items']['DEV-1237'].pop('verified_ccc_readmission_sha')
     drift.write_text(json.dumps({'status': 'drift_detected', 'problems': ['failed'], 'observed_at': datetime.now(timezone.utc).isoformat()}))
     assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, **kwargs) == 0
+
+
+def test_verified_ccc_owner_review_rejects_production_sha_mismatch(monkeypatch, tmp_path):
+    import json
+    from datetime import datetime, timezone
+    sha = 'e' * 40
+    review = tmp_path / 'review.json'
+    drift = tmp_path / 'drift.json'
+    reports = tmp_path / 'reports'
+    folder = reports / 'run1'
+    folder.mkdir(parents=True)
+    review.write_text(json.dumps({'status': 'approved', 'source_revision': sha}))
+    drift.write_text(json.dumps({'status': 'pass', 'problems': [], 'observed_at': datetime.now(timezone.utc).isoformat()}))
+    (folder / 'ccc-report.json').write_text(json.dumps({'status': 'PASS', 'source_revision': sha, 'runtime_revision': sha, 'checks': [{'status': 'PASS'}]}))
+    monkeypatch.setattr(module.support, 'production_state_from_main', lambda repo: {'production': {'revision': 'a' * 40}})
+    state = {'items': {'DEV-1237': {'phase': 'blocked', 'reason': 'Exact owner-approved CCC material-change review for the current production SHA is required and not yet authorized.'}}}
+    assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, source_repo=tmp_path, review_path=review, report_root=reports, drift_path=drift) == 0
+    assert state['items']['DEV-1237']['phase'] == 'blocked'
+
+
+def test_verified_ccc_owner_review_rejects_missing_production_identity(monkeypatch, tmp_path):
+    import json
+    from datetime import datetime, timezone
+    sha = 'e' * 40
+    review = tmp_path / 'review.json'
+    drift = tmp_path / 'drift.json'
+    reports = tmp_path / 'reports'
+    folder = reports / 'run1'
+    folder.mkdir(parents=True)
+    review.write_text(json.dumps({'status': 'approved', 'source_revision': sha}))
+    drift.write_text(json.dumps({'status': 'pass', 'problems': [], 'observed_at': datetime.now(timezone.utc).isoformat()}))
+    (folder / 'ccc-report.json').write_text(json.dumps({'status': 'PASS', 'source_revision': sha, 'runtime_revision': sha, 'checks': [{'status': 'PASS'}]}))
+    monkeypatch.setattr(module.support, 'production_state_from_main', lambda repo: {})
+    state = {'items': {'DEV-1237': {'phase': 'blocked', 'reason': 'Exact owner-approved CCC material-change review for the current production SHA is required and not yet authorized.'}}}
+    assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, source_repo=tmp_path, review_path=review, report_root=reports, drift_path=drift) == 0
+    assert state['items']['DEV-1237']['phase'] == 'blocked'
+
+
+
+def test_ccc_readmission_git_failure_is_fail_closed_without_worker_crash(monkeypatch, tmp_path):
+    import json
+    from datetime import datetime, timezone
+    sha = 'e' * 40
+    review = tmp_path / 'review.json'
+    drift = tmp_path / 'drift.json'
+    reports = tmp_path / 'reports'
+    folder = reports / 'run1'
+    folder.mkdir(parents=True)
+    review.write_text(json.dumps({'status': 'approved', 'source_revision': sha}))
+    drift.write_text(json.dumps({
+        'status': 'pass',
+        'problems': [],
+        'observed_at': datetime.now(timezone.utc).isoformat(),
+    }))
+    (folder / 'ccc-report.json').write_text(json.dumps({
+        'status': 'PASS', 'source_revision': sha, 'runtime_revision': sha,
+        'checks': [{'status': 'PASS'}],
+    }))
+
+    def unavailable_source(repo):
+        assert repo == tmp_path
+        raise module.support.WorkerError('synthetic source fetch unavailable')
+
+    monkeypatch.setattr(module.support, 'production_state_from_main', unavailable_source)
+    item = {'phase': 'blocked', 'reason': 'Exact owner-approved CCC material-change review required.'}
+    state = {'items': {'DEV-1237': item}}
+    assert module.readmit_verified_ccc_owner_review(
+        state, {'DEV-1237'}, source_repo=tmp_path,
+        review_path=review, drift_path=drift, report_root=reports,
+    ) == 0
+    assert item['phase'] == 'blocked'
+
+    # A timed-out Git source fetch is also a failed CCC read, not an exception
+    # that should mark the systemd engineering worker itself as failed.
+    import subprocess
+    def timed_out_source(repo):
+        assert repo == tmp_path
+        raise subprocess.TimeoutExpired(['git', 'fetch'], timeout=5)
+    monkeypatch.setattr(module.support, 'production_state_from_main', timed_out_source)
+    assert module.readmit_verified_ccc_owner_review(
+        state, {'DEV-1237'}, source_repo=tmp_path,
+        review_path=review, drift_path=drift, report_root=reports,
+    ) == 0
+    assert item['phase'] == 'blocked'
 
 
 def test_ccc_readmission_rejects_empty_certification_checks(tmp_path):
@@ -797,7 +891,7 @@ def test_ccc_readmission_rejects_empty_certification_checks(tmp_path):
     drift.write_text(json.dumps({'status': 'pass', 'problems': [], 'observed_at': datetime.now(timezone.utc).isoformat()}))
     (folder / 'ccc-report.json').write_text(json.dumps({'status': 'PASS', 'source_revision': sha, 'runtime_revision': sha, 'checks': []}))
     state = {'items': {'DEV-1237': {'phase': 'blocked', 'reason': 'Exact CCC material-change review required.'}}}
-    assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, review_path=review, drift_path=drift, report_root=reports) == 0
+    assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, source_repo=tmp_path, review_path=review, drift_path=drift, report_root=reports) == 0
     assert state['items']['DEV-1237']['phase'] == 'blocked'
 
 
@@ -1600,3 +1694,211 @@ def test_intervening_upgrade_rejects_untrusted_or_missing_git_history(tmp_path):
         'a'*40, 'c'*40, repo,
     )
     assert not module.verified_intervening_worker_upgrade([], 'a'*40, 'a'*40, repo)
+
+
+def test_development_readmit_only_exact_recovered_response(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(module, 'active_support_count', lambda spool: 0)
+    rid = 'c' * 64
+    responses = tmp_path / 'reasoning' / 'responses'
+    responses.mkdir(parents=True)
+    (responses / f'{rid}.json').write_text(json.dumps({
+        'status': 'succeeded', 'request_id': rid, 'kind': 'search_plan',
+        'support_item': 'DEV-111', 'result': {'search_terms': ['foo']},
+    }))
+    record = {'phase': 'blocked', 'reason': 'development reasoning failed: HTTP transport failed',
+              'reasoning_request_id': rid}
+    state = {'items': {'DEV-111': record}}
+    assert module.readmit_recovered_development_reasoning(state, [{'id': 'DEV-111'}], tmp_path,
+                                                             max_active=2) == ['DEV-111']
+    assert record['phase'] == 'diagnosing'
+    assert module.readmit_recovered_development_reasoning(state, [{'id': 'DEV-111'}], tmp_path,
+                                                             max_active=2) == []
+
+
+def test_existing_pr_preserves_pending_and_inflight_ci_repairs():
+    assert module.phase_for_existing_pr('ci_repair_needed') == 'ci_repair_needed'
+    assert module.phase_for_existing_pr('ci_repairing') == 'ci_repairing'
+
+
+def test_existing_pr_reconciles_other_phases_through_validation():
+    for phase in ('identified', 'diagnosing', 'implementing', 'pr_validating'):
+        assert module.phase_for_existing_pr(phase) == 'pr_validating'
+
+
+def test_failed_diagnostic_routes_to_inert_support_handoff(monkeypatch, tmp_path):
+    record = {'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+              'issue_number': 1196, 'reason': 'development reasoning HTTP 400',
+              'recovery_diagnostic_request_id': 'request-123'}
+    state = {'items': {'DEV-1196': record}}
+    monkeypatch.setattr(module.support, 'reasoning_response', lambda spool, rid: {
+        'request_id': rid, 'status': 'failed', 'error_type': 'ConnectorTransportError'})
+    module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-1196'}, tmp_path)
+    module.reconcile_recovery_handoff_intake(state, {'DEV-1196'}, tmp_path)
+    created = []
+    monkeypatch.setattr(module.support, 'ensure_support_issue', lambda repo, item: created.append(item))
+    module.raise_exhausted_repair_support_issues(state, {'DEV-1196'}, tmp_path)
+    module.raise_exhausted_repair_support_issues(state, {'DEV-1196'}, tmp_path)
+    assert len(created) == 1
+    assert created[0]['id'] == 'SUPPORT-DEV-1196'
+    handoffs = list((tmp_path / 'development-recovery' / 'handoffs').glob('*.json'))
+    assert len(handoffs) == 1
+    payload = module.support.json.loads(handoffs[0].read_text())
+    assert payload['admission_authority'] is False
+    assert payload['diagnostic_request_id'] == 'request-123'
+    assert record['phase'] == 'blocked'
+    assert record['recovery_diagnostic_result_status'] == 'failed'
+
+def test_failed_diagnostic_without_verified_original_blocker_does_not_route(monkeypatch, tmp_path):
+    record = {'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+              'issue_number': 1196, 'reason': '', 'recovery_diagnostic_request_id': 'request-123'}
+    state = {'items': {'DEV-1196': record}}
+    monkeypatch.setattr(module.support, 'reasoning_response', lambda spool, rid: {
+        'request_id': rid, 'status': 'failed'})
+    module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-1196'}, tmp_path)
+    assert not list((tmp_path / 'development-recovery').rglob('*.json'))
+    assert record['phase'] == 'blocked'
+
+
+def test_failed_diagnostic_requires_matching_canonical_issue_identity(monkeypatch, tmp_path):
+    record = {'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+              'issue_number': 1459, 'reason': 'HTTP 400 transport failure',
+              'recovery_diagnostic_request_id': 'request-123'}
+    state = {'items': {'DEV-1196': record}}
+    monkeypatch.setattr(module.support, 'reasoning_response', lambda spool, rid: {
+        'request_id': rid, 'status': 'failed', 'error_type': 'ConnectorTransportError'})
+    module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-1196'}, tmp_path)
+    module.reconcile_recovery_handoff_intake(state, {'DEV-1196'}, tmp_path)
+    assert record['phase'] == 'blocked'
+    assert 'recovery_handoff_id' not in record
+    assert 'recovery_handoff_intake' not in record
+    assert not list((tmp_path / 'development-recovery').rglob('*.json'))
+
+
+def test_failed_diagnostic_handoff_is_idempotent_and_preserves_retry_budget(monkeypatch, tmp_path):
+    record = {'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+              'issue_number': 1196, 'reason': 'HTTP 400 transport failure',
+              'self_recovery_attempts': 2,
+              'recovery_diagnostic_request_id': 'request-123'}
+    state = {'items': {'DEV-1196': record}}
+    monkeypatch.setattr(module.support, 'reasoning_response', lambda spool, rid: {
+        'request_id': rid, 'status': 'failed', 'error_type': 'ConnectorTransportError'})
+    module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-1196'}, tmp_path)
+    handoff = record['recovery_handoff_id']
+    at = record['recovery_diagnostic_result_at']
+    module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-1196'}, tmp_path)
+    assert record['recovery_handoff_id'] == handoff
+    assert record['recovery_diagnostic_result_at'] == at
+    assert record['self_recovery_attempts'] == 2
+    assert record['phase'] == 'blocked'
+    assert len(list((tmp_path / 'development-recovery' / 'handoffs').glob('*.json'))) == 1
+
+
+def test_preexisting_failed_diagnostic_backfills_support_once(monkeypatch, tmp_path):
+    # These are the durable DEV-1196/DEV-1500 states recorded before #1582
+    # was deployed. No development replay or new authorization is permitted.
+    created = []
+    monkeypatch.setattr(
+        module.support, 'reasoning_response',
+        lambda spool, rid: {'request_id': rid, 'status': 'failed',
+                            'error_type': 'ConnectorTransportError'},
+    )
+    monkeypatch.setattr(
+        module.support, 'ensure_support_issue',
+        lambda repo, item: created.append(item),
+    )
+    for issue in (1196, 1500):
+        record = {
+            'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+            'issue_number': issue, 'reason': 'development reasoning HTTP 400',
+            'self_recovery_attempts': 2,
+            'recovery_diagnostic_request_id': f'old-request-{issue}',
+            'recovery_diagnostic_result_status': 'failed',
+            'recovery_diagnostic_result_at': 'original-failure-time',
+        }
+        item_id = f'DEV-{issue}'
+        state = {'items': {item_id: record}}
+        root = tmp_path / str(issue)
+        for _ in range(2):
+            module.reconcile_exhausted_recovery_diagnostics(state, {item_id}, root)
+            module.reconcile_recovery_handoff_intake(state, {item_id}, root)
+            module.raise_exhausted_repair_support_issues(state, {item_id}, root)
+        handoffs = list((root / 'development-recovery' / 'handoffs').glob('*.json'))
+        assert len(handoffs) == 1
+        payload = module.support.json.loads(handoffs[0].read_text())
+        assert payload['admission_authority'] is False
+        assert payload['diagnostic_request_id'] == f'old-request-{issue}'
+        assert record['phase'] == 'blocked'
+        assert record['self_recovery_attempts'] == 2
+        assert record['recovery_diagnostic_result_at'] == 'original-failure-time'
+        assert record['recovery_diagnostic_result_status'] == 'failed'
+        assert record['recovery_support_issue_raised'] == f'SUPPORT-DEV-{issue}'
+    assert [x['id'] for x in created] == ['SUPPORT-DEV-1196', 'SUPPORT-DEV-1500']
+
+
+def test_preexisting_failed_diagnostic_backfill_rejects_untrusted_evidence(monkeypatch, tmp_path):
+    for index, response in enumerate((
+        None,
+        {'request_id': 'wrong-request', 'status': 'failed'},
+        {'request_id': 'old-request', 'status': 'succeeded'},
+        {'status': 'failed'},
+    )):
+        record = {
+            'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+            'issue_number': 1196, 'reason': 'HTTP transport failed',
+            'recovery_diagnostic_request_id': 'old-request',
+            'recovery_diagnostic_result_status': 'failed',
+            'recovery_diagnostic_result_at': 'original-failure-time',
+        }
+        monkeypatch.setattr(
+            module.support, 'reasoning_response',
+            lambda spool, rid, result=response: result,
+        )
+        root = tmp_path / str(index)
+        module.reconcile_exhausted_recovery_diagnostics(
+            {'items': {'DEV-1196': record}}, {'DEV-1196'}, root,
+        )
+        assert 'recovery_handoff_id' not in record
+        assert record['recovery_diagnostic_result_status'] == 'failed'
+        assert record['recovery_diagnostic_result_at'] == 'original-failure-time'
+        assert not list(root.rglob('*.json'))
+
+
+def test_preexisting_nonfailed_diagnostic_is_not_backfilled(monkeypatch, tmp_path):
+    record = {
+        'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+        'issue_number': 1196, 'reason': 'transport failed',
+        'recovery_diagnostic_request_id': 'old-request',
+        'recovery_diagnostic_result_status': 'succeeded',
+    }
+    monkeypatch.setattr(
+        module.support, 'reasoning_response',
+        lambda spool, rid: {'request_id': rid, 'status': 'succeeded'},
+    )
+    module.reconcile_exhausted_recovery_diagnostics(
+        {'items': {'DEV-1196': record}}, {'DEV-1196'}, tmp_path,
+    )
+    assert 'recovery_handoff_id' not in record
+    assert not list(tmp_path.rglob('*.json'))
+
+
+def test_preexisting_failed_diagnostic_backfill_requires_matching_issue_identity(monkeypatch, tmp_path):
+    # Even exact old error receipts must not repair a different issue.
+    record = {
+        'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+        'issue_number': 1500, 'reason': 'HTTP transport failed',
+        'recovery_diagnostic_request_id': 'old-request',
+        'recovery_diagnostic_result_status': 'failed',
+        'recovery_diagnostic_result_at': 'original-failure-time',
+    }
+    monkeypatch.setattr(
+        module.support, 'reasoning_response',
+        lambda spool, rid: {'request_id': rid, 'status': 'failed'},
+    )
+    module.reconcile_exhausted_recovery_diagnostics(
+        {'items': {'DEV-1196': record}}, {'DEV-1196'}, tmp_path,
+    )
+    assert record['phase'] == 'blocked'
+    assert record['recovery_diagnostic_result_status'] == 'failed'
+    assert 'recovery_handoff_id' not in record
+    assert not list(tmp_path.rglob('*.json'))

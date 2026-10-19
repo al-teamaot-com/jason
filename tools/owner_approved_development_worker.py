@@ -134,6 +134,92 @@ def owner_approved_issues(repo: Path) -> list[dict[str, Any]]:
         })
     eligible.sort(key=lambda item: item['issue_number'])
     return eligible
+
+def apply_owner_development_focus(state: Mapping[str, Any], admitted: list[dict[str, Any]],
+                                  policy: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Restrict new discretionary work without granting authority or killing work.
+
+    Critical support uses its existing separate priority lane. Already-active
+    engineering is allowed to reach its safe checkpoint rather than interrupted.
+    """
+    if policy.get('enabled') is not True:
+        return admitted
+    if policy.get('schema_version') != '1.0':
+        raise ValueError('invalid development focus schema')
+    numbers=policy.get('issue_numbers')
+    if (not isinstance(numbers,list) or not numbers
+            or any(type(n) is not int or n<1 for n in numbers)):
+        raise ValueError('development focus requires explicit issue numbers')
+    records=state.get('items') or {}
+    allowed=[]
+    for item in admitted:
+        record=records.get(item['id']) or {}
+        continuing=record.get('phase') in (ACTIVE_PHASES-{'identified'}) | {'pr_validating','pr_monitoring'}
+        if item['issue_number'] in numbers or continuing:
+            allowed.append(item)
+    return allowed
+
+
+def reconcile_owner_selected_pull_requests(repo: Path, state: dict[str, Any],
+                                           admitted: list[dict[str, Any]]) -> list[str]:
+    """Adopt a PR explicitly selected in an already Owner-authorized issue.
+
+    This replaces a stale reasoning-stage blocker with actual source/CI evidence.
+    It does not reset retry counters, mutate source, approve or deploy anything.
+    The worker monitors draft/CI state; independent integration remains required.
+    """
+    selected=re.compile(r'(?im)^\s*-\s*Development pull request\s*:\s*#([1-9][0-9]*)\s*$')
+    records=state.setdefault('items',{})
+    slug=None
+    monitored=[]
+    for item in admitted:
+        matches=selected.findall(str(item.get('body') or ''))
+        if not matches:
+            continue
+        if len(set(matches))!=1:
+            raise support.WorkerError('ambiguous Owner-selected development PR')
+        number=int(matches[0])
+        slug=slug or repository_name(repo)
+        pr=support.gh_json(['api',f'repos/{slug}/pulls/{number}'],cwd=repo) or {}
+        head=pr.get('head') or {};base=pr.get('base') or {}
+        if (pr.get('number')!=number or (head.get('repo') or {}).get('full_name')!=slug
+                or (base.get('repo') or {}).get('full_name')!=slug or base.get('ref')!='main'
+                or not re.fullmatch(r'[0-9a-f]{40}',str(head.get('sha') or ''))):
+            raise support.WorkerError('Owner-selected PR does not match governed repository boundary')
+        record=records.setdefault(item['id'],{'attempts':0,'issue_number':item['issue_number'],
+            'approval_source':item['approval_source'],'approved_by':item['approved_by'],
+            'worker':'jason-owner-approved-development-worker','claimed_at':now()})
+        if record.get('phase') in ACTIVE_PHASES and record.get('owner_selected_pr')!=number:
+            # Never seize a live editor's worktree mid-operation.
+            continue
+        if not record.get('owner_selected_pr'):
+            record['prior_stage_evidence']={k:record[k] for k in ('phase','reason','reasoning_request_id',
+                'recovery_diagnostic_request_id','self_recovery_attempts','attempts') if k in record}
+        previous_sha=record.get('source_sha')
+        record.update({'owner_selected_pr':number,'pr_number':number,'branch':str(head.get('ref') or ''),
+            'source_sha':head['sha'],'last_observed_at':now(),'updated_at':now(),
+            'source_owner':'explicit_owner_selected_pull_request','next_action':'observe_pr_validation'})
+        if previous_sha!=head['sha']:
+            record['last_meaningful_progress_at']=now()
+        if pr.get('merged_at'):
+            record.update(phase='complete',reason='Owner-selected PR merged; production acceptance remains separate.',
+                merge_sha=pr.get('merge_commit_sha'),next_action='governed_release_preparation')
+        elif pr.get('state')!='open':
+            record.update(phase='blocked',reason='Owner-selected PR closed without merge.',next_action='owner_selected_pr_replacement')
+        elif pr.get('draft'):
+            record.update(phase='pr_monitoring',reason='Owner-selected implementation is a draft; observing source and tests, not running duplicate reasoning.')
+        else:
+            fresh=support.pr_view(repo,number)
+            check_phase,detail=support.check_state(fresh)
+            if check_phase=='passed':
+                record.update(phase='pr_ready',checks='passed',reason='Owner-selected exact source passed checks; awaiting governed integration.',next_action='governed_integration')
+            else:
+                record.update(phase='pr_monitoring',checks=check_phase,
+                    reason='Owner-selected source validation: '+', '.join(detail),
+                    next_action='repair_selected_pr_ci' if check_phase=='failed' else 'observe_pr_validation')
+        monitored.append(item['id'])
+    return monitored
+
 def active_support_count(spool: Path) -> int:
     state = support.load_state(spool / 'state.json')
     items = state.get('items') if isinstance(state.get('items'), Mapping) else {}
@@ -180,6 +266,17 @@ def ensure_recovery_worktree(repo: Path, issue_number: int, revision: str) -> Pa
     if support.run(['git', 'status', '--porcelain'], cwd=path):
         raise support.WorkerError('new recovery worktree is not clean')
     return path
+
+
+def phase_for_existing_pr(phase: str) -> str:
+    """An existing PR must not erase a pending/in-progress CI repair.
+
+    The repair branch has its own bounded reasoning response and worktree;
+    resetting to validation would strand that work on every worker run.
+    """
+    if phase in {'ci_repair_needed', 'ci_repairing'}:
+        return phase
+    return 'pr_validating'
 
 
 def development_pr_for(issue_number: int, prs: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -485,6 +582,7 @@ def reconcile_issue_dependency_holds(
 
 
 def readmit_verified_ccc_owner_review(state: dict[str, Any], eligible_ids: set[str], *,
+                                    source_repo: Path,
                                     review_path: Path = Path('/var/lib/jason/ccc/material-review.json'),
                                     report_root: Path = Path('/home/al/Jason-Evidence/CCC/runs'),
                                     drift_path: Path = Path('/var/lib/jason/openclaw/release-manager/protected-readback/production-drift.json')) -> int:
@@ -513,7 +611,18 @@ def readmit_verified_ccc_owner_review(state: dict[str, Any], eligible_ids: set[s
                 or drift.get('status') != 'pass' or drift.get('problems')
                 or not 0 <= age <= 120):
             return 0
-    except (OSError, ValueError, TypeError, KeyError):
+        # Installed production workers live outside the source Git checkout.
+        # Use the already-selected, verified worker repository, never __file__.
+        production_state = support.production_state_from_main(source_repo)
+        production = production_state.get('production') if isinstance(production_state, dict) else None
+        live_sha = str((production or {}).get('revision') or '')
+        if len(live_sha) != 40 or any(c not in '0123456789abcdef' for c in live_sha):
+            return 0
+        if live_sha != sha:
+            return 0
+    except (support.WorkerError, subprocess.TimeoutExpired, OSError, ValueError, TypeError, KeyError, AttributeError):
+        # A temporary source-read failure must not crash the scheduled worker
+        # or turn an unverified CCC review into permission to resume work.
         return 0
     items = state.get('items', {})
     for item_id, record in items.items():
@@ -642,18 +751,32 @@ def reconcile_exhausted_recovery_diagnostics(
         if record.get('phase') != 'blocked' or record.get('blocker_class') != 'internal_retry_exhausted':
             continue
         rid = str(record.get('recovery_diagnostic_request_id') or '')
-        if not rid or record.get('recovery_diagnostic_result_status'):
+        if not rid:
+            continue
+        # #1582 creates inert SUPPORT handoffs for freshly failed diagnostics,
+        # but older blocked items already persisted their failed status. Permit
+        # an evidence-verified, one-time backfill without resetting or retrying.
+        prior_status = str(record.get('recovery_diagnostic_result_status') or '')
+        if prior_status and (prior_status != 'failed' or record.get('recovery_handoff_id')):
             continue
         response = support.reasoning_response(spool, rid)
-        if response is None:
+        if not isinstance(response, Mapping):
             continue
+        if prior_status == 'failed':
+            # Historical failures require the stored response to match both
+            # original request ID and failure status exactly. Do not infer a
+            # request identity or use newly successful response as authority.
+            if (str(response.get('request_id') or '') != rid
+                    or str(response.get('status') or '') != 'failed'):
+                continue
         if str(response.get('request_id') or rid) != rid:
             record['recovery_diagnostic_result_status'] = 'invalid_request_id'
             record['recovery_next_action'] = 'Inspect mismatched diagnostic response; no automatic re-admission.'
             continue
         status = str(response.get('status') or 'unknown')
-        record['recovery_diagnostic_result_status'] = status
-        record['recovery_diagnostic_result_at'] = now()
+        if not prior_status:
+            record['recovery_diagnostic_result_status'] = status
+            record['recovery_diagnostic_result_at'] = now()
         if status == 'succeeded':
             result = response.get('result')
             if isinstance(result, Mapping):
@@ -687,6 +810,32 @@ def reconcile_exhausted_recovery_diagnostics(
                 'Diagnostic reasoning failed; route to support with request ID and original blocker. '
                 'Do not restart retries or bypass dependencies.'
             )
+            # A failed diagnostic cannot be a prerequisite to repairing the
+            # diagnostic service itself. Preserve the original failed response;
+            # make a deterministic, non-executing support handoff instead.
+            # A signed-in owner-approved item and the original worker error
+            # remain required. Neither retry nor admission authority is granted.
+            if (record.get('blocker_class') == 'internal_retry_exhausted'
+                    and type(record.get('issue_number')) is int
+                    and record['issue_number'] > 0
+                    and item_id == f'DEV-{record["issue_number"]}'
+                    and str(record.get('reason') or '').strip()):
+                from hashlib import sha256
+                import json
+                handoff = {
+                    'schema': 'jason.development-recovery-handoff.v1',
+                    'source_item': item_id,
+                    'diagnostic_request_id': rid,
+                    'original_blocker': str(record['reason'])[:1800],
+                    'diagnosis': 'Diagnostic reasoning unavailable; deterministic support review required.',
+                    'required_gate': 'authorized_repair_and_production_acceptance',
+                    'admission_authority': False,
+                }
+                handoff_id = sha256(json.dumps(handoff, sort_keys=True).encode()).hexdigest()
+                handoff_path = spool / 'development-recovery' / 'handoffs' / f'{handoff_id}.json'
+                if not handoff_path.exists():
+                    support.atomic_json(handoff_path, handoff)
+                record['recovery_handoff_id'] = handoff_id
 
 
 def reconcile_recovery_handoff_intake(
@@ -1122,6 +1271,50 @@ def readmit_explicit_verified_dependencies(
     return 0
 
 
+
+def readmit_recovered_development_reasoning(
+    state: dict[str, Any], admitted: list[dict[str, Any]], spool: Path,
+    *, max_active: int,
+) -> list[str]:
+    """Readmit approved blocked work only after its exact reasoning reply succeeds."""
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active = sum(1 for record in records.values() if isinstance(record, Mapping)
+                 and record.get('phase') in ACTIVE_PHASES)
+    slots = max(0, max(1, int(max_active)) - active_support_count(spool) - active)
+    resumed = []
+    for item in admitted:
+        if slots == 0:
+            break
+        record = records.get(item['id'])
+        if not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        reason = str(record.get('reason') or '')
+        if reason.startswith('development edit reasoning failed: HTTP transport failed'):
+            phase, expected_kind = 'implementing', 'edit_plan'
+        elif reason.startswith('development reasoning failed: HTTP transport failed'):
+            phase, expected_kind = 'diagnosing', 'search_plan'
+        else:
+            continue
+        rid = str(record.get('reasoning_request_id') or '')
+        if not re.fullmatch(r'[a-f0-9]{64}', rid):
+            continue
+        response = support.reasoning_response(spool, rid)
+        if not isinstance(response, Mapping) or response.get('status') != 'succeeded':
+            continue
+        if response.get('request_id') != rid or response.get('kind') != expected_kind:
+            continue
+        if response.get('support_item') != item['id']:
+            continue
+        if record.get('reasoning_recovered_request_id') == rid:
+            continue
+        record.update({'phase': phase,
+                       'reason': 'Re-admitted after exact reasoning request recovered.',
+                       'reasoning_recovered_request_id': rid, 'updated_at': now()})
+        resumed.append(item['id'])
+        slots -= 1
+    return resumed
+
+
 def blocked_work_next_action(reason: str) -> dict[str, str]:
     text = str(reason or "").casefold()
     if any(x in text for x in ("approval", "authorization", "credential")):
@@ -1204,9 +1397,15 @@ def main() -> int:
     eligible_ids = {item['id'] for item in eligible}
     reconcile_issue_dependency_holds(state, eligible, repo)
     admitted = [item for item in eligible if not issue_has_closed_dependency_gate(item)]
+    focus_path=repo/'config'/'owner-approved-development-focus.json'
+    focus=json.loads(focus_path.read_text()) if focus_path.exists() else {'enabled':False}
+    admitted=apply_owner_development_focus(state,admitted,focus)
     admitted_ids = {item['id'] for item in admitted}
     reconcile_removed_approval(state, eligible_ids)
-    readmit_verified_ccc_owner_review(state, admitted_ids)
+    monitored_ids=set(reconcile_owner_selected_pull_requests(repo,state,admitted))
+    state['focus']={'enabled':bool(focus.get('enabled')),'issue_numbers':focus.get('issue_numbers',[]),
+                    'observed_at':now(),'owner_selected_pr_items':sorted(monitored_ids)}
+    readmit_verified_ccc_owner_review(state, admitted_ids, source_repo=repo)
     recycle_self_recoverable_blockers(state, admitted_ids)
     queue_exhausted_recovery_diagnostics(state, admitted, spool)
     reconcile_exhausted_recovery_diagnostics(state, admitted_ids, spool)
@@ -1217,6 +1416,7 @@ def main() -> int:
         state, admitted_ids, spool, source_repo=repo,
     )
     readmit_explicit_verified_dependencies(state, admitted, spool, max_active=max(1, int(args.max_active)))
+    readmit_recovered_development_reasoning(state, admitted, spool, max_active=max(1, int(args.max_active)))
     state['discovery'] = {
         'observed_at': now(),
         'approved_issue_numbers': [item['issue_number'] for item in eligible],
@@ -1232,7 +1432,8 @@ def main() -> int:
         0,
         max(1, int(args.max_active)) - support_active - development_active,
     )
-    selected = select_items(state, admitted, capacity=capacity)
+    selected = [item_id for item_id in select_items(state, admitted, capacity=capacity)
+                if item_id not in monitored_ids]
     by_id = {item['id']: item for item in admitted}
     try:
         prs = support.open_prs(repo)
@@ -1279,7 +1480,7 @@ def main() -> int:
             if pr is not None:
                 record['pr_number'] = int(pr['number'])
                 record['branch'] = str(pr['headRefName'])
-                phase = 'pr_validating'
+                phase = phase_for_existing_pr(phase)
             if phase in {'ci_repair_needed', 'ci_repairing'}:
                 worktree = ensure_worktree(
                     repo,

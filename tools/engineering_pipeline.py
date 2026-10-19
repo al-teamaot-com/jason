@@ -59,6 +59,89 @@ def atomic_json(path: Path, state: dict[str, Any]) -> None:
             os.unlink(name)
 
 
+def stalled_approved_work(spool: Path) -> dict[str, Any] | None:
+    """Fail health projection when approved work is stranded upstream.
+
+    Stage exit code success only proves controller execution, not work progress.
+    This read-only assessment does not claim, retry, or mutate work items.
+    """
+    path = spool / "todo-intake-state.json"
+    if not path.exists():
+        return None
+    try:
+        intake = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(intake, dict):
+            raise ValueError("invalid intake state")
+        commitments = intake.get("downstream_commitments") or {}
+        outstanding = int(commitments.get("outstanding_count") or 0)
+        active = int(intake.get("active_development_items") or 0) + int(intake.get("active_support_repairs") or 0)
+        capacity = int(intake.get("engineering_capacity") or 0)
+        if outstanding > 0 and active == 0 and capacity > 0 and intake.get("status") == "stalled_upstream_or_downstream":
+            return {"reason": "approved_work_stalled", "outstanding": outstanding, "active": active, "capacity": capacity}
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return {"reason": "intake_health_unknown"}
+    return None
+
+
+
+def canonical_support_rows(repo: Path) -> str:
+    """Prefer the fetched authoritative main, never a dirty local topic branch."""
+    if (repo / ".git").exists():
+        result = subprocess.run(
+            ["git", "show", "origin/main:SUPPORT.md"], cwd=str(repo),
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, timeout=10, check=False,
+        )
+        if result.returncode or len(result.stdout) > 1_000_000:
+            raise ValueError("authoritative support source unavailable")
+        return result.stdout
+    # Isolated unit-test directories contain no Git metadata.
+    return (repo / "SUPPORT.md").read_text(encoding="utf-8")
+
+
+def blocked_critical_support(spool: Path, repo: Path) -> dict[str, Any] | None:
+    """Surface already-blocked canonical P0 repairs without creating new authority.
+
+    Unadmitted P0 defects and exhausted P0 repairs must remain visible even if
+    scheduled worker commands exit successfully. This is a health projection,
+    not an instruction to bypass dependency, reasoning or release gates.
+    """
+    state_path = spool / "state.json"
+    if not state_path.exists():
+        return None
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        if not isinstance(state, dict):
+            raise ValueError("invalid support state")
+        items = state.get("items", {})
+        if not isinstance(items, dict):
+            raise ValueError("invalid support items")
+        critical = set()
+        for line in canonical_support_rows(repo).splitlines():
+            cells = [cell.strip() for cell in line.split("|")]
+            if (len(cells) >= 4 and cells[2] == "P0"
+                    and cells[1].startswith("SUPPORT-")
+                    and not any(status in cells[3].casefold()
+                                for status in ("closed", "resolved", "reclassified"))):
+                critical.add(cells[1])
+        mismatches = state.get("support_state_mismatches", {})
+        not_open = set(mismatches.get("support_open_issue_not_open", [])) if isinstance(mismatches, dict) else set()
+        # A stale SUPPORT.md row never reopens a GitHub issue that is closed.
+        blocked = sorted(item for item in critical
+                         if item not in not_open
+                         and isinstance(items.get(item), dict)
+                         and items[item].get("phase") in {"blocked", "escalated"})
+        audit = state.get("admission_audit", {})
+        missing = sorted(str(item) for item in audit.get("unadmitted_p0", [])) if isinstance(audit, dict) else []
+        if blocked or missing:
+            return {"reason": "critical_support_stalled", "blocked_count": len(blocked),
+                    "blocked_items": blocked[:12], "unadmitted_count": len(missing),
+                    "unadmitted_items": missing[:12]}
+    except (OSError, TypeError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired):
+        return {"reason": "support_health_unknown"}
+    return None
+
+
 def run_pipeline(
     *,
     scripts: Path,
@@ -112,15 +195,34 @@ def run_pipeline(
         print(f"ENGINEERING_STAGE_END name={stage.name} status={item['status']}", flush=True)
     failed = [name for name, item in state["stages"].items() if item["status"] != "succeeded"]
     state["finished_at"] = now()
-    state["status"] = "degraded" if failed else "healthy"
+    stalled = stalled_approved_work(spool) if not failed else None
+    critical = blocked_critical_support(spool, repo) if not failed else None
+    state["status"] = "degraded" if failed or stalled or critical else "healthy"
     state["failed_or_skipped_stages"] = failed
+    if stalled:
+        state["operational_blocker"] = stalled
+    if critical:
+        state["critical_support_blocker"] = critical
     atomic_json(output, state)
     print("ENGINEERING_PIPELINE_RESULT " + json.dumps({
         "status": state["status"],
         "failed_or_skipped_stages": failed,
+        "operational_blocker": stalled,
+        "critical_support_blocker": critical,
         "state_path": str(output),
     }, sort_keys=True), flush=True)
     return state
+
+
+def service_exit_code(state: dict[str, Any]) -> int:
+    """Report failed execution, not a legitimate pending/blocked work state.
+
+    The user service has no automatic Restart/OnFailure recovery. Returning a
+    failure for backlog alone only adds a failed critical unit and can block CCC
+    from releasing the repair. Operational degradation remains explicit in the
+    state/event; the native work reconciler owns recovery and source adoption.
+    """
+    return 1 if state.get("failed_or_skipped_stages") else 0
 
 
 def main() -> int:
@@ -139,7 +241,8 @@ def main() -> int:
         release_state=args.release_state.resolve(),
         stage_timeout=args.stage_timeout,
     )
-    return 0 if state["status"] == "healthy" else 1
+    # Preserve degraded health without marking successful stage execution as a failed service.
+    return service_exit_code(state)
 
 
 if __name__ == "__main__":

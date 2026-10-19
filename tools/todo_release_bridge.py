@@ -75,11 +75,15 @@ def load_state(path: Path) -> dict[str, Any]:
 def todo_issues(repo: Path) -> list[dict[str, Any]]:
     issues = gh_json(
         [
-            "issue", "list", "--state", "open", "--limit", "200",
+            "issue", "list", "--state", "open", "--limit", "5000",
             "--json", "number,title,body,url,updatedAt",
         ],
         cwd=repo,
     ) or []
+    # GitHub CLI returns only the requested leading window. Silent truncation
+    # strands older owner-approved TODO issues with stale release states.
+    if len(issues) >= 5000:
+        raise TodoReleaseBridgeError("open issue inventory reached safe discovery limit")
     result = []
     for issue in issues:
         body = str(issue.get("body") or "")
@@ -623,6 +627,76 @@ def close_issue(repo: Path, issue_number: int, release: Mapping[str, Any]) -> No
     )
 
 
+
+def reconcile_verified_closed_issues(
+    repo: Path, release_root: Path, items: dict[str, Any]
+) -> None:
+    """Finalize a prior closure only from original-issue and release proof.
+
+    Open-issue discovery omits already-closed TODOs. Keep their persisted
+    commitments reconciled without allowing a duplicate intake issue's stale
+    development result to reverse a verified production closure.
+    """
+    for todo_id, record in items.items():
+        if not isinstance(record, dict) or record.get('phase') == 'complete':
+            continue
+        issue_number = record.get('issue_number')
+        closure_number = record.get('closure_pr')
+        rid = record.get('release_id')
+        if (not isinstance(issue_number, int) or not isinstance(closure_number, int)
+                or not isinstance(rid, str)
+                or not re.fullmatch(r'release-[0-9a-f]{16}', rid)):
+            continue
+        path = release_root / 'records' / f'{rid}.json'
+        if not path.is_file():
+            continue
+        release = json.loads(path.read_text(encoding='utf-8'))
+        production = release.get('production') or {}
+        candidate = release.get('release_candidate') or {}
+        sha = str(production.get('live_sha') or '')
+        if (release.get('release_id') != rid or release.get('state') != 'closed'
+                or not isinstance(production, dict)
+                or production.get('alignment_verified') is not True
+                or not production.get('verified_at')
+                or candidate.get('candidate_sha') != sha
+                or not re.fullmatch(r'[0-9a-f]{40}', sha)):
+            continue
+        merge_sha = record.get('merge_sha')
+        if (not isinstance(merge_sha, str) or not re.fullmatch(r'[0-9a-f]{40}', merge_sha)
+                or (merge_sha != sha and not commit_is_ancestor(repo, merge_sha, sha))):
+            continue
+        closure = gh_json([
+            'pr', 'view', str(closure_number), '--json', 'number,body,mergedAt'
+        ], cwd=repo) or {}
+        text = str(closure.get('body') or '')
+        required = (
+            f'- TODO closure: {todo_id}',
+            f'- Development issue: #{issue_number}',
+            f'- Release ID: {rid}',
+            f'- Production SHA: {sha}',
+        )
+        if (closure.get('number') != closure_number
+                or not closure.get('mergedAt')
+                or not all(line in text.splitlines() for line in required)):
+            continue
+        issue = gh_json([
+            'issue', 'view', str(issue_number), '--json', 'number,state,body'
+        ], cwd=repo) or {}
+        marker = TODO_META.search(str(issue.get('body') or ''))
+        if (issue.get('number') != issue_number or issue.get('state') != 'CLOSED'
+                or marker is None or marker.group(1).upper() != todo_id):
+            continue
+        record.update({
+            'phase': 'complete', 'reason': '', 'blocker_category': 'none',
+            'next_action': 'none', 'retry_eligible': False,
+            'verified_operational_evidence': {
+                'release_id': rid, 'production_sha': sha,
+                'closure_pr': closure_number, 'canonical_issue': issue_number,
+            },
+            'updated_at': now(),
+        })
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", type=Path, default=DEFAULT_REPO)
@@ -788,6 +862,7 @@ def main() -> int:
                 }
             )
 
+    reconcile_verified_closed_issues(repo, args.release_state.resolve(), state["items"])
     for item in state["items"].values():
         if isinstance(item, dict):
             item.update(next_work_gate(str(item.get("phase") or ""), str(item.get("reason") or "")))

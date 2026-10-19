@@ -7,10 +7,11 @@ It deliberately performs no authority decision: Teams is transport/UI only.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from datetime import datetime
 from typing import Mapping
 
-from implementation.connectors.src.jason_connectors.approval_requests import (
+from connectors.src.jason_connectors.approval_requests import (
     ApprovalDecision,
     ApprovalRequest,
     ApprovalResponse,
@@ -28,12 +29,21 @@ class TeamsApprovalCard:
     expires_at: str
     evidence_artifact_ids: tuple[str, ...]
     facts: tuple[tuple[str, str], ...] = ()
+    card_instance_challenge: str | None = None
 
 
 def render_approval_card(request: ApprovalRequest) -> TeamsApprovalCard:
     """Render only non-secret approval metadata for delivery to Teams."""
     request.validate()
     presentation = request.presentation
+    challenge = request.metadata.get("card_instance_challenge")
+    if challenge is not None and (
+        request.capability != "release.production.approve"
+        or not request.approval_id.startswith("relapproval-")
+        or type(challenge) is not str
+        or re.fullmatch(r"[0-9a-f]{48}", challenge) is None
+    ):
+        raise PermissionError("protected card-instance proof belongs only to an exact release request")
     return TeamsApprovalCard(
         approval_id=request.approval_id,
         organization_id=request.organization_id,
@@ -48,6 +58,7 @@ def render_approval_card(request: ApprovalRequest) -> TeamsApprovalCard:
         expires_at=request.expires_at.isoformat(),
         evidence_artifact_ids=tuple(ref.artifact_id for ref in request.evidence_references),
         facts=(presentation.facts if presentation is not None else ()),
+        card_instance_challenge=request.metadata.get("card_instance_challenge"),
     )
 
 

@@ -1,0 +1,101 @@
+{
+  "schema_version": "1.0.0",
+  "role_id": "jason-development-worker",
+  "role_version": "0.1.0",
+  "lifecycle": "approved_for_engineering_not_activated",
+  "owner": "AOT Owner / Jason Architecture Authority",
+  "purpose": "Run bounded approved engineering tasks on an approved disposable worker without authority to approve or deploy production releases",
+  "applies_to": "exact_enrolled_device_uid_and_organization_bound_outside_role_manifest",
+  "platform": {
+    "os_family": "linux",
+    "os_version": "verify_and_set_before_activation",
+    "minimum_cpu_cores": "verify_before_activation",
+    "minimum_memory_bytes": "verify_before_activation",
+    "minimum_free_disk_bytes": "verify_before_activation"
+  },
+  "service_contract": {
+    "work_type": "approved_isolated_todo_development",
+    "dependencies": [
+      "central_task_queue",
+      "fenced_exclusive_lease",
+      "durable_checkpoint_store",
+      "governed_identity",
+      "github_scoped_build_identity",
+      "service_readiness_monitor"
+    ],
+    "start_conditions": [
+      "exact_owner_approved_device_role_binding",
+      "no_production_dependencies",
+      "manifest_version_accepted",
+      "worker_attested_ready"
+    ],
+    "output": [
+      "isolated_patch_or_pr",
+      "test_evidence",
+      "task_checkpoint",
+      "health_and_audit_events"
+    ]
+  },
+  "governance": {
+    "service_boundary": "AOT_owner_approved",
+    "direct_provider_access": false,
+    "production_deploy_authority": false,
+    "production_secrets_allowed": false,
+    "arbitrary_shell_standing_safe": false,
+    "generic_shell_requires_exact_per_run_approval": true,
+    "new_role_or_tenant_requires_owner_approval": true,
+    "role_routine_nondisruptive_operations_after_acceptance": [
+      "inventory",
+      "drift_reconciliation",
+      "verified_package_service_maintenance",
+      "health_monitoring",
+      "checkpoint_and_safe_reassignment"
+    ],
+    "disruptive_operations": [
+      "reboot_when_disruptive",
+      "reimage",
+      "wipe",
+      "destructive_disk_change"
+    ],
+    "approval_for_disruptive_operations": "exact_per_action"
+  },
+  "security": {
+    "worker_identity": "per_device_short_lived",
+    "secret_delivery": "scoped_broker_never_copied_from_production",
+    "isolation": "tenant_and_client_boundary",
+    "network_policy": "deny_except_approved_control_and_artifact_endpoints",
+    "artifact_integrity": "verified_revision_or_digest",
+    "audit": "central_append_only_correlation"
+  },
+  "desired_state": {
+    "packages": [],
+    "services": [],
+    "config": "resolved_from_versioned_approved_workload_manifest_after_hardware_inventory",
+    "bootstrapping": "idempotent_finite_state_and_readback"
+  },
+  "recovery": {
+    "state_centralized": true,
+    "worker_is_disposable": true,
+    "lease_fencing_required": true,
+    "checkpoint_required": true,
+    "drain_before_maintenance": true,
+    "rebuild_after_approval": true
+  },
+  "acceptance": {
+    "first_target": "Claw2-PC",
+    "datto_uid": "13eda165-08e0-ec79-026a-985b37e2eb9e",
+    "excluded_production_host": "aoteq-OptiPlex-3040",
+    "proof_required": [
+      "approved_host_role_binding",
+      "device_inventory",
+      "non_disruptive_idempotent_install",
+      "independent_health_readback",
+      "real_approved_TODO_PR",
+      "lease_fencing_and_resume",
+      "safe_drain",
+      "role_recovery",
+      "no_worker_production_deploy"
+    ],
+    "status": "pending"
+  }
+}

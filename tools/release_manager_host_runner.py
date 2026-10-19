@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import sys
 import time
 import urllib.request
 from datetime import datetime, timezone, timedelta
@@ -26,8 +27,10 @@ from typing import Any
 from uuid import uuid4
 
 import release_manager_gate as gate
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import worker_execution_enrollment as worker_enrollment
 
-DEFAULT_REPO = Path("/home/al/projects/jason")
+DEFAULT_REPO = Path("/home/al/.local/lib/jason/engineering-worker-source")
 DEFAULT_STATE = Path("/var/lib/jason/openclaw/release-manager")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 MUTATION_ENV_OVERRIDES = {
@@ -38,9 +41,20 @@ MUTATION_ENV_OVERRIDES = {
     "JASON_AUTOTASK_PROCUREMENT_MCP_PROFILE": "",
     "JASON_DATTO_COMPONENT_EXECUTION_MCP_PROFILE": "",
     "JASON_DATTO_COMPONENT_EXECUTION_AUTONOMY_ENABLED": "false",
+    "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID": "",
     "JASON_AUTONOMY_WORKER_ENABLED": "false",
     "JASON_AUTONOMY_SHADOW_ENABLED": "false",
     "JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED": "false",
+    "JASON_UNIVERSAL_APPROVAL_MODE": "off",
+    "JASON_UNIVERSAL_APPROVAL_WORKER_ENABLED": "false",
+    # A test-only Teams card must never be issued from isolated preproduction.
+    "JASON_OWNER_UAT_MODE": "off",
+    "JASON_OWNER_UAT_WORKER_ENABLED": "false",
+    "JASON_OWNER_UAT_SESSION_ID": "",
+    # Isolated preproduction must not issue real owner Teams cards or read
+    # live mobile release approvals even when production mode is enabled.
+    "JASON_RELEASE_MOBILE_APPROVAL_MODE": "off",
+    "JASON_RELEASE_MOBILE_APPROVAL_WORKER_ENABLED": "false",
 }
 
 CONTROLLER_SOURCE = Path(__file__).resolve()
@@ -588,6 +602,17 @@ def classify_change_risk(change_class: str, files: list[str]) -> str:
     if any(
         path.startswith("tools/release_manager")
         or path == "config/release-manager-policy.json"
+        or path in {".dockerignore", "infrastructure/jason-runtime/Dockerfile"}
+        or path in {
+            "tools/reconcile_production_host_services.sh",
+            "tools/reconcile_managed_unit_delta.py",
+            "tools/release_exporter_port_guard.py",
+            "tools/release_mobile_approval_consumer.py",
+            "implementation/runtime_service/src/jason_runtime/mobile_release_approval.py",
+            "implementation/runtime_service/src/jason_runtime/universal_teams_approval.py",
+            "implementation/runtime_service/src/jason_runtime/playbook_autonomy_review.py",
+            "implementation/connectors/microsoft_graph/teams_approval_channel.py",
+        }
         or "release-host-reconcile" in path
         for path in paths
     ):
@@ -991,12 +1016,30 @@ def image_id(image: str) -> str:
 
 
 def worktree(repo: Path, state_root: Path, candidate_sha: str) -> Path:
+    """Create a fresh, exact-SHA release worktree without deleting old ones.
+
+    A previous deployment attempt may leave Git worktree registration behind.
+    Reusing the same SHA-named path can then produce git exit 128 even when
+    its directory was removed. Never blindly rmtree an existing checkout:
+    every attempt receives a fresh, scoped worktree identity and Git owns
+    its cleanup through remove_worktree().
+    """
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
     root = state_root / "worktrees"
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    path = root / candidate_sha
-    if path.exists():
-        shutil.rmtree(path)
-    run(["git", "worktree", "add", "--detach", str(path), candidate_sha], cwd=repo)
+    if root.is_symlink() or not root.is_dir():
+        raise ReleaseManagerError("release worktree root is not a real directory")
+    path = root / f"{candidate_sha}-{uuid4().hex[:12]}"
+    if path.exists() or path.is_symlink():
+        raise ReleaseManagerError("release worktree attempt path already exists")
+    try:
+        run(["git", "worktree", "add", "--detach", str(path), candidate_sha], cwd=repo)
+    except subprocess.CalledProcessError as exc:
+        detail = (str(exc.stdout or "")[-600:]).strip()
+        raise ReleaseManagerError(
+            "immutable release worktree materialization failed before production mutation: "
+            + (detail or f"git exit {exc.returncode}")
+        ) from exc
     return path
 
 
@@ -1024,6 +1067,20 @@ def build_candidate(repo: Path, state_root: Path, candidate_sha: str) -> tuple[s
                 str(path),
             ]
         )
+        # A Docker build can succeed even when a restrictive Git release
+        # worktree leaves Python sources root-only in the resulting image.
+        # Test the exact built artifact as the production UID/GID before a
+        # preproduction state copy. No network, state mounts, secrets, or
+        # provider connectors are available to this import-only smoke.
+        run([
+            "timeout", "--signal=TERM", "--kill-after=5s", "45s",
+            "docker", "run", "--rm", "--pull", "never",
+            "--network", "none", "--read-only",
+            "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+            "--pids-limit", "64", "--memory", "256m",
+            "--user", "1000:1000", "--entrypoint", "python", tag,
+            "-c", "from usage_ledger.ledger import SQLiteUsageLedger; import jason_runtime.main",
+        ])
         return tag, image_id(tag)
     finally:
         remove_worktree(repo, path)
@@ -1259,6 +1316,39 @@ def install_release_manager_from_current(expected_sha: str) -> dict[str, Any]:
     }
 
 
+_PREPROD_OPENCLAW_EXCLUDED = frozenset({
+    "orchestration-events.sqlite3",
+    "orchestration-events.sqlite3-wal",
+    "orchestration-events.sqlite3-shm",
+})
+
+
+def _preprod_regenerable_sqlite_shm(name: str) -> bool:
+    # SQLite -shm files are transient WAL-index coordination state, not the
+    # database or committed transaction log. They can vanish after the source
+    # listing but before docker cp, or become invalid across container copies.
+    # Only exact top-level *.sqlite3-shm names are skipped; preserve sqlite3,
+    # sqlite3-wal, and all other production/authority files.
+    return name.endswith(".sqlite3-shm") and len(name) > len(".sqlite3-shm")
+_PREPROD_CLONE_MAX_BYTES = 4 * 1024**3
+_PREPROD_DISK_RESERVE_BYTES = 3 * 1024**3
+
+
+def bounded_preprod_openclaw_entries(raw: str) -> list[str]:
+    """Exclude only the large append-only event journal, not authority data."""
+    entries = raw.splitlines()
+    if not entries or len(entries) > 256:
+        raise ReleaseManagerError("invalid preproduction OpenClaw state listing")
+    if any(not re.fullmatch(r"[A-Za-z0-9_.-]+", name) or name in {".", ".."}
+           for name in entries) or len(set(entries)) != len(entries):
+        raise ReleaseManagerError("unsafe preproduction OpenClaw state name")
+    return [
+        name for name in entries
+        if name not in _PREPROD_OPENCLAW_EXCLUDED
+        and not _preprod_regenerable_sqlite_shm(name)
+    ]
+
+
 def copy_state_from_live_container(
     container_path: str,
     destination: Path,
@@ -1267,6 +1357,27 @@ def copy_state_from_live_container(
     if destination.exists():
         shutil.rmtree(destination)
     destination.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if container_path == "/var/lib/jason/openclaw":
+        # Docker copies from the live container (never via a mutable host
+        # checkout), but whole-tree docker cp can fill the host disk with
+        # years of append-only orchestration event history.
+        free_at_start = shutil.disk_usage(destination).free
+        if free_at_start < _PREPROD_CLONE_MAX_BYTES + _PREPROD_DISK_RESERVE_BYTES:
+            raise ReleaseManagerError("insufficient disk headroom for isolated preproduction state")
+        names = bounded_preprod_openclaw_entries(run([
+            "docker", "exec", "jason-runtime", "python", "-c",
+            "import os; print('\\n'.join(sorted(os.listdir('/var/lib/jason/openclaw'))))",
+        ]))
+        for name in names:
+            run(["docker", "cp", f"jason-runtime:{container_path}/{name}", str(destination / name)])
+            free_now = shutil.disk_usage(destination).free
+            if (free_now < _PREPROD_DISK_RESERVE_BYTES
+                    or free_at_start - free_now > _PREPROD_CLONE_MAX_BYTES):
+                raise ReleaseManagerError("isolated preproduction state exceeded bounded disk capacity")
+        if any((destination / name).exists() for name in _PREPROD_OPENCLAW_EXCLUDED):
+            raise ReleaseManagerError("excluded production event journal was copied")
+        # Runtime startup initializes a fresh isolated orchestration journal.
+        return
     run(
         [
             "docker",
@@ -1281,6 +1392,28 @@ def preprod_scratch_path(state_root: Path, release_id: str) -> Path:
     return state_root.parent.parent / "release-manager-preprod" / release_id
 
 
+def _preprod_cleanup_on_failure(function):
+    """Remove only canonical scratch and preprod container on partial failure."""
+    def guarded(*, state_root: Path, release_id: str, candidate_sha: str, **kwargs):
+        try:
+            return function(state_root=state_root, release_id=release_id,
+                            candidate_sha=candidate_sha, **kwargs)
+        except BaseException:
+            if (re.fullmatch(r"release-[0-9a-f]{16}(?:-retry-[1-9][0-9]{0,2})?", release_id)
+                    and SHA.fullmatch(candidate_sha)):
+                scratch = preprod_scratch_path(state_root, release_id)
+                expected = state_root.parent.parent / "release-manager-preprod"
+                if scratch.parent.resolve() == expected.resolve() and not scratch.is_symlink():
+                    shutil.rmtree(scratch, ignore_errors=True)
+                subprocess.run(["docker", "rm", "-f",
+                                "jason-runtime-preprod-" + candidate_sha[:12]],
+                               check=False, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL)
+            raise
+    return guarded
+
+
+@_preprod_cleanup_on_failure
 def create_preprod_container(
     *,
     live: dict[str, Any],
@@ -1314,7 +1447,12 @@ def create_preprod_container(
                 raise ReleaseManagerError(
                     f"pre-production clone destination is nested under live state source: {destination}"
                 )
-            copy_state_from_live_container(destination, clone)
+            try:
+                copy_state_from_live_container(destination, clone)
+            except BaseException:
+                # A failed state clone must never leave its temporary bytes on disk.
+                shutil.rmtree(scratch, ignore_errors=True)
+                raise
             mount_sources[destination] = str(clone)
 
     config = src["Config"]
@@ -1392,6 +1530,43 @@ def create_preprod_container(
     return name, scratch
 
 
+def preprod_failure_state(name: str) -> str:
+    """Return narrowly bounded diagnostic fields, never container logs/env.
+
+    A rejected isolated health check currently deletes the test container;
+    preserve only its state/exit information for a safe actionable error.
+    """
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "--format", "{{json .State}}", name],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, timeout=5, check=False,
+        )
+        if result.returncode != 0:
+            return "container_state=unavailable"
+        record = json.loads(result.stdout)
+        if not isinstance(record, dict):
+            return "container_state=unavailable"
+        status = str(record.get("Status") or "unknown")
+        exit_code = record.get("ExitCode")
+        oom_killed = record.get("OOMKilled")
+        health = (record.get("Health") or {}).get("Status")
+        if status not in {"created", "running", "restarting", "exited", "dead", "paused"}:
+            status = "unknown"
+        if type(exit_code) is not int:
+            exit_code = "unknown"
+        if type(oom_killed) is not bool:
+            oom_killed = "unknown"
+        if health not in {None, "starting", "healthy", "unhealthy"}:
+            health = "unknown"
+        return (
+            f"container_state={status} exit_code={exit_code} "
+            f"oom_killed={oom_killed} health={health or 'none'}"
+        )
+    except (OSError, ValueError, TypeError, subprocess.TimeoutExpired):
+        return "container_state=unavailable"
+
+
 def wait_health(name: str, attempts: int = 30) -> None:
     script = (
         "import urllib.request; "
@@ -1408,7 +1583,10 @@ def wait_health(name: str, attempts: int = 30) -> None:
         if result.returncode == 0:
             return
         time.sleep(2)
-    raise ReleaseManagerError("pre-production candidate failed health acceptance")
+    raise ReleaseManagerError(
+        "pre-production candidate failed health acceptance: "
+        + preprod_failure_state(name)
+    )
 
 
 def verify_preprod_env(name: str, candidate_sha: str) -> None:
@@ -1957,49 +2135,155 @@ def verify_release_ccc_report(
     }
 
 
+# Keep the CCC itself authoritative. The only permitted bounded retry is an
+# independently refreshed post-deployment checker report whose *sole* failing
+# check is a transient Prometheus scrape gap while host units settle. Each
+# report remains subject to exact SHA, complete checks and freshness proofs.
+CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS = (15, 20, 25)
+
+
 def run_release_ccc_gate(
     candidate_sha: str, runtime_sha: str, *, before_mutation: bool,
     ccc_runner: Path = Path("/opt/jason/ccc-current/tools/run_ccc.py"),
     ccc_config: Path = Path("/var/lib/jason/ccc/ccc.json"),
     latest: Path = Path("/var/lib/jason/ccc/latest.json"),
 ) -> dict[str, Any]:
-    """Run the installed independent checker and bind fresh evidence to SHA.
+    """Demand a fresh independent CCC PASS; boundedly recheck scrape races.
 
-    A NOT_PROVEN checker exit is admissible only at pre-mutation transition,
-    and only for its sole expected runtime-source-alignment check.
+    Never reinterpret FAIL as PASS. For a single transient monitoring FAIL,
+    request a completely new checker run while keeping the production
+    transaction lock held. All non-monitoring failures fail immediately.
     """
     if not ccc_runner.is_file() or not ccc_config.is_file():
         raise ReleaseManagerError("independent CCC checker/config unavailable")
-    started = datetime.now(timezone.utc)
+    failed_monitoring_runs: list[str] = []
+    for attempt in range(len(CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS) + 1):
+        started = datetime.now(timezone.utc)
+        try:
+            completed = subprocess.run(
+                ["python3", str(ccc_runner), "--config", str(ccc_config),
+                 "--force", "--trigger", "material_change",
+                 "--candidate-sha", candidate_sha],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                check=False, timeout=300,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise ReleaseManagerError("independent CCC execution did not complete") from exc
+        if not latest.is_file():
+            raise ReleaseManagerError("independent CCC did not persist a report")
+        report = json.loads(latest.read_text(encoding="utf-8"))
+        if not isinstance(report, dict):
+            raise ReleaseManagerError("CCC report is not a JSON object")
+        try:
+            finished = datetime.fromisoformat(str(report.get("finished_at") or ""))
+        except (ValueError, TypeError) as exc:
+            raise ReleaseManagerError("CCC completion timestamp missing") from exc
+        if (finished.tzinfo is None or
+                finished < started - timedelta(seconds=2) or
+                finished > datetime.now(timezone.utc) + timedelta(seconds=15)):
+            raise ReleaseManagerError(
+                "CCC report is stale, future-dated or not independently refreshed"
+            )
+        try:
+            evidence = verify_release_ccc_report(
+                report, candidate_sha=candidate_sha, runtime_sha=runtime_sha,
+                before_mutation=before_mutation,
+            )
+        except ReleaseManagerError as exc:
+            # verify_release_ccc_report checked exact candidate and runtime SHA,
+            # required check set, unique IDs, and report schema BEFORE raising
+            # this specific failure. A missing/unverified check can never retry.
+            nonpassing = [
+                (x["check_id"], x["status"]) for x in report["checks"]
+                if x["status"] != "PASS"
+            ] if isinstance(report.get("checks"), list) else []
+            transient = (
+                not before_mutation
+                and str(exc) == "post-mutation CCC did not certify exact live candidate"
+                and report.get("status") == "FAIL"
+                and nonpassing == [("prometheus-targets", "FAIL")]
+                and completed.returncode != 0
+            )
+            if transient and attempt < len(CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS):
+                run_id = str(report["run_id"])
+                if run_id in failed_monitoring_runs:
+                    raise ReleaseManagerError("CCC repeated a prior monitoring report")
+                failed_monitoring_runs.append(run_id)
+                print(
+                    f"CCC_MONITORING_TRANSIENT=RECHECK run_id={run_id} "
+                    f"attempt={attempt + 1}",
+                    flush=True,
+                )
+                time.sleep(CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS[attempt])
+                continue
+            raise
+        if completed.returncode != 0 and evidence["status"] == "PASS":
+            raise ReleaseManagerError("independent CCC process failed despite PASS report")
+        if failed_monitoring_runs:
+            if str(evidence["run_id"]) in failed_monitoring_runs:
+                raise ReleaseManagerError("CCC reused an earlier failed report identifier")
+            evidence["transient_monitoring_retries"] = len(failed_monitoring_runs)
+            evidence["failed_monitoring_run_ids"] = failed_monitoring_runs
+        return evidence
+    raise ReleaseManagerError("independent CCC monitoring check never certified")
+
+
+
+# Recovery of a script that started but returned nonzero must not assume the
+# subordinate deploy_live_container.py successfully restored everything. Its
+# best-effort Docker rename/start and tag restoration intentionally use
+# check=False; a preflight error, however, may leave the baseline untouched.
+# Pin only these two known image surfaces and verified LKG image IDs.
+_ROLLBACK_SURFACE_TAGS = {
+    "runtime": ("jason-runtime:rollback-current", "jason-runtime:production"),
+    "mcp": ("jason-mcp:rollback-current", "jason-mcp:production"),
+}
+
+
+def rollback_surface_is_verified(
+    surface: str, rollback_sha: str, baseline_manifest: dict[str, Any],
+) -> bool:
+    if surface not in _ROLLBACK_SURFACE_TAGS:
+        raise ReleaseManagerError("unsupported rollback surface")
+    expected_id = str(baseline_manifest[f"{surface}_image_id"])
     try:
-        completed = subprocess.run(
-            ["python3", str(ccc_runner), "--config", str(ccc_config),
-             "--force", "--trigger", "material_change"],
-            text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            check=False, timeout=300,
+        current = live_runtime() if surface == "runtime" else live_mcp()
+        production_tag = _ROLLBACK_SURFACE_TAGS[surface][1]
+        return (
+            current["revision"] == rollback_sha
+            and current["image_id"] == expected_id
+            and image_id(production_tag) == expected_id
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise ReleaseManagerError("independent CCC execution did not complete") from exc
-    if not latest.is_file():
-        raise ReleaseManagerError("independent CCC did not persist a report")
-    report = json.loads(latest.read_text(encoding="utf-8"))
-    if not isinstance(report, dict):
-        raise ReleaseManagerError("CCC report is not a JSON object")
+    except (KeyError, ValueError, ReleaseManagerError, subprocess.CalledProcessError, OSError):
+        # Unreadable state is not a proof of successful rollback.
+        return False
+
+
+def pin_exact_rollback_image(
+    surface: str, baseline_manifest: dict[str, Any],
+) -> None:
+    """Repair only a stale rollback-current tag from immutable LKG evidence.
+
+    A failed forward deploy may occur before the helper retags rollback-current,
+    leaving the *previous-previous* image. Never use that stale alias to
+    restore a release with a different exact rollback SHA.
+    """
+    if surface not in _ROLLBACK_SURFACE_TAGS:
+        raise ReleaseManagerError("unsupported rollback surface")
+    expected_id = str(baseline_manifest[f"{surface}_image_id"])
+    if re.fullmatch(r"sha256:[a-f0-9]{64}", expected_id) is None:
+        raise ReleaseManagerError("verified immutable rollback image ID is invalid")
+    rollback_tag = _ROLLBACK_SURFACE_TAGS[surface][0]
     try:
-        finished = datetime.fromisoformat(str(report.get("finished_at") or ""))
-    except (ValueError, TypeError) as exc:
-        raise ReleaseManagerError("CCC completion timestamp missing") from exc
-    if (finished.tzinfo is None or
-            finished < started - timedelta(seconds=2) or
-            finished > datetime.now(timezone.utc) + timedelta(seconds=15)):
-        raise ReleaseManagerError("CCC report is stale, future-dated or not independently refreshed")
-    evidence = verify_release_ccc_report(
-        report, candidate_sha=candidate_sha, runtime_sha=runtime_sha,
-        before_mutation=before_mutation,
-    )
-    if completed.returncode != 0 and evidence["status"] == "PASS":
-        raise ReleaseManagerError("independent CCC process failed despite PASS report")
-    return evidence
+        existing = image_id(rollback_tag)
+    except (ReleaseManagerError, subprocess.CalledProcessError, OSError):
+        existing = None
+    if existing != expected_id:
+        # This controlled Docker tag operation is within the already
+        # owner-authorized, exclusive Production Manager rollback transaction.
+        run(["docker", "tag", expected_id, rollback_tag])
+        if image_id(rollback_tag) != expected_id:
+            raise ReleaseManagerError("pinned rollback image tag readback mismatch")
 
 
 def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
@@ -2040,6 +2324,8 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "exact candidate worktree is missing a required production deploy script"
         )
     candidate_quickbooks_profile = declared_quickbooks_read_profile(deploy_worktree)
+    candidate_worker_uid = worker_enrollment.approved_diagnostic_uid(deploy_worktree)
+    previous_worker_uid = worker_enrollment.live_diagnostic_uid(output)
     prior_quickbooks_profile = live_quickbooks_read_profile()
     if (candidate_quickbooks_profile is not None
             and os.environ.get("JASON_QUICKBOOKS_READ_PROFILE") not in (None, candidate_quickbooks_profile)):
@@ -2095,29 +2381,34 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     env["JASON_RUNTIME_PRODUCTION_IMAGE"] = image
     env["JASON_MCP_PRODUCTION_IMAGE"] = mcp_image
     env["JASON_SOURCE_REVISION_OVERRIDE"] = candidate_sha
+    env[worker_enrollment.ENV_NAME] = candidate_worker_uid
     if candidate_quickbooks_profile is not None:
         env["JASON_QUICKBOOKS_READ_PROFILE"] = candidate_quickbooks_profile
 
-    runtime_deployed = False
-    mcp_deployed = False
+    runtime_attempted = False
+    mcp_attempted = False
     host_attempted = False
     release_manager_installed = False
 
     try:
+        # Mark *attempt* BEFORE executing the helper. A failed helper may have
+        # already stopped/renamed/replaced live state before returning nonzero.
+        runtime_attempted = True
         runtime_output = run(
             [str(runtime_script)],
             cwd=deploy_worktree,
             env=env,
         )
-        runtime_deployed = True
         wait_live_runtime()
 
+        mcp_attempted = True
         mcp_output = run(
             [str(mcp_script)],
             cwd=deploy_worktree,
             env=env,
         )
-        mcp_deployed = True
+        if worker_enrollment.live_diagnostic_uid(output) != candidate_worker_uid:
+            raise ReleaseManagerError("diagnostic worker enrollment failed dual-plane readback")
         if live_mcp()["revision"] != candidate_sha:
             raise ReleaseManagerError(
                 "MCP did not report the exact candidate revision after deployment"
@@ -2216,60 +2507,83 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "final_state": "closed",
             "closed_at": now(),
         }
-        gate_transition(repo, state_root, record, "production_verified")
-        write_owner_notification_event(
-            state_root, record, "production_queue_completed"
-        )
-        gate_transition(repo, state_root, record, "closed")
+        # The final root-governed last-known-good commit is part of production
+        # acceptance. No verified/closed state or success notification may be
+        # emitted until that protected transition independently succeeds.
         set_last_known_good(
             state_root,
             production_manifest,
             release_id=str(record["release_id"]),
         )
+        gate_transition(repo, state_root, record, "production_verified")
+        gate_transition(repo, state_root, record, "closed")
         save_record(state_root, record)
+        write_owner_notification_event(
+            state_root, record, "production_queue_completed"
+        )
         return record
     except Exception as error:
         rollback_env = quickbooks_rollback_environment(
             os.environ, rollback_sha=rollback_sha, prior_profile=prior_quickbooks_profile
         )
+        rollback_env[worker_enrollment.ENV_NAME] = previous_worker_uid
 
         rollback_errors: list[str] = []
+        recovery_steps = {"mcp": "not_attempted", "host": "not_attempted",
+                          "manager": "not_attempted", "runtime": "not_attempted"}
 
-        # Reverse the forward transaction in dependency order. Host reconciliation
-        # requires MCP to already report the requested release revision.
-        if mcp_deployed:
+        # Reverse the forward transaction in dependency order. A script can
+        # return nonzero AFTER mutating production; do not trust its exit code
+        # or its best-effort internal rollback as proof. A healthy, exact-LKG
+        # surface need not be restarted merely because preflight failed.
+        if mcp_attempted:
             try:
-                run([str(mcp_script)], cwd=deploy_worktree, env=rollback_env)
-                if live_mcp()["revision"] != rollback_sha:
-                    raise ReleaseManagerError(
-                        "MCP rollback revision does not match recorded rollback SHA"
-                    )
+                if rollback_surface_is_verified("mcp", rollback_sha, baseline_manifest):
+                    recovery_steps["mcp"] = "already_verified_at_baseline"
+                else:
+                    recovery_steps["mcp"] = "restoration_attempted"
+                    pin_exact_rollback_image("mcp", baseline_manifest)
+                    run([str(mcp_script)], cwd=deploy_worktree, env=rollback_env)
+                    if not rollback_surface_is_verified("mcp", rollback_sha, baseline_manifest):
+                        raise ReleaseManagerError("MCP rollback image/alias/live revision is not verified")
+                    recovery_steps["mcp"] = "restored_and_verified"
             except Exception as exc:
+                recovery_steps["mcp"] = "unverified"
                 rollback_errors.append("mcp=" + type(exc).__name__ + ":" + str(exc)[:200])
 
         if host_attempted:
             try:
+                recovery_steps["host"] = "restoration_attempted"
                 request_host_reconcile(state_root, rollback_sha)
+                recovery_steps["host"] = "reconciled_baseline"
             except Exception as exc:
+                recovery_steps["host"] = "unverified"
                 rollback_errors.append("host=" + type(exc).__name__ + ":" + str(exc)[:200])
 
         if release_manager_installed or host_attempted:
             try:
+                recovery_steps["manager"] = "restoration_attempted"
                 install_release_manager_from_current(rollback_sha)
+                recovery_steps["manager"] = "reconciled_baseline"
             except Exception as exc:
+                recovery_steps["manager"] = "unverified"
                 rollback_errors.append(
                     "release_manager=" + type(exc).__name__ + ":" + str(exc)[:200]
                 )
 
-        if runtime_deployed:
+        if runtime_attempted:
             try:
-                run([str(runtime_script)], cwd=deploy_worktree, env=rollback_env)
-                rollback_live = wait_live_runtime()
-                if rollback_live["revision"] != rollback_sha:
-                    raise ReleaseManagerError(
-                        "runtime rollback revision does not match recorded rollback SHA"
-                    )
+                if rollback_surface_is_verified("runtime", rollback_sha, baseline_manifest):
+                    recovery_steps["runtime"] = "already_verified_at_baseline"
+                else:
+                    recovery_steps["runtime"] = "restoration_attempted"
+                    pin_exact_rollback_image("runtime", baseline_manifest)
+                    run([str(runtime_script)], cwd=deploy_worktree, env=rollback_env)
+                    if not rollback_surface_is_verified("runtime", rollback_sha, baseline_manifest):
+                        raise ReleaseManagerError("runtime rollback image/alias/health is not verified")
+                    recovery_steps["runtime"] = "restored_and_verified"
             except Exception as exc:
+                recovery_steps["runtime"] = "unverified"
                 rollback_errors.append(
                     "runtime=" + type(exc).__name__ + ":" + str(exc)[:200]
                 )
@@ -2277,8 +2591,18 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         rollback_ok = False
         if not rollback_errors:
             try:
+                # Read-only, full-manifest verification includes runtime health,
+                # exact immutable image IDs, MCP, host, controller and timers.
+                # Do not reinstall/restart an unchanged controller a second
+                # time just to verify it.
                 live_production_alignment(rollback_sha)
-                install_release_manager_from_current(rollback_sha)
+                verified_manifest = capture_production_manifest(rollback_sha)
+                if verified_manifest.get("complete") is not True:
+                    raise ReleaseManagerError("rollback baseline manifest is incomplete")
+                for surface in ("runtime", "mcp"):
+                    if (verified_manifest[f"{surface}_image_id"]
+                            != baseline_manifest[f"{surface}_image_id"]):
+                        raise ReleaseManagerError("rollback image ID differs from pinned LKG")
                 rollback_ok = True
             except Exception as exc:
                 rollback_errors.append(
@@ -2291,6 +2615,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "message": str(error)[:700],
             "rollback_verified": rollback_ok,
             "rollback_errors": rollback_errors,
+            "rollback_actions": recovery_steps,
         }
         record["state"] = "rolled_back" if rollback_ok else "failed"
         record.setdefault("history", []).append(
@@ -2454,6 +2779,45 @@ def reconcile_stopped_rollback_retention(*, keep: int = 16) -> int:
     return len(eligible[:keep])
 
 
+def authoritative_auto_promotion_head(repo: Path) -> str:
+    """Read the exact protected remote-main tip, never a stale local checkout."""
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", "--exit-code", "origin", "refs/heads/main"],
+            cwd=repo, text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, check=False, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ReleaseManagerError("protected main cannot be verified for automatic promotion") from exc
+    if result.returncode != 0:
+        raise ReleaseManagerError("protected main cannot be verified for automatic promotion")
+    lines = [line.split() for line in result.stdout.splitlines() if line.strip()]
+    if (len(lines) != 1 or len(lines[0]) != 2
+            or lines[0][1] != "refs/heads/main"
+            or not SHA.fullmatch(lines[0][0])):
+        raise ReleaseManagerError("protected main returned an invalid exact revision")
+    return lines[0][0]
+
+
+def live_release_mobile_approval_mode(runtime: dict[str, Any]) -> str:
+    """Read only the trusted *running* container's release-approval mode.
+
+    A policy file upgraded on disk cannot activate new risk classes while
+    production is still running the older owner-only pilot. No other
+    env variables or secrets are included in output.
+    """
+    config = (runtime.get("inspect") or {}).get("Config") or {}
+    values = config.get("Env")
+    if not isinstance(values, list):
+        return "off"
+    selected = [str(value).split("=", 1)[1] for value in values
+                if isinstance(value, str)
+                and value.startswith("JASON_RELEASE_MOBILE_APPROVAL_MODE=")]
+    if len(selected) != 1:
+        return "off"
+    return selected[0] if selected[0] in {"owner_only_pilot", "owner_reviewed"} else "off"
+
+
 def promote_eligible(repo: Path, state_root: Path) -> bool:
     # Keep the required five-minute timer active, but do not allow it to
     # execute a production promotion while Owner has selected manual mode.
@@ -2461,15 +2825,67 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
     policy = gate.load_json(repo / "config" / "release-manager-policy.json")
     if (policy.get("schedule") or {}).get("automatic_promotion_enabled") is not True:
         return False
+    # Mobile Teams owner decisions are checked independently against the
+    # registered gateway signature, active Entra/Jason owner binding, exact
+    # release manifest, 0600 versioned policy and durable single-use receipt.
+    # Disabled by default: no policy/ledger => no mobile authorization.
+    tools_root = str(repo / "tools")
+    if tools_root not in sys.path:
+        sys.path.insert(0, tools_root)
+    from release_mobile_approval_consumer import (
+        _install_repo_modules, consume_mobile_release_decisions,
+    )
+    # The host runner also operates from a lightweight systemd/unittest
+    # environment without PYTHONPATH. Install ONLY modules from the pinned
+    # release source before importing the shared runtime safety policy.
+    _install_repo_modules(Path(repo))
+    from jason_runtime.owner_release_approval_containment import read_release_approval_containment
+    from jason_runtime.mobile_release_approval import read_mobile_release_policy
+    release_teams_containment = read_release_approval_containment(state_root)
+    # SECURITY: the default mobile approval database contains LIVE signed owner
+    # decisions. Isolated/preproduction release-manager state roots MUST never
+    # consume them into a different release/CCC state or test fixture.
+    # Existing explicit test invocation of the consumer uses injected test DBs.
+    if Path(state_root).resolve() == DEFAULT_STATE.resolve():
+        consume_mobile_release_decisions(
+            repo=repo, state_root=state_root, approve_release=approve_release,
+        )
     consume_owner_approval_requests(repo, state_root)
     if not production_window_open():
         return False
     records = state_root / "records"
     if not records.exists():
         return False
+    try:
+        main_sha = authoritative_auto_promotion_head(repo)
+    except ReleaseManagerError:
+        # Network failure is an explicit *deferral*, not a production-service
+        # outage. No approval or queued release state is changed.
+        print("RELEASE_MANAGER_AUTO_DEFERRED=authoritative_main_unavailable", flush=True)
+        return False
+    # Cards are issued only for the exact release independently found at
+    # protected GitHub main and the still-matching live rollback baseline.
+    # A 5-minute signed-review offer eliminates stale historical approval spam.
+    offer_root = state_root / "mobile-release-offers"
+    if (Path("/var/lib/jason/authority/mobile-release-approval-policy.json").is_file()
+            and offer_root.is_dir()):
+        for old in offer_root.glob("release-*.json"):
+            if old.stem != record_id(main_sha):
+                old.unlink()
+    superseded = 0
     for path in sorted(records.glob("*.json"), key=lambda item: item.stat().st_mtime):
         record = json.loads(path.read_text(encoding="utf-8"))
         if record.get("state") != "production_eligible":
+            continue
+        candidate_sha = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
+        if not SHA.fullmatch(candidate_sha):
+            print("RELEASE_MANAGER_AUTO_DEFERRED=invalid_candidate_identity", flush=True)
+            continue
+        # A prior explicit Owner approval remains valid for its exact SHA,
+        # but must never be selected unattended after a newer protected
+        # source becomes authoritative. Preserve its record as evidence.
+        if candidate_sha != main_sha:
+            superseded += 1
             continue
 
         # A queued release is tied to the production baseline against which it
@@ -2498,11 +2914,54 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
             save_record(state_root, record)
             continue
 
-        # Preserve retention headroom for two runtime/MCP rollback containers.
-        # Any Docker failure aborts promotion rather than weakening the drift gate.
-        reconcile_stopped_rollback_retention()
+        reviewed_policy_path = Path("/var/lib/jason/authority/mobile-release-approval-policy.json")
+        owner_teams_eligible = False
+        if (not release_teams_containment.active
+                and reviewed_policy_path.is_file()
+                and (record.get("owner_approval") or {}).get("approved") is not True):
+            reviewed_policy = read_mobile_release_policy(reviewed_policy_path)
+            live_mode = live_release_mobile_approval_mode(live_runtime())
+            expected_mode = ("owner_only_pilot" if reviewed_policy.schema_version == "1.0"
+                             else "owner_reviewed")
+            requested_risk = str(record.get("risk_profile") or "unknown")
+            owner_teams_eligible = (
+                live_mode == expected_mode
+                and requested_risk in reviewed_policy.allowed_risk_profiles
+            )
+            if live_mode != expected_mode:
+                print("RELEASE_TEAMS_APPROVAL_UNAVAILABLE=runtime_mode_mismatch"
+                      + f" expected={expected_mode} active={live_mode}", flush=True)
+            elif requested_risk not in reviewed_policy.allowed_risk_profiles:
+                print("RELEASE_TEAMS_APPROVAL_UNAVAILABLE=reviewed_policy_excludes_risk"
+                      + f" risk={requested_risk}", flush=True)
+        if owner_teams_eligible:
+            offer_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            offer = offer_root / (record_id(candidate_sha) + ".json")
+            atomic_json(offer, {
+                "schema_version": "1.0", "release_id": record_id(candidate_sha),
+                "candidate_sha": candidate_sha,
+                "manifest_sha256": hashlib.sha256(json.dumps(
+                    record["release_manifest"], sort_keys=True, separators=(",", ":"),
+                    ensure_ascii=False,
+                ).encode("utf-8")).hexdigest(),
+                "protected_main_sha": main_sha, "live_rollback_sha": current_sha,
+                "published_at": now(),
+            })
         result = production_gate_result(repo, record)
         if result.get("allowed") is True:
+            # Close the TOCTOU gap between scanning the queue and opening the
+            # production transaction. A newer protected merge defers the
+            # unattended release without redefining Owner authorization.
+            try:
+                if authoritative_auto_promotion_head(repo) != candidate_sha:
+                    print("RELEASE_MANAGER_AUTO_DEFERRED=protected_main_advanced", flush=True)
+                    return False
+            except ReleaseManagerError:
+                print("RELEASE_MANAGER_AUTO_DEFERRED=authoritative_main_unavailable", flush=True)
+                return False
+            # No rollback retention mutation until exact-source Owner and
+            # production gates are verified for the current protected HEAD.
+            reconcile_stopped_rollback_retention()
             try:
                 deploy_production(repo, state_root, record)
             except ReleaseManagerBusy:
@@ -2520,17 +2979,36 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
             reason.strip().casefold() in owner_only_reasons for reason in reasons
         )
         if owner_only:
+            # An informational Teams message is NOT an approval card. Publish
+            # the actual lane/blocker rather than implying that a protected
+            # release can be approved through an ineligible channel.
+            if owner_teams_eligible:
+                owner_instruction = (
+                    "STATUS ONLY - NOT AN APPROVAL CARD. A signed Teams approval "
+                    "offer was published for the exact release. Only a separate "
+                    "authenticated owner Approve click can authorize it; "
+                    "delivery and a click must each be verified."
+                )
+            else:
+                owner_instruction = (
+                    "BLOCKED: no actionable Teams approval is enabled for "
+                    "this exact release risk under the running mode and "
+                    "reviewed policy. This notice is NOT an approval card. "
+                    "Existing exact-SHA owner authorization remains required."
+                )
             write_owner_notification_event(
                 state_root,
                 record,
                 "production_owner_action_required",
-                owner_action="Owner approval is required to promote this build to Production.",
+                owner_action=owner_instruction,
             )
             continue
         raise ReleaseManagerError(
             "Production Eligible release failed production gate: "
             + "; ".join(reasons)
         )
+    if superseded:
+        print(f"RELEASE_MANAGER_AUTO_DEFERRED=superseded_candidate_count:{superseded}", flush=True)
     return False
 
 

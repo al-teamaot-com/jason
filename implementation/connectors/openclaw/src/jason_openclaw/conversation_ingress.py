@@ -126,9 +126,17 @@ class HardwareBillingDispositionEvidence:
 
 _TICKET_NUMBER_RE = re.compile(r"\bT\d{8}\.\d{4}\b", re.IGNORECASE)
 _HTTPS_URL_RE = re.compile(r"https://[^\s<>]+", re.IGNORECASE)
-_PROCUREMENT_CONTEXT_TERMS = frozenset({
-    "procurement", "quote", "invoice", "purchase", "order", "product", "part",
+# These are development or documentation destinations, not vendor product
+# pages. A GitHub PR mentioning "invoice/part/PO" must not be intercepted
+# by procurement; the authenticated conversation handler must see it.
+_NON_PROCUREMENT_LINK_HOSTS = frozenset({
+    "github.com", "gitlab.com", "bitbucket.org", "dev.azure.com",
+    "learn.microsoft.com", "docs.microsoft.com", "teams.microsoft.com",
 })
+_PROCUREMENT_INTENT_RE = re.compile(
+    r"\b(?:procurement|quote|invoice|purchase|order|product|part|buy|price|source)\b",
+    re.IGNORECASE,
+)
 
 
 def _procurement_url_context(text: str) -> tuple[str | None, str | None]:
@@ -142,6 +150,12 @@ def _procurement_url_context(text: str) -> tuple[str | None, str | None]:
     parsed = urlsplit(url)
     if parsed.scheme.casefold() != "https" or not parsed.hostname:
         return None, None
+    host = parsed.hostname.casefold().rstrip(".")
+    if any(host == excluded or host.endswith("." + excluded)
+           for excluded in _NON_PROCUREMENT_LINK_HOSTS):
+        # Never convert review, source-control or documentation links into
+        # purchase/invoice operations, even when unrelated words are present.
+        return None, None
 
     tickets = [match.upper() for match in _TICKET_NUMBER_RE.findall(value)]
     if len(set(tickets)) > 1:
@@ -149,9 +163,12 @@ def _procurement_url_context(text: str) -> tuple[str | None, str | None]:
     ticket = tickets[0] if tickets else None
 
     if value == url:
+        # Retain the established paste-one-product-link workflow for any
+        # vendor; supplier domains are NOT an invented new allowlist.
         return url, None
-    lowered = value.casefold()
-    if ticket or any(term in lowered for term in _PROCUREMENT_CONTEXT_TERMS):
+    before_url, _, after_url = value.partition(url)
+    if (ticket or _PROCUREMENT_INTENT_RE.search(before_url)
+            or _PROCUREMENT_INTENT_RE.search(after_url)):
         return url, ticket
     return None, None
 
@@ -567,6 +584,10 @@ class GovernedOpenClawTeamsConversationIngress:
                         conversation_id=parsed.conversation_id,
                         channel_response_id=parsed.approval_submit.channel_response_id,
                         decided_at=parsed.issued_at,
+                        **({'signed_envelope': envelope}
+                           if parsed.approval_submit.approval_id.startswith((
+                               'planapproval-', 'relapproval-', 'owneruatapproval-'
+                           )) else {}),
                     )
                 )
             except PermissionError as error:

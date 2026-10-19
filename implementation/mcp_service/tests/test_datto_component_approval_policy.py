@@ -178,3 +178,119 @@ def test_caller_cannot_override_server_approval_mode(monkeypatch):
         component_name=result["component_name"],
     )
     assert selected.approval_mode == "per_run"
+
+
+LINUX_SHELL_UID = "bc7c4531-6869-4658-b1d6-7639a477045e"
+LINUX_SHELL_NAME = "Run Ad Hoc Command (Shell) [MAC] [LIN]"
+
+
+def set_linux_worker_scope(monkeypatch):
+    set_scope(monkeypatch)
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_component_name",
+        lambda name: (LINUX_SHELL_UID, LINUX_SHELL_NAME),
+    )
+    monkeypatch.setenv(
+        "JASON_DATTO_COMPONENT_EXECUTION_COMPONENTS_JSON",
+        '[{"uid":"' + LINUX_SHELL_UID + '","name":"' + LINUX_SHELL_NAME + '","approval_mode":"standing_safe"}]',
+    )
+
+
+def test_linux_worker_requires_server_enrollment(monkeypatch):
+    set_linux_worker_scope(monkeypatch)
+    monkeypatch.delenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", raising=False)
+    try:
+        server._canonicalize_governed_action_arguments(
+            "automation.component.execute",
+            {"device_uid": "claw2", "component_name": LINUX_SHELL_NAME, "variables": {"usrInput": "uname -srm"}},
+        )
+    except ValueError as exc:
+        assert str(exc) == "DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED"
+    else:
+        raise AssertionError("Linux shell missing enrolled host was allowed")
+
+
+def test_linux_worker_denies_other_managed_devices(monkeypatch):
+    set_linux_worker_scope(monkeypatch)
+    monkeypatch.setenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", "claw2")
+    try:
+        server._canonicalize_governed_action_arguments(
+            "automation.component.execute",
+            {"device_uid": "production-claw", "component_name": LINUX_SHELL_NAME, "variables": {"usrInput": "uname -srm"}},
+        )
+    except ValueError as exc:
+        assert str(exc) == "DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED"
+    else:
+        raise AssertionError("Linux shell targeted a non-enrolled host")
+
+
+def test_linux_worker_bound_to_exact_per_run_permission(monkeypatch):
+    set_linux_worker_scope(monkeypatch)
+    monkeypatch.setenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", "claw2")
+    _, calls = install_runtime(monkeypatch)
+    before_approval = server._governed_execute(
+        capability_name="automation.component.execute",
+        arguments={"device_uid": "claw2", "component_name": LINUX_SHELL_NAME, "variables": {"usrInput": "uname -srm"}},
+    )
+    assert before_approval["status"] == "approval_required"
+    assert calls == []
+    with_approval = server._governed_execute(
+        capability_name="automation.component.execute",
+        arguments={"device_uid": "claw2", "component_name": LINUX_SHELL_NAME, "variables": {"usrInput": "uname -srm"}},
+        explicit_approval=True,
+    )
+    assert with_approval["status"] == "succeeded"
+    assert len(calls) == 1
+
+
+def test_linux_worker_has_separate_server_scope_without_legacy_catalog_entry(monkeypatch):
+    set_scope(monkeypatch)
+    monkeypatch.setattr(
+        server,
+        "_resolve_live_datto_component_name",
+        lambda name: (LINUX_SHELL_UID, LINUX_SHELL_NAME),
+    )
+    monkeypatch.setenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", "claw2")
+    # The Desktop catalog intentionally has no Linux shell component.
+    assert all(
+        component.uid != LINUX_SHELL_UID
+        for component in server.configured_datto_components()
+    )
+    result = server._canonicalize_governed_action_arguments(
+        "automation.component.execute",
+        {"device_uid": "claw2", "component_name": LINUX_SHELL_NAME,
+         "device_class": "Desktop",
+         "variables": {"usrInput": "uname -srm"}},
+    )
+    assert result["device_uid"] == "claw2"
+    assert result["allowlist_name"] == "aot-approved-linux-worker"
+    assert result["device_class"] == "Server"
+    assert result["component_uid"] == LINUX_SHELL_UID
+    _, calls = install_runtime(monkeypatch)
+    unapproved = server._governed_execute(
+        capability_name="automation.component.execute",
+        arguments={"device_uid": "claw2", "component_name": LINUX_SHELL_NAME,
+                   "variables": {"usrInput": "uname -srm"}},
+    )
+    assert unapproved["status"] == "approval_required"
+    assert calls == []
+    approved = server._governed_execute(
+        capability_name="automation.component.execute",
+        arguments={"device_uid": "claw2", "component_name": LINUX_SHELL_NAME,
+                   "variables": {"usrInput": "uname -srm"}},
+        explicit_approval=True,
+    )
+    assert approved["status"] == "succeeded"
+    assert len(calls) == 1
+
+
+def test_separate_worker_scope_does_not_change_desktop_diagnostics(monkeypatch):
+    set_scope(monkeypatch)
+    monkeypatch.setenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", "claw2")
+    result = server._canonicalize_governed_action_arguments(
+        "automation.component.execute",
+        {"device_uid": "device-123", "component_uid": "component-dns"},
+    )
+    assert result["allowlist_name"] == "AOT governed diagnostic pilot"
+    assert result["device_class"] == "Desktop"

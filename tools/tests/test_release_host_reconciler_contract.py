@@ -121,3 +121,40 @@ def test_root_worker_tolerates_only_historical_post_success_documentation_failur
     assert "JASON_HOST_SERVICE_RECONCILIATION=PASS" in text
     assert "ERROR: production succeeded but documentation reconciliation publication failed" in text
     assert "HISTORICAL_POST_SUCCESS_DOCUMENTATION_FAILURE=DEFERRED_TO_RELEASE_MANAGER" in text
+
+
+def test_root_worker_unit_timeout_exceeds_script_deadline_and_processes_one_request():
+    import importlib.util
+    from unittest.mock import patch
+    worker = ROOT / 'tools' / 'release_host_reconcile_worker.py'
+    text = worker.read_text(encoding='utf-8')
+    unit = (ROOT / 'infrastructure/openclaw-operations/systemd/jason-release-host-reconcile.service').read_text(encoding='utf-8')
+    path = (ROOT / 'infrastructure/openclaw-operations/systemd/jason-release-host-reconcile.path').read_text(encoding='utf-8')
+    assert 'MAX_REQUESTS_PER_RUN = 1' in text
+    assert 'HOST_RECONCILE_TIMEOUT_SECONDS = 360' in text
+    assert 'TimeoutStartSec=480' in unit
+    assert 'DirectoryNotEmpty=' in path
+
+
+def test_root_worker_leaves_remaining_requests_for_next_path_activation(tmp_path):
+    import importlib.util
+    from unittest.mock import patch
+    source = ROOT / 'tools' / 'release_host_reconcile_worker.py'
+    spec = importlib.util.spec_from_file_location('host_reconcile_timeout_contract',source)
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    requests=tmp_path/'requests';results=tmp_path/'results'
+    requests.mkdir()
+    for name in ('first.json','second.json'):
+        (requests/name).write_text('{}')
+    processed=[]
+    def process_one(path):
+        processed.append(path.name)
+        path.unlink()
+    with patch.object(worker,'REQUESTS',requests), patch.object(worker,'RESULTS',results), patch.object(worker,'_process',process_one), patch.object(worker.os,'geteuid',return_value=0):
+        assert worker.main()==0
+        assert len(processed)==1
+        assert len(list(requests.glob('*.json')))==1
+        assert worker.main()==0
+        assert len(processed)==2
+        assert list(requests.glob('*.json'))==[]

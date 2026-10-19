@@ -1,4 +1,5 @@
 import importlib.util
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -27,6 +28,129 @@ SHA_B = "b" * 40
 
 
 class ReleaseManagerHostRunnerTests(unittest.TestCase):
+    def test_root_host_reconciliation_is_always_production_control_core(self):
+        for path in (
+            "tools/reconcile_production_host_services.sh",
+            "tools/reconcile_managed_unit_delta.py",
+            "tools/release_exporter_port_guard.py",
+        ):
+            for change_class in ("support", "release_blocker", "todo", "feature"):
+                self.assertEqual(
+                    runner.classify_change_risk(change_class, [path]),
+                    "production_control_core",
+                )
+
+    def test_runtime_image_and_build_context_are_protected_core(self):
+        import fnmatch
+        import json
+        policy = json.loads((ROOT / "config/release-manager-policy.json").read_text())
+        for path in ("infrastructure/jason-runtime/Dockerfile", ".dockerignore"):
+            self.assertEqual(
+                runner.classify_change_risk("feature", [path]),
+                "production_control_core",
+            )
+            self.assertTrue(
+                any(fnmatch.fnmatch(path, pattern)
+                    for pattern in policy["protected_core_globs"])
+            )
+
+    def test_owner_release_approval_code_is_protected_control_core(self):
+        import json
+        policy = json.loads((ROOT / "config/release-manager-policy.json").read_text())
+        import fnmatch
+        names = (
+            "implementation/runtime_service/src/jason_runtime/mobile_release_approval.py",
+            "implementation/runtime_service/src/jason_runtime/universal_teams_approval.py",
+            "tools/release_mobile_approval_consumer.py",
+            "implementation/runtime_service/src/jason_runtime/playbook_autonomy_review.py",
+            "implementation/connectors/microsoft_graph/teams_approval_channel.py",
+        )
+        for name in names:
+            self.assertEqual(runner.classify_change_risk("feature", [name]), "production_control_core")
+            self.assertTrue(any(fnmatch.fnmatch(name, pat) for pat in policy["protected_core_globs"]))
+
+    def test_owner_approval_status_notice_does_not_imply_teams_card_or_release(self):
+        import inspect
+        source = inspect.getsource(runner.promote_eligible)
+        self.assertIn("STATUS ONLY - NOT AN APPROVAL CARD", source)
+        self.assertIn("BLOCKED: no actionable Teams approval is enabled", source)
+        self.assertIn("Only a separate", source)
+        self.assertIn("authenticated owner Approve click", source)
+        self.assertIn("this notice", source.casefold())
+        self.assertIn("owner_action=owner_instruction", source)
+        self.assertIn("if owner_teams_eligible:", source)
+
+    def test_live_owner_release_mode_does_not_trust_policy_file_alone(self):
+        expected = {"inspect": {"Config": {"Env": [
+            "SAFE_CONSOLE=silent",
+            "JASON_RELEASE_MOBILE_APPROVAL_MODE=owner_reviewed",
+        ]}}}
+        self.assertEqual(runner.live_release_mobile_approval_mode(expected), "owner_reviewed")
+        expected["inspect"]["Config"]["Env"][-1] = "JASON_RELEASE_MOBILE_APPROVAL_MODE=owner_only_pilot"
+        self.assertEqual(runner.live_release_mobile_approval_mode(expected), "owner_only_pilot")
+        for values in (
+            [], ["JASON_RELEASE_MOBILE_APPROVAL_MODE=off"],
+            ["JASON_RELEASE_MOBILE_APPROVAL_MODE=unexpected"],
+            ["JASON_RELEASE_MOBILE_APPROVAL_MODE=owner_reviewed"] * 2,
+        ):
+            self.assertEqual(
+                runner.live_release_mobile_approval_mode({"inspect": {"Config": {"Env": values}}}),
+                "off",
+            )
+
+    def test_runtime_candidate_build_requires_nonroot_offline_import_smoke(self):
+        from unittest.mock import call
+        repo = Path("/tmp/jason-source")
+        state = Path("/tmp/jason-preproduction")
+        checkout = state / "private-git-worktree"
+        tag = "jason-runtime:release-" + SHA_A[:12]
+        with (patch.object(runner, "worktree", return_value=checkout) as worktree,
+              patch.object(runner, "run") as invoke,
+              patch.object(runner, "image_id", return_value="sha256:verified") as image,
+              patch.object(runner, "remove_worktree") as cleanup):
+            actual = runner.build_candidate(repo, state, SHA_A)
+        self.assertEqual(actual, (tag, "sha256:verified"))
+        worktree.assert_called_once_with(repo, state, SHA_A)
+        cleanup.assert_called_once_with(repo, checkout)
+        image.assert_called_once_with(tag)
+        commands = [entry.args[0] for entry in invoke.call_args_list]
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands[0][:2], ["docker", "build"])
+        self.assertEqual(commands[0][-1], str(checkout))
+        smoke = commands[1]
+        self.assertEqual(smoke[:5], ["timeout", "--signal=TERM", "--kill-after=5s",
+                                     "45s", "docker"])
+        self.assertIn("--network", smoke)
+        self.assertEqual(smoke[smoke.index("--network") + 1], "none")
+        self.assertIn("--read-only", smoke)
+        self.assertIn("--cap-drop", smoke)
+        self.assertEqual(smoke[smoke.index("--cap-drop") + 1], "ALL")
+        self.assertEqual(smoke[smoke.index("--user") + 1], "1000:1000")
+        self.assertEqual(smoke[smoke.index("--entrypoint") + 1], "python")
+        self.assertIn("from usage_ledger.ledger import SQLiteUsageLedger", smoke[-1])
+        self.assertIn("import jason_runtime.main", smoke[-1])
+        self.assertEqual(smoke[-2], "-c")
+        self.assertEqual(smoke[-3], tag)
+
+    def test_failed_runtime_import_smoke_cannot_admit_candidate(self):
+        repo = Path("/tmp/jason-source")
+        state = Path("/tmp/jason-preproduction")
+        checkout = state / "private-git-worktree"
+        build = None
+        with (patch.object(runner, "worktree", return_value=checkout),
+              patch.object(runner, "run") as invoke,
+              patch.object(runner, "image_id") as image,
+              patch.object(runner, "remove_worktree") as cleanup):
+            invoke.side_effect = [
+                None,
+                subprocess.CalledProcessError(1, ["docker", "run"]),
+            ]
+            with self.assertRaises(subprocess.CalledProcessError):
+                runner.build_candidate(repo, state, SHA_A)
+        self.assertEqual(invoke.call_count, 2)
+        image.assert_not_called()
+        cleanup.assert_called_once_with(repo, checkout)
+
     def test_release_id_is_deterministic(self):
         self.assertEqual(runner.record_id(SHA_A), "release-" + "a" * 16)
 
@@ -48,6 +172,8 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_AUTOTASK_MUTATION_ENABLED"], "false")
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_AUTONOMY_WORKER_ENABLED"], "false")
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_SUPPORT_REPAIR_AUTONOMY_ENABLED"], "false")
+        self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_UNIVERSAL_APPROVAL_MODE"], "off")
+        self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_UNIVERSAL_APPROVAL_WORKER_ENABLED"], "false")
         self.assertEqual(runner.MUTATION_ENV_OVERRIDES["JASON_AUTOTASK_PROCUREMENT_MCP_PROFILE"], "")
 
     def test_github_checks_reads_required_check_beyond_first_page(self):
@@ -525,11 +651,13 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 "state": "production_eligible",
                 "created_at": "2026-10-07T17:00:00+00:00",
                 "rollback_sha": SHA_B,
+                "release_candidate": {"candidate_sha": SHA_A},
             }
             runner.atomic_json(records / f"{payload['release_id']}.json", payload)
             with (
                 patch.object(runner.gate, "load_json", return_value={"schedule": {"automatic_promotion_enabled": True}}),
                 patch.object(runner, "production_window_open", return_value=True),
+                patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
                 patch.object(runner, "live_runtime", return_value={"revision": SHA_B}),
                 patch.object(runner, "live_production_alignment", return_value={}),
                 patch.object(
@@ -556,6 +684,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                     "state": "production_eligible",
                     "created_at": f"2026-10-02T0{index}:00:00+00:00",
                     "rollback_sha": SHA_B,
+                    "release_candidate": {"candidate_sha": sha},
                 }
                 runner.atomic_json(records / f"{payload['release_id']}.json", payload)
 
@@ -567,6 +696,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             with (
                 patch.object(runner.gate, "load_json", return_value={"schedule": {"automatic_promotion_enabled": True}}),
                 patch.object(runner, "production_window_open", return_value=True),
+                patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
                 patch.object(runner, "live_runtime", return_value={"revision": SHA_B}),
                 patch.object(runner, "live_production_alignment", return_value={}),
                 patch.object(
@@ -598,6 +728,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             with (
                 patch.object(runner.gate, "load_json", return_value={"schedule": {"automatic_promotion_enabled": True}}),
                 patch.object(runner, "production_window_open", return_value=True),
+                patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
                 patch.object(runner, "live_runtime", return_value={"revision": "c" * 40}),
                 patch.object(runner, "live_production_alignment", return_value={}),
                 patch.object(runner, "deploy_production") as deploy,
@@ -666,7 +797,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             self.assertTrue(create.call_args.kwargs["owner_approved"])
             preprod.assert_called_once()
 
-    def test_promote_eligible_skips_unapproved_protected_core_and_continues(self):
+    def test_promote_eligible_skips_superseded_and_selects_only_main(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             records = root / "records"
@@ -679,6 +810,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                     "state": "production_eligible",
                     "created_at": f"2026-10-02T0{index}:00:00+00:00",
                     "rollback_sha": SHA_B,
+                    "release_candidate": {"candidate_sha": sha},
                 }
                 runner.atomic_json(records / f"{payload['release_id']}.json", payload)
 
@@ -698,6 +830,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             with (
                 patch.object(runner.gate, "load_json", return_value={"schedule": {"automatic_promotion_enabled": True}}),
                 patch.object(runner, "production_window_open", return_value=True),
+                patch.object(runner, "authoritative_auto_promotion_head", return_value=second_sha),
                 patch.object(runner, "live_runtime", return_value={"revision": SHA_B}),
                 patch.object(runner, "live_production_alignment", return_value={}),
                 patch.object(runner, "production_gate_result", side_effect=gate_result),
@@ -837,6 +970,218 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         )
         self.assertNotIn("/home/al/projects/jason", service)
 
+    def test_preprod_health_failure_records_safe_status_without_secret_logs(self):
+        from unittest.mock import Mock
+        inspect = {
+            "Status": "exited", "ExitCode": 17, "OOMKilled": False,
+            "Health": {"Status": "unhealthy"},
+            "SensitiveToken": "should_not_appear_in_exception",
+            "Config": {"Env": ["SENSITIVE=secret"]},
+        }
+        calls = []
+        def fake_exec(cmd, **kwargs):
+            calls.append(cmd)
+            if cmd[:2] == ["docker", "exec"]:
+                return Mock(returncode=1)
+            if cmd[:3] == ["docker", "inspect", "--format"]:
+                import json
+                return Mock(returncode=0, stdout=json.dumps(inspect))
+            raise AssertionError("unexpected command")
+        with (patch.object(runner.subprocess, "run", side_effect=fake_exec),
+              patch.object(runner.time, "sleep", return_value=None)):
+            with self.assertRaises(runner.ReleaseManagerError) as context:
+                runner.wait_health("jason-runtime-preprod-example", attempts=2)
+        message = str(context.exception)
+        self.assertIn("container_state=exited", message)
+        self.assertIn("exit_code=17", message)
+        self.assertIn("oom_killed=False", message)
+        self.assertIn("health=unhealthy", message)
+        self.assertNotIn("secret", message.lower())
+        self.assertEqual(len([x for x in calls if x[:2] == ["docker", "exec"]]), 2)
+
+    def test_preprod_health_failed_inspect_retains_failure_and_no_secrets(self):
+        from unittest.mock import Mock
+        def fake_exec(cmd, **kwargs):
+            if cmd[:2] == ["docker", "exec"]:
+                return Mock(returncode=1)
+            if cmd[:3] == ["docker", "inspect", "--format"]:
+                return Mock(returncode=1, stdout="sensitive-error-do-not-print")
+            raise AssertionError("unexpected command")
+        with (patch.object(runner.subprocess, "run", side_effect=fake_exec),
+              patch.object(runner.time, "sleep", return_value=None)):
+            with self.assertRaisesRegex(
+                runner.ReleaseManagerError,
+                "container_state=unavailable",
+            ) as context:
+                runner.wait_health("jason-runtime-preprod-example", attempts=1)
+        self.assertNotIn("sensitive", str(context.exception))
+
+    def test_bounded_preprod_filters_only_event_history(self):
+        names = (
+            "orchestration-events.sqlite3\n"
+            "orchestration-events.sqlite3-wal\n"
+            "orchestration-events.sqlite3-shm\n"
+            "authority.sqlite3\n"
+            "governed-execution.sqlite3\n"
+            "support-repair\n"
+        )
+        self.assertEqual(
+            runner.bounded_preprod_openclaw_entries(names),
+            ["authority.sqlite3", "governed-execution.sqlite3", "support-repair"],
+        )
+
+    def test_preprod_preserves_sqlite_data_and_wal_but_skips_regenerable_shm(self):
+        names = (
+            "governed-execution.sqlite3\n"
+            "governed-execution.sqlite3-wal\n"
+            "governed-execution.sqlite3-shm\n"
+            "authority.sqlite3\n"
+            "authority.sqlite3-shm\n"
+            "authority.sqlite3-wal\n"
+            "not-sqlite-shm\n"
+            "governed-execution.sqlite3-shm-other\n"
+        )
+        result = runner.bounded_preprod_openclaw_entries(names)
+        self.assertEqual(
+            result,
+            [
+                "governed-execution.sqlite3",
+                "governed-execution.sqlite3-wal",
+                "authority.sqlite3",
+                "authority.sqlite3-wal",
+                "not-sqlite-shm",
+                "governed-execution.sqlite3-shm-other",
+            ],
+        )
+
+    def test_preprod_does_not_copy_ephemeral_shm_after_listing_to_docker_cp(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as td:
+            clone = Path(td) / "clone"
+            commands = []
+            def fake_run(cmd):
+                commands.append(cmd)
+                if cmd[:3] == ["docker", "exec", "jason-runtime"]:
+                    return (
+                        "governed-execution.sqlite3\n"
+                        "governed-execution.sqlite3-shm\n"
+                        "governed-execution.sqlite3-wal\n"
+                        "authority.sqlite3\n"
+                        "authority.sqlite3-shm"
+                    )
+                if cmd[:2] == ["docker", "cp"] and str(cmd[2]).endswith("-shm"):
+                    raise subprocess.CalledProcessError(1, cmd)
+                return ""
+            with (
+                patch.object(runner.shutil, "disk_usage", return_value=Mock(free=12 * 1024**3)),
+                patch.object(runner, "run", side_effect=fake_run),
+            ):
+                runner.copy_state_from_live_container("/var/lib/jason/openclaw", clone)
+            copied = [
+                str(cmd[2]).rsplit("/", 1)[-1]
+                for cmd in commands if cmd[:2] == ["docker", "cp"]
+            ]
+            self.assertEqual(
+                copied,
+                [
+                    "governed-execution.sqlite3",
+                    "governed-execution.sqlite3-wal",
+                    "authority.sqlite3",
+                ],
+            )
+            self.assertFalse(any(name.endswith("-shm") for name in copied))
+
+    def test_preprod_missing_sqlite_wal_remains_a_hard_clone_failure(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as td:
+            clone = Path(td) / "clone"
+            commands = []
+            def fake_run(cmd):
+                commands.append(cmd)
+                if cmd[:3] == ["docker", "exec", "jason-runtime"]:
+                    return "governed-execution.sqlite3\ngoverned-execution.sqlite3-wal"
+                if cmd[:2] == ["docker", "cp"] and str(cmd[2]).endswith("-wal"):
+                    raise subprocess.CalledProcessError(1, cmd)
+                return ""
+            with (
+                patch.object(runner.shutil, "disk_usage", return_value=Mock(free=12 * 1024**3)),
+                patch.object(runner, "run", side_effect=fake_run),
+            ):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    runner.copy_state_from_live_container("/var/lib/jason/openclaw", clone)
+            self.assertTrue(any(str(cmd[2]).endswith("-wal") for cmd in commands
+                                if cmd[:2] == ["docker", "cp"]))
+
+    def test_bounded_preprod_refuses_unsafe_or_oversized_listing(self):
+        for value in ("", "../escape\n", "a/b\n", "dup\ndup\n", "entry\n" * 257):
+            with self.subTest(value=value[:25]):
+                with self.assertRaises(runner.ReleaseManagerError):
+                    runner.bounded_preprod_openclaw_entries(value)
+
+    def test_bounded_preprod_rejects_low_disk_before_provider_io(self):
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "clone"
+            from unittest.mock import Mock
+            with (
+                patch.object(runner.shutil, "disk_usage", return_value=Mock(free=5 * 1024**3)),
+                patch.object(runner, "run") as command,
+            ):
+                with self.assertRaisesRegex(runner.ReleaseManagerError, "disk headroom"):
+                    runner.copy_state_from_live_container(
+                        "/var/lib/jason/openclaw", target,
+                    )
+            command.assert_not_called()
+
+    def test_bounded_preprod_copies_authority_but_not_large_event_journal(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "clone"
+            commands = []
+            def record(command):
+                commands.append(command)
+                if command[:3] == ["docker", "exec", "jason-runtime"]:
+                    return "orchestration-events.sqlite3\nauthority.sqlite3\nsupport-repair"
+                return ""
+            with (
+                patch.object(runner.shutil, "disk_usage", return_value=Mock(free=12 * 1024**3)),
+                patch.object(runner, "run", side_effect=record),
+            ):
+                runner.copy_state_from_live_container(
+                    "/var/lib/jason/openclaw", target,
+                )
+            copied = [str(v[2]) for v in commands if v[:2] == ["docker", "cp"]]
+            self.assertEqual(len(copied), 2)
+            self.assertTrue(any(name.endswith("/authority.sqlite3") for name in copied))
+            self.assertTrue(any(name.endswith("/support-repair") for name in copied))
+            self.assertFalse(any("orchestration-events" in name for name in copied))
+
+    def test_bounded_preprod_refuses_growth_past_reserve_after_copy(self):
+        from unittest.mock import Mock
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "clone"
+            seen = []
+            def record(command):
+                seen.append(command)
+                if command[:3] == ["docker", "exec", "jason-runtime"]:
+                    return "governed-execution.sqlite3"
+                return ""
+            with (
+                patch.object(runner.shutil, "disk_usage",
+                             side_effect=[Mock(free=8 * 1024**3), Mock(free=2 * 1024**3)]),
+                patch.object(runner, "run", side_effect=record),
+            ):
+                with self.assertRaisesRegex(runner.ReleaseManagerError, "bounded disk capacity"):
+                    runner.copy_state_from_live_container(
+                        "/var/lib/jason/openclaw", target,
+                    )
+            self.assertEqual(len([c for c in seen if c[:2] == ["docker", "cp"]]), 1)
+
+    def test_release_manager_defaults_to_managed_source_not_developer_checkout(self):
+        self.assertEqual(
+            runner.DEFAULT_REPO,
+            Path("/home/al/.local/lib/jason/engineering-worker-source"),
+        )
+
     def test_preprod_state_clone_uses_live_container_not_host_cp(self):
         source = (ROOT / "tools" / "release_manager_host_runner.py").read_text(
             encoding="utf-8"
@@ -874,6 +1219,44 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(runner.ReleaseManagerError, "production alignment mismatch"):
                 runner.live_production_alignment(SHA_A)
+
+    def test_preprod_partial_clone_failure_cleans_only_isolated_scratch(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            state_root = root / "openclaw" / "release-manager"
+            state_root.mkdir(parents=True)
+            live_source = root / "live-openclaw"
+            live_source.mkdir()
+            release_id = "release-" + "a" * 16
+            live = {
+                "inspect": {
+                    "Config": {"Env": [], "Labels": {}},
+                    "HostConfig": {"NetworkMode": "bridge", "Tmpfs": {}},
+                    "Mounts": [{
+                        "Type": "bind",
+                        "Source": str(live_source),
+                        "Destination": "/var/lib/jason/openclaw",
+                        "RW": True,
+                    }],
+                    "NetworkSettings": {"Networks": {}},
+                },
+            }
+            with (
+                patch.object(runner.subprocess, "run"),
+                patch.object(
+                    runner, "copy_state_from_live_container",
+                    side_effect=OSError("simulated test copy failure"),
+                ),
+            ):
+                with self.assertRaisesRegex(OSError, "simulated test copy failure"):
+                    runner.create_preprod_container(
+                        live=live, candidate_image="jason-runtime:test",
+                        candidate_sha=SHA_A, state_root=state_root,
+                        release_id=release_id,
+                    )
+            scratch = runner.preprod_scratch_path(state_root, release_id)
+            self.assertFalse(scratch.exists())
+            self.assertTrue(live_source.is_dir())
 
     def test_preprod_scratch_is_outside_live_openclaw_tree(self):
         state_root = Path("/var/lib/jason/openclaw/release-manager")
@@ -1642,11 +2025,12 @@ def test_nonprotected_release_waits_for_owner_without_failing_systemd(tmp_path):
     from unittest.mock import patch
     records = tmp_path / 'records';records.mkdir()
     record = {'release_id': runner.record_id(SHA_A), 'state': 'production_eligible',
-              'rollback_sha': SHA_B, 'owner_approval': {'approved': False}}
+              'rollback_sha': SHA_B, 'release_candidate': {'candidate_sha': SHA_A}, 'owner_approval': {'approved': False}}
     runner.atomic_json(records / (record['release_id'] + '.json'), record)
     with (patch.object(runner.gate, 'load_json', return_value={'schedule': {'automatic_promotion_enabled': True}}),
           patch.object(runner, 'consume_owner_approval_requests'),
           patch.object(runner, 'production_window_open', return_value=True),
+          patch.object(runner, 'authoritative_auto_promotion_head', return_value=SHA_A),
           patch.object(runner, 'live_runtime', return_value={'revision': SHA_B}),
           patch.object(runner, 'live_production_alignment', return_value={}),
           patch.object(runner, 'reconcile_stopped_rollback_retention'),
@@ -1666,11 +2050,12 @@ def test_unapproved_release_with_other_denials_fails_closed(tmp_path):
     import pytest
     records = tmp_path / 'records';records.mkdir()
     record = {'release_id': runner.record_id(SHA_A), 'state': 'production_eligible',
-              'rollback_sha': SHA_B}
+              'rollback_sha': SHA_B, 'release_candidate': {'candidate_sha': SHA_A}}
     runner.atomic_json(records / (record['release_id'] + '.json'), record)
     with (patch.object(runner.gate, 'load_json', return_value={'schedule': {'automatic_promotion_enabled': True}}),
           patch.object(runner, 'consume_owner_approval_requests'),
           patch.object(runner, 'production_window_open', return_value=True),
+          patch.object(runner, 'authoritative_auto_promotion_head', return_value=SHA_A),
           patch.object(runner, 'live_runtime', return_value={'revision': SHA_B}),
           patch.object(runner, 'live_production_alignment', return_value={}),
           patch.object(runner, 'reconcile_stopped_rollback_retention'),
@@ -1833,9 +2218,25 @@ def test_ccc_precedes_mutation_and_postflight_precedes_closed_release():
     import inspect
     source = inspect.getsource(runner._deploy_production_locked)
     assert source.index('ccc_preflight = run_release_ccc_gate(') < source.index('gate_transition(repo, state_root, record, "production")')
-    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('runtime_deployed = True')
+    # The current controller marks the attempt *before* invoking the helper so
+    # rollback also covers a helper that partially mutates and then fails.
+    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('runtime_attempted = True')
+    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('mcp_attempted = True')
+    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('host_result = request_host_reconcile(')
+    assert source.index('ccc_postflight = run_release_ccc_gate(') > source.index('manager_result = install_release_manager_from_current(')
     assert source.index('ccc_postflight = run_release_ccc_gate(') < source.index('gate_transition(repo, state_root, record, "production_verified")')
     assert source.index('ccc_postflight = run_release_ccc_gate(') < source.index('set_last_known_good(\n            state_root,\n            production_manifest')
+
+
+def test_production_complete_notification_follows_root_last_known_good_commit():
+    import inspect
+    source = inspect.getsource(runner._deploy_production_locked)
+    commit = source.index('set_last_known_good(\n            state_root,\n            production_manifest')
+    verified = source.index('gate_transition(repo, state_root, record, "production_verified")')
+    closed = source.index('gate_transition(repo, state_root, record, "closed")')
+    persisted = source.index('save_record(state_root, record)', closed)
+    complete_notification = source.index('"production_queue_completed"')
+    assert commit < verified < closed < persisted < complete_notification
 
 
 def test_release_contract_accepts_emitted_string_risk_enum_with_exact_manifest():
@@ -1862,3 +2263,135 @@ def test_release_contract_rejects_missing_unknown_or_mismatched_risk():
     record['release_manifest']['risk_profile'] = 'normal'
     with pytest.raises(runner.ReleaseManagerError, match='risk classification differs'):
         runner.validate_release_record_contract(record)
+
+
+def test_ccc_postflight_transient_prometheus_rechecks_fresh_report_and_audits_runs(tmp_path):
+    from types import SimpleNamespace
+    import json
+
+    ccc = tmp_path / "run_ccc.py"
+    ccc.write_text("")
+    config = tmp_path / "ccc.json"
+    config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    calls = []
+
+    def ccc_check(*args, **kwargs):
+        calls.append(len(calls) + 1)
+        report = _ccc_test_report(runtime=SHA_A, mode="pass")
+        report["run_id"] = f"independent-check-{calls[-1]}"
+        report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        failed = calls[-1] <= 2
+        if failed:
+            report["status"] = "FAIL"
+            next(x for x in report["checks"] if x["check_id"] == "prometheus-targets")["status"] = "FAIL"
+        latest.write_text(json.dumps(report))
+        return SimpleNamespace(returncode=1 if failed else 0)
+
+    with patch.object(runner.subprocess, "run", side_effect=ccc_check), patch.object(runner.time, "sleep") as sleep:
+        evidence = runner.run_release_ccc_gate(
+            SHA_A, SHA_A, before_mutation=False,
+            ccc_runner=ccc, ccc_config=config, latest=latest,
+        )
+    assert evidence["mode"] == "live_certified"
+    assert evidence["checks"]["prometheus-targets"] == "PASS"
+    assert evidence["transient_monitoring_retries"] == 2
+    assert evidence["failed_monitoring_run_ids"] == [
+        "independent-check-1", "independent-check-2",
+    ]
+    assert len(calls) == 3
+    assert [x.args for x in sleep.call_args_list] == [(15,), (20,)]
+
+
+def test_ccc_postflight_persistent_monitoring_failure_remains_fatal(tmp_path):
+    from types import SimpleNamespace
+    import json
+    import pytest
+
+    ccc = tmp_path / "run_ccc.py"
+    ccc.write_text("")
+    config = tmp_path / "ccc.json"
+    config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    runs = []
+
+    def ccc_check(*args, **kwargs):
+        runs.append(len(runs) + 1)
+        report = _ccc_test_report(runtime=SHA_A, mode="pass")
+        report["status"] = "FAIL"
+        report["run_id"] = f"independent-check-{runs[-1]}"
+        report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        next(x for x in report["checks"] if x["check_id"] == "prometheus-targets")["status"] = "FAIL"
+        latest.write_text(json.dumps(report))
+        return SimpleNamespace(returncode=1)
+
+    with patch.object(runner.subprocess, "run", side_effect=ccc_check), patch.object(runner.time, "sleep") as sleep:
+        with pytest.raises(runner.ReleaseManagerError, match="post-mutation CCC did not certify"):
+            runner.run_release_ccc_gate(
+                SHA_A, SHA_A, before_mutation=False,
+                ccc_runner=ccc, ccc_config=config, latest=latest,
+            )
+    assert len(runs) == 4
+    assert [x.args for x in sleep.call_args_list] == [(15,), (20,), (25,)]
+
+
+def test_ccc_postflight_other_failures_and_wrong_identity_do_not_retry(tmp_path):
+    from types import SimpleNamespace
+    import json
+    import pytest
+
+    ccc = tmp_path / "run_ccc.py"
+    ccc.write_text("")
+    config = tmp_path / "ccc.json"
+    config.write_text("{}")
+    latest = tmp_path / "latest.json"
+
+    for check, source in [
+        ("systemd-failed-units", SHA_A),
+        ("openclaw-authority-health", SHA_A),
+        ("prometheus-targets", SHA_B),
+    ]:
+        report = _ccc_test_report(runtime=SHA_A, mode="pass")
+        report["status"] = "FAIL"
+        report["source_revision"] = source
+        report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        next(x for x in report["checks"] if x["check_id"] == check)["status"] = "FAIL"
+        latest.write_text(json.dumps(report))
+        with patch.object(runner.subprocess, "run", return_value=SimpleNamespace(returncode=1)) as proc, patch.object(runner.time, "sleep") as sleep:
+            with pytest.raises(runner.ReleaseManagerError):
+                runner.run_release_ccc_gate(
+                    SHA_A, SHA_A, before_mutation=False,
+                    ccc_runner=ccc, ccc_config=config, latest=latest,
+                )
+        assert proc.call_count == 1
+        sleep.assert_not_called()
+
+
+def test_ccc_postflight_reused_failed_run_id_fails_closed(tmp_path):
+    from types import SimpleNamespace
+    import json
+    import pytest
+
+    ccc = tmp_path / "run_ccc.py"
+    ccc.write_text("")
+    config = tmp_path / "ccc.json"
+    config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    report = _ccc_test_report(runtime=SHA_A, mode="pass")
+    report["status"] = "FAIL"
+    report["run_id"] = "reused-ccc-run"
+    next(x for x in report["checks"] if x["check_id"] == "prometheus-targets")["status"] = "FAIL"
+
+    def ccc_check(*args, **kwargs):
+        report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        latest.write_text(json.dumps(report))
+        return SimpleNamespace(returncode=1)
+
+    with patch.object(runner.subprocess, "run", side_effect=ccc_check) as proc, patch.object(runner.time, "sleep") as sleep:
+        with pytest.raises(runner.ReleaseManagerError, match="repeated a prior monitoring report"):
+            runner.run_release_ccc_gate(
+                SHA_A, SHA_A, before_mutation=False,
+                ccc_runner=ccc, ccc_config=config, latest=latest,
+            )
+    assert proc.call_count == 2
+    assert sleep.call_count == 1

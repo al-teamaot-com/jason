@@ -41,6 +41,25 @@ def test_runtime_image_drops_to_host_state_owner_uid_and_uses_internal_entrypoin
     assert 'CMD ["python", "-m", "jason_runtime.main"]' in dockerfile
 
 
+def test_runtime_image_normalizes_git_worktree_private_modes_for_nonroot_read():
+    # Root-governed Release Manager materializes exact-SHA Git source with
+    # restrictive 0700 directories / 0600 Python files under umask 0077.
+    # Docker COPY would retain root ownership and those private modes.
+    # The production container must import its code as 1000:1000, without
+    # making the code writable by that unprivileged runtime account.
+    dockerfile = (_repo_root() / "infrastructure/jason-runtime/Dockerfile").read_text(
+        encoding="utf-8"
+    )
+    assert "COPY implementation /app/implementation" in dockerfile
+    assert "COPY config /app/config" in dockerfile
+    assert "&& chown -R 0:1000 /app/implementation /app/config" in dockerfile
+    assert "&& chmod -R go-w,g+rX /app/implementation /app/config" in dockerfile
+    assert dockerfile.index("RUN python -m pip install") < dockerfile.index("&& chown -R")
+    assert dockerfile.index("&& chmod -R go-w,g+rX") < dockerfile.index("USER 1000:1000")
+    assert "chmod -R 777" not in dockerfile
+    assert "USER root" not in dockerfile
+
+
 def test_runtime_compose_enables_owner_autonomous_completion_teams_notifications():
     compose = (_repo_root() / "infrastructure/jason-runtime/compose.yaml").read_text(encoding="utf-8")
 

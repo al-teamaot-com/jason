@@ -375,6 +375,12 @@ export function replyForRuntimeResult(result) {
     }
     return "Jason needs one more detail before it can continue. No action was taken.";
   }
+  if (payload.status === "approved") {
+    // A recorded approval is not completion. The server-side worker owns execution.
+    return typeof payload.reply?.text === "string" && payload.reply.text.trim()
+      ? payload.reply.text.trim()
+      : "Approval recorded. Jason has queued the reviewed plan; execution is not yet complete.";
+  }
   if (payload.status === "approval_required") {
     return "Jason requires approval before this request can continue.";
   }

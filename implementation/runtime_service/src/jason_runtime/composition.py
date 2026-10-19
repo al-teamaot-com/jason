@@ -350,6 +350,7 @@ from .playbook_autonomy_review import (
     PlaybookAutonomyApprovalInteractionFlow,
     PlaybookAutonomyReviewMaintenance,
     TeamsGatewayPlaybookApprovalSender,
+    load_playbook_owner_approval_policy,
 )
 from autonomous_remediation.playbook_autonomy_approval import SQLitePlaybookAutonomyApprovalStore
 from autonomous_remediation.playbook_autonomy_review import PlaybookAutonomyReviewService
@@ -544,6 +545,14 @@ class RuntimeSettings:
     )
     windows_time_source_shadow_cadence_minutes: int = 15
     autonomy_review_enabled: bool = False
+    # The HTTP process must accept authenticated approval responses even
+    # when scheduled review generation runs only in the maintenance child.
+    playbook_approval_ingress_enabled: bool = False
+    # Local 0600 owner-reviewed AOT pilot policy. Absent means the existing
+    # independently configured owner allowlist stays in force.
+    playbook_owner_approval_policy: Path = Path(
+        "/var/lib/jason/authority/playbook-owner-approval-policy.json"
+    )
     autonomy_review_db: Path = Path(
         "/var/lib/jason/openclaw/playbook-autonomy-review.sqlite3"
     )
@@ -569,6 +578,23 @@ class RuntimeSettings:
         "/var/lib/jason/openclaw/procurement/billing-audit.sqlite3"
     )
     procurement_inventory_location_id: int = 1
+    universal_approval_mode: str = "off"
+    universal_approval_worker_enabled: bool = True
+    universal_approval_db: Path = Path("/var/lib/jason/openclaw/universal-approvals.sqlite3")
+    universal_approval_policy: Path = Path("/var/lib/jason/authority/universal-approval-policy.json")
+    # Separate, opt-in AOT owner-only release/CCC mobile pilot. This never
+    # borrows broad Datto/procurement owner roles or auto-enables Universal.
+    release_mobile_approval_mode: str = "off"
+    release_mobile_approval_worker_enabled: bool = True
+    release_mobile_approval_policy: Path = Path("/var/lib/jason/authority/mobile-release-approval-policy.json")
+    release_mobile_approval_db: Path = Path("/var/lib/jason/openclaw/mobile-release-approvals.sqlite3")
+    release_mobile_state_root: Path = Path("/var/lib/jason/openclaw/release-manager")
+    release_mobile_interval_seconds: int = 300
+    # Nonexecuting owner Teams acceptance pilot. Disabled independently of
+    # normal-risk mobile release approval and Universal approval modes.
+    owner_uat_mode: str = "off"
+    owner_uat_worker_enabled: bool = False
+    owner_uat_session_id: str = ""
     host: str = "0.0.0.0"
     port: int = 8080
 
@@ -1017,6 +1043,36 @@ class RuntimeSettings:
                     "/var/lib/jason/openclaw/procurement/billing-audit.sqlite3",
                 )
             ),
+            universal_approval_mode=os.getenv("JASON_UNIVERSAL_APPROVAL_MODE", "off").strip().lower(),
+            universal_approval_worker_enabled=os.getenv(
+                "JASON_UNIVERSAL_APPROVAL_WORKER_ENABLED", "true"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            universal_approval_db=Path(os.getenv("JASON_UNIVERSAL_APPROVAL_DB", "/var/lib/jason/openclaw/universal-approvals.sqlite3")),
+            universal_approval_policy=Path(os.getenv("JASON_UNIVERSAL_APPROVAL_POLICY", "/var/lib/jason/authority/universal-approval-policy.json")),
+            release_mobile_approval_mode=os.getenv("JASON_RELEASE_MOBILE_APPROVAL_MODE", "off").strip().lower(),
+            release_mobile_approval_worker_enabled=os.getenv(
+                "JASON_RELEASE_MOBILE_APPROVAL_WORKER_ENABLED", "true"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            release_mobile_approval_policy=Path(os.getenv(
+                "JASON_RELEASE_MOBILE_APPROVAL_POLICY",
+                "/var/lib/jason/authority/mobile-release-approval-policy.json",
+            )),
+            release_mobile_approval_db=Path(os.getenv(
+                "JASON_RELEASE_MOBILE_APPROVAL_DB",
+                "/var/lib/jason/openclaw/mobile-release-approvals.sqlite3",
+            )),
+            release_mobile_state_root=Path(os.getenv(
+                "JASON_RELEASE_MOBILE_STATE_ROOT",
+                "/var/lib/jason/openclaw/release-manager",
+            )),
+            release_mobile_interval_seconds=int(os.getenv(
+                "JASON_RELEASE_MOBILE_INTERVAL_SECONDS", "300"
+            )),
+            owner_uat_mode=os.getenv("JASON_OWNER_UAT_MODE", "off").strip().lower(),
+            owner_uat_worker_enabled=os.getenv(
+                "JASON_OWNER_UAT_WORKER_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            owner_uat_session_id=os.getenv("JASON_OWNER_UAT_SESSION_ID", "").strip(),
             procurement_inventory_location_id=int(
                 os.getenv("JASON_PROCUREMENT_INVENTORY_LOCATION_ID", "1")
             ),
@@ -1027,6 +1083,20 @@ class RuntimeSettings:
         return settings
 
     def validate(self) -> None:
+        if self.universal_approval_mode not in {"off", "enforced"}:
+            raise ValueError("JASON_UNIVERSAL_APPROVAL_MODE must be off or enforced")
+        if self.release_mobile_approval_mode not in {"off", "owner_only_pilot", "owner_reviewed"}:
+            raise ValueError("JASON_RELEASE_MOBILE_APPROVAL_MODE must be off, owner_only_pilot or owner_reviewed")
+        if self.release_mobile_interval_seconds < 60:
+            raise ValueError("mobile release approval scans require at least a 60-second interval")
+        if self.owner_uat_mode not in {"off", "nonexecuting_test_only"}:
+            raise ValueError("JASON_OWNER_UAT_MODE must be off or nonexecuting_test_only")
+        if self.owner_uat_worker_enabled and self.owner_uat_mode != "nonexecuting_test_only":
+            raise ValueError("owner UAT worker requires test-only mode")
+        if self.owner_uat_mode == "nonexecuting_test_only":
+            from .universal_interaction.owner_uat import SESSION_ID
+            if SESSION_ID.fullmatch(self.owner_uat_session_id) is None:
+                raise ValueError("owner UAT requires bounded unique session identifier")
         if not self.ollama_model:
             raise ValueError("JASON_OLLAMA_MODEL is required")
         if self.procurement_inventory_location_id < 1:
@@ -1260,7 +1330,8 @@ def _deterministic_resource_contracts(
     return tuple(contracts)
 
 
-def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplication:
+def build_runtime_application(settings: RuntimeSettings, *, universal_approval_handler=None,
+        teams_workflow_approval_handlers: Mapping[str, Any] | None = None) -> RuntimeHttpApplication:
     settings.validate()
 
     authority_store = SQLiteIdentityAuthorityStore(settings.authority_db)
@@ -2121,10 +2192,47 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         settings.continuation_db,
         ttl_seconds=1200,
     )
+    # Normal startup composes real authenticated/durable ports when explicitly
+    # activated. Activation never creates approver or requester authority grants.
+    from .universal_teams_approval import build_universal_teams_approval_runtime
+    trusted_keys = FileBackedTrustedKeyRegistry(settings.trusted_keys_registry)
+    teams_authenticator = trusted_keys.build_authenticator()
+    if universal_approval_handler is None:
+        universal_approval_handler = build_universal_teams_approval_runtime(
+            mode=settings.universal_approval_mode,
+            database_path=settings.universal_approval_db,
+            policy_path=settings.universal_approval_policy,
+            bindings=durable_bindings,
+            identities=SQLiteIdentityRepository(authority_store),
+            grants=SQLiteAuthorityGrantRepository(authority_store),
+            formal_approvals=approval_repository,
+            authority=identity_authority,
+            authenticator=teams_authenticator,
+            allowed_machine_identities=settings.allowed_machine_identities,
+            orchestrator=orchestrator,
+            governed_execution_ledger=governed_execution_ledger,
+        )
+    if universal_approval_handler is not None and settings.universal_approval_mode == "enforced":
+        from dataclasses import replace as replace_dataclass
+        from .universal_plan_issuance import UniversalPlanIssuer, ExistingTeamsApprovalDelivery
+        from .universal_teams_approval import UniversalApprovalPolicyFile
+        universal_approval_handler = replace_dataclass(universal_approval_handler,
+            issuer=UniversalPlanIssuer(
+                handler=universal_approval_handler,
+                policy=UniversalApprovalPolicyFile(settings.universal_approval_policy),
+                authority=identity_authority, capabilities=capabilities, bindings=durable_bindings,
+                delivery=ExistingTeamsApprovalDelivery(
+                    gateway_url=settings.teams_gateway_internal_url,
+                    token_file=settings.teams_proactive_token_file,
+                    bindings=durable_bindings,
+                ),
+            ),
+        )
     request_factory = GovernedTeamsOrchestrationRequestFactory(
         authority=identity_authority,
         capabilities=capabilities,
         approvals=approval_repository,
+        approval_requester=universal_approval_handler,
     )
 
     legacy_flow = None
@@ -2221,8 +2329,12 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
 
     playbook_approval_flow = None
     playbook_review_maintenance = None
-    if settings.autonomy_review_enabled:
-        owner_ids = approval_owner_identities()
+    if settings.autonomy_review_enabled or settings.playbook_approval_ingress_enabled:
+        owner_policy = load_playbook_owner_approval_policy(
+            path=settings.playbook_owner_approval_policy,
+            legacy_owner_identity_ids=approval_owner_identities(),
+        )
+        owner_ids = owner_policy.owner_identity_ids
         playbook_promotion_store = SQLitePlaybookAutonomyApprovalStore(
             settings.autonomy_promotion_db
         )
@@ -2237,29 +2349,32 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         )
         playbook_approval_service = ApprovalRequestService(
             repository=playbook_review_repository,
-            authority=OwnerOnlyPlaybookAutonomyAuthority(owner_ids),
+            authority=OwnerOnlyPlaybookAutonomyAuthority(
+                owner_ids, allowed_requested_modes=owner_policy.allowed_requested_modes
+            ),
         )
         playbook_approval_flow = PlaybookAutonomyApprovalInteractionFlow(
             bindings=bindings,
             approval_service=playbook_approval_service,
             review_service=playbook_review_service,
         )
-        playbook_approval_sender = TeamsGatewayPlaybookApprovalSender(
-            gateway_url=settings.teams_gateway_internal_url,
-            token_file=settings.teams_proactive_token_file,
-            bindings=bindings,
-            owner_identity_ids=owner_ids,
-        )
-        playbook_review_maintenance = PlaybookAutonomyReviewMaintenance(
-            enabled=True,
-            registry_path=settings.autonomy_playbook_registry,
-            request_repository=playbook_review_repository,
-            approval_service=playbook_approval_service,
-            review_service=playbook_review_service,
-            sender=playbook_approval_sender,
-            promotion_store=playbook_promotion_store,
-            interval_seconds=settings.autonomy_review_interval_seconds,
-        )
+        if settings.autonomy_review_enabled:
+            playbook_approval_sender = TeamsGatewayPlaybookApprovalSender(
+                gateway_url=settings.teams_gateway_internal_url,
+                token_file=settings.teams_proactive_token_file,
+                bindings=bindings,
+                owner_identity_ids=owner_ids,
+            )
+            playbook_review_maintenance = PlaybookAutonomyReviewMaintenance(
+                enabled=True,
+                registry_path=settings.autonomy_playbook_registry,
+                request_repository=playbook_review_repository,
+                approval_service=playbook_approval_service,
+                review_service=playbook_review_service,
+                sender=playbook_approval_sender,
+                promotion_store=playbook_promotion_store,
+                interval_seconds=settings.autonomy_review_interval_seconds,
+            )
 
     procurement_teams_flow = None
     procurement_approval_flow = None
@@ -2342,14 +2457,147 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
             actions=procurement_worker,
         )
 
+    release_mobile_flow = None
+    release_mobile_maintenance = None
+    if settings.release_mobile_approval_mode in {"owner_only_pilot", "owner_reviewed"}:
+        from .mobile_release_approval import (
+            MobileReleaseApprovalFlow, MobileReleaseApprovalMaintenance,
+            MobileReleaseOwnerAuthority, MobileReleaseSignedEvidenceStore,
+            read_mobile_release_policy,
+        )
+        from .universal_teams_approval import SignedTeamsApprovalEvidenceVerifier
+        owner_policy = read_mobile_release_policy(settings.release_mobile_approval_policy)
+        expected_version = ("1.0" if settings.release_mobile_approval_mode == "owner_only_pilot"
+                            else "2.0")
+        if owner_policy.schema_version != expected_version:
+            raise PermissionError("active release approval mode and reviewed policy version do not match")
+        release_repo = SQLiteApprovalRequestRepository(settings.release_mobile_approval_db)
+        release_approval_service = ApprovalRequestService(
+            release_repo, MobileReleaseOwnerAuthority(settings.release_mobile_approval_policy),
+        )
+        release_mobile_flow = MobileReleaseApprovalFlow(
+            approvals=release_approval_service,
+            requests=release_repo,
+            policy_path=settings.release_mobile_approval_policy,
+            state_root=settings.release_mobile_state_root,
+            bindings=durable_bindings,
+            identities=SQLiteIdentityRepository(authority_store),
+            signed_verifier=SignedTeamsApprovalEvidenceVerifier(
+                authenticator=teams_authenticator,
+                allowed_machine_identities=settings.allowed_machine_identities,
+                allowed_approval_prefixes=("relapproval-",),
+                allowed_selection_keys=(frozenset({"card_challenge"}) if expected_version == "2.0"
+                                        else frozenset()),
+            ),
+            signed_evidence=MobileReleaseSignedEvidenceStore(settings.release_mobile_approval_db),
+            required_policy_version=expected_version,
+        )
+        if settings.release_mobile_approval_worker_enabled:
+            release_mobile_maintenance = MobileReleaseApprovalMaintenance(
+                enabled=True,
+                policy_path=settings.release_mobile_approval_policy,
+                state_root=settings.release_mobile_state_root,
+                requests=release_repo,
+                approvals=release_approval_service,
+                sender=TeamsGatewayPlaybookApprovalSender(
+                    gateway_url=settings.teams_gateway_internal_url,
+                    token_file=settings.teams_proactive_token_file,
+                    bindings=durable_bindings,
+                    owner_identity_ids=owner_policy.owner_identity_ids,
+                ),
+                interval_seconds=settings.release_mobile_interval_seconds,
+                required_policy_version=expected_version,
+            )
+
+    # Owner acceptance: an explicitly gated, one-time NONEXECUTING Teams card.
+    # There is no provider execution/host approval consumer for its capability.
+    # Off by default; it never changes release/procurement/playbook behavior.
+    owner_uat_maintenance = None
+    workflow_approval_routes = dict(teams_workflow_approval_handlers or {})
+    if settings.owner_uat_mode == "nonexecuting_test_only":
+        from communication.audience.engine import AudiencePolicyEngine
+        from .teams_communication_service import (
+            ExistingTeamsGatewayTransport, JasonTeamsCommunicationService,
+        )
+        from .universal_interaction.service import (
+            ExistingApprovalGuard, OrchestrationInteractionJournal,
+            UniversalInteractionService,
+        )
+        from .universal_interaction.teams import ExistingTeamsInteractionAdapter
+        from .universal_interaction.owner_uat import (
+            APPROVAL_PREFIX as OWNER_UAT_PREFIX,
+            OwnerUatAuthority, OwnerUatDecisionFlow, OwnerUatIssuer,
+            OwnerUatMaintenance, OwnerUatReleaseGate, OwnerUatRouteAuthority,
+            OwnerUatWorkflowSendAuthority,
+        )
+        from .universal_teams_approval import SignedTeamsApprovalEvidenceVerifier
+
+        if OWNER_UAT_PREFIX in workflow_approval_routes:
+            raise ValueError("duplicate reserved owner UAT approval route")
+        owner_uat_repository = SQLiteApprovalRequestRepository(
+            settings.release_mobile_approval_db
+        )
+        owner_uat_approval_service = ApprovalRequestService(
+            owner_uat_repository, OwnerUatAuthority(),
+        )
+        owner_uat_flow = OwnerUatDecisionFlow(
+            approvals=owner_uat_approval_service,
+            signed_verifier=SignedTeamsApprovalEvidenceVerifier(
+                authenticator=teams_authenticator,
+                allowed_machine_identities=settings.allowed_machine_identities,
+                allowed_approval_prefixes=(OWNER_UAT_PREFIX,),
+            ),
+            bindings=durable_bindings,
+            identities=SQLiteIdentityRepository(authority_store),
+            enabled=True,
+        )
+        workflow_approval_routes[OWNER_UAT_PREFIX] = owner_uat_flow
+        owner_uat_sender = JasonTeamsCommunicationService(
+            transport=ExistingTeamsGatewayTransport(
+                gateway_url=settings.teams_gateway_internal_url,
+                token_file=settings.teams_proactive_token_file,
+            ),
+            bindings=durable_bindings,
+            identities=SQLiteIdentityRepository(authority_store),
+            workflow_authority=OwnerUatWorkflowSendAuthority(),
+            approval_requests=owner_uat_repository,
+            audience=AudiencePolicyEngine(),
+        )
+        owner_uat_core = UniversalInteractionService(
+            authority=OwnerUatRouteAuthority(),
+            channels={"teams": ExistingTeamsInteractionAdapter(
+                sender=owner_uat_sender,
+                approval_callbacks_registered=True,
+            )},
+            audit=OrchestrationInteractionJournal(orchestration_events),
+            approvals=ExistingApprovalGuard(owner_uat_repository),
+            approval_dispatch_enabled=True,
+        )
+        if settings.owner_uat_worker_enabled:
+            owner_uat_maintenance = OwnerUatMaintenance(
+                issuer=OwnerUatIssuer(
+                    requests=owner_uat_approval_service,
+                    universal_interactions=owner_uat_core,
+                    enabled=True,
+                ),
+                session_id=settings.owner_uat_session_id,
+                enabled=True,
+                release_ready=OwnerUatReleaseGate(
+                    state_root=Path("/var/lib/jason/openclaw/release-manager"),
+                    source_revision=os.getenv("JASON_SOURCE_REVISION", ""),
+                ).ready,
+            )
+
     approval_interaction_flow = ApprovalInteractionDispatcher(
         procurement=procurement_approval_flow,
         fallback=playbook_approval_flow,
+        universal=universal_approval_handler,
+        mobile_release=release_mobile_flow,
+        workflow_routes=workflow_approval_routes,
     )
 
-    trusted_keys = FileBackedTrustedKeyRegistry(settings.trusted_keys_registry)
     governed_ingress = GovernedOpenClawTeamsConversationIngress(
-        authenticator=trusted_keys.build_authenticator(),
+        authenticator=teams_authenticator,
         replay=SQLiteReplayStore(settings.replay_db),
         audit=SQLiteIngressSecurityAudit(settings.security_audit_db),
         flow=flow,
@@ -2469,7 +2717,25 @@ def build_runtime_application(settings: RuntimeSettings) -> RuntimeHttpApplicati
         cadence_minutes=settings.windows_time_source_shadow_cadence_minutes,
         audit=reflection_audit,
     )
+    universal_plan_maintenance = (
+        getattr(universal_approval_handler, "plan_runner", None)
+        if settings.universal_approval_worker_enabled else None
+    )
+    universal_plan_status_maintenance = None
+    if universal_plan_maintenance is not None:
+        from .universal_plan_status import UniversalPlanStatusMaintenance
+        universal_plan_status_maintenance = UniversalPlanStatusMaintenance(
+            handler=universal_approval_handler, bindings=durable_bindings,
+            identities=SQLiteIdentityRepository(authority_store),
+            sender_factory=TeamsGatewayPlaybookApprovalSender,
+            gateway_url=settings.teams_gateway_internal_url,
+            token_file=settings.teams_proactive_token_file,
+        )
     autonomy_maintenance = CompositeAutonomyMaintenance(
+        release_mobile_maintenance,
+        owner_uat_maintenance,
+        universal_plan_maintenance,
+        universal_plan_status_maintenance,
         playbook_review_maintenance,
         autonomous_work_lifecycle_notification_maintenance,
         autonomous_deployment_completion_notification_maintenance,

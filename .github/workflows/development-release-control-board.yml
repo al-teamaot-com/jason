@@ -3,7 +3,8 @@ name: Development Release Control Board
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 * * * *"
+    # Best-effort operator visibility; do not interpret schedule ticks as work progress.
+    - cron: "*/5 * * * *"
   push:
     branches:
       - main
@@ -27,9 +28,11 @@ permissions:
   pull-requests: read
   issues: write
 
+# Keep a running authoritative control-board reconciliation intact even when a
+# PR sync, CI completion, or hourly schedule triggers a later refresh.
 concurrency:
   group: jason-development-release-control-board
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   refresh:
