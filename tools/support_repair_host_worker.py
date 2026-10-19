@@ -2041,6 +2041,158 @@ def readmit_verified_evidence_starvation_after_upgrade(
     return resumed
 
 
+def resume_verified_recovery_interrupted_by_rollback(
+    state: dict[str, Any], eligible: list[dict[str, str]],
+    repo: Path, spool: Path, gate, policy: Mapping[str, Any],
+    *, max_active: int,
+) -> list[str]:
+    """One bounded recovery of a preexisting read-only request after rollback.
+
+    A previous runtime produced an evidence branch unknown to the older LKG
+    worker. Preserve the original request, response and worktree; do not replay
+    an old patch or reset the reasoning budget. New branch uses the historical
+    context suffix supported by the LKG worker.
+    """
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active = sum(1 for entry in records.values() if isinstance(entry, Mapping)
+                 and entry.get('phase') in {'diagnosing', 'implementing',
+                                            'ci_repair_needed', 'ci_repairing'})
+    slots = max(0, max(1, int(max_active)) - active)
+    resumed: list[str] = []
+    for item in eligible:
+        if not slots:
+            break
+        item_id = str(item.get('id') or '')
+        record = records.get(item_id)
+        if (item.get('priority') != 'P0' or not isinstance(record, dict)
+                or record.get('phase') != 'blocked'
+                or record.get('reason') != 'WorkerError: recovery worktree does not match its pinned branch'
+                or record.get('interrupted_recovery_request_id') or record.get('pr_number')
+                or record.get('blocker_class') in {'external_authority', 'blocked_by_dependency'}
+                or (isinstance(record.get('recovery_handoff_intake'), Mapping)
+                    and record['recovery_handoff_intake'].get('status') == 'awaiting_governed_repair')):
+            continue
+        previous_id = str(record.get('reasoning_request_id') or '')
+        old_sha = str(record.get('evidence_upgrade_source_revision') or '')
+        branch = str(record.get('branch') or '')
+        if (not re.fullmatch(r'[0-9a-f]{64}', previous_id)
+                or not re.fullmatch(r'[0-9a-f]{40}', old_sha)
+                or record.get('evidence_upgrade_recovery_request_id') != previous_id
+                or not re.fullmatch(r'[0-9a-f]{64}',
+                                    str(record.get('evidence_upgrade_original_request_id') or ''))
+                or not re.fullmatch(
+                    re.escape(branch_name(item_id)) + r'-evidence-[a-f0-9]{12}', branch)):
+            continue
+        try:
+            head = run(['git', 'rev-parse', 'origin/main'], cwd=repo)
+            if not re.fullmatch(r'[0-9a-f]{40}', head):
+                continue
+            old_worktree = support_worktree_path(item_id, branch)
+            if (not old_worktree.is_dir() or old_worktree.is_symlink()
+                    or run(['git', 'branch', '--show-current'], cwd=old_worktree) != branch
+                    or run(['git', 'rev-parse', 'HEAD'], cwd=old_worktree) != old_sha
+                    or run(['git', 'status', '--porcelain', '--untracked-files=all'],
+                           cwd=old_worktree)):
+                continue
+            original = spool / 'reasoning' / 'requests' / (previous_id + '.json')
+            if not original.is_file() or original.stat().st_size > 250000:
+                continue
+            request = json.loads(original.read_text(encoding='utf-8'))
+            response = reasoning_response(spool, previous_id)
+            if (not isinstance(request, dict)
+                    or request.get('request_id') != previous_id
+                    or request_id(request) != previous_id
+                    or request.get('kind') != 'edit_plan'
+                    or request.get('support_item') != item_id
+                    or not isinstance(response, Mapping)
+                    or response.get('status') != 'succeeded'
+                    or response.get('request_id') != previous_id
+                    or response.get('kind') != 'edit_plan'
+                    or response.get('support_item') != item_id
+                    or not isinstance(response.get('result'), Mapping)):
+                continue
+            result = response['result']
+            if (result.get('blocked_reason') or result.get('edits')
+                    or result.get('test_paths')
+                    or not isinstance(result.get('evidence_requests'), list)):
+                continue
+            paths: list[str] = []
+            terms: list[str] = []
+            for action in result['evidence_requests'][:3]:
+                if not isinstance(action, Mapping) or action.get('tool') != 'read_source':
+                    continue
+                path = action.get('path')
+                if not isinstance(path, str):
+                    continue
+                if path not in paths:
+                    paths.append(path)
+                for word in re.findall(r'[A-Za-z_][A-Za-z0-9_]{7,}',
+                                       str(action.get('query') or '')):
+                    if '_' in word and word not in terms:
+                        terms.append(word)
+            if not paths:
+                continue
+            new_branch = branch_name(item_id) + '-context-' + previous_id[:12]
+            fresh = ensure_worktree(repo, item_id, new_branch)
+            if (run(['git', 'branch', '--show-current'], cwd=fresh) != new_branch
+                    or run(['git', 'status', '--porcelain', '--untracked-files=all'], cwd=fresh)
+                    or run(['git', 'rev-parse', 'HEAD'], cwd=fresh) != head):
+                continue
+            authorized = [
+                path for path in paths[:2]
+                if engineering_evidence_tools._safe_path(fresh, path, gate, policy)
+            ]
+            tests: list[str] = []
+            for path in authorized:
+                candidate = Path(path)
+                test_name = (candidate.parent / 'tests' / ('test_' + candidate.name)).as_posix()
+                if engineering_evidence_tools._safe_path(fresh, test_name, gate, policy):
+                    tests.append(test_name)
+            if not authorized or not tests:
+                continue
+            excerpts = source_excerpts_for_paths(
+                fresh, authorized + tests, gate, policy,
+                terms=terms[:12], limit=4, content_limit=12000,
+            )
+            if (not excerpts or excerpts[0]['path'] != authorized[0]
+                    or not any(entry['path'] in tests for entry in excerpts)):
+                continue
+            next_id = queue_reasoning(spool, kind='edit_plan', item=item, context={
+                'verified_rollback_interruption': {
+                    'previous_request_id': previous_id,
+                    'previous_source_revision': old_sha,
+                    'new_source_revision': head,
+                    'original_branch': branch,
+                    'retry_limit': 1,
+                },
+                'validation_feedback': (
+                    'The earlier LKG worker did not recognize the new recovery '
+                    'branch before processing the completed read-only source request. '
+                    'Use the freshly pinned source and regression excerpts. Return '
+                    'exact verified edits and tests or a genuine blocked reason; '
+                    'do not invent unseen code, authority or deployment steps.'
+                ),
+                'source_excerpts': excerpts,
+            })
+            if next_id == previous_id:
+                continue
+            record.update({
+                'phase': 'implementing',
+                'reason': 'Verified read-only work resumed after rollback branch mismatch.',
+                'branch': new_branch,
+                'reasoning_request_id': next_id,
+                'interrupted_recovery_request_id': next_id,
+                'interrupted_recovery_original_request_id': previous_id,
+                'interrupted_recovery_source_revision': head,
+                'updated_at': now(),
+            })
+            resumed.append(item_id)
+            slots -= 1
+        except (WorkerError, OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+    return resumed
+
+
 def readmit_preserved_anchor_failure(
     state: dict[str, Any],
     eligible: list[dict[str, str]],
@@ -2323,6 +2475,9 @@ def main() -> int:
         state, support, repo, spool, gate, policy, max_active=args.max_active,
     )
     readmit_verified_evidence_starvation_after_upgrade(
+        state, support, repo, spool, gate, policy, max_active=args.max_active,
+    )
+    resume_verified_recovery_interrupted_by_rollback(
         state, support, repo, spool, gate, policy, max_active=args.max_active,
     )
     reassess_model_scope_blocks(state, support, spool, args.max_active)

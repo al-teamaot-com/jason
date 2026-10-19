@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 
 MODULE = Path(__file__).resolve().parents[1] / 'support_repair_host_worker.py'
@@ -1847,3 +1848,140 @@ def test_starved_recovery_cannot_take_over_pending_governed_repair_handoff(tmp_p
         {'items':{item['id']:record}},[item],repo,spool,gate,{},max_active=2)==[]
     assert record['phase']=='blocked'
     assert record.get('evidence_upgrade_recovery_request_id') is None
+
+
+def _rollback_paused_recovery_fixture(tmp_path, monkeypatch):
+    import subprocess
+    repo, spool, item, record, gate, first, last = _starved_evidence_fixture(
+        tmp_path, monkeypatch,
+    )
+    current_sha = subprocess.run(
+        ['git', 'rev-parse', 'HEAD'], cwd=repo,
+        text=True, capture_output=True, check=True,
+    ).stdout.strip()
+    actual_branch = subprocess.run(
+        ['git', 'branch', '--show-current'], cwd=repo,
+        text=True, capture_output=True, check=True,
+    ).stdout.strip()
+    record.update({
+        'phase': 'blocked',
+        'reason': 'WorkerError: recovery worktree does not match its pinned branch',
+        'branch': actual_branch,
+        'evidence_upgrade_source_revision': current_sha,
+        'evidence_upgrade_recovery_request_id': last,
+        'evidence_upgrade_original_request_id': first,
+    })
+    new_branch = worker.branch_name(item['id']) + '-context-' + last[:12]
+    fresh = tmp_path / new_branch.split('/')[-1]
+    original_locator = worker.support_worktree_path
+    def isolated_locator(item_id, branch=None):
+        if branch == actual_branch:
+            return repo
+        if branch == new_branch:
+            return fresh
+        return original_locator(item_id, branch)
+    monkeypatch.setattr(worker, 'support_worktree_path', isolated_locator)
+    def add_fresh(repo_arg, item_id, branch):
+        subprocess.run(
+            ['git', 'worktree', 'add', '-b', branch, str(fresh), 'origin/main'],
+            cwd=repo, check=True, text=True, capture_output=True,
+        )
+        return fresh
+    monkeypatch.setattr(worker, 'ensure_worktree', add_fresh)
+    return repo, spool, item, record, gate, first, last, fresh
+
+
+def test_verified_rollback_interruption_recovers_once_from_fresh_compatible_branch(tmp_path, monkeypatch):
+    repo, spool, item, record, gate, first, last, fresh = (
+        _rollback_paused_recovery_fixture(tmp_path, monkeypatch)
+    )
+    state = {'items': {item['id']: record}}
+    original_branch = record['branch']
+    original_turns = record['evidence_turn_count']
+    assert worker.resume_verified_recovery_interrupted_by_rollback(
+        state, [item], repo, spool, gate, {}, max_active=2,
+    ) == [item['id']]
+    assert record['phase'] == 'implementing'
+    assert record['branch'].endswith('-context-' + last[:12])
+    assert record['branch'] != original_branch
+    assert record['evidence_turn_count'] == original_turns
+    assert record['reasoning_request_id'] != last
+    assert record['interrupted_recovery_original_request_id'] == last
+    assert worker.support_worktree_path(item['id'], record['branch']).name.endswith(
+        '-context-' + last[:12])
+    request = json.loads((spool / 'reasoning/requests' /
+                          (record['reasoning_request_id'] + '.json')).read_text())
+    assert request['context']['verified_rollback_interruption']['previous_request_id'] == last
+    assert request['context']['verified_rollback_interruption']['retry_limit'] == 1
+    assert request['context']['source_excerpts'][0]['path'] == 'tools/support_repair_host_worker.py'
+    assert 'tools/tests/test_support_repair_host_worker.py' in [
+        entry['path'] for entry in request['context']['source_excerpts']]
+    assert worker.reasoning_response(spool, last)['status'] == 'succeeded'
+    assert subprocess.run(['git','status','--porcelain'], cwd=repo,
+                          check=True,capture_output=True,text=True).stdout.strip() == ''
+    record['phase'] = 'blocked'
+    record['reason'] = 'WorkerError: recovery worktree does not match its pinned branch'
+    assert worker.resume_verified_recovery_interrupted_by_rollback(
+        state, [item], repo, spool, gate, {}, max_active=2,
+    ) == []
+
+
+def test_verified_rollback_interruption_denies_dirty_previous_worktree(tmp_path, monkeypatch):
+    repo, spool, item, record, gate, first, last, fresh = (
+        _rollback_paused_recovery_fixture(tmp_path, monkeypatch)
+    )
+    (repo / 'tools' / 'untracked-dirty.txt').write_text('dirty')
+    assert worker.resume_verified_recovery_interrupted_by_rollback(
+        {'items': {item['id']: record}}, [item], repo, spool, gate, {}, max_active=2,
+    ) == []
+    assert record['phase'] == 'blocked'
+    assert not fresh.exists()
+
+
+def test_verified_rollback_interruption_denies_tampered_response(tmp_path, monkeypatch):
+    repo, spool, item, record, gate, first, last, fresh = (
+        _rollback_paused_recovery_fixture(tmp_path, monkeypatch)
+    )
+    path = spool / 'reasoning/responses' / (last + '.json')
+    data = json.loads(path.read_text())
+    data['support_item'] = 'SUPPORT-OPS-999'
+    path.write_text(json.dumps(data))
+    assert worker.resume_verified_recovery_interrupted_by_rollback(
+        {'items': {item['id']: record}}, [item], repo, spool, gate, {}, max_active=2,
+    ) == []
+    assert record.get('interrupted_recovery_request_id') is None
+
+
+def test_verified_rollback_interruption_denies_unapproved_or_full_capacity(tmp_path, monkeypatch):
+    repo, spool, item, record, gate, first, last, fresh = (
+        _rollback_paused_recovery_fixture(tmp_path, monkeypatch)
+    )
+    item['priority'] = 'P1'
+    assert worker.resume_verified_recovery_interrupted_by_rollback(
+        {'items': {item['id']: record}}, [item], repo, spool, gate, {}, max_active=2,
+    ) == []
+    item['priority'] = 'P0'
+    assert worker.resume_verified_recovery_interrupted_by_rollback(
+        {'items': {item['id']: record, 'SUPPORT-OPS-030': {'phase':'diagnosing'}}},
+        [item], repo, spool, gate, {}, max_active=1,
+    ) == []
+    record['recovery_handoff_intake'] = {'status': 'awaiting_governed_repair'}
+    assert worker.resume_verified_recovery_interrupted_by_rollback(
+        {'items': {item['id']: record}}, [item], repo, spool, gate, {}, max_active=2,
+    ) == []
+    assert record.get('interrupted_recovery_request_id') is None
+
+
+def test_verified_rollback_interruption_denies_wrong_branch_or_source_revision(tmp_path, monkeypatch):
+    repo, spool, item, record, gate, first, last, fresh = (
+        _rollback_paused_recovery_fixture(tmp_path, monkeypatch)
+    )
+    record['branch'] = worker.branch_name(item['id']) + '-context-' + last[:12]
+    assert worker.resume_verified_recovery_interrupted_by_rollback(
+        {'items': {item['id']: record}}, [item], repo, spool, gate, {}, max_active=2,
+    ) == []
+    record['branch'] = worker.branch_name(item['id']) + '-evidence-' + last[:12]
+    record['evidence_upgrade_source_revision'] = 'a' * 40
+    assert worker.resume_verified_recovery_interrupted_by_rollback(
+        {'items': {item['id']: record}}, [item], repo, spool, gate, {}, max_active=2,
+    ) == []

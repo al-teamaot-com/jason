@@ -587,6 +587,12 @@ print(json.dumps(out,sort_keys=True))
                 "correlation_id": value.get("correlation_id"),
                 "expected_status": expected_status,
             }
+            # Preserve exception TYPE for troubleshooting, never provider
+            # error strings that might contain request data or credentials.
+            if value.get("status") == "exception":
+                exception_type = str(value.get("error_type") or "")
+                if exception_type.isidentifier() and len(exception_type) <= 80:
+                    record["exception_type"] = exception_type
             summary.append(record)
             if not matches:
                 failures.append({**record, "expected": dict(expected)})
@@ -595,7 +601,8 @@ print(json.dumps(out,sort_keys=True))
                 "governed-provider-boundary-canaries",
                 "PASS",
                 f"{len(values)} governed provider boundary canaries matched expected positive/negative outcomes.",
-                {"results": summary},
+                {"results": summary,
+                 "expected_canary_count": len(self.config.provider_canaries)},
             )
         encoded = json.dumps(failures, sort_keys=True)
         status = "NOT_PROVEN" if "NO_MATCHING_AUTHORITY_GRANT" in encoded else "FAIL"
@@ -603,7 +610,8 @@ print(json.dumps(out,sort_keys=True))
             "governed-provider-boundary-canaries",
             status,
             f"{len(failures)} canaries did not match their expected governed outcomes.",
-            {"failures": failures, "results": summary},
+            {"failures": failures, "results": summary,
+             "expected_canary_count": len(self.config.provider_canaries)},
         )
 
     def _runtime_manifest(self, runtime_revision: str) -> Mapping[str, Any]:

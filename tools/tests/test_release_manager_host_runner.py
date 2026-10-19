@@ -2395,3 +2395,203 @@ def test_ccc_postflight_reused_failed_run_id_fails_closed(tmp_path):
             )
     assert proc.call_count == 2
     assert sleep.call_count == 1
+
+
+def _transient_provider_ccc_report(*, name="datto_edr"):
+    report = _ccc_test_report(runtime=SHA_A, mode="pass")
+    report["status"] = "FAIL"
+    item = next(x for x in report["checks"]
+                if x["check_id"] == "governed-provider-boundary-canaries")
+    item["status"] = "FAIL"
+    failure = {
+        "name": name,
+        "status": "exception",
+        "expected_status": "succeeded",
+        "expected": {"name": name, "expected_status": "succeeded",
+                     "expected_provider": name,
+                     "capability": runner.CCC_RETRYABLE_READ_CANARIES[name]},
+    }
+    canary_names = [
+        "autotask", "datto_rmm", "datto_edr", "dnsfilter",
+        "backup_net", "kyocera_kfs", "microsoft_graph", "system_registry",
+    ]
+    item["evidence"] = {
+        "failures": [failure],
+        "results": [
+            {"name": entry,
+             "status": "exception" if entry == name else "succeeded",
+             "expected_status": "succeeded"}
+            for entry in canary_names
+        ],
+        "expected_canary_count": len(canary_names),
+    }
+    return report
+
+
+def test_ccc_provider_exception_only_classifier_never_broadens():
+    import copy
+    correct = _transient_provider_ccc_report()
+    assert runner.retryable_ccc_provider_exceptions(correct)
+    changes = []
+    bad = copy.deepcopy(correct)
+    bad["status"] = "NOT_PROVEN"
+    changes.append(bad)
+    bad = copy.deepcopy(correct)
+    bad["checks"][-1]["status"] = "FAIL"
+    changes.append(bad)
+    bad = copy.deepcopy(correct)
+    bad["checks"][-1]["status"] = "NOT_PROVEN"
+    changes.append(bad)
+    bad = copy.deepcopy(correct)
+    next(x for x in bad["checks"] if x["check_id"] == "systemd-failed-units")["status"] = "FAIL"
+    changes.append(bad)
+    bad = copy.deepcopy(correct)
+    x = next(x for x in bad["checks"] if x["check_id"] == "governed-provider-boundary-canaries")
+    x["evidence"]["failures"][0]["status"] = "denied"
+    changes.append(bad)
+    bad = copy.deepcopy(correct)
+    x = next(x for x in bad["checks"] if x["check_id"] == "governed-provider-boundary-canaries")
+    x["evidence"]["failures"][0]["expected_status"] = "denied"
+    changes.append(bad)
+    bad = copy.deepcopy(correct)
+    x = next(x for x in bad["checks"] if x["check_id"] == "governed-provider-boundary-canaries")
+    x["evidence"]["failures"][0]["name"] = "microsoft_graph"
+    changes.append(bad)
+    bad = copy.deepcopy(correct)
+    x = next(x for x in bad["checks"] if x["check_id"] == "governed-provider-boundary-canaries")
+    x["evidence"]["failures"] = []
+    changes.append(bad)
+    bad = copy.deepcopy(correct)
+    x = next(x for x in bad["checks"] if x["check_id"] == "governed-provider-boundary-canaries")
+    x["evidence"]["failures"] = x["evidence"]["failures"] * 3
+    changes.append(bad)
+    bad = copy.deepcopy(correct)
+    x = next(x for x in bad["checks"] if x["check_id"] == "governed-provider-boundary-canaries")
+    x["evidence"]["expected_canary_count"] = 9
+    changes.append(bad)
+    bad = copy.deepcopy(correct)
+    x = next(x for x in bad["checks"] if x["check_id"] == "governed-provider-boundary-canaries")
+    x["evidence"]["results"] = x["evidence"]["results"][:-1]
+    changes.append(bad)
+    bad = copy.deepcopy(correct)
+    x = next(x for x in bad["checks"] if x["check_id"] == "governed-provider-boundary-canaries")
+    x["evidence"]["results"][1]["name"] = x["evidence"]["results"][0]["name"]
+    changes.append(bad)
+    bad = copy.deepcopy(correct)
+    x = next(x for x in bad["checks"] if x["check_id"] == "governed-provider-boundary-canaries")
+    x["evidence"]["failures"][0]["expected"]["capability"] = "service.ticket.delete"
+    changes.append(bad)
+    for bad in changes:
+        assert not runner.retryable_ccc_provider_exceptions(bad)
+
+
+def test_ccc_postflight_provider_exceptions_require_new_full_pass_and_audit(tmp_path):
+    import json
+    from types import SimpleNamespace
+    ccc = tmp_path / "run_ccc.py"
+    ccc.write_text("")
+    config = tmp_path / "ccc.json"
+    config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    calls = []
+
+    def checker(*args, **kwargs):
+        calls.append(len(calls) + 1)
+        report = (_transient_provider_ccc_report(name="datto_edr") if len(calls) == 1
+                  else _transient_provider_ccc_report(name="dnsfilter") if len(calls) == 2
+                  else _ccc_test_report(runtime=SHA_A, mode="pass"))
+        report["run_id"] = f"fresh-provider-check-{len(calls)}"
+        report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        latest.write_text(json.dumps(report))
+        return SimpleNamespace(returncode=1 if len(calls) < 3 else 0)
+
+    with patch.object(runner.subprocess, "run", side_effect=checker), patch.object(runner.time, "sleep") as sleep:
+        evidence = runner.run_release_ccc_gate(
+            SHA_A, SHA_A, before_mutation=False,
+            ccc_runner=ccc, ccc_config=config, latest=latest,
+        )
+    assert evidence["mode"] == "live_certified"
+    assert evidence["checks"]["governed-provider-boundary-canaries"] == "PASS"
+    assert evidence["transient_provider_exception_retries"] == 2
+    assert evidence["failed_provider_exception_run_ids"] == [
+        "fresh-provider-check-1", "fresh-provider-check-2"]
+    assert len(calls) == 3
+    assert [x.args for x in sleep.call_args_list] == [(10,), (15,)]
+
+
+def test_ccc_persistent_provider_exceptions_remain_hard_failure(tmp_path):
+    import json
+    import pytest
+    from types import SimpleNamespace
+    ccc = tmp_path / "run_ccc.py"
+    ccc.write_text("")
+    config = tmp_path / "ccc.json"
+    config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    calls = []
+
+    def checker(*args, **kwargs):
+        calls.append(len(calls) + 1)
+        report = _transient_provider_ccc_report()
+        report["run_id"] = f"provider-constant-failure-{len(calls)}"
+        report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        latest.write_text(json.dumps(report))
+        return SimpleNamespace(returncode=1)
+
+    with patch.object(runner.subprocess, "run", side_effect=checker), patch.object(runner.time, "sleep") as sleep:
+        with pytest.raises(runner.ReleaseManagerError, match="post-mutation CCC did not certify"):
+            runner.run_release_ccc_gate(SHA_A, SHA_A, before_mutation=False,
+                                        ccc_runner=ccc, ccc_config=config, latest=latest)
+    assert len(calls) == 3
+    assert [x.args for x in sleep.call_args_list] == [(10,), (15,)]
+
+
+def test_ccc_provider_exception_wrong_sha_and_preflight_never_retry(tmp_path):
+    import json
+    import pytest
+    from types import SimpleNamespace
+    ccc = tmp_path / "run_ccc.py"
+    ccc.write_text("")
+    config = tmp_path / "ccc.json"
+    config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    for wrong_sha, before_mutation in [(True, False), (False, True)]:
+        report = _transient_provider_ccc_report()
+        report["source_revision"] = SHA_B if wrong_sha else SHA_A
+        report["run_id"] = "provider-identity-check"
+        report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        latest.write_text(json.dumps(report))
+        with patch.object(runner.subprocess, "run", return_value=SimpleNamespace(returncode=1)) as proc, patch.object(runner.time, "sleep") as sleep:
+            with pytest.raises(runner.ReleaseManagerError):
+                runner.run_release_ccc_gate(SHA_A, SHA_A if not before_mutation else SHA_B,
+                                            before_mutation=before_mutation,
+                                            ccc_runner=ccc, ccc_config=config, latest=latest)
+        assert proc.call_count == 1
+        sleep.assert_not_called()
+
+
+def test_ccc_provider_retry_requires_distinct_checker_run_ids(tmp_path):
+    import json
+    import pytest
+    from types import SimpleNamespace
+    ccc = tmp_path / "run_ccc.py"
+    ccc.write_text("")
+    config = tmp_path / "ccc.json"
+    config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    calls = []
+
+    def checker(*args, **kwargs):
+        calls.append(1)
+        report = _transient_provider_ccc_report()
+        report["run_id"] = "reused-provider-ccc-run"
+        report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        latest.write_text(json.dumps(report))
+        return SimpleNamespace(returncode=1)
+
+    with patch.object(runner.subprocess, "run", side_effect=checker) as proc, patch.object(runner.time, "sleep") as sleep:
+        with pytest.raises(runner.ReleaseManagerError, match="repeated a prior provider canary report"):
+            runner.run_release_ccc_gate(SHA_A, SHA_A, before_mutation=False,
+                                        ccc_runner=ccc, ccc_config=config, latest=latest)
+    assert proc.call_count == 2
+    assert sleep.call_count == 1

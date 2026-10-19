@@ -76,6 +76,8 @@ def classify(phase: str, reason: str, *, lane: str) -> tuple[str, str]:
     if any(term in text for term in ("owner approval", "must approve", "unauthorized",
                                       "explicit authority", "identity not verified")):
         return "human_authority", "request_verified_human_authorization"
+    if "recovery worktree does not match its pinned branch" in text:
+        return "recoverable_source", "native_worker_verify_rollback_interruption_or_escalate"
     if "source evidence turn budget exhausted" in text:
         return "recoverable_source", "native_worker_verify_source_upgrade_or_escalate"
     if any(term in text for term in ("source excerpt", "source context", "source-code context",
