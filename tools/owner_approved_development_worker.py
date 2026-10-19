@@ -9,6 +9,12 @@ import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+import sys
+
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import engineering_evidence_tools
+
 from typing import Any, Mapping
 
 import support_repair_host_worker as support
@@ -1797,6 +1803,13 @@ def main() -> int:
                     })
                     continue
                 result = response.get('result') or {}
+                if engineering_evidence_tools.continue_evidence_session(
+                    response_result=result, record=record, item=item, spool=spool,
+                    worktree=worktree, repo=repo, gate=gate, repair_policy=policy,
+                    support=support, queue_reasoning=queue_reasoning,
+                ):
+                    record['updated_at'] = now()
+                    continue
                 if result.get('blocked_reason'):
                     blocked_reason = str(result['blocked_reason'])
                     expansion_attempts = int(record.get('context_expansion_attempts', 0))

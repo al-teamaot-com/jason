@@ -17,13 +17,20 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Mapping
 
 ROOT = Path(__file__).resolve().parents[1]
+# Tests and production both load tools by exact file path; pin our sibling module.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import engineering_evidence_tools
+
 DEFAULT_REPO = Path('/home/al/projects/jason')
 DEFAULT_SPOOL = Path('/var/lib/jason/openclaw/support-repair')
 DEFAULT_LIFECYCLE_EVENT_ROOT = Path('/var/lib/jason/openclaw/autonomous-repair/lifecycle-events')
@@ -2399,6 +2406,17 @@ def main() -> int:
                     record.update({'phase': 'blocked', 'reason': 'edit reasoning failed: ' + str(response.get('error') or ''), 'updated_at': now()})
                     continue
                 result = response.get('result') or {}
+                if engineering_evidence_tools.continue_evidence_session(
+                    response_result=result, record=record, item=item, spool=spool,
+                    worktree=worktree, repo=repo, gate=gate, repair_policy=policy,
+                    support=SimpleNamespace(
+                        run=run, request_id=request_id, safe_search=safe_search,
+                        source_excerpts_for_paths=source_excerpts_for_paths,
+                        merge_source_excerpts=merge_source_excerpts,
+                    ), queue_reasoning=queue_reasoning,
+                ):
+                    record['updated_at'] = now()
+                    continue
                 if result.get('blocked_reason'):
                     record.update({'phase': 'blocked', 'reason': str(result['blocked_reason']), 'updated_at': now()})
                     continue

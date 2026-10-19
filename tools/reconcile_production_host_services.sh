@@ -485,6 +485,9 @@ fi
 for worker in \
   support_repair_host_worker.py \
   owner_approved_development_worker.py \
+  engineering_pipeline.py \
+  engineering_supervisor.py \
+  engineering_evidence_tools.py \
   todo_engineering_intake.py \
   todo_release_bridge.py \
   operational_acceptance_reader.py \
