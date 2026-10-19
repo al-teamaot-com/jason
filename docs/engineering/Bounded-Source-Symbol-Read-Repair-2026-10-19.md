@@ -71,3 +71,21 @@ Acceptance remains actual SUPPORT-OPS-054 code/test implementation or
 a genuine evidence-backed escalation, followed by protected PR checks,
 explicit exact-revision release approval where required, independent CCC
 and production acceptance. A status of implementing is not closure.
+
+## Active pull-request integration review
+
+Reviewed October 19, 2026 against protected main after PR #1609:
+PR #1599 changes acceptance of legacy development model request kinds,
+PR #1495 changes transport-error classification, and PR #1434 changes
+stale self-heal incident re-admission. All are separate functions/regions
+from the bounded exact-symbol parser and its immutable rollback-provenance
+recovery. PR #1331 contains a separate model fallback proposal, while
+the much older draft #692 touches general finance reconciliation and the
+same shared worker/model files without being authoritative main.
+
+No unrelated PR is automatically adopted, closed, deployed or treated as
+accepted by this repair. Every overlapping pull request must rebase to
+protected main, verify its precise net diff and rerun all required checks.
+The protected change-integration evidence explicitly coordinates #692,
+#1331, #1434, #1495 and #1599; mere file overlap is not permission to
+relax existing authorization, test or release boundaries.
