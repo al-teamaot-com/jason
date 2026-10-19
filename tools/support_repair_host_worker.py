@@ -456,7 +456,7 @@ def support_worktree_path(item_id: str, branch: str | None = None) -> Path:
     if re.fullmatch(SUPPORT_ID_PATTERN, item_id) is None:
         raise WorkerError('invalid support identity for repair worktree')
     normal = branch_name(item_id)
-    if branch and re.fullmatch(re.escape(normal) + r'-(?:anchor|context)-[0-9a-f]{12}', branch):
+    if branch and re.fullmatch(re.escape(normal) + r'-(?:anchor|context|evidence)-[0-9a-f]{12}', branch):
         return Path('/home/al/jason-worktrees/support-repair') / branch.split('/')[-1]
     return Path('/home/al/jason-worktrees/support-repair') / item_id.casefold()
 
@@ -1865,6 +1865,182 @@ def readmit_missing_support_source_context(
     return resumed
 
 
+def readmit_verified_evidence_starvation_after_upgrade(
+    state: dict[str, Any], eligible: list[dict[str, str]],
+    repo: Path, spool: Path, gate, policy: Mapping[str, Any],
+    *, max_active: int,
+) -> list[str]:
+    """Recover one P0 item only when a verified older tool dropped an explicit read.
+
+    Never blindly replay a completed reasoning turn or reset a historical
+    budget. Requires: same canonical P0; content-addressed request+response
+    ancestry; an actual, previously requested but omitted tracked source file;
+    a *changed* host evidence executor at fetched main; and a fresh clean,
+    isolated worktree. A prior recovery marker prevents any second admission.
+    """
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active = sum(1 for rec in records.values() if isinstance(rec, Mapping)
+                 and rec.get('phase') in {'diagnosing', 'implementing',
+                                          'ci_repair_needed', 'ci_repairing'})
+    slots = max(0, max(1, int(max_active)) - active)
+    resumed: list[str] = []
+    for item in eligible:
+        if not slots:
+            break
+        record = records.get(item['id'])
+        if (item.get('priority') != 'P0' or not isinstance(record, dict)
+                or record.get('phase') != 'blocked'
+                or record.get('reason') != 'EvidenceToolError: source evidence turn budget exhausted'
+                or record.get('evidence_upgrade_recovery_request_id')
+                or record.get('pr_number')
+                or record.get('blocker_class') in {'external_authority', 'blocked_by_dependency'}
+                or (isinstance(record.get('recovery_handoff_intake'), Mapping)
+                    and record['recovery_handoff_intake'].get('status') == 'awaiting_governed_repair')
+                or type(record.get('evidence_turn_count')) is not int
+                or record['evidence_turn_count'] < 2):
+            continue
+        last_id = str(record.get('reasoning_request_id') or '')
+        old_sha = str(record.get('evidence_source_revision') or '')
+        if not re.fullmatch(r'[0-9a-f]{64}', last_id) or not re.fullmatch(r'[0-9a-f]{40}', old_sha):
+            continue
+        try:
+            head = run(['git', 'rev-parse', 'origin/main'], cwd=repo)
+            if not re.fullmatch(r'[0-9a-f]{40}', head) or head == old_sha:
+                continue
+            old_blob = run(['git', 'rev-parse', f'{old_sha}:tools/engineering_evidence_tools.py'], cwd=repo)
+            new_blob = run(['git', 'rev-parse', f'{head}:tools/engineering_evidence_tools.py'], cwd=repo)
+            if old_blob == new_blob:
+                continue
+
+            # Walk no more than two prior evidence turns to prove that the
+            # previously authorized explicit read was starved by broad search.
+            current = last_id
+            lost_reads: list[str] = []
+            symbol_terms: list[str] = []
+            for _ in range(3):
+                req_path = spool / 'reasoning' / 'requests' / (current + '.json')
+                if not req_path.is_file() or req_path.stat().st_size > 250000:
+                    break
+                request = json.loads(req_path.read_text(encoding='utf-8'))
+                response = reasoning_response(spool, current)
+                if (not isinstance(request, dict)
+                        or request.get('request_id') != current
+                        or request_id(request) != current
+                        or request.get('kind') != 'edit_plan'
+                        or request.get('support_item') != item['id']
+                        or not isinstance(response, Mapping)
+                        or response.get('status') != 'succeeded'
+                        or response.get('request_id') != current
+                        or response.get('kind') != 'edit_plan'
+                        or response.get('support_item') != item['id']
+                        or not isinstance(response.get('result'), Mapping)):
+                    break
+                result = response['result']
+                if result.get('blocked_reason') or result.get('edits'):
+                    break
+                context = request.get('context')
+                if not isinstance(context, Mapping):
+                    break
+                ancestor = str(context.get('previous_reasoning_request_id') or '')
+                if re.fullmatch(r'[0-9a-f]{64}', ancestor) is None:
+                    break
+                prev_path = spool / 'reasoning' / 'requests' / (ancestor + '.json')
+                if not prev_path.is_file() or prev_path.stat().st_size > 250000:
+                    break
+                previous = json.loads(prev_path.read_text(encoding='utf-8'))
+                previous_result = reasoning_response(spool, ancestor)
+                if (not isinstance(previous, dict)
+                        or previous.get('request_id') != ancestor
+                        or request_id(previous) != ancestor
+                        or previous.get('kind') != 'edit_plan'
+                        or previous.get('support_item') != item['id']
+                        or not isinstance(previous_result, Mapping)
+                        or previous_result.get('status') != 'succeeded'
+                        or previous_result.get('request_id') != ancestor
+                        or previous_result.get('kind') != 'edit_plan'
+                        or previous_result.get('support_item') != item['id']
+                        or not isinstance(previous_result.get('result'), Mapping)):
+                    break
+                source_rows = context.get('source_excerpts')
+                if not isinstance(source_rows, list):
+                    break
+                delivered = {str(entry.get('path')) for entry in source_rows
+                             if isinstance(entry, Mapping)}
+                for asked in previous_result['result'].get('evidence_requests') or []:
+                    if not isinstance(asked, Mapping):
+                        continue
+                    path = asked.get('path')
+                    if asked.get('tool') == 'read_source' and isinstance(path, str):
+                        if path not in delivered and path not in lost_reads:
+                            lost_reads.append(path)
+                    elif asked.get('tool') == 'search_source':
+                        query = str(asked.get('query') or '')
+                        for term in re.findall(r'[A-Za-z_][A-Za-z0-9_]{7,}', query):
+                            if '_' in term and term not in symbol_terms:
+                                symbol_terms.append(term)
+                current = ancestor
+
+            if not lost_reads:
+                continue
+            branch = branch_name(item['id']) + '-evidence-' + last_id[:12]
+            fresh = ensure_worktree(repo, item['id'], branch)
+            if (run(['git', 'branch', '--show-current'], cwd=fresh) != branch
+                    or run(['git', 'status', '--porcelain', '--untracked-files=all'], cwd=fresh)
+                    or run(['git', 'rev-parse', 'HEAD'], cwd=fresh) != head):
+                continue
+            paths = [path for path in lost_reads
+                     if engineering_evidence_tools._safe_path(fresh, path, gate, policy)][:2]
+            if not paths:
+                continue
+            companions = []
+            for path in paths:
+                candidate = Path(path)
+                test_path = (candidate.parent / 'tests' / ('test_' + candidate.name)).as_posix()
+                if engineering_evidence_tools._safe_path(fresh, test_path, gate, policy):
+                    companions.append(test_path)
+            excerpts = source_excerpts_for_paths(
+                fresh, paths + companions, gate, policy, terms=symbol_terms[:12],
+                limit=4, content_limit=12000,
+            )
+            if not excerpts or excerpts[0]['path'] != paths[0]:
+                continue
+            new_id = queue_reasoning(spool, kind='edit_plan', item=item, context={
+                'evidence_starvation_recovery': {
+                    'previous_request_id': last_id,
+                    'previous_source_revision': old_sha,
+                    'corrected_source_revision': head,
+                    'missed_exact_reads': paths,
+                    'retry_limit': 1,
+                },
+                'validation_feedback': (
+                    'A verified old executor starved an explicit source read behind broad '
+                    'search results. Exact missing source files and companion tests now '
+                    'take priority. Use these pinned excerpts for exact edits and regression '
+                    'tests. If more evidence is essential, use bounded read_source with a '
+                    'specific function symbol. Never propose unseen code or new authority.'
+                ),
+                'source_excerpts': excerpts,
+            })
+            if new_id == last_id:
+                continue
+            record.update({
+                'phase': 'implementing',
+                'branch': branch,
+                'reasoning_request_id': new_id,
+                'evidence_upgrade_recovery_request_id': new_id,
+                'evidence_upgrade_original_request_id': last_id,
+                'evidence_upgrade_source_revision': head,
+                'evidence_prior_exhausted_turns': int(record['evidence_turn_count']),
+                'reason': 'One verified source-starvation recovery admitted on corrected worker.',
+                'updated_at': now(),
+            })
+            resumed.append(item['id'])
+            slots -= 1
+        except (WorkerError, OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+    return resumed
+
+
 def readmit_preserved_anchor_failure(
     state: dict[str, Any],
     eligible: list[dict[str, str]],
@@ -2144,6 +2320,9 @@ def main() -> int:
     readmit_recovered_reasoning(state, support, spool, max_active=args.max_active)
     readmit_after_verified_transport_recovery(state, support, spool, max_active=args.max_active)
     readmit_missing_support_source_context(
+        state, support, repo, spool, gate, policy, max_active=args.max_active,
+    )
+    readmit_verified_evidence_starvation_after_upgrade(
         state, support, repo, spool, gate, policy, max_active=args.max_active,
     )
     reassess_model_scope_blocks(state, support, spool, args.max_active)
