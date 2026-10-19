@@ -22,6 +22,7 @@ class InstallSupportRepairHostWorkerTests(unittest.TestCase):
         )
         self.assertTrue((root / "tools/engineering_pipeline.py").is_file())
         self.assertTrue((root / "tools/engineering_supervisor.py").is_file())
+        self.assertTrue((root / "tools/release_breaker_recovery_manager.py").is_file())
         self.assertTrue((root / "tools/engineering_evidence_tools.py").is_file())
         self.assertTrue((root / "tools/support_repair_host_worker.py").is_file())
         self.assertTrue((root / "tools/owner_approved_development_worker.py").is_file())
@@ -50,12 +51,13 @@ class InstallSupportRepairHostWorkerTests(unittest.TestCase):
         spec.loader.exec_module(module)
         self.assertEqual([stage.name for stage in module.STAGES], [
             "support_repair", "todo_intake", "development", "release_bridge",
-            "engineering_supervisor",
+            "engineering_supervisor", "release_breaker_recovery",
         ])
         self.assertEqual(module.STAGES[1].requires, ("support_repair",))
         self.assertEqual(module.STAGES[2].requires, ("support_repair",))
         self.assertEqual(module.STAGES[3].requires, ())
         self.assertEqual(module.STAGES[4].requires, ())
+        self.assertEqual(module.STAGES[5].requires, ())
 
     def test_engineering_service_uses_immutable_installed_source(self):
         service = (
@@ -71,6 +73,7 @@ class InstallSupportRepairHostWorkerTests(unittest.TestCase):
         self.assertIn("engineering-worker-source", installer)
         self.assertIn("_copy(pipeline_runner, install_root", installer)
         self.assertIn("_copy(supervisor_runner, install_root", installer)
+        self.assertIn("_copy(breaker_recovery_runner, install_root", installer)
         self.assertIn("_copy(evidence_module, install_root", installer)
         self.assertIn("_copy(change_integration_gate, install_root", installer)
         self.assertIn("_copy(documentation_impact_gate, install_root", installer)

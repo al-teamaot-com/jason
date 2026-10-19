@@ -486,6 +486,7 @@ for worker in \
   support_repair_host_worker.py \
   owner_approved_development_worker.py \
   engineering_pipeline.py \
+  release_breaker_recovery_manager.py \
   engineering_supervisor.py \
   engineering_evidence_tools.py \
   todo_engineering_intake.py \
