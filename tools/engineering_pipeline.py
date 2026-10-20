@@ -45,6 +45,12 @@ STAGES = (
 )
 
 
+# Work-item discovery and execution errors are operational incidents, not
+# evidence that the installed production runtime or release authority drifted.
+# A failed controller, supervisor, or recovery stage is still a hard failure.
+ISOLATABLE_WORK_STAGES = frozenset({"support_repair", "todo_intake", "development"})
+
+
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -205,6 +211,14 @@ def run_pipeline(
     critical = blocked_critical_support(spool, repo) if not failed else None
     state["status"] = "degraded" if failed or stalled or critical else "healthy"
     state["failed_or_skipped_stages"] = failed
+    # Keep stage failures visible and actionable even when the systemd runner
+    # completes successfully. Only the work-item execution lane is isolated.
+    state["failed_work_stages"] = sorted(set(failed) & ISOLATABLE_WORK_STAGES)
+    state["failed_control_stages"] = sorted(set(failed) - ISOLATABLE_WORK_STAGES)
+    state["failure_domain"] = (
+        "control" if state["failed_control_stages"] else
+        "engineering_operations" if state["failed_work_stages"] else "none"
+    )
     if stalled:
         state["operational_blocker"] = stalled
     if critical:
@@ -221,15 +235,38 @@ def run_pipeline(
 
 
 def service_exit_code(state: dict[str, Any]) -> int:
-    """Report failed execution, not a legitimate pending/blocked work state.
+    """Keep work-item failures out of the production-integrity breaker domain.
 
-    The user service has no automatic Restart/OnFailure recovery. Returning a
-    failure for backlog alone only adds a failed critical unit and can block CCC
-    from releasing the repair. Operational degradation remains explicit in the
-    state/event; the native work reconciler owns recovery and source adoption.
+    The coordinator must have durably completed *every* scheduled stage and
+    recorded an honest degraded result. A GitHub listing failure, exhausted
+    reasoning budget or rejected work-item operation is reported by its stage,
+    supervisor, and durable pipeline state, not as a failed systemd service.
+    Real release-control, supervision, recovery, or unknown failures remain
+    nonzero and retain the full production drift guard.
     """
-    return 1 if state.get("failed_or_skipped_stages") else 0
-
+    stages = state.get("stages")
+    if (not isinstance(stages, dict)
+            or set(stages) != {stage.name for stage in STAGES}
+            or not isinstance(state.get("finished_at"), str)
+            or state.get("status") not in {"healthy", "degraded"}):
+        return 1
+    for item in stages.values():
+        if (not isinstance(item, dict)
+                or item.get("status") not in {"succeeded", "failed", "skipped_dependency"}):
+            return 1
+    actual_failed = {name for name, item in stages.items()
+                     if item["status"] != "succeeded"}
+    recorded_failed = state.get("failed_or_skipped_stages")
+    if (not isinstance(recorded_failed, list)
+            or len(recorded_failed) != len(set(recorded_failed))
+            or set(recorded_failed) != actual_failed
+            or (actual_failed and state["status"] != "degraded")):
+        return 1
+    if actual_failed - ISOLATABLE_WORK_STAGES:
+        return 1
+    # A legitimately blocked ticket or work-stage failure remains degraded,
+    # but does not make the production watchdog open the release breaker.
+    return 0
 
 def main() -> int:
     parser = argparse.ArgumentParser()
