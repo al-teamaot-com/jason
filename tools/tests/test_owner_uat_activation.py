@@ -99,3 +99,28 @@ def test_git_object_pins_immutable_campaign(tmp_path):
     forged = write(tmp_path, manifest())
     with pytest.raises(PermissionError, match="exact release tree"):
         activation.verify_source_pinned_manifest(forged, revision)
+
+
+
+def test_current_committed_nonexecuting_campaign_is_bounded_and_expires():
+    """A refreshed campaign must not grant production authority or outlive its window."""
+    path = MODULE.parents[1] / "config" / "owner-uat-campaign.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["schema_version"] == "1.0"
+    assert data["organization_id"] == "aot"
+    assert data["owner_identity_id"] == "person-al"
+    assert data["requester_identity_id"] == "svc-jason-acceptance-test"
+    assert data["capability"] == "interaction.owner.acceptance.record"
+    assert data["execution_permitted"] is False
+    assert data["purpose"] == "owner_teams_nonexecuting_uat"
+    end = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00"))
+    assert end.utcoffset() == timedelta(0)
+    in_window = end - timedelta(hours=12)
+    assert activation.activate_from_manifest(path, now=in_window) == (
+        "nonexecuting_test_only|true|" + data["session_id"]
+    )
+    assert activation.activate_from_manifest(path, now=in_window, preflight=True) == activation.OFF
+    assert activation.activate_from_manifest(path, now=end) == activation.OFF
+    assert activation.activate_from_manifest(path, now=end + timedelta(seconds=1)) == activation.OFF
+    with pytest.raises(ValueError, match="48 hours"):
+        activation.activate_from_manifest(path, now=end - timedelta(hours=49))
