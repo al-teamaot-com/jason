@@ -125,9 +125,13 @@ class ExactRelease:
     purpose: str
     affected_files: tuple[str, ...]
     affected_surfaces: tuple[str, ...]
+    review_only: bool = False
 
 
-def read_eligible_release(state_root: Path, release_id: str, policy: MobileReleasePolicy) -> ExactRelease:
+def read_eligible_release(
+    state_root: Path, release_id: str, policy: MobileReleasePolicy,
+    *, allow_existing_owner_approval: bool = False,
+) -> ExactRelease:
     if not isinstance(release_id, str) or not RELEASE_ID.fullmatch(release_id):
         raise ValueError("release ID must be exact")
     p = Path(state_root) / "records" / (release_id + ".json")
@@ -143,8 +147,19 @@ def read_eligible_release(state_root: Path, release_id: str, policy: MobileRelea
             or not isinstance(preprod, dict) or preprod.get("acceptance_passed") is not True
             or preprod.get("rollback_readiness_passed") is not True
             or preprod.get("provider_mutations_disabled") is not True
-            or (doc.get("owner_approval") or {}).get("approved") is True):
+            ):
         raise PermissionError("release is not pending owner approval with safe preproduction evidence")
+    owner_approval = doc.get("owner_approval") or {}
+    review_only = owner_approval.get("approved") is True
+    # The reviewed V2 lane alone permits a fresh signed Teams owner click
+    # to attest CCC material review AFTER an earlier exact release grant.
+    # This cannot mint another release approval or make the old V1 pilot
+    # accept protected-control changes.
+    if review_only and (
+        not allow_existing_owner_approval or policy.schema_version != "2.0"
+        or owner_approval.get("candidate_sha") != (candidate or {}).get("candidate_sha")
+    ):
+        raise PermissionError("existing release approval requires a reviewed exact CCC-only card")
     sha = candidate.get("candidate_sha")
     rollback = doc.get("rollback_sha")
     if (not isinstance(sha, str) or not SHA.fullmatch(sha)
@@ -171,7 +186,7 @@ def read_eligible_release(state_root: Path, release_id: str, policy: MobileRelea
         str(manifest.get("policy_digest") or ""),
         str(manifest.get("desired_state_policy_digest") or ""),
         risk, str(manifest.get("change_class") or ""), purpose.strip(),
-        tuple(files), tuple(surfaces))
+        tuple(files), tuple(surfaces), review_only)
 
 
 def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleasePolicy,
@@ -210,6 +225,10 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
         "desired_state_policy_digest": evidence.desired_state_policy_digest,
         "owner_policy_sha256": policy.policy_sha256,
     }
+    if evidence.review_only:
+        if policy.schema_version != "2.0":
+            raise PermissionError("CCC-only Teams material review requires owner-reviewed V2 mode")
+        intent["review_only"] = True
     return ApprovalRequest(
         approval_id=REQUEST_PREFIX + secrets.token_hex(16),
         request_id="mobile-release:" + evidence.release_id,
@@ -223,9 +242,16 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
         expires_at=instant + timedelta(seconds=policy.ttl_seconds),
         authorized_approver_ids=policy.owner_identity_ids,
         presentation=ApprovalPresentation(
-            title="Production + CCC: " + evidence.purpose[:90],
-            summary="Review this exact immutable release. Approve authorizes only this SHA's "
-                    "release and CCC material review; independent checks, deployment and rollback remain mandatory.",
+            title=("CCC Material Review: " if evidence.review_only else "Production + CCC: ")
+                  + evidence.purpose[:90],
+            summary=(
+                "The exact production release was already owner-authorized. "
+                "Approve records ONLY the missing CCC material-change owner review for this SHA. "
+                "Independent CCC, deployment and rollback remain mandatory."
+                if evidence.review_only else
+                "Review this exact immutable release. Approve authorizes only this SHA's "
+                "release and CCC material review; independent checks, deployment and rollback remain mandatory."
+            ),
             facts=(
                 ("Purpose", evidence.purpose),
                 ("Release", evidence.release_id),
@@ -355,7 +381,12 @@ class MobileReleaseApprovalFlow:
                 or request.metadata.get("owner_policy_sha256") != policy.policy_sha256):
             raise PermissionError("mobile approval requester, role or policy has changed")
         release_id = request.metadata.get("release_id", "")
-        current = read_eligible_release(self.state_root, release_id, policy)
+        current = read_eligible_release(
+            self.state_root, release_id, policy,
+            allow_existing_owner_approval=(request.metadata.get("review_only") is True),
+        )
+        if current.review_only != (request.metadata.get("review_only") is True):
+            raise PermissionError("CCC-only review purpose changed after card issuance")
         if policy.schema_version == "2.0":
             proof = request.metadata.get("card_instance_challenge")
             if (type(proof) is not str or re.fullmatch(r"[0-9a-f]{48}", proof) is None
@@ -499,12 +530,16 @@ class MobileReleaseApprovalMaintenance:
                 # requires a separately recorded owner/release request.
                 continue
             try:
-                evidence = read_eligible_release(self.state_root, path.stem, policy)
+                evidence = read_eligible_release(
+                    self.state_root, path.stem, policy,
+                    allow_existing_owner_approval=(offer.get("review_only") is True),
+                )
             except (ValueError, PermissionError, FileNotFoundError, json.JSONDecodeError):
                 continue
             if (evidence.candidate_sha != offer["candidate_sha"]
                     or evidence.rollback_sha != offer.get("live_rollback_sha")
-                    or evidence.manifest_sha256 != offer.get("manifest_sha256")):
+                    or evidence.manifest_sha256 != offer.get("manifest_sha256")
+                    or evidence.review_only != (offer.get("review_only") is True)):
                 continue
             read_release_approval_containment(self.state_root).require_request_eligible(now)
             request = create_mobile_release_request(evidence, policy, now=now)

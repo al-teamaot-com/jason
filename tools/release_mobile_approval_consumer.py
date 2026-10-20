@@ -278,7 +278,15 @@ def consume_mobile_release_decisions(
         read_release_approval_containment(state_root).require_request_eligible(
             request.requested_at
         )
-        if prior_approval.get("approved") is True:
+        review_only = request.metadata.get("review_only") is True
+        if review_only:
+            if (policy.schema_version != "2.0"
+                    or prior_approval.get("approved") is not True
+                    or prior_approval.get("candidate_sha") != request.metadata.get("candidate_sha")
+                    or digest(raw_release.get("release_manifest") or {})
+                        != request.metadata.get("manifest_sha256")):
+                raise PermissionError("CCC-only Teams decision lacks an exact prior owner release grant")
+        if prior_approval.get("approved") is True and not review_only:
             manifest = raw_release.get("release_manifest") or {}
             named = ccc_root / ("material-review-" + request.metadata["candidate_sha"][:16] + ".json")
             if (prior_approval.get("source") != exact_prior_source
@@ -302,7 +310,12 @@ def consume_mobile_release_decisions(
                 "recovery": "previous_exact_owner_approval_verified",
             })
             continue
-        candidate = read_eligible_release(state_root, release_id, policy)
+        candidate = read_eligible_release(
+            state_root, release_id, policy,
+            allow_existing_owner_approval=review_only,
+        )
+        if candidate.review_only != review_only:
+            raise PermissionError("CCC-only Teams decision changed release approval state")
         expected = create_mobile_release_request(
             candidate, policy, now=request.requested_at,
             card_challenge=(request.metadata.get("card_instance_challenge")
@@ -321,6 +334,18 @@ def consume_mobile_release_decisions(
         read_release_approval_containment(state_root).require_request_eligible(
             request.requested_at
         )
+        # Revalidate the existing owner authorization immediately before
+        # writing a CCC-only review; the signed card cannot resurrect or alter
+        # a grant revoked after the original Teams callback.
+        if review_only:
+            just_before = json.loads(
+                (state_root / "records" / (release_id + ".json")).read_text()
+            )
+            if (just_before.get("owner_approval") != prior_approval
+                    or digest(just_before.get("release_manifest") or {})
+                        != candidate.manifest_sha256
+                    or just_before.get("state") != "production_eligible"):
+                raise PermissionError("exact prior owner release grant changed before CCC write")
         # All trusted evidence is now independently reverified. CCC is an
         # *owner material review*, not a CCC PASS; fresh CCC must still run.
         sha = candidate.candidate_sha
@@ -339,6 +364,9 @@ def consume_mobile_release_decisions(
             prior = json.loads(named.read_text(encoding="utf-8"))
             if prior.get("source_revision") != sha or prior.get("recorded_by") != owner.identity_id:
                 raise PermissionError("conflicting CCC owner review for exact SHA")
+            if review_only and (prior.get("signed_evidence_sha256") != evidence_sha
+                                or prior.get("mobile_approval_id") != approval_id):
+                raise PermissionError("CCC-only Teams review conflicts with an existing owner review")
             if prior.get("signed_evidence_sha256") != evidence_sha:
                 # An older manual owner review is valid provenance, but it is
                 # not the signed mobile receipt. Archive it without deletion
@@ -372,10 +400,17 @@ def consume_mobile_release_decisions(
         read_release_approval_containment(state_root).require_request_eligible(
             request.requested_at
         )
-        approve_release(
-            repo, state_root, release_id=candidate.release_id,
-            candidate_sha=sha, source="authenticated_mobile_teams_owner:" + approval_id,
-        )
+        if not review_only:
+            approve_release(
+                repo, state_root, release_id=candidate.release_id,
+                candidate_sha=sha, source="authenticated_mobile_teams_owner:" + approval_id,
+            )
+        else:
+            # Only the existing owner release grant is valid. A signed CCC
+            # review cannot add, modify or resurrect release execution scope.
+            stored = json.loads((state_root / "records" / (release_id + ".json")).read_text())
+            if stored.get("owner_approval") != prior_approval:
+                raise PermissionError("prior exact owner release grant changed during CCC review")
         _private_atomic(marker, {
             "schema_version": "1.0", "approval_id": approval_id,
             "release_id": candidate.release_id,
@@ -384,6 +419,7 @@ def consume_mobile_release_decisions(
             "mobile_policy_sha256": policy.policy_sha256,
             "signed_evidence_sha256": evidence_sha,
             "decision": "approve",
+            **({"review_only": True} if review_only else {}),
             "processed_at": datetime.now(timezone.utc).isoformat(),
         })
         completed += 1

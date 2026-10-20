@@ -29,7 +29,8 @@ NOW = datetime.now(timezone.utc).replace(microsecond=0)  # avoid expired histori
 RID = "release-" + SHA[:16]
 
 
-def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=None):
+def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=None,
+            review_only=False):
     from implementation.runtime_service.tests.test_mobile_release_approval import (
         policy_file, reviewed_policy_file, mark_release_high_impact, release_record,
     )
@@ -37,10 +38,25 @@ def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=N
     root, release_path = release_record(tmp_path)
     if reviewed:
         mark_release_high_impact(root)
+    if review_only:
+        assert reviewed
+        record = json.loads(release_path.read_text(encoding="utf-8"))
+        record["owner_approval"] = {
+            "approved": True,
+            "candidate_sha": SHA,
+            "source": "explicit_owner_instruction",
+            "recorded_at": NOW.isoformat(),
+        }
+        release_path.write_text(json.dumps(record), encoding="utf-8")
     ccc = tmp_path / "ccc"
     ccc.mkdir()
     policy = read_mobile_release_policy(policy_path)
-    request = create_mobile_release_request(read_eligible_release(root, RID, policy), policy, now=NOW)
+    request = create_mobile_release_request(
+        read_eligible_release(
+            root, RID, policy, allow_existing_owner_approval=review_only,
+        ),
+        policy, now=NOW,
+    )
     path = tmp_path / "approvals.sqlite3"
     repo = SQLiteApprovalRequestRepository(path)
     svc = ApprovalRequestService(repo, MobileReleaseOwnerAuthority(policy_path))
@@ -569,3 +585,114 @@ def test_locked_owner_binding_is_retryable_without_minting_release(tmp_path):
         lock.close()
     assert consume_mobile_release_decisions(**opts) == 1
     assert len(invoked) == 1
+
+def test_high_impact_review_only_signed_teams_click_mints_ccc_not_release(tmp_path):
+    """An already exact-approved core release can get a new mobile CCC review."""
+    flow, repo, release_path, req, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, review_only=True,
+    )
+    before = release_path.read_bytes()
+    assert req.metadata["review_only"] is True
+    assert "CCC Material Review:" in req.presentation.title
+    assert "ONLY the missing CCC" in req.presentation.summary
+    assert req.requested_mode == "release:" + SHA
+
+    accepted = flow.handle(**args)
+    assert accepted["approval_status"] == "approved"
+    assert release_path.read_bytes() == before
+    calls = []
+    opts["approve_release"] = lambda *a, **k: calls.append(k)
+    assert consume_mobile_release_decisions(**opts) == 1
+    assert calls == []
+    assert release_path.read_bytes() == before
+    material = json.loads((opts["ccc_root"] / "material-review.json").read_text())
+    assert material["source_revision"] == SHA
+    assert material["recorded_by"] == "person-al"
+    assert material["mobile_approval_id"] == req.approval_id
+    assert material["signed_evidence_sha256"] == repo.accepted_decision(
+        req.approval_id
+    ).authentication_evidence_hash
+    assert consume_mobile_release_decisions(**opts) == 0
+    marker = json.loads((opts["state_root"] / "mobile-release-decisions-processed"
+                         / (req.approval_id + ".json")).read_text())
+    assert marker["review_only"] is True
+
+
+def test_high_impact_review_only_teams_deny_preserves_release_grant(tmp_path):
+    flow, repo, release_path, req, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, review_only=True, approve=False,
+    )
+    original = release_path.read_bytes()
+    response = flow.handle(**args)
+    assert response["approval_status"] == "denied"
+    opts["approve_release"] = lambda *a, **k: pytest.fail("deny cannot mint a release")
+    assert consume_mobile_release_decisions(**opts) == 0
+    assert release_path.read_bytes() == original
+    assert not (opts["ccc_root"] / "material-review.json").exists()
+
+
+def test_review_only_rejects_changed_previous_owner_sha_at_signed_callback(tmp_path):
+    flow, repo, release_path, req, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, review_only=True,
+    )
+    record = json.loads(release_path.read_text())
+    record["owner_approval"]["candidate_sha"] = ROLLBACK
+    release_path.write_text(json.dumps(record))
+    with pytest.raises(PermissionError, match="exact CCC-only card"):
+        flow.handle(**args)
+    assert repo.accepted_decision(req.approval_id) is None
+    assert not (opts["ccc_root"] / "material-review.json").exists()
+
+
+def test_review_only_rejects_modified_manifest_in_independent_host(tmp_path):
+    flow, repo, release_path, req, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, review_only=True,
+    )
+    flow.handle(**args)
+    record = json.loads(release_path.read_text())
+    record["release_manifest"]["changed_files"].append("unreviewed_new_auth_file.py")
+    release_path.write_text(json.dumps(record))
+    opts["approve_release"] = lambda *a, **k: pytest.fail("tamper cannot mint release")
+    with pytest.raises(PermissionError, match="exact prior owner release grant"):
+        consume_mobile_release_decisions(**opts)
+    assert not (opts["ccc_root"] / "material-review.json").exists()
+
+
+def test_review_only_rejects_missing_prior_grant_in_independent_host(tmp_path):
+    flow, repo, release_path, req, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, review_only=True,
+    )
+    flow.handle(**args)
+    record = json.loads(release_path.read_text())
+    record["owner_approval"]["approved"] = False
+    release_path.write_text(json.dumps(record))
+    opts["approve_release"] = lambda *a, **k: pytest.fail("no CCC-only backdoor")
+    with pytest.raises(PermissionError, match="exact prior owner release grant"):
+        consume_mobile_release_decisions(**opts)
+    assert not (opts["ccc_root"] / "material-review.json").exists()
+
+
+def test_review_only_signed_teams_replay_with_different_card_challenge_denied(tmp_path):
+    flow, repo, release_path, req, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, review_only=True,
+        card_selection_override={"card_challenge": "0" * 48},
+    )
+    with pytest.raises(PermissionError, match="card"):
+        flow.handle(**args)
+    assert repo.accepted_decision(req.approval_id) is None
+
+
+def test_review_only_preexisting_different_signed_ccc_review_is_not_overwritten(tmp_path):
+    flow, repo, release_path, req, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, review_only=True,
+    )
+    flow.handle(**args)
+    named = opts["ccc_root"] / ("material-review-" + SHA[:16] + ".json")
+    prior = {"source_revision": SHA, "recorded_by": "person-al", "status": "approved",
+             "signed_evidence_sha256": "0" * 64, "mobile_approval_id": "relapproval-old"}
+    named.write_text(json.dumps(prior))
+    opts["approve_release"] = lambda *a, **k: pytest.fail("no duplicate grant")
+    with pytest.raises(PermissionError, match="conflicts with an existing owner review"):
+        consume_mobile_release_decisions(**opts)
+    assert json.loads(named.read_text()) == prior
+    assert not (opts["ccc_root"] / "material-review.json").exists()

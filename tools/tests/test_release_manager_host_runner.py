@@ -2986,3 +2986,90 @@ def test_scheduled_promotion_defers_exact_material_owner_review_without_deployin
     assert saved["state"] == "production_eligible"
     assert saved["owner_approval"] == record["owner_approval"]
     assert saved["rollback_sha"] == SHA_B
+
+def test_reviewed_owner_offer_can_request_only_missing_ccc_review(tmp_path):
+    from types import SimpleNamespace
+    import json
+    policy = SimpleNamespace(
+        schema_version="2.0",
+        allowed_risk_profiles=frozenset({"normal", "production_control_core"}),
+    )
+    approved = {
+        "risk_profile": "production_control_core",
+        "owner_approval": {
+            "approved": True, "candidate_sha": SHA_A,
+            "source": "explicit_owner_instruction",
+        },
+    }
+    assert runner.signed_owner_offer_purpose(
+        approved, SHA_A, policy, "owner_reviewed", ccc_root=tmp_path,
+    ) == "ccc_material_review_only"
+    # The exact already-approved release needs no second release grant.
+    original_approval = dict(approved["owner_approval"])
+    assert approved["owner_approval"] == original_approval
+    # A valid separately recorded review suppresses duplicate cards.
+    (tmp_path / ("material-review-" + SHA_A[:16] + ".json")).write_text(
+        json.dumps({"status": "approved", "source_revision": SHA_A,
+                    "recorded_by": "person-al"})
+    )
+    assert runner.signed_owner_offer_purpose(
+        approved, SHA_A, policy, "owner_reviewed", ccc_root=tmp_path,
+    ) is None
+
+
+def test_reviewed_offer_policy_mode_risk_and_identity_do_not_widen(tmp_path):
+    from types import SimpleNamespace
+    v1 = SimpleNamespace(schema_version="1.0", allowed_risk_profiles=frozenset({"normal"}))
+    v2 = SimpleNamespace(schema_version="2.0", allowed_risk_profiles=frozenset({
+        "normal", "production_control_core",
+    }))
+    approved = {
+        "risk_profile": "production_control_core",
+        "owner_approval": {"approved": True, "candidate_sha": SHA_A},
+    }
+    for policy, mode in (
+        (v1, "owner_only_pilot"), (v1, "owner_reviewed"),
+        (v2, "owner_only_pilot"), (v2, "off"),
+    ):
+        assert runner.signed_owner_offer_purpose(
+            approved, SHA_A, policy, mode, ccc_root=tmp_path,
+        ) is None
+    missing_approval = {"risk_profile": "normal", "owner_approval": {"approved": False}}
+    assert runner.signed_owner_offer_purpose(
+        missing_approval, SHA_A, v1, "owner_only_pilot", ccc_root=tmp_path,
+    ) == "release_and_ccc"
+    changed_sha = {
+        **approved, "owner_approval": {"approved": True, "candidate_sha": SHA_B},
+    }
+    assert runner.signed_owner_offer_purpose(
+        changed_sha, SHA_A, v2, "owner_reviewed", ccc_root=tmp_path,
+    ) is None
+    unsupported_risk = {**approved, "risk_profile": "schema_or_contract"}
+    assert runner.signed_owner_offer_purpose(
+        unsupported_risk, SHA_A, v2, "owner_reviewed", ccc_root=tmp_path,
+    ) is None
+
+
+def test_reviewed_offer_rejects_conflicting_ccc_evidence_not_overwrite(tmp_path):
+    from types import SimpleNamespace
+    import json
+    import pytest
+    policy = SimpleNamespace(schema_version="2.0", allowed_risk_profiles=frozenset({
+        "normal", "production_control_core",
+    }))
+    approved = {
+        "risk_profile": "production_control_core",
+        "owner_approval": {"approved": True, "candidate_sha": SHA_A},
+    }
+    named = tmp_path / ("material-review-" + SHA_A[:16] + ".json")
+    for bad in (
+        {"status": "denied", "source_revision": SHA_A, "recorded_by": "person-al"},
+        {"status": "approved", "source_revision": SHA_B, "recorded_by": "person-al"},
+        {"status": "approved", "source_revision": SHA_A, "recorded_by": "person-other"},
+    ):
+        named.write_text(json.dumps(bad))
+        with pytest.raises(runner.ReleaseManagerError, match="conflicts"):
+            runner.signed_owner_offer_purpose(
+                approved, SHA_A, policy, "owner_reviewed", ccc_root=tmp_path,
+            )
+        assert json.loads(named.read_text()) == bad

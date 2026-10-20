@@ -636,3 +636,38 @@ def test_p0_issuer_never_sends_or_creates_approval_while_hold_is_active(tmp_path
     )
     assert worker.tick() is False
     assert repo.list_all() == ()
+
+
+def test_reviewed_v2_can_request_ccc_only_after_exact_owner_release_grant(tmp_path):
+    policy = read_mobile_release_policy(reviewed_policy_file(tmp_path))
+    root, p = release_record(tmp_path)
+    mark_release_high_impact(root)
+    record = json.loads(p.read_text())
+    record["owner_approval"] = {
+        "approved": True, "candidate_sha": SHA,
+        "source": "explicit_owner_instruction",
+    }
+    p.write_text(json.dumps(record))
+    with pytest.raises(PermissionError, match="exact CCC-only card"):
+        read_eligible_release(root, RELEASE, policy)
+    review = read_eligible_release(
+        root, RELEASE, policy, allow_existing_owner_approval=True,
+    )
+    assert review.review_only is True
+    request = create_mobile_release_request(review, policy, now=NOW)
+    request.validate()
+    assert request.metadata["review_only"] is True
+    assert "CCC Material Review" in request.presentation.title
+    assert SHA in repr(request.presentation.facts)
+    assert ROLLBACK in repr(request.presentation.facts)
+    assert request.metadata["card_instance_challenge"]
+
+
+def test_v1_can_never_issue_owner_reviewed_ccc_only_card(tmp_path):
+    policy = read_mobile_release_policy(policy_file(tmp_path))
+    root, p = release_record(tmp_path)
+    record = json.loads(p.read_text())
+    record["owner_approval"] = {"approved": True, "candidate_sha": SHA}
+    p.write_text(json.dumps(record))
+    with pytest.raises(PermissionError, match="exact CCC-only card"):
+        read_eligible_release(root, RELEASE, policy, allow_existing_owner_approval=True)
