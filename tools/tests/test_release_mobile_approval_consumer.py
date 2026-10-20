@@ -400,3 +400,172 @@ def test_malformed_containment_prevents_host_material_review(tmp_path):
     with pytest.raises(PermissionError,match="policy_invalid"):
         consume_mobile_release_decisions(**opts)
     assert not (opts["ccc_root"]/"material-review.json").exists()
+
+
+def test_completed_mobile_decisions_require_no_authority_db_access_even_if_locked(tmp_path):
+    """Six finished live decisions must not reinitialize the shared authority DB."""
+    import sqlite3
+    from unittest.mock import patch
+    from kernel.identity_authority import SQLiteIdentityAuthorityStore
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(tmp_path)
+    flow.handle(**args)
+    approvals = []
+    opts["approve_release"] = lambda *a, **kw: approvals.append(kw)
+    assert consume_mobile_release_decisions(**opts) == 1
+    prior = release_path.read_bytes()
+    assert len(approvals) == 1
+
+    connection = sqlite3.connect(opts["authority_db"], isolation_level=None)
+    try:
+        connection.execute("BEGIN EXCLUSIVE")
+        with patch.object(
+            SQLiteIdentityAuthorityStore, "__init__",
+            side_effect=AssertionError("do not initialize shared authority schema"),
+        ):
+            assert consume_mobile_release_decisions(**opts) == 0
+    finally:
+        connection.rollback()
+        connection.close()
+    assert len(approvals) == 1
+    assert release_path.read_bytes() == prior
+
+
+def test_host_signed_decision_identity_verification_is_read_only(tmp_path):
+    """New signed owner evidence is verified without any shared-DB schema write."""
+    import hashlib
+    from unittest.mock import patch
+    from kernel.identity_authority import SQLiteIdentityAuthorityStore
+    from orchestrator.teams_identity_binding_sqlite import SQLiteMicrosoftIdentityBindingStore
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True,
+    )
+    flow.handle(**args)
+    authority_before = hashlib.sha256(opts["authority_db"].read_bytes()).hexdigest()
+    binding_before = hashlib.sha256(opts["bindings_db"].read_bytes()).hexdigest()
+    approvals = []
+    opts["approve_release"] = lambda *a, **kw: approvals.append(kw)
+    with (
+        patch.object(
+            SQLiteIdentityAuthorityStore, "__init__",
+            side_effect=AssertionError("schema must never be initialized from host reader"),
+        ),
+        patch.object(
+            SQLiteMicrosoftIdentityBindingStore, "__init__",
+            side_effect=AssertionError("binding migration must never run from host reader"),
+        ),
+    ):
+        assert consume_mobile_release_decisions(**opts) == 1
+    assert len(approvals) == 1
+    assert hashlib.sha256(opts["authority_db"].read_bytes()).hexdigest() == authority_before
+    assert hashlib.sha256(opts["bindings_db"].read_bytes()).hexdigest() == binding_before
+    assert json.loads((opts["ccc_root"] / "material-review.json").read_text())[
+        "source_revision"
+    ] == SHA
+
+
+def test_locked_unprocessed_authority_blocks_only_signed_consumer_until_retry(tmp_path):
+    """Do not turn SQLITE_BUSY into owner consent, and never lose the pending proof."""
+    import sqlite3
+    from release_mobile_approval_consumer import MobileReleaseEvidenceBusy
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True,
+    )
+    flow.handle(**args)
+    approvals = []
+    opts["approve_release"] = lambda *a, **kw: approvals.append(kw)
+    connection = sqlite3.connect(opts["authority_db"], isolation_level=None)
+    try:
+        connection.execute("BEGIN EXCLUSIVE")
+        with pytest.raises(MobileReleaseEvidenceBusy, match="identity evidence database busy"):
+            consume_mobile_release_decisions(**opts)
+        assert approvals == []
+        assert not (opts["ccc_root"] / "material-review.json").exists()
+        assert not (
+            opts["state_root"] / "mobile-release-decisions-processed"
+            / (request.approval_id + ".json")
+        ).exists()
+    finally:
+        connection.rollback()
+        connection.close()
+    assert consume_mobile_release_decisions(**opts) == 1
+    assert len(approvals) == 1
+    assert consume_mobile_release_decisions(**opts) == 0
+
+
+def test_pending_owner_evidence_missing_identity_database_is_hard_error(tmp_path):
+    import sqlite3
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(tmp_path)
+    flow.handle(**args)
+    opts["authority_db"] = tmp_path / "missing-authority.sqlite3"
+    approvals = []
+    opts["approve_release"] = lambda *a, **kw: approvals.append(kw)
+    with pytest.raises(sqlite3.OperationalError, match="unable to open database"):
+        consume_mobile_release_decisions(**opts)
+    assert not opts["authority_db"].exists()
+    assert approvals == []
+    assert not (opts["ccc_root"] / "material-review.json").exists()
+
+
+def test_processed_mobile_marker_evidence_conflict_fails_before_identity_access(tmp_path):
+    from unittest.mock import patch
+    from kernel.identity_authority import SQLiteIdentityAuthorityStore
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(tmp_path)
+    flow.handle(**args)
+    opts["approve_release"] = lambda *a, **kw: None
+    assert consume_mobile_release_decisions(**opts) == 1
+    marker = (
+        opts["state_root"] / "mobile-release-decisions-processed"
+        / (request.approval_id + ".json")
+    )
+    stored = json.loads(marker.read_text())
+    stored["signed_evidence_sha256"] = "tampered"
+    marker.write_text(json.dumps(stored))
+    with patch.object(
+        SQLiteIdentityAuthorityStore, "__init__",
+        side_effect=AssertionError("unnecessary shared DB access"),
+    ):
+        with pytest.raises(PermissionError, match="conflicting evidence"):
+            consume_mobile_release_decisions(**opts)
+
+
+def test_bounded_signed_evidence_ledger_busy_is_retryable_and_never_mints_authority(tmp_path):
+    # The fixture ledger uses WAL where a separate EXCLUSIVE writer does not
+    # necessarily block snapshots. Inject a real SQLite BUSY error code at
+    # its one read-only open boundary to exercise the exact error handling.
+    import sqlite3
+    from unittest.mock import patch
+    from release_mobile_approval_consumer import MobileReleaseEvidenceBusy
+    flow, repo, record, request, args, opts, identities, bindings = fixture(tmp_path)
+    flow.handle(**args)
+    invoked = []
+    opts["approve_release"] = lambda *a, **kw: invoked.append(kw)
+    busy = sqlite3.OperationalError("database is locked")
+    busy.sqlite_errorcode = sqlite3.SQLITE_BUSY
+    with patch("release_mobile_approval_consumer._read_only_db", side_effect=busy):
+        with pytest.raises(MobileReleaseEvidenceBusy, match="decision ledger busy"):
+            consume_mobile_release_decisions(**opts)
+    assert invoked == []
+    assert not (opts["ccc_root"] / "material-review.json").exists()
+    assert consume_mobile_release_decisions(**opts) == 1
+    assert len(invoked) == 1
+
+
+def test_locked_owner_binding_is_retryable_without_minting_release(tmp_path):
+    import sqlite3
+    from release_mobile_approval_consumer import MobileReleaseEvidenceBusy
+    flow, repo, record, request, args, opts, identities, bindings = fixture(tmp_path)
+    flow.handle(**args)
+    invoked = []
+    opts["approve_release"] = lambda *a, **kw: invoked.append(kw)
+    lock = sqlite3.connect(opts["bindings_db"], isolation_level=None)
+    try:
+        lock.execute("BEGIN EXCLUSIVE")
+        with pytest.raises(MobileReleaseEvidenceBusy, match="binding evidence database busy"):
+            consume_mobile_release_decisions(**opts)
+        assert invoked == []
+        assert not (opts["ccc_root"] / "material-review.json").exists()
+    finally:
+        lock.rollback()
+        lock.close()
+    assert consume_mobile_release_decisions(**opts) == 1
+    assert len(invoked) == 1

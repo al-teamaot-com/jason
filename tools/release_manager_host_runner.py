@@ -87,6 +87,14 @@ class CCCCheckerUpgradeRequired(ReleaseManagerError):
     """
 
 
+class CCCMaterialReviewRequired(ReleaseManagerError):
+    """Exact-revision owner material review has not yet been recorded.
+
+    Only the scheduled timer may defer cleanly. Direct promotion fails closed,
+    and the CCC report remains NOT_PROVEN until a separately recorded review.
+    """
+
+
 def acquire_production_transaction_lock(
     repo: Path,
     state_root: Path,
@@ -2187,6 +2195,40 @@ def verify_release_ccc_report(
                 raise CCCCheckerUpgradeRequired(
                     "pre-mutation CCC requires independently certified checker upgrade"
                 )
+            # A report from the current trusted checker can independently
+            # attest the absence of the *separate* human material review.
+            # Only the canonical missing-review detail and exact path evidence
+            # constitute a deferrable human dependency. Neither the owner
+            # release approval nor an arbitrary NOT_PROVEN check is sufficient.
+            review_entry = next((
+                entry for entry in checks
+                if entry.get("check_id") == "material-change-owner-review"
+            ), {})
+            material_paths = report.get("material_changes")
+            review_evidence = review_entry.get("evidence")
+            expected_review_status = {
+                "material-change-owner-review": "NOT_PROVEN",
+            }
+            expected_review_and_alignment = {
+                **expected_review_status,
+                "runtime-source-alignment": "NOT_PROVEN",
+            }
+            review_pending = (
+                report.get("status") == "NOT_PROVEN"
+                and exceptional in (
+                    expected_review_status, expected_review_and_alignment,
+                )
+                and isinstance(material_paths, list) and bool(material_paths)
+                and all(isinstance(path, str) and path for path in material_paths)
+                and review_entry.get("detail")
+                    == "Material change requires an exact owner review record for this source revision."
+                and isinstance(review_evidence, dict)
+                and review_evidence.get("paths") == material_paths
+            )
+            if review_pending:
+                raise CCCMaterialReviewRequired(
+                    "pre-mutation CCC requires independently recorded exact-owner material review"
+                )
             raise ReleaseManagerError("pre-mutation CCC denied: " + str(exceptional)[:300])
         mode = "candidate_transition" if exceptional else "aligned"
     else:
@@ -2987,7 +3029,8 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
     if tools_root not in sys.path:
         sys.path.insert(0, tools_root)
     from release_mobile_approval_consumer import (
-        _install_repo_modules, consume_mobile_release_decisions,
+        MobileReleaseEvidenceBusy, _install_repo_modules,
+        consume_mobile_release_decisions,
     )
     # The host runner also operates from a lightweight systemd/unittest
     # environment without PYTHONPATH. Install ONLY modules from the pinned
@@ -3001,9 +3044,18 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
     # consume them into a different release/CCC state or test fixture.
     # Existing explicit test invocation of the consumer uses injected test DBs.
     if Path(state_root).resolve() == DEFAULT_STATE.resolve():
-        consume_mobile_release_decisions(
-            repo=repo, state_root=state_root, approve_release=approve_release,
-        )
+        try:
+            consume_mobile_release_decisions(
+                repo=repo, state_root=state_root, approve_release=approve_release,
+            )
+        except MobileReleaseEvidenceBusy:
+            # Only an independently typed SQLITE_BUSY/LOCKED condition permits
+            # this bounded scheduled-cycle deferral. NEVER approve/deploy while
+            # signed owner evidence cannot be read. Other identity, trust,
+            # policy, schema and receipt failures remain hard denials.
+            print("RELEASE_MANAGER_AUTO_DEFERRED=signed_owner_evidence_busy",
+                  flush=True)
+            return False
     consume_owner_approval_requests(repo, state_root)
     if not production_window_open():
         return False
@@ -3120,14 +3172,17 @@ def promote_eligible(repo: Path, state_root: Path) -> bool:
                 deploy_production(repo, state_root, record)
             except ReleaseManagerBusy:
                 return False
-            except CCCCheckerUpgradeRequired:
-                # Only the unattended timer treats this *narrowly classified*
-                # pre-mutation report as an operational wait, not a failed
-                # systemd unit. Do not touch owner approval, checker policy,
-                # release eligibility, protected state, or rollback surfaces.
-                # The explicit 'promote' action continues to fail closed.
+            except (CCCCheckerUpgradeRequired, CCCMaterialReviewRequired) as prerequisite:
+                # An exact attested preflight prerequisite is a scheduled
+                # WAIT, never deployment permission. ALL other CCC denials
+                # remain hard failures; explicit 'promote' still raises.
+                reason = (
+                    "ccc_checker_upgrade_required"
+                    if isinstance(prerequisite, CCCCheckerUpgradeRequired)
+                    else "ccc_exact_material_owner_review_required"
+                )
                 print(
-                    "RELEASE_MANAGER_AUTO_DEFERRED=ccc_checker_upgrade_required"
+                    "RELEASE_MANAGER_AUTO_DEFERRED=" + reason
                     + f" candidate={candidate_sha} release_id={record['release_id']}",
                     flush=True,
                 )

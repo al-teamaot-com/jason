@@ -16,6 +16,7 @@ import stat
 import sys
 import tempfile
 from typing import Callable
+from urllib.parse import quote
 
 DEFAULT_MOBILE_DB = Path("/var/lib/jason/openclaw/mobile-release-approvals.sqlite3")
 DEFAULT_POLICY = Path("/var/lib/jason/authority/mobile-release-approval-policy.json")
@@ -23,6 +24,62 @@ DEFAULT_CCC_ROOT = Path("/var/lib/jason/ccc")
 DEFAULT_BINDINGS = Path("/var/lib/jason/openclaw/teams-identity-bindings.sqlite3")
 DEFAULT_AUTHORITY = Path("/var/lib/jason/authority/authority.sqlite3")
 DEFAULT_TRUSTED_KEYS = Path("/var/lib/jason/openclaw/trusted-keys/registry.json")
+
+
+class MobileReleaseEvidenceBusy(RuntimeError):
+    """Transient SQLITE_BUSY/LOCKED while reading independent owner evidence."""
+
+
+def _sqlite_busy(error: sqlite3.OperationalError) -> bool:
+    return getattr(error, "sqlite_errorcode", None) in {
+        sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED,
+    }
+
+
+def _read_only_db(path: Path) -> sqlite3.Connection:
+    # URI read-only mode never initializes schemas, migrates tables, modifies
+    # permission bits, or requests a write lock on live authority state.
+    encoded = quote(str(Path(path).absolute()), safe="/")
+    return sqlite3.connect("file:" + encoded + "?mode=ro", uri=True, timeout=1.0)
+
+
+def _read_active_owner_binding(path: Path, tenant_id: str, object_id: str):
+    from orchestrator.teams_identity_binding_sqlite import SQLiteMicrosoftIdentityBindingStore
+    try:
+        connection = _read_only_db(path)
+        try:
+            row = connection.execute(
+                """SELECT microsoft_tenant_id, microsoft_object_id, jason_identity_id,
+                          client_id, email_address, status
+                     FROM microsoft_identity_bindings
+                    WHERE microsoft_tenant_id = ? AND microsoft_object_id = ?""",
+                (tenant_id, object_id),
+            ).fetchone()
+        finally:
+            connection.close()
+    except sqlite3.OperationalError as exc:
+        if _sqlite_busy(exc):
+            raise MobileReleaseEvidenceBusy("owner binding evidence database busy") from exc
+        raise
+    return None if row is None else SQLiteMicrosoftIdentityBindingStore._from_row(row)
+
+
+def _read_only_jason_identity(path: Path, identity_id: str):
+    from kernel.identity_authority import IdentityRecord
+    try:
+        connection = _read_only_db(path)
+        try:
+            row = connection.execute(
+                "SELECT payload FROM identities WHERE identity_id=?",
+                (identity_id,),
+            ).fetchone()
+        finally:
+            connection.close()
+    except sqlite3.OperationalError as exc:
+        if _sqlite_busy(exc):
+            raise MobileReleaseEvidenceBusy("owner identity evidence database busy") from exc
+        raise
+    return None if row is None else IdentityRecord(**json.loads(row[0]))
 
 
 def _install_repo_modules(repo: Path) -> None:
@@ -92,42 +149,65 @@ def consume_mobile_release_decisions(
     from jason_runtime.universal_teams_approval import SignedTeamsApprovalEvidenceVerifier
     from jason_runtime.owner_release_approval_containment import read_release_approval_containment
     from jason_openclaw.key_registry import FileBackedTrustedKeyRegistry
-    from orchestrator.teams_identity_binding_sqlite import SQLiteMicrosoftIdentityBindingStore
-    from kernel.identity_authority import SQLiteIdentityAuthorityStore, SQLiteIdentityRepository
 
     policy = read_mobile_release_policy(policy_file)
     containment = read_release_approval_containment(state_root)
     if containment.active:
         print('OWNER_RELEASE_APPROVAL_HOLD_ACTIVE=' + containment.hold_id, flush=True)
         return 0  # Do not convert held Teams decisions into owner/CCC authority.
-    con = sqlite3.connect("file:" + str(database) + "?mode=ro", uri=True)
     try:
-        records = con.execute("""
-            SELECT a.approval_id, a.payload, r.response_json, e.signed_envelope_json,
-                   e.evidence_sha256
-              FROM approval_requests AS a
-              INNER JOIN approval_decision_receipts AS r ON r.approval_id=a.approval_id
-              INNER JOIN mobile_release_signed_evidence AS e ON e.approval_id=a.approval_id
-             ORDER BY a.approval_id
-        """).fetchall()
-    finally:
-        con.close()
+        con = _read_only_db(database)
+        try:
+            records = con.execute("""
+                SELECT a.approval_id, a.payload, r.response_json, e.signed_envelope_json,
+                       e.evidence_sha256
+                  FROM approval_requests AS a
+                  INNER JOIN approval_decision_receipts AS r ON r.approval_id=a.approval_id
+                  INNER JOIN mobile_release_signed_evidence AS e ON e.approval_id=a.approval_id
+                 ORDER BY a.approval_id
+            """).fetchall()
+        finally:
+            con.close()
+    except sqlite3.OperationalError as exc:
+        if _sqlite_busy(exc):
+            raise MobileReleaseEvidenceBusy("signed owner decision ledger busy") from exc
+        raise
     if not records:
         return 0
-    key_auth = FileBackedTrustedKeyRegistry(trusted_keys).build_authenticator()
-    bindings = SQLiteMicrosoftIdentityBindingStore(bindings_db)
-    identities = SQLiteIdentityRepository(SQLiteIdentityAuthorityStore(authority_db))
+
     consumed_dir = state_root / "mobile-release-decisions-processed"
-    completed = 0
-    for approval_id, encoded, receipt_json, envelope_json, evidence_sha in records:
+
+    def already_processed(approval_id: str, evidence_sha: str) -> bool:
+        marker = consumed_dir / (approval_id + ".json")
+        if not marker.exists():
+            return False
+        stored = json.loads(marker.read_text(encoding="utf-8"))
+        if (stored.get("approval_id") != approval_id
+                or stored.get("signed_evidence_sha256") != evidence_sha):
+            raise PermissionError("processed mobile decision marker has conflicting evidence")
+        return True
+
+    # A completed historical decision needs no authority-database read at all.
+    # Validate every immutable receipt marker BEFORE loading identity stores.
+    # This eliminates schema write-lock attempts on 1.8 GiB of shared authority
+    # data every five minutes when nothing is pending.
+    pending = []
+    for row in records:
+        approval_id, _, _, _, evidence_sha = row
         if not isinstance(approval_id, str) or not approval_id.startswith(REQUEST_PREFIX):
             raise PermissionError("unknown mobile decision ID prefix")
-        marker = consumed_dir / (approval_id + ".json")
-        if marker.exists():
-            stored = json.loads(marker.read_text(encoding="utf-8"))
-            if stored.get("approval_id") != approval_id or stored.get("signed_evidence_sha256") != evidence_sha:
-                raise PermissionError("processed mobile decision marker has conflicting evidence")
+        if not already_processed(approval_id, evidence_sha):
+            pending.append(row)
+    if not pending:
+        return 0
+
+    key_auth = FileBackedTrustedKeyRegistry(trusted_keys).build_authenticator()
+    completed = 0
+    for approval_id, encoded, receipt_json, envelope_json, evidence_sha in pending:
+        # Another authenticated cycle may have just completed this receipt.
+        if already_processed(approval_id, evidence_sha):
             continue
+        marker = consumed_dir / (approval_id + ".json")
         request = SQLiteApprovalRequestRepository._decode(encoded)
         if not containment.is_request_eligible(request.requested_at):
             # Immutable revocation watermark survives release of the hold.
@@ -177,10 +257,12 @@ def consume_mobile_release_decisions(
                 raise PermissionError("host attestation lacks original card-instance proof")
         elif submit.selections:
             raise PermissionError("legacy signed release cannot contain card changes")
-        binding = bindings.find(microsoft_tenant_id=principal.tenant_id, microsoft_object_id=principal.object_id)
+        binding = _read_active_owner_binding(
+            bindings_db, principal.tenant_id, principal.object_id
+        )
         if binding is None or binding.status != "active":
             raise PermissionError("mobile owner Entra binding has been revoked")
-        owner = identities.get(binding.jason_identity_id)
+        owner = _read_only_jason_identity(authority_db, binding.jason_identity_id)
         if (owner is None or owner.status != "active" or owner.organization_id != policy.organization_id
                 or owner.identity_id != receipt["approver_identity_id"]
                 or owner.identity_id == request.requested_by):
