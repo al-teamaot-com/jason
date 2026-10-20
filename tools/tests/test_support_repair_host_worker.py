@@ -2502,3 +2502,40 @@ def test_source_search_blocker_supervisor_is_recoverable_only_through_worker():
     from engineering_supervisor import classify
     assert classify('blocked', 'EvidenceToolError: invalid source search', lane='support') == (
         'recoverable_source', 'native_worker_verify_search_shape_upgrade_or_escalate')
+
+
+def test_verified_search_shape_rejects_path_traversal_and_unknown_parameters(
+        tmp_path, monkeypatch):
+    repo, spool, item, record, gate, old, _, original, fresh = (
+        _search_shape_recovery_fixture(tmp_path, monkeypatch))
+    path = spool / 'reasoning/responses' / (old + '.json')
+    original_response = json.loads(path.read_text())
+    for malicious in (
+            {'path': '../../private/secrets.txt'},
+            {'path': 'tools/source.py', 'shell': 'echo unsafe'},
+            {'path': '/etc/passwd'},
+    ):
+        response = json.loads(json.dumps(original_response))
+        response['result']['evidence_requests'][0].update(malicious)
+        path.write_text(json.dumps(response))
+        assert worker.readmit_verified_legacy_search_shape_after_upgrade(
+            {'items': {item['id']: record}}, [item],
+            repo, spool, gate, {}, max_active=2) == []
+    assert not fresh.exists()
+    assert record['phase'] == 'blocked'
+
+
+def test_verified_search_shape_denies_dirty_original_and_external_authority(
+        tmp_path, monkeypatch):
+    repo, spool, item, record, gate, old, _, original, fresh = (
+        _search_shape_recovery_fixture(tmp_path, monkeypatch))
+    record['blocker_class'] = 'external_authority'
+    assert worker.readmit_verified_legacy_search_shape_after_upgrade(
+        {'items': {item['id']: record}}, [item],
+        repo, spool, gate, {}, max_active=2) == []
+    del record['blocker_class']
+    (original / 'tools/untracked-secret.txt').write_text('confidential example')
+    assert worker.readmit_verified_legacy_search_shape_after_upgrade(
+        {'items': {item['id']: record}}, [item],
+        repo, spool, gate, {}, max_active=2) == []
+    assert not fresh.exists()
