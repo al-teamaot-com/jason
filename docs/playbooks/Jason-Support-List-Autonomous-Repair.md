@@ -14,6 +14,17 @@ Preserve Central Orchestrator authority, `direct_provider_access=false`, exact g
 ## 4. Initial Identification
 Resolve the exact support ID, GitHub issue, current status, acceptance criteria, related PRs/branches, production revision, and any overlapping active repair. Never create a duplicate repair workstream when one already exists.
 
+
+### 4A. GitHub Issue Identity and Admission Collision Policy
+
+The canonical SUPPORT identifier names an approved repair workstream; each GitHub issue number is a separate authoritative issue identity. Intake must retain **all** issue numbers that map to a support ID and report the real open-issue count. It must never silently overwrite one GitHub issue with another.
+
+- When unrelated manual GitHub issues share one SUPPORT ID, classify the ID as an **identity conflict**, record the exact issue numbers and block automated admission/closure of that ambiguous workstream. Assign distinct canonical IDs in a separately reviewed source-and-issue migration before resuming. Do not infer that one issue supersedes another.
+- When multiple SUPPORT-AUTO issues share the same fingerprinted ID, retain them as one logical diagnostic workstream and preserve **all** GitHub issue-number references. The existence of duplicate reports does not prove identical incident evidence or authorize automatic closure. Closure must remain fail-closed while more than one matching open issue exists.
+- The admission audit records logical-ID count, open issue count, duplicate issue numbers, and manual identity conflicts. P0 collisions are explicit admission blockers; repeated auto incidents are reported as one deduplicated operational alert, not silently discarded.
+
+This policy does not add provider write authority, change the maximum active-repair count, or relax the existing production-verification and release gates.
+
 ## 5. Expected State
 Each approved support item is in exactly one durable state and progresses without owner prompting until verified complete or genuinely blocked.
 
