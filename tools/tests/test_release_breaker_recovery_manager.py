@@ -236,6 +236,31 @@ def test_main_persists_permit_before_authorized_root_call_and_checks_closeout(tm
     assert track.stat().st_mode & 0o777 == 0o600
 
 
+@pytest.mark.parametrize(('detail', 'expected'), [
+    ('governed root release transition rejected: ValueError: immutable last-known-good mismatch: runtime_image_id',
+     'root_lkg_fingerprint_mismatch'),
+    ('governed root release transition rejected: ValueError: production drift is not clean',
+     'root_independent_drift_not_clean'),
+    ('governed root release transition rejected: ValueError: independent production drift refresh did not pass',
+     'root_drift_refresh_failed'),
+    ('governed root release transition rejected: PermissionError: root-only mode-0600 file required',
+     'root_protected_file_invalid'),
+    ('governed root transition result timed out', 'root_transition_result_timeout'),
+    ('root-governed breaker transition succeeded but readback did not converge',
+     'root_closeout_readback_not_converged'),
+    ('production circuit breaker is open; authoritative health revalidation failed: timer inactive',
+     'production_manifest_precheck_failed'),
+    ('governed root release transition rejected: UnknownNewFailure /tokens/must-not-persist',
+     'root_transition_rejected_other'),
+    ('unknown secret JWT=not-allowed path=/etc/secure', 'unclassified_root_revalidation_failure'),
+])
+def test_revalidation_failure_classification_is_whitelisted(detail, expected):
+    category = recovery.classify_root_revalidation_error(RuntimeError(detail))
+    assert category == expected
+    assert detail not in category
+    assert 'secret' not in category and 'JWT' not in category
+
+
 def test_root_rejection_does_not_replay_same_permit_or_claim_pass(tmp_path, monkeypatch):
     repo=tmp_path/"repo";repo.mkdir();(repo/"config").mkdir()
     (repo/recovery.POLICY_PATH).write_text((Path(__file__).resolve().parents[2]/recovery.POLICY_PATH).read_text())
@@ -254,7 +279,10 @@ def test_root_rejection_does_not_replay_same_permit_or_claim_pass(tmp_path, monk
     def reject(*args):
         calls.append(True)
         assert json.loads(track.read_text())["attempts"]
-        raise RuntimeError("root-protected guard rejected")
+        raise RuntimeError(
+            "governed root release transition rejected: "
+            "ValueError: immutable last-known-good mismatch: runtime_image_id; SECRET=DONT_STORE"
+        )
     monkeypatch.setattr(recovery,"native_root_transition",reject)
     monkeypatch.setattr(recovery,"transaction_busy",lambda path: False)
     monkeypatch.setattr(sys,"argv",["recovery","--repo",str(repo),
@@ -268,6 +296,9 @@ def test_root_rejection_does_not_replay_same_permit_or_claim_pass(tmp_path, monk
     assert len(calls)==1
     assert result["status"]=="blocked"
     assert result["attempts"][0]["result"]=="root_revalidation_rejected"
+    assert result["attempts"][0]["failure_class"]=="root_lkg_fingerprint_mismatch"
+    assert "SECRET" not in track.read_text()
+    assert result["last_revalidation_attempt"]["failure_class"]=="root_lkg_fingerprint_mismatch"
     assert result["next_action"]=="wait_for_next_bounded_attempt"
 
 
