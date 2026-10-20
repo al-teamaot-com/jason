@@ -230,23 +230,58 @@ def open_support_issue_records(repo: Path) -> dict[str, dict[str, Any]]:
     an ID cannot be safely admitted or closed until their identities are fixed.
     """
     limit = 1000
-    data = gh_json([
-        'issue', 'list', '--state', 'open', '--search', 'SUPPORT- in:title',
-        '--limit', str(limit), '--json', 'number,title'
-    ], cwd=repo) or []
-    if not isinstance(data, list) or len(data) >= limit:
-        raise WorkerError('GitHub open SUPPORT listing incomplete; refusing partial admission')
+    # GitHub search result pages can shift while issues are updated; fixed
+    # creation ordering narrows that race but does not establish a snapshot.
+    command = [
+        'issue', 'list', '--state', 'open',
+        '--search', 'SUPPORT- in:title sort:created-asc',
+        '--limit', str(limit), '--json', 'number,title',
+    ]
+
+    def validated_snapshot(raw: Any) -> tuple[dict[int, str], bool]:
+        if not isinstance(raw, list) or len(raw) >= limit:
+            raise WorkerError('GitHub open SUPPORT listing incomplete; refusing partial admission')
+        seen: dict[int, str] = {}
+        repeated_identical = False
+        for issue in raw:
+            if not isinstance(issue, Mapping):
+                raise WorkerError('GitHub SUPPORT issue record is not an object')
+            number = issue.get('number')
+            if isinstance(number, bool) or not isinstance(number, int) or number <= 0:
+                raise WorkerError('GitHub SUPPORT issue number missing or repeated')
+            title = issue.get('title')
+            if not isinstance(title, str) or not title:
+                raise WorkerError('GitHub SUPPORT issue title missing or invalid')
+            if number in seen:
+                # Two DIFFERENT records claiming one immutable issue number are
+                # never an admissible pagination artifact.
+                if seen[number] != title:
+                    raise WorkerError('GitHub SUPPORT issue number missing or repeated')
+                repeated_identical = True
+            else:
+                seen[number] = title
+        return seen, repeated_identical
+
+    numbers, repeated = validated_snapshot(gh_json(command, cwd=repo))
+    if repeated:
+        # Never silently deduplicate a malformed GitHub result. Re-fetch two
+        # clean complete listings independently and require identical
+        # number/title identities before any SUPPORT admission or closure.
+        logger.warning(
+            'GITHUB_SUPPORT_LISTING_INCONSISTENT kind=repeated_identical_issue '
+            'unique_issue_numbers=%d; checking two bounded fresh snapshots',
+            len(numbers),
+        )
+        verified, again = validated_snapshot(gh_json(command, cwd=repo))
+        if again:
+            raise WorkerError('GitHub SUPPORT issue number missing or repeated after bounded recheck')
+        confirmation, again = validated_snapshot(gh_json(command, cwd=repo))
+        if again or verified != confirmation:
+            raise WorkerError('GitHub SUPPORT issue listing inconsistent after bounded recheck')
+        numbers = confirmation
+
     grouped: dict[str, list[tuple[int, str]]] = {}
-    seen_numbers: set[int] = set()
-    for issue in data:
-        if not isinstance(issue, Mapping):
-            raise WorkerError('GitHub SUPPORT issue record is not an object')
-        number = issue.get('number')
-        if (isinstance(number, bool) or not isinstance(number, int)
-                or number <= 0 or number in seen_numbers):
-            raise WorkerError('GitHub SUPPORT issue number missing or repeated')
-        seen_numbers.add(number)
-        title = str(issue.get('title') or '')
+    for number, title in numbers.items():
         item_id = support_id_from_title(title)
         if item_id:
             grouped.setdefault(item_id, []).append((number, title))
