@@ -2265,6 +2265,196 @@ def resume_verified_recovery_interrupted_by_rollback(
     return resumed
 
 
+
+def normalize_verified_legacy_source_search(
+    result: Mapping[str, Any],
+) -> tuple[dict[str, Any], int] | None:
+    """Drop legacy advisory path hints ONLY for bounded repository searches.
+
+    Never use the model path for file selection, authorization or search scope.
+    The normal source executor independently checks every resulting tool call.
+    Reject mixed edits, hidden arguments, malformed queries, and non-search
+    actions with unexpected shapes; do not make a generic schema repair.
+    """
+    calls = result.get('evidence_requests')
+    if (result.get('blocked_reason') or result.get('edits') or result.get('test_paths')
+            or not isinstance(calls, list) or not 1 <= len(calls) <= 4):
+        return None
+    rewritten: list[dict[str, Any]] = []
+    discarded = 0
+    for action in calls:
+        if not isinstance(action, dict) or set(action) - {'tool', 'query', 'path'}:
+            return None
+        name = action.get('tool')
+        query, hint = action.get('query'), action.get('path')
+        if name == 'search_source':
+            if (not isinstance(query, str) or
+                    re.fullmatch(r'[A-Za-z0-9_ ,:./#-]{3,100}', query) is None):
+                return None
+            if hint is not None:
+                if (not isinstance(hint, str)
+                        or re.fullmatch(r'[A-Za-z0-9_./-]{4,240}', hint) is None
+                        or Path(hint).is_absolute()
+                        or any(part in {'.', '..'} or part.startswith('.')
+                               for part in Path(hint).parts)):
+                    return None
+                discarded += 1
+            rewritten.append({'tool': 'search_source', 'query': query, 'path': None})
+        elif name == 'read_source':
+            rewritten.append(dict(action))
+        else:
+            return None
+    if discarded == 0:
+        return None
+    return {**result, 'evidence_requests': rewritten}, discarded
+
+
+def readmit_verified_legacy_search_shape_after_upgrade(
+    state: dict[str, Any], eligible: list[dict[str, str]],
+    repo: Path, spool: Path, gate, policy: Mapping[str, Any],
+    *, max_active: int,
+) -> list[str]:
+    """One source-upgrade-bound P0 recovery for a malformed READ-ONLY search.
+
+    The original malformed model response remains immutable. Require exact
+    content-addressed request/response ancestry, clean old and current source,
+    and a changed reviewed host worker. A discarded advisory path must never
+    become a read path or executable code. No retries without spare capacity.
+    """
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active = sum(1 for entry in records.values() if isinstance(entry, Mapping)
+                 and entry.get('phase') in {'diagnosing', 'implementing',
+                                            'ci_repair_needed', 'ci_repairing'})
+    slots = max(0, max(1, int(max_active)) - active)
+    resumed: list[str] = []
+    for item in eligible:
+        if not slots:
+            break
+        item_id = str(item.get('id') or '')
+        record = records.get(item_id)
+        if (item.get('priority') != 'P0' or not isinstance(record, dict)
+                or record.get('phase') != 'blocked'
+                or record.get('reason') != 'EvidenceToolError: invalid source search'
+                or record.get('search_shape_recovery_request_id')
+                or record.get('pr_number')
+                or record.get('blocker_class') in {'external_authority', 'blocked_by_dependency'}
+                or (isinstance(record.get('recovery_handoff_intake'), Mapping)
+                    and record['recovery_handoff_intake'].get('status') == 'awaiting_governed_repair')
+                or type(record.get('evidence_turn_count')) is not int
+                or not 0 <= record['evidence_turn_count'] < 4):
+            continue
+        prior_id = str(record.get('reasoning_request_id') or '')
+        ancestor_id = str(record.get('evidence_last_source_request') or '')
+        old_sha = str(record.get('evidence_source_revision') or '')
+        old_branch = str(record.get('branch') or '')
+        if (not re.fullmatch(r'[0-9a-f]{64}', prior_id)
+                or not re.fullmatch(r'[0-9a-f]{64}', ancestor_id)
+                or not re.fullmatch(r'[0-9a-f]{40}', old_sha)
+                or old_branch != branch_name(item_id)):
+            continue
+        try:
+            head = run(['git', 'rev-parse', 'origin/main'], cwd=repo)
+            if not re.fullmatch(r'[0-9a-f]{40}', head) or head == old_sha:
+                continue
+            old_blob = run(['git', 'rev-parse',
+                            f'{old_sha}:tools/support_repair_host_worker.py'], cwd=repo)
+            new_blob = run(['git', 'rev-parse',
+                            f'{head}:tools/support_repair_host_worker.py'], cwd=repo)
+            if old_blob == new_blob:
+                continue
+            original = support_worktree_path(item_id, old_branch)
+            if (not original.is_dir() or original.is_symlink()
+                    or run(['git', 'branch', '--show-current'], cwd=original) != old_branch
+                    or run(['git', 'rev-parse', 'HEAD'], cwd=original) != old_sha
+                    or run(['git', 'status', '--porcelain', '--untracked-files=all'],
+                           cwd=original)):
+                continue
+            req_path = spool / 'reasoning/requests' / (prior_id + '.json')
+            ancestor_path = spool / 'reasoning/requests' / (ancestor_id + '.json')
+            if (not req_path.is_file() or req_path.stat().st_size > 250000
+                    or not ancestor_path.is_file()
+                    or ancestor_path.stat().st_size > 250000):
+                continue
+            request = json.loads(req_path.read_text(encoding='utf-8'))
+            ancestor = json.loads(ancestor_path.read_text(encoding='utf-8'))
+            response = reasoning_response(spool, prior_id)
+            ancestor_response = reasoning_response(spool, ancestor_id)
+            if (not isinstance(request, dict)
+                    or request.get('request_id') != prior_id
+                    or request_id(request) != prior_id
+                    or request.get('kind') != 'edit_plan'
+                    or request.get('support_item') != item_id
+                    or not isinstance(request.get('context'), dict)
+                    or request['context'].get('pinned_source_revision') != old_sha
+                    or request['context'].get('previous_reasoning_request_id') != ancestor_id
+                    or not isinstance(ancestor, dict)
+                    or ancestor.get('request_id') != ancestor_id
+                    or request_id(ancestor) != ancestor_id
+                    or ancestor.get('kind') != 'edit_plan'
+                    or ancestor.get('support_item') != item_id
+                    or not isinstance(ancestor_response, Mapping)
+                    or ancestor_response.get('status') != 'succeeded'
+                    or ancestor_response.get('request_id') != ancestor_id
+                    or ancestor_response.get('support_item') != item_id
+                    or not isinstance(response, Mapping)
+                    or response.get('status') != 'succeeded'
+                    or response.get('request_id') != prior_id
+                    or response.get('kind') != 'edit_plan'
+                    or response.get('support_item') != item_id
+                    or not isinstance(response.get('result'), Mapping)):
+                continue
+            normalized = normalize_verified_legacy_source_search(response['result'])
+            if normalized is None:
+                continue
+            sanitized_result, discard_count = normalized
+            branch = branch_name(item_id) + '-context-' + prior_id[:12]
+            fresh = ensure_worktree(repo, item_id, branch)
+            if (run(['git', 'branch', '--show-current'], cwd=fresh) != branch
+                    or run(['git', 'rev-parse', 'HEAD'], cwd=fresh) != head
+                    or run(['git', 'status', '--porcelain', '--untracked-files=all'],
+                           cwd=fresh)):
+                continue
+            context = dict(request['context'])
+            context['verified_search_shape_recovery'] = {
+                'previous_request_id': prior_id,
+                'original_source_revision': old_sha,
+                'source_revision': head,
+                'ignored_advisory_path_count': discard_count,
+                'retry_limit': 1,
+            }
+            context['validation_feedback'] = (
+                'One verified legacy read-only search included an advisory path '
+                'which was not used for searching or reading. The recovered '
+                'queries are repository searches only; source access remains '
+                'strictly Git-tracked, bounded and governed. Form an exact '
+                'evidence-backed edit or return a real blocked_reason.'
+            )
+            next_record = dict(record)
+            ok = engineering_evidence_tools.continue_evidence_session(
+                response_result=sanitized_result, record=next_record,
+                item=item, spool=spool, worktree=fresh, repo=repo,
+                gate=gate, repair_policy=policy,
+                support=sys.modules[__name__], queue_reasoning=queue_reasoning,
+                context_base=context,
+            )
+            if not ok or next_record.get('reasoning_request_id') == prior_id:
+                continue
+            record.update(next_record)
+            record.update({
+                'phase': 'implementing', 'branch': branch,
+                'reason': 'Verified bounded read-only search resumed; original malformed path ignored.',
+                'search_shape_recovery_request_id': next_record['reasoning_request_id'],
+                'search_shape_recovery_original_request_id': prior_id,
+                'search_shape_recovery_source_revision': head,
+                'updated_at': now(),
+            })
+            resumed.append(item_id)
+            slots -= 1
+        except (WorkerError, engineering_evidence_tools.EvidenceToolError,
+                OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+    return resumed
+
 def readmit_verified_malformed_source_symbol_after_upgrade(
     state: dict[str, Any], eligible: list[dict[str, str]],
     repo: Path, spool: Path, gate, policy: Mapping[str, Any],
@@ -2708,6 +2898,9 @@ def main() -> int:
         state, support, repo, spool, gate, policy, max_active=args.max_active,
     )
     readmit_verified_malformed_source_symbol_after_upgrade(
+        state, support, repo, spool, gate, policy, max_active=args.max_active,
+    )
+    readmit_verified_legacy_search_shape_after_upgrade(
         state, support, repo, spool, gate, policy, max_active=args.max_active,
     )
     reassess_model_scope_blocks(state, support, spool, args.max_active)
