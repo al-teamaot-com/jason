@@ -128,9 +128,57 @@ class PipelineTests(unittest.TestCase):
         state = self.execute()
         self.assertEqual(pipeline.service_exit_code(state), 0)
 
-    def test_failed_stage_still_fails_systemd_unit(self):
+    def test_bounded_support_discovery_failure_is_isolated_from_systemd_drift(self):
+        # A malformed GitHub issue listing is a work admission error.
+        # Downstream admission is skipped, the independent control lane runs,
+        # and the durable status remains degraded instead of falsely healthy.
         state = self.execute(failed={"support_repair_host_worker"})
-        self.assertEqual(pipeline.service_exit_code(state), 1)
+        self.assertEqual(pipeline.service_exit_code(state), 0)
+        self.assertEqual(state["status"], "degraded")
+        self.assertEqual(state["failure_domain"], "engineering_operations")
+        self.assertEqual(state["failed_work_stages"], [
+            "development", "support_repair", "todo_intake"])
+        self.assertEqual(state["failed_control_stages"], [])
+        self.assertEqual(state["stages"]["todo_intake"]["status"], "skipped_dependency")
+        self.assertEqual(self.state_file(), state)
+
+    def test_worker_returncode_failure_stays_durable_not_a_production_breaker(self):
+        for stage_name in ("todo_engineering_intake", "owner_approved_development_worker"):
+            self.calls.clear()
+            state = self.execute(failed={stage_name})
+            self.assertEqual(pipeline.service_exit_code(state), 0)
+            self.assertEqual(state["status"], "degraded")
+            self.assertEqual(state["failure_domain"], "engineering_operations")
+            self.assertIn("failed", [x["status"] for x in state["stages"].values()])
+
+    def test_release_control_and_supervision_failures_still_fail_the_unit(self):
+        for stage_name in ("todo_release_bridge", "engineering_supervisor",
+                           "release_breaker_recovery_manager"):
+            self.calls.clear()
+            state = self.execute(failed={stage_name})
+            self.assertEqual(pipeline.service_exit_code(state), 1)
+            self.assertEqual(state["status"], "degraded")
+            self.assertEqual(state["failure_domain"], "control")
+            self.assertEqual(len(state["failed_control_stages"]), 1)
+
+    def test_process_launch_and_timeout_still_hard_fail(self):
+        for exception in ("launch_error", "support_repair_host_worker"):
+            self.calls.clear()
+            state = self.execute(exception=exception)
+            self.assertEqual(pipeline.service_exit_code(state), 1)
+            self.assertEqual(state["status"], "degraded")
+
+    def test_unverified_or_tampered_pipeline_summary_cannot_claim_isolation(self):
+        state = self.execute(failed={"todo_engineering_intake"})
+        self.assertEqual(pipeline.service_exit_code(state), 0)
+        for broken in (
+            {**state, "finished_at": None},
+            {**state, "status": "healthy"},
+            {**state, "failed_or_skipped_stages": []},
+            {**state, "stages": {**state["stages"], "ghost": {"status": "succeeded"}}},
+            {**state, "stages": {}},
+        ):
+            self.assertEqual(pipeline.service_exit_code(broken), 1)
 
     def test_upstream_stall_is_degraded_even_when_all_stages_succeed(self):
         self.spool.mkdir(parents=True, exist_ok=True)
