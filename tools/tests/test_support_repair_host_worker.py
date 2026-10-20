@@ -2327,3 +2327,178 @@ def test_duplicate_auto_issue_closure_needs_unique_identity(monkeypatch, tmp_pat
     monkeypatch.setattr(worker, 'gh_json', lambda args, cwd: records)
     with pytest.raises(worker.WorkerError, match='ambiguous GitHub issue identity'):
         worker.close_support_issue(tmp_path, 'SUPPORT-AUTO-01215564E143', '0'*40)
+
+
+def _search_shape_recovery_fixture(tmp_path, monkeypatch, *, upgrade=True):
+    import sys
+    repo = tmp_path / 'source'
+    repo.mkdir()
+    p = repo / 'config/engineering-supervisor-policy.json'
+    p.parent.mkdir(parents=True)
+    p.write_text((MODULE.parents[1] / p.relative_to(repo)).read_text())
+    for name, content in {
+        'tools/support_repair_host_worker.py': (
+            "def support_id_from_title():\n    return 'source admission logic'\n"
+            "def release_bridge_summary():\n    return 'source phase summary logic'\n"),
+        'tools/engineering_evidence_tools.py': 'def evidence_reader():\n    return True\n',
+        'tools/tests/test_support_repair_host_worker.py': 'def test_summary():\n    assert True\n',
+    }.items():
+        t = repo / name
+        t.parent.mkdir(parents=True, exist_ok=True)
+        t.write_text(content)
+
+    def git(*args):
+        return subprocess.run(['git', *args], cwd=repo, check=True,
+                              text=True, capture_output=True).stdout.strip()
+
+    git('init', '-b', 'main')
+    git('config', 'user.name', 'Fixture')
+    git('config', 'user.email', 'fixture@example.invalid')
+    git('add', '.')
+    git('commit', '-m', 'old source search worker')
+    old_sha = git('rev-parse', 'HEAD')
+    item = {'id': 'SUPPORT-OPS-059', 'priority': 'P0',
+            'title': 'TODO release bridge',
+            'evidence': 'waiting phases and summary',
+            'acceptance': 'phase preservation with proof'}
+    old_branch = worker.branch_name(item['id'])
+    git('branch', old_branch)
+    original = tmp_path / 'original'
+    git('worktree', 'add', str(original), old_branch)
+    if upgrade:
+        updated = repo / 'tools/support_repair_host_worker.py'
+        updated.write_text(updated.read_text() + '\ndef verified_shape_upgrade():\n    return True\n')
+    else:
+        updated = repo / 'tools/engineering_evidence_tools.py'
+        updated.write_text(updated.read_text() + '\ndef unrelated_upgrade():\n    return True\n')
+    git('add', '.')
+    git('commit', '-m', 'one source upgrade')
+    git('update-ref', 'refs/remotes/origin/main', git('rev-parse', 'HEAD'))
+    spool = tmp_path / 'spool'
+    ancestor_id = worker.queue_reasoning(spool, kind='edit_plan', item=item,
+                                        context={'source_excerpts': []})
+    responses = spool / 'reasoning/responses'
+    responses.mkdir(parents=True, exist_ok=True)
+    (responses / (ancestor_id + '.json')).write_text(json.dumps({
+        'status': 'succeeded', 'kind': 'edit_plan',
+        'support_item': item['id'], 'request_id': ancestor_id,
+        'result': {'blocked_reason': None, 'edits': []},
+    }))
+    previous_id = worker.queue_reasoning(spool, kind='edit_plan', item=item,
+        context={'previous_reasoning_request_id': ancestor_id,
+                 'pinned_source_revision': old_sha, 'evidence_turn': 1,
+                 'source_excerpts': [{'path': 'tools/support_repair_host_worker.py',
+                                     'content': 'old source bytes are not authoritative'}]})
+    old_response = {
+        'status': 'succeeded', 'request_id': previous_id,
+        'kind': 'edit_plan', 'support_item': item['id'],
+        'result': {
+            'blocked_reason': None, 'edits': [], 'test_paths': [],
+            'evidence_requests': [
+                {'tool': 'search_source', 'query': 'support_id_from_title',
+                 'path': 'implementation/orchestrator/dynamic_teams_flow_bridge.py'},
+                {'tool': 'search_source', 'query': 'release_bridge_summary',
+                 'path': None},
+            ],
+        },
+    }
+    (responses / (previous_id + '.json')).write_text(json.dumps(old_response))
+    record = {
+        'phase': 'blocked',
+        'reason': 'EvidenceToolError: invalid source search',
+        'branch': old_branch, 'reasoning_request_id': previous_id,
+        'evidence_last_source_request': ancestor_id,
+        'evidence_source_revision': old_sha,
+        'evidence_turn_count': 1,
+    }
+    fresh = tmp_path / 'fresh'
+    new_branch = old_branch + '-context-' + previous_id[:12]
+    def worktree_path(item_id, branch=None):
+        assert item_id == item['id']
+        if branch == old_branch:
+            return original
+        if branch == new_branch:
+            return fresh
+        raise AssertionError('unexpected worker source path')
+    def ensure(source, item_id, branch):
+        assert source == repo and item_id == item['id'] and branch == new_branch
+        if not fresh.exists():
+            git('worktree', 'add', '-b', branch, str(fresh), 'origin/main')
+        return fresh
+    monkeypatch.setattr(worker, 'support_worktree_path', worktree_path)
+    monkeypatch.setattr(worker, 'ensure_worktree', ensure)
+    monkeypatch.setitem(sys.modules, worker.__name__, worker)
+    class Gate:
+        def path_denial_reason(self, path, policy):
+            return 'denied' if 'secrets' in path else None
+    return repo, spool, item, record, Gate(), previous_id, old_response, original, fresh
+
+
+def test_verified_legacy_search_path_recovery_one_time_and_read_only(tmp_path, monkeypatch):
+    repo, spool, item, record, gate, old_id, old_response, original, fresh = (
+        _search_shape_recovery_fixture(tmp_path, monkeypatch))
+    state = {'items': {item['id']: record}}
+    assert worker.readmit_verified_legacy_search_shape_after_upgrade(
+        state, [item], repo, spool, gate, {}, max_active=2) == [item['id']]
+    assert record['phase'] == 'implementing'
+    assert record['evidence_turn_count'] == 2
+    assert record['reasoning_request_id'] != old_id
+    assert record['search_shape_recovery_original_request_id'] == old_id
+    req = json.loads((spool / 'reasoning/requests' /
+                      (record['reasoning_request_id'] + '.json')).read_text())
+    ctx = req['context']
+    assert ctx['verified_search_shape_recovery']['ignored_advisory_path_count'] == 1
+    assert ctx['previous_reasoning_request_id'] == old_id
+    assert ctx['read_only_tool_receipts']
+    assert 'old source bytes are not authoritative' not in json.dumps(ctx['source_excerpts'])
+    assert any(x['path'] == 'tools/support_repair_host_worker.py'
+               for x in ctx['source_excerpts'])
+    assert json.loads((spool / 'reasoning/responses' /
+                       (old_id + '.json')).read_text()) == old_response
+    record.update({'phase': 'blocked', 'reason': 'EvidenceToolError: invalid source search'})
+    assert worker.readmit_verified_legacy_search_shape_after_upgrade(
+        state, [item], repo, spool, gate, {}, max_active=2) == []
+
+
+def test_verified_search_shape_denies_malicious_query_and_extras(tmp_path, monkeypatch):
+    repo, spool, item, record, gate, old, _, original, fresh = (
+        _search_shape_recovery_fixture(tmp_path, monkeypatch))
+    path = spool / 'reasoning/responses' / (old + '.json')
+    for bad_query in ('$(rm -rf /)', 'x' * 101, 'abc\ncommand'):
+        result = json.loads(path.read_text())
+        result['result']['evidence_requests'][0]['query'] = bad_query
+        path.write_text(json.dumps(result))
+        assert worker.readmit_verified_legacy_search_shape_after_upgrade(
+            {'items': {item['id']: record}},
+            [item], repo, spool, gate, {}, max_active=2) == []
+    assert not fresh.exists()
+
+
+def test_verified_search_shape_denies_unauthorized_work_and_missing_source_upgrade(
+        tmp_path, monkeypatch):
+    repo, spool, item, record, gate, old, _, original, fresh = (
+        _search_shape_recovery_fixture(tmp_path, monkeypatch, upgrade=False))
+    assert worker.readmit_verified_legacy_search_shape_after_upgrade(
+        {'items': {item['id']: record}}, [item],
+        repo, spool, gate, {}, max_active=2) == []
+    assert not fresh.exists()
+
+
+def test_verified_search_shape_denies_exhausted_capacity_and_changed_ancestry(
+        tmp_path, monkeypatch):
+    repo, spool, item, record, gate, old, _, original, fresh = (
+        _search_shape_recovery_fixture(tmp_path, monkeypatch))
+    state = {'items': {item['id']: record, 'SUPPORT-OPS-100': {'phase': 'implementing'}}}
+    assert worker.readmit_verified_legacy_search_shape_after_upgrade(
+        state, [item], repo, spool, gate, {}, max_active=1) == []
+    record['evidence_last_source_request'] = 'e' * 64
+    assert worker.readmit_verified_legacy_search_shape_after_upgrade(
+        {'items': {item['id']: record}}, [item],
+        repo, spool, gate, {}, max_active=2) == []
+    assert not fresh.exists()
+
+
+def test_source_search_blocker_supervisor_is_recoverable_only_through_worker():
+    from engineering_supervisor import classify
+    assert classify('blocked', 'EvidenceToolError: invalid source search', lane='support') == (
+        'recoverable_source', 'native_worker_verify_search_shape_upgrade_or_escalate')

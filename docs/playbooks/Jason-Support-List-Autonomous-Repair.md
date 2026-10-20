@@ -25,6 +25,20 @@ The canonical SUPPORT identifier names an approved repair workstream; each GitHu
 
 This policy does not add provider write authority, change the maximum active-repair count, or relax the existing production-verification and release gates.
 
+
+### 4B. Bounded read-only search request recovery
+
+A model-generated \`search_source\` request must not specify a source \`path\`; that argument is reserved for independently authorized \`read_source\` calls. A rejected search does **not** grant implicit authorization to search arbitrary files, expand the source scope, reset the evidence budget, or retry an editing request without proof.
+
+For an exact P0 \`EvidenceToolError: invalid source search\` blocker, the host worker may perform **one** new read-only evidence turn, only after a reviewed worker source upgrade and all of these preconditions:
+
+- The original model response, its parent request and preceding successful evidence turn match the canonical support ID and content-addressed ancestry.
+- The original branch remains clean and pinned to its recorded revision, the new recovery branch is independently clean and pinned to fetched authoritative \`origin/main\`, and the approved worker source blob has changed.
+- Every request has a bounded, non-command query and known tool schema. A legacy **advisory** path on \`search_source\` is recorded as discarded and is never used for file selection, path authorization, or an executable command. All source results still pass normal Git-tracked, scoped and J-CHANGE-002 authorization checks.
+- There is available native support-worker capacity, a remaining policy evidence-turn budget, no external-authority blocker, and no prior recovery marker. The original request and response remain immutable.
+
+The recovery creates a fresh content-addressed reasoning request with authenticated lineage and read-only tool receipts. The worker cannot self-approve edits, bypass CI, mutate providers, deploy production, or close a support item based on this recovery. If evidence or authority is incomplete, the original blocked state remains and the worker must report the actual reason.
+
 ## 5. Expected State
 Each approved support item is in exactly one durable state and progresses without owner prompting until verified complete or genuinely blocked.
 
