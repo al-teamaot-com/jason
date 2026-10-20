@@ -237,6 +237,35 @@ def transaction_busy(path: Path) -> bool:
         os.close(fd)
 
 
+def classify_root_revalidation_error(exc: BaseException) -> str:
+    """Classify known failures without persisting untrusted exception details.
+
+    Root's separate permission, health, drift and LKG gates are authoritative.
+    This is *diagnostic only*. No raw root rejection messages, paths, tokens,
+    client data, attempts, retry eligibility, or approval data are modified.
+    """
+    message = str(exc).casefold()
+    known = (
+        ('immutable last-known-good mismatch:', 'root_lkg_fingerprint_mismatch'),
+        ('production drift is not clean', 'root_independent_drift_not_clean'),
+        ('independent production drift refresh did not pass', 'root_drift_refresh_failed'),
+        ('independent drift refresh failed closed', 'root_drift_refresh_failed'),
+        ('root-owned drift evidence is stale', 'root_drift_stale'),
+        ('root-only mode-0600 file required', 'root_protected_file_invalid'),
+        ('invalid requester ownership', 'root_request_ownership_rejected'),
+        ('governed root transition result timed out', 'root_transition_result_timeout'),
+        ('root-governed breaker transition succeeded but readback did not converge',
+         'root_closeout_readback_not_converged'),
+        ('protected release-state snapshot stale', 'protected_readback_stale'),
+        ('authoritative health revalidation failed', 'production_manifest_precheck_failed'),
+        ('governed root release transition rejected', 'root_transition_rejected_other'),
+    )
+    for fragment, classification in known:
+        if fragment in message:
+            return classification
+    return 'unclassified_root_revalidation_failure'
+
+
 def native_root_transition(state_root: Path, expected_revision: str) -> dict[str, Any]:
     """Use only existing guarded request/response path; root decides outcome."""
     host = Path.home() / ".local/lib/jason/release_manager_host_runner.py"
@@ -307,6 +336,7 @@ def main() -> int:
             except (OSError, ValueError, RuntimeError, TypeError) as exc:
                 attempt["result"] = "root_revalidation_rejected"
                 attempt["error_type"] = type(exc).__name__
+                attempt["failure_class"] = classify_root_revalidation_error(exc)
                 result["status"] = "blocked"
                 result["next_action"] = "root_revalidation_rejected_retry_if_budget_allows"
         if result.get("attempts"):
