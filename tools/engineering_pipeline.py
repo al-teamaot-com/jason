@@ -254,6 +254,13 @@ def service_exit_code(state: dict[str, Any]) -> int:
         if (not isinstance(item, dict)
                 or item.get("status") not in {"succeeded", "failed", "skipped_dependency"}):
             return 1
+        # Process-launch errors, hung workers, and signal terminations are
+        # infrastructure failures, not validated work-item rejections.
+        if (item.get("reason") in {"stage_timeout", "stage_process_launch_failed"}
+                or (item.get("status") == "failed"
+                    and isinstance(item.get("return_code"), int)
+                    and item["return_code"] < 0)):
+            return 1
     actual_failed = {name for name, item in stages.items()
                      if item["status"] != "succeeded"}
     recorded_failed = state.get("failed_or_skipped_stages")
