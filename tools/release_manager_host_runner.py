@@ -2024,10 +2024,16 @@ def run_preproduction(repo: Path, state_root: Path, record: dict[str, Any]) -> d
     if image_id(mcp_image) != mcp_digest:
         raise ReleaseManagerError("candidate MCP image changed before pre-production")
 
-    live = live_runtime()
+    # Hold the existing serialized release lock only during the temporary
+    # preproduction container lifecycle. The independent production watchdog
+    # already defers while this lock is held; no container allowlist or drift
+    # policy is weakened. This also prevents a concurrent production promotion
+    # from starting while preproduction has a live ephemeral container.
+    preprod_lock = acquire_production_transaction_lock(repo, state_root, record)
     name = ""
     scratch: Path | None = None
     try:
+        live = live_runtime()
         name, scratch = create_preprod_container(
             live=live,
             candidate_image=image,
@@ -2070,10 +2076,15 @@ def run_preproduction(repo: Path, state_root: Path, record: dict[str, Any]) -> d
         save_record(state_root, record)
         return record
     finally:
-        if name:
-            subprocess.run(["docker", "rm", "-f", name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if scratch and scratch.exists():
-            shutil.rmtree(scratch, ignore_errors=True)
+        try:
+            if name:
+                subprocess.run(["docker", "rm", "-f", name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if scratch and scratch.exists():
+                shutil.rmtree(scratch, ignore_errors=True)
+        finally:
+            # No stale lock if preproduction fails in health, CCC preflight,
+            # rollback verification, or even the cleanup subprocess.
+            release_production_transaction_lock(preprod_lock)
 
 
 def publish_production_closeout(repo: Path, candidate_sha: str) -> dict[str, str]:
