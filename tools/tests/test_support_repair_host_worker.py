@@ -2216,6 +2216,85 @@ def test_symbol_blocker_supervisor_classifies_native_verified_path():
     assert next_action == "native_worker_verify_symbol_parser_upgrade_or_escalate"
 
 
+def test_support_listing_rechecks_transient_duplicate_number_without_dropping_issue(monkeypatch, tmp_path):
+    rows = [
+        {'number': 1344, 'title': 'SUPPORT-AUTO-0E1A433B5B0C - self-heal alert'},
+        {'number': 1301, 'title': 'P0 SUPPORT-OPS-053: watchdog'},
+    ]
+    batches = iter([rows + [dict(rows[0])], list(reversed(rows)), rows])
+    calls = []
+
+    def fake_gh(args, *, cwd):
+        calls.append(args)
+        assert args[args.index('--search') + 1] == 'SUPPORT- in:title sort:created-asc'
+        return next(batches)
+
+    monkeypatch.setattr(worker, 'gh_json', fake_gh)
+    inventory = worker.open_support_issue_records(tmp_path)
+    assert len(calls) == 3
+    assert inventory['SUPPORT-AUTO-0E1A433B5B0C']['issue_numbers'] == [1344]
+    assert inventory['SUPPORT-AUTO-0E1A433B5B0C']['issue_count'] == 1
+    assert inventory['SUPPORT-OPS-053']['issue_numbers'] == [1301]
+    assert inventory['SUPPORT-OPS-053']['priority'] == 'P0'
+
+
+def test_support_listing_healthy_snapshot_requires_only_one_read(monkeypatch, tmp_path):
+    calls = []
+    def fake_gh(args, *, cwd):
+        calls.append(args)
+        return [{'number': 1, 'title': 'SUPPORT-OPS-001: valid'}]
+    monkeypatch.setattr(worker, 'gh_json', fake_gh)
+    assert worker.open_support_issue_ids(tmp_path) == {'SUPPORT-OPS-001'}
+    assert len(calls) == 1
+
+
+def test_support_listing_persistent_duplicate_number_fails_closed(monkeypatch, tmp_path):
+    import pytest
+    record = {'number': 1344, 'title': 'SUPPORT-AUTO-0E1A433B5B0C - self-heal alert'}
+    calls = []
+    def fake_gh(args, *, cwd):
+        calls.append(args)
+        return [dict(record), dict(record)]
+    monkeypatch.setattr(worker, 'gh_json', fake_gh)
+    with pytest.raises(worker.WorkerError, match='number missing or repeated'):
+        worker.open_support_issue_records(tmp_path)
+    assert len(calls) == 2
+
+
+def test_support_listing_recheck_must_confirm_same_full_identity_set(monkeypatch, tmp_path):
+    import pytest
+    a = {'number': 1344, 'title': 'SUPPORT-AUTO-0E1A433B5B0C - alert'}
+    b = {'number': 1301, 'title': 'P0 SUPPORT-OPS-053: watchdog'}
+    c = {'number': 1302, 'title': 'SUPPORT-OPS-054: admission'}
+    batches = iter([[a, b, dict(a)], [a, b], [a, c]])
+    calls = []
+    def fake_gh(args, *, cwd):
+        calls.append(args)
+        return next(batches)
+    monkeypatch.setattr(worker, 'gh_json', fake_gh)
+    with pytest.raises(worker.WorkerError, match='inconsistent after bounded recheck'):
+        worker.open_support_issue_records(tmp_path)
+    assert len(calls) == 3
+
+
+def test_support_listing_invalid_metadata_never_bypasses_authoritative_validation(monkeypatch, tmp_path):
+    import pytest
+    for invalid in (
+        None,
+        [{'number': True, 'title': 'SUPPORT-OPS-053: invalid bool'}],
+        [{'number': 3, 'title': None}],
+        [{'number': 3, 'title': 'SUPPORT-OPS-053: a'}, {'number': 3, 'title': 'SUPPORT-OPS-054: b'}],
+    ):
+        calls = []
+        def fake_gh(args, *, cwd):
+            calls.append(args)
+            return invalid
+        monkeypatch.setattr(worker, 'gh_json', fake_gh)
+        with pytest.raises(worker.WorkerError):
+            worker.open_support_issue_records(tmp_path)
+        assert len(calls) == 1
+
+
 def test_github_issue_identity_inventory_preserves_collisions(monkeypatch, tmp_path):
     records = [
         {'number': 1301, 'title': 'P0 SUPPORT-OPS-053: current watchdog'},
