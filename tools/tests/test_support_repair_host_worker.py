@@ -2319,3 +2319,11 @@ def test_open_issue_id_helper_excludes_ambiguous_manual_id(monkeypatch, tmp_path
     assert worker.open_support_issue_ids(tmp_path) == {
         'SUPPORT-AUTO-01215564E143', 'SUPPORT-OPS-052'
     }
+
+def test_duplicate_auto_issue_closure_needs_unique_identity(monkeypatch, tmp_path):
+    import pytest
+    records = [{'number': 881, 'title': 'SUPPORT-AUTO-01215564E143 - alert'},
+               {'number': 1336, 'title': 'SUPPORT-AUTO-01215564E143 - alert'}]
+    monkeypatch.setattr(worker, 'gh_json', lambda args, cwd: records)
+    with pytest.raises(worker.WorkerError, match='ambiguous GitHub issue identity'):
+        worker.close_support_issue(tmp_path, 'SUPPORT-AUTO-01215564E143', '0'*40)
