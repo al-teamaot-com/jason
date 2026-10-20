@@ -2214,3 +2214,108 @@ def test_symbol_blocker_supervisor_classifies_native_verified_path():
     )
     assert kind == "recoverable_source"
     assert next_action == "native_worker_verify_symbol_parser_upgrade_or_escalate"
+
+
+def test_github_issue_identity_inventory_preserves_collisions(monkeypatch, tmp_path):
+    records = [
+        {'number': 1301, 'title': 'P0 SUPPORT-OPS-053: current watchdog'},
+        {'number': 1102, 'title': 'SUPPORT-OPS-053: old controller bootstrap'},
+        {'number': 1099, 'title': 'SUPPORT-OPS-053: old release bridge'},
+        {'number': 1336, 'title': 'SUPPORT-AUTO-01215564E143 - alert'},
+        {'number': 881, 'title': 'SUPPORT-AUTO-01215564E143 - alert'},
+        {'number': 1095, 'title': 'SUPPORT-OPS-052: independent issue'},
+    ]
+    monkeypatch.setattr(worker, 'gh_json', lambda args, cwd: records)
+    found = worker.open_support_issue_records(tmp_path)
+    assert found['SUPPORT-OPS-053']['issue_numbers'] == [1099, 1102, 1301]
+    assert found['SUPPORT-OPS-053']['identity_conflict'] is True
+    assert found['SUPPORT-OPS-053']['priority'] == 'P0'
+    assert found['SUPPORT-AUTO-01215564E143']['issue_numbers'] == [881, 1336]
+    assert found['SUPPORT-AUTO-01215564E143']['identity_conflict'] is False
+    assert found['SUPPORT-AUTO-01215564E143']['duplicate_issue_records'] is True
+    assert found['SUPPORT-OPS-052']['identity_conflict'] is False
+
+
+def test_issue_identity_conflict_blocks_unsafe_admission_and_is_audited(tmp_path):
+    issues = {
+        'SUPPORT-OPS-053': {'title': 'P0 SUPPORT-OPS-053', 'priority': 'P0',
+                            'issue_numbers': [1102, 1301], 'issue_count': 2,
+                            'identity_conflict': True, 'duplicate_issue_records': True},
+        'SUPPORT-AUTO-01215564E143': {'title': 'SUPPORT-AUTO alert', 'priority': 'unknown',
+                                       'issue_numbers': [881, 1336], 'issue_count': 2,
+                                       'identity_conflict': False, 'duplicate_issue_records': True},
+        'SUPPORT-OPS-052': {'title': 'SUPPORT-OPS-052', 'priority': 'unknown',
+                            'issue_numbers': [1095], 'issue_count': 1,
+                            'identity_conflict': False, 'duplicate_issue_records': False},
+    }
+    support = [{'id': 'SUPPORT-OPS-053', 'priority': 'P0'},
+               {'id': 'SUPPORT-AUTO-01215564E143', 'priority': 'P0'},
+               {'id': 'SUPPORT-OPS-052', 'priority': 'P0'}]
+    state = {}
+    missing = worker.audit_support_admission(issues, support, state, event_root=tmp_path)
+    assert missing == ['SUPPORT-OPS-053']
+    audit = state['admission_audit']
+    assert audit['status'] == 'degraded'
+    assert audit['open_issue_count'] == 5
+    assert audit['logical_work_id_count'] == 3
+    assert audit['identity_conflicts'] == {'SUPPORT-OPS-053': [1102, 1301]}
+    assert len(audit['duplicate_issue_records']) == 2
+    admissible = {key for key, record in issues.items() if not record.get('identity_conflict')}
+    assert [item['id'] for item in worker.eligible_support_items(support, admissible)] == [
+        'SUPPORT-AUTO-01215564E143', 'SUPPORT-OPS-052']
+    events = [worker.json.loads(path.read_text()) for path in tmp_path.glob('*.json')]
+    assert len(events) == 2
+    assert any(event['work_id'] == 'SUPPORT-OPS-053' for event in events)
+    assert any(event['work_id'] == 'SUPPORT-AUTO-IDENTITY-AUDIT' for event in events)
+    worker.audit_support_admission(issues, support, state, event_root=tmp_path)
+    assert len(list(tmp_path.glob('*.json'))) == 2
+
+
+def test_manual_identity_collision_never_closes_arbitrary_github_issue(monkeypatch, tmp_path):
+    import pytest
+    issues = [
+        {'number': 1301, 'title': 'P0 SUPPORT-OPS-053: current watchdog'},
+        {'number': 1102, 'title': 'SUPPORT-OPS-053: older controller'},
+    ]
+    monkeypatch.setattr(worker, 'gh_json', lambda args, cwd: issues)
+    monkeypatch.setattr(worker, 'run', lambda *args, **kwargs: pytest.fail('unexpected GitHub write'))
+    with pytest.raises(worker.WorkerError, match='ambiguous GitHub issue identity'):
+        worker.close_support_issue(tmp_path, 'SUPPORT-OPS-053', '0' * 40)
+
+
+def test_unique_issue_closure_uses_exact_id_not_partial_prefix(monkeypatch, tmp_path):
+    issues = [
+        {'number': 1, 'title': 'SUPPORT-OPS-0530: different issue'},
+        {'number': 2, 'title': 'SUPPORT-OPS-053: exact issue'},
+    ]
+    monkeypatch.setattr(worker, 'gh_json', lambda args, cwd: issues)
+    calls = []
+    monkeypatch.setattr(worker, 'run', lambda argv, **kwargs: calls.append(argv))
+    worker.close_support_issue(tmp_path, 'SUPPORT-OPS-053', '0' * 40)
+    assert len(calls) == 1
+    assert calls[0][:4] == ['gh', 'issue', 'close', '2']
+
+
+def test_github_issue_inventory_rejects_duplicate_numeric_identity(monkeypatch, tmp_path):
+    import pytest
+    issues = [
+        {'number': 1301, 'title': 'SUPPORT-OPS-053: first'},
+        {'number': 1301, 'title': 'SUPPORT-OPS-054: second'},
+    ]
+    monkeypatch.setattr(worker, 'gh_json', lambda args, cwd: issues)
+    with pytest.raises(worker.WorkerError, match='number missing or repeated'):
+        worker.open_support_issue_records(tmp_path)
+
+
+def test_open_issue_id_helper_excludes_ambiguous_manual_id(monkeypatch, tmp_path):
+    records = [
+        {'number': 1102, 'title': 'SUPPORT-OPS-053: previous controller'},
+        {'number': 1301, 'title': 'P0 SUPPORT-OPS-053: current watchdog'},
+        {'number': 881, 'title': 'SUPPORT-AUTO-01215564E143 - incident'},
+        {'number': 1336, 'title': 'SUPPORT-AUTO-01215564E143 - incident'},
+        {'number': 1095, 'title': 'SUPPORT-OPS-052: unique incident'},
+    ]
+    monkeypatch.setattr(worker, 'gh_json', lambda args, cwd: records)
+    assert worker.open_support_issue_ids(tmp_path) == {
+        'SUPPORT-AUTO-01215564E143', 'SUPPORT-OPS-052'
+    }

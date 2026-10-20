@@ -222,7 +222,13 @@ def support_id_from_title(title: str) -> str | None:
     return match.group(1).upper() if match else None
 
 
-def open_support_issue_records(repo: Path) -> dict[str, dict[str, str]]:
+def open_support_issue_records(repo: Path) -> dict[str, dict[str, Any]]:
+    """Preserve every GitHub issue number; an ID alone is not an issue identity.
+
+    Automatically detected incident IDs represent one fingerprinted repair even
+    if duplicate GitHub reports exist. Distinct manual SUPPORT issues sharing
+    an ID cannot be safely admitted or closed until their identities are fixed.
+    """
     limit = 1000
     data = gh_json([
         'issue', 'list', '--state', 'open', '--search', 'SUPPORT- in:title',
@@ -230,44 +236,103 @@ def open_support_issue_records(repo: Path) -> dict[str, dict[str, str]]:
     ], cwd=repo) or []
     if not isinstance(data, list) or len(data) >= limit:
         raise WorkerError('GitHub open SUPPORT listing incomplete; refusing partial admission')
-    records = {}
+    grouped: dict[str, list[tuple[int, str]]] = {}
+    seen_numbers: set[int] = set()
     for issue in data:
+        if not isinstance(issue, Mapping):
+            raise WorkerError('GitHub SUPPORT issue record is not an object')
+        number = issue.get('number')
+        if (isinstance(number, bool) or not isinstance(number, int)
+                or number <= 0 or number in seen_numbers):
+            raise WorkerError('GitHub SUPPORT issue number missing or repeated')
+        seen_numbers.add(number)
         title = str(issue.get('title') or '')
         item_id = support_id_from_title(title)
         if item_id:
-            records[item_id] = {'title': title, 'priority': 'P0' if re.search(r'\bP0\b', title, re.I) else 'unknown'}
+            grouped.setdefault(item_id, []).append((number, title))
+
+    records: dict[str, dict[str, Any]] = {}
+    for item_id, issues in grouped.items():
+        ordered = sorted(issues)
+        records[item_id] = {
+            'title': ordered[0][1],
+            'priority': 'P0' if any(re.search(r'\bP0\b', title, re.I)
+                                    for _, title in ordered) else 'unknown',
+            'issue_numbers': [number for number, _ in ordered],
+            'issue_count': len(ordered),
+            'duplicate_issue_records': len(ordered) > 1,
+            # A fingerprinted AUTO item remains one logical work item. All
+            # its GitHub reports still require explicit closure reconciliation.
+            'identity_conflict': (len(ordered) > 1
+                                  and not item_id.startswith('SUPPORT-AUTO-')),
+        }
     return records
 
-
 def open_support_issue_ids(repo: Path) -> set[str]:
-    return set(open_support_issue_records(repo))
+    return {
+        item_id for item_id, issue in open_support_issue_records(repo).items()
+        if not issue.get('identity_conflict')
+    }
 
 
-def audit_support_admission(issues: Mapping[str, Mapping[str, str]],
+def audit_support_admission(issues: Mapping[str, Mapping[str, Any]],
                             support: list[dict[str, str]],
                             state: dict[str, Any], *,
                             event_root: Path | None = None) -> list[str]:
+    """Audit real issue identities, including collisions hidden by ID grouping."""
     known = {item['id'] for item in support}
+    priorities = {item['id']: item.get('priority') for item in support}
+    conflicts = {
+        key: list(value.get('issue_numbers') or [])
+        for key, value in issues.items() if value.get('identity_conflict')
+    }
+    duplicates = {
+        key: list(value.get('issue_numbers') or [])
+        for key, value in issues.items() if value.get('duplicate_issue_records')
+    }
     missing = sorted(
         item_id for item_id, issue in issues.items()
-        if issue.get('priority') == 'P0' and item_id not in known
+        if (issue.get('priority') == 'P0' or priorities.get(item_id) == 'P0')
+        and (item_id not in known or item_id in conflicts)
     )
     state['admission_audit'] = {
         'checked_at': now(),
-        'open_issue_count': len(issues),
+        'open_issue_count': sum(int(value.get('issue_count') or 1)
+                                for value in issues.values()),
+        'logical_work_id_count': len(issues),
+        'identity_conflicts': conflicts,
+        'duplicate_issue_records': duplicates,
         'unadmitted_p0': missing,
-        'status': 'degraded' if missing else 'healthy',
+        'status': 'degraded' if missing or duplicates else 'healthy',
     }
     for item_id in missing:
+        if item_id in conflicts:
+            summary = ('Multiple open GitHub issues share one manual SUPPORT ID; '
+                       'no issue may be selected or closed by ambiguous ID.')
+            owner_action = ('Assign distinct canonical IDs to GitHub issues '
+                            + ', '.join(str(n) for n in conflicts[item_id][:8])
+                            + ' through reviewed source and issue reconciliation.')
+        else:
+            summary = 'Open P0 SUPPORT issue has no canonical support source row; admission is blocked.'
+            owner_action = 'Reconcile issue with canonical SUPPORT.md through reviewed GitHub PR.'
         emit_lifecycle_event(
             event_type='work_blocked', work_id=item_id,
             work_title=issues[item_id]['title'],
-            summary='Open P0 SUPPORT issue has no canonical support source row; admission is blocked.',
-            owner_action='Reconcile issue with canonical SUPPORT.md through reviewed GitHub PR.',
+            summary=summary, owner_action=owner_action, event_root=event_root,
+        )
+    auto_duplicates = [key for key in duplicates if key.startswith('SUPPORT-AUTO-')]
+    if auto_duplicates:
+        emit_lifecycle_event(
+            event_type='work_blocked', work_id='SUPPORT-AUTO-IDENTITY-AUDIT',
+            work_title='Duplicate automatic support incident records',
+            summary=(f'{len(auto_duplicates)} fingerprinted support items have '
+                     'multiple open GitHub reports. Logical work is deduplicated, '
+                     'but each report remains open pending explicit verification.'),
+            owner_action=('Reconcile duplicate GitHub issue numbers before closure; '
+                          'never discard differing incident evidence.'),
             event_root=event_root,
         )
     return missing
-
 
 def eligible_support_items(items: list[dict[str, str]], open_issue_ids: set[str]) -> list[dict[str, str]]:
     return [item for item in items if item['id'] in open_issue_ids]
@@ -1307,10 +1372,17 @@ def create_closure_pr(repo: Path, item: Mapping[str, str], merge_sha: str, accep
 
 
 def close_support_issue(repo: Path, item_id: str, merge_sha: str) -> None:
+    limit = 20
     issues = gh_json([
-        'issue', 'list', '--state', 'open', '--search', f'{item_id} in:title', '--limit', '10', '--json', 'number,title'
+        'issue', 'list', '--state', 'open', '--search', f'{item_id} in:title',
+        '--limit', str(limit), '--json', 'number,title'
     ], cwd=repo) or []
-    exact = [issue for issue in issues if item_id.casefold() in str(issue.get('title') or '').casefold()]
+    if not isinstance(issues, list) or len(issues) >= limit:
+        raise WorkerError('GitHub support closure listing is incomplete')
+    exact = [issue for issue in issues
+             if support_id_from_title(str(issue.get('title') or '')) == item_id.upper()]
+    if len(exact) > 1:
+        raise WorkerError('ambiguous GitHub issue identity; closure requires unique issue number')
     if len(exact) == 1:
         run([
             'gh', 'issue', 'close', str(exact[0]['number']), '--comment',
@@ -2574,7 +2646,12 @@ def main() -> int:
     for item in auto_incidents:
         ensure_support_issue(repo, item)
     open_issue_records = open_support_issue_records(repo)
-    open_issue_ids = set(open_issue_records)
+    # Manual ID collisions are not authoritative issue selectors. Automated
+    # fingerprint duplicates remain one item, with every GitHub ID audited.
+    open_issue_ids = {
+        item_id for item_id, info in open_issue_records.items()
+        if not info.get('identity_conflict')
+    }
     unadmitted_p0 = audit_support_admission(
         open_issue_records, parsed_support + auto_incidents + development_recovery_incidents, state,
     )
@@ -2592,11 +2669,13 @@ def main() -> int:
     support.sort(key=lambda item: (PRIORITY.get(item['priority'], 99), item['id']))
     state['support_state_mismatches'] = {
         'support_open_issue_not_open': sorted(
-            item['id'] for item in parsed_support if item['id'] not in open_issue_ids
+            item['id'] for item in parsed_support if item['id'] not in open_issue_records
         ),
         'issue_open_missing_support_row': sorted(
             item_id for item_id in open_issue_ids if item_id not in {item['id'] for item in parsed_support}
         ),
+        'identity_conflicts': state['admission_audit']['identity_conflicts'],
+        'duplicate_issue_records': state['admission_audit']['duplicate_issue_records'],
     }
     try:
         prs = open_prs(repo)
