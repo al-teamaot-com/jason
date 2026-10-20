@@ -53,7 +53,25 @@ original immutable LKG evidence before closure.
 
 Failures, missing protected files, mismatched image fingerprints,
 busy deployments, stale drift, denied source, exhausted attempts and timeouts
-are visible blockers, not successful verification. A closed breaker is a
+are visible blockers, not successful verification.
+
+A rejected native root revalidation additionally persists a **whitelisted,
+non-secret failure classification** in the durable attempt ledger. The
+classification distinguishes independently rejected production drift,
+immutable LKG mismatch, protected file/identity rejection, root transition
+timeouts, stale readback and preflight health failure when a known root error
+is explicitly returned. Unknown errors remain
+`unclassified_root_revalidation_failure`, never guessed healthy. Raw root
+exceptions, paths, secrets or provider data are never written to the
+unprivileged ledger, and no additional root request or budget reset is
+authorized by these diagnostic fields. Historical rejections from before the
+instrumentation remain unknown; root operator evidence is still required.
+
+The October 20 breaker incident had two rejected native revalidation requests
+at 12:21:18Z and 12:31:11Z; the installed version retained only their
+`ReleaseManagerError` type. This diagnostics-only change does **not** replay
+those attempts, clear that open breaker, delete the owner incident hold, or
+supply exact-SHA authorization for a newer release. A closed breaker is a
 no-op; engineering release approval, preproduction, CCC, rollback and
 postdeployment checks remain independent and mandatory. No provider calls,
 production deployment, Docker retagging, sudo, shell forwarding or mutable
