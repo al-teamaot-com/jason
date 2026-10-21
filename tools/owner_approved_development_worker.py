@@ -1294,6 +1294,10 @@ def readmit_recovered_development_reasoning(
         record = records.get(item['id'])
         if not isinstance(record, dict) or record.get('phase') != 'blocked':
             continue
+        # Retry exhaustion requires the separately verified governed repair
+        # path. A late response to the exhausted request is not new authority.
+        if record.get('blocker_class') == 'internal_retry_exhausted':
+            continue
         reason = str(record.get('reason') or '')
         if reason.startswith('development edit reasoning failed: HTTP transport failed'):
             phase, expected_kind = 'implementing', 'edit_plan'
