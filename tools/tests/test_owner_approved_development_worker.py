@@ -1716,6 +1716,30 @@ def test_development_readmit_only_exact_recovered_response(tmp_path, monkeypatch
                                                              max_active=2) == []
 
 
+def test_development_recovered_response_does_not_bypass_retry_exhaustion(tmp_path, monkeypatch):
+    monkeypatch.setattr(module, 'active_support_count', lambda spool: 0)
+    rid = 'd' * 64
+    responses = tmp_path / 'reasoning' / 'responses'
+    responses.mkdir(parents=True)
+    (responses / f'{rid}.json').write_text(module.json.dumps({
+        'status': 'succeeded', 'request_id': rid, 'kind': 'search_plan',
+        'support_item': 'DEV-1500', 'result': {'search_terms': ['foo']},
+    }))
+    record = {
+        'phase': 'blocked',
+        'blocker_class': 'internal_retry_exhausted',
+        'reason': 'development reasoning failed: HTTP transport failed',
+        'reasoning_request_id': rid,
+    }
+    state = {'items': {'DEV-1500': record}}
+
+    assert module.readmit_recovered_development_reasoning(
+        state, [{'id': 'DEV-1500'}], tmp_path, max_active=3,
+    ) == []
+    assert record['phase'] == 'blocked'
+    assert record['blocker_class'] == 'internal_retry_exhausted'
+
+
 def test_existing_pr_preserves_pending_and_inflight_ci_repairs():
     assert module.phase_for_existing_pr('ci_repair_needed') == 'ci_repair_needed'
     assert module.phase_for_existing_pr('ci_repairing') == 'ci_repairing'
