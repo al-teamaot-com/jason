@@ -3073,3 +3073,106 @@ def test_reviewed_offer_rejects_conflicting_ccc_evidence_not_overwrite(tmp_path)
                 approved, SHA_A, policy, "owner_reviewed", ccc_root=tmp_path,
             )
         assert json.loads(named.read_text()) == bad
+
+
+def _exercise_serialized_preprod(monkeypatch, tmp_path, *, fail_health=False):
+    """Exercise the real preprod transaction layout without Docker or providers."""
+    import pytest
+    record = {
+        "release_id": "release-" + SHA_A[:16],
+        "state": "release_candidate",
+        "release_candidate": {
+            "candidate_sha": SHA_A,
+            "image": "jason-runtime:test",
+            "artifact_digest": "sha256:fixture",
+            "mcp_image": "jason-mcp:test",
+            "mcp_artifact_digest": "sha256:fixture",
+        },
+    }
+    events = []
+    lock = object()
+    held = {"active": False}
+    scratch = tmp_path / "isolated-scratch"
+    scratch.mkdir()
+
+    def acquire(repo, state_root, entry):
+        assert entry is record and not held["active"]
+        held["active"] = True
+        events.append("acquired")
+        return lock
+
+    def release(handle):
+        assert handle is lock and held["active"]
+        events.append("released")
+        held["active"] = False
+
+    def create(**kwargs):
+        assert held["active"]
+        events.append("created")
+        return "jason-runtime-preprod-" + SHA_A[:12], scratch
+
+    def guarded_run(argv, **kwargs):
+        assert held["active"]
+        assert argv[:2] == ["docker", "start"]
+        events.append("started")
+        return ""
+
+    def wait(name):
+        assert held["active"]
+        events.append("health_checked")
+        if fail_health:
+            raise runner.ReleaseManagerError("mock isolated health failure")
+
+    def transition(repo, state_root, entry, target):
+        entry["state"] = target
+        events.append("stage:" + target)
+
+    def cleanup(argv, **kwargs):
+        assert held["active"]
+        assert argv[:3] == ["docker", "rm", "-f"]
+        events.append("container_removed")
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(runner, "gate_transition", transition)
+    monkeypatch.setattr(runner, "image_id", lambda _: "sha256:fixture")
+    monkeypatch.setattr(runner, "acquire_production_transaction_lock", acquire)
+    monkeypatch.setattr(runner, "release_production_transaction_lock", release)
+    monkeypatch.setattr(runner, "live_runtime", lambda: {"revision": SHA_B})
+    monkeypatch.setattr(runner, "create_preprod_container", create)
+    monkeypatch.setattr(runner, "run", guarded_run)
+    monkeypatch.setattr(runner, "wait_health", wait)
+    monkeypatch.setattr(runner, "verify_preprod_env",
+                        lambda *args: events.append("env_verified"))
+    monkeypatch.setattr(runner, "production_preflight",
+                        lambda *args: events.append("preflight"))
+    monkeypatch.setattr(runner, "write_owner_notification_event",
+                        lambda *args: events.append("notice"))
+    monkeypatch.setattr(runner, "save_record",
+                        lambda *args: events.append("record_saved"))
+    monkeypatch.setattr(runner.subprocess, "run", cleanup)
+
+    if fail_health:
+        with pytest.raises(runner.ReleaseManagerError, match="mock isolated health failure"):
+            runner.run_preproduction(tmp_path, tmp_path / "release-state", record)
+        assert "preproduction" not in record
+    else:
+        result = runner.run_preproduction(tmp_path, tmp_path / "release-state", record)
+        assert result["state"] == "production_eligible"
+        assert result["preproduction"]["acceptance_passed"] is True
+
+    assert events.index("acquired") < events.index("created")
+    assert events.index("started") < events.index("container_removed")
+    assert events.index("container_removed") < events.index("released")
+    assert events[-1] == "released"
+    assert not held["active"]
+    assert not scratch.exists()
+
+
+def test_preprod_ephemeral_container_is_guarded_by_serialized_release_lock(
+        monkeypatch, tmp_path):
+    _exercise_serialized_preprod(monkeypatch, tmp_path)
+
+
+def test_preprod_health_failure_still_removes_container_and_releases_lock(
+        monkeypatch, tmp_path):
+    _exercise_serialized_preprod(monkeypatch, tmp_path, fail_health=True)
