@@ -260,3 +260,17 @@ class PipelineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_signaled_work_item_process_is_not_mistaken_for_recoverable_data_failure(tmp_path):
+    def terminated_runner(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, -9 if Path(argv[1]).name == 'support_repair_host_worker.py' else 0)
+
+    state = pipeline.run_pipeline(
+        scripts=tmp_path / 'tools', repo=tmp_path / 'repo',
+        spool=tmp_path / 'spool', release_state=tmp_path / 'releases',
+        runner=terminated_runner,
+    )
+    assert state['status'] == 'degraded'
+    assert 'support_repair' in state['failed_work_stages']
+    assert pipeline.service_exit_code(state) == 1
