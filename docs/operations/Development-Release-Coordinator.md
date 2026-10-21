@@ -129,8 +129,11 @@ For a failed **P0 Support List** item specifically marked
 **one new, separately fingerprinted reasoning request** only if a newer
 provider-reported metered success is recorded from an explicitly scoped,
 operator-authorized `provider-credit-verify` diagnostic in the local usage ledger.
-The evidence must postdate the failure and be fresh (at most 12 hours). The
-readmission retains the old failure, response, and retry count, records its
+The evidence must postdate the failure and be fresh (at most 12 hours).
+The operator diagnostic must be a real, minimal hosted-model request through
+Jason's configured client; an account-billing screenshot or a manually entered
+ledger row is not equivalent to a provider-reported successful usage receipt.
+The readmission retains the old failure, response, and retry count, records its
 metered-proof lineage, respects active-work capacity, checks the original
 request fingerprint and current issue eligibility, and refuses pending governed
 repair handoffs or previously retried credit failures. A tiny successful model
