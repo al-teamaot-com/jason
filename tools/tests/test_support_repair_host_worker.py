@@ -767,7 +767,7 @@ def test_transient_github_pr_listing_deferred_without_mutation(tmp_path, monkeyp
     monkeypatch.setattr(worker, 'run', lambda *a, **k: '')
     monkeypatch.setattr(worker, 'parse_support', lambda _: [])
     monkeypatch.setattr(worker, 'load_self_heal_incidents', lambda: [])
-    monkeypatch.setattr(worker, 'open_support_issue_ids', lambda _: set())
+    monkeypatch.setattr(worker, 'open_support_issue_records', lambda _: {})
     monkeypatch.setattr(worker, 'open_prs', lambda _: (_ for _ in ()).throw(worker.WorkerError('HTTP 504: gateway timeout')))
     assert worker.main() == 0
     state = worker.load_state(tmp_path / 'spool' / 'state.json')
@@ -780,7 +780,7 @@ def test_nongateway_github_pr_listing_failure_remains_fatal(tmp_path, monkeypatc
     monkeypatch.setattr(worker, 'run', lambda *a, **k: '')
     monkeypatch.setattr(worker, 'parse_support', lambda _: [])
     monkeypatch.setattr(worker, 'load_self_heal_incidents', lambda: [])
-    monkeypatch.setattr(worker, 'open_support_issue_ids', lambda _: set())
+    monkeypatch.setattr(worker, 'open_support_issue_records', lambda _: {})
     monkeypatch.setattr(worker, 'open_prs', lambda _: (_ for _ in ()).throw(worker.WorkerError('HTTP 403: forbidden')))
     try:
         worker.main()
@@ -880,7 +880,7 @@ def test_transient_github_listing_error_is_deferred_without_permission_bypass(tm
     monkeypatch.setattr(worker, 'run', lambda *a, **k: '')
     monkeypatch.setattr(worker, 'parse_support', lambda _: [])
     monkeypatch.setattr(worker, 'load_self_heal_incidents', lambda: [])
-    monkeypatch.setattr(worker, 'open_support_issue_ids', lambda _: set())
+    monkeypatch.setattr(worker, 'open_support_issue_records', lambda _: {})
     monkeypatch.setattr(worker, 'open_prs', lambda _: (_ for _ in ()).throw(
         worker.WorkerError('GitHub JSON command failed after 3 bounded attempts: command failed (gh): unexpected end of JSON input')))
     assert worker.main() == 0
@@ -2618,3 +2618,160 @@ def test_verified_search_shape_denies_dirty_original_and_external_authority(
         {'items': {item['id']: record}}, [item],
         repo, spool, gate, {}, max_active=2) == []
     assert not fresh.exists()
+
+
+def _credit_reload_fixture(tmp_path, *, successful=True, overrides=None):
+    """Independent provider credit test is metered, short, and later than failure."""
+    import os
+    import sqlite3
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    target = {
+        'id': 'SUPPORT-OPS-059', 'priority': 'P0',
+        'title': 'Release bridge must preserve blocked phases',
+        'evidence': 'approved bounded regression',
+        'acceptance': 'blocked and acceptance states must be preserved',
+    }
+    failed = worker.queue_reasoning(
+        tmp_path, kind='edit_plan', item=target,
+        context={'source_excerpts': ['bounded source evidence']},
+    )
+    response_path = tmp_path / 'reasoning' / 'responses' / (failed + '.json')
+    response_path.parent.mkdir(parents=True, exist_ok=True)
+    response_path.write_text(json.dumps({
+        'status': 'failed', 'request_id': failed,
+        'error_type': 'ConnectorTransportError',
+        'primary_provider_error_code': 'credit_balance_exhausted',
+        'primary_http_status': 429,
+        'required_owner_action': 'restore_provider_credits',
+        'retryable': False,
+        'error': 'Hosted reasoning blocked: credit_balance_exhausted; Owner action: restore_provider_credits',
+        'completed_at': (now - timedelta(hours=2)).isoformat(),
+        'attempts': 1,
+    }))
+    ledger = tmp_path / 'usage.sqlite3'
+    with sqlite3.connect(ledger) as db:
+        db.execute('create table model_usage_entries (entry_id text, payload_json text)')
+        if successful:
+            proof = {
+                'entry_id': 'provider-success-001',
+                'provider': 'openai', 'model': 'gpt-5.4-mini',
+                'outcome': 'completed',
+                'usage_source': 'provider_reported',
+                'completed_at': (now - timedelta(minutes=2)).isoformat(),
+                'tokens': {'total_tokens': 86},
+                'context': {
+                    'workflow_id': 'provider-credit-verify',
+                    'routing_profile': 'operator-authorized-diagnostic',
+                },
+            }
+            proof.update(overrides or {})
+            db.execute(
+                'insert into model_usage_entries values (?, ?)',
+                (proof['entry_id'], json.dumps(proof)),
+            )
+        db.commit()
+    os.chmod(ledger, 0o600)
+    record = {
+        'phase': 'blocked',
+        'reason': 'edit reasoning failed: Hosted reasoning blocked: credit_balance_exhausted; Owner action: restore_provider_credits',
+        'reasoning_request_id': failed,
+        'self_recovery_attempts': 2,
+    }
+    return target, failed, ledger, record
+
+
+def test_verified_provider_credit_reload_allows_one_bounded_p0_request(tmp_path):
+    item, failed, ledger, record = _credit_reload_fixture(tmp_path)
+    state = {'items': {item['id']: record}}
+    previous = worker.reasoning_response(tmp_path, failed)
+
+    assert worker.readmit_after_verified_credit_replenishment(
+        state, [item], tmp_path, max_active=1, usage_ledger_path=ledger
+    ) == [item['id']]
+    assert record['phase'] == 'implementing'
+    assert record['self_recovery_attempts'] == 2
+    assert record['provider_credit_original_failure_id'] == failed
+    assert record['provider_credit_receipt_id'] == 'provider-success-001'
+    new_id = record['reasoning_request_id']
+    assert new_id != failed
+    new_request = json.loads((tmp_path / 'reasoning' / 'requests' / (new_id + '.json')).read_text())
+    assert new_request['context']['verified_credit_recovery'] == {
+        'failed_request_id': failed,
+        'metered_receipt_id': 'provider-success-001',
+        'provider_model': 'gpt-5.4-mini',
+        'verified_at': new_request['context']['verified_credit_recovery']['verified_at'],
+        'retry_limit': 1,
+    }
+    assert worker.reasoning_response(tmp_path, failed) == previous
+    # Repeated cadence and another 429 must not replay original credit failures.
+    record['phase'] = 'blocked'
+    record['reason'] = 'edit reasoning failed: Hosted reasoning blocked: credit_balance_exhausted'
+    assert worker.readmit_after_verified_credit_replenishment(
+        state, [item], tmp_path, max_active=1, usage_ledger_path=ledger
+    ) == []
+
+
+def test_credit_reload_requires_fresh_metered_provider_receipt_and_exact_failure(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    wrong = [
+        {'provider': 'other-provider'},
+        {'outcome': 'failed'},
+        {'usage_source': 'unknown'},
+        {'tokens': {'total_tokens': 0}},
+        {'context': {'workflow_id': 'unattributed-runtime', 'routing_profile': 'operator-authorized-diagnostic'}},
+        {'completed_at': (datetime.now(timezone.utc)-timedelta(days=2)).isoformat()},
+    ]
+    for i, overrides in enumerate(wrong):
+        root = tmp_path / str(i)
+        item, failed, ledger, record = _credit_reload_fixture(root, overrides=overrides)
+        state = {'items': {item['id']: record}}
+        assert worker.readmit_after_verified_credit_replenishment(
+            state, [item], root, max_active=1, usage_ledger_path=ledger
+        ) == []
+        assert record['phase'] == 'blocked'
+        assert record['reasoning_request_id'] == failed
+
+    for i, field, value in [
+        (1, 'primary_provider_error_code', 'insufficient_quota'),
+        (2, 'primary_http_status', 400),
+        (3, 'required_owner_action', 'unknown'),
+        (4, 'retryable', True),
+    ]:
+        root = tmp_path / ('response-' + str(i))
+        item, failed, ledger, record = _credit_reload_fixture(root)
+        response_path = root / 'reasoning' / 'responses' / (failed + '.json')
+        response = json.loads(response_path.read_text())
+        response[field] = value
+        response_path.write_text(json.dumps(response))
+        assert worker.readmit_after_verified_credit_replenishment(
+            {'items': {item['id']: record}}, [item], root,
+            max_active=1, usage_ledger_path=ledger
+        ) == []
+
+
+def test_credit_reload_preserves_authority_handoff_and_engineering_capacity(tmp_path):
+    item, _, ledger, record = _credit_reload_fixture(tmp_path)
+    item['priority'] = 'P1'
+    state = {'items': {item['id']: record}}
+    assert worker.readmit_after_verified_credit_replenishment(
+        state, [item], tmp_path, max_active=1, usage_ledger_path=ledger
+    ) == []
+
+    item['priority'] = 'P0'
+    record['recovery_handoff_intake'] = {'status': 'awaiting_governed_repair'}
+    assert worker.readmit_after_verified_credit_replenishment(
+        state, [item], tmp_path, max_active=1, usage_ledger_path=ledger
+    ) == []
+    del record['recovery_handoff_intake']
+    state['items']['SUPPORT-OPS-OTHER'] = {'phase': 'implementing'}
+    assert worker.readmit_after_verified_credit_replenishment(
+        state, [item], tmp_path, max_active=1, usage_ledger_path=ledger
+    ) == []
+
+    state['items'].pop('SUPPORT-OPS-OTHER')
+    ledger.unlink()
+    assert worker.readmit_after_verified_credit_replenishment(
+        state, [item], tmp_path, max_active=1, usage_ledger_path=ledger
+    ) == []

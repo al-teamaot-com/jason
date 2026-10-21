@@ -116,6 +116,37 @@ A support item stops automatically only for a genuine governance/capability bloc
 
 For every autonomously claimed Support List item, the support-repair lane must emit owner lifecycle events through the same canonical governed Teams owner-notification path used for TODO engineering: **repair started**, **blocked / owner action required** when applicable, and **production-verified complete**. The start message identifies the support ID, defect summary, and repair scope. The blocked message identifies the exact blocker and required owner action. The completion message identifies the merged/deployed revision and the production acceptance evidence that proves the defect is resolved. A support fix is not "complete" for notification purposes merely because code was committed, CI passed, or a PR merged. Notification delivery uses the same durable message/correlation identity, provider/readback verification, bounded retry, duplicate suppression, and `SUPPORT-CONN-037` reliability requirements as TODO lifecycle messages.
 
+### Verified hosted-model credit replenishment
+
+A hosted-model credit or billing error is **not** an ordinary transient transport
+failure. The runtime records a non-retryable failed reasoning receipt and the host
+worker must preserve that receipt and its retry budget; simply restarting the
+worker or overwriting the failed response is prohibited.
+
+For a failed **P0 Support List** item specifically marked
+`credit_balance_exhausted` with HTTP 429 and owner action
+`restore_provider_credits`, the existing rootless support worker may queue
+**one new, separately fingerprinted reasoning request** only if a newer
+provider-reported metered success is recorded from an explicitly scoped,
+operator-authorized `provider-credit-verify` diagnostic in the local usage ledger.
+The evidence must postdate the failure and be fresh (at most 12 hours).
+The operator diagnostic must be a real, minimal hosted-model request through
+Jason's configured client; an account-billing screenshot or a manually entered
+ledger row is not equivalent to a provider-reported successful usage receipt.
+The readmission retains the old failure, response, and retry count, records its
+metered-proof lineage, respects active-work capacity, checks the original
+request fingerprint and current issue eligibility, and refuses pending governed
+repair handoffs or previously retried credit failures. A tiny successful model
+diagnostic proves billing availability **only**; it does not prove the prior
+large engineering request is valid, nor does it authorize source changes,
+provider writes, PR merges, or production deployment.
+
+This limited recovery applies to eligible P0 **support** reasoning, not
+automatically to blocked TODO/development items with independently exhausted
+retries. Those items retain their release-verified repair and readmission
+requirements. The canonical governed Release Manager remains the only
+production promotion path.
+
 The canonical operational logic is `docs/playbooks/Jason-Support-List-Autonomous-Repair.md`.
 
 ## Production boundary

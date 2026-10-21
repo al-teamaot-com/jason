@@ -13,8 +13,11 @@ import ast
 import hashlib
 import importlib.util
 import json
+import logging
 import os
 import re
+import sqlite3
+import stat
 import shutil
 import subprocess
 import sys
@@ -39,6 +42,7 @@ SUPPORT_ID_PATTERN = r'SUPPORT-(?:[A-Z]+-[0-9]+|AUTO-[A-F0-9]{12})'
 META = re.compile(rf'(?im)^\s*-\s*Support item\s*:\s*({SUPPORT_ID_PATTERN})\s*$')
 SUPPORT_ID_IN_TITLE = re.compile(rf'\b({SUPPORT_ID_PATTERN})\b', re.IGNORECASE)
 PRIORITY = {'P0': 0, 'P1': 1, 'P2': 2, 'P3': 3}
+logger = logging.getLogger(__name__)
 
 
 class WorkerError(RuntimeError):
@@ -1768,6 +1772,152 @@ def readmit_after_verified_transport_recovery(
     return resumed
 
 
+def verified_credit_reload_receipt(
+    ledger_path: Path, *, failed_at: datetime, max_age_hours: int = 12,
+) -> dict[str, str] | None:
+    """Read a recent metered provider receipt from a dedicated diagnostic.
+
+    This proves only that the configured hosted reasoning provider accepted a
+    later small request. It does not prove the original large request will pass,
+    authorize endpoint changes, or modify the original retry history.
+    """
+    path = Path(ledger_path)
+    try:
+        info = path.lstat()
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or info.st_mode & 0o077 or failed_at.tzinfo is None):
+            return None
+        db = sqlite3.connect(path.as_uri() + '?mode=ro', uri=True, timeout=2.0)
+        try:
+            rows = db.execute(
+                'SELECT payload_json FROM model_usage_entries '
+                'ORDER BY rowid DESC LIMIT 256'
+            ).fetchall()
+        finally:
+            db.close()
+        observed_now = datetime.now(timezone.utc)
+        for (raw,) in rows:
+            entry = json.loads(raw)
+            if not isinstance(entry, Mapping):
+                continue
+            context = entry.get('context')
+            tokens = entry.get('tokens')
+            if (entry.get('provider') != 'openai'
+                    or entry.get('outcome') != 'completed'
+                    or entry.get('usage_source') != 'provider_reported'
+                    or not isinstance(context, Mapping)
+                    or context.get('workflow_id') != 'provider-credit-verify'
+                    or context.get('routing_profile') != 'operator-authorized-diagnostic'
+                    or not isinstance(tokens, Mapping)
+                    or int(tokens.get('total_tokens') or 0) <= 0):
+                continue
+            at = datetime.fromisoformat(str(entry.get('completed_at') or '').replace('Z', '+00:00'))
+            if (at.tzinfo is None or at <= failed_at
+                    or not 0 <= (observed_now - at).total_seconds() <= max_age_hours * 3600):
+                continue
+            receipt = str(entry.get('entry_id') or '')
+            model = str(entry.get('model') or '')
+            if not receipt or not model:
+                continue
+            return {'entry_id': receipt, 'model': model, 'completed_at': at.isoformat()}
+    except (OSError, ValueError, TypeError, sqlite3.Error, json.JSONDecodeError):
+        return None
+    return None
+
+
+def readmit_after_verified_credit_replenishment(
+    state: dict[str, Any], eligible: list[dict[str, str]], spool: Path,
+    *, max_active: int, usage_ledger_path: Path | None = None,
+) -> list[str]:
+    """One new scoped P0 support request after independently verified API credits.
+
+    Credit failures are deliberately non-retryable at the model boundary.
+    Preserve that failure and its exhausted budget; only the host-side support
+    worker may queue one new content-addressed request with a metered provider
+    success receipt. This is a planning request, never a release/approval action.
+    """
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active = sum(
+        1 for record in records.values()
+        if isinstance(record, Mapping)
+        and record.get('phase') in {'diagnosing', 'implementing', 'ci_repair_needed', 'ci_repairing'}
+    )
+    slots = max(0, max(1, int(max_active)) - active)
+    ledger_path = Path(usage_ledger_path) if usage_ledger_path is not None else spool.parent / 'model-usage.sqlite3'
+    resumed = []
+    for item in eligible:
+        if not slots:
+            break
+        if item.get('priority') != 'P0':
+            continue
+        record = records.get(item['id'])
+        if not isinstance(record, dict) or record.get('phase') != 'blocked':
+            continue
+        handoff = record.get('recovery_handoff_intake')
+        if (record.get('provider_credit_requeue_id') or record.get('pr_number')
+                or (isinstance(handoff, Mapping)
+                    and handoff.get('status') == 'awaiting_governed_repair')):
+            continue
+        reason = str(record.get('reason') or '')
+        if reason.startswith('edit reasoning failed: Hosted reasoning blocked: credit_balance_exhausted'):
+            kind, phase = 'edit_plan', 'implementing'
+        elif reason.startswith('reasoning request failed: Hosted reasoning blocked: credit_balance_exhausted'):
+            kind, phase = 'search_plan', 'diagnosing'
+        else:
+            continue
+        failed_id = str(record.get('reasoning_request_id') or '')
+        if not re.fullmatch(r'[a-f0-9]{64}', failed_id):
+            continue
+        prior = reasoning_response(spool, failed_id)
+        if (not isinstance(prior, Mapping) or prior.get('status') != 'failed'
+                or prior.get('request_id') != failed_id
+                or prior.get('primary_provider_error_code') != 'credit_balance_exhausted'
+                or prior.get('required_owner_action') != 'restore_provider_credits'
+                or prior.get('primary_http_status') != 429
+                or prior.get('retryable') is not False):
+            continue
+        try:
+            failed_at = datetime.fromisoformat(str(prior['completed_at']).replace('Z', '+00:00'))
+            receipt = verified_credit_reload_receipt(ledger_path, failed_at=failed_at)
+            source = spool / 'reasoning' / 'requests' / (failed_id + '.json')
+            if not source.is_file() or source.stat().st_size > 200_000 or receipt is None:
+                continue
+            original = json.loads(source.read_text(encoding='utf-8'))
+            if (not isinstance(original, dict) or request_id(original) != failed_id
+                    or original.get('request_id') != failed_id
+                    or original.get('support_item') != item['id']
+                    or original.get('kind') != kind
+                    or not isinstance(original.get('context'), dict)):
+                continue
+        except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+            continue
+        context = dict(original['context'])
+        if 'verified_credit_recovery' in context:
+            continue
+        context['verified_credit_recovery'] = {
+            'failed_request_id': failed_id,
+            'metered_receipt_id': receipt['entry_id'],
+            'provider_model': receipt['model'],
+            'verified_at': receipt['completed_at'],
+            'retry_limit': 1,
+        }
+        new_id = queue_reasoning(spool, kind=kind, item=item, context=context)
+        if new_id == failed_id:
+            continue
+        record.update({
+            'phase': phase,
+            'reason': 'One bounded new request after verified API credit replenishment.',
+            'provider_credit_original_failure_id': failed_id,
+            'provider_credit_receipt_id': receipt['entry_id'],
+            'provider_credit_requeue_id': new_id,
+            'reasoning_request_id': new_id,
+            'updated_at': now(),
+        })
+        resumed.append(item['id'])
+        slots -= 1
+    return resumed
+
+
 def original_partial_edits_match_known_proposal(
     worktree: Path,
     edits: list[Mapping[str, Any]],
@@ -2923,6 +3073,7 @@ def main() -> int:
 
     readmit_recovered_reasoning(state, support, spool, max_active=args.max_active)
     readmit_after_verified_transport_recovery(state, support, spool, max_active=args.max_active)
+    readmit_after_verified_credit_replenishment(state, support, spool, max_active=args.max_active)
     readmit_missing_support_source_context(
         state, support, repo, spool, gate, policy, max_active=args.max_active,
     )
