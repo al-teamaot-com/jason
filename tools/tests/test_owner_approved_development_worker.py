@@ -1769,6 +1769,47 @@ def test_exhausted_development_transport_gets_one_verified_recovery_request(tmp_
     ) == []
 
 
+
+def test_verified_transport_recovery_rejects_missing_proof_and_full_capacity(tmp_path, monkeypatch):
+    """Never reopen an exhausted development item without proof and a worker slot."""
+    failed_id = 'a' * 64
+    item = {'id': 'DEV-1196', 'issue_number': 1196, 'title': 'Approved P0 work'}
+    record = {
+        'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+        'reason': 'development reasoning failed: HTTP transport failed',
+        'reasoning_request_id': failed_id, 'self_recovery_attempts': 2,
+    }
+    state = {'items': {'DEV-1196': record}}
+    seen = []
+    monkeypatch.setattr(
+        module, 'queue_reasoning',
+        lambda *args, **kwargs: seen.append((args, kwargs)) or 'c' * 64,
+    )
+    monkeypatch.setattr(module, 'active_support_count', lambda spool: 0)
+    monkeypatch.setattr(
+        module.support, 'verified_later_reasoning_success',
+        lambda *args, **kwargs: None,
+    )
+    assert module.readmit_development_after_verified_transport_recovery(
+        state, [item], tmp_path, max_active=2,
+    ) == []
+    assert record['phase'] == 'blocked'
+    assert record['self_recovery_attempts'] == 2
+    assert not seen
+
+    monkeypatch.setattr(
+        module.support, 'verified_later_reasoning_success',
+        lambda *args, **kwargs: ({'context': {}}, 'b' * 64),
+    )
+    monkeypatch.setattr(module, 'active_support_count', lambda spool: 2)
+    assert module.readmit_development_after_verified_transport_recovery(
+        state, [item], tmp_path, max_active=2,
+    ) == []
+    assert record['phase'] == 'blocked'
+    assert not seen
+
+
+
 def test_existing_pr_preserves_pending_and_inflight_ci_repairs():
     assert module.phase_for_existing_pr('ci_repair_needed') == 'ci_repair_needed'
     assert module.phase_for_existing_pr('ci_repairing') == 'ci_repairing'
