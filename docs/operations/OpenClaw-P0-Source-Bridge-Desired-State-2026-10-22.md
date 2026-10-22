@@ -20,4 +20,8 @@ The drift guard retains normal detection of unexpected user/system units, forbid
 4. Verify fresh protected drift evidence, correct production SHA, CCC/last-known-good alignment and the circuit-breaker state.
 5. Only after native reasoning has produced a genuinely successful new `search_plan` or `edit_plan` reply and the merged retry repair is deployed may existing blocked development work be admitted under its exact-once safeguards. No historical retry ledger is reset.
 
+## Source integration overlap
+
+Draft finance PR #692 changes historical versions of the desired-state policy and drift-guard test files. The finance PR is based on older source and is unrelated to this P0 recovery. If #692 is eventually reconciled, it must retain the exact OpenClaw bridge entries and the regression that still rejects all other undeclared user units. No finance changes are adopted by this repair.
+
 When the pilot is retired, remove both optional entries through the same governed versioned process and retire the corresponding user units under the approved P0 cleanup plan.
