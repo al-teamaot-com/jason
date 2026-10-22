@@ -69,3 +69,18 @@ Next reuse the same service for actual PO/invoice staff submissions and later Qu
 Every meaningful failure yields one recorded first failed boundary, actual root cause rather than symptom, a bounded fix, a regression reproducing the original failure, and post-fix proof. A recurrence should correlate to the existing incident—not create another stalled issue. Status must distinguish **working**, **not working**, and **needs a human action**, and never claim delivery or production success without verifying it.
 
 This method does not introduce another engineering queue, production manager, release lane or project. Reuse the existing owner-approved development workflow and related P0 issues (#1440/#1545, #759, #1467/#1470, #635).
+
+## Reviewer handoff and state reporting
+
+For each feature PR, attach one compact evidence record:
+
+| Stage | Required observation |
+| --- | --- |
+| BUILD | Synthetic fixture, successful output and repeatable test |
+| PROVE | Real, harmless provider interaction and authenticated requester/recipient readback |
+| PROTECT | Original successful test remains green, unauthorized/expired/replayed tests fail closed |
+| DEPLOY | Protected exact-SHA release, authoritative production readback, real employee task completion |
+
+The worker should record the **first unmet stage**, the exact action needed to advance, and whether a human must act. Do not label a staged PR as live readiness; do not gate safe BUILD/PROVE experiments on unrelated production work. Any change that breaks an already proven behavior must restore that same behavior and add a regression test before proceeding.
+
+**Contact policy:** 04:00–17:00 Eastern is the Owner's available immediate-contact window; notifications outside it may be sent for review upon waking, without assuming an after-hours response. User-facing status and Adaptive Cards must distinguish an actionable approval from an informational notice.
