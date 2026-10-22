@@ -1325,6 +1325,68 @@ def readmit_recovered_development_reasoning(
     return resumed
 
 
+def readmit_development_after_verified_transport_recovery(
+    state: dict[str, Any], admitted: list[dict[str, Any]], spool: Path,
+    *, max_active: int,
+) -> list[str]:
+    """Queue one new development request after independent transport recovery proof."""
+    records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
+    active = sum(1 for record in records.values() if isinstance(record, Mapping)
+                 and record.get('phase') in ACTIVE_PHASES)
+    slots = max(0, max(1, int(max_active)) - active_support_count(spool) - active)
+    resumed: list[str] = []
+    for item in admitted:
+        if not slots:
+            break
+        record = records.get(item['id'])
+        if (not isinstance(record, dict) or record.get('phase') != 'blocked'
+                or record.get('blocker_class') != 'internal_retry_exhausted'
+                or record.get('provider_recovery_requeue_id') or record.get('pr_number')):
+            continue
+        reason = str(record.get('reason') or '')
+        if reason in {
+            'development edit reasoning failed: HTTP transport failed',
+            'development edit reasoning failed: HTTP transport failed with status 400',
+        }:
+            kind, phase = 'edit_plan', 'implementing'
+        elif reason in {
+            'development reasoning failed: HTTP transport failed',
+            'development reasoning failed: HTTP transport failed with status 400',
+        }:
+            kind, phase = 'search_plan', 'diagnosing'
+        else:
+            continue
+        failed_id = str(record.get('reasoning_request_id') or '')
+        verified = support.verified_later_reasoning_success(
+            spool, failed_rid=failed_id, item_id=item['id'], kind=kind,
+        )
+        if verified is None:
+            continue
+        original, proof_id = verified
+        context = dict(original['context'])
+        if 'verified_transport_recovery' in context:
+            continue
+        context['verified_transport_recovery'] = {
+            'failed_request_id': failed_id, 'newer_success_id': proof_id,
+            'retry_limit': 1, 'purpose': 'bounded_same_schema_provider_recovery',
+        }
+        new_id = queue_reasoning(spool, kind=kind, item=item, context=context)
+        if new_id == failed_id:
+            continue
+        record.update({
+            'phase': phase,
+            'reason': 'One bounded development request after verified reasoning transport recovery.',
+            'provider_recovery_original_failure_id': failed_id,
+            'provider_recovery_proof_id': proof_id,
+            'provider_recovery_requeue_id': new_id,
+            'reasoning_request_id': new_id,
+            'updated_at': now(),
+        })
+        resumed.append(item['id'])
+        slots -= 1
+    return resumed
+
+
 def blocked_work_next_action(reason: str) -> dict[str, str]:
     text = str(reason or "").casefold()
     if any(x in text for x in ("approval", "authorization", "credential")):
@@ -1427,6 +1489,9 @@ def main() -> int:
     )
     readmit_explicit_verified_dependencies(state, admitted, spool, max_active=max(1, int(args.max_active)))
     readmit_recovered_development_reasoning(state, admitted, spool, max_active=max(1, int(args.max_active)))
+    readmit_development_after_verified_transport_recovery(
+        state, admitted, spool, max_active=max(1, int(args.max_active)),
+    )
     state['discovery'] = {
         'observed_at': now(),
         'approved_issue_numbers': [item['issue_number'] for item in eligible],

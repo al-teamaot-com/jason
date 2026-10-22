@@ -1740,6 +1740,76 @@ def test_development_recovered_response_does_not_bypass_retry_exhaustion(tmp_pat
     assert record['blocker_class'] == 'internal_retry_exhausted'
 
 
+def test_exhausted_development_transport_gets_one_verified_recovery_request(tmp_path, monkeypatch):
+    monkeypatch.setattr(module, 'active_support_count', lambda spool: 0)
+    failed_id = 'a' * 64
+    record = {
+        'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+        'reason': 'development edit reasoning failed: HTTP transport failed with status 400',
+        'reasoning_request_id': failed_id, 'self_recovery_attempts': 2,
+    }
+    item = {'id': 'DEV-1196', 'issue_number': 1196, 'title': 'Existing approved repair'}
+    proof = ({'context': {'approved_scope': 'existing'}}, 'b' * 64)
+    monkeypatch.setattr(module.support, 'verified_later_reasoning_success',
+                        lambda *args, **kwargs: proof)
+    queued = []
+    monkeypatch.setattr(module, 'queue_reasoning',
+                        lambda spool, kind, item, context: queued.append((kind, context)) or 'c' * 64)
+
+    state = {'items': {'DEV-1196': record}}
+    assert module.readmit_development_after_verified_transport_recovery(
+        state, [item], tmp_path, max_active=3,
+    ) == ['DEV-1196']
+    assert record['phase'] == 'implementing'
+    assert record['self_recovery_attempts'] == 2
+    assert queued[0][0] == 'edit_plan'
+    assert queued[0][1]['verified_transport_recovery']['retry_limit'] == 1
+    assert module.readmit_development_after_verified_transport_recovery(
+        state, [item], tmp_path, max_active=3,
+    ) == []
+
+
+
+def test_verified_transport_recovery_rejects_missing_proof_and_full_capacity(tmp_path, monkeypatch):
+    """Never reopen an exhausted development item without proof and a worker slot."""
+    failed_id = 'a' * 64
+    item = {'id': 'DEV-1196', 'issue_number': 1196, 'title': 'Approved P0 work'}
+    record = {
+        'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+        'reason': 'development reasoning failed: HTTP transport failed',
+        'reasoning_request_id': failed_id, 'self_recovery_attempts': 2,
+    }
+    state = {'items': {'DEV-1196': record}}
+    seen = []
+    monkeypatch.setattr(
+        module, 'queue_reasoning',
+        lambda *args, **kwargs: seen.append((args, kwargs)) or 'c' * 64,
+    )
+    monkeypatch.setattr(module, 'active_support_count', lambda spool: 0)
+    monkeypatch.setattr(
+        module.support, 'verified_later_reasoning_success',
+        lambda *args, **kwargs: None,
+    )
+    assert module.readmit_development_after_verified_transport_recovery(
+        state, [item], tmp_path, max_active=2,
+    ) == []
+    assert record['phase'] == 'blocked'
+    assert record['self_recovery_attempts'] == 2
+    assert not seen
+
+    monkeypatch.setattr(
+        module.support, 'verified_later_reasoning_success',
+        lambda *args, **kwargs: ({'context': {}}, 'b' * 64),
+    )
+    monkeypatch.setattr(module, 'active_support_count', lambda spool: 2)
+    assert module.readmit_development_after_verified_transport_recovery(
+        state, [item], tmp_path, max_active=2,
+    ) == []
+    assert record['phase'] == 'blocked'
+    assert not seen
+
+
+
 def test_existing_pr_preserves_pending_and_inflight_ci_repairs():
     assert module.phase_for_existing_pr('ci_repair_needed') == 'ci_repair_needed'
     assert module.phase_for_existing_pr('ci_repairing') == 'ci_repairing'
