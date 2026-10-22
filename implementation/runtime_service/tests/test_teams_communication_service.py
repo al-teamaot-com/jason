@@ -461,4 +461,3 @@ def test_canonical_adaptive_card_reports_synthetic_receipt_as_unverified(tmp_pat
     assert receipt.message_id_synthetic is True
     assert receipt.delivery_evidence_type == "provider_call_completed_without_message_id"
     assert len(calls) == 1  # unknown outcome cannot trigger a blind resend
-
