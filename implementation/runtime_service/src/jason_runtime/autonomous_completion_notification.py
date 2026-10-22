@@ -910,20 +910,14 @@ class ReleaseManagerOwnerNotificationMaintenance:
                 arguments["owner_action"] = owner_action
             try:
                 result = self.notifier.send(event_type, **arguments)
-                message_id = str(result.get("message_id") or "").strip()
-                if not message_id:
-                    raise RuntimeError("release Teams notification missing message id")
-                if result.get("message_id_synthetic") or message_id.startswith("accepted:"):
-                    # Provider acceptance is not delivery. A blind resend risks
-                    # duplicate cards; retain evidence for explicit reconciliation.
-                    unverified.mkdir(parents=True, exist_ok=True, mode=0o700)
-                    uncertain = unverified / path.name
-                    uncertain.write_text(json.dumps({
-                        "event_type": event_type, "release_id": release_id,
-                        "receipt_id": message_id, "observed_at": current.isoformat(),
-                        "status": "provider_accepted_delivery_unverified",
-                    }, sort_keys=True) + "\n", encoding="utf-8")
-                    os.chmod(uncertain, 0o600)
+                message_id, synthetic = _notification_receipt(result)
+                if synthetic:
+                    # A gateway acceptance token is not a Microsoft message ID.
+                    # Preserve the unknown state without a duplicate send.
+                    _persist_unverified_notification(
+                        unverified, path.name, event_type=event_type,
+                        receipt_id=message_id, observed_at=current, release_id=release_id,
+                    )
                     continue
             except Exception as exc:
                 # Never let one undelivered release event suppress subsequent alerts.
@@ -949,6 +943,7 @@ class ReleaseManagerOwnerNotificationMaintenance:
                         "event_type": event_type,
                         "release_id": release_id,
                         "message_id": message_id,
+                        "delivery_state": "provider_message_reference_recorded",
                         "notified_at": current.isoformat(),
                     },
                     sort_keys=True,
