@@ -2267,6 +2267,12 @@ CCC_POSTFLIGHT_MONITORING_RETRY_DELAYS = (15, 20, 25)
 # source/runtime identity, all other gates passing, and new report identifiers.
 CCC_POSTFLIGHT_PROVIDER_EXCEPTION_RETRY_DELAYS = (10, 15)
 CCC_RETRYABLE_READ_CANARIES = {
+    # Both Datto checks are read-only. If provider initialization or transient
+    # SQLite contention raises during a live read, the independent checker may
+    # run a bounded, FRESH full CCC report. A failed report never counts as PASS.
+    # Incident 2026-10-22: two Datto-only exceptions did not qualify because
+    # this mapping omitted endpoint.device.read, stranding an approved release.
+    "datto_rmm": "endpoint.device.read",
     "datto_edr": "endpoint.security.status.read",
     "dnsfilter": "dns.protection.organization.read",
 }
