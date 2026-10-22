@@ -988,6 +988,7 @@ class AutonomousDeploymentCompletionNotificationMaintenance:
 
         results = self.spool_root / "results"
         notified = self.spool_root / "notifications"
+        unverified = self.spool_root / "notifications-unverified"
         if not results.exists():
             return False
         notified.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -995,7 +996,7 @@ class AutonomousDeploymentCompletionNotificationMaintenance:
         handled = False
         for path in sorted(results.glob("*.json"), key=lambda item: item.stat().st_mtime):
             marker = notified / path.name
-            if marker.exists():
+            if marker.exists() or (unverified / path.name).exists():
                 continue
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
@@ -1013,11 +1014,18 @@ class AutonomousDeploymentCompletionNotificationMaintenance:
             if len(candidate) != 40 or not support_item:
                 continue
 
-            self.notifier.send(
+            result = self.notifier.send(
                 "deployment_completed",
                 candidate_sha=candidate,
                 support_item=support_item,
             )
+            message_id, synthetic = _notification_receipt(result)
+            if synthetic:
+                _persist_unverified_notification(
+                    unverified, path.name, event_type="deployment_completed",
+                    receipt_id=message_id, observed_at=current, support_item=support_item,
+                )
+                continue
             temp = marker.with_suffix(marker.suffix + ".tmp")
             temp.write_text(
                 json.dumps(
@@ -1025,6 +1033,8 @@ class AutonomousDeploymentCompletionNotificationMaintenance:
                         "event_type": "deployment_completed",
                         "candidate_sha": candidate,
                         "support_item": support_item,
+                        "message_id": message_id,
+                        "delivery_state": "provider_message_reference_recorded",
                         "notified_at": current.isoformat(),
                     },
                     sort_keys=True,
