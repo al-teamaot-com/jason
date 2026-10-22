@@ -2434,6 +2434,128 @@ def _transient_provider_ccc_report(*, name="datto_edr"):
     return report
 
 
+
+
+def _dual_datto_provider_ccc_report():
+    """The two precise, read-only canary failures seen in the Oct 22 CCC."""
+    report = _transient_provider_ccc_report(name="datto_rmm")
+    check = next(x for x in report["checks"]
+                 if x["check_id"] == "governed-provider-boundary-canaries")
+    evidence = check["evidence"]
+    evidence["failures"].append({
+        "name": "datto_edr",
+        "status": "exception",
+        "exception_type": "OperationalError",
+        "expected_status": "succeeded",
+        "expected": {
+            "name": "datto_edr",
+            "expected_status": "succeeded",
+            "expected_provider": "datto_edr",
+            "capability": "endpoint.security.status.read",
+        },
+    })
+    evidence["failures"][0]["exception_type"] = "OperationalError"
+    next(x for x in evidence["results"] if x["name"] == "datto_edr")["status"] = "exception"
+    return report
+
+
+def test_ccc_oct22_dual_datto_read_exceptions_are_retryable_but_never_pass():
+    import copy
+
+    report = _dual_datto_provider_ccc_report()
+    # Qualification means *retry*, not certification of this failed report.
+    assert report["status"] == "FAIL"
+    assert runner.retryable_ccc_provider_exceptions(report) is True
+
+    bad = copy.deepcopy(report)
+    bad["checks"][-1]["status"] = "FAIL"
+    assert runner.retryable_ccc_provider_exceptions(bad) is False
+
+    bad = copy.deepcopy(report)
+    bad["checks"][-1]["status"] = "NOT_PROVEN"
+    assert runner.retryable_ccc_provider_exceptions(bad) is False
+
+    bad = copy.deepcopy(report)
+    check = next(x for x in bad["checks"]
+                 if x["check_id"] == "governed-provider-boundary-canaries")
+    check["evidence"]["failures"][0]["expected"]["capability"] = "endpoint.device.delete"
+    assert runner.retryable_ccc_provider_exceptions(bad) is False
+
+    bad = copy.deepcopy(report)
+    check = next(x for x in bad["checks"]
+                 if x["check_id"] == "governed-provider-boundary-canaries")
+    check["evidence"]["failures"][0]["status"] = "denied"
+    assert runner.retryable_ccc_provider_exceptions(bad) is False
+
+    bad = copy.deepcopy(report)
+    check = next(x for x in bad["checks"]
+                 if x["check_id"] == "governed-provider-boundary-canaries")
+    check["evidence"]["failures"].append(copy.deepcopy(check["evidence"]["failures"][0]))
+    assert runner.retryable_ccc_provider_exceptions(bad) is False
+
+
+def test_ccc_oct22_dual_datto_reads_need_fresh_pass_not_first_failed_report(tmp_path):
+    import json
+    from types import SimpleNamespace
+
+    ccc = tmp_path / "run_ccc.py"
+    ccc.write_text("")
+    config = tmp_path / "ccc.json"
+    config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    calls = []
+
+    def checker(*args, **kwargs):
+        calls.append(len(calls) + 1)
+        report = (_dual_datto_provider_ccc_report() if len(calls) == 1
+                  else _ccc_test_report(runtime=SHA_A, mode="pass"))
+        report["run_id"] = f"distinct-datto-ccc-{len(calls)}"
+        report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        latest.write_text(json.dumps(report))
+        return SimpleNamespace(returncode=1 if len(calls) == 1 else 0)
+
+    with patch.object(runner.subprocess, "run", side_effect=checker), patch.object(runner.time, "sleep") as sleep:
+        proof = runner.run_release_ccc_gate(
+            SHA_A, SHA_A, before_mutation=False,
+            ccc_runner=ccc, ccc_config=config, latest=latest,
+        )
+    assert proof["mode"] == "live_certified"
+    assert proof["transient_provider_exception_retries"] == 1
+    assert proof["failed_provider_exception_run_ids"] == ["distinct-datto-ccc-1"]
+    assert len(calls) == 2
+    assert [x.args for x in sleep.call_args_list] == [(10,)]
+
+
+def test_ccc_oct22_dual_datto_repeated_failure_still_denies_release(tmp_path):
+    import json
+    from types import SimpleNamespace
+
+    ccc = tmp_path / "run_ccc.py"
+    ccc.write_text("")
+    config = tmp_path / "ccc.json"
+    config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    calls = []
+
+    def checker(*args, **kwargs):
+        calls.append(len(calls) + 1)
+        report = _dual_datto_provider_ccc_report()
+        report["run_id"] = f"persistent-datto-ccc-{len(calls)}"
+        report["finished_at"] = datetime.now(timezone.utc).isoformat()
+        latest.write_text(json.dumps(report))
+        return SimpleNamespace(returncode=1)
+
+    with patch.object(runner.subprocess, "run", side_effect=checker), patch.object(runner.time, "sleep") as sleep:
+        with pytest.raises(runner.ReleaseManagerError, match="post-mutation CCC did not certify"):
+            runner.run_release_ccc_gate(
+                SHA_A, SHA_A, before_mutation=False,
+                ccc_runner=ccc, ccc_config=config, latest=latest,
+            )
+    assert len(calls) == 3
+    assert [x.args for x in sleep.call_args_list] == [(10,), (15,)]
+
+
+
 def test_ccc_provider_exception_only_classifier_never_broadens():
     import copy
     correct = _transient_provider_ccc_report()
