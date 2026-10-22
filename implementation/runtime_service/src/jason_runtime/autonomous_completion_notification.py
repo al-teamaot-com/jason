@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
-from urllib.request import Request, urlopen
 
 from kernel.capabilities import (
     CapabilityApproval,
@@ -18,7 +17,6 @@ from kernel.capabilities import (
     CapabilityStewardship,
     IdempotencyBehavior,
 )
-from kernel.execution_deadline import bounded_execution_timeout
 from kernel.execution_providers import (
     ExecutionProvider,
     ExecutionProviderRegistryService,
@@ -36,6 +34,7 @@ from orchestrator.contracts import OrchestrationRequest
 from orchestrator.execution_plan import ExecutionPlan, PreparedExecutionPlan
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.service import InvocationResult
+from .teams_message_send import post_existing_teams_gateway
 from autonomous_remediation.autonomous_principal import AutonomousPrincipal, AutonomousRequestFactory
 from autonomous_remediation.playbook_autonomy_approval import SQLitePlaybookAutonomyApprovalStore
 from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
@@ -611,27 +610,26 @@ class AutonomousCompletionTeamsInvoker:
         opaque = prepared.opaque
         if not isinstance(opaque, _PreparedNotification):
             raise PermissionError("invalid autonomous completion prepared state")
-        body = json.dumps(opaque.payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        http_request = Request(
-            opaque.gateway_url + "/internal/proactive/send",
-            data=body,
-            method="POST",
-            headers={
-                "Authorization": "Bearer " + opaque.token,
-                "Content-Type": "application/json",
-            },
+        # Share the governed gateway transport and its strict real-vs-synthetic
+        # receipt contract. Do not independently interpret an accepted:... token
+        # as the Microsoft Teams provider's message identifier.
+        result = post_existing_teams_gateway(
+            gateway_url=opaque.gateway_url,
+            token=opaque.token,
+            payload=opaque.payload,
         )
-        with urlopen(http_request, timeout=bounded_execution_timeout(20)) as response:
-            result = json.loads(response.read().decode("utf-8"))
-        if result.get("status") != "succeeded" or not result.get("message_id"):
-            raise RuntimeError("autonomous completion Teams send failed")
         return InvocationResult(
             output={
                 "provider": PROVIDER,
                 "channel": "microsoft_teams",
                 "recipient_identity": RECIPIENT_JASON_IDENTITY,
-                "message_id": str(result["message_id"]),
-                "message_id_synthetic": bool(result.get("message_id_synthetic", False)),
+                "message_id": result["message_id"],
+                "message_id_synthetic": result["message_id_synthetic"],
+                "delivery_evidence_type": result["delivery_evidence_type"],
+                "delivery_state": (
+                    "provider_accepted_delivery_unverified"
+                    if result["message_id_synthetic"] else "provider_accepted"
+                ),
             },
             attempts=1,
         )
