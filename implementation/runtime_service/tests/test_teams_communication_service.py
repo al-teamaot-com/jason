@@ -445,3 +445,19 @@ def test_callback_binding_cannot_switch_tenant_or_actor():
         with pytest.raises(PermissionError,match="not bound"):
             flow.handle(**args)
     assert not repo.decisions
+
+
+def test_canonical_adaptive_card_reports_synthetic_receipt_as_unverified(tmp_path, monkeypatch):
+    trans, calls = transport(tmp_path, monkeypatch, result={
+        "status": "succeeded",
+        "message_id": "accepted:synthetic-card",
+        "message_id_synthetic": True,
+        "delivery_evidence_type": "provider_call_completed_without_message_id",
+        "conversation_id": "teams-conversation-1",
+    })
+    receipt = facade(trans).send(request())
+    assert receipt.delivery_state == "provider_accepted_delivery_unverified"
+    assert receipt.message_id == "accepted:synthetic-card"
+    assert receipt.message_id_synthetic is True
+    assert receipt.delivery_evidence_type == "provider_call_completed_without_message_id"
+    assert len(calls) == 1  # unknown outcome cannot trigger a blind resend

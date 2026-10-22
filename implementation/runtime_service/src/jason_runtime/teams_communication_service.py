@@ -42,7 +42,11 @@ class TeamsDeliveryReceipt:
     message_id: str
     conversation_id: str | None
     recipient_identity_id: str
+    # A provider call may be accepted without a real Teams message identifier.
+    # Neither state proves the human saw or acted on the message.
     delivery_state: str = "provider_accepted"
+    message_id_synthetic: bool = False
+    delivery_evidence_type: str = "provider_message_id"
 
 
 @dataclass
@@ -85,6 +89,12 @@ class ExistingTeamsGatewayTransport:
             message_id=message_id.strip(),
             conversation_id=conversation_id if isinstance(conversation_id, str) else None,
             recipient_identity_id=str(getattr(binding, "jason_identity_id", "")),
+            delivery_state=(
+                "provider_accepted_delivery_unverified"
+                if result["message_id_synthetic"] else "provider_accepted"
+            ),
+            message_id_synthetic=result["message_id_synthetic"],
+            delivery_evidence_type=result["delivery_evidence_type"],
         )
 
 
