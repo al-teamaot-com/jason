@@ -51,7 +51,29 @@ def post_existing_teams_gateway(
             or not isinstance(result.get("message_id"), str)
             or not result["message_id"].strip()):
         raise RuntimeError("Teams proactive send failed")
-    return result
+
+    # The SDK sometimes returns no provider message ID for Adaptive Cards.
+    # The gateway then returns accepted:<UUID>, which is only an acceptance
+    # reference, not a Teams message ID or evidence the person was notified.
+    message_id = result["message_id"].strip()
+    synthetic = result.get("message_id_synthetic", message_id.startswith("accepted:"))
+    if type(synthetic) is not bool or synthetic != message_id.startswith("accepted:"):
+        raise RuntimeError("Teams gateway supplied inconsistent send evidence")
+    evidence_type = result.get(
+        "delivery_evidence_type",
+        "provider_call_completed_without_message_id" if synthetic else "provider_message_id",
+    )
+    expected_type = (
+        "provider_call_completed_without_message_id" if synthetic else "provider_message_id"
+    )
+    if evidence_type != expected_type:
+        raise RuntimeError("Teams gateway supplied inconsistent receipt type")
+    return {
+        **result,
+        "message_id": message_id,
+        "message_id_synthetic": synthetic,
+        "delivery_evidence_type": evidence_type,
+    }
 
 
 @dataclass
@@ -136,6 +158,12 @@ class TeamsMessageSendInvoker:
                 "message_id": result["message_id"],
                 "conversation_id": result.get("conversation_id"),
                 "bootstrap_created": bool(result.get("bootstrap_created", False)),
+                "message_id_synthetic": result["message_id_synthetic"],
+                "delivery_evidence_type": result["delivery_evidence_type"],
+                "delivery_state": (
+                    "provider_accepted_delivery_unverified"
+                    if result["message_id_synthetic"] else "provider_accepted"
+                ),
             },
             attempts=1,
         )
