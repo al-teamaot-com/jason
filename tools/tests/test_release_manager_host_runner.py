@@ -2494,6 +2494,33 @@ def test_ccc_oct22_dual_datto_read_exceptions_are_retryable_but_never_pass():
     assert runner.retryable_ccc_provider_exceptions(bad) is False
 
 
+def test_ccc_oct22_dual_datto_preflight_never_uses_postflight_retry(tmp_path):
+    import json
+    import pytest
+    from types import SimpleNamespace
+
+    ccc = tmp_path / "run_ccc.py"
+    ccc.write_text("")
+    config = tmp_path / "ccc.json"
+    config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    report = _dual_datto_provider_ccc_report()
+    report["run_id"] = "datto-preflight-still-fail-closed"
+    report["finished_at"] = datetime.now(timezone.utc).isoformat()
+    latest.write_text(json.dumps(report))
+
+    with patch.object(
+        runner.subprocess, "run", return_value=SimpleNamespace(returncode=1)
+    ) as proc, patch.object(runner.time, "sleep") as sleep:
+        with pytest.raises(runner.ReleaseManagerError, match="pre-mutation CCC denied"):
+            runner.run_release_ccc_gate(
+                SHA_A, SHA_A, before_mutation=True,
+                ccc_runner=ccc, ccc_config=config, latest=latest,
+            )
+    assert proc.call_count == 1
+    sleep.assert_not_called()
+
+
 def test_ccc_oct22_dual_datto_reads_need_fresh_pass_not_first_failed_report(tmp_path):
     import json
     from types import SimpleNamespace
