@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -77,6 +78,55 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
             invoker.prepare_execution_plan(
                 request=request,
                 resolution=resolution,
+            )
+
+    def test_autonomous_card_notifier_reuses_shared_gateway_once(self):
+        with tempfile.TemporaryDirectory() as td:
+            token_path = Path(td) / "token"
+            token_path.write_text("synthetic-token", encoding="utf-8")
+            binding = SimpleNamespace(
+                status="active", jason_identity_id="person-al",
+                microsoft_tenant_id="f7054323-d52b-4863-8c2f-1898f0b6077c",
+                microsoft_object_id="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            )
+            invoker = AutonomousCompletionTeamsInvoker(
+                gateway_url="http://gateway.internal:3979",
+                token_file=token_path, bindings=BindingStore(binding),
+            )
+            request = SimpleNamespace(
+                capability_name="communication.teams.autonomy.completion.send",
+                principal_id="jason-autonomy-worker", permission_mode="execute",
+                organization_id="aot", client_id=None,
+                arguments={
+                    "event_type": "work_started",
+                    "work_id": "DEV-1440",
+                    "work_title": "Teams universal approver",
+                    "summary": "Safe nonexecuting test started",
+                },
+            )
+            resolution = SimpleNamespace(
+                selected_provider_id="microsoft_teams_gateway_autonomy_completion",
+            )
+            prepared = invoker.prepare_execution_plan(
+                request=request, resolution=resolution,
+            )
+            receipt = {
+                "message_id": "accepted:receipt-1",
+                "message_id_synthetic": True,
+                "delivery_evidence_type": "provider_call_completed_without_message_id",
+            }
+            with patch(
+                "jason_runtime.autonomous_completion_notification.post_existing_teams_gateway",
+                return_value=receipt,
+            ) as send:
+                result = invoker.invoke_execution_plan(
+                    request=request, resolution=resolution, prepared=prepared,
+                )
+            send.assert_called_once()
+            self.assertEqual(send.call_args.kwargs["payload"]["card"]["type"], "AdaptiveCard")
+            self.assertTrue(result.output["message_id_synthetic"])
+            self.assertEqual(
+                result.output["delivery_state"], "provider_accepted_delivery_unverified",
             )
 
     def test_verified_deployment_notifies_once(self):
