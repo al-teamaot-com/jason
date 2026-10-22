@@ -1085,6 +1085,7 @@ class SelfHealEscalationNotificationMaintenance:
 
         escalations = self.spool_root / "escalations"
         notified = self.spool_root / "notifications"
+        unverified = self.spool_root / "notifications-unverified"
         if not escalations.exists():
             return False
         notified.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -1092,7 +1093,7 @@ class SelfHealEscalationNotificationMaintenance:
         handled = False
         for path in sorted(escalations.glob("*.json"), key=lambda item: item.stat().st_mtime):
             marker = notified / path.name
-            if marker.exists():
+            if marker.exists() or (unverified / path.name).exists():
                 continue
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
@@ -1103,19 +1104,28 @@ class SelfHealEscalationNotificationMaintenance:
             fingerprint = str(payload.get("fingerprint") or "").strip()
             if not fingerprint or path.stem != fingerprint:
                 continue
-            self.notifier.send(
+            result = self.notifier.send(
                 "self_heal_escalation",
                 degraded_function=str(payload.get("degraded_function") or ""),
                 evidence_summary=str(payload.get("evidence_summary") or ""),
                 attempt_summary=str(payload.get("attempt_summary") or ""),
                 owner_action=str(payload.get("owner_action") or ""),
             )
+            message_id, synthetic = _notification_receipt(result)
+            if synthetic:
+                _persist_unverified_notification(
+                    unverified, path.name, event_type="self_heal_escalation",
+                    receipt_id=message_id, observed_at=current, fingerprint=fingerprint,
+                )
+                continue
             temp = marker.with_suffix(marker.suffix + ".tmp")
             temp.write_text(
                 json.dumps(
                     {
                         "event_type": "self_heal_escalation",
                         "fingerprint": fingerprint,
+                        "message_id": message_id,
+                        "delivery_state": "provider_message_reference_recorded",
                         "notified_at": current.isoformat(),
                     },
                     sort_keys=True,
