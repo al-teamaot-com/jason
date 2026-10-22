@@ -113,6 +113,16 @@ def test_database_unavailable_fails_even_with_full_proof(seeded):
     assert "replay_unavailable_or_unsafe" in result["failures"]
 
 
+def test_symlinked_database_rejected_even_if_target_is_readable(seeded):
+    db, _, _, _, _ = seeded
+    replacement = db["replay"].with_name("replacement.sqlite3")
+    db["replay"].rename(replacement)
+    db["replay"].symlink_to(replacement)
+    result = probe(seeded)
+    assert result["status"] == "fail"
+    assert "replay_unavailable_or_unsafe" in result["failures"]
+
+
 def test_bad_signing_registry_fails_even_with_full_proof(seeded):
     _, registry, _, _, _ = seeded
     registry.write_text(json.dumps({"keys": []}), encoding="utf-8")
@@ -139,6 +149,18 @@ def test_legacy_failed_proof_never_adopted(seeded):
     report["status"] = "fail"
     output.write_text(json.dumps(report), encoding="utf-8")
     os.chmod(output, 0o600)
+    full.unlink()
+    result = fast.check(output=output, full_path=full, databases=db, registry_path=registry)
+    assert result["status"] == "fail"
+    assert not full.exists()
+
+
+def test_legacy_stale_full_proof_is_not_adopted_or_refreshed(seeded):
+    db, registry, full, report, output = seeded
+    output.write_text(json.dumps(report), encoding="utf-8")
+    os.chmod(output, 0o600)
+    stale = datetime.now(timezone.utc) - timedelta(hours=31)
+    os.utime(output, (stale.timestamp(), stale.timestamp()))
     full.unlink()
     result = fast.check(output=output, full_path=full, databases=db, registry_path=registry)
     assert result["status"] == "fail"

@@ -158,8 +158,13 @@ def check(
         failures.append("full_integrity_proof_missing_stale_or_invalid")
     files = {}
     for name, path in databases.items():
-        present = path.is_file()
-        mode = oct(path.stat().st_mode & 0o777) if present else None
+        try:
+            file_state = path.lstat()
+            # Fail closed on symlinks, device nodes and replacement paths.
+            present = stat.S_ISREG(file_state.st_mode)
+            mode = oct(stat.S_IMODE(file_state.st_mode)) if present else None
+        except OSError:
+            present, mode = False, None
         readable = read_only_probe(path) if present and mode == "0o600" else False
         files[name] = {"path": str(path), "present": present, "mode": mode,
                        "readable": readable, "integrity": "not_run_in_frequent_check"}
