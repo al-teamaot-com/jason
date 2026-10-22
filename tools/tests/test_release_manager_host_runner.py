@@ -2528,6 +2528,7 @@ def test_ccc_oct22_dual_datto_reads_need_fresh_pass_not_first_failed_report(tmp_
 
 def test_ccc_oct22_dual_datto_repeated_failure_still_denies_release(tmp_path):
     import json
+    import pytest
     from types import SimpleNamespace
 
     ccc = tmp_path / "run_ccc.py"
