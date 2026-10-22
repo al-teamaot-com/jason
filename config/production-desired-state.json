@@ -75,7 +75,9 @@
     "jason-support-repair-worker.service",
     "jason-self-heal-watchdog.service",
     "jason-dnsfilter-boundary-reconcile.service",
-    "jason-kfs-collector.service"
+    "jason-kfs-collector.service",
+    "jason-openclaw-recovery-source-bridge.service",
+    "jason-openclaw-recovery-source-bridge.timer"
   ],
   "rollback_container_prefixes": [
     "jason-runtime-rollback-",
