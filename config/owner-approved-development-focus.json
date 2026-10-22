@@ -3,10 +3,12 @@
   "enabled": true,
   "issue_numbers": [
     1440,
-    1493,
-    1458,
-    1196
+    1545,
+    1553,
+    1468,
+    1566,
+    1493
   ],
-  "directive": "Owner-approved focused development: Universal Teams Approval and its required blockers remain primary. Also admit only P0 #1196 for the existing failed-diagnostic recovery handoff and acceptance; no general backlog intake. Critical support and safely completing active work remain allowed.",
-  "authority_source": "https://github.com/al-teamaot-com/jason/issues/1440#issuecomment-6217970983"
+  "directive": "Exclusive owner-approved engineering priority: finish real, tested Universal Teams Approvals #1440 and directly necessary #1545 live acceptance, #1553 callback/delivery provenance, #1468/#1566 shared approval and Teams communications only to enable UTA, and #1493 reasoning transport only if it blocks this delivery. No new unrelated TODO, PO/invoice, QuickBooks, general Production Manager, or refactoring development until UTA works end-to-end. Keep critical operational safety/support services and let already-running unrelated work reach a safe checkpoint, then park it. Do not treat source merge as production activation.",
+  "authority_source": "https://github.com/al-teamaot-com/jason/issues/1440#issuecomment-6341481471"
 }

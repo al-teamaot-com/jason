@@ -77,16 +77,46 @@ def test_ambiguous_owner_selection_fails_closed(monkeypatch,tmp_path):
         worker.reconcile_owner_selected_pull_requests(tmp_path,{'items':{}},[item(body='- Development pull request: #1518\n- Development pull request: #1514')])
 
 
-def test_canonical_owner_focus_admits_p0_recovery_without_opening_backlog():
+def test_canonical_owner_focus_only_admits_universal_teams_approvals():
     import json
     repo = Path(__file__).resolve().parents[2]
     policy = json.loads((repo / 'config' / 'owner-approved-development-focus.json').read_text())
     assert policy['schema_version'] == '1.0' and policy['enabled'] is True
-    assert {1440, 1458, 1493, 1196}.issubset(set(policy['issue_numbers']))
-    assert len(policy['issue_numbers']) == len(set(policy['issue_numbers']))
-    assert 1500 not in policy['issue_numbers']
-    selected = worker.apply_owner_development_focus(
-        {'items': {'DEV-1196': {'phase': 'blocked'}, 'DEV-1500': {'phase': 'blocked'}}},
-        [item(1196, body='owner-approved repair'), item(1500, body='unrelated P1')], policy,
+    expected = {1440, 1545, 1553, 1468, 1566, 1493}
+    assert set(policy['issue_numbers']) == expected
+    assert len(policy['issue_numbers']) == len(expected)
+    assert {1196, 1458, 759, 1467, 1470, 1500}.isdisjoint(policy['issue_numbers'])
+    assert 'Universal Teams Approvals' in policy['directive']
+    assert policy['authority_source'].startswith('https://github.com/al-teamaot-com/jason/issues/1440#issuecomment-')
+
+    # Existing broad PM/TODO release work is parked, not newly admitted.
+    # Previously blocked work is *not* equivalent to live in-flight editing.
+    state = {'items': {
+        'DEV-1196': {'phase': 'blocked'},
+        'DEV-1458': {'phase': 'blocked'},
+        'DEV-1553': {'phase': 'blocked'},
+    }}
+    items = [
+        item(1196, body='general TODO worker'),
+        item(1458, body='release capability'),
+        item(759, body='invoice intake'),
+        item(1545, body='universal approver acceptance'),
+        item(1553, body='approval provenance'),
+        item(1467, body='QuickBooks'),
+    ]
+    admitted = worker.apply_owner_development_focus(state, items, policy)
+    assert [entry['issue_number'] for entry in admitted] == [1545, 1553]
+
+
+def test_focus_does_not_interrupt_unrelated_active_edit_mid_transaction():
+    # Preserve the existing safe-checkpoint exception. No new unrelated work.
+    policy = {'schema_version': '1.0', 'enabled': True,
+              'issue_numbers': [1440, 1545, 1553, 1468, 1566, 1493]}
+    state = {'items': {
+        'DEV-1196': {'phase': 'implementing'},
+        'DEV-1458': {'phase': 'blocked'},
+    }}
+    accepted = worker.apply_owner_development_focus(
+        state, [item(1196), item(1458), item(1440)], policy,
     )
-    assert [entry['issue_number'] for entry in selected] == [1196]
+    assert [entry['issue_number'] for entry in accepted] == [1196, 1440]
