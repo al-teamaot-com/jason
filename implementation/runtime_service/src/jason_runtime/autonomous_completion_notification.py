@@ -721,6 +721,38 @@ def build_notifier(
     )
 
 
+def _notification_receipt(result: Mapping[str, Any]) -> tuple[str, bool]:
+    """Return a reference and uncertainty, never claim human delivery."""
+    if not isinstance(result, Mapping):
+        raise RuntimeError("Teams notification did not return a receipt")
+    message_id = str(result.get("message_id") or "").strip()
+    if not message_id:
+        raise RuntimeError("Teams notification missing receipt")
+    synthetic = result.get("message_id_synthetic", message_id.startswith("accepted:"))
+    if type(synthetic) is not bool or synthetic != message_id.startswith("accepted:"):
+        raise RuntimeError("Teams notification receipt evidence is inconsistent")
+    return message_id, synthetic
+
+
+def _persist_unverified_notification(
+    directory: Path, filename: str, *, event_type: str,
+    receipt_id: str, observed_at: datetime, **context: str,
+) -> None:
+    """Do not blindly resend an indeterminate Teams message or mark it notified."""
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = directory / filename
+    temp = path.with_suffix(path.suffix + ".tmp")
+    temp.write_text(json.dumps({
+        "event_type": event_type,
+        "receipt_id": receipt_id,
+        "observed_at": observed_at.isoformat(),
+        "status": "provider_accepted_delivery_unverified",
+        **context,
+    }, sort_keys=True) + "\n", encoding="utf-8")
+    os.chmod(temp, 0o600)
+    os.replace(temp, path)
+
+
 @dataclass(slots=True)
 class AutonomousWorkLifecycleNotificationMaintenance:
     notifier: GovernedAutonomousCompletionNotifier
@@ -745,6 +777,7 @@ class AutonomousWorkLifecycleNotificationMaintenance:
 
         events = self.spool_root / "lifecycle-events"
         notified = self.spool_root / "lifecycle-notifications"
+        unverified = self.spool_root / "lifecycle-notifications-unverified"
         if not events.exists():
             return False
         notified.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -752,7 +785,7 @@ class AutonomousWorkLifecycleNotificationMaintenance:
         handled = False
         for path in sorted(events.glob("*.json"), key=lambda item: item.stat().st_mtime):
             marker = notified / path.name
-            if marker.exists():
+            if marker.exists() or (unverified / path.name).exists():
                 continue
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
@@ -775,9 +808,13 @@ class AutonomousWorkLifecycleNotificationMaintenance:
             if owner_action:
                 arguments["owner_action"] = owner_action
             result = self.notifier.send(event_type, **arguments)
-            message_id = str(result.get("message_id") or "").strip()
-            if not message_id:
-                raise RuntimeError("lifecycle Teams notification missing message id")
+            message_id, synthetic = _notification_receipt(result)
+            if synthetic:
+                _persist_unverified_notification(
+                    unverified, path.name, event_type=event_type,
+                    receipt_id=message_id, observed_at=current, work_id=work_id,
+                )
+                continue
             temp = marker.with_suffix(marker.suffix + ".tmp")
             temp.write_text(
                 json.dumps(
@@ -785,6 +822,7 @@ class AutonomousWorkLifecycleNotificationMaintenance:
                         "event_type": event_type,
                         "work_id": work_id,
                         "message_id": message_id,
+                        "delivery_state": "provider_message_reference_recorded",
                         "notified_at": current.isoformat(),
                     },
                     sort_keys=True,
