@@ -152,6 +152,70 @@ def test_installers_and_root_worker_stage_then_restore_in_safe_order():
     assert reconcile.index("install_release_host_reconciler.py") < reconcile.index(
         "install_release_control_transition.py")
     assert "protected_root_policy_migration.py" in installer
+    assert installer.index('ROOT / "tools" / "protected_root_policy_migration.py"') < installer.index('ROOT / "tools" / "release_host_reconcile_worker.py"')
     assert "migration.apply_for_candidate(candidate,baseline)" in transition
     assert "_restore_root_policy_for_target(source_revision)" in worker
     assert worker.index("_restore_root_policy_for_target(source_revision)", worker.index("def _process(")) < worker.index("_candidate_reconcile_script(source_revision)", worker.index("def _process("))
+
+
+def test_exact_owner_approval_and_ccc_reviewer_are_checked(monkeypatch, tmp_path):
+    root = tmp_path / "release-manager"
+    (root / "records").mkdir(parents=True)
+    ccc = tmp_path / "material-review.json"
+    ctrl = root / "production-control-state.json"
+    release = root / "records" / ("release-" + CANDIDATE[:16] + ".json")
+    record = {
+        "state": "production",
+        "risk_profile": "production_control_core",
+        "owner_approval": {"approved": True, "candidate_sha": CANDIDATE},
+        "release_manifest": {"candidate_sha": CANDIDATE, "rollback_sha": BASE},
+    }
+    review = {"source_revision": CANDIDATE, "status": "approved",
+              "recorded_by": "person-al"}
+    control = {"schema_version": "1.0", "last_known_good": {
+        "manifest": {"revision": BASE, "complete": True}},
+        "circuit_breaker": {"state": "closed"}}
+    monkeypatch.setattr(m, "ROOT", root)
+    monkeypatch.setattr(m, "CCC_REVIEW", ccc)
+    monkeypatch.setattr(m, "_root_only", lambda p: Path(p).read_bytes())
+    def write():
+        release.write_text(json.dumps(record))
+        ccc.write_text(json.dumps(review))
+        ctrl.write_text(json.dumps(control))
+    write()
+    m._approval(CANDIDATE, BASE)
+    record["owner_approval"]["approved"] = False
+    write()
+    with pytest.raises(m.MigrationRefused, match="exact owner-approved"):
+        m._approval(CANDIDATE, BASE)
+    record["owner_approval"]["approved"] = True
+    review["recorded_by"] = "some-other-person"
+    write()
+    with pytest.raises(m.MigrationRefused, match="exact owner-reviewed CCC"):
+        m._approval(CANDIDATE, BASE)
+    review["recorded_by"] = "person-al"
+    control["circuit_breaker"]["state"] = "open"
+    write()
+    with pytest.raises(m.MigrationRefused, match="breaker"):
+        m._approval(CANDIDATE, BASE)
+
+
+def test_crash_before_policy_write_can_be_recovered_without_false_success(monkeypatch, tmp_path):
+    policy, original, _ = configure(monkeypatch, tmp_path)
+    real_atomic = m._atomic
+    attempts = []
+    def fail_on_policy(path, data):
+        attempts.append(Path(path))
+        if Path(path) == policy:
+            raise OSError("injected atomic policy write failure")
+        return real_atomic(path, data)
+    monkeypatch.setattr(m, "_atomic", fail_on_policy)
+    with pytest.raises(OSError, match="injected"):
+        m.apply_for_candidate(CANDIDATE, BASE)
+    assert policy.read_bytes() == original
+    receipt = json.loads(m.ACTIVE.read_text())
+    assert receipt["phase"] == "prepared"
+    monkeypatch.setattr(m, "_atomic", real_atomic)
+    assert m.restore_for_baseline(BASE) == "RESTORED"
+    assert policy.read_bytes() == original
+    assert not m.ACTIVE.exists()
