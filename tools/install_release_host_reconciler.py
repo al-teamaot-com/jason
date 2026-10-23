@@ -40,6 +40,13 @@ def main() -> int:
         LIB / "release_host_reconcile_worker.py",
         0o755,
     )
+    # The root-owned worker must be able to restore the approved overlay
+    # before invoking an immutable older rollback script.
+    install(
+        ROOT / "tools" / "protected_root_policy_migration.py",
+        LIB / "protected_root_policy_migration.py",
+        0o755,
+    )
     for name in (
         "jason-release-host-reconcile.service",
         "jason-release-host-reconcile.path",
