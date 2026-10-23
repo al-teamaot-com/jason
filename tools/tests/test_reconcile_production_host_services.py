@@ -148,9 +148,11 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'curl --connect-timeout 2 --max-time 15 -fsS' in text
     assert 'exporter verification failed on port $port after 3 bounded attempts' in text
     assert 'timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"' in text
-    assert 'timeout --signal=TERM --kill-after=5s 45s systemctl start "$unit"' in text
     assert 'if [ "$unit" = "jason-openclaw-authority-health.service" ]; then' in text
-    assert text.index('timeout --signal=TERM --kill-after=5s 45s systemctl start "$unit"') < text.index('timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"')
+    assert 'AUTHORITY_HANDOFF="$RELEASE_DIR/tools/release_authority_fast_health_handoff.py"' in text
+    assert '/usr/bin/python3 "$AUTHORITY_HANDOFF" --release-dir "$RELEASE_DIR"' in text
+    assert text.index('AUTHORITY_HANDOFF="$RELEASE_DIR/tools/') < text.index('timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"')
+    assert '45s systemctl start "$unit"' not in text
     assert 'HOST_RECONCILE_FAILURE step=' in text
     assert 'timeout --signal=TERM --kill-after=5s 180s env JASON_REPO_ROOT=' in text
 
@@ -462,7 +464,10 @@ def test_authority_health_is_lightweight_and_full_proof_deferred_out_of_reconcil
     assert "openclaw_authority_health_snapshot.py" not in fast
     assert "openclaw_authority_health_snapshot.py" in full
     assert "OnCalendar=" in timer and "Persistent=false" in timer
-    assert text.count('45s systemctl start "$unit"') == 1
+    assert text.count('45s systemctl start "$unit"') == 0
+    assert 'release_authority_fast_health_handoff.py' in text
+    assert '--verify-only' in text
+    assert 'openclaw_authority_fast_health.py' in (REPO_ROOT / 'tools/release_authority_fast_health_handoff.py').read_text()
     assert 'if [ "$unit" = "jason-openclaw-authority-health.service" ]; then' in text
     assert "jason-openclaw-authority-full-integrity.service" in text
     assert "jason-openclaw-authority-full-integrity.timer" in text
