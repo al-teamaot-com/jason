@@ -1,6 +1,6 @@
 # Jason Teams card UX: approval and operational status (source-only)
 
-**Status:** Engineering preview, not live. Parent #1440; design direction ADR-013. Reviewed source branch PR #1971. This is a presentation contract, not an authority policy or permission to deploy.
+**Status:** Engineering preview, not live. Parent #1440; design direction ADR-013. Draft source branch PR #1971; protected CI and live visual review are still required. This is a presentation contract, not an authority policy or permission to deploy.
 
 ## Actual problem observed
 
