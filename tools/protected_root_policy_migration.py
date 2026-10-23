@@ -47,6 +47,17 @@ APPROVED_DELTA = {
 }
 
 
+# Stage the timer as ALLOWED, never REQUIRED, until the root host script
+# confirms systemd activation. Other reviewed additions are also allowed.
+# This closes the watchdog race from installed-but-undeclared candidate units.
+STAGED_DELTA = {
+    "required_system_units": frozenset(),
+    "allowed_system_units": APPROVED_DELTA["allowed_system_units"] | APPROVED_DELTA["required_system_units"],
+    "required_user_units": frozenset(),
+    "allowed_user_units": APPROVED_DELTA["allowed_user_units"],
+}
+
+
 class MigrationRefused(RuntimeError):
     pass
 
@@ -257,56 +268,112 @@ def preview_exact_migration(candidate_sha: str, rollback_sha: str) -> str:
     return "OWNER_CCC_REVIEWED_DELTA_ONLY"
 
 
-def apply_for_candidate(candidate_sha: str, rollback_sha: str) -> str:
-    """Atomic, exact-known-delta policy install; no generated approvals."""
+def _overlay_policy(root_policy: dict, additions: dict[str, frozenset[str]]) -> bytes:
+    result = dict(root_policy)
+    for key in UNIT_FIELDS:
+        result[key] = sorted(set(root_policy[key]) | additions[key])
+    return (json.dumps(result, indent=2, sort_keys=True) + "\n").encode()
+
+
+def _receipt_match(receipt: dict, candidate_sha: str, rollback_sha: str) -> None:
+    if (receipt.get("candidate_sha") != candidate_sha
+            or receipt.get("rollback_sha") != rollback_sha
+            or receipt.get("reviewed_delta") != {
+                key: sorted(value) for key, value in APPROVED_DELTA.items()
+            }):
+        raise MigrationRefused("root migration receipt belongs to another release")
+
+
+def stage_for_candidate(candidate_sha: str, rollback_sha: str) -> str:
+    """Audited short-lived ALLOWED-only policy stage before unit installation.
+
+    A full required timer is NOT declared until later full host activation.
+    Active policy is always individually checked against its phase hash.
+    """
     _require_root()
     candidate_sha, rollback_sha = _sha(candidate_sha), _sha(rollback_sha)
     _approval(candidate_sha, rollback_sha)
-    original_source = _source_policy(rollback_sha)
-    candidate_source = _source_policy(candidate_sha)
-    _planned_delta(original_source, candidate_source)
+    previous = _source_policy(rollback_sha)
+    candidate = _source_policy(candidate_sha)
+    _planned_delta(previous, candidate)
     _ledger_dir()
-
     if ACTIVE.exists():
         receipt = _json(_root_only(ACTIVE))
-        if (receipt.get("candidate_sha") != candidate_sha
-                or receipt.get("rollback_sha") != rollback_sha
-                or receipt.get("phase") != "applied"):
-            raise MigrationRefused("a different root policy migration is active")
+        _receipt_match(receipt, candidate_sha, rollback_sha)
         raw, _ = _current_root_policy()
-        if digest(raw) != receipt.get("applied_sha256"):
-            raise MigrationRefused("applied root policy differs from audited receipt")
-        return "ALREADY_APPLIED"
+        phase = receipt.get("phase")
+        if phase == "staged" and digest(raw) == receipt.get("staged_sha256"):
+            return "ALREADY_STAGED"
+        if phase == "applied" and digest(raw) == receipt.get("applied_sha256"):
+            return "ALREADY_APPLIED"
+        raise MigrationRefused("prior migration phase or root bytes require recovery")
 
-    raw, root_policy = _current_root_policy()
-    if set(root_policy) != set(original_source):
-        raise MigrationRefused("root recovery policy structure differs from protected source")
+    original, root_policy = _current_root_policy()
+    if set(root_policy) != set(previous):
+        raise MigrationRefused("root recovery policy differs in structure from old source")
     for key in root_policy:
-        if key not in UNIT_FIELDS and root_policy[key] != original_source[key]:
-            raise MigrationRefused("unreviewed independent root policy drift: " + key)
-    updated = dict(root_policy)
-    for key in UNIT_FIELDS:
-        root_set = set(root_policy[key])
-        if not set(original_source[key]).issubset(root_set):
-            raise MigrationRefused("root overlay missing known-good source declarations")
-        if root_set.intersection(APPROVED_DELTA[key]):
-            raise MigrationRefused("candidate-specific units already in root overlay without journal")
-        updated[key] = sorted(root_set | APPROVED_DELTA[key])
-    newraw = (json.dumps(updated, indent=2, sort_keys=True) + "\n").encode()
+        if key not in UNIT_FIELDS and root_policy[key] != previous[key]:
+            raise MigrationRefused("unreviewed non-unit root recovery policy difference: " + key)
+        if key in UNIT_FIELDS:
+            current = set(root_policy[key])
+            if not set(previous[key]).issubset(current):
+                raise MigrationRefused("root recovery overlay missing known-good units: " + key)
+            if current.intersection(STAGED_DELTA[key] | APPROVED_DELTA[key]):
+                raise MigrationRefused("candidate-specific root unit already present without ledger")
+
+    staged = _overlay_policy(root_policy, STAGED_DELTA)
+    final = _overlay_policy(root_policy, APPROVED_DELTA)
     receipt = {
         "schema_version": "1.0", "candidate_sha": candidate_sha,
         "rollback_sha": rollback_sha, "phase": "prepared",
-        "original_sha256": digest(raw), "applied_sha256": digest(newraw),
-        "original_policy_base64": base64.b64encode(raw).decode("ascii"),
-        "authorized_by": "owner_approval_and_exact_ccc",
-        "reviewed_delta": {k: sorted(v) for k, v in APPROVED_DELTA.items()},
+        "original_sha256": digest(original), "staged_sha256": digest(staged),
+        "applied_sha256": digest(final),
+        "original_policy_base64": base64.b64encode(original).decode("ascii"),
+        "authorized_by": "exact_owner_approval_and_ccc_material_review",
+        "reviewed_delta": {key: sorted(v) for key, v in APPROVED_DELTA.items()},
         "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
+    # Durable undo receipt precedes any protected policy replacement.
     _atomic(ACTIVE, (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode())
-    _atomic(POLICY, newraw)
+    _atomic(POLICY, staged)
+    receipt["phase"] = "staged"
+    _atomic(ACTIVE, (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode())
+    return "STAGED_ALLOWED_ONLY"
+
+
+def apply_for_candidate(candidate_sha: str, rollback_sha: str) -> str:
+    """Commit required timer only AFTER the candidate's full systemd check."""
+    _require_root()
+    candidate_sha, rollback_sha = _sha(candidate_sha), _sha(rollback_sha)
+    _approval(candidate_sha, rollback_sha)
+    previous = _source_policy(rollback_sha)
+    candidate = _source_policy(candidate_sha)
+    _planned_delta(previous, candidate)
+    _ledger_dir()
+    if not ACTIVE.exists():
+        raise MigrationRefused("approved root policy stage missing before final commit")
+
+    receipt = _json(_root_only(ACTIVE))
+    _receipt_match(receipt, candidate_sha, rollback_sha)
+    raw, _ = _current_root_policy()
+    if receipt.get("phase") == "applied" and digest(raw) == receipt.get("applied_sha256"):
+        return "ALREADY_APPLIED"
+    if receipt.get("phase") not in {"staged", "prepared"}:
+        raise MigrationRefused("root migration was not staged")
+    if digest(raw) != receipt.get("staged_sha256"):
+        raise MigrationRefused("root policy diverged from exact approved stage")
+    original = base64.b64decode(receipt["original_policy_base64"], validate=True)
+    if digest(original) != receipt.get("original_sha256"):
+        raise MigrationRefused("root original-byte receipt checksum mismatch")
+    baseline = _json(original)
+    _safe_units(baseline)
+    final = _overlay_policy(baseline, APPROVED_DELTA)
+    if digest(final) != receipt.get("applied_sha256"):
+        raise MigrationRefused("root exact final policy hash mismatch")
+    _atomic(POLICY, final)
     receipt["phase"] = "applied"
     _atomic(ACTIVE, (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode())
-    return "APPLIED"
+    return "APPLIED_REQUIRED_AFTER_HEALTH"
 
 
 def restore_for_baseline(target_sha: str) -> str:
@@ -324,14 +391,14 @@ def restore_for_baseline(target_sha: str) -> str:
     if digest(original) != receipt.get("original_sha256"):
         raise MigrationRefused("original protected policy checksum mismatch")
     current, _ = _current_root_policy()
-    if digest(current) not in {receipt.get("original_sha256"), receipt.get("applied_sha256")}:
+    if digest(current) not in {receipt.get("original_sha256"), receipt.get("staged_sha256"), receipt.get("applied_sha256")}:
         raise MigrationRefused("active root policy changed outside migration; refusing restore")
     control = _json(_root_only(ROOT / "production-control-state.json"))
     if (((control.get("last_known_good") or {}).get("manifest") or {}).get("revision")
             != target_sha):
         raise MigrationRefused("root LKG no longer matches exact rollback target")
     _ledger_dir()
-    if digest(current) == receipt.get("applied_sha256"):
+    if digest(current) in {receipt.get("staged_sha256"), receipt.get("applied_sha256")}:
         _atomic(POLICY, original)
     receipt["phase"] = "restored"
     receipt["restored_at"] = datetime.now(timezone.utc).isoformat()
