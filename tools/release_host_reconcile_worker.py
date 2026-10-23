@@ -194,12 +194,8 @@ def _verify_root_policy_covers_candidate(source_revision: str) -> None:
         )
 
 
-def _restore_root_policy_for_target(source_revision: str) -> str:
-    """Restore only a root-audited delta before an immutable LKG downgrade.
-
-    Installed helper and reconciler originate from the same reviewed release.
-    A missing helper is fatal; the worker never trusts a mutable checkout.
-    """
+def _trusted_root_policy_helper():
+    """Load only the installed root-owned helper, never mutable source."""
     helper = Path(__file__).with_name("protected_root_policy_migration.py")
     meta = helper.lstat()
     if (not stat.S_ISREG(meta.st_mode) or helper.is_symlink()
@@ -210,6 +206,12 @@ def _restore_root_policy_for_target(source_revision: str) -> str:
         raise HostReconcileError("root policy rollback helper cannot be loaded")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+def _restore_root_policy_for_target(source_revision: str) -> str:
+    """Restore audited rollback or retain exact independently committed policy."""
+    module = _trusted_root_policy_helper()
     if not module.ACTIVE.is_file():
         return "NO_MIGRATION_ACTIVE"
     receipt = module._json(module._root_only(module.ACTIVE))
