@@ -111,7 +111,11 @@ def test_root_policy_must_be_root_owned_and_private(tmp_path):
 
 def test_root_policy_gate_precedes_candidate_host_shell_execution():
     code = SCRIPT.read_text(encoding="utf-8")
-    preflight = code.index("_verify_root_policy_covers_candidate(source_revision)", code.index("def _process("))
-    candidate_script = code.index("_candidate_reconcile_script(source_revision)", code.index("def _process("))
-    assert preflight < candidate_script
+    start = code.index("def _process(")
+    preflight = code.index("_preflight_candidate_root_policy(source_revision)", start)
+    candidate_script = code.index("_candidate_reconcile_script(source_revision)", start)
+    after_install = code.index("_verify_root_policy_covers_candidate(source_revision)", candidate_script)
+    success_result = code.index("_write_result(", after_install)
+    assert preflight < candidate_script < after_install < success_result
+    assert 'if policy_preflight != "ALREADY_COVERED":' in code
     assert "requires separately authorized root-policy migration" in code
