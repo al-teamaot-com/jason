@@ -299,3 +299,33 @@ def test_actual_fallback_command_is_unprivileged_and_result_still_verified(
     publish(report(mode="legacy_full_scan"))
     with pytest.raises(gate.HandoffRefused):
         gate._run_direct_probe(source)
+
+
+
+@pytest.mark.parametrize("failure", ["timeout", "nonzero", "oserror"])
+def test_bounded_systemd_or_fast_probe_command_failure_never_becomes_pass(
+    monkeypatch, failure
+):
+    import subprocess
+    def failing_run(argv, **kwargs):
+        assert kwargs.get("check") is True
+        assert kwargs.get("timeout") == 35
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(argv, 35)
+        if failure == "nonzero":
+            raise subprocess.CalledProcessError(2, argv)
+        raise OSError("command unavailable")
+    monkeypatch.setattr(gate.subprocess, "run", failing_run)
+    with pytest.raises(gate.HandoffRefused, match="bounded systemd or health command failed"):
+        gate._call(["/usr/bin/true"], timeout=35)
+
+
+def test_successful_systemd_exit_without_fresh_fast_json_is_still_denied(
+    monkeypatch, tmp_path, snapshot
+):
+    source = _reconcile_fixture(monkeypatch, tmp_path)
+    output, publish = snapshot
+    publish(report(mode="legacy_full_scan"))
+    monkeypatch.setattr(gate, "_call", lambda argv, **kw: "")
+    with pytest.raises(gate.HandoffRefused, match="stale"):
+        gate.reconcile(source)
