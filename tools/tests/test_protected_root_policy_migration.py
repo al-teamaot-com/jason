@@ -270,7 +270,7 @@ def test_real_temporary_policy_full_forward_and_downgrade_roundtrip(monkeypatch,
 
 
 def test_preinstall_preview_uses_exact_git_objects_when_candidate_host_dir_absent(monkeypatch, tmp_path):
-    from subprocess import CalledProcessError
+    reviewed_git_policy = m._reviewed_git_policy
     old = source()
     candidate = source(new=True)
     policy, original, _ = configure(monkeypatch, tmp_path)
@@ -290,11 +290,7 @@ def test_preinstall_preview_uses_exact_git_objects_when_candidate_host_dir_absen
         return json.dumps({BASE: old, CANDIDATE: candidate}[sha]).encode()
     # Override fixture policy loader with actual exact Git-object reader.
     monkeypatch.setattr(m.subprocess, "check_output", fake_git)
-    monkeypatch.setattr(m, "_reviewed_git_policy",
-                        lambda sha: fake_git(
-                            ["/usr/bin/git", "-c", f"safe.directory={m.MANAGED_GIT}",
-                             "-C", str(m.MANAGED_GIT), "show",
-                             f"{sha}:config/production-desired-state.json"]))
+    monkeypatch.setattr(m, "_reviewed_git_policy", reviewed_git_policy)
     assert m.preview_exact_migration(CANDIDATE, BASE) == "OWNER_CCC_REVIEWED_DELTA_ONLY"
     assert len(calls) == 2
     assert policy.read_bytes() == original
@@ -302,6 +298,7 @@ def test_preinstall_preview_uses_exact_git_objects_when_candidate_host_dir_absen
 
 
 def test_reviewed_git_policy_denies_missing_object_and_oversized_payload(monkeypatch):
+    from subprocess import CalledProcessError
     monkeypatch.setattr(
         m.subprocess, "check_output",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
