@@ -53,6 +53,7 @@ def configure(monkeypatch, tmp_path, *, policy=None, candidate=None, old=None):
     monkeypatch.setattr(m, "ACTIVE", store / "active.json")
     monkeypatch.setattr(m, "ROOT", tmp_path)
     monkeypatch.setattr(m, "_source_policy", lambda sha: source_map[sha])
+    monkeypatch.setattr(m, "_reviewed_git_policy", lambda sha: source_map[sha])
     monkeypatch.setattr(m, "_approval", lambda candidate_sha, rollback_sha: None)
     monkeypatch.setattr(m, "_require_root", lambda: None)
     monkeypatch.setattr(m, "_root_only", lambda p: Path(p).read_bytes())
@@ -266,3 +267,49 @@ def test_real_temporary_policy_full_forward_and_downgrade_roundtrip(monkeypatch,
         'restored-' + CANDIDATE + '.json')
     assert receipt_path.exists()
     assert json.loads(receipt_path.read_text())['phase'] == 'restored'
+
+
+def test_preinstall_preview_uses_exact_git_objects_when_candidate_host_dir_absent(monkeypatch, tmp_path):
+    from subprocess import CalledProcessError
+    old = source()
+    candidate = source(new=True)
+    policy, original, _ = configure(monkeypatch, tmp_path)
+    # Explicitly prove that read-only preflight never attempts a host release
+    # directory before the reconciler has created it.
+    monkeypatch.setattr(m, "_source_policy",
+                        lambda _: (_ for _ in ()).throw(
+                            AssertionError("candidate immutable directory unavailable")))
+    calls = []
+    def fake_git(argv, **kwargs):
+        calls.append((argv, kwargs))
+        assert argv[:6] == [
+            "/usr/bin/git", "-c", f"safe.directory={m.MANAGED_GIT}",
+            "-C", str(m.MANAGED_GIT), "show",
+        ]
+        sha = argv[-1].split(":", 1)[0]
+        return json.dumps({BASE: old, CANDIDATE: candidate}[sha]).encode()
+    # Override fixture policy loader with actual exact Git-object reader.
+    monkeypatch.setattr(m.subprocess, "check_output", fake_git)
+    monkeypatch.setattr(m, "_reviewed_git_policy",
+                        lambda sha: fake_git(
+                            ["/usr/bin/git", "-c", f"safe.directory={m.MANAGED_GIT}",
+                             "-C", str(m.MANAGED_GIT), "show",
+                             f"{sha}:config/production-desired-state.json"]))
+    assert m.preview_exact_migration(CANDIDATE, BASE) == "OWNER_CCC_REVIEWED_DELTA_ONLY"
+    assert len(calls) == 2
+    assert policy.read_bytes() == original
+    assert not m.ACTIVE.exists()
+
+
+def test_reviewed_git_policy_denies_missing_object_and_oversized_payload(monkeypatch):
+    monkeypatch.setattr(
+        m.subprocess, "check_output",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            CalledProcessError(128, "git show")),
+    )
+    with pytest.raises(m.MigrationRefused, match="exact-source"):
+        m._reviewed_git_policy(CANDIDATE)
+    monkeypatch.setattr(m.subprocess, "check_output",
+                        lambda *_args, **_kwargs: b"x" * 131073)
+    with pytest.raises(m.MigrationRefused, match="too large"):
+        m._reviewed_git_policy(CANDIDATE)
