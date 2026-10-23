@@ -409,11 +409,15 @@ timeout --signal=TERM --kill-after=5s 45s systemctl start "$PROVIDER_CANARY_SERV
 for unit in "${MAINTENANCE_SERVICES[@]}"; do
   CURRENT_UNIT="$unit"
   if [ "$unit" = "jason-openclaw-authority-health.service" ]; then
-    # Frequent health is now short, strictly read-only, and fails closed
-    # if the independent daily full-integrity/restore proof is stale.
-    # Never launch a multi-minute full SQLite integrity scan during
-    # host reconciliation or post-deployment CCC certification.
-    timeout --signal=TERM --kill-after=5s 45s systemctl start "$unit"
+    # An in-flight legacy full SQLite scan can leave this oneshot activating.
+    # Never block on, cancel, restart or kill that older job. Prove a current
+    # fast-health PASS against the exact newly installed systemd unit instead.
+    AUTHORITY_HANDOFF="$RELEASE_DIR/tools/release_authority_fast_health_handoff.py"
+    test -f "$AUTHORITY_HANDOFF" || {
+      echo "ERROR: missing bounded authority fast-health handoff" >&2
+      exit 9
+    }
+    /usr/bin/python3 "$AUTHORITY_HANDOFF" --release-dir "$RELEASE_DIR"
   else
     timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"
   fi
@@ -453,6 +457,11 @@ for unit in "${MAINTENANCE_SERVICES[@]}"; do
     exit 3
   fi
 done
+# Legacy full-scan completion can overwrite fast evidence during transition.
+# Recheck independent fast-mode evidence before accepting the host service.
+CURRENT_UNIT="jason-openclaw-authority-health.service"
+/usr/bin/python3 "$AUTHORITY_HANDOFF" --release-dir "$RELEASE_DIR" --verify-only
+CURRENT_UNIT=""
 for unit in "${OBSOLETE_UNITS[@]}"; do
   state="$(systemctl is-active "$unit" 2>/dev/null || true)"
   if [ "$state" = "active" ] || [ "$state" = "activating" ]; then
