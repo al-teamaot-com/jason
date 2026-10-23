@@ -20,6 +20,13 @@ CANDIDATE_SCRIPTS = SPOOL / "candidate-scripts"
 CURRENT = Path("/opt/jason/current")
 REPO = Path("/home/al/.local/lib/jason/engineering-source-repo")
 SHA = re.compile(r"^[0-9a-f]{40}$")
+ROOT_RECOVERY_POLICY = Path("/etc/jason/release-readback-recovery/production-desired-state.json")
+SOURCE_DRIFT_POLICY = "config/production-desired-state.json"
+POLICY_UNIT_LISTS = (
+    "required_system_units", "allowed_system_units",
+    "required_user_units", "allowed_user_units",
+)
+
 REQUEST_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 # Process one request per systemd activation; DirectoryNotEmpty retriggers for
 # remaining requests. Multiple 360s scripts must never overrun one unit start.
@@ -114,6 +121,71 @@ def _verify_main(source_revision: str) -> None:
 
 
 
+def _protected_root_drift_policy() -> dict[str, object]:
+    """Read the root-only policy without following symlinks or weakening mode."""
+    fd = os.open(ROOT_RECOVERY_POLICY, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        meta = os.fstat(fd)
+        if not stat.S_ISREG(meta.st_mode) or meta.st_uid != 0 or meta.st_mode & 0o077:
+            raise HostReconcileError("root recovery policy is not root-only mode-0600")
+        if meta.st_size > 131072:
+            raise HostReconcileError("root recovery policy is unexpectedly large")
+        with os.fdopen(fd, "r", encoding="utf-8", closefd=False) as handle:
+            policy = json.load(handle)
+    finally:
+        os.close(fd)
+    if not isinstance(policy, dict) or policy.get("schema_version") != "1.0":
+        raise HostReconcileError("root recovery policy schema is invalid")
+    return policy
+
+
+def _declared_units(policy: dict[str, object], field: str) -> set[str]:
+    units = policy.get(field)
+    if (not isinstance(units, list)
+            or any(not isinstance(item, str)
+                   or not re.fullmatch(r"jason-[a-z0-9_.@-]{1,120}", item)
+                   for item in units)
+            or len(units) != len(set(units))):
+        raise HostReconcileError("invalid protected drift unit declarations: " + field)
+    return set(units)
+
+
+def _verify_root_policy_covers_candidate(source_revision: str) -> None:
+    """Refuse a host install that root's independent drift checker would reject.
+
+    This is intentionally READ-ONLY. Adding a source unit to an independently
+    root-approved policy is a material authority change: the host reconciler
+    must never silently enlarge its own protected allowlist.
+    """
+    try:
+        raw = subprocess.check_output(
+            _git("show", f"{source_revision}:{SOURCE_DRIFT_POLICY}"),
+            text=True, timeout=15,
+        )
+        candidate = json.loads(raw)
+    except (subprocess.SubprocessError, ValueError) as exc:
+        raise HostReconcileError("exact candidate drift policy could not be verified") from exc
+    if not isinstance(candidate, dict) or candidate.get("schema_version") != "1.0":
+        raise HostReconcileError("exact candidate drift policy schema is invalid")
+
+    root_policy = _protected_root_drift_policy()
+    missing: list[str] = []
+    for field in POLICY_UNIT_LISTS:
+        declared = _declared_units(candidate, field)
+        protected = _declared_units(root_policy, field)
+        # A required timer cannot be substituted by a merely allowed entry.
+        for unit in sorted(declared - protected):
+            missing.append(field + ":" + unit)
+
+    if missing:
+        raise HostReconcileError(
+            "protected root drift policy missing exact candidate unit declarations: "
+            + ", ".join(missing[:16])
+            + (" (additional entries omitted)" if len(missing) > 16 else "")
+            + "; requires separately authorized root-policy migration before host mutation"
+        )
+
+
 def _candidate_reconcile_script(source_revision: str) -> Path:
     """Materialize the exact candidate reconciliation script from protected Git evidence."""
     CANDIDATE_SCRIPTS.mkdir(parents=True, exist_ok=True)
@@ -204,6 +276,10 @@ def _process(path: Path) -> None:
             raise HostReconcileError(
                 "live MCP revision does not match requested host release"
             )
+
+        # Prevent the exact failure seen in #1974: host units were installed
+        # but root's independent recovery overlay did not declare them.
+        _verify_root_policy_covers_candidate(source_revision)
 
         script = _candidate_reconcile_script(source_revision)
         if not script.is_file():
