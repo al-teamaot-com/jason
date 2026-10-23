@@ -204,34 +204,79 @@ class TeamsGatewayPlaybookApprovalSender:
             and card.requested_mode == "test:nonexecuting"
         )
         if is_mobile_release:
+            # Presentation only: the immutable persisted approval, signed
+            # Action.Submit payload and original host/CCC gates remain intact.
+            # Put the human decision first, not an unbroken technical FactSet.
             review = dict(card.facts)
-            keys = (
-                ("Release", "Release"),
-                ("Highest risk", "Risk"),
-                ("Exact SHA", "Exact commit"),
-                ("Affected services", "Affected systems"),
-                ("Changed files", "Changed files"),
-                ("Rollback", "Rollback SHA"),
-                ("Preproduction and rollback", "Preproduction"),
-                ("Manifest fingerprint", "Manifest SHA-256"),
-            )
-            facts = [{"title": label, "value": str(review[key])}
-                     for key, label in keys if key in review]
-            facts.append({"title": "Expires", "value": card.expires_at})
-            actions = (
-                ("Approve", "approve"), ("Deny", "deny"),
-            )
-            body = [
-                {"type": "TextBlock", "text": "ACTION REQUIRED: PRODUCTION + CCC",
-                 "weight": "Bolder", "wrap": True},
-                {"type": "TextBlock", "text": card.title, "weight": "Bolder", "wrap": True},
-                {"type": "TextBlock",
-                 "text": ("Review this exact release. The Approve and Deny buttons "
-                          "are below the details. Approve authorizes only this SHA; "
-                          "independent deployment, CCC and rollback gates still apply."),
-                 "wrap": True},
-                {"type": "FactSet", "facts": facts},
+            purpose = str(card.title).removeprefix("Production + CCC: ").strip()
+            top_facts = [
+                {"title": label, "value": str(review[key])}
+                for key, label in (
+                    ("Highest risk", "Risk"),
+                    ("Preproduction and rollback", "Checks"),
+                )
+                if key in review
             ]
+            top_facts.append({"title": "Expires", "value": card.expires_at})
+            detail_facts = [
+                {"title": label, "value": str(review[key])}
+                for key, label in (
+                    ("Release", "Release ID"),
+                    ("Affected services", "Affected systems"),
+                    ("Changed files", "Changed files"),
+                    ("Manifest fingerprint", "Manifest SHA-256"),
+                    ("Release policy", "Policy SHA-256"),
+                    ("Purpose", "Purpose"),
+                )
+                if key in review
+            ]
+            details = [
+                {"type": "TextBlock", "text": "IMPACT AND EVIDENCE",
+                 "size": "Small", "weight": "Bolder", "isSubtle": True},
+            ]
+            if detail_facts:
+                details.append({"type": "FactSet", "facts": detail_facts})
+            body = [
+                {"type": "TextBlock", "text": "JASON \u00b7 AOT",
+                 "size": "Small", "isSubtle": True, "spacing": "None"},
+                {"type": "TextBlock", "text": "Approval required",
+                 "size": "Large", "color": "Warning",
+                 "weight": "Bolder", "wrap": True, "spacing": "Small"},
+                {"type": "TextBlock", "text": purpose or str(card.title),
+                 "weight": "Bolder", "wrap": True, "spacing": "Small"},
+                {"type": "TextBlock",
+                 "text": ("Approve authorizes this exact release and its CCC "
+                          "material review. Deployment still requires "
+                          "independent checks."),
+                 "size": "Small", "isSubtle": True, "wrap": True,
+                 "spacing": "Small"},
+                {"type": "FactSet", "facts": top_facts},
+            ]
+            # Full exact identities stay visible without squeezing 40-character
+            # SHA values into FactSet's narrow label/value columns on phones.
+            for key, label in (
+                ("Exact SHA", "EXACT SOURCE REVISION"),
+                ("Rollback", "ROLLBACK REVISION"),
+            ):
+                if key in review:
+                    body.extend([
+                        {"type": "TextBlock", "text": label,
+                         "size": "Small", "weight": "Bolder", "isSubtle": True,
+                         "spacing": "Small"},
+                        {"type": "TextBlock", "text": str(review[key]),
+                         "size": "Small", "fontType": "Monospace",
+                         "wrap": True, "spacing": "None"},
+                    ])
+            body.extend([
+                {"type": "ActionSet", "actions": [{
+                    "type": "Action.ToggleVisibility",
+                    "title": "Review impact and evidence",
+                    "targetElements": ["jason_release_technical_details"],
+                }]},
+                {"type": "Container", "id": "jason_release_technical_details",
+                 "isVisible": False, "items": details},
+            ])
+            actions = (("Approve", "approve"), ("Deny", "deny"))
         elif is_owner_uat:
             # Harmless owner acceptance must offer exactly the two supported
             # decisions. It must never look like a real release or expose a
@@ -268,14 +313,16 @@ class TeamsGatewayPlaybookApprovalSender:
                 {"type": "FactSet", "facts": facts},
             ]
         if card.evidence_artifact_ids:
-            body.append(
-                {
-                    "type": "TextBlock",
-                    "text": "Evidence references: " + ", ".join(card.evidence_artifact_ids),
-                    "isSubtle": True,
-                    "wrap": True,
-                }
-            )
+            evidence_label = {
+                "type": "TextBlock",
+                "text": "Evidence references: " + ", ".join(card.evidence_artifact_ids),
+                "isSubtle": True,
+                "wrap": True,
+            }
+            if is_mobile_release:
+                body[-1]["items"].append(evidence_label)
+            else:
+                body.append(evidence_label)
         return {
             "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
             "type": "AdaptiveCard",
@@ -285,6 +332,9 @@ class TeamsGatewayPlaybookApprovalSender:
                 {
                     "type": "Action.Submit",
                     "title": title,
+                    **({"style": "positive"} if is_mobile_release and decision == "approve"
+                       else {"style": "destructive"} if is_mobile_release and decision == "deny"
+                       else {}),
                     "data": {
                         "approval_id": card.approval_id, "decision": decision,
                         **({"card_challenge": card.card_instance_challenge}
