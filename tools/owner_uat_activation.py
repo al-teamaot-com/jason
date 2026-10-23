@@ -17,6 +17,9 @@ import subprocess
 
 OFF = "off|false|none"
 SESSION = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{4,88}$")
+IMMUTABLE_RELEASES_ROOT = Path("/opt/jason/releases")
+MANAGED_SOURCE_GIT = Path("/home/al/.local/lib/jason/engineering-worker-source")
+
 EXPECTED_KEYS = frozenset({
     "schema_version", "enabled", "purpose", "organization_id",
     "owner_identity_id", "requester_identity_id", "capability",
@@ -32,11 +35,26 @@ def verify_source_pinned_manifest(path: Path, source_revision: str) -> None:
     canonical = root / "config" / "owner-uat-campaign.json"
     if path.is_symlink() or path.absolute() != canonical:
         raise PermissionError("UAT manifest must come from the exact release tree")
-    expected = subprocess.check_output([
-        "git", "-C", str(root), "show",
-        source_revision + ":config/owner-uat-campaign.json",
-    ], timeout=15)
-    if path.read_bytes() != expected:
+    # Production packages are immutable /opt/jason/releases/<exact_sha> trees,
+    # NOT Git worktrees: they intentionally contain no .git directory.
+    # Read only the immutable SHA blob from the managed source repository.
+    # Local/test worktrees still pin against their own Git objects.
+    if root.parent == IMMUTABLE_RELEASES_ROOT:
+        if root.name != source_revision or root.is_symlink():
+            raise PermissionError("UAT campaign does not belong to the approved immutable release")
+        source_git = MANAGED_SOURCE_GIT
+    elif (root / ".git").exists():
+        source_git = root
+    else:
+        raise PermissionError("UAT campaign not in a trusted Git or immutable release tree")
+    try:
+        expected = subprocess.check_output([
+            "/usr/bin/git", "-C", str(source_git), "show",
+            source_revision + ":config/owner-uat-campaign.json",
+        ], timeout=15, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise PermissionError("reviewed UAT Git object unavailable") from exc
+    if len(expected) > 4096 or path.read_bytes() != expected:
         raise PermissionError("UAT manifest differs from approved source revision")
 
 
