@@ -124,3 +124,57 @@ def test_current_committed_nonexecuting_campaign_is_bounded_and_expires():
     assert activation.activate_from_manifest(path, now=end + timedelta(seconds=1)) == activation.OFF
     with pytest.raises(ValueError, match="48 hours"):
         activation.activate_from_manifest(path, now=end - timedelta(hours=49))
+
+
+def test_actual_immutable_release_without_dotgit_uses_exact_managed_git_object(
+    monkeypatch, tmp_path
+):
+    root = MODULE.parents[1]
+    sha = subprocess.check_output(
+        ["/usr/bin/git", "-C", str(root), "rev-parse", "HEAD"], text=True
+    ).strip()
+    release_root = tmp_path / "opt" / "jason" / "releases"
+    candidate = release_root / sha
+    (candidate / "tools").mkdir(parents=True)
+    (candidate / "config").mkdir()
+    (candidate / "tools" / "owner_uat_activation.py").write_text("# source tested in worktree")
+    installed = candidate / "config" / "owner-uat-campaign.json"
+    installed.write_bytes((root / "config" / "owner-uat-campaign.json").read_bytes())
+    assert not (candidate / ".git").exists()
+    monkeypatch.setattr(activation, "__file__",
+                        str(candidate / "tools" / "owner_uat_activation.py"))
+    monkeypatch.setattr(activation, "IMMUTABLE_RELEASES_ROOT", release_root)
+    monkeypatch.setattr(activation, "MANAGED_SOURCE_GIT", root)
+    activation.verify_source_pinned_manifest(installed, sha)
+    assert activation.activate_from_manifest(
+        installed, now=datetime(2026, 10, 24, 12, 0, tzinfo=timezone.utc)
+    ) == "nonexecuting_test_only|true|OwnerUAT20261023SafeDenyApprove01"
+
+    changed = json.loads(installed.read_text())
+    changed["session_id"] = "ForgedOwnerUAT01"
+    installed.write_text(json.dumps(changed))
+    with pytest.raises(PermissionError, match="differs"):
+        activation.verify_source_pinned_manifest(installed, sha)
+
+    installed.write_bytes((root / "config" / "owner-uat-campaign.json").read_bytes())
+    with pytest.raises(PermissionError, match="does not belong"):
+        activation.verify_source_pinned_manifest(installed, "a" * 40)
+
+    monkeypatch.setattr(activation, "MANAGED_SOURCE_GIT", tmp_path / "not_git")
+    with pytest.raises(PermissionError, match="Git object unavailable"):
+        activation.verify_source_pinned_manifest(installed, sha)
+
+
+def test_untrusted_source_without_git_or_immutable_revision_denied(
+    monkeypatch, tmp_path
+):
+    untracked = tmp_path / "untracked"
+    (untracked / "tools").mkdir(parents=True)
+    (untracked / "config").mkdir()
+    src = untracked / "tools" / "owner_uat_activation.py"
+    src.write_text("# synthetic")
+    f = untracked / "config" / "owner-uat-campaign.json"
+    f.write_text(json.dumps(manifest()))
+    monkeypatch.setattr(activation, "__file__", str(src))
+    with pytest.raises(PermissionError, match="trusted Git"):
+        activation.verify_source_pinned_manifest(f, "a" * 40)

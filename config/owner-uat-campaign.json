@@ -7,6 +7,6 @@
   "requester_identity_id": "svc-jason-acceptance-test",
   "capability": "interaction.owner.acceptance.record",
   "execution_permitted": false,
-  "session_id": "OwnerUAT20261020NoSSH01",
-  "expires_at": "2026-10-22T02:00:00Z"
+  "session_id": "OwnerUAT20261023SafeDenyApprove01",
+  "expires_at": "2026-10-25T17:00:00Z"
 }
