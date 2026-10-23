@@ -52,6 +52,14 @@ def _show(prop: str, *, unit: str = UNIT) -> str:
     return _call(["/usr/bin/systemctl", "show", unit, "-p", prop, "--value"], timeout=9)
 
 
+def _trusted_root_regular(info: os.stat_result) -> bool:
+    return (
+        stat.S_ISREG(info.st_mode) and info.st_uid == 0
+        and not (info.st_mode & stat.S_IWOTH)
+        and not (info.st_mode & stat.S_IWGRP and info.st_gid != 0)
+    )
+
+
 def _installed_is_exact(source: Path) -> None:
     expected = source / UNIT_IN_RELEASE
     for p in (expected, INSTALLED):
@@ -59,9 +67,7 @@ def _installed_is_exact(source: Path) -> None:
             info = p.lstat()
         except OSError as exc:
             raise HandoffRefused("canonical authority service unit unavailable") from exc
-        if (not stat.S_ISREG(info.st_mode) or p.is_symlink()
-                or info.st_uid != 0 or info.st_mode & stat.S_IWOTH
-                or (info.st_mode & stat.S_IWGRP and info.st_gid != 0)):
+        if p.is_symlink() or not _trusted_root_regular(info):
             raise HandoffRefused("authority service unit not securely root-owned")
     if expected.read_bytes() != INSTALLED.read_bytes():
         raise HandoffRefused("installed authority service differs from exact immutable release")
@@ -130,9 +136,7 @@ def _run_direct_probe(source: Path) -> None:
         info = fast.lstat()
     except OSError as exc:
         raise HandoffRefused("immutable fast-health program unavailable") from exc
-    if (not stat.S_ISREG(info.st_mode) or fast.is_symlink()
-            or info.st_uid != 0 or info.st_mode & stat.S_IWOTH
-            or (info.st_mode & stat.S_IWGRP and info.st_gid != 0)):
+    if fast.is_symlink() or not _trusted_root_regular(info):
         raise HandoffRefused("immutable fast-health program is untrusted")
     before = time.time_ns() - 1_000_000_000
     _call([
