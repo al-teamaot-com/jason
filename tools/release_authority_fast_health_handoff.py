@@ -27,6 +27,7 @@ LEGACY = "/opt/jason/current/tools/openclaw_authority_health_snapshot.py"
 OUTPUT = Path("/var/lib/jason/openclaw/operational-health.json")
 FULL = Path("/var/lib/jason/openclaw/operational-full-health.json")
 INSTALLED = Path("/etc/systemd/system") / UNIT
+PROC_ROOT = Path("/proc")
 UNIT_IN_RELEASE = "infrastructure/openclaw-operations/systemd/" + UNIT
 CHECK_MODE = "frequent_read_only_plus_recent_full_integrity"
 MAX_REPORT_AGE_SECONDS = 360
@@ -82,7 +83,7 @@ def _legacy_job_is_exact() -> bool:
     if not job or not job.isdecimal() or not raw_pid.isdecimal() or int(raw_pid) < 2:
         return False
     pid = int(raw_pid)
-    proc = Path("/proc") / str(pid)
+    proc = PROC_ROOT / str(pid)
     try:
         info = proc.stat()
         argv = (proc / "cmdline").read_bytes().split(b"\0")
@@ -125,8 +126,14 @@ def _run_direct_probe(source: Path) -> None:
     # The fallback runs ONLY for the exact still-running legacy oneshot.
     # No start/stop/restart/kill or modification of its systemd job.
     fast = source / "tools/openclaw_authority_fast_health.py"
-    if not fast.is_file() or fast.is_symlink() or fast.stat().st_uid != 0:
-        raise HandoffRefused("immutable fast-health program unavailable")
+    try:
+        info = fast.lstat()
+    except OSError as exc:
+        raise HandoffRefused("immutable fast-health program unavailable") from exc
+    if (not stat.S_ISREG(info.st_mode) or fast.is_symlink()
+            or info.st_uid != 0 or info.st_mode & stat.S_IWOTH
+            or (info.st_mode & stat.S_IWGRP and info.st_gid != 0)):
+        raise HandoffRefused("immutable fast-health program is untrusted")
     before = time.time_ns() - 1_000_000_000
     _call([
         "/usr/sbin/runuser", "-u", "al", "--",
