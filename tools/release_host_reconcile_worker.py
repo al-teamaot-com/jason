@@ -218,7 +218,7 @@ def _restore_root_policy_for_target(source_revision: str) -> str:
     if receipt.get("candidate_sha") == source_revision:
         return "CANDIDATE_POLICY_ACTIVE"
     if receipt.get("rollback_sha") == source_revision:
-        return module.restore_for_baseline(source_revision)
+        return module.prepare_rollback(source_revision)
     # The first migrated candidate can later become the independently
     # root-verified LKG. Its reviewed declarations must then remain in root
     # policy for subsequent exact-source releases. Never restore the old
@@ -452,6 +452,14 @@ def _process(path: Path) -> None:
             raise HostReconcileError(
                 "immutable host release did not resolve to requested revision"
             )
+        if root_policy_result == "ROLLBACK_ALLOWED_STAGE":
+            # Candidate-only units have now been removed by the immutable
+            # baseline host script. Verify absence, then restore and archive
+            # the exact pre-migration root policy; never mark host PASS sooner.
+            module = _trusted_root_policy_helper()
+            root_policy_result = module.complete_rollback(source_revision)
+            if root_policy_result != "RESTORED":
+                raise HostReconcileError("root rollback policy restoration not certified")
         _write_result(
             request_id,
             source_revision,
