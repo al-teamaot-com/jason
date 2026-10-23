@@ -327,5 +327,5 @@ def test_successful_systemd_exit_without_fresh_fast_json_is_still_denied(
     output, publish = snapshot
     publish(report(mode="legacy_full_scan"))
     monkeypatch.setattr(gate, "_call", lambda argv, **kw: "")
-    with pytest.raises(gate.HandoffRefused, match="stale"):
+    with pytest.raises(gate.HandoffRefused, match="independent PASS"):
         gate.reconcile(source)
