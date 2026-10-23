@@ -70,7 +70,11 @@ def test_reviewed_exact_four_declarations_and_original_root_extras_preserved(mon
     assert m.preview_exact_migration(CANDIDATE, BASE) == "OWNER_CCC_REVIEWED_DELTA_ONLY"
     assert policy.read_bytes() == original
     assert not m.ACTIVE.exists()
-    assert m.apply_for_candidate(CANDIDATE, BASE) == "APPLIED"
+    assert m.stage_for_candidate(CANDIDATE, BASE) == "STAGED_ALLOWED_ONLY"
+    staged = json.loads(policy.read_text())
+    assert "jason-openclaw-authority-full-integrity.timer" in staged["allowed_system_units"]
+    assert "jason-openclaw-authority-full-integrity.timer" not in staged["required_system_units"]
+    assert m.apply_for_candidate(CANDIDATE, BASE) == "APPLIED_REQUIRED_AFTER_HEALTH"
     after = json.loads(policy.read_text())
     for field, entries in m.APPROVED_DELTA.items():
         assert set(after[field]) == set(previous[field]) | entries
@@ -89,7 +93,11 @@ def test_reviewed_exact_four_declarations_and_original_root_extras_preserved(mon
 
 def test_wrong_rollback_or_tampered_protected_policy_does_not_restore(monkeypatch, tmp_path):
     policy, before, _ = configure(monkeypatch, tmp_path)
-    assert m.apply_for_candidate(CANDIDATE, BASE) == "APPLIED"
+    assert m.stage_for_candidate(CANDIDATE, BASE) == "STAGED_ALLOWED_ONLY"
+    staged = json.loads(policy.read_text())
+    assert "jason-openclaw-authority-full-integrity.timer" in staged["allowed_system_units"]
+    assert "jason-openclaw-authority-full-integrity.timer" not in staged["required_system_units"]
+    assert m.apply_for_candidate(CANDIDATE, BASE) == "APPLIED_REQUIRED_AFTER_HEALTH"
     with pytest.raises(m.MigrationRefused, match="rollback target"):
         m.restore_for_baseline("c" * 40)
     changed = json.loads(policy.read_text())
@@ -119,14 +127,14 @@ def test_source_policy_scope_change_or_missing_declarations_rejected(monkeypatch
     updated["required_system_units"].remove("jason-openclaw-authority-full-integrity.timer")
     policy, original, _ = configure(monkeypatch, tmp_path, candidate=updated)
     with pytest.raises(m.MigrationRefused, match="unapproved desired-state"):
-        m.apply_for_candidate(CANDIDATE, BASE)
+        m.stage_for_candidate(CANDIDATE, BASE)
     assert policy.read_bytes() == original
     assert not m.ACTIVE.exists()
     updated2 = source(new=True)
     updated2["max_stopped_rollback_containers"] = 10000
     configure(monkeypatch, tmp_path / "second", candidate=updated2)
     with pytest.raises(m.MigrationRefused, match="unreviewed non-unit"):
-        m.apply_for_candidate(CANDIDATE, BASE)
+        m.stage_for_candidate(CANDIDATE, BASE)
 
 
 def test_approval_rejection_happens_before_policy_touch(monkeypatch, tmp_path):
@@ -135,7 +143,7 @@ def test_approval_rejection_happens_before_policy_touch(monkeypatch, tmp_path):
         raise m.MigrationRefused("exact owner-reviewed CCC required")
     monkeypatch.setattr(m, "_approval", deny)
     with pytest.raises(m.MigrationRefused, match="CCC"):
-        m.apply_for_candidate(CANDIDATE, BASE)
+        m.stage_for_candidate(CANDIDATE, BASE)
     assert policy.read_bytes() == original
     assert not m.ACTIVE.exists()
 
@@ -145,13 +153,17 @@ def test_unreviewed_addition_and_policy_mismatch_fail_closed(monkeypatch, tmp_pa
     changed["allowed_system_units"].append("jason-openclaw-authority-full-integrity.service")
     policy, original, _ = configure(monkeypatch, tmp_path, policy=changed)
     with pytest.raises(m.MigrationRefused, match="already in root overlay"):
-        m.apply_for_candidate(CANDIDATE, BASE)
+        m.stage_for_candidate(CANDIDATE, BASE)
     assert policy.read_bytes() == original
 
 
 def test_rollback_refuses_mismatched_last_known_good(monkeypatch, tmp_path):
     policy, _, _ = configure(monkeypatch, tmp_path)
-    assert m.apply_for_candidate(CANDIDATE, BASE) == "APPLIED"
+    assert m.stage_for_candidate(CANDIDATE, BASE) == "STAGED_ALLOWED_ONLY"
+    staged = json.loads(policy.read_text())
+    assert "jason-openclaw-authority-full-integrity.timer" in staged["allowed_system_units"]
+    assert "jason-openclaw-authority-full-integrity.timer" not in staged["required_system_units"]
+    assert m.apply_for_candidate(CANDIDATE, BASE) == "APPLIED_REQUIRED_AFTER_HEALTH"
     state = tmp_path / "production-control-state.json"
     state.write_text(json.dumps({"schema_version": "1.0",
                                  "last_known_good": {"manifest": {"revision": "c" * 40}}}))
@@ -166,6 +178,8 @@ def test_installers_and_root_worker_stage_then_restore_in_safe_order():
     installer = (root / "tools/install_release_host_reconciler.py").read_text()
     transition = (root / "tools/install_release_control_transition.py").read_text()
     worker = (root / "tools/release_host_reconcile_worker.py").read_text()
+    assert reconcile.index("install_release_host_reconciler.py\" --stage-only") < reconcile.index("step_start system_service_activation")
+    assert reconcile.index("step_start system_service_activation") < reconcile.index("step_start root_release_transition_install")
     assert reconcile.index("install_release_host_reconciler.py") < reconcile.index(
         "install_release_control_transition.py")
     assert "protected_root_policy_migration.py" in installer
@@ -228,7 +242,7 @@ def test_crash_before_policy_write_can_be_recovered_without_false_success(monkey
         return real_atomic(path, data)
     monkeypatch.setattr(m, "_atomic", fail_on_policy)
     with pytest.raises(OSError, match="injected"):
-        m.apply_for_candidate(CANDIDATE, BASE)
+        m.stage_for_candidate(CANDIDATE, BASE)
     assert policy.read_bytes() == original
     receipt = json.loads(m.ACTIVE.read_text())
     assert receipt["phase"] == "prepared"
@@ -255,7 +269,11 @@ def test_real_temporary_policy_full_forward_and_downgrade_roundtrip(monkeypatch,
         "OWNER_CCC_REVIEWED_DELTA_ONLY")
     assert root_policy.read_bytes() == original
     assert not m.ACTIVE.exists()
-    assert m.apply_for_candidate(CANDIDATE, BASE) == 'APPLIED'
+    assert m.stage_for_candidate(CANDIDATE, BASE) == "STAGED_ALLOWED_ONLY"
+    staged = json.loads(root_policy.read_text())
+    assert "jason-openclaw-authority-full-integrity.timer" in staged["allowed_system_units"]
+    assert "jason-openclaw-authority-full-integrity.timer" not in staged["required_system_units"]
+    assert m.apply_for_candidate(CANDIDATE, BASE) == "APPLIED_REQUIRED_AFTER_HEALTH"
     worker._verify_root_policy_covers_candidate(CANDIDATE)
     installed = json.loads(root_policy.read_text())
     for field, units in m.APPROVED_DELTA.items():
