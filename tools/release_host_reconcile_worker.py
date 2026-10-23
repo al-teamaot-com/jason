@@ -215,9 +215,25 @@ def _restore_root_policy_for_target(source_revision: str) -> str:
     receipt = module._json(module._root_only(module.ACTIVE))
     if receipt.get("candidate_sha") == source_revision:
         return "CANDIDATE_POLICY_ACTIVE"
-    if receipt.get("rollback_sha") != source_revision:
-        raise HostReconcileError("active root policy migration does not belong to target SHA")
-    return module.restore_for_baseline(source_revision)
+    if receipt.get("rollback_sha") == source_revision:
+        return module.restore_for_baseline(source_revision)
+    # The first migrated candidate can later become the independently
+    # root-verified LKG. Its reviewed declarations must then remain in root
+    # policy for subsequent exact-source releases. Never restore the old
+    # overlay or treat an unrelated active receipt as a fresh approval.
+    control = module._json(module._root_only(
+        module.ROOT / "production-control-state.json"))
+    lkg = ((control.get("last_known_good") or {}).get("manifest") or {})
+    breaker = control.get("circuit_breaker") or {}
+    if (receipt.get("phase") == "applied"
+            and lkg.get("revision") == receipt.get("candidate_sha")
+            and lkg.get("complete") is True
+            and breaker.get("state") == "closed"):
+        data = module._root_only(module.POLICY)
+        if module.digest(data) != receipt.get("applied_sha256"):
+            raise HostReconcileError("committed root policy differs from reviewed migration")
+        return "PREVIOUS_MIGRATION_LKG_VERIFIED"
+    raise HostReconcileError("active root policy migration does not belong to target SHA")
 
 
 def _candidate_reconcile_script(source_revision: str) -> Path:
