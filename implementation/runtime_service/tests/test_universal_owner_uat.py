@@ -198,12 +198,12 @@ def test_issuer_is_one_shot_with_existing_universal_interaction(env):
     ]
 
 
-@pytest.mark.parametrize("decision,expected", [
-    ("approve", ApprovalRequestStatus.APPROVED),
-    ("deny", ApprovalRequestStatus.DENIED),
+@pytest.mark.parametrize("session,decision,expected", [
+    ("acceptance-October17", "deny", ApprovalRequestStatus.DENIED),
+    ("acceptance-October17.approve", "approve", ApprovalRequestStatus.APPROVED),
 ])
-def test_real_signed_owner_approve_or_deny_only_records_test_receipt(env, decision, expected):
-    request = setup_issued(env)
+def test_real_signed_owner_approve_or_deny_only_records_test_receipt(env, session, decision, expected):
+    request = setup_issued(env, session_id=session)
     env.callback.enabled = True
     payload = signed(env, request, decision)
     result = click(env.callback, payload)
@@ -274,7 +274,7 @@ def test_approval_expiry_denied_by_existing_ledger_not_callback_clock(env):
     env.callback.enabled = True
     env.callback.clock = lambda: NOW + timedelta(hours=1)
     with pytest.raises(PermissionError, match="expired"):
-        click(env.callback, signed(env, request))
+        click(env.callback, signed(env, request, decision="deny"))
     assert env.repo.get(request.approval_id).status == ApprovalRequestStatus.EXPIRED
 
 
@@ -377,7 +377,7 @@ def test_owner_campaign_requires_denial_then_separate_signed_approval(env):
         assert receipt.authentication_evidence_hash is not None
 
 
-def test_first_approve_does_not_issue_second_card(env):
+def test_wrong_first_approve_is_noncommitting_and_real_deny_then_approve_completes(env):
     from jason_runtime.universal_interaction.owner_uat import OwnerUatMaintenance
 
     env.issuer.enabled = True
@@ -388,9 +388,36 @@ def test_first_approve_does_not_issue_second_card(env):
     )
     assert worker.tick() is True
     first = env.repo.list_all()[0]
-    click(env.callback, signed(env, first, decision="approve"))
+    wrong = click(env.callback, signed(env, first, decision="approve"))
+    assert wrong["status"] == "denied"
+    assert wrong["executed"] is False
+    assert "DENY only" in wrong["reply"]["text"]
+    assert env.repo.get(first.approval_id).status == ApprovalRequestStatus.PENDING
+    assert env.repo.accepted_decision(first.approval_id) is None
     assert worker.tick() is False
     assert len(env.repo.list_all()) == len(env.channel.sends) == 1
+
+    # The original request is still pending: a real Deny can complete it.
+    denied = click(env.callback, signed(env, first, decision="deny"))
+    assert denied["status"] == "completed"
+    assert env.repo.get(first.approval_id).status == ApprovalRequestStatus.DENIED
+    assert worker.tick() is True
+    second = next(x for x in env.repo.list_all() if x.approval_id != first.approval_id)
+    assert second.request_id.endswith(".approve")
+
+    wrong_second = click(env.callback, signed(env, second, decision="deny"))
+    assert wrong_second["status"] == "denied"
+    assert wrong_second["executed"] is False
+    assert "APPROVE only" in wrong_second["reply"]["text"]
+    assert env.repo.get(second.approval_id).status == ApprovalRequestStatus.PENDING
+    assert env.repo.accepted_decision(second.approval_id) is None
+    assert worker.tick() is False
+
+    approved = click(env.callback, signed(env, second, decision="approve"))
+    assert approved["status"] == "completed"
+    assert env.repo.get(second.approval_id).status == ApprovalRequestStatus.APPROVED
+    assert worker.tick() is False
+    assert len(env.channel.sends) == len(env.repo.list_all()) == 2
 
 
 def test_uat_worker_fails_closed_without_release_gate(env):
@@ -467,3 +494,30 @@ def test_root_verified_exact_sha_closeout_required_for_uat(tmp_path):
     assert gate.ready() is True
     snapshot.chmod(0o644)
     assert gate.ready() is False
+
+
+def test_signed_owner_phase_mismatch_does_not_change_any_acceptance_record(env):
+    from jason_runtime.universal_interaction.owner_uat import expected_owner_uat_decision
+    first = setup_issued(env, session_id="OwnerUATPhaseBound01")
+    assert expected_owner_uat_decision(first) == "deny"
+    env.callback.enabled = True
+    wrong = click(env.callback, signed(env, first, decision="approve"))
+    assert wrong["status"] == "denied"
+    assert env.repo.get(first.approval_id).status == ApprovalRequestStatus.PENDING
+    assert env.repo.accepted_decision(first.approval_id) is None
+    followup = create_nonexecuting_approval(
+        session_id="OwnerUATPhaseBound01.approve", now=NOW
+    )
+    assert expected_owner_uat_decision(followup) == "approve"
+
+    # Tampering the persisted phase/title is never authority for either path.
+    from dataclasses import replace as replace_record
+    tampered = replace_record(first, request_id="owner-uat:AlteredSession")
+    with pytest.raises(PermissionError, match="immutable phase"):
+        expected_owner_uat_decision(tampered)
+    tampered_title = replace_record(
+        first,
+        presentation=replace_record(first.presentation, title="TEST ONLY: changed phase")
+    )
+    with pytest.raises(PermissionError, match="immutable phase"):
+        expected_owner_uat_decision(tampered_title)

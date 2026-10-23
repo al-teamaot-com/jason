@@ -80,9 +80,10 @@ def create_nonexecuting_approval(
         presentation=ApprovalPresentation(
             title="TEST ONLY: Jason owner approval in Teams (" + phase + ")",
             summary=(
-                "This is a NONEXECUTING acceptance test. Choose Approve or "
-                "Deny to verify Teams authorization; no production, ticket, "
-                "purchase order, service, or customer action will occur."
+                "This is a NONEXECUTING acceptance test. Choose only "
+                + ("APPROVE" if followup else "DENY")
+                + " for this stage. No production, ticket, purchase order, "
+                "service, or customer action will occur."
             ),
             facts=(
                 ("Mode", "TEST ONLY / NO EXECUTION"),
@@ -94,6 +95,26 @@ def create_nonexecuting_approval(
         ),
         metadata={"test_only": "true", "execution_permitted": "false"},
     )
+
+
+def expected_owner_uat_decision(request: ApprovalRequest) -> str:
+    """Derive the sole allowed test decision from the server-stored request.
+
+    A Teams card title/selection is NOT authority; the signed callback must
+    independently prove the exact immutable phase and stable approval ID.
+    """
+    prefix = "owner-uat:"
+    if not isinstance(request.request_id, str) or not request.request_id.startswith(prefix):
+        raise PermissionError("owner acceptance has no trusted phase")
+    session_id = request.request_id[len(prefix):]
+    if not SESSION_ID.fullmatch(session_id):
+        raise PermissionError("owner acceptance phase has invalid session")
+    expected = create_nonexecuting_approval(session_id=session_id, now=request.requested_at)
+    if (request.approval_id != expected.approval_id
+            or request.presentation != expected.presentation
+            or request.expires_at != expected.expires_at):
+        raise PermissionError("owner acceptance does not match its immutable phase")
+    return "approve" if session_id.endswith(".approve") else "deny"
 
 
 @dataclass
@@ -195,6 +216,23 @@ class OwnerUatDecisionFlow:
                     "execution_permitted": "false",
                 }):
             raise PermissionError("not a pending, immutable nonexecuting UAT request")
+        expected_decision = expected_owner_uat_decision(request)
+        if decision != expected_decision:
+            # This is a signed, correctly authenticated Owner click, but the
+            # WRONG TEST PHASE choice. No ledger mutation, no success receipt.
+            # Return an explicit noncommitting result so the existing Teams
+            # gateway releases its short-lived processing claim, allowing the
+            # Owner to select the intended action on this SAME pending card.
+            return {
+                "status": "denied",
+                "approval_id": approval_id,
+                "executed": False,
+                "reply": {"text": (
+                    "TEST ONLY: This stage accepts " + expected_decision.upper()
+                    + " only. No decision was recorded. Choose "
+                    + expected_decision.upper() + " on the original card."
+                )},
+            }
         result = self.approvals.accept_response(ApprovalResponse(
             approval_id=approval_id,
             organization_id=ORGANIZATION,

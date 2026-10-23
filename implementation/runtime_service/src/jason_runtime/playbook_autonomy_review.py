@@ -233,14 +233,25 @@ class TeamsGatewayPlaybookApprovalSender:
                 {"type": "FactSet", "facts": facts},
             ]
         elif is_owner_uat:
-            # Harmless owner acceptance must offer exactly the two supported
-            # decisions. It must never look like a real release or expose a
-            # Request Changes button that its signed handler rejects.
-            facts = [
-                {"title": str(k), "value": str(v)} for k, v in card.facts
-            ]
+            # This is a TWO-STAGE scripted nonexecuting acceptance test.
+            # Never display both buttons when only one result can advance the
+            # campaign. The signed server-side callback independently checks
+            # the immutable phase, rather than trusting the card UI.
+            review = dict(card.facts)
+            if (review.get("Mode") != "TEST ONLY / NO EXECUTION"
+                    or review.get("Impact") != "None: records one test approval decision"
+                    or not review.get("Session")):
+                raise PermissionError("unrecognized nonexecuting owner UAT card scope")
+            if (card.title == "TEST ONLY: Jason owner approval in Teams (1/2: DENY)"
+                    and review.get("Next action") == "Click DENY (test only)"):
+                actions = (("Deny", "deny"),)
+            elif (card.title == "TEST ONLY: Jason owner approval in Teams (2/2: APPROVE)"
+                    and review.get("Next action") == "Click APPROVE (test only)"):
+                actions = (("Approve", "approve"),)
+            else:
+                raise PermissionError("nonexecuting owner UAT phase was not verifiable")
+            facts = [{"title": str(k), "value": str(v)} for k, v in card.facts]
             facts.append({"title": "Expires", "value": card.expires_at})
-            actions = (("Approve", "approve"), ("Deny", "deny"))
             body = [
                 {"type": "TextBlock",
                  "text": "TEST ONLY: NO OPERATION WILL EXECUTE",

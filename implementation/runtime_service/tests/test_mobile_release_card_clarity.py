@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import subprocess
 
+import pytest
+
 from connectors.microsoft_graph.teams_approval_channel import TeamsApprovalCard
 from jason_runtime.playbook_autonomy_review import TeamsGatewayPlaybookApprovalSender
 from jason_runtime.autonomous_completion_notification import _render
@@ -151,27 +153,25 @@ def test_old_release_notice_prominently_identifies_itself_as_status_only():
     assert not rendered.get("actions")
 
 
-def test_owner_acceptance_card_is_unambiguously_test_only_two_button():
+def test_owner_acceptance_card_displays_only_deny_in_phase_one():
     from connectors.microsoft_graph.teams_approval_channel import TeamsApprovalCard
     card = TeamsApprovalCard(
         approval_id="owneruatapproval-abcd1234", organization_id="aot",
-        title="TEST ONLY: Jason owner approval in Teams",
+        title="TEST ONLY: Jason owner approval in Teams (1/2: DENY)",
         summary=("NONEXECUTING test; no production, ticket, PO or customer "
                  "action occurs regardless of decision."),
         capability="interaction.owner.acceptance.record",
         requested_mode="test:nonexecuting",
         expires_at="2026-10-17T22:50:00Z",
         evidence_artifact_ids=(),
-        facts=(("Impact", "None"), ("Session", "one-time-test")),
+        facts=(("Mode", "TEST ONLY / NO EXECUTION"), ("Impact", "None: records one test approval decision"), ("Session", "one-time-test"), ("Next action", "Click DENY (test only)")),
     )
     rendered = TeamsGatewayPlaybookApprovalSender._adaptive_card(card)
     assert rendered["type"] == "AdaptiveCard"
     assert rendered["body"][0]["text"] == "TEST ONLY: NO OPERATION WILL EXECUTE"
     assert rendered["body"][0]["color"] == "Warning"
-    assert [a["title"] for a in rendered["actions"]] == ["Approve", "Deny"]
-    assert [a["data"]["decision"] for a in rendered["actions"]] == [
-        "approve", "deny",
-    ]
+    assert [a["title"] for a in rendered["actions"]] == ["Deny"]
+    assert [a["data"]["decision"] for a in rendered["actions"]] == ["deny"]
     assert all(a["data"]["approval_id"] == card.approval_id
                for a in rendered["actions"])
     assert "Request Changes" not in json.dumps(rendered)
@@ -183,10 +183,10 @@ def test_owner_acceptance_buttons_use_existing_gateway_parser():
     from connectors.microsoft_graph.teams_approval_channel import TeamsApprovalCard
     candidate = TeamsApprovalCard(
         approval_id="owneruatapproval-testonly", organization_id="aot",
-        title="Test only", summary="No execution",
+        title="TEST ONLY: Jason owner approval in Teams (1/2: DENY)", summary="No execution",
         capability="interaction.owner.acceptance.record",
         requested_mode="test:nonexecuting", expires_at="2026-10-17T22:50:00Z",
-        evidence_artifact_ids=(), facts=(),
+        evidence_artifact_ids=(), facts=(("Mode", "TEST ONLY / NO EXECUTION"), ("Impact", "None: records one test approval decision"), ("Session", "one-time-test"), ("Next action", "Click DENY (test only)")),
     )
     rendered = TeamsGatewayPlaybookApprovalSender._adaptive_card(candidate)
     root = Path(__file__).resolve().parents[3]
@@ -204,6 +204,46 @@ def test_owner_acceptance_buttons_use_existing_gateway_parser():
         capture_output=True, text=True, check=True, timeout=12,
     )
     decisions = json.loads(parsed.stdout)
-    assert [x["decision"] for x in decisions] == ["approve", "deny"]
+    assert [x["decision"] for x in decisions] == ["deny"]
     assert all(x["approvalId"] == "owneruatapproval-testonly" for x in decisions)
     assert all(x["selections"] == {} for x in decisions)
+
+
+def test_owner_acceptance_phase_two_displays_approve_button_only():
+    from dataclasses import replace
+    first = TeamsApprovalCard(
+        approval_id="owneruatapproval-secondphase", organization_id="aot",
+        title="TEST ONLY: Jason owner approval in Teams (2/2: APPROVE)",
+        summary="NONEXECUTING phase two", capability="interaction.owner.acceptance.record",
+        requested_mode="test:nonexecuting", expires_at="2026-10-25T17:00:00Z",
+        evidence_artifact_ids=(),
+        facts=(("Mode", "TEST ONLY / NO EXECUTION"),
+               ("Impact", "None: records one test approval decision"),
+               ("Session", "OwnerUAT20261023PhaseBound02.approve"),
+               ("Next action", "Click APPROVE (test only)")),
+    )
+    rendered = TeamsGatewayPlaybookApprovalSender._adaptive_card(first)
+    assert [x["data"]["decision"] for x in rendered["actions"]] == ["approve"]
+    wrong = replace(first, title="TEST ONLY: Jason owner approval in Teams (1/2: DENY)")
+    with pytest.raises(PermissionError, match="phase"):
+        TeamsGatewayPlaybookApprovalSender._adaptive_card(wrong)
+    changed = replace(first, facts=first.facts[:-1] + (("Next action", "Click DENY (test only)"),))
+    with pytest.raises(PermissionError, match="phase"):
+        TeamsGatewayPlaybookApprovalSender._adaptive_card(changed)
+
+
+def test_real_persisted_uat_phase_request_has_only_its_valid_action():
+    from jason_runtime.universal_interaction.owner_uat import create_nonexecuting_approval
+    from connectors.microsoft_graph.teams_approval_channel import render_approval_card
+    now = datetime(2026, 10, 23, 19, 0, tzinfo=timezone.utc)
+    for session_suffix, expected in (("", "deny"), (".approve", "approve")):
+        request = create_nonexecuting_approval(
+            session_id="OwnerUAT20261023PhaseBound02" + session_suffix,
+            now=now,
+        )
+        card = TeamsGatewayPlaybookApprovalSender._adaptive_card(render_approval_card(request))
+        assert len(card["actions"]) == 1
+        assert card["actions"][0]["data"] == {
+            "approval_id": request.approval_id, "decision": expected,
+        }
+        assert card["actions"][0]["title"] == expected.capitalize()
