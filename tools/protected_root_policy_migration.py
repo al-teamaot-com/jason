@@ -92,16 +92,24 @@ def _safe_units(policy: dict) -> None:
 def _source_policy(revision: str) -> dict:
     revision = _sha(revision)
     folder = Path("/opt/jason/releases") / revision
-    data = (folder / "config" / "production-desired-state.json").read_bytes()
-    policy = _json(data)
-    _safe_units(policy)
-    # Require a real, root-controlled immutable release directory. Never
-    # consume editable project/worktree files in the root trust boundary.
-    meta = folder.lstat()
-    if folder.is_symlink() or not stat.S_ISDIR(meta.st_mode) or meta.st_uid != 0:
-        raise MigrationRefused("immutable source is not a root-owned release directory")
-    if folder.resolve() != folder:
+    # Validate every path component BEFORE reading bytes as root, rejecting
+    # Git symlinks and any mutable non-root content.
+    directory = folder / "config"
+    path = directory / "production-desired-state.json"
+    for item in (folder, directory):
+        info = item.lstat()
+        if (not stat.S_ISDIR(info.st_mode) or item.is_symlink()
+                or info.st_uid != 0 or info.st_mode & 0o022):
+            raise MigrationRefused("immutable source directory is not root-controlled")
+    if folder.resolve() != folder or directory.resolve() != directory:
         raise MigrationRefused("immutable source path is not canonical")
+    meta = path.lstat()
+    if (not stat.S_ISREG(meta.st_mode) or path.is_symlink()
+            or meta.st_uid != 0 or meta.st_mode & 0o022
+            or meta.st_size > 131072):
+        raise MigrationRefused("immutable source policy file is not securely rooted")
+    policy = _json(path.read_bytes())
+    _safe_units(policy)
     return policy
 
 
