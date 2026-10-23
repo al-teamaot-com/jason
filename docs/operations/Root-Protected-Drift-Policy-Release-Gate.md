@@ -1,6 +1,6 @@
 # Root-protected production drift policy — exact-release parity gate
 
-**Status:** Source-only P0 release-safety repair; not deployed
+**Status:** Source-only exact-release policy migration and rollback repair; not deployed
 **Incident:** #1974; blocks Universal Teams Approver #1440
 **Authority:** Exact owner-approved immutable release and separate CCC material review; root-controlled drift guard and protected LKG remain independent
 
@@ -15,7 +15,7 @@ The independently root-protected policy at `/etc/jason/release-readback-recovery
 
 The root `set_last_known_good` transition independently invokes the current immutable `production_drift_guard.py` with that protected overlay when previous root drift evidence is stale. The guard treats an installed undeclared service or timer as drift and refuses to report PASS. This provides a concrete failure mechanism for the observed `independent production drift refresh did not pass`, but the actual rejected unit was not captured by the previous root transition, so the precise historical cause is **probable, not independently proved**.
 
-Post-deployment CCC passed, but root LKG refused. Native rollback restored the old runtime and MCP and host revision, but timed out on the legacy multi-minute OpenClaw health service during host reconciliation. Durable release record is `failed`, rollback verification is false, and the root breaker is OPEN. No CI check or clean readback snapshot may reclassify the failed release as closed.
+Post-deployment CCC passed, but root LKG refused. Native rollback restored the old runtime and MCP and host revision, but timed out on the legacy multi-minute OpenClaw health service during host reconciliation. Durable release record is `failed`, and its historical rollback verification is false. On October 23 at approximately 13:25 UTC, the Owner explicitly authorized native non-drift host recovery. Jason independently compared all ten protected immutable LKG fingerprint fields (all MATCH), observed root-owned drift PASS and zero failed systemd units, and invoked its existing root-governed `revalidate` transition. Root worker independently returned `root_verified_revalidate` for the original LKG revision, closing the breaker. **This is new recovery evidence, not retroactive historical rollback success.** The automatic-release incident hold remains intact.
 
 ## Source safety gate introduced by this change
 
@@ -29,20 +29,30 @@ Root-owned `release_host_reconcile_worker.py` now inspects:
 
 Root transition `refresh_stale_drift()` separately extracts at most six bounded `kind:jason-unit` values from the independent guard's structured failure evidence, not raw stdout/stderr, command lines, credentials or provider data. Nonzero guard results still fail. A 70-second timeout is explicitly classified as denial, never accepted as green.
 
-This gate executes **only after the reviewed new root-owned host worker is installed**. The presently deployed older rollback revision still runs the older worker, which does not contain this preflight. A new release must therefore satisfy a separately reviewed root-authority bootstrap and source/policy parity validation **before** it relies on this gate. Merely merging this PR or deploying containers does not activate the root worker safely.
+## Protected four-unit migration and symmetric downgrade
 
-This is an **admission and diagnostic fix**, not authorization or an automatic root policy migration.
+The exact failed-release source delta is **four declarations**, not just the two system units: REQUIRED `jason-openclaw-authority-full-integrity.timer`, ALLOWED `jason-openclaw-authority-full-integrity.service`, and ALLOWED user `jason-openclaw-recovery-source-bridge.service` and `jason-openclaw-recovery-source-bridge.timer`.
 
-## Protected migration and release recovery — required separate work
+`tools/protected_root_policy_migration.py` now implements a bounded root-only migration. The four specific names and categories are a static source-review boundary; it will **not** union arbitrary units advertised by a candidate into the privileged overlay.
 
-1. Preserve original root overlay bytes, owner/mode, and audit evidence before proposing migration.
-2. Compute the exact desired-state delta from current immutable LKG to the separately approved candidate; do not union all candidate-controlled unit names into a privileged root allowlist.
-3. Independently review and authorize the candidate-bound root policy delta, including **downgrade/rollback policy restoration**. A service approved for one SHA must not stay **required** after rollback to an earlier LKG which does not declare it.
-4. Implement a root-owned, bounded, atomic versioned policy transition, protecting schema, ownership, path and exact SHA, and stage it **before** host mutation. Do not modify the protected policy by hand as an expedient workaround and do not use provider/shell bypasses.
-5. Prove real rollback host reconciliation across the legacy slow authority-health service, with appropriate bounded timeout budgets. The recovered old runtime/MCP and no failed systemd units are helpful evidence but do not substitute for a root host PASS.
-6. Obtain separate human-reviewed non-drift breaker recovery and exact-SHA release/CCC authorizations. Do not re-use the failed release approval, clear the incident hold, self-certify failure, or force `production_verified`.
-7. Final acceptance requires a new release record `closed`, all candidate runtime/MCP/host identities aligned, complete root-owned LKG, fresh post-release CCC PASS, desired-state drift PASS, and rollback safety proved. Only then proceed to Universal Teams Approve/Deny acceptance.
+When an **independently owner-approved, CCC-reviewed, exact-SHA** future release reaches native immutable host reconciliation:
+
+1. The candidate's root host reconciler and rollback helper are installed **first** from that exact immutable release source, before any policy mutation. The currently running old reconciler still controls the forward request, but the newly installed helper is available for the subsequent rollback request.
+2. After the new units and standard host controls are installed, the candidate's `install_release_control_transition.py` validates root last-known-good and closed breaker, exact candidate SHA and rollback SHA, the production release record's owner approval and `production_control_core` classification, and matching `person-al` CCC material review. It compares the old/new immutable desired-state files; all non-unit fields must match, and only the four explicit declarations may be added.
+3. The migrator preserves all existing root-only recovery additions, saves the **exact original policy bytes**, hashes, source revisions, reviewed delta and authorization linkage in a mode-0600 root ledger. It installs the exact changed policy atomically with root ownership, mode 0600 and filesystem sync. It never changes `last_known_good`, the breaker or a release record itself.
+4. At final LKG, the independent root drift checker sees only reviewed required/allowed units, and its original fail-closed invariant remains unchanged. Unknown units still block.
+5. If the promotion fails and native Release Manager rolls back to its original immutable LKG, the installed root host reconciler first checks the active root-only receipt, **restores the exact original root policy bytes**, archives the migration receipt, and *then* invokes the older immutable host rollback script. A different rollback SHA, tampered policy hash, missing receipt or diverged root LKG refuses restoration.
+
+The migrator **cannot be invoked as a standalone policy-write shortcut** and does not install candidate-only requirements into the currently healthy older production state. Its activation depends on a new reviewed source revision being merged, independently authorized and promoted normally; the previous failed `e8caace979...` release is never silently retried or reused for approval.
+
+## Separate rollback service timeout still requires acceptance
+
+The old immutable rollback script starts `jason-openclaw-authority-health.service` with a 45-second systemctl timeout, while the old multi-minute SQLite integrity scan can exceed that limit. The source policy migration correctly restores its required/allowed unit inventory **before** running that script, but policy restoration alone does **not** repair the legacy service timeout. Treat a future host rollback as unverified if this service still times out. Never patch the older immutable rollback script, disable its security check, or fabricate a successful root host reconciliation.
+
+The incident's **current LKG** is independently recovered and breaker-verified as described above. Before repeating production promotion, separately prove the full candidate-to-legacy rollback fault path in isolated preproduction and establish a governed, bounded way to handle the slow legacy unit without weakening its authority-health semantics. The automatic promotion hold remains active until documented disposition.
+
+Final production acceptance still requires new source/approval/CCC, immutable runtime-MCP-host match, full protected root LKG, fresh CCC PASS and real rollback readiness. Teams Approve/Deny production acceptance is downstream.
 
 ## Test boundary
 
-Focused checks cover missing required/allowed declarations, required-vs-allowed substitution, malformed or non-root policy, exact SHA read from Git, failure before host mutation, bounded drift messages without credential leakage, timeout denial, LKG/rollback and breaker behavior. Tests in an isolated worktree validate source behavior only, **not** a successful production migration or a completed rollback. No protected production state is modified by this source change.
+Focused checks cover missing required/allowed declarations, required-vs-allowed substitution, malformed or non-root policy, exact SHA read from Git, failure before host mutation, bounded drift messages without credential leakage, timeout denial, LKG/rollback and breaker behavior. Tests in an isolated worktree validate source behavior only, including exact byte-for-byte migration restoration; they do **not** establish that any new policy has been applied on live production or that the legacy health-service rollback timeout is resolved. No protected production state is modified by this source change.
