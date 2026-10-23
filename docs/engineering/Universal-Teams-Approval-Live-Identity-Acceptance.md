@@ -20,3 +20,27 @@ The implementation needs a trusted Teams platform activity-authentication design
 4. Capture a separate **real** Deny on a fresh proposal. Verify audit persisted, no grant, no execution continuation.
 5. Reject missing/untrusted proof, different tenant, different actor, mismatched receipt, expired plan, duplicate response, and replay. Verify on desktop and mobile where supported.
 6. Retain draft and no production activation until protected CI, independent security and governance reviews, and live provider receipt readback pass.
+
+## 2026-10-17 verified human-token binding groundwork (development only)
+
+`jason_runtime.teams_human_token_binding.VerifiedTeamsHumanTokenBinding` now supplies
+an isolated, **off-by-default** proof boundary. It composes Jason's existing
+registered-gateway Ed25519 verifier and Microsoft JWKS-backed token verifier
+without introducing a second approval engine or changing live authority.
+
+The only accepted proof pairs the exact signed `planapproval-*` callback
+(including the signed message/response receipt) with a **delegated Microsoft
+human token**, independently checked for issuer, audience, approved tenant,
+expiration, `oid`, `sub`, delegated `scp`, allowed OAuth client `azp`/`appid`,
+and MFA evidence. The signed Teams tenant/actor must equal the token's verified
+tenant/actor. App-only tokens and cross-user/cross-tenant mismatches fail closed.
+The result contains a non-bearer SHA-256 commitment, never the user token.
+
+This change **does not** retrieve the user token, configure Azure Bot OAuth,
+activate `JASON_UNIVERSAL_APPROVAL_MODE`, create a test approval, or authorize
+a provider execution. The Microsoft 365 Agents SDK user-authorization route
+must supply the ephemeral token **from the same actual Teams callback**, and
+a reviewed integration must preserve the proof through the existing
+one-time approval/JKD execution path. No production rollout or owner approval
+may be inferred from unit tests; complete the live desktop/mobile acceptance
+steps below first.
