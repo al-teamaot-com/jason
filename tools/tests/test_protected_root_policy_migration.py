@@ -66,6 +66,9 @@ def test_reviewed_exact_four_declarations_and_original_root_extras_preserved(mon
     previous = source()
     previous["allowed_system_units"] += ["jason-release-control-readback.service"]
     policy, original, _ = configure(monkeypatch, tmp_path, policy=previous)
+    assert m.preview_exact_migration(CANDIDATE, BASE) == "OWNER_CCC_REVIEWED_DELTA_ONLY"
+    assert policy.read_bytes() == original
+    assert not m.ACTIVE.exists()
     assert m.apply_for_candidate(CANDIDATE, BASE) == "APPLIED"
     after = json.loads(policy.read_text())
     for field, entries in m.APPROVED_DELTA.items():
@@ -96,6 +99,19 @@ def test_wrong_rollback_or_tampered_protected_policy_does_not_restore(monkeypatc
     assert policy.read_bytes() != before
     assert m.ACTIVE.exists()
 
+
+def test_reviewed_migration_preview_is_read_only_and_fails_without_authority(monkeypatch, tmp_path):
+    policy, original, _ = configure(monkeypatch, tmp_path)
+    assert m.preview_exact_migration(CANDIDATE, BASE) == "OWNER_CCC_REVIEWED_DELTA_ONLY"
+    assert policy.read_bytes() == original
+    assert not m.ACTIVE.exists()
+    def deny(*args):
+        raise m.MigrationRefused("exact Owner CCC review missing")
+    monkeypatch.setattr(m, "_approval", deny)
+    with pytest.raises(m.MigrationRefused, match="Owner"):
+        m.preview_exact_migration(CANDIDATE, BASE)
+    assert policy.read_bytes() == original
+    assert not m.ACTIVE.exists()
 
 def test_source_policy_scope_change_or_missing_declarations_rejected(monkeypatch, tmp_path):
     updated = source(new=True)
