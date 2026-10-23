@@ -35,16 +35,16 @@ def main() -> int:
         os.chown(path, al.pw_uid, jason_gid)
         os.chmod(path, 0o750)
 
-    install(
-        ROOT / "tools" / "release_host_reconcile_worker.py",
-        LIB / "release_host_reconcile_worker.py",
-        0o755,
-    )
-    # The root-owned worker must be able to restore the approved overlay
-    # before invoking an immutable older rollback script.
+    # Stage the audited helper first: never expose a newly installed root
+    # worker that cannot yet restore protected policy during rollback.
     install(
         ROOT / "tools" / "protected_root_policy_migration.py",
         LIB / "protected_root_policy_migration.py",
+        0o755,
+    )
+    install(
+        ROOT / "tools" / "release_host_reconcile_worker.py",
+        LIB / "release_host_reconcile_worker.py",
         0o755,
     )
     for name in (
