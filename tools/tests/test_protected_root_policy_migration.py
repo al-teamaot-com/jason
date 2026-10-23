@@ -385,3 +385,40 @@ def test_rollback_stage_is_idempotent_and_does_not_become_required_again(
     d = json.loads(policy.read_text())
     assert "jason-openclaw-authority-full-integrity.timer" in d["allowed_system_units"]
     assert "jason-openclaw-authority-full-integrity.timer" not in d["required_system_units"]
+
+
+@pytest.mark.parametrize(
+    ('mode', 'owner', 'group', 'accepted'),
+    [
+        (0o755, 0, 0, True),
+        (0o775, 0, 0, True),  # Actual immutable root:root config directory
+        (0o664, 0, 0, True),  # Actual immutable root:root desired-state file
+        (0o644, 0, 999, True),  # Non-root group cannot write
+        (0o775, 0, 1000, False),  # Non-root group can write
+        (0o664, 0, 1000, False),
+        (0o777, 0, 0, False),  # World writable even though root group
+        (0o666, 0, 0, False),
+        (0o775, 1000, 0, False),  # Non-root owner
+        (0o664, 1000, 0, False),
+    ],
+)
+def test_immutable_root_group_packaging_modes_are_bounded(
+    mode, owner, group, accepted
+):
+    from types import SimpleNamespace
+    import stat
+    info = SimpleNamespace(
+        st_uid=owner, st_gid=group, st_mode=stat.S_IFREG | mode
+    )
+    assert m._trusted_immutable_package_metadata(info) is accepted
+
+
+def test_immutable_file_gate_and_root_private_policy_gate_remain_distinct():
+    code = (Path(__file__).resolve().parents[1] /
+            'protected_root_policy_migration.py').read_text()
+    assert 'not _trusted_immutable_package_metadata(info)' in code
+    assert 'not _trusted_immutable_package_metadata(meta)' in code
+    # Independently root-protected policy, review ledger and CCC keys must
+    # remain mode 0600 even though packaged immutable root:root files are 0664.
+    assert 'meta.st_mode & 0o077' in code
+    assert 'os.O_NOFOLLOW' in code
