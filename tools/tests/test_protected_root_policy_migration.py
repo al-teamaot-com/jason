@@ -235,3 +235,34 @@ def test_crash_before_policy_write_can_be_recovered_without_false_success(monkey
     assert m.restore_for_baseline(BASE) == "RESTORED"
     assert policy.read_bytes() == original
     assert not m.ACTIVE.exists()
+
+
+def test_real_temporary_policy_full_forward_and_downgrade_roundtrip(monkeypatch, tmp_path):
+    import importlib.util
+    repo_root = Path(__file__).resolve().parents[1]
+    spec = importlib.util.spec_from_file_location("release_worker_roundtrip",
+        repo_root / "release_host_reconcile_worker.py")
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    root_policy, original, _ = configure(monkeypatch, tmp_path)
+    monkeypatch.setattr(worker, '_trusted_root_policy_helper', lambda: m)
+    monkeypatch.setattr(worker, '_protected_root_drift_policy',
+                        lambda: json.loads(root_policy.read_text()))
+    monkeypatch.setattr(worker.subprocess, 'check_output',
+                        lambda *args, **kwargs: json.dumps(source(new=True)))
+    assert worker._preflight_candidate_root_policy(CANDIDATE) == (
+        "OWNER_CCC_REVIEWED_DELTA_ONLY")
+    assert root_policy.read_bytes() == original
+    assert not m.ACTIVE.exists()
+    assert m.apply_for_candidate(CANDIDATE, BASE) == 'APPLIED'
+    worker._verify_root_policy_covers_candidate(CANDIDATE)
+    installed = json.loads(root_policy.read_text())
+    for field, units in m.APPROVED_DELTA.items():
+        assert units.issubset(set(installed[field]))
+    assert worker._restore_root_policy_for_target(BASE) == 'RESTORED'
+    assert root_policy.read_bytes() == original
+    assert not m.ACTIVE.exists()
+    receipt_path = tmp_path / 'recovery' / 'approved-migrations' / (
+        'restored-' + CANDIDATE + '.json')
+    assert receipt_path.exists()
+    assert json.loads(receipt_path.read_text())['phase'] == 'restored'
