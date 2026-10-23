@@ -152,7 +152,7 @@ def test_unreviewed_addition_and_policy_mismatch_fail_closed(monkeypatch, tmp_pa
     changed = source()
     changed["allowed_system_units"].append("jason-openclaw-authority-full-integrity.service")
     policy, original, _ = configure(monkeypatch, tmp_path, policy=changed)
-    with pytest.raises(m.MigrationRefused, match="already in root overlay"):
+    with pytest.raises(m.MigrationRefused, match="already present without ledger"):
         m.stage_for_candidate(CANDIDATE, BASE)
     assert policy.read_bytes() == original
 
