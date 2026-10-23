@@ -410,5 +410,75 @@ def restore_for_baseline(target_sha: str) -> str:
     return "RESTORED"
 
 
+def prepare_rollback(target_sha: str) -> str:
+    """Drop candidate REQUIRED timer before the old host removes units.
+
+    Keep candidate units temporarily ALLOWED until they are actually
+    uninstalled. This preserves independent drift checks throughout rollback.
+    """
+    _require_root()
+    target_sha = _sha(target_sha)
+    if not ACTIVE.is_file():
+        return "NO_MIGRATION_ACTIVE"
+    receipt = _json(_root_only(ACTIVE))
+    if receipt.get("rollback_sha") != target_sha:
+        raise MigrationRefused("root rollback target differs from audited LKG")
+    if receipt.get("reviewed_delta") != {
+        k: sorted(v) for k, v in APPROVED_DELTA.items()
+    }:
+        raise MigrationRefused("root rollback reviewed unit delta differs from receipt")
+    control = _json(_root_only(ROOT / "production-control-state.json"))
+    if (((control.get("last_known_good") or {}).get("manifest") or {}).get("revision")
+            != target_sha):
+        raise MigrationRefused("root last-known-good does not match rollback target")
+    current, _ = _current_root_policy()
+    phase = receipt.get("phase")
+    if phase == "rollback_prepared":
+        if digest(current) in {receipt.get("staged_sha256"), receipt.get("original_sha256")}:
+            return "ROLLBACK_ALLOWED_STAGE"
+        raise MigrationRefused("prepared rollback policy hash changed unexpectedly")
+    if phase not in {"prepared", "staged", "applied"}:
+        raise MigrationRefused("root policy migration is not in an abortable phase")
+    if digest(current) not in {
+        receipt.get("original_sha256"), receipt.get("staged_sha256"),
+        receipt.get("applied_sha256")
+    }:
+        raise MigrationRefused("root policy changed outside reviewed migration")
+
+    if digest(current) == receipt.get("applied_sha256"):
+        original = base64.b64decode(receipt["original_policy_base64"], validate=True)
+        if digest(original) != receipt.get("original_sha256"):
+            raise MigrationRefused("root rollback original policy checksum mismatch")
+        baseline = _json(original)
+        _safe_units(baseline)
+        allowed = _overlay_policy(baseline, STAGED_DELTA)
+        if digest(allowed) != receipt.get("staged_sha256"):
+            raise MigrationRefused("root rollback allowed-only stage hash mismatch")
+        _atomic(POLICY, allowed)
+    receipt["phase"] = "rollback_prepared"
+    _atomic(ACTIVE, (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode())
+    return "ROLLBACK_ALLOWED_STAGE"
+
+
+def complete_rollback(target_sha: str) -> str:
+    """Restore exact old bytes ONLY after installed candidate units are gone."""
+    _require_root()
+    target_sha = _sha(target_sha)
+    if not ACTIVE.is_file():
+        return "NO_MIGRATION_ACTIVE"
+    receipt = _json(_root_only(ACTIVE))
+    if receipt.get("rollback_sha") != target_sha or receipt.get("phase") != "rollback_prepared":
+        raise MigrationRefused("root rollback completion not in approved phase")
+    for unit in APPROVED_DELTA["required_system_units"] | APPROVED_DELTA["allowed_system_units"]:
+        if (Path("/etc/systemd/system") / unit).exists():
+            raise MigrationRefused("candidate system unit still installed during rollback")
+    for unit in APPROVED_DELTA["allowed_user_units"]:
+        if (Path("/home/al/.config/systemd/user") / unit).exists():
+            raise MigrationRefused("candidate user unit still installed during rollback")
+    # restore_for_baseline checks the root-protected LKG SHA, exact original
+    # bytes and phase-bound policy digest before archiving the receipt.
+    return restore_for_baseline(target_sha)
+
+
 if __name__ == "__main__":
     raise SystemExit("Root policy changes require native host reconcile, not a standalone command")
