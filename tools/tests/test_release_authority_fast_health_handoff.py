@@ -214,3 +214,88 @@ def test_real_host_shell_calls_fast_verifier_twice_but_never_kills_health_job():
         '/usr/bin/python3 "$AUTHORITY_HANDOFF" --release-dir "$RELEASE_DIR"')
     assert script.index('AUTHORITY_HANDOFF="$RELEASE_DIR/tools/') < script.index(
         'JASON_HOST_SERVICE_RECONCILIATION=PASS')
+
+
+
+@pytest.mark.parametrize("owner,group,mode,allowed", [
+    (0, 0, 0o644, True),
+    (0, 0, 0o664, True),
+    (0, 1000, 0o644, True),
+    (0, 1000, 0o664, False),
+    (1000, 0, 0o644, False),
+    (0, 0, 0o666, False),
+])
+def test_exact_root_unit_policy_rejects_untrusted_writable_users(owner, group, mode, allowed):
+    record = SimpleNamespace(
+        st_mode=stat.S_IFREG | mode, st_uid=owner, st_gid=group
+    )
+    assert gate._trusted_root_regular(record) is allowed
+
+
+def test_exact_canonical_fast_systemd_unit_and_timer_verification(monkeypatch, tmp_path):
+    source = tmp_path / OLD
+    source_unit = source / gate.UNIT_IN_RELEASE
+    source_unit.parent.mkdir(parents=True)
+    contents = (
+        "[Unit]\nDescription=Frequent Fast Probe\n"
+        "[Service]\nType=oneshot\n"
+        "ExecStart=/usr/bin/python3 " + gate.EXPECTED_FAST
+    )
+    source_unit.write_text(contents)
+    installed = tmp_path / gate.UNIT
+    installed.write_text(contents)
+    monkeypatch.setattr(gate, "INSTALLED", installed)
+    # Tested root metadata separately; this fixture runs as non-root.
+    monkeypatch.setattr(gate, "_trusted_root_regular", lambda _: True)
+    props = {
+        "FragmentPath": str(installed), "DropInPaths": "",
+        "ExecStart": ("{ path=/usr/bin/python3 ; argv[]=/usr/bin/python3 "
+                      + gate.EXPECTED_FAST + " --output /var/lib/jason/openclaw/operational-health.json }"),
+    }
+    monkeypatch.setattr(gate, "_show", lambda key: props[key])
+    monkeypatch.setattr(gate, "_call", lambda cmd, **kwargs:
+                        "active" if cmd == ["/usr/bin/systemctl", "is-active", gate.TIMER]
+                        else (_ for _ in ()).throw(AssertionError("unexpected systemd call")))
+    gate._installed_is_exact(source)
+    props["DropInPaths"] = "/etc/systemd/system/unreviewed-override.conf"
+    with pytest.raises(gate.HandoffRefused, match="override"):
+        gate._installed_is_exact(source)
+    props["DropInPaths"] = ""
+    props["ExecStart"] = "legacy checker"
+    with pytest.raises(gate.HandoffRefused, match="not new fast checker"):
+        gate._installed_is_exact(source)
+    props["ExecStart"] = gate.EXPECTED_FAST
+    installed.write_text(contents + "\n# changed")
+    with pytest.raises(gate.HandoffRefused, match="differs"):
+        gate._installed_is_exact(source)
+
+
+def test_actual_fallback_command_is_unprivileged_and_result_still_verified(
+    monkeypatch, tmp_path, snapshot
+):
+    source = tmp_path / OLD
+    program = source / "tools/openclaw_authority_fast_health.py"
+    program.parent.mkdir(parents=True)
+    program.write_text("# only a synthetic fixture, never executed")
+    output, publish = snapshot
+    monkeypatch.setattr(gate, "_trusted_root_regular", lambda _: True)
+    commands = []
+    def real_snapshot_fake_process(argv, *, timeout=12):
+        commands.append((argv, timeout))
+        publish()
+        return '{"status":"pass"}'
+    monkeypatch.setattr(gate, "_call", real_snapshot_fake_process)
+    gate._run_direct_probe(source)
+    assert len(commands) == 1
+    assert commands[0][0][:7] == [
+        "/usr/sbin/runuser", "-u", "al", "--",
+        "/usr/bin/python3", str(program), "--output",
+    ]
+    assert commands[0][1] == 35
+    # Legacy health process was never stopped or restarted.
+    assert all("systemctl" not in str(command) for command, _ in commands)
+    # Even a successful process return code with an invalid proof must deny.
+    monkeypatch.setattr(gate, "_call", lambda argv, **kw: '{"status":"pass"}')
+    publish(report(mode="legacy_full_scan"))
+    with pytest.raises(gate.HandoffRefused):
+        gate._run_direct_probe(source)
