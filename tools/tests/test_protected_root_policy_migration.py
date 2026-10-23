@@ -38,7 +38,7 @@ def configure(monkeypatch, tmp_path, *, policy=None, candidate=None, old=None):
     candidate = candidate or source(new=True)
     old = old or source()
     recovery = tmp_path / "recovery"
-    recovery.mkdir()
+    recovery.mkdir(parents=True)
     store = recovery / "approved-migrations"
     store.mkdir(mode=0o700)
     root_policy = recovery / "production-desired-state.json"
