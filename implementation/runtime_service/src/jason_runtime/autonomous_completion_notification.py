@@ -280,27 +280,43 @@ def _adaptive_card(
     color: str,
     facts: tuple[tuple[str, str], ...] = (),
 ) -> dict[str, Any]:
+    """One quiet AOT/Jason notification layout; never an approval control.
+
+    The established signed transport, one-attempt delivery claim and approved
+    message text remain unchanged. Only the card's semantic presentation
+    changes, and a real owner action is no longer buried inside FactSet.
+    """
     body: list[dict[str, Any]] = [
-        {
-            "type": "TextBlock",
-            "text": title,
-            "weight": "Bolder",
-            "size": "Large",
-            "color": color,
-            "wrap": True,
-        },
-        {"type": "TextBlock", "text": summary, "wrap": True},
+        {"type": "TextBlock", "text": "JASON \u00b7 AOT",
+         "size": "Small", "isSubtle": True, "spacing": "None"},
+        {"type": "TextBlock", "text": title,
+         "weight": "Bolder", "size": "Medium", "color": color,
+         "wrap": True, "spacing": "Small"},
+        {"type": "TextBlock", "text": summary,
+         "wrap": True, "spacing": "Small"},
     ]
-    if facts:
-        body.append(
-            {
-                "type": "FactSet",
-                "facts": [
-                    {"title": key, "value": value}
-                    for key, value in facts
-                ],
-            }
-        )
+    detail_facts = []
+    next_action = None
+    for key, value in facts:
+        if key == "Owner action":
+            next_action = value
+        else:
+            detail_facts.append({"title": key, "value": value})
+    if next_action:
+        body.append({
+            "type": "Container", "style": "emphasis",
+            "items": [
+                {"type": "TextBlock", "text": "NEXT ACTION",
+                 "size": "Small", "weight": "Bolder", "color": "Warning"},
+                {"type": "TextBlock", "text": next_action,
+                 "wrap": True, "spacing": "Small"},
+            ],
+        })
+    if detail_facts:
+        body.append({
+            "type": "FactSet", "facts": detail_facts,
+            "separator": True, "spacing": "Small",
+        })
     return {
         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
         "type": "AdaptiveCard",
