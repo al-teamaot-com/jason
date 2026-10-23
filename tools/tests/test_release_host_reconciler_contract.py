@@ -158,3 +158,26 @@ def test_root_worker_leaves_remaining_requests_for_next_path_activation(tmp_path
         assert worker.main()==0
         assert len(processed)==2
         assert list(requests.glob('*.json'))==[]
+
+
+
+def test_root_installer_stages_helper_and_worker_atomically(tmp_path, monkeypatch):
+    import importlib.util
+    import os
+    source = ROOT / "tools" / "install_release_host_reconciler.py"
+    spec = importlib.util.spec_from_file_location("jason_root_installer_atomic", source)
+    installer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(installer)
+    orig = tmp_path / "staged.py"
+    orig.write_text("new helper")
+    target = tmp_path / "root.py"
+    target.write_text("old helper")
+    monkeypatch.setattr(installer.os, "fchown", lambda *args: None)
+    installer.install(orig, target, 0o755)
+    assert target.read_text() == "new helper"
+    assert (target.stat().st_mode & 0o777) == 0o755
+    assert not list(tmp_path.glob(".jason-root-install-*"))
+    code = source.read_text()
+    assert "os.replace(temporary, destination)" in code
+    assert code.index('ROOT / "tools" / "protected_root_policy_migration.py"') < code.index(
+        'ROOT / "tools" / "release_host_reconcile_worker.py"')
