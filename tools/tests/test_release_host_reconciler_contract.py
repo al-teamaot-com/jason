@@ -203,3 +203,63 @@ def test_pinned_legacy_health_timeout_does_not_skip_mandatory_health_verificatio
     systemd = (ROOT / "infrastructure/openclaw-operations/systemd/jason-release-host-reconcile.service").read_text()
     assert "timeout_seconds: float = 420.0" in manager
     assert "TimeoutStartSec=480" in systemd
+
+
+
+def test_committed_root_policy_remains_authoritative_for_subsequent_releases(tmp_path, monkeypatch):
+    import importlib.util
+    import hashlib
+    import json
+    from types import SimpleNamespace
+    worker_source = ROOT / "tools" / "release_host_reconcile_worker.py"
+    spec = importlib.util.spec_from_file_location("jason_root_ledger_reader", worker_source)
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    old = "a" * 40
+    committed = "b" * 40
+    next_revision = "c" * 40
+    active = tmp_path / "active.json"
+    policy = tmp_path / "policy.json"
+    control = tmp_path / "production-control-state.json"
+    raw = b'{"schema_version":"1.0","required_system_units":["jason-known.timer"]}\n'
+    policy.write_bytes(raw)
+    receipt = {
+        "schema_version": "1.0", "candidate_sha": committed,
+        "rollback_sha": old, "phase": "applied",
+        "applied_sha256": hashlib.sha256(raw).hexdigest(),
+    }
+    active.write_text(json.dumps(receipt))
+    state = {
+        "schema_version": "1.0",
+        "circuit_breaker": {"state": "closed"},
+        "last_known_good": {"manifest": {"revision": committed, "complete": True}},
+    }
+    control.write_text(json.dumps(state))
+    helper = SimpleNamespace(
+        ROOT=tmp_path, ACTIVE=active, POLICY=policy,
+        _json=lambda b: json.loads(b),
+        _root_only=lambda p: p.read_bytes(),
+        digest=lambda b: hashlib.sha256(b).hexdigest(),
+        restore_for_baseline=lambda _: (_ for _ in ()).throw(AssertionError("unexpected rollback")),
+    )
+    monkeypatch.setattr(worker, "_trusted_root_policy_helper", lambda: helper)
+    assert worker._restore_root_policy_for_target(next_revision) == "PREVIOUS_MIGRATION_LKG_VERIFIED"
+    # Keep root policy unchanged: this is proof of an already-committed
+    # migration, NOT implicit authorization for a new policy write.
+    assert policy.read_bytes() == raw
+    policy.write_bytes(b"unauthorized addition\n")
+    try:
+        worker._restore_root_policy_for_target(next_revision)
+    except worker.HostReconcileError as exc:
+        assert "committed root policy differs" in str(exc)
+    else:
+        raise AssertionError("tampered committed policy must fail closed")
+    policy.write_bytes(raw)
+    state["circuit_breaker"]["state"] = "open"
+    control.write_text(json.dumps(state))
+    try:
+        worker._restore_root_policy_for_target(next_revision)
+    except worker.HostReconcileError:
+        pass
+    else:
+        raise AssertionError("open breaker cannot authorize committed receipt reuse")
