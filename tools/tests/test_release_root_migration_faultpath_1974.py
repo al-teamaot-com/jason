@@ -111,8 +111,11 @@ def _simulate_root_worker(monkeypatch, tmp_path, revision, *, approved, outcome,
     monkeypatch.setattr(worker, "_mcp_revision", lambda: revision)
     monkeypatch.setattr(worker, "_restore_root_policy_for_target",
                         lambda s: (events.append(("restore", s)) or
-                                   ("RESTORED" if revision == BASELINE else
+                                   ("ROLLBACK_ALLOWED_STAGE" if revision == BASELINE else
                                     "NO_MIGRATION_ACTIVE")))
+    monkeypatch.setattr(worker, "_trusted_root_policy_helper",
+                        lambda: SimpleNamespace(complete_rollback=lambda sha:
+                            (events.append(("complete_policy", sha)) or "RESTORED")))
     monkeypatch.setattr(worker, "_preflight_candidate_root_policy",
                         lambda s: (events.append(("preflight", s)) or
                                    ("OWNER_CCC_REVIEWED_DELTA_ONLY" if approved else
@@ -164,7 +167,7 @@ def test_candidate_install_without_actual_root_migration_is_rejected(
     assert any(name == "root_post_check" for name, _ in events)
 
 
-def test_baseline_rollback_restores_policy_before_full_health_script(
+def test_baseline_rollback_restores_exact_bytes_only_after_full_health_script(
     monkeypatch, tmp_path
 ):
     events, result = _simulate_root_worker(
@@ -173,6 +176,8 @@ def test_baseline_rollback_restores_policy_before_full_health_script(
     assert result["success"] is True
     assert "ROOT_POLICY_MIGRATION=RESTORED" in result["detail"]
     assert ("host_script", 410) in events
+    assert ("complete_policy", BASELINE) in events
+    assert [name for name, _ in events].index("host_script") < [name for name, _ in events].index("complete_policy")
     assert [name for name, _ in events].index("restore") < [
         name for name, _ in events].index("host_script")
     assert not any(name == "root_post_check" for name, _ in events)
@@ -185,6 +190,7 @@ def test_stalled_legacy_full_health_check_is_not_accepted_as_verified_rollback(
         monkeypatch, tmp_path, BASELINE, approved=False, outcome="",
         expires=True)
     assert ("host_script", 410) in events
+    assert not any(name == "complete_policy" for name, _ in events)
     assert result["success"] is False
     assert "exceeded 410s" in result["detail"]
     assert not any(name == "root_post_check" for name, _ in events)
