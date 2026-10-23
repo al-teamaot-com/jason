@@ -1,7 +1,7 @@
 # Root-protected production drift policy — exact-release parity gate
 
-**Status:** Source-only P0 release-safety repair; not deployed  
-**Incident:** #1974; blocks Universal Teams Approver #1440  
+**Status:** Source-only P0 release-safety repair; not deployed
+**Incident:** #1974; blocks Universal Teams Approver #1440
 **Authority:** Exact owner-approved immutable release and separate CCC material review; root-controlled drift guard and protected LKG remain independent
 
 ## Evidence from the October 23 failed release
