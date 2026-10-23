@@ -181,3 +181,25 @@ def test_root_installer_stages_helper_and_worker_atomically(tmp_path, monkeypatc
     assert "os.replace(temporary, destination)" in code
     assert code.index('ROOT / "tools" / "protected_root_policy_migration.py"') < code.index(
         'ROOT / "tools" / "release_host_reconcile_worker.py"')
+
+
+
+def test_pinned_legacy_health_timeout_does_not_skip_mandatory_health_verification():
+    """A single pinned line change; this must not become general script rewriting."""
+    from pathlib import Path
+    text = (ROOT / "tools" / "release_host_reconcile_worker.py").read_text()
+    assert 'LEGACY_LKG_SHA = "aca94fdc0bfa551162f6ea99d7ddded311786414"' in text
+    assert 'LEGACY_HOST_SCRIPT_SHA256 = "d8bf41dfe824b8eb01ae192386907a6657f09c245aa246306597a1162c7d1707"' in text
+    assert 'LEGACY_HEALTH_FROM = ' in text and '240s systemctl start' in text
+    assert 'LEGACY_HEALTH_TO = ' in text and '300s systemctl start' in text
+    assert "hashlib.sha256(body.encode(\"utf-8\")).hexdigest()" in text
+    assert "body.count(LEGACY_HEALTH_FROM) != 1" in text
+    assert "body = body.replace(LEGACY_HEALTH_FROM, LEGACY_HEALTH_TO)" in text
+    assert "HOST_RECONCILE_LEGACY_ROLLBACK_TIMEOUT_SECONDS = 410" in text
+    assert "if source_revision == LEGACY_LKG_SHA" in text
+    # The native Release Manager's independent 420-second absolute deadline
+    # and root systemd unit's 480-second deadline must still bound the work.
+    manager = (ROOT / "tools" / "release_manager_host_runner.py").read_text()
+    systemd = (ROOT / "infrastructure/openclaw-operations/systemd/jason-release-host-reconcile.service").read_text()
+    assert "timeout_seconds: float = 420.0" in manager
+    assert "TimeoutStartSec=480" in systemd
