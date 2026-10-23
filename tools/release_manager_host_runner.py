@@ -67,6 +67,7 @@ USER_CONTROL_TIMERS = (
 SYSTEM_CONTROL_TIMERS = (
     "jason-delegation-maintenance.timer",
     "jason-openclaw-authority-health.timer",
+    "jason-openclaw-authority-full-integrity.timer",
     "jason-production-drift-watchdog.timer",
 )
 
