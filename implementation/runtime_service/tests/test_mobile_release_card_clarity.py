@@ -183,8 +183,9 @@ def test_old_release_notice_prominently_identifies_itself_as_status_only():
     assert event == "production_owner_action_required"
     assert "STATUS ONLY" in text
     assert "no approval buttons" in text.lower()
-    assert "NOT an approval card" in rendered["body"][0]["text"]
-    assert "no approval buttons" in rendered["body"][1]["text"].lower()
+    assert rendered["body"][0]["text"] == "JASON \u00b7 AOT"
+    assert "NOT an approval card" in rendered["body"][1]["text"]
+    assert "no approval buttons" in rendered["body"][2]["text"].lower()
     assert not rendered.get("actions")
 
 
