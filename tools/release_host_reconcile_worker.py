@@ -209,6 +209,24 @@ def _trusted_root_policy_helper():
     return module
 
 
+def _verified_migration_ancestor(ancestor: str, descendant: str) -> bool:
+    """Verify exact immutable Git lineage; a persisted receipt alone is insufficient."""
+    if (not isinstance(ancestor, str) or not SHA.fullmatch(ancestor)
+            or not isinstance(descendant, str) or not SHA.fullmatch(descendant)):
+        raise HostReconcileError("root policy migration lineage requires exact revisions")
+    try:
+        result = subprocess.run(
+            _git("merge-base", "--is-ancestor", ancestor, descendant),
+            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise HostReconcileError("root policy migration lineage unavailable") from exc
+    if result.returncode not in (0, 1):
+        raise HostReconcileError("root policy migration lineage verification failed")
+    return result.returncode == 0
+
+
 def _restore_root_policy_for_target(source_revision: str) -> str:
     """Restore audited rollback or retain exact independently committed policy."""
     module = _trusted_root_policy_helper()
@@ -219,22 +237,27 @@ def _restore_root_policy_for_target(source_revision: str) -> str:
         return "CANDIDATE_POLICY_ACTIVE"
     if receipt.get("rollback_sha") == source_revision:
         return module.prepare_rollback(source_revision)
-    # The first migrated candidate can later become the independently
-    # root-verified LKG. Its reviewed declarations must then remain in root
-    # policy for subsequent exact-source releases. Never restore the old
-    # overlay or treat an unrelated active receipt as a fresh approval.
+    # Root-verified LKG can advance beyond the original migration SHA.
+    # Retain committed root policy only for independently verified descendants.
+    # With an open breaker, allow ONLY the protected complete LKG target, never
+    # a new candidate: rollback must remain possible without bypassing gates.
     control = module._json(module._root_only(
         module.ROOT / "production-control-state.json"))
     lkg = ((control.get("last_known_good") or {}).get("manifest") or {})
     breaker = control.get("circuit_breaker") or {}
+    lkg_revision = lkg.get("revision")
+    state = breaker.get("state")
+    authorized_target = (state == "closed" or
+                         (state == "open" and source_revision == lkg_revision))
     if (receipt.get("phase") == "applied"
-            and lkg.get("revision") == receipt.get("candidate_sha")
-            and lkg.get("complete") is True
-            and breaker.get("state") == "closed"):
+            and lkg.get("complete") is True and authorized_target):
         data = module._root_only(module.POLICY)
         if module.digest(data) != receipt.get("applied_sha256"):
             raise HostReconcileError("committed root policy differs from reviewed migration")
-        return "PREVIOUS_MIGRATION_LKG_VERIFIED"
+        migration_sha = receipt.get("candidate_sha")
+        if (_verified_migration_ancestor(migration_sha, lkg_revision)
+                and _verified_migration_ancestor(migration_sha, source_revision)):
+            return "PREVIOUS_MIGRATION_LKG_VERIFIED"
     raise HostReconcileError("active root policy migration does not belong to target SHA")
 
 
