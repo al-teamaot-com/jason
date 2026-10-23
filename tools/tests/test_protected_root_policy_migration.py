@@ -48,6 +48,12 @@ def configure(monkeypatch, tmp_path, *, policy=None, candidate=None, old=None):
     state = tmp_path / "production-control-state.json"
     state.write_text(json.dumps({"schema_version": "1.0",
                                  "last_known_good": {"manifest": {"revision": BASE}}}))
+    systemd = tmp_path / "systemd-system"
+    systemd.mkdir(exist_ok=True)
+    user_units = tmp_path / "systemd-user"
+    user_units.mkdir(exist_ok=True)
+    monkeypatch.setattr(m, "SYSTEMD_SYSTEM_UNITS", systemd)
+    monkeypatch.setattr(m, "SYSTEMD_USER_UNITS", user_units)
     monkeypatch.setattr(m, "POLICY", root_policy)
     monkeypatch.setattr(m, "LEDGER_DIR", store)
     monkeypatch.setattr(m, "ACTIVE", store / "active.json")
@@ -278,7 +284,11 @@ def test_real_temporary_policy_full_forward_and_downgrade_roundtrip(monkeypatch,
     installed = json.loads(root_policy.read_text())
     for field, units in m.APPROVED_DELTA.items():
         assert units.issubset(set(installed[field]))
-    assert worker._restore_root_policy_for_target(BASE) == 'RESTORED'
+    assert worker._restore_root_policy_for_target(BASE) == 'ROLLBACK_ALLOWED_STAGE'
+    staged = json.loads(root_policy.read_text())
+    assert "jason-openclaw-authority-full-integrity.timer" in staged["allowed_system_units"]
+    assert "jason-openclaw-authority-full-integrity.timer" not in staged["required_system_units"]
+    assert m.complete_rollback(BASE) == 'RESTORED'
     assert root_policy.read_bytes() == original
     assert not m.ACTIVE.exists()
     receipt_path = tmp_path / 'recovery' / 'approved-migrations' / (
@@ -328,3 +338,50 @@ def test_reviewed_git_policy_denies_missing_object_and_oversized_payload(monkeyp
                         lambda *_args, **_kwargs: b"x" * 131073)
     with pytest.raises(m.MigrationRefused, match="too large"):
         m._reviewed_git_policy(CANDIDATE)
+
+
+
+def test_rollback_waits_until_both_system_and_user_candidate_units_are_removed(
+    monkeypatch, tmp_path
+):
+    policy, original, _ = configure(monkeypatch, tmp_path)
+    assert m.stage_for_candidate(CANDIDATE, BASE) == "STAGED_ALLOWED_ONLY"
+    assert m.apply_for_candidate(CANDIDATE, BASE) == "APPLIED_REQUIRED_AFTER_HEALTH"
+    systemd = m.SYSTEMD_SYSTEM_UNITS / "jason-openclaw-authority-full-integrity.timer"
+    systemd.write_text("[Unit]\nDescription=Simulated installed timer\n")
+    assert m.prepare_rollback(BASE) == "ROLLBACK_ALLOWED_STAGE"
+    with pytest.raises(m.MigrationRefused, match="system unit still installed"):
+        m.complete_rollback(BASE)
+    assert m.ACTIVE.is_file()
+    assert policy.read_bytes() != original
+    systemd.unlink()
+    user = m.SYSTEMD_USER_UNITS / "jason-openclaw-recovery-source-bridge.timer"
+    user.write_text("[Unit]\nDescription=Simulated installed bridge\n")
+    with pytest.raises(m.MigrationRefused, match="user unit still installed"):
+        m.complete_rollback(BASE)
+    user.unlink()
+    assert m.complete_rollback(BASE) == "RESTORED"
+    assert policy.read_bytes() == original
+
+
+def test_interrupted_staging_before_service_start_restores_old_policy(
+    monkeypatch, tmp_path
+):
+    policy, original, _ = configure(monkeypatch, tmp_path)
+    assert m.stage_for_candidate(CANDIDATE, BASE) == "STAGED_ALLOWED_ONLY"
+    assert m.prepare_rollback(BASE) == "ROLLBACK_ALLOWED_STAGE"
+    assert m.complete_rollback(BASE) == "RESTORED"
+    assert policy.read_bytes() == original
+
+
+def test_rollback_stage_is_idempotent_and_does_not_become_required_again(
+    monkeypatch, tmp_path
+):
+    policy, _, _ = configure(monkeypatch, tmp_path)
+    assert m.stage_for_candidate(CANDIDATE, BASE) == "STAGED_ALLOWED_ONLY"
+    assert m.apply_for_candidate(CANDIDATE, BASE) == "APPLIED_REQUIRED_AFTER_HEALTH"
+    assert m.prepare_rollback(BASE) == "ROLLBACK_ALLOWED_STAGE"
+    assert m.prepare_rollback(BASE) == "ROLLBACK_ALLOWED_STAGE"
+    d = json.loads(policy.read_text())
+    assert "jason-openclaw-authority-full-integrity.timer" in d["allowed_system_units"]
+    assert "jason-openclaw-authority-full-integrity.timer" not in d["required_system_units"]
