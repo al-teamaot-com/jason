@@ -139,3 +139,68 @@ def test_stale_root_drift_refresh_rejects_failed_guard(tmp_path):
             with pytest.raises(ValueError,match='did not pass'):
                 m.verify_drift()
     write.assert_not_called()
+
+
+def test_root_drift_denial_preserves_only_bounded_unit_identities():
+    report = {
+        "schema_version": "1.0",
+        "status": "drift_detected",
+        "problems": [
+            {"kind": "undeclared_installed_system_unit",
+             "unit": "jason-openclaw-authority-full-integrity.service",
+             "exec_start": "PRIVATE SECRET OR COMMAND MUST NOT APPEAR"},
+            {"kind": "required_system_unit_not_active",
+             "unit": "jason-openclaw-authority-full-integrity.timer",
+             "state": "inactive"},
+        ],
+    }
+    rendered = m._bounded_drift_denial(json.dumps(report))
+    assert rendered == (
+        "undeclared_installed_system_unit:jason-openclaw-authority-full-integrity.service,"
+        "required_system_unit_not_active:jason-openclaw-authority-full-integrity.timer"
+    )
+    assert "PRIVATE" not in rendered
+    assert m._bounded_drift_denial("non-json private data") == ""
+    assert m._bounded_drift_denial("X" * 200000) == ""
+
+
+def test_independent_drift_refresh_reports_safely_bounded_violation_and_denies(tmp_path):
+    from datetime import datetime, timezone, timedelta
+    from types import SimpleNamespace
+    stale = {"schema_version": "1.0", "status": "pass", "problems": [],
+             "observed_at": (datetime.now(timezone.utc)-timedelta(minutes=6)).isoformat()}
+    policy = tmp_path / "root-policy.json"; policy.write_text("{}")
+    guard = tmp_path / "guard.py"; guard.write_text("pass")
+    denial = {
+        "schema_version": "1.0", "status": "drift_detected",
+        "problems": [{"kind": "undeclared_installed_system_unit",
+                      "unit": "jason-openclaw-authority-full-integrity.timer"}],
+    }
+    with patch.object(m, "DRIFT_CONFIG", policy), patch.object(m, "DRIFT_EVALUATOR", guard), \
+         patch.object(m, "protected_read", return_value=stale), \
+         patch.object(m, "write_json") as write, \
+         patch.object(m.subprocess, "run",
+                      return_value=SimpleNamespace(returncode=2, stdout=json.dumps(denial))):
+        with patch.object(m.Path, "stat",
+                          return_value=SimpleNamespace(st_mode=0o100600, st_uid=0)):
+            with pytest.raises(ValueError, match="undeclared_installed_system_unit:jason-openclaw-authority-full-integrity.timer"):
+                m.verify_drift()
+    write.assert_not_called()
+
+
+def test_root_drift_refresh_timeout_remains_fail_closed(tmp_path):
+    from datetime import datetime, timezone, timedelta
+    stale = {"schema_version": "1.0", "status": "pass", "problems": [],
+             "observed_at": (datetime.now(timezone.utc)-timedelta(minutes=6)).isoformat()}
+    policy = tmp_path / "root-policy.json"; policy.write_text("{}")
+    guard = tmp_path / "guard.py"; guard.write_text("pass")
+    with patch.object(m, "DRIFT_CONFIG", policy), patch.object(m, "DRIFT_EVALUATOR", guard), \
+         patch.object(m, "protected_read", return_value=stale), \
+         patch.object(m, "write_json") as write, \
+         patch.object(m.subprocess, "run",
+                      side_effect=m.subprocess.TimeoutExpired(cmd=["drift"], timeout=70)):
+        with patch.object(m.Path, "stat",
+                          return_value=type("Stat", (), {"st_mode": 0o100600, "st_uid": 0})()):
+            with pytest.raises(ValueError, match="refresh timed out"):
+                m.verify_drift()
+    write.assert_not_called()

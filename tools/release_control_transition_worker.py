@@ -87,6 +87,37 @@ def verify_health(revision: str) -> dict:
     return manifest
 
 
+def _bounded_drift_denial(raw: str) -> str:
+    """Surface only bounded non-secret issue identity from the root evaluator.
+
+    Never print raw stdout/stderr, arbitrary property values or command lines
+    from protected drift evidence into unprivileged release error messages.
+    """
+    if not isinstance(raw, str) or len(raw) > 131072:
+        return ""
+    try:
+        report = json.loads(raw)
+    except (ValueError, TypeError):
+        return ""
+    if (not isinstance(report, dict) or report.get('schema_version') != '1.0'
+            or report.get('status') != 'drift_detected'
+            or not isinstance(report.get('problems'), list)):
+        return ""
+    reasons = []
+    for entry in report['problems'][:6]:
+        if not isinstance(entry, dict):
+            continue
+        kind = str(entry.get('kind') or '')
+        if not re.fullmatch(r'[a-z][a-z0-9_]{0,62}', kind):
+            continue
+        unit = str(entry.get('unit') or '')
+        if re.fullmatch(r'jason-[a-z0-9_.@-]{1,120}', unit):
+            reasons.append(kind + ':' + unit)
+        else:
+            reasons.append(kind)
+    return ','.join(reasons[:6])
+
+
 def refresh_stale_drift() -> None:
     """Regenerate drift from the independent policy while transaction lock is held.
 
@@ -99,12 +130,17 @@ def refresh_stale_drift() -> None:
         info=path.stat()
         if not stat.S_ISREG(info.st_mode) or info.st_uid!=0 or (info.st_mode & 0o002):
             raise PermissionError('root-owned drift evaluator and policy required')
-    result=subprocess.run(
-        ['/usr/bin/python3',str(DRIFT_EVALUATOR),'--config',str(DRIFT_CONFIG)],
-        capture_output=True,text=True,timeout=70,check=False,
-    )
+    try:
+        result=subprocess.run(
+            ['/usr/bin/python3',str(DRIFT_EVALUATOR),'--config',str(DRIFT_CONFIG)],
+            capture_output=True,text=True,timeout=70,check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ValueError('independent production drift refresh timed out within root boundary') from exc
     if result.returncode!=0:
-        raise ValueError('independent production drift refresh did not pass')
+        detail = _bounded_drift_denial(result.stdout)
+        raise ValueError('independent production drift refresh did not pass'
+                         + (': ' + detail if detail else ' (no bounded drift detail available)'))
     payload=json.loads(result.stdout)
     if (payload.get('schema_version')!='1.0' or payload.get('status')!='pass'
             or payload.get('problems') or not payload.get('observed_at')):

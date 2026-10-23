@@ -158,3 +158,108 @@ def test_root_worker_leaves_remaining_requests_for_next_path_activation(tmp_path
         assert worker.main()==0
         assert len(processed)==2
         assert list(requests.glob('*.json'))==[]
+
+
+
+def test_root_installer_stages_helper_and_worker_atomically(tmp_path, monkeypatch):
+    import importlib.util
+    import os
+    source = ROOT / "tools" / "install_release_host_reconciler.py"
+    spec = importlib.util.spec_from_file_location("jason_root_installer_atomic", source)
+    installer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(installer)
+    orig = tmp_path / "staged.py"
+    orig.write_text("new helper")
+    target = tmp_path / "root.py"
+    target.write_text("old helper")
+    monkeypatch.setattr(installer.os, "fchown", lambda *args: None)
+    installer.install(orig, target, 0o755)
+    assert target.read_text() == "new helper"
+    assert (target.stat().st_mode & 0o777) == 0o755
+    assert not list(tmp_path.glob(".jason-root-install-*"))
+    code = source.read_text()
+    assert "os.replace(temporary, destination)" in code
+    assert code.index('ROOT / "tools" / "protected_root_policy_migration.py"') < code.index(
+        'ROOT / "tools" / "release_host_reconcile_worker.py"')
+
+
+
+def test_pinned_legacy_health_timeout_does_not_skip_mandatory_health_verification():
+    """A single pinned line change; this must not become general script rewriting."""
+    from pathlib import Path
+    text = (ROOT / "tools" / "release_host_reconcile_worker.py").read_text()
+    assert 'LEGACY_LKG_SHA = "aca94fdc0bfa551162f6ea99d7ddded311786414"' in text
+    assert 'LEGACY_HOST_SCRIPT_SHA256 = "d8bf41dfe824b8eb01ae192386907a6657f09c245aa246306597a1162c7d1707"' in text
+    assert 'LEGACY_HEALTH_FROM = ' in text and '240s systemctl start' in text
+    assert 'LEGACY_HEALTH_TO = ' in text and '300s systemctl start' in text
+    assert "hashlib.sha256(body.encode(\"utf-8\")).hexdigest()" in text
+    assert "body.count(LEGACY_HEALTH_FROM) != 1" in text
+    assert "body = body.replace(LEGACY_HEALTH_FROM, LEGACY_HEALTH_TO)" in text
+    assert "HOST_RECONCILE_LEGACY_ROLLBACK_TIMEOUT_SECONDS = 410" in text
+    assert "if source_revision == LEGACY_LKG_SHA" in text
+    # The native Release Manager's independent 420-second absolute deadline
+    # and root systemd unit's 480-second deadline must still bound the work.
+    manager = (ROOT / "tools" / "release_manager_host_runner.py").read_text()
+    systemd = (ROOT / "infrastructure/openclaw-operations/systemd/jason-release-host-reconcile.service").read_text()
+    assert "timeout_seconds: float = 420.0" in manager
+    assert "TimeoutStartSec=480" in systemd
+
+
+
+def test_committed_root_policy_remains_authoritative_for_subsequent_releases(tmp_path, monkeypatch):
+    import importlib.util
+    import hashlib
+    import json
+    from types import SimpleNamespace
+    worker_source = ROOT / "tools" / "release_host_reconcile_worker.py"
+    spec = importlib.util.spec_from_file_location("jason_root_ledger_reader", worker_source)
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    old = "a" * 40
+    committed = "b" * 40
+    next_revision = "c" * 40
+    active = tmp_path / "active.json"
+    policy = tmp_path / "policy.json"
+    control = tmp_path / "production-control-state.json"
+    raw = b'{"schema_version":"1.0","required_system_units":["jason-known.timer"]}\n'
+    policy.write_bytes(raw)
+    receipt = {
+        "schema_version": "1.0", "candidate_sha": committed,
+        "rollback_sha": old, "phase": "applied",
+        "applied_sha256": hashlib.sha256(raw).hexdigest(),
+    }
+    active.write_text(json.dumps(receipt))
+    state = {
+        "schema_version": "1.0",
+        "circuit_breaker": {"state": "closed"},
+        "last_known_good": {"manifest": {"revision": committed, "complete": True}},
+    }
+    control.write_text(json.dumps(state))
+    helper = SimpleNamespace(
+        ROOT=tmp_path, ACTIVE=active, POLICY=policy,
+        _json=lambda b: json.loads(b),
+        _root_only=lambda p: p.read_bytes(),
+        digest=lambda b: hashlib.sha256(b).hexdigest(),
+        restore_for_baseline=lambda _: (_ for _ in ()).throw(AssertionError("unexpected rollback")),
+    )
+    monkeypatch.setattr(worker, "_trusted_root_policy_helper", lambda: helper)
+    assert worker._restore_root_policy_for_target(next_revision) == "PREVIOUS_MIGRATION_LKG_VERIFIED"
+    # Keep root policy unchanged: this is proof of an already-committed
+    # migration, NOT implicit authorization for a new policy write.
+    assert policy.read_bytes() == raw
+    policy.write_bytes(b"unauthorized addition\n")
+    try:
+        worker._restore_root_policy_for_target(next_revision)
+    except worker.HostReconcileError as exc:
+        assert "committed root policy differs" in str(exc)
+    else:
+        raise AssertionError("tampered committed policy must fail closed")
+    policy.write_bytes(raw)
+    state["circuit_breaker"]["state"] = "open"
+    control.write_text(json.dumps(state))
+    try:
+        worker._restore_root_policy_for_target(next_revision)
+    except worker.HostReconcileError:
+        pass
+    else:
+        raise AssertionError("open breaker cannot authorize committed receipt reuse")

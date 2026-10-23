@@ -204,6 +204,23 @@ if [ ! -d "$DOCUMENTATION_SOURCE_REPO/.git" ]; then
   exit 9
 fi
 
+# Root worker and audited rollback helper MUST be staged before any
+# candidate-specific systemd unit is installed. A separately Owner/CCC-
+# approved migration may temporarily declare the new timer ALLOWED but
+# not yet REQUIRED. The full required timer is committed only after
+# independent systemd activation checks pass near the end of this script.
+step_start protected_root_policy_stage
+/usr/bin/python3 "$RELEASE_DIR/tools/install_release_host_reconciler.py" --stage-only
+cmp -s "$RELEASE_DIR/tools/protected_root_policy_migration.py" /usr/local/lib/jason/protected_root_policy_migration.py || {
+  echo "ERROR: root policy migration helper differs from exact immutable release" >&2
+  exit 9
+}
+cmp -s "$RELEASE_DIR/tools/release_host_reconcile_worker.py" /usr/local/lib/jason/release_host_reconcile_worker.py || {
+  echo "ERROR: root host rollback worker differs from exact immutable release" >&2
+  exit 9
+}
+step_pass protected_root_policy_stage
+
 for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}" "${DEFERRED_MAINTENANCE_SERVICES[@]}" "${MAINTENANCE_TIMERS[@]}" "$PROVIDER_CANARY_SERVICE" "$PROVIDER_CANARY_TIMER" "$DRIFT_WATCHDOG_SERVICE" "$DRIFT_WATCHDOG_TIMER" "${OBSOLETE_UNITS[@]}"; do
   if [ -f "/etc/systemd/system/$unit" ]; then
     cp -a "/etc/systemd/system/$unit" "$BACKUP_DIR/$unit.before"
@@ -572,8 +589,23 @@ echo "JASON_USER_WORKER_RECONCILIATION=PASS"
 echo "ENGINEERING_SOURCE_REPO=$ENGINEERING_SOURCE_REPO"
 echo "DOCUMENTATION_SOURCE_REPO=$DOCUMENTATION_SOURCE_REPO"
 
-# Keep the root-governed release-transition processor aligned with the
-# immutable release before final production baseline verification. A retry
+# Install the exact root host worker and policy rollback helper FIRST, so
+# any subsequent protected-policy migration is reversible even if the
+# root transition install fails before the release can be certified.
+step_start root_reconciler_install
+/usr/bin/python3 "$RELEASE_DIR/tools/install_release_host_reconciler.py"
+cmp -s "$RELEASE_DIR/tools/release_host_reconcile_worker.py" /usr/local/lib/jason/release_host_reconcile_worker.py || {
+  echo "ERROR: installed root host reconciler differs from production source" >&2
+  exit 9
+}
+if [ "$(systemctl is-active jason-release-host-reconcile.path 2>/dev/null || true)" != "active" ]; then
+  echo "ERROR: root host-reconcile path is not active after production install" >&2
+  exit 9
+fi
+step_pass root_reconciler_install
+echo "JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS"
+# Align the independent root transition processor and its exact reviewed
+# root-only policy only AFTER the rollback-capable host worker is installed. A retry
 # identity accepted by the Release Manager must also be accepted by the root
 # processor; otherwise final closeout unnecessarily rolls production back.
 step_start root_release_transition_install
@@ -589,21 +621,6 @@ fi
 step_pass root_release_transition_install
 echo "JASON_ROOT_RELEASE_TRANSITION_RECONCILIATION=PASS"
 
-# Keep the privileged host-reconciliation boundary on the exact production
-# implementation after this successful reconciliation. The worker validates
-# only local refs from the managed engineering Git source.
-step_start root_reconciler_install
-/usr/bin/python3 "$RELEASE_DIR/tools/install_release_host_reconciler.py"
-cmp -s "$RELEASE_DIR/tools/release_host_reconcile_worker.py" /usr/local/lib/jason/release_host_reconcile_worker.py || {
-  echo "ERROR: installed root host reconciler differs from production source" >&2
-  exit 9
-}
-if [ "$(systemctl is-active jason-release-host-reconcile.path 2>/dev/null || true)" != "active" ]; then
-  echo "ERROR: root host-reconcile path is not active after production install" >&2
-  exit 9
-fi
-step_pass root_reconciler_install
-echo "JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS"
 echo "JASON_HOST_SERVICE_RECONCILIATION=PASS"
 echo "HOST_RECONCILIATION_SCRIPT_SOURCE_REVISION=$SOURCE_REVISION"
 echo "MANAGED_ENGINEERING_SOURCE=PASS"

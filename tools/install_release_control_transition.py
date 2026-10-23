@@ -48,6 +48,23 @@ def install():
             os.replace(temp,recovery)
         finally:
             if os.path.exists(temp):os.unlink(temp)
+    # Apply only the four specifically reviewed #1974 unit declarations to
+    # the independently root-controlled overlay, AFTER the candidate host
+    # worker (including symmetric rollback support) has been installed.
+    # This runs inside the existing exact-SHA host reconciliation transaction.
+    import protected_root_policy_migration as migration
+    control=migration._json(migration._root_only(
+        Path('/var/lib/jason/openclaw/release-manager/production-control-state.json')))
+    baseline=str(((control.get('last_known_good') or {}).get('manifest') or {}).get('revision') or '')
+    candidate=BASE.name
+    if migration.SHA.fullmatch(candidate) and migration.SHA.fullmatch(baseline) and candidate != baseline:
+        prior=migration._source_policy(baseline)
+        target=migration._source_policy(candidate)
+        added_timer='jason-openclaw-authority-full-integrity.timer'
+        if added_timer in target['required_system_units'] and added_timer not in prior['required_system_units']:
+            outcome=migration.apply_for_candidate(candidate,baseline)
+            print('JASON_ROOT_PROTECTED_POLICY_MIGRATION=' + outcome)
+
     subprocess.run(['systemctl','daemon-reload'],check=True)
     subprocess.run(['systemctl','enable','--now','jason-release-control-transition.timer'],check=True)
     subprocess.run(['systemctl','start','jason-release-control-transition.service'],check=True)
