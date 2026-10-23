@@ -255,8 +255,8 @@ class TeamsGatewayPlaybookApprovalSender:
             # Full exact identities stay visible without squeezing 40-character
             # SHA values into FactSet's narrow label/value columns on phones.
             for key, label in (
-                ("Exact SHA", "EXACT SOURCE REVISION"),
-                ("Rollback", "ROLLBACK REVISION"),
+                ("Exact SHA", "Exact commit"),
+                ("Rollback", "Rollback commit"),
             ):
                 if key in review:
                     body.extend([
