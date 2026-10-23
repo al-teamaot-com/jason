@@ -14,6 +14,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,7 @@ from pathlib import Path
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 ROOT = Path("/var/lib/jason/openclaw/release-manager")
 POLICY = Path("/etc/jason/release-readback-recovery/production-desired-state.json")
+MANAGED_GIT = Path("/home/al/.local/lib/jason/engineering-source-repo")
 LEDGER_DIR = Path("/etc/jason/release-readback-recovery/approved-migrations")
 ACTIVE = LEDGER_DIR / "active.json"
 CCC_REVIEW = Path("/var/lib/jason/ccc/material-review.json")
@@ -87,6 +89,33 @@ def _safe_units(policy: dict) -> None:
                        or not re.fullmatch(r"jason-[a-z0-9_.@-]{1,120}", x)
                        for x in items)):
             raise MigrationRefused("unsafe unit field: " + key)
+
+
+def _reviewed_git_policy(revision: str) -> dict:
+    """Immutable Git commit content for read-only PRE-INSTALL preview.
+
+    At host-reconcile preflight the candidate /opt/jason/releases/<sha>
+    DOES NOT YET EXIST. Read only the previously verified main-ancestor
+    Git object, never an editable checkout, and never change root policy.
+    Actual APPLY still requires the root-owned immutable release directory.
+    """
+    _sha(revision)
+    command = [
+        "/usr/bin/git", "-c", f"safe.directory={MANAGED_GIT}",
+        "-C", str(MANAGED_GIT),
+        "show", f"{revision}:config/production-desired-state.json",
+    ]
+    try:
+        data = subprocess.check_output(
+            command, stderr=subprocess.DEVNULL, timeout=15
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise MigrationRefused("protected exact-source desired state unavailable") from exc
+    if len(data) > 131072:
+        raise MigrationRefused("protected exact-source desired state too large")
+    policy = _json(data)
+    _safe_units(policy)
+    return policy
 
 
 def _source_policy(revision: str) -> dict:
@@ -205,8 +234,10 @@ def preview_exact_migration(candidate_sha: str, rollback_sha: str) -> str:
     _require_root()
     candidate_sha, rollback_sha = _sha(candidate_sha), _sha(rollback_sha)
     _approval(candidate_sha, rollback_sha)
-    old = _source_policy(rollback_sha)
-    new = _source_policy(candidate_sha)
+    # The candidate host release directory is created AFTER this preview.
+    # A root-only immutable release file is required later at actual APPLY.
+    old = _reviewed_git_policy(rollback_sha)
+    new = _reviewed_git_policy(candidate_sha)
     _planned_delta(old, new)
     original, root = _current_root_policy()
     if set(root) != set(old):
