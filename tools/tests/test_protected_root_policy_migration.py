@@ -420,5 +420,5 @@ def test_immutable_file_gate_and_root_private_policy_gate_remain_distinct():
     assert 'not _trusted_immutable_package_metadata(meta)' in code
     # Independently root-protected policy, review ledger and CCC keys must
     # remain mode 0600 even though packaged immutable root:root files are 0664.
-    assert 'meta.st_mode & 0o077' in code
+    assert 'st.st_mode & 0o077' in code
     assert 'os.O_NOFOLLOW' in code
