@@ -136,7 +136,8 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'jason-release-control-transition.timer' in text
     assert 'root release-transition timer is not active after production install' in text
     assert 'JASON_ROOT_RELEASE_TRANSITION_RECONCILIATION=PASS' in text
-    assert text.index('install_release_control_transition.py') < text.index('install_release_host_reconciler.py')
+    # Preserve rollback helper before root-only policy migration can commit.
+    assert text.index('install_release_host_reconciler.py') < text.index('install_release_control_transition.py')
     assert 'install_release_host_reconciler.py' in text
     assert 'installed root host reconciler differs from production source' in text
     assert 'JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS' in text
