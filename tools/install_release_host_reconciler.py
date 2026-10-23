@@ -8,6 +8,7 @@ import os
 import pwd
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,10 +18,25 @@ SPOOL = Path("/var/lib/jason/openclaw/release-manager/host-reconcile")
 
 
 def install(source: Path, destination: Path, mode: int) -> None:
+    """Atomically install one root-owned file; never expose a partial worker."""
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, destination)
-    os.chown(destination, 0, 0)
-    os.chmod(destination, mode)
+    fd, temporary = tempfile.mkstemp(prefix=".jason-root-install-", dir=destination.parent)
+    try:
+        with os.fdopen(fd, "wb") as output, source.open("rb") as inp:
+            shutil.copyfileobj(inp, output)
+            output.flush()
+            os.fchown(output.fileno(), 0, 0)
+            os.fchmod(output.fileno(), mode)
+            os.fsync(output.fileno())
+        os.replace(temporary, destination)
+        handle = os.open(destination.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(handle)
+        finally:
+            os.close(handle)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def main() -> int:
