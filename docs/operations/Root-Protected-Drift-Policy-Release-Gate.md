@@ -29,6 +29,8 @@ Root-owned `release_host_reconcile_worker.py` now inspects:
 
 Root transition `refresh_stale_drift()` separately extracts at most six bounded `kind:jason-unit` values from the independent guard's structured failure evidence, not raw stdout/stderr, command lines, credentials or provider data. Nonzero guard results still fail. A 70-second timeout is explicitly classified as denial, never accepted as green.
 
+This gate executes **only after the reviewed new root-owned host worker is installed**. The presently deployed older rollback revision still runs the older worker, which does not contain this preflight. A new release must therefore satisfy a separately reviewed root-authority bootstrap and source/policy parity validation **before** it relies on this gate. Merely merging this PR or deploying containers does not activate the root worker safely.
+
 This is an **admission and diagnostic fix**, not authorization or an automatic root policy migration.
 
 ## Protected migration and release recovery — required separate work
