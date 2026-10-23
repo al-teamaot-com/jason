@@ -243,6 +243,9 @@ def test_committed_root_policy_remains_authoritative_for_subsequent_releases(tmp
         restore_for_baseline=lambda _: (_ for _ in ()).throw(AssertionError("unexpected rollback")),
     )
     monkeypatch.setattr(worker, "_trusted_root_policy_helper", lambda: helper)
+    monkeypatch.setattr(worker, "_verified_migration_ancestor",
+                        lambda ancestor, desc: ancestor == committed and
+                        desc in (committed, next_revision))
     assert worker._restore_root_policy_for_target(next_revision) == "PREVIOUS_MIGRATION_LKG_VERIFIED"
     # Keep root policy unchanged: this is proof of an already-committed
     # migration, NOT implicit authorization for a new policy write.
@@ -263,3 +266,111 @@ def test_committed_root_policy_remains_authoritative_for_subsequent_releases(tmp
         pass
     else:
         raise AssertionError("open breaker cannot authorize committed receipt reuse")
+
+
+
+def test_applied_migration_survives_descendant_lkg_and_open_breaker_rollback(
+        tmp_path, monkeypatch):
+    import importlib.util
+    import hashlib
+    import json
+    import pytest
+    from types import SimpleNamespace
+    spec = importlib.util.spec_from_file_location(
+        "jason_root_migration_descendant", ROOT / "tools" / "release_host_reconcile_worker.py")
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    old, migrated, lkg, candidate = ("a"*40, "b"*40, "c"*40, "d"*40)
+    active, policy, control = (tmp_path / name for name in
+                               ("active.json", "policy.json", "production-control-state.json"))
+    raw = b'{"schema_version":"1.0","allowed_system_units":[]}\n'
+    policy.write_bytes(raw)
+    receipt = {"schema_version": "1.0", "candidate_sha": migrated,
+               "rollback_sha": old, "phase": "applied",
+               "applied_sha256": hashlib.sha256(raw).hexdigest()}
+    active.write_text(json.dumps(receipt))
+    state = {"schema_version": "1.0", "circuit_breaker": {"state": "closed"},
+             "last_known_good": {"manifest": {"revision": lkg, "complete": True}}}
+    control.write_text(json.dumps(state))
+    helper = SimpleNamespace(
+        ROOT=tmp_path, ACTIVE=active, POLICY=policy,
+        _json=lambda data: json.loads(data),
+        _root_only=lambda path: path.read_bytes(),
+        digest=lambda data: hashlib.sha256(data).hexdigest(),
+        prepare_rollback=lambda sha: (_ for _ in ()).throw(AssertionError(
+            "committed root policy must never be restored to an ancestor")),
+    )
+    monkeypatch.setattr(worker, "_trusted_root_policy_helper", lambda: helper)
+    ancestry = {(migrated, lkg), (migrated, candidate)}
+    monkeypatch.setattr(worker, "_verified_migration_ancestor",
+                        lambda ancestor, desc: (ancestor, desc) in ancestry)
+    assert worker._restore_root_policy_for_target(candidate) == "PREVIOUS_MIGRATION_LKG_VERIFIED"
+    assert policy.read_bytes() == raw
+    state["circuit_breaker"]["state"] = "open"
+    control.write_text(json.dumps(state))
+    assert worker._restore_root_policy_for_target(lkg) == "PREVIOUS_MIGRATION_LKG_VERIFIED"
+    with pytest.raises(worker.HostReconcileError, match="does not belong"):
+        worker._restore_root_policy_for_target(candidate)
+    state["circuit_breaker"]["state"] = "closed"
+    control.write_text(json.dumps(state))
+    with pytest.raises(worker.HostReconcileError, match="does not belong"):
+        worker._restore_root_policy_for_target("e"*40)
+    ancestry.clear()
+    with pytest.raises(worker.HostReconcileError, match="does not belong"):
+        worker._restore_root_policy_for_target(candidate)
+    ancestry.update({(migrated, lkg), (migrated, candidate)})
+    state["last_known_good"]["manifest"]["complete"] = False
+    control.write_text(json.dumps(state))
+    with pytest.raises(worker.HostReconcileError, match="does not belong"):
+        worker._restore_root_policy_for_target(candidate)
+    state["last_known_good"]["manifest"]["complete"] = True
+    control.write_text(json.dumps(state))
+    policy.write_bytes(b"changed")
+    with pytest.raises(worker.HostReconcileError, match="committed root policy differs"):
+        worker._restore_root_policy_for_target(candidate)
+    policy.write_bytes(raw)
+    # A staged or malformed receipt is not a committed authority grant.
+    receipt["phase"] = "staged"
+    active.write_text(json.dumps(receipt))
+    with pytest.raises(worker.HostReconcileError, match="does not belong"):
+        worker._restore_root_policy_for_target(candidate)
+    receipt["phase"] = "applied"
+    active.write_text(json.dumps(receipt))
+    state["circuit_breaker"]["state"] = "unknown"
+    control.write_text(json.dumps(state))
+    with pytest.raises(worker.HostReconcileError, match="does not belong"):
+        worker._restore_root_policy_for_target(candidate)
+
+
+def test_migration_lineage_is_exact_and_fails_closed(monkeypatch):
+    import importlib.util
+    import subprocess
+    import pytest
+    from types import SimpleNamespace
+    spec = importlib.util.spec_from_file_location(
+        "jason_root_lineage_test", ROOT / "tools" / "release_host_reconcile_worker.py")
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    ancestor, descendant = "b"*40, "c"*40
+    calls = []
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(worker.subprocess, "run", run)
+    assert worker._verified_migration_ancestor(ancestor, descendant)
+    assert calls[0][0][-4:] == ["merge-base", "--is-ancestor", ancestor, descendant]
+    assert calls[0][1]["timeout"] == 15
+    with pytest.raises(worker.HostReconcileError, match="exact revisions"):
+        worker._verified_migration_ancestor("invalid", descendant)
+    monkeypatch.setattr(worker.subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(returncode=1))
+    assert not worker._verified_migration_ancestor(ancestor, descendant)
+    monkeypatch.setattr(worker.subprocess, "run",
+                        lambda *a, **k: SimpleNamespace(returncode=128))
+    with pytest.raises(worker.HostReconcileError, match="verification failed"):
+        worker._verified_migration_ancestor(ancestor, descendant)
+    monkeypatch.setattr(worker.subprocess, "run",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            subprocess.TimeoutExpired("git", 15)))
+    with pytest.raises(worker.HostReconcileError, match="unavailable"):
+        worker._verified_migration_ancestor(ancestor, descendant)
