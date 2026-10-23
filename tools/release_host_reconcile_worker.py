@@ -238,6 +238,30 @@ def _restore_root_policy_for_target(source_revision: str) -> str:
     raise HostReconcileError("active root policy migration does not belong to target SHA")
 
 
+def _preflight_candidate_root_policy(source_revision: str) -> str:
+    """Read-only reviewed-delta check, never automatic root allowlist writes."""
+    try:
+        _verify_root_policy_covers_candidate(source_revision)
+        return "ALREADY_COVERED"
+    except HostReconcileError as exc:
+        # Only an exact missing declaration is eligible for the separately
+        # authorized, fixed-scope migration path. Any malformed or untrusted
+        # policy must remain a hard denial.
+        if not str(exc).startswith(
+            "protected root drift policy missing exact candidate unit declarations:"
+        ):
+            raise
+    helper = _trusted_root_policy_helper()
+    state = helper._json(helper._root_only(
+        helper.ROOT / "production-control-state.json"
+    ))
+    rollback = (((state.get("last_known_good") or {}).get("manifest") or {})
+                .get("revision"))
+    if not isinstance(rollback, str) or not SHA.fullmatch(rollback):
+        raise HostReconcileError("root LKG absent for reviewed migration preflight")
+    return helper.preview_exact_migration(source_revision, rollback)
+
+
 def _candidate_reconcile_script(source_revision: str) -> Path:
     """Materialize the exact candidate reconciliation script from protected Git evidence."""
     CANDIDATE_SCRIPTS.mkdir(parents=True, exist_ok=True)
@@ -342,7 +366,7 @@ def _process(path: Path) -> None:
 
         # Prevent the exact failure seen in #1974: host units were installed
         # but root's independent recovery overlay did not declare them.
-        _verify_root_policy_covers_candidate(source_revision)
+        policy_preflight = _preflight_candidate_root_policy(source_revision)
 
         script = _candidate_reconcile_script(source_revision)
         if not script.is_file():
@@ -413,6 +437,11 @@ def _process(path: Path) -> None:
         finally:
             os.umask(previous_umask)
 
+        if policy_preflight != "ALREADY_COVERED":
+            # The candidate install was required to apply its independent
+            # root-reviewed migration. Never accept success if it did not.
+            _verify_root_policy_covers_candidate(source_revision)
+
         release_meta = release_dir.stat()
         if release_meta.st_uid != 0 or (release_meta.st_mode & 0o055) != 0o055:
             raise HostReconcileError(
@@ -427,7 +456,9 @@ def _process(path: Path) -> None:
             request_id,
             source_revision,
             success=True,
-            detail="ROOT_POLICY_MIGRATION=" + root_policy_result + "\n" + completed.stdout,
+            detail=("ROOT_POLICY_MIGRATION=" + root_policy_result
+                    + "\nROOT_POLICY_PREFLIGHT=" + policy_preflight
+                    + "\n" + completed.stdout),
         )
     except Exception as exc:
         _write_result(
