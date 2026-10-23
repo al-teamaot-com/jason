@@ -328,6 +328,18 @@ def test_applied_migration_survives_descendant_lkg_and_open_breaker_rollback(
     policy.write_bytes(b"changed")
     with pytest.raises(worker.HostReconcileError, match="committed root policy differs"):
         worker._restore_root_policy_for_target(candidate)
+    policy.write_bytes(raw)
+    # A staged or malformed receipt is not a committed authority grant.
+    receipt["phase"] = "staged"
+    active.write_text(json.dumps(receipt))
+    with pytest.raises(worker.HostReconcileError, match="does not belong"):
+        worker._restore_root_policy_for_target(candidate)
+    receipt["phase"] = "applied"
+    active.write_text(json.dumps(receipt))
+    state["circuit_breaker"]["state"] = "unknown"
+    control.write_text(json.dumps(state))
+    with pytest.raises(worker.HostReconcileError, match="does not belong"):
+        worker._restore_root_policy_for_target(candidate)
 
 
 def test_migration_lineage_is_exact_and_fails_closed(monkeypatch):
