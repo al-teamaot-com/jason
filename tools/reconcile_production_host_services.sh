@@ -204,6 +204,23 @@ if [ ! -d "$DOCUMENTATION_SOURCE_REPO/.git" ]; then
   exit 9
 fi
 
+# Root worker and audited rollback helper MUST be staged before any
+# candidate-specific systemd unit is installed. A separately Owner/CCC-
+# approved migration may temporarily declare the new timer ALLOWED but
+# not yet REQUIRED. The full required timer is committed only after
+# independent systemd activation checks pass near the end of this script.
+step_start protected_root_policy_stage
+/usr/bin/python3 "$RELEASE_DIR/tools/install_release_host_reconciler.py" --stage-only
+cmp -s "$RELEASE_DIR/tools/protected_root_policy_migration.py" /usr/local/lib/jason/protected_root_policy_migration.py || {
+  echo "ERROR: root policy migration helper differs from exact immutable release" >&2
+  exit 9
+}
+cmp -s "$RELEASE_DIR/tools/release_host_reconcile_worker.py" /usr/local/lib/jason/release_host_reconcile_worker.py || {
+  echo "ERROR: root host rollback worker differs from exact immutable release" >&2
+  exit 9
+}
+step_pass protected_root_policy_stage
+
 for unit in "${EXPORTER_UNITS[@]}" "${MAINTENANCE_SERVICES[@]}" "${DEFERRED_MAINTENANCE_SERVICES[@]}" "${MAINTENANCE_TIMERS[@]}" "$PROVIDER_CANARY_SERVICE" "$PROVIDER_CANARY_TIMER" "$DRIFT_WATCHDOG_SERVICE" "$DRIFT_WATCHDOG_TIMER" "${OBSOLETE_UNITS[@]}"; do
   if [ -f "/etc/systemd/system/$unit" ]; then
     cp -a "/etc/systemd/system/$unit" "$BACKUP_DIR/$unit.before"
