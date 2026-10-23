@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import grp
 import json
 import os
@@ -186,6 +187,30 @@ def _verify_root_policy_covers_candidate(source_revision: str) -> None:
         )
 
 
+def _restore_root_policy_for_target(source_revision: str) -> str:
+    """Restore only a root-audited delta before an immutable LKG downgrade.
+
+    Installed helper and reconciler originate from the same reviewed release.
+    A missing helper is fatal; the worker never trusts a mutable checkout.
+    """
+    helper = Path(__file__).with_name("protected_root_policy_migration.py")
+    if not helper.is_file() or helper.is_symlink() or helper.stat().st_uid != 0:
+        raise HostReconcileError("root policy rollback helper is not securely installed")
+    spec = importlib.util.spec_from_file_location("jason_root_policy_migration", helper)
+    if spec is None or spec.loader is None:
+        raise HostReconcileError("root policy rollback helper cannot be loaded")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    if not module.ACTIVE.is_file():
+        return "NO_MIGRATION_ACTIVE"
+    receipt = module._json(module._root_only(module.ACTIVE))
+    if receipt.get("candidate_sha") == source_revision:
+        return "CANDIDATE_POLICY_ACTIVE"
+    if receipt.get("rollback_sha") != source_revision:
+        raise HostReconcileError("active root policy migration does not belong to target SHA")
+    return module.restore_for_baseline(source_revision)
+
+
 def _candidate_reconcile_script(source_revision: str) -> Path:
     """Materialize the exact candidate reconciliation script from protected Git evidence."""
     CANDIDATE_SCRIPTS.mkdir(parents=True, exist_ok=True)
@@ -277,6 +302,10 @@ def _process(path: Path) -> None:
                 "live MCP revision does not match requested host release"
             )
 
+        # The audited root overlay must be restored before installing a
+        # previous immutable release that no longer declares its new units.
+        root_policy_result = _restore_root_policy_for_target(source_revision)
+
         # Prevent the exact failure seen in #1974: host units were installed
         # but root's independent recovery overlay did not declare them.
         _verify_root_policy_covers_candidate(source_revision)
@@ -359,7 +388,7 @@ def _process(path: Path) -> None:
             request_id,
             source_revision,
             success=True,
-            detail=completed.stdout,
+            detail="ROOT_POLICY_MIGRATION=" + root_policy_result + "\n" + completed.stdout,
         )
     except Exception as exc:
         _write_result(
