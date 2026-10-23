@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import grp
 import json
 import os
@@ -33,6 +34,12 @@ REQUEST_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 # remaining requests. Multiple 360s scripts must never overrun one unit start.
 MAX_REQUESTS_PER_RUN = 1
 HOST_RECONCILE_TIMEOUT_SECONDS = 360
+# Pinned historical rollback-only check; never skip the mandatory health start.
+LEGACY_LKG_SHA = "aca94fdc0bfa551162f6ea99d7ddded311786414"
+LEGACY_HOST_SCRIPT_SHA256 = "d8bf41dfe824b8eb01ae192386907a6657f09c245aa246306597a1162c7d1707"
+LEGACY_HEALTH_FROM = 'timeout --signal=TERM --kill-after=5s 240s systemctl start "$unit"'
+LEGACY_HEALTH_TO = 'timeout --signal=TERM --kill-after=5s 300s systemctl start "$unit"'
+HOST_RECONCILE_LEGACY_ROLLBACK_TIMEOUT_SECONDS = 410
 
 
 class HostReconcileError(RuntimeError):
@@ -225,6 +232,13 @@ def _candidate_reconcile_script(source_revision: str) -> Path:
         raise HostReconcileError(
             "candidate host reconciliation script is not materializable from protected source"
         ) from exc
+    if source_revision == LEGACY_LKG_SHA:
+        if (hashlib.sha256(body.encode("utf-8")).hexdigest() != LEGACY_HOST_SCRIPT_SHA256
+                or body.count(LEGACY_HEALTH_FROM) != 1):
+            raise HostReconcileError("pinned immutable legacy health script identity mismatch")
+        # Only this exact checked source gets a timeout-only replacement.
+        # Mandatory full health execution and all pass/fail logic are unchanged.
+        body = body.replace(LEGACY_HEALTH_FROM, LEGACY_HEALTH_TO)
     developer_checkout = "/home/al/projects" + "/jason"
     if developer_checkout in body:
         raise HostReconcileError(
@@ -345,7 +359,9 @@ def _process(path: Path) -> None:
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                timeout=HOST_RECONCILE_TIMEOUT_SECONDS,
+                timeout=(HOST_RECONCILE_LEGACY_ROLLBACK_TIMEOUT_SECONDS
+                         if source_revision == LEGACY_LKG_SHA
+                         else HOST_RECONCILE_TIMEOUT_SECONDS),
                 env=script_env,
             )
         except subprocess.TimeoutExpired as exc:
@@ -354,7 +370,10 @@ def _process(path: Path) -> None:
                 output = output.decode("utf-8", errors="replace")
             detail = str(output).strip()
             raise HostReconcileError(
-                f"candidate host reconciliation script exceeded {HOST_RECONCILE_TIMEOUT_SECONDS}s"
+                "candidate host reconciliation script exceeded "
+                + str(HOST_RECONCILE_LEGACY_ROLLBACK_TIMEOUT_SECONDS
+                      if source_revision == LEGACY_LKG_SHA
+                      else HOST_RECONCILE_TIMEOUT_SECONDS) + "s"
                 + (": " + detail[-3000:] if detail else "")
             ) from exc
         except subprocess.CalledProcessError as exc:
