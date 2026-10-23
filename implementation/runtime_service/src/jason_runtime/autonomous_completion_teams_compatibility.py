@@ -76,19 +76,28 @@ def prepare_status_notice_preview(
             or "actions" in legacy_card):
         raise ValueError("legacy status card was not a nonactionable Adaptive Card")
     body = legacy_card.get("body")
-    if (not isinstance(body, list) or len(body) not in (2, 3)
-            or body[0].get("type") != "TextBlock"
-            or body[0].get("color") != expected_color
+    # Presentation v1.4: fixed quiet brand header, semantic event headline,
+    # full bounded summary and the original exact facts. This is an explicit
+    # shape change, NOT permission to accept arbitrary HTML/cards or actions.
+    header = {
+        "type": "TextBlock", "text": "JASON \u00b7 AOT",
+        "size": "Small", "isSubtle": True, "spacing": "None",
+    }
+    if (not isinstance(body, list) or len(body) != 4
+            or body[0] != header
             or body[1].get("type") != "TextBlock"
-            or not isinstance(body[0].get("text"), str)
-            or not isinstance(body[1].get("text"), str)):
+            or body[1].get("color") != expected_color
+            or body[2].get("type") != "TextBlock"
+            or body[3].get("type") != "FactSet"
+            or not isinstance(body[1].get("text"), str)
+            or not isinstance(body[2].get("text"), str)
+            or not isinstance(body[3].get("facts"), list)):
         raise ValueError("legacy status card content or semantic color changed")
-    if len(body) == 3:
-        if body[2].get("type") != "FactSet" or not isinstance(body[2].get("facts"), list):
-            raise ValueError("legacy status card facts changed")
-        raw_facts = body[2]["facts"]
-    else:
-        raw_facts = []
+    raw_facts = body[3]["facts"]
+    if not all(isinstance(x, dict) and set(x) == {"title", "value"}
+               and isinstance(x["title"], str) and isinstance(x["value"], str)
+               for x in raw_facts):
+        raise ValueError("legacy status card facts changed")
 
     facts = tuple(Fact(label=x["title"], value=x["value"]) for x in raw_facts)
     spec = Interaction(
@@ -101,7 +110,7 @@ def prepare_status_notice_preview(
         client_id=client_id,
         requester_identity_id=principal_id,
         kind=kind,
-        title=body[0]["text"],
+        title=body[1]["text"],
         # Full original provider text retained to avoid any lost work/ticket
         # detail; facts remain structured and subject to audience review.
         summary=legacy_text,
@@ -110,7 +119,7 @@ def prepare_status_notice_preview(
     )
     card = ExistingTeamsInteractionAdapter.informational_card(spec)
     if (card["body"][0]["color"] != expected_color
-            or card["body"][0]["text"] != body[0]["text"]
+            or card["body"][0]["text"] != body[1]["text"]
             or card["body"][1]["text"] != legacy_text
             or ("actions" in card)):
         raise RuntimeError("canonical status template failed the original message parity guard")
@@ -190,10 +199,14 @@ class GovernedAutonomyStatusInteractionPort:
         old_body = preview.legacy_card.get("body")
         if (preview.interaction.kind is not expected_kind
                 or preview.interaction.visual_intent is not expected_visual
-                or not isinstance(old_body, list) or len(old_body) < 2
-                or preview.interaction.title != old_body[0].get("text")
+                or not isinstance(old_body, list) or len(old_body) != 4
+                or old_body[0] != {
+                    "type": "TextBlock", "text": "JASON \u00b7 AOT",
+                    "size": "Small", "isSubtle": True, "spacing": "None",
+                }
+                or preview.interaction.title != old_body[1].get("text")
                 or preview.interaction.summary != preview.legacy_text
-                or old_body[0].get("color") != expected_color
+                or old_body[1].get("color") != expected_color
                 or preview.canonical_card
                 != ExistingTeamsInteractionAdapter.informational_card(preview.interaction)):
             raise PermissionError("canonical status preview differs from reviewed legacy material")
