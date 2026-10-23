@@ -195,6 +195,37 @@ def _current_root_policy() -> tuple[bytes, dict]:
     return original, policy
 
 
+def preview_exact_migration(candidate_sha: str, rollback_sha: str) -> str:
+    """Read-only host preflight for the reviewed, candidate-bound unit delta.
+
+    This never changes root policy or a release record. The immutable host
+    reconciler still must apply the signed plan and independently re-check
+    coverage before it can report success.
+    """
+    _require_root()
+    candidate_sha, rollback_sha = _sha(candidate_sha), _sha(rollback_sha)
+    _approval(candidate_sha, rollback_sha)
+    old = _source_policy(rollback_sha)
+    new = _source_policy(candidate_sha)
+    _planned_delta(old, new)
+    original, root = _current_root_policy()
+    if set(root) != set(old):
+        raise MigrationRefused("root recovery policy shape differs from protected source")
+    for key in old:
+        if key not in UNIT_FIELDS and root[key] != old[key]:
+            raise MigrationRefused("unreviewed independent root policy change: " + key)
+    for field in UNIT_FIELDS:
+        known = set(old[field])
+        actual = set(root[field])
+        if not known.issubset(actual):
+            raise MigrationRefused("root policy lost a known-good declaration: " + field)
+        if actual.intersection(APPROVED_DELTA[field]):
+            raise MigrationRefused("candidate-only unit already present without migration receipt")
+    if ACTIVE.exists():
+        raise MigrationRefused("preexisting root migration requires independent review")
+    return "OWNER_CCC_REVIEWED_DELTA_ONLY"
+
+
 def apply_for_candidate(candidate_sha: str, rollback_sha: str) -> str:
     """Atomic, exact-known-delta policy install; no generated approvals."""
     _require_root()
