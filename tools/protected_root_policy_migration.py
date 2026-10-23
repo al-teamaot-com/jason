@@ -131,6 +131,21 @@ def _reviewed_git_policy(revision: str) -> dict:
     return policy
 
 
+def _trusted_immutable_package_metadata(info: os.stat_result) -> bool:
+    """Accept shipped root:root group-writable packaging, never untrusted writes.
+
+    Jason's immutable host packager publishes root:root config directories
+    mode 0775 and config files mode 0664. Root-group write is still within
+    the root privilege boundary, unlike writable non-root groups or others.
+    This does NOT relax the independently protected root policy's 0600 mode.
+    """
+    return (
+        info.st_uid == 0
+        and not (info.st_mode & stat.S_IWOTH)
+        and (not (info.st_mode & stat.S_IWGRP) or info.st_gid == 0)
+    )
+
+
 def _source_policy(revision: str) -> dict:
     revision = _sha(revision)
     folder = Path("/opt/jason/releases") / revision
@@ -141,13 +156,13 @@ def _source_policy(revision: str) -> dict:
     for item in (folder, directory):
         info = item.lstat()
         if (not stat.S_ISDIR(info.st_mode) or item.is_symlink()
-                or info.st_uid != 0 or info.st_mode & 0o022):
+                or not _trusted_immutable_package_metadata(info)):
             raise MigrationRefused("immutable source directory is not root-controlled")
     if folder.resolve() != folder or directory.resolve() != directory:
         raise MigrationRefused("immutable source path is not canonical")
     meta = path.lstat()
     if (not stat.S_ISREG(meta.st_mode) or path.is_symlink()
-            or meta.st_uid != 0 or meta.st_mode & 0o022
+            or not _trusted_immutable_package_metadata(meta)
             or meta.st_size > 131072):
         raise MigrationRefused("immutable source policy file is not securely rooted")
     policy = _json(path.read_bytes())

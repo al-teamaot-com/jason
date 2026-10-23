@@ -29,6 +29,14 @@ Root-owned `release_host_reconcile_worker.py` now inspects:
 
 Root transition `refresh_stale_drift()` separately extracts at most six bounded `kind:jason-unit` values from the independent guard's structured failure evidence, not raw stdout/stderr, command lines, credentials or provider data. Nonzero guard results still fail. A 70-second timeout is explicitly classified as denial, never accepted as green.
 
+## Immutable package ownership compatibility — October 23 follow-up
+
+The separately authorized exact release `27ae6df84d5377e0ba23e9083d121dbf71f5d575` reached root host reconciliation, but its root-owned stage-only installer stopped with `MigrationRefused: immutable source directory is not root-controlled`. The immutable directories themselves were root-owned and mode `0755`, while **both** the old LKG and candidate packages consistently shipped `config/` mode `0775` and `config/production-desired-state.json` mode `0664`, with owner and group **root:root**. Independent read-only comparison showed each packaged JSON file exactly matched its immutable Git blob. The safety predicate had rejected **all** group write, including group ID 0; this was an overly restrictive mismatch with the existing trusted host packager, not evidence of an untrusted package.
+
+The narrow correction accepts group write **only** when the file is root-owned and the writable group is GID 0; it continues to reject world-write, non-root ownership, writable non-root groups, symlinks, wrong file types and oversize data. The separate root-protected recovery policy and root ledger still demand root ownership, mode `0600`, no symlinks and bounded bytes. Both actual immutable package directories were read in place using the corrected code, matched the exact Git desired-state content, and 270 targeted host tests plus 5 subtests passed. These are read-only acceptance checks, not a successful deployment.
+
+The original release record `release-27ae6df84d5377e0` remains `failed` with `rollback_verified=false` because runtime health verification was not yet ready at native rollback closeout. Subsequent read-only inspection found the old runtime/MCP/host healthy, all ten independently protected LKG fingerprints matched, and root-owned revalidation returned `root_verified_revalidate`, closing the breaker. That is new baseline recovery evidence, not a rewrite of the failed rollback record. The owner-set automatic-release hold remains in force. The failed exact-SHA authorization must not be reused for a later revised candidate.
+
 ## Protected four-unit migration and symmetric downgrade
 
 The exact failed-release source delta is **four declarations**, not just the two system units: REQUIRED `jason-openclaw-authority-full-integrity.timer`, ALLOWED `jason-openclaw-authority-full-integrity.service`, and ALLOWED user `jason-openclaw-recovery-source-bridge.service` and `jason-openclaw-recovery-source-bridge.timer`.
