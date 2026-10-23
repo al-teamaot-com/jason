@@ -178,4 +178,3 @@ def test_untrusted_source_without_git_or_immutable_revision_denied(
     monkeypatch.setattr(activation, "__file__", str(src))
     with pytest.raises(PermissionError, match="trusted Git"):
         activation.verify_source_pinned_manifest(f, "a" * 40)
-
