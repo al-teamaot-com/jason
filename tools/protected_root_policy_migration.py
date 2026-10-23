@@ -26,6 +26,8 @@ MANAGED_GIT = Path("/home/al/.local/lib/jason/engineering-source-repo")
 LEDGER_DIR = Path("/etc/jason/release-readback-recovery/approved-migrations")
 ACTIVE = LEDGER_DIR / "active.json"
 CCC_REVIEW = Path("/var/lib/jason/ccc/material-review.json")
+SYSTEMD_SYSTEM_UNITS = Path("/etc/systemd/system")
+SYSTEMD_USER_UNITS = Path("/home/al/.config/systemd/user")
 UNIT_FIELDS = (
     "required_system_units", "allowed_system_units",
     "required_user_units", "allowed_user_units",
@@ -470,10 +472,10 @@ def complete_rollback(target_sha: str) -> str:
     if receipt.get("rollback_sha") != target_sha or receipt.get("phase") != "rollback_prepared":
         raise MigrationRefused("root rollback completion not in approved phase")
     for unit in APPROVED_DELTA["required_system_units"] | APPROVED_DELTA["allowed_system_units"]:
-        if (Path("/etc/systemd/system") / unit).exists():
+        if (SYSTEMD_SYSTEM_UNITS / unit).exists():
             raise MigrationRefused("candidate system unit still installed during rollback")
     for unit in APPROVED_DELTA["allowed_user_units"]:
-        if (Path("/home/al/.config/systemd/user") / unit).exists():
+        if (SYSTEMD_USER_UNITS / unit).exists():
             raise MigrationRefused("candidate user unit still installed during rollback")
     # restore_for_baseline checks the root-protected LKG SHA, exact original
     # bytes and phase-bound policy digest before archiving the receipt.
