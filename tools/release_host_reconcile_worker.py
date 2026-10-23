@@ -194,7 +194,9 @@ def _restore_root_policy_for_target(source_revision: str) -> str:
     A missing helper is fatal; the worker never trusts a mutable checkout.
     """
     helper = Path(__file__).with_name("protected_root_policy_migration.py")
-    if not helper.is_file() or helper.is_symlink() or helper.stat().st_uid != 0:
+    meta = helper.lstat()
+    if (not stat.S_ISREG(meta.st_mode) or helper.is_symlink()
+            or meta.st_uid != 0 or meta.st_mode & 0o022):
         raise HostReconcileError("root policy rollback helper is not securely installed")
     spec = importlib.util.spec_from_file_location("jason_root_policy_migration", helper)
     if spec is None or spec.loader is None:
