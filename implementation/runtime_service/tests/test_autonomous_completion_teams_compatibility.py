@@ -62,7 +62,8 @@ def test_semantic_status_preview_is_full_legacy_content_not_a_new_message(
     assert result.legacy_text == legacy_text
     assert result.legacy_card == old
     assert spec.summary == legacy_text
-    assert spec.title == old["body"][0]["text"]
+    assert old["body"][0]["text"] == "JASON \u00b7 AOT"
+    assert spec.title == old["body"][1]["text"]
     assert spec.kind == kind
     assert spec.visual_intent == visual
     assert spec.workflow == WORKFLOW
@@ -75,7 +76,7 @@ def test_semantic_status_preview_is_full_legacy_content_not_a_new_message(
     assert result.canonical_card["version"] == "1.5"
     assert result.canonical_card["body"][0]["color"] == color
     assert result.canonical_card["body"][1]["text"] == legacy_text
-    assert result.canonical_card["body"][2]["facts"] == old["body"][2]["facts"]
+    assert result.canonical_card["body"][2]["facts"] == old["body"][3]["facts"]
     assert "actions" not in result.canonical_card
 
 
@@ -231,7 +232,7 @@ def test_tampered_preview_can_never_change_recipient():
 
 
 @pytest.mark.parametrize("edit", [
-    "rewritten_summary", "false_success", "changed_card",
+    "rewritten_summary", "false_success", "changed_card", "changed_legacy_header",
 ])
 def test_tampered_preview_or_visual_intent_never_sends(edit):
     original = preview(examples()[0][0])
@@ -241,6 +242,13 @@ def test_tampered_preview_or_visual_intent_never_sends(edit):
     elif edit == "false_success":
         changed = replace(original, interaction=replace(
             original.interaction, visual_intent=VisualIntent.SUCCESS))
+    elif edit == "changed_legacy_header":
+        legacy = dict(original.legacy_card)
+        legacy["body"] = list(legacy["body"])
+        legacy["body"][0] = {
+            **legacy["body"][0], "text": "Forged sender or tenant",
+        }
+        changed = replace(original, legacy_card=legacy)
     else:
         changed = replace(original, canonical_card={
             "type": "AdaptiveCard", "version": "1.5", "body": []})
