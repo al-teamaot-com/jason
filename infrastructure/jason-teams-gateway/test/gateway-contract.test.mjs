@@ -116,3 +116,12 @@ test('SDK observed replyToId is signed only as optional metadata, never as card 
   const parser = readFileSync(new URL('../approval-submit.mjs', import.meta.url),'utf8');
   assert.match(parser, /"callback_reply_to_id"/);
 });
+
+
+test("packaged source is readable before switching to the non-root node user", () => {
+  const dockerfile = readFileSync(new URL("../Dockerfile", import.meta.url), "utf8");
+  assert.match(dockerfile, /chmod 0755 \/app/);
+  assert.match(dockerfile, /chmod 0644 \/app\/package\.json \/app\/\*\.mjs/);
+  assert.ok(dockerfile.indexOf("chmod 0644") < dockerfile.indexOf("USER node"));
+  assert.doesNotMatch(dockerfile, /chmod (?:777|666)|USER root/);
+});
