@@ -51,3 +51,62 @@ def test_revoked_participant_does_not_get_status(tmp_path):
     env.identities.put(replace(actor,status='disabled'))
     assert maintenance(env).tick()
     assert [r for r,_ in Sender.calls]==[('requester-a',)]
+
+
+def _service_result(tmp_path, *, decision='approve'):
+    from test_universal_service_plan_issuance import service_env, issue
+    env, _, issuer, request = service_env(tmp_path)
+    issued = issue(issuer, request)
+    plan = env.handler.proposals.require(issued['approval_id'])
+    click(env, signed(env, plan, decision=decision))
+    if decision == 'approve':
+        assert env.handler.plan_runner.tick()
+        assert env.handler.requests.progress(plan.approval_id)['state'] == 'completed'
+    return env, plan
+
+
+def test_service_plan_completion_notifies_only_its_authenticated_decider(tmp_path):
+    Sender.calls=[]; Sender.fail=False
+    env, plan = _service_result(tmp_path)
+    # A service principal has no human Microsoft Teams binding to notify.
+    assert env.bindings.find_active_by_jason_identity(jason_identity_id='worker') is None
+    assert maintenance(env).tick()
+    assert [targets for targets, _ in Sender.calls] == [('approver-a',)]
+    assert 'finished successfully' in Sender.calls[0][1]
+    assert plan.approval_id in Sender.calls[0][1]
+    assert maintenance(env).tick() is False
+    assert len(Sender.calls) == 1
+    assert len(env.provider.calls) == 1
+
+
+def test_service_plan_denial_notifies_only_decider_and_never_executes(tmp_path):
+    Sender.calls=[]; Sender.fail=False
+    env, plan = _service_result(tmp_path, decision='deny')
+    assert env.handler.requests.progress(plan.approval_id)['state'] == 'denied'
+    assert maintenance(env).tick()
+    assert [targets for targets, _ in Sender.calls] == [('approver-a',)]
+    assert 'not executed' in Sender.calls[0][1]
+    assert maintenance(env).tick() is False
+    assert env.provider.calls == []
+
+
+def test_service_plan_status_fails_closed_if_workload_tenant_changes(tmp_path):
+    import json
+    Sender.calls=[]; Sender.fail=False
+    env, _ = _service_result(tmp_path)
+    policy=json.loads(env.policy.read_text())
+    policy['organizations']['org']['service_requesters']['worker']['microsoft_tenant_id']='different-tenant'
+    env.policy.write_text(json.dumps(policy))
+    assert maintenance(env).tick() is False
+    assert Sender.calls == []
+
+
+def test_service_plan_status_never_infers_a_tenant_without_current_policy(tmp_path):
+    import json
+    Sender.calls=[]; Sender.fail=False
+    env, _ = _service_result(tmp_path)
+    policy=json.loads(env.policy.read_text())
+    del policy['organizations']['org']['service_requesters']
+    env.policy.write_text(json.dumps(policy))
+    assert maintenance(env).tick() is False
+    assert Sender.calls == []
