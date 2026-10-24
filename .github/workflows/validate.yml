@@ -203,7 +203,9 @@ jobs:
             tools/tests/test_reconcile_production_host_services.py \
             tools/tests/test_approval_unit_install_order.py \
             tools/tests/test_held_offer_stage_b_installation.py \
-            tools/tests/test_protected_root_policy_migration.py
+            tools/tests/test_protected_root_policy_migration.py \
+            tools/tests/test_deploy_live_container_extensions.py \
+            tools/tests/test_deploy_live_container_aliases.py
       - name: Test governed TODO engineering intake
         run: python3 -B -m unittest tools.tests.test_todo_engineering_intake
       - name: Test owner-approved development recovery and legacy handoff

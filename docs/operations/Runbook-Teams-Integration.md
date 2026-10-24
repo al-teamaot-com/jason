@@ -379,3 +379,34 @@ The routing workstream is production-proven. Remaining hardening includes:
 - Current resume point: `docs/control/CURRENT.md`
 
 If these sources conflict, the Constitution/governing ADRs and System Registry/current host evidence take precedence over this operational runbook.
+
+
+## Single-card delivery identity (October 24, 2026)
+
+The existing proactive sender must send a card as one attachment-only message.
+Do not combine top-level Activity.text with its Adaptive Card attachment: Teams
+can split that payload into two visible messages and return an empty HTTP 202,
+leaving no provider card ID. Microsoft documents that behavior in
+https://github.com/microsoft/botframework-sdk/issues/6155.
+
+The shared buildProactiveActivity helper now puts the notification text into
+Activity.summary and leaves the actual card, actions, challenge and payload
+unchanged. The card's own body contains the visible review details. Summary
+rendering varies by Teams client; it is not evidence of a displayed notification.
+Text-only messages remain unchanged. Both saved-conversation and first-contact
+proactive paths use this one helper.
+
+An actual provider message ID remains distinct from a synthetic accepted receipt.
+The patch does not fabricate delivery confirmation, grant approval, change
+identity verification, or clear an unresolved delivery block. Verify the deployed
+gateway source, then read the actual newly sent card and signed response before
+marking end-to-end acceptance. Existing uncertain requests must not be blindly
+resent.
+
+The shared deploy_live_container.py supports --health-runtime node for this
+existing Node gateway. Python stays the default for runtime/MCP. Both modes
+require HTTP 200 with a bounded timeout and use the same failure rollback.
+For an exact-source gateway image replacement, preserve the current container
+settings, signing-key/token mounts, network, public port and durable decision
+store. Use the shared preflight and rollback mechanism; do not rerun the
+historical initial OpenClaw port cutover to update an already direct gateway.
