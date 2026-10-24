@@ -41,3 +41,21 @@ open. This source-only implementation does not enable
 `JASON_UNIVERSAL_APPROVAL_MODE=enforced`, provide a production routing policy,
 authorize any reboot/PO/client message, or substitute for live negative UAT,
 Owner approval, CCC, and governed release controls.
+
+
+## Teams card send acceptance is not provider-confirmed delivery (P0 #1553)
+
+The existing Teams proactive transport can return either a provider message ID
+or a synthetic accepted:UUID receipt when the send returned no ID. Only the
+former can support a provider-delivery claim. The general plan approval
+delivery adapter now rejects synthetic, empty and duplicate message IDs and
+fails closed. The existing coordinator retains the pending request and
+records PROCESSING_FAILED, while the plan progress becomes blocked rather
+than reporting delivery. A later signed callback cannot silently remove a
+recorded delivery-origin block or mint an executable plan grant. Never automatically resend after a partial/unknown
+delivery outcome; reconcile native Teams message evidence first.
+
+A genuine provider message ID is not proof of device notification, Adaptive
+Card rendering, MFA, human presence, or a click. The historically disputed
+approval #1553 remains unproven. General approval mode stays off. Separately
+verify original message IDs, user interaction, identity and negative cases.

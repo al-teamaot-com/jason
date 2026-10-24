@@ -156,6 +156,14 @@ class UniversalTeamsApprovalInteractionFlow:
                 or signed_selections != {'card_challenge': challenge}
                 or dict(selections or {}) != signed_selections):
             raise PermissionError('signed Teams plan decision is not bound to the issued card instance')
+        # A signed callback is insufficient when the issuing workflow already
+        # recorded an unknown/partial provider delivery outcome. Never turn
+        # this unverified card into an execution grant without reconciliation.
+        progress = self.requests.progress(approval_id)
+        if (progress is not None and progress.get('state') == 'blocked'
+                and isinstance(progress.get('reason_code'), str)
+                and progress['reason_code'].startswith('approval_delivery_')):
+            raise PermissionError('Teams card delivery remains unverified; plan authorization blocked')
         original = self.requests.require(approval_id)
         proposal = self.proposals.require(approval_id)
         now = self.clock()
