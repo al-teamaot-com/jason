@@ -491,7 +491,7 @@ Multi-device split branch (exact `vulscan_multi_device_split@1.0.0` promotion):
 
 This branch is separately promotion-bound. Ticket creation authority is not inherited by the v1.0 diagnostic branch or v1.1 client-disposition branch.
 
-Client-disposition branch (exact `vulscan_missing_patch@1.1.0` promotion):
+Client-disposition branch (exact `vulscan_missing_patch@1.2.0` promotion):
 - all required core ticket/update capabilities used by the disposition branch
 - `service.ticket.client.notification.create`
 - approved workflow/template registry resolution
@@ -543,15 +543,15 @@ Acceptance must prove:
 19. exact final KB/build verification before completion
 20. Gromelski company 597 resolves the client-specific disposition rule
 21. Chris Benton contact 30684489 is associated and independently read back
-22. exact canned template `vulscan-approved-or-installed-v1` is used with no generated wording
+22. exact canned template `vulscan-complete-v1` is used with no generated wording
 23. Gromelski terminal ticket status is Close Pending (21), never Complete
 24. Notification History proves a new same-ticket copy to chris.benton@e-gai.com
-25. approved-pending Gromelski tickets remain in persisted monitoring state after Close Pending
+25. approved-pending Gromelski tickets remain internal in waiting_patch_window and do not receive a client-facing note or Close Pending status
 26. a more-specific site/device/user/ticket override wins over the client rule
 27. non-Gromelski tickets preserve the global VulScan disposition
-28. an exact v1.0.0 diagnostic/classification promotion remains eligible even when the v1.1.0 client-disposition branch is not promoted
-29. a Gromelski ticket that reaches client disposition without v1.1.0 promotion enters waiting_client_notification_authority, releases its active slot, and performs no contact/status/client-message mutation
-30. activating the exact v1.1.0 client-disposition promotion automatically resumes the preserved ticket and uses workflow_id=vulscan_missing_patch plus template_id=vulscan-approved-or-installed-v1
+28. an exact v1.0.0 diagnostic/classification promotion remains eligible even when the v1.2.0 client-disposition branch is not promoted
+29. a technically complete Gromelski ticket that reaches client disposition without v1.2.0 promotion enters waiting_client_notification_authority, releases its active slot, and performs no contact/status/client-message mutation
+30. activating the exact v1.2.0 client-disposition promotion automatically resumes the preserved ticket and uses workflow_id=vulscan_missing_patch plus template_id=vulscan-complete-v1
 31. the approved-workflow connector reconstructs canned title/body server-side; autonomous VulScan does not supply free-form client wording or an arbitrary recipient
 32. a VulScan source ticket with two or more affected nodes is split before the one-device admission gate
 33. each affected node resolves to exactly one active same-company CI and exact DRMM UID/hostname
@@ -597,12 +597,7 @@ Authoritative Autotask identities verified 2026-09-29:
 
 This override applies only when the exact ticket company is 597 unless a more-specific approved site/device/user/ticket rule replaces it.
 
-When a Gromelski VulScan ticket reaches either of these states:
-
-1. all exact reported KBs are already installed and endpoint reboot state does not block resolution; or
-2. the exact required patch is approved for implementation and is waiting for the regular maintenance window;
-
-Jason must:
+When a Gromelski VulScan ticket has reached **technical completion** — meaning the reported vulnerability condition is authoritatively verified resolved and no remaining remediation, patch-window wait, reboot requirement, approval dependency, or technician review is outstanding — Jason must:
 
 1. resolve the applicable VulScan disposition policy;
 2. require the exact authoritative Gromelski company identity;
@@ -613,9 +608,9 @@ Jason must:
 7. verify a new Autotask Notification History record for the same ticket was sent to `chris.benton@e-gai.com`;
 8. suppress duplicate client communications using the approved template fingerprint.
 
-For an approved-pending patch, Close Pending is a client-facing disposition only; it does **not** end Jason's technical responsibility. Persist `vulscan_monitoring` and continue exact-KB verification through the normal patch window. When the patch becomes installed and endpoint state is healthy, Jason may mark the internal playbook state complete while leaving the PSA ticket in Close Pending for the normal client-facing close lifecycle.
+Intermediate VulScan states are internal only. In particular, APPROVED_PENDING / waiting_patch_window, waiting_patch_approval, reboot_pending, ambiguous/supersedence review, install failure, remediation, and verification states must **not** create the client-facing completion note and must **not** move the ticket to Close Pending.
 
-For an already-installed stale/recovered finding, Jason may mark the internal playbook state complete only after the client communication, primary-contact association, Close Pending status, and notification-copy verification all succeed.
+At technical completion, Jason may mark the internal playbook state complete only after the external/client-facing note, configured contact association, Close Pending status, and notification-copy verification all succeed.
 
 If the exact client-disposition branch has not yet received durable owner promotion, set `state=waiting_client_notification_authority`, retain Jason ownership, release the active-work slot, and make no client contact/status/communication mutation. Resume automatically when that exact promotion becomes active.
 
@@ -623,15 +618,15 @@ After the client-disposition branch is authorized, any contact association failu
 
 ### Approved canned client communication
 
-Template ID: `vulscan-approved-or-installed-v1`
+Template ID: `vulscan-complete-v1`
 
-Title: `Vulnerability Update`
+Title: `Vulnerability Resolved`
 
 Text:
 
-> The identified vulnerability mentioned in this ticket has been reviewed. The required update has either already been installed or has been approved for implementation and is scheduled to be applied during the device’s next regular patching window in accordance with our maintenance policy.
+> The vulnerability identified in this ticket has been reviewed and the technical work is complete. Current verification confirms the reported vulnerability condition is resolved.
 >
-> No further action is required at this time. Monitoring will continue to confirm successful deployment and remediation. Please reopen the ticket if you experience any issues following the update.
+> No further action is required at this time. Please reply to or reopen the ticket if you experience any related issues.
 
 The template is source-controlled approved text. Jason must not paraphrase, expand, summarize, or otherwise alter it during autonomous use.
 
@@ -649,10 +644,10 @@ The autonomous branch may extract exact KB identities from the ticket, read the 
 
 It may not approve patches, force installation, run Windows Update repair, clear WSUS policy, schedule or perform a reboot, or automatically complete the ticket. Those branches remain separately acceptance- and approval-gated. Material changes invalidate this approval until re-reviewed.
 
-Version 1.1.0 adds the Gromelski client-disposition branch and uses the source-controlled approved-workflow communication registry introduced by PR #629. The exact pair is `workflow_id=vulscan_missing_patch` + `template_id=vulscan-approved-or-installed-v1`; the connector reconstructs the approved title/body server-side and derives the recipient from the authoritative ticket contact.
+Version 1.2.0 narrows the Gromelski client-disposition branch to technical completion only and uses the source-controlled approved-workflow communication registry. The exact pair is `workflow_id=vulscan_missing_patch` + `template_id=vulscan-complete-v1`; the connector reconstructs the approved external-note title/body server-side and derives the recipient from the authoritative ticket contact.
 
 Branch-level authority is explicit:
 - **Core diagnostic/classification scope:** `vulscan_missing_patch@1.0.0`, policy `playbook-autonomy:vulscan_missing_patch`, capabilities `service.ticket.note.create` + `service.ticket.update`. This preserves the previously owner-promoted read/classify/wait lifecycle and must not be disabled merely because the client-communication branch changes.
-- **Client-disposition scope:** `vulscan_missing_patch@1.1.0`, same policy ID, capabilities `service.ticket.note.create` + `service.ticket.update` + `service.ticket.client.notification.create`. This branch requires its own exact durable owner promotion.
+- **Client-disposition scope:** `vulscan_missing_patch@1.2.0`, same policy ID, capabilities `service.ticket.note.create` + `service.ticket.update` + `service.ticket.client.notification.create`. This branch runs only after technical completion and requires its own exact durable owner promotion.
 
-Until the exact v1.1.0 client-disposition scope is promoted, qualifying Gromelski tickets enter `waiting_client_notification_authority`; Jason retains ownership, releases the active slot, preserves the patch classification, and performs no client communication/contact/Close Pending mutation. Once promoted, Jason resumes automatically and must still satisfy canned-template, contact/company, email-notification, ticket readback, and Notification History verification gates.
+Until the exact v1.2.0 client-disposition scope is promoted, technically complete Gromelski tickets enter `waiting_client_notification_authority`; Jason retains ownership, releases the active slot, preserves the patch classification, and performs no client communication/contact/Close Pending mutation. Once promoted, Jason resumes automatically and must still satisfy canned-template, contact/company, email-notification, ticket readback, and Notification History verification gates.
