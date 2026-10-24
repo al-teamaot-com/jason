@@ -19,7 +19,7 @@ import {
   replyForRuntimeResult,
 } from "./bridge-core.mjs";
 import { createApprovalDecisionStore } from "./approval-decision-store.mjs";
-import { resolveProactiveSendResult } from "./proactive-send-result.mjs";
+import { buildProactiveActivity, resolveProactiveSendResult } from "./proactive-send-result.mjs";
 import { ensureTeamsUserBootstrap, TeamsBootstrapError } from "./teams-user-bootstrap.mjs";
 
 const PORT = Number(process.env.PORT ?? 3979);
@@ -357,20 +357,6 @@ const agent = new AgentApplication({
   agentAppId: auth.clientId,
 });
 
-function buildProactiveActivity(text, card) {
-  return card
-    ? {
-        type: "message",
-        text,
-        attachments: [
-          {
-            contentType: "application/vnd.microsoft.card.adaptive",
-            content: card,
-          },
-        ],
-      }
-    : text;
-}
 
 async function createPersonalConversationAndSend({ aadObjectId, tenantId, text, card }) {
   const options = CreateConversationOptionsBuilder
