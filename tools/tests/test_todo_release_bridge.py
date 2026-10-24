@@ -185,7 +185,7 @@ def test_upstream_commitment_state_reports_real_development_blocker():
     )
     assert phase == 'development_blocked'
     assert reason == 'provider consent required'
-    phase, _ = module.upstream_commitment_state({'phase': 'pr_ready'})
+    phase, _ = module.upstream_commitment_state({'phase': 'pr_ready', 'pr_number': 1330})
     assert phase == 'waiting_development_merge'
     phase, reason = module.upstream_commitment_state(
         {'phase': 'waiting_external_dependency', 'reason': 'provider consent required'}
@@ -382,7 +382,7 @@ class MixedPhaseReconciliationTests(unittest.TestCase):
                 'operational_eligible': True, 'operational_recheck': 'not_applicable',
                 'retry_eligible': False, 'verified_operational_evidence': {},
             }
-            with patch.object(module.sys, 'argv', argv), \
+            with patch.object(sys, 'argv', argv), \
                  patch.object(module, 'run', return_value=''), \
                  patch.object(module, 'todo_issues', return_value=issues), \
                  patch.object(module, 'merged_prs_by_issue', return_value={}), \
@@ -425,7 +425,7 @@ class MixedPhaseReconciliationTests(unittest.TestCase):
                 state['summary']['outstanding_count'], 7,
             )
             # Distinct logical clock: a second pass must preserve exact bytes.
-            with patch.object(module.sys, 'argv', argv), \
+            with patch.object(sys, 'argv', argv), \
                  patch.object(module, 'run', return_value=''), \
                  patch.object(module, 'todo_issues', return_value=issues), \
                  patch.object(module, 'merged_prs_by_issue', return_value={}), \
