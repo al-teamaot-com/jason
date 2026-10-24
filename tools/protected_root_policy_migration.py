@@ -538,6 +538,52 @@ def restore_for_baseline(target_sha: str) -> str:
     return "RESTORED"
 
 
+def _remove_held_offer_units_for_rollback(plan: dict[str, frozenset[str]]) -> None:
+    """Remove only the exact reviewed held-offer pair after rollback staging.
+
+    The previous immutable host script predates these units. Cleanup must be
+    performed by this installed trusted helper before that script validates
+    the old desired state. Never extend this to arbitrary unit names.
+    """
+    if plan != APPROVED_HELD_OFFER_DELTA:
+        return
+    if SYSTEMD_USER_UNITS.is_symlink():
+        raise MigrationRefused("rollback user unit directory must not be a symlink")
+    names = ("jason-release-approval-only.timer", "jason-release-approval-only.service")
+    present = []
+    for name in names:
+        path = SYSTEMD_USER_UNITS / name
+        if path.is_symlink():
+            raise MigrationRefused("rollback offer unit must be a regular managed file")
+        if path.exists():
+            if not path.is_file():
+                raise MigrationRefused("rollback offer unit is not a regular file")
+            present.append(name)
+    if not present:
+        return
+    import pwd
+    uid = pwd.getpwnam("al").pw_uid
+    command = ["/usr/sbin/runuser", "-u", "al", "--", "/usr/bin/env",
+               "HOME=/home/al", f"XDG_RUNTIME_DIR=/run/user/{uid}",
+               f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus",
+               "/usr/bin/systemctl", "--user"]
+    try:
+        subprocess.run(command + ["disable", "--now", *present], check=True,
+                       capture_output=True, text=True, timeout=45)
+        for name in present:
+            state = subprocess.run(command + ["is-active", name], check=False,
+                                   capture_output=True, text=True, timeout=15)
+            if (state.returncode not in {3, 4}
+                    or state.stdout.strip() not in {"inactive", "failed", "unknown"}):
+                raise MigrationRefused("rollback offer unit is not safely stopped")
+        for name in present:
+            (SYSTEMD_USER_UNITS / name).unlink()
+        subprocess.run(command + ["daemon-reload"], check=True,
+                       capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise MigrationRefused("reviewed offer unit rollback cleanup failed") from exc
+
+
 def prepare_rollback(target_sha: str) -> str:
     """Drop candidate REQUIRED timer before the old host removes units.
 
@@ -560,6 +606,7 @@ def prepare_rollback(target_sha: str) -> str:
     phase = receipt.get("phase")
     if phase == "rollback_prepared":
         if digest(current) in {receipt.get("staged_sha256"), receipt.get("original_sha256")}:
+            _remove_held_offer_units_for_rollback(plan)
             return "ROLLBACK_ALLOWED_STAGE"
         raise MigrationRefused("prepared rollback policy hash changed unexpectedly")
     if phase not in {"prepared", "staged", "applied"}:
@@ -582,6 +629,7 @@ def prepare_rollback(target_sha: str) -> str:
         _atomic(POLICY, allowed)
     receipt["phase"] = "rollback_prepared"
     _atomic(ACTIVE, (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode())
+    _remove_held_offer_units_for_rollback(plan)
     return "ROLLBACK_ALLOWED_STAGE"
 
 

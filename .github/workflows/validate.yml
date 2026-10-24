@@ -200,7 +200,10 @@ jobs:
             tools/tests/test_release_manager_atomic_surfaces.py \
             tools/tests/test_release_host_reconciler_contract.py \
             tools/tests/test_release_exporter_port_guard.py \
-            tools/tests/test_reconcile_production_host_services.py
+            tools/tests/test_reconcile_production_host_services.py \
+            tools/tests/test_approval_unit_install_order.py \
+            tools/tests/test_held_offer_stage_b_installation.py \
+            tools/tests/test_protected_root_policy_migration.py
       - name: Test governed TODO engineering intake
         run: python3 -B -m unittest tools.tests.test_todo_engineering_intake
       - name: Test owner-approved development recovery and legacy handoff

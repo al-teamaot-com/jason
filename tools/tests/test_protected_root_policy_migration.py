@@ -613,3 +613,56 @@ def test_nested_root_rollback_rejects_parent_digest_before_policy_write(monkeypa
         m.restore_for_baseline(CANDIDATE)
     assert policy.read_bytes()==before
     assert not (tmp_path/"recovery/approved-migrations"/("restored-"+child+".json")).exists()
+
+
+def _held_pair_with_installed_units(monkeypatch,tmp_path):
+    import types
+    import pwd
+    prior=source(new=True)
+    candidate={**prior,
+        'required_user_units':prior['required_user_units']+['jason-release-approval-only.timer'],
+        'allowed_user_units':prior['allowed_user_units']+['jason-release-approval-only.service']}
+    policy,original,_=configure(monkeypatch,tmp_path,policy=prior,old=prior,candidate=candidate)
+    m.stage_for_candidate(CANDIDATE,BASE)
+    m.apply_for_candidate(CANDIDATE,BASE)
+    for name in ('jason-release-approval-only.timer','jason-release-approval-only.service'):
+        (m.SYSTEMD_USER_UNITS/name).write_text('reviewed unit')
+    monkeypatch.setattr(pwd,'getpwnam',lambda name:types.SimpleNamespace(pw_uid=1000))
+    return policy,original
+
+
+def test_held_offer_rollback_stops_and_removes_pair_before_old_host(monkeypatch,tmp_path):
+    import subprocess
+    policy,original=_held_pair_with_installed_units(monkeypatch,tmp_path)
+    calls=[]
+    def run(cmd,**kwargs):
+        calls.append(cmd)
+        if 'is-active' in cmd:return subprocess.CompletedProcess(cmd,3,stdout='inactive\n',stderr='')
+        return subprocess.CompletedProcess(cmd,0,stdout='',stderr='')
+    monkeypatch.setattr(m.subprocess,'run',run)
+    assert m.prepare_rollback(BASE)=='ROLLBACK_ALLOWED_STAGE'
+    assert not list(m.SYSTEMD_USER_UNITS.iterdir())
+    assert any('disable' in cmd and '--now' in cmd for cmd in calls)
+    assert all('jason-release-manager.timer' not in cmd for cmd in calls)
+    assert m.complete_rollback(BASE)=='RESTORED'
+    assert policy.read_bytes()==original
+
+
+def test_held_offer_rollback_stop_failure_retains_files_and_audit(monkeypatch,tmp_path):
+    import subprocess
+    _held_pair_with_installed_units(monkeypatch,tmp_path)
+    def fail(cmd,**kwargs):raise subprocess.CalledProcessError(1,cmd)
+    monkeypatch.setattr(m.subprocess,'run',fail)
+    with pytest.raises(m.MigrationRefused,match='cleanup failed'):m.prepare_rollback(BASE)
+    assert len(list(m.SYSTEMD_USER_UNITS.iterdir()))==2
+    assert json.loads(m.ACTIVE.read_text())['phase']=='rollback_prepared'
+    with pytest.raises(m.MigrationRefused,match='still installed'):m.complete_rollback(BASE)
+
+
+def test_held_offer_rollback_wrong_target_never_stops_units(monkeypatch,tmp_path):
+    _held_pair_with_installed_units(monkeypatch,tmp_path)
+    with patch.object(m.subprocess,'run') as run:
+        with pytest.raises(m.MigrationRefused,match='rollback target'):
+            m.prepare_rollback('c'*40)
+        run.assert_not_called()
+    assert len(list(m.SYSTEMD_USER_UNITS.iterdir()))==2

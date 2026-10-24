@@ -617,6 +617,13 @@ echo "JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS"
 # root-only policy only AFTER the rollback-capable host worker is installed. A retry
 # identity accepted by the Release Manager must also be accepted by the root
 # processor; otherwise final closeout unnecessarily rolls production back.
+# Install the newly staged user units BEFORE committing them as REQUIRED and
+# before the final drift guard. Do not replace the running release controller.
+step_start held_approval_user_unit_install
+run_as_al /usr/bin/python3 "$RELEASE_DIR/tools/install_release_manager.py" \
+  --approval-units-only --activate
+step_pass held_approval_user_unit_install
+
 step_start root_release_transition_install
 /usr/bin/python3 "$RELEASE_DIR/tools/install_release_control_transition.py"
 cmp -s "$RELEASE_DIR/tools/release_control_transition_worker.py" /usr/local/lib/jason/release_control_transition_worker.py || {
