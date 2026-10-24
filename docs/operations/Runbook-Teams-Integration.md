@@ -450,6 +450,19 @@ nonce/challenge, immutable plan, current JKD grant evaluation, Central
 Orchestrator and exactly-once execution ledger. A service remains a service in
 its execution context; a human approving it is not impersonated as the requester.
 
+**Final Teams result for workload requests:** The originating service account has
+no personal Teams binding. The existing universal-plan status maintenance must
+send its fixed, once-only completion/denial/blockage message to the *actual
+authenticated human decider*, not silently skip delivery because the requester
+is a workload. It resolves the tenant from the current versioned
+`service_requesters` policy and checks the original request's
+`workload_identity` evidence, organization, decider's active identity and
+current Teams binding. A missing/changed policy, cross-tenant binding or
+disabled decider blocks notification; it never redirects to a substitute user.
+Status delivery failure remains indeterminate without repeating the completed
+provider step or blindly re-sending an uncertain Teams message. Human-requester
+notifications retain their existing requester-and-decider behavior.
+
 After separately reviewed source deployment, run inside the existing runtime:
 `python -m jason_runtime.universal_approval_pilot deny`. A genuine human DENY
 must precede the `approve` case. The `approve` command then requests exactly one
