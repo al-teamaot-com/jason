@@ -1729,7 +1729,7 @@ SUPPORT_ACTIVE_PHASES = frozenset(
         "closure_merging",
     }
 )
-SUPPORT_ID_IN_TITLE = re.compile(r"\\b(SUPPORT-[A-Z]+-[A-Z0-9]+)\\b")
+SUPPORT_ID_IN_TITLE = re.compile(r"\b(SUPPORT-[A-Z]+-[A-Z0-9]+)\b")
 
 
 def open_support_issue_ids(repo: Path) -> set[str]:
