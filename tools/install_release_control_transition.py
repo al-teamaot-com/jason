@@ -60,8 +60,14 @@ def install():
     if migration.SHA.fullmatch(candidate) and migration.SHA.fullmatch(baseline) and candidate != baseline:
         prior=migration._source_policy(baseline)
         target=migration._source_policy(candidate)
-        added_timer='jason-openclaw-authority-full-integrity.timer'
-        if added_timer in target['required_system_units'] and added_timer not in prior['required_system_units']:
+        # Commit only an already staged, exact SHA and OWNER+CCC-reviewed
+        # plan after host unit install. Never decide scope from one hardcoded
+        # historical timer: the installed root migrator validates all fields.
+        changed_units=any(
+            set(prior[field]) != set(target[field])
+            for field in migration.UNIT_FIELDS
+        )
+        if changed_units:
             outcome=migration.apply_for_candidate(candidate,baseline)
             print('JASON_ROOT_PROTECTED_POLICY_MIGRATION=' + outcome)
 

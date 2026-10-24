@@ -82,9 +82,15 @@ def main(*, stage_only: bool = False) -> int:
         if candidate != baseline:
             old = migration._source_policy(baseline)
             new = migration._source_policy(candidate)
-            marker = "jason-openclaw-authority-full-integrity.timer"
-            if (marker in new["required_system_units"]
-                    and marker not in old["required_system_units"]):
+            # Stage ONLY if the exact Git revision introduces one of the
+            # root migration plans. The root-owned helper independently
+            # checks the COMPLETE four-category delta, exact owner+CCC grant
+            # and locked rollback evidence; no arbitrary new unit permitted.
+            changed_units = any(
+                set(old[field]) != set(new[field])
+                for field in migration.UNIT_FIELDS
+            )
+            if changed_units:
                 result = migration.stage_for_candidate(candidate, baseline)
                 print("JASON_ROOT_POLICY_STAGING=" + result)
         print("JASON_ROOT_HOST_RECONCILER_STAGE_ONLY=PASS")
