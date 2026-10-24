@@ -59,9 +59,12 @@ def _service_result(tmp_path, *, decision='approve'):
     issued = issue(issuer, request)
     plan = env.handler.proposals.require(issued['approval_id'])
     click(env, signed(env, plan, decision=decision))
-    if decision == 'approve':
-        assert env.handler.plan_runner.tick()
-        assert env.handler.requests.progress(plan.approval_id)['state'] == 'completed'
+    # The normal continuation worker records the terminal state after the
+    # signed callback. It runs for Deny as well as Approve.
+    assert env.handler.plan_runner.tick()
+    assert env.handler.requests.progress(plan.approval_id)['state'] == (
+        'completed' if decision == 'approve' else 'denied'
+    )
     return env, plan
 
 
