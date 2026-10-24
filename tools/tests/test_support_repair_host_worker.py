@@ -2780,7 +2780,8 @@ def test_credit_reload_preserves_authority_handoff_and_engineering_capacity(tmp_
 
 def _stale_clean_worktree_recovery_case(tmp_path, monkeypatch):
     """Exercise the recovery contract without touching a real repository or provider."""
-    import engineering_evidence_tools as evidence
+    # Patch the exact module instance imported by this worker.
+    evidence = worker.engineering_evidence_tools
 
     item_id = 'SUPPORT-OPS-100'
     item = {'id': item_id, 'priority': 'P0', 'title': 'Bounded source recovery',
