@@ -131,3 +131,18 @@ def test_service_plan_disabled_requester_cannot_send_terminal_status(tmp_path):
     env.identities.put(replace(worker,status='disabled'))
     assert maintenance(env).tick() is False
     assert Sender.calls == []
+
+
+def test_service_plan_uncertain_terminal_send_does_not_retry_provider_or_message(tmp_path):
+    Sender.calls=[]; Sender.fail=True
+    env, plan = _service_result(tmp_path)
+    assert maintenance(env).tick()
+    assert env.handler.requests.progress(plan.approval_id)['state'] == 'completed'
+    assert maintenance(env).tick() is False
+    assert len(Sender.calls) == 1
+    assert len(env.provider.calls) == 1
+    with sqlite3.connect(env.handler.requests.path) as db:
+        assert db.execute(
+            'SELECT DISTINCT delivery_status FROM universal_plan_status_deliveries'
+        ).fetchall() == [('indeterminate',)]
+    Sender.fail=False
