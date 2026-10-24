@@ -65,6 +65,7 @@ class UniversalPlanContinuationMaintenance:
             raise PermissionError('requester cannot approve their own plan')
         checker=self.service.teams_flow.approval_service.authority
         for step in steps:
+            self.policy.assert_request_allowed(step, required=step.requester_kind == 'service')
             if not checker.can_approve(approver_identity_id=accepted.decided_by,
                     organization_id=step.organization_id,client_id=step.client_id,
                     capability=step.capability_name,requested_mode=step.permission_mode):

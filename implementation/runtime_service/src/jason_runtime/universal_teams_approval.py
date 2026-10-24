@@ -113,6 +113,7 @@ class UniversalTeamsApprovalInteractionFlow:
     clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
     plan_runner: Any | None = None
     issuer: Any | None = None
+    policy: Any | None = None
 
     def request_approval(self, *, request, identity):
         if self.issuer is None:
@@ -178,6 +179,10 @@ class UniversalTeamsApprovalInteractionFlow:
             raise PermissionError('requester cannot approve their own universal plan')
         # The human must be authorized for every reviewed step, not just the first.
         for step in self.requests.steps(approval_id):
+            if self.policy is not None:
+                self.policy.assert_request_allowed(step, required=step.requester_kind == 'service')
+            elif step.requester_kind == 'service':
+                raise PermissionError('workload approval has no exact request containment policy')
             if not self.service.teams_flow.approval_service.authority.can_approve(
                     approver_identity_id=response.approver_identity_id,
                     organization_id=step.organization_id, client_id=step.client_id,
@@ -242,6 +247,7 @@ class UniversalTeamsApprovalInteractionFlow:
 class UniversalApprovalPolicyFile:
     """Versioned routing constraints, always subordinate to live JKD-001 grants."""
     path: Any
+    clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
 
     def document(self) -> dict:
         from pathlib import Path
@@ -281,7 +287,49 @@ class UniversalApprovalPolicyFile:
         disabled = value.get('disabled_principals', [])
         if not isinstance(disabled, list) or any(not isinstance(p,str) for p in disabled):
             raise ValueError('invalid disabled approval principal list')
+        if 'valid_until' in value:
+            expiration = datetime.fromisoformat(value['valid_until'].replace('Z', '+00:00'))
+            if expiration.tzinfo is None or self.clock() >= expiration:
+                raise PermissionError('source-reviewed approval pilot has expired')
         return value
+
+    def assert_request_allowed(self, request, *, required: bool = False) -> None:
+        """Optional exact-intent containment; mandatory for workload issuance.
+
+        This narrows existing JKD authority. It never adds a grant, actor, tenant
+        or capability. The entire original arguments hash is pinned, including
+        internal-only visibility and the target test ticket in the initial pilot.
+        """
+        policy = self.for_organization(request.organization_id)
+        rules = policy.get('request_allowlist')
+        if rules is None:
+            if required:
+                raise PermissionError('service approval requires an exact request allowlist')
+            return
+        if not isinstance(rules, list) or not 1 <= len(rules) <= 64:
+            raise ValueError('invalid exact approval request allowlist')
+        expected_keys = {'principal_id', 'capability', 'permission_mode',
+                         'client_id', 'arguments_sha256'}
+        digest = hashlib.sha256(json.dumps(dict(request.arguments), sort_keys=True,
+            separators=(',', ':'), allow_nan=False).encode('utf-8')).hexdigest()
+        matched = False
+        for rule in rules:
+            if (not isinstance(rule, dict) or set(rule) != expected_keys
+                    or any(type(rule[k]) is not str or not rule[k]
+                           for k in ('principal_id', 'capability', 'permission_mode', 'arguments_sha256'))
+                    or rule['permission_mode'] not in {'observe', 'execute'}
+                    or (rule['client_id'] is not None and
+                        (type(rule['client_id']) is not str or not rule['client_id']))
+                    or re.fullmatch(r'[0-9a-f]{64}', rule['arguments_sha256']) is None):
+                raise ValueError('invalid exact approval request rule')
+            matched = matched or (
+                rule['principal_id'] == request.principal_id
+                and rule['capability'] == request.capability_name
+                and rule['permission_mode'] == request.permission_mode
+                and rule['client_id'] == request.client_id
+                and hmac.compare_digest(rule['arguments_sha256'], digest))
+        if not matched:
+            raise PermissionError('request is outside the exact approval pilot allowlist')
 
     def candidates(self, *, organization_id: str, capability: str, requester_id: str) -> tuple[str, ...]:
         from orchestrator.approval_role_routing import TenantApprovalPolicy, route_approval_candidates
@@ -334,7 +382,7 @@ def build_universal_teams_approval_runtime(*, mode: str, database_path, policy_p
     from orchestrator.teams_plan_proposal_repository import PlanProposalRepository
     from orchestrator.teams_plan_request_repository import PlanRequestRepository
     path = Path(database_path)
-    policy = UniversalApprovalPolicyFile(Path(policy_path))
+    policy = UniversalApprovalPolicyFile(Path(policy_path), clock=clock)
     policy.digest()  # Fail startup closed on missing or invalid activation configuration.
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     requests = PlanRequestRepository(path, current_policy_digest=policy.digest)
@@ -357,5 +405,5 @@ def build_universal_teams_approval_runtime(*, mode: str, database_path, policy_p
     from .universal_plan_continuation import UniversalPlanContinuationMaintenance
     service=UniversalTeamsPlanApprovalService(flow,ledger)
     runner=UniversalPlanContinuationMaintenance(service,proposals,requests,continuation,policy,governed_execution_ledger,clock)
-    handler = UniversalTeamsApprovalInteractionFlow(service,verifier,proposals,requests,continuation,clock,runner)
+    handler = UniversalTeamsApprovalInteractionFlow(service,verifier,proposals,requests,continuation,clock,runner,policy=policy)
     return handler

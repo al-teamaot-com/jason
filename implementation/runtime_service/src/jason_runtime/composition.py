@@ -608,6 +608,8 @@ class RuntimeSettings:
             ).split(",")
             if item.strip()
         )
+        from .universal_approval_pilot import settings_defaults
+        pilot_mode, pilot_policy = settings_defaults(os.environ)
         settings = cls(
             authority_db=Path(os.getenv("JASON_AUTHORITY_DB", "/var/lib/jason/authority/authority.sqlite3")),
             bindings_db=Path(
@@ -1043,12 +1045,12 @@ class RuntimeSettings:
                     "/var/lib/jason/openclaw/procurement/billing-audit.sqlite3",
                 )
             ),
-            universal_approval_mode=os.getenv("JASON_UNIVERSAL_APPROVAL_MODE", "off").strip().lower(),
+            universal_approval_mode=pilot_mode,
             universal_approval_worker_enabled=os.getenv(
                 "JASON_UNIVERSAL_APPROVAL_WORKER_ENABLED", "true"
             ).strip().casefold() in {"1", "true", "yes", "on"},
             universal_approval_db=Path(os.getenv("JASON_UNIVERSAL_APPROVAL_DB", "/var/lib/jason/openclaw/universal-approvals.sqlite3")),
-            universal_approval_policy=Path(os.getenv("JASON_UNIVERSAL_APPROVAL_POLICY", "/var/lib/jason/authority/universal-approval-policy.json")),
+            universal_approval_policy=Path(pilot_policy),
             release_mobile_approval_mode=os.getenv("JASON_RELEASE_MOBILE_APPROVAL_MODE", "off").strip().lower(),
             release_mobile_approval_worker_enabled=os.getenv(
                 "JASON_RELEASE_MOBILE_APPROVAL_WORKER_ENABLED", "true"
@@ -2758,6 +2760,7 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         ),
         conversation_reasoning_client=hosted_conversation_client or ollama_client,
         governed_orchestrator=orchestrator,
+        universal_approval_handler=universal_approval_handler,
         identity_authority=identity_authority,
         capabilities=capabilities,
         microsoft_identity_bindings=bindings,

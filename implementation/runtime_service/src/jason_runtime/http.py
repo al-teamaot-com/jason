@@ -40,6 +40,8 @@ class RuntimeHttpApplication:
     # Internal composition references for alternate governed ingress adapters.
     # These are never exposed through the Teams HTTP contract.
     governed_orchestrator: Any | None = None
+    # Trusted in-process pilot issuance only; never exposed through HTTP.
+    universal_approval_handler: Any | None = None
     identity_authority: Any | None = None
     capabilities: Any | None = None
     microsoft_identity_bindings: Any | None = None
