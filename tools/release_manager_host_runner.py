@@ -1759,6 +1759,77 @@ def open_support_issue_ids(repo: Path) -> set[str]:
     return result
 
 
+def verify_support_release_binding(
+    repo: Path, candidate_sha: str, support_item: str | None,
+    support_pr_number: int | None,
+) -> dict[str, Any]:
+    """Validate exact, open Support item and reviewed merged PR provenance."""
+    candidate_sha = exact_sha(candidate_sha, 'candidate_sha')
+    if (not isinstance(support_item, str)
+            or SUPPORT_ID_IN_TITLE.fullmatch(support_item) is None
+            or type(support_pr_number) is not int or support_pr_number < 1):
+        raise ReleaseManagerError('support release requires exact Support and PR identities')
+    listed = gate.parse_support((repo / 'SUPPORT.md').read_text(encoding='utf-8'))
+    if support_item not in {item['id'] for item in listed}:
+        raise ReleaseManagerError('support item is absent from current Support List')
+    raw = run([
+        'gh', 'pr', 'view', str(support_pr_number),
+        '--json', 'number,state,mergedAt,mergeCommit,body',
+    ], cwd=repo)
+    try:
+        pr = json.loads(raw)
+    except (ValueError, TypeError) as exc:
+        raise ReleaseManagerError('support PR evidence malformed') from exc
+    if not isinstance(pr, dict):
+        raise ReleaseManagerError('support PR evidence not an object')
+    commit = pr.get('mergeCommit') or {}
+    if (not isinstance(commit, dict) or type(pr.get('number')) is not int
+            or pr['number'] != support_pr_number
+            or pr.get('state') != 'MERGED'
+            or not pr.get('mergedAt')
+            or commit.get('oid') != candidate_sha):
+        raise ReleaseManagerError('support PR is not the exact merged release SHA')
+    body = str(pr.get('body') or '')
+    heading = re.findall(
+        rf'(?m)^## +{re.escape(support_item)} +/ +#([1-9][0-9]*) *$',
+        body,
+    )
+    labelled = re.findall(
+        rf'(?im)^- *Support item: *{re.escape(support_item)} *$',
+        body,
+    )
+    reference = re.findall(
+        r'(?im)^- *Support issue: *#([1-9][0-9]*) *$',
+        body,
+    )
+    matches = heading if heading else (reference if labelled else [])
+    if len(matches) != 1:
+        raise ReleaseManagerError('support PR lacks a unique canonical Support issue')
+    issue_number = int(matches[0])
+    raw = run([
+        'gh', 'issue', 'view', str(issue_number),
+        '--json', 'number,state,title',
+    ], cwd=repo)
+    try:
+        issue = json.loads(raw)
+    except (ValueError, TypeError) as exc:
+        raise ReleaseManagerError('support issue evidence malformed') from exc
+    if not isinstance(issue, dict):
+        raise ReleaseManagerError('support issue evidence not an object')
+    marker = SUPPORT_ID_IN_TITLE.search(str(issue.get('title') or ''))
+    if (type(issue.get('number')) is not int
+            or issue['number'] != issue_number
+            or issue.get('state') != 'OPEN'
+            or marker is None or marker.group(1) != support_item):
+        raise ReleaseManagerError('support issue is not open and bound to the Support ID')
+    return {
+        'support_item': support_item,
+        'support_pr_number': support_pr_number,
+        'support_issue_number': issue_number,
+        'support_merge_sha': candidate_sha,
+    }
+
+
 def support_repair_state_context(state_root: Path) -> tuple[list[str], list[str]]:
     path = state_root.parent / "support-repair" / "state.json"
     if not path.exists():
@@ -1837,6 +1908,8 @@ def create_record(
     rollback_sha: str,
     change_class: str,
     owner_approved: bool,
+    support_item: str | None = None,
+    support_pr_number: int | None = None,
     release_id_override: str | None = None,
 ) -> dict[str, Any]:
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
@@ -1847,6 +1920,14 @@ def create_record(
             "rollback SHA must equal the exact aligned production revision"
         )
     verify_candidate_on_main(repo, candidate_sha)
+    if change_class == 'support':
+        binding = verify_support_release_binding(
+            repo, candidate_sha, support_item, support_pr_number,
+        )
+    else:
+        if support_item is not None or support_pr_number is not None:
+            raise ReleaseManagerError('non-Support releases cannot claim Support identity')
+        binding = {}
     files = changed_files(repo, rollback_sha, candidate_sha)
     checks = github_checks(candidate_sha, required_checks(repo))
     if not checks["passed"]:
@@ -1863,6 +1944,7 @@ def create_record(
         "release_id": release_id,
         "state": "requested",
         "change_class": change_class,
+        **binding,
         "description": release_description(repo, candidate_sha),
         "risk_profile": risk_profile,
         "created_at": now(),
@@ -1921,6 +2003,7 @@ def create_record(
         "rollback_sha": rollback_sha,
         "change_class": change_class,
         "risk_profile": risk_profile,
+        **binding,
         "changed_files": files,
         "surfaces": [
             "runtime",
