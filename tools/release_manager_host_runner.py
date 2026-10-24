@@ -1729,7 +1729,7 @@ SUPPORT_ACTIVE_PHASES = frozenset(
         "closure_merging",
     }
 )
-SUPPORT_ID_IN_TITLE = re.compile(r"\\b(SUPPORT-[A-Z]+-[A-Z0-9]+)\\b")
+SUPPORT_ID_IN_TITLE = re.compile(r"\b(SUPPORT-[A-Z]+-[A-Z0-9]+)\b")
 
 
 def open_support_issue_ids(repo: Path) -> set[str]:
@@ -1757,6 +1757,77 @@ def open_support_issue_ids(repo: Path) -> set[str]:
         if match:
             result.add(match.group(1).upper())
     return result
+
+
+def verify_support_release_binding(
+    repo: Path, candidate_sha: str, support_item: str | None,
+    support_pr_number: int | None,
+) -> dict[str, Any]:
+    """Validate exact, open Support item and reviewed merged PR provenance."""
+    candidate_sha = exact_sha(candidate_sha, 'candidate_sha')
+    if (not isinstance(support_item, str)
+            or SUPPORT_ID_IN_TITLE.fullmatch(support_item) is None
+            or type(support_pr_number) is not int or support_pr_number < 1):
+        raise ReleaseManagerError('support release requires exact Support and PR identities')
+    listed = gate.parse_support((repo / 'SUPPORT.md').read_text(encoding='utf-8'))
+    if support_item not in {item['id'] for item in listed}:
+        raise ReleaseManagerError('support item is absent from current Support List')
+    raw = run([
+        'gh', 'pr', 'view', str(support_pr_number),
+        '--json', 'number,state,mergedAt,mergeCommit,body',
+    ], cwd=repo)
+    try:
+        pr = json.loads(raw)
+    except (ValueError, TypeError) as exc:
+        raise ReleaseManagerError('support PR evidence malformed') from exc
+    if not isinstance(pr, dict):
+        raise ReleaseManagerError('support PR evidence not an object')
+    commit = pr.get('mergeCommit') or {}
+    if (not isinstance(commit, dict) or type(pr.get('number')) is not int
+            or pr['number'] != support_pr_number
+            or pr.get('state') != 'MERGED'
+            or not pr.get('mergedAt')
+            or commit.get('oid') != candidate_sha):
+        raise ReleaseManagerError('support PR is not the exact merged release SHA')
+    body = str(pr.get('body') or '')
+    heading = re.findall(
+        rf'(?m)^## +{re.escape(support_item)} +/ +#([1-9][0-9]*) *$',
+        body,
+    )
+    labelled = re.findall(
+        rf'(?im)^- *Support item: *{re.escape(support_item)} *$',
+        body,
+    )
+    reference = re.findall(
+        r'(?im)^- *Support issue: *#([1-9][0-9]*) *$',
+        body,
+    )
+    matches = heading if heading else (reference if labelled else [])
+    if len(matches) != 1:
+        raise ReleaseManagerError('support PR lacks a unique canonical Support issue')
+    issue_number = int(matches[0])
+    raw = run([
+        'gh', 'issue', 'view', str(issue_number),
+        '--json', 'number,state,title',
+    ], cwd=repo)
+    try:
+        issue = json.loads(raw)
+    except (ValueError, TypeError) as exc:
+        raise ReleaseManagerError('support issue evidence malformed') from exc
+    if not isinstance(issue, dict):
+        raise ReleaseManagerError('support issue evidence not an object')
+    marker = SUPPORT_ID_IN_TITLE.search(str(issue.get('title') or ''))
+    if (type(issue.get('number')) is not int
+            or issue['number'] != issue_number
+            or issue.get('state') != 'OPEN'
+            or marker is None or marker.group(1) != support_item):
+        raise ReleaseManagerError('support issue is not open and bound to the Support ID')
+    return {
+        'support_item': support_item,
+        'support_pr_number': support_pr_number,
+        'support_issue_number': issue_number,
+        'support_merge_sha': candidate_sha,
+    }
 
 
 def support_repair_state_context(state_root: Path) -> tuple[list[str], list[str]]:
@@ -1837,6 +1908,8 @@ def create_record(
     rollback_sha: str,
     change_class: str,
     owner_approved: bool,
+    support_item: str | None = None,
+    support_pr_number: int | None = None,
     release_id_override: str | None = None,
 ) -> dict[str, Any]:
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
@@ -1847,6 +1920,14 @@ def create_record(
             "rollback SHA must equal the exact aligned production revision"
         )
     verify_candidate_on_main(repo, candidate_sha)
+    if change_class == 'support':
+        binding = verify_support_release_binding(
+            repo, candidate_sha, support_item, support_pr_number,
+        )
+    else:
+        if support_item is not None or support_pr_number is not None:
+            raise ReleaseManagerError('non-Support releases cannot claim Support identity')
+        binding = {}
     files = changed_files(repo, rollback_sha, candidate_sha)
     checks = github_checks(candidate_sha, required_checks(repo))
     if not checks["passed"]:
@@ -1863,6 +1944,7 @@ def create_record(
         "release_id": release_id,
         "state": "requested",
         "change_class": change_class,
+        **binding,
         "description": release_description(repo, candidate_sha),
         "risk_profile": risk_profile,
         "created_at": now(),
@@ -1921,6 +2003,7 @@ def create_record(
         "rollback_sha": rollback_sha,
         "change_class": change_class,
         "risk_profile": risk_profile,
+        **binding,
         "changed_files": files,
         "surfaces": [
             "runtime",
@@ -2884,8 +2967,16 @@ def prepare_release(
     *,
     owner_approved: bool = False,
     reissue_rolled_back: bool = False,
+    support_item: str | None = None,
+    support_pr_number: int | None = None,
 ) -> dict[str, Any]:
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    if change_class == 'support':
+        verify_support_release_binding(
+            repo, candidate_sha, support_item, support_pr_number,
+        )
+    elif support_item is not None or support_pr_number is not None:
+        raise ReleaseManagerError('non-Support release cannot claim Support identity')
     # Routine promotion and explicit owner-authorized preparation must share the
     # same bounded, stopped-container-only retention hygiene. It must run
     # before breaker revalidation (which checks drift including retention).
@@ -2917,6 +3008,13 @@ def prepare_release(
 
     if path.exists():
         record = load_record(state_root, release_id)
+        if record.get('change_class') != change_class:
+            raise ReleaseManagerError('existing release changed its reviewed change class')
+        if change_class == 'support' and (
+            record.get('support_item') != support_item
+            or record.get('support_pr_number') != support_pr_number
+        ):
+            raise ReleaseManagerError('existing release Support identity does not match')
         state = str(record.get("state") or "")
         if state in {
             "production_eligible",
@@ -2942,6 +3040,8 @@ def prepare_release(
                 rollback_sha=rollback_sha,
                 change_class=str(record.get("change_class") or change_class),
                 owner_approved=bool((record.get("owner_approval") or {}).get("approved")),
+                support_item=support_item,
+                support_pr_number=support_pr_number,
             )
             rebuilt["prior_revalidation"] = previous
             save_record(state_root, rebuilt)
@@ -2959,6 +3059,8 @@ def prepare_release(
         rollback_sha=rollback_sha,
         change_class=change_class,
         owner_approved=owner_approved,
+        support_item=support_item,
+        support_pr_number=support_pr_number,
         release_id_override=release_id if reissue_rolled_back else None,
     )
     if reissue_rolled_back:
@@ -3563,11 +3665,15 @@ def main() -> int:
     create.add_argument("--candidate-sha", required=True)
     create.add_argument("--rollback-sha", required=True)
     create.add_argument("--change-class", default="feature")
+    create.add_argument("--support-item")
+    create.add_argument("--support-pr-number", type=int)
     create.add_argument("--owner-approved", action="store_true")
 
     prepare = sub.add_parser("prepare")
     prepare.add_argument("--candidate-sha", required=True)
     prepare.add_argument("--change-class", default="feature")
+    prepare.add_argument("--support-item")
+    prepare.add_argument("--support-pr-number", type=int)
     prepare.add_argument("--owner-approved", action="store_true")
     prepare.add_argument("--reissue-rolled-back", action="store_true")
 
@@ -3607,6 +3713,8 @@ def main() -> int:
             rollback_sha=args.rollback_sha,
             change_class=args.change_class,
             owner_approved=args.owner_approved,
+            support_item=args.support_item,
+            support_pr_number=args.support_pr_number,
         )
         print(json.dumps(record, indent=2))
         return 0
@@ -3621,6 +3729,8 @@ def main() -> int:
             change_class=args.change_class,
             owner_approved=args.owner_approved,
             reissue_rolled_back=args.reissue_rolled_back,
+            support_item=args.support_item,
+            support_pr_number=args.support_pr_number,
         )
         print(json.dumps(record, indent=2))
         return 0

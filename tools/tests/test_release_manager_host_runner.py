@@ -1348,6 +1348,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 {
                     "release_id": release_id,
                     "state": "production_eligible",
+                    "change_class": "todo",
                     "release_candidate": {"candidate_sha": SHA_A},
                 },
             )
@@ -3627,3 +3628,156 @@ def test_owner_console_denies_replayed_or_unsafe_renewal(tmp_path, monkeypatch):
             )):
                 _owner_console_renewal(case, local)
             assert not (case.root / "mobile-release-renewals").exists()
+
+
+class BoundSupportReleaseIdentityTests(unittest.TestCase):
+    """Support release eligibility is not a free-form source/issue ID claim."""
+
+    @staticmethod
+    def positive_pr():
+        return {
+            'number': 2018, 'state': 'MERGED',
+            'mergedAt': '2026-10-24T19:39:00Z',
+            'mergeCommit': {'oid': SHA_A},
+            'body': '## SUPPORT-OPS-059 / #1099\n\nVerified P0 corrective patch.',
+        }
+
+    @staticmethod
+    def positive_issue():
+        return {
+            'number': 1099, 'state': 'OPEN',
+            'title': 'SUPPORT-OPS-059: TODO release bridge control-state corruption',
+        }
+
+    def assert_binding(self, *, pr=None, issue=None, rows=None, item='SUPPORT-OPS-059',
+                       pr_number=2018, sha=SHA_A, expected=True):
+        import json
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            (repo / 'SUPPORT.md').write_text('Bounded Support List')
+            merged = self.positive_pr() if pr is None else pr
+            support_issue = self.positive_issue() if issue is None else issue
+            def gh(argv, **kwargs):
+                if argv[:3] == ['gh', 'pr', 'view']:
+                    return json.dumps(merged)
+                if argv[:3] == ['gh', 'issue', 'view']:
+                    return json.dumps(support_issue)
+                raise AssertionError('unapproved GitHub action: ' + str(argv))
+            with patch.object(runner, 'run', side_effect=gh) as calls, \
+                 patch.object(runner.gate, 'parse_support', return_value=(
+                     [{'id': 'SUPPORT-OPS-059'}] if rows is None else rows
+                 )):
+                if expected:
+                    proof = runner.verify_support_release_binding(
+                        repo, sha, item, pr_number,
+                    )
+                    self.assertEqual(proof, {
+                        'support_item': 'SUPPORT-OPS-059',
+                        'support_pr_number': 2018,
+                        'support_issue_number': 1099,
+                        'support_merge_sha': SHA_A,
+                    })
+                    self.assertEqual(calls.call_count, 2)
+                else:
+                    with self.assertRaises(runner.ReleaseManagerError):
+                        runner.verify_support_release_binding(
+                            repo, sha, item, pr_number,
+                        )
+
+    def test_support_issue_title_regex_uses_actual_word_boundaries(self):
+        matches = runner.SUPPORT_ID_IN_TITLE.findall(
+            "SUPPORT-OPS-059: Phase corruption Support item."
+        )
+        self.assertEqual(matches, ['SUPPORT-OPS-059'])
+        self.assertIsNone(
+            runner.SUPPORT_ID_IN_TITLE.search("XSUPPORT-OPS-059")
+        )
+
+    def test_support_release_accepts_exact_merged_pr_open_issue_and_support_row(self):
+        self.assert_binding()
+
+    def test_support_release_rejects_mismatched_unmerged_or_fake_evidence(self):
+        import copy
+        pr = self.positive_pr()
+        p = copy.deepcopy(pr)
+        p['mergeCommit']['oid'] = SHA_B
+        self.assert_binding(pr=p, expected=False)
+        p = copy.deepcopy(pr)
+        p['state'] = 'OPEN'
+        self.assert_binding(pr=p, expected=False)
+        p = copy.deepcopy(pr)
+        p['mergedAt'] = None
+        self.assert_binding(pr=p, expected=False)
+        p = copy.deepcopy(pr)
+        p['body'] = 'Unrelated title mentions SUPPORT-OPS-059 but no explicit issue header'
+        self.assert_binding(pr=p, expected=False)
+        p = copy.deepcopy(pr)
+        p['body'] = '## SUPPORT-OPS-059 / #1099\n## SUPPORT-OPS-059 / #1098'
+        self.assert_binding(pr=p, expected=False)
+        p = copy.deepcopy(pr)
+        p['number'] = 2017
+        self.assert_binding(pr=p, expected=False)
+        self.assert_binding(
+            issue={**self.positive_issue(), 'state': 'CLOSED'}, expected=False,
+        )
+        self.assert_binding(
+            issue={**self.positive_issue(), 'title': 'Other Support item'},
+            expected=False,
+        )
+        self.assert_binding(rows=[], expected=False)
+        self.assert_binding(item='SUPPORT-OPS-060', expected=False)
+        self.assert_binding(pr_number=0, expected=False)
+        self.assert_binding(sha=SHA_B, expected=False)
+
+    def test_support_class_requires_binding_before_any_release_artifact_build(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            state = repo / 'release-state'
+            state.mkdir()
+            with patch.object(runner, 'live_production_alignment',
+                              return_value={'runtime_revision': SHA_B}), \
+                 patch.object(runner, 'verify_candidate_on_main'), \
+                 patch.object(runner, 'verify_support_release_binding',
+                              side_effect=runner.ReleaseManagerError(
+                                  'missing Support PR')), \
+                 patch.object(runner, 'build_candidate') as build:
+                with self.assertRaisesRegex(
+                    runner.ReleaseManagerError, 'missing Support PR',
+                ):
+                    runner.create_record(
+                        repo=repo, state_root=state, candidate_sha=SHA_A,
+                        rollback_sha=SHA_B, change_class='support',
+                        owner_approved=False,
+                    )
+                build.assert_not_called()
+
+    def test_non_support_class_rejects_support_metadata_before_build(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            with patch.object(runner, 'live_production_alignment',
+                              return_value={'runtime_revision': SHA_B}), \
+                 patch.object(runner, 'verify_candidate_on_main'), \
+                 patch.object(runner, 'build_candidate') as build:
+                with self.assertRaisesRegex(runner.ReleaseManagerError, 'non-Support'):
+                    runner.create_record(
+                        repo=repo, state_root=repo,
+                        candidate_sha=SHA_A, rollback_sha=SHA_B,
+                        change_class='feature', owner_approved=False,
+                        support_item='SUPPORT-OPS-059',
+                        support_pr_number=2018,
+                    )
+                build.assert_not_called()
+
+    def test_prepare_support_fails_before_retention_or_root_transitions(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td)
+            with patch.object(runner, 'verify_support_release_binding',
+                              side_effect=runner.ReleaseManagerError(
+                                  'missing Support issue')), \
+                 patch.object(runner, 'reconcile_stopped_rollback_retention') as retention:
+                with self.assertRaisesRegex(runner.ReleaseManagerError, 'missing Support'):
+                    runner.prepare_release(
+                        repo, repo, SHA_A, 'support',
+                        support_item='SUPPORT-OPS-059', support_pr_number=2018,
+                    )
+                retention.assert_not_called()
