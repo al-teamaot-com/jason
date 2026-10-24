@@ -13,7 +13,7 @@ from connectors.core.contracts import ConnectorTransportError
 
 
 DEFAULT_SPOOL = Path('/var/lib/jason/openclaw/support-repair')
-_ALLOWED_KINDS = {'search_plan', 'edit_plan', 'acceptance_review'}
+_ALLOWED_KINDS = {'search_plan', 'edit_plan', 'acceptance_review', 'development'}
 _BILLING_ERRORS = {
     'credit_balance_exhausted': 'restore_provider_credits',
     'organization_spend_limit_exceeded': 'review_organization_spend_limit',
