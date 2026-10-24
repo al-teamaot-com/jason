@@ -472,6 +472,17 @@ class MobileReleaseApprovalFlow:
         )
         if current.review_only != (request.metadata.get("review_only") is True):
             raise PermissionError("CCC-only review purpose changed after card issuance")
+        renewal_nonce = request.metadata.get("renewal_nonce")
+        renewed_from = request.metadata.get("renewed_from_approval_id")
+        if renewal_nonce is not None or renewed_from is not None:
+            if renewal_nonce is None or renewed_from is None:
+                raise PermissionError("incomplete signed owner renewal")
+            previous_id = read_explicit_release_renewal(
+                self.state_root, self.requests, current, policy,
+                renewal_nonce, requested_at=request.requested_at,
+            )
+            if previous_id != renewed_from:
+                raise PermissionError("owner renewal predecessor does not match")
         if policy.schema_version == "2.0":
             proof = request.metadata.get("card_instance_challenge")
             if (type(proof) is not str or re.fullmatch(r"[0-9a-f]{48}", proof) is None
@@ -481,11 +492,15 @@ class MobileReleaseApprovalFlow:
                 raise PermissionError("signed Teams decision is not bound to the issued card instance")
             expected = create_mobile_release_request(
                 current, policy, now=request.requested_at, card_challenge=proof,
+                renewed_from=renewed_from, renewal_nonce=renewal_nonce,
             )
         else:
             if submit.selections:
                 raise PermissionError("legacy release approval cannot change immutable card material")
-            expected = create_mobile_release_request(current, policy, now=request.requested_at)
+            expected = create_mobile_release_request(
+                current, policy, now=request.requested_at,
+                renewed_from=renewed_from, renewal_nonce=renewal_nonce,
+            )
         # The issuer durably records the *transport receipt* after calling
         # TeamsGatewayPlaybookApprovalSender.send(). That single field cannot
         # appear in the immutable reviewed intent reconstructed above. Do not
@@ -499,6 +514,8 @@ class MobileReleaseApprovalFlow:
         ):
             raise PermissionError("mobile Teams delivery receipt is invalid")
         if (expected.requested_mode != request.requested_mode
+                or expected.request_id != request.request_id
+                or expected.correlation_id != request.correlation_id
                 or expected.metadata != verified_metadata
                 or expected.presentation != request.presentation
                 or expected.expires_at != request.expires_at):
