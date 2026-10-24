@@ -200,3 +200,33 @@ unattended production promotion; manual exact-SHA promotion remains
 governed by existing owner/CCC root checks. This is not a broad Universal
 Teams Approver activation. Existing #1553 original-card human-origin
 provenance remains a separate acceptance gate.
+
+
+## Root-policy migration proof for held-only timer (#1993 follow-up)
+
+An exact Owner-approved/CCC-reviewed production-control release containing
+the held-only owner approval timer may require updating the root-owned
+production desired-state policy during the immutable host reconciliation.
+The original protected migration previously only allowed the historical
+#1974 full-integrity units and rejected this release despite full
+preproduction PASS. The native root migrator now recognizes exactly two
+**separate** named delta plans: the original historical #1974 set or
+the #1993 pair:
+- required_user_units: jason-release-approval-only.timer
+- allowed_user_units: jason-release-approval-only.service
+- no added system units and no other policy change
+
+It selects exactly one plan from the difference between the prior
+immutable LKG Git source policy and new immutable candidate source policy.
+The plans cannot be combined or partially mixed. Before new user timer
+activation, the root policy stages that timer as merely ALLOWED; after
+the host has fully installed and checked the unit, the root migrator
+promotes it to REQUIRED. The original root policy bytes and exact
+reviewed plan are recorded in an owner/CCC/source-bound 0600 root ledger
+for staged, applied and rollback phases. Rollback demotes the timer to
+ALLOWED first, then rejects final restoration if newly installed
+candidate-only user timer/service definitions remain, and finally
+restores the exact original protected root-policy bytes. Candidate
+source still cannot edit arbitrary root units, release approvals,
+production breaker, auto-promotion incident hold or unrelated provider
+permissions. An old approved SHA does not authorize a new changed SHA.
