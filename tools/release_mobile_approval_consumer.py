@@ -145,6 +145,7 @@ def consume_mobile_release_decisions(
     from jason_runtime.mobile_release_approval import (
         CAPABILITY, REQUEST_PREFIX, create_mobile_release_request, digest,
         read_eligible_release, read_mobile_release_policy,
+        read_explicit_release_renewal,
     )
     from jason_runtime.universal_teams_approval import SignedTeamsApprovalEvidenceVerifier
     from jason_runtime.owner_release_approval_containment import read_release_approval_containment
@@ -316,17 +317,51 @@ def consume_mobile_release_decisions(
         )
         if candidate.review_only != review_only:
             raise PermissionError("CCC-only Teams decision changed release approval state")
+        renewal_nonce = request.metadata.get("renewal_nonce")
+        renewed_from = request.metadata.get("renewed_from_approval_id")
+        if renewal_nonce is not None or renewed_from is not None:
+            if renewal_nonce is None or renewed_from is None:
+                raise PermissionError("host sees incomplete signed renewal lineage")
+            # Read-only independent SQLite evidence, not the callback's authority.
+            connection = _read_only_db(database)
+            try:
+                class ParentReadPort:
+                    def get(self, approval_id):
+                        row = connection.execute(
+                            "SELECT payload FROM approval_requests WHERE approval_id=?",
+                            (approval_id,),
+                        ).fetchone()
+                        return (None if row is None
+                                else SQLiteApprovalRequestRepository._decode(row[0]))
+
+                    def accepted_decision(self, approval_id):
+                        return connection.execute(
+                            "SELECT 1 FROM approval_decision_receipts WHERE approval_id=?",
+                            (approval_id,),
+                        ).fetchone()
+
+                verified_parent = read_explicit_release_renewal(
+                    state_root, ParentReadPort(), candidate, policy,
+                    renewal_nonce, requested_at=request.requested_at,
+                )
+            finally:
+                connection.close()
+            if verified_parent != renewed_from:
+                raise PermissionError("signed renewed release parent evidence mismatched")
         expected = create_mobile_release_request(
             candidate, policy, now=request.requested_at,
             card_challenge=(request.metadata.get("card_instance_challenge")
                             if policy.schema_version == "2.0" else None),
+            renewed_from=renewed_from, renewal_nonce=renewal_nonce,
         )
         if (request.metadata != {**expected.metadata, **{
                 key: value for key, value in request.metadata.items()
                 if key == "delivery_message_ids"}}
                 or request.presentation != expected.presentation
                 or request.expires_at != expected.expires_at
-                or request.requested_mode != expected.requested_mode):
+                or request.requested_mode != expected.requested_mode
+                or request.request_id != expected.request_id
+                or request.correlation_id != expected.correlation_id):
             raise PermissionError("mobile release policy or exact reviewed manifest changed")
 
         # Cross-process race guard immediately before CCC/release state writes.
