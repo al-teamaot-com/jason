@@ -339,3 +339,31 @@ Universal Teams Approver is operational. The total rollout remains 0 of 3
 representative live approval workflows certified until genuine Teams human
 callback, origin card identity, Deny/expiry/replay, authorized bounded
 execution and audit are all independently proven.
+
+## Held-offer user-unit installation order (October 24 regression)
+
+The Stage B host attempt reached its final desired-state guard before the
+Release Manager's later controller installer copied the newly required user
+timer. The guard correctly rejected the missing timer and rolled back. Passing
+preproduction and source-level migration tests did not exercise this host order.
+
+The existing Release Manager installer now exposes an approval-units-only mode.
+The native host reconciliation invokes it as the existing user after the trusted
+root migration helper has staged the exact pair, and before committing the timer
+as required or running the final drift guard. This mode installs and activates
+only that existing timer/service; it does not replace the running controller,
+change its source link, or touch the normal promotion timer or incident hold.
+The later full controller installation remains in its original transaction slot.
+
+For rollback to an older immutable host script, the trusted root migration helper
+stops and removes only the exact held-offer pair after validating and staging the
+rollback receipt. The old script can then satisfy its unchanged desired state.
+Unknown plans, wrong targets, unexpected file types, unsuccessful stop, and
+policy/receipt mismatches remain failures. The original root policy and parent
+receipt are restored only after the existing final absence checks succeed.
+
+Regression tests exercise unit-only installation, half-pair refusal, no-unit
+bootstrap, controller preservation, host stage ordering, exact-pair removal,
+stop-failure retention, and wrong-target rejection. A passing source test is not
+live Teams acceptance; the deployed timer and actual approval flow still require
+independent verification.
