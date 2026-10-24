@@ -7,6 +7,9 @@ active Jason identity/authority records. Card fields never supply stored scope.
 from __future__ import annotations
 
 import json
+import hashlib
+import hmac
+import re
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
@@ -124,8 +127,8 @@ class UniversalTeamsApprovalInteractionFlow:
             conversation_id: str, channel_response_id: str, decided_at: datetime,
             selections: Mapping[str, str] | None = None,
             signed_envelope: Mapping[str, Any] | None = None) -> Mapping[str, Any]:
-        if signed_envelope is None or selections:
-            raise PermissionError('original signed approval evidence required; plan selections are immutable')
+        if signed_envelope is None:
+            raise PermissionError('original signed approval evidence required')
         token = json.dumps(dict(signed_envelope), ensure_ascii=False, separators=(',', ':'))
         _, parsed = self.evidence_verifier.parse(token)
         interaction = parsed.approval_submit
@@ -136,6 +139,23 @@ class UniversalTeamsApprovalInteractionFlow:
                 or interaction.channel_response_id != channel_response_id
                 or parsed.issued_at != decided_at):
             raise PermissionError('approval callback does not match signed Teams evidence')
+        # Reject callbacks without the original issued-card challenge before
+        # consuming any approval or retaining an executable grant. The gateway
+        # signature authenticates the transport, not arbitrary client values.
+        signed_selections = dict(interaction.selections)
+        pending = self.service.teams_flow.approval_service.repository.get(approval_id)
+        if pending is None or not approval_id.startswith('planapproval-'):
+            raise PermissionError('universal plan has no original issued approval card')
+        challenge = pending.metadata.get('card_instance_challenge')
+        recorded_digest = pending.metadata.get('card_instance_challenge_sha256')
+        if (type(challenge) is not str
+                or re.fullmatch(r'[0-9a-f]{48}', challenge) is None
+                or type(recorded_digest) is not str
+                or not hmac.compare_digest(hashlib.sha256(
+                    challenge.encode('ascii')).hexdigest(), recorded_digest)
+                or signed_selections != {'card_challenge': challenge}
+                or dict(selections or {}) != signed_selections):
+            raise PermissionError('signed Teams plan decision is not bound to the issued card instance')
         original = self.requests.require(approval_id)
         proposal = self.proposals.require(approval_id)
         now = self.clock()
@@ -315,7 +335,9 @@ def build_universal_teams_approval_runtime(*, mode: str, database_path, policy_p
     pending = SQLiteApprovalRequestRepository(path)
     checker = ConfiguredPlanApprovalAuthority(policy, JKD001ApprovalAuthorityChecker(identities, grants, clock))
     approval_service = ApprovalRequestService(pending, checker)
-    verifier = SignedTeamsApprovalEvidenceVerifier(authenticator, frozenset(allowed_machine_identities), clock)
+    verifier = SignedTeamsApprovalEvidenceVerifier(
+        authenticator, frozenset(allowed_machine_identities), clock,
+        allowed_selection_keys=frozenset({'card_challenge'}))
     audit_sink = SQLiteApprovalAuditSink(str(path))
     audit_sink.initialize()
     audit = ApprovalAuditRecorder(audit_sink)

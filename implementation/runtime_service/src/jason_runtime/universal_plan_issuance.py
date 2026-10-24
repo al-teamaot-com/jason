@@ -10,6 +10,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import secrets
 from typing import Any, Callable
 from uuid import uuid4
 
@@ -152,11 +153,21 @@ class UniversalPlanIssuer:
             if len(detail)>600:
                 raise ValueError('reviewed step parameters exceed card review bound; attach an approved immutable evidence artifact')
             facts.append((f'Step {index}',request.capability_name+'@'+request.capability_version+' '+detail))
+        # Match the reviewed protected-release V2 lane: every universal plan
+        # approval binds its Teams click to an unguessable, one-use issued card.
+        # Callback verification is independently enforced before any grant.
+        card_challenge = secrets.token_hex(24)
         pending=ApprovalRequest(approval_id,first.execution_id,first.correlation_id,
             first.organization_id,first.client_id,first.principal_id,first.capability_name,
             first.permission_mode,now,scope.expires_at,tuple(sorted(eligible)),
             presentation=ApprovalPresentation(title,summary,tuple(facts)),
-            metadata={'plan_fingerprint':fingerprint,'plan_id':scope.plan_id,'policy_digest':scope.policy_digest})
+            metadata={
+                'plan_fingerprint':fingerprint,'plan_id':scope.plan_id,
+                'policy_digest':scope.policy_digest,
+                'card_instance_challenge':card_challenge,
+                'card_instance_challenge_sha256':hashlib.sha256(
+                    card_challenge.encode('ascii')).hexdigest(),
+            })
         self.handler.requests.store(proposal,pinned,now=now)
         self.handler.proposals.store(proposal)
         self.handler.requests.record_progress(approval_id,state='awaiting_approval',now=now)

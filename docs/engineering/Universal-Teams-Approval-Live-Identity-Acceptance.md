@@ -20,3 +20,24 @@ The implementation needs a trusted Teams platform activity-authentication design
 4. Capture a separate **real** Deny on a fresh proposal. Verify audit persisted, no grant, no execution continuation.
 5. Reject missing/untrusted proof, different tenant, different actor, mismatched receipt, expired plan, duplicate response, and replay. Verify on desktop and mobile where supported.
 6. Retain draft and no production activation until protected CI, independent security and governance reviews, and live provider receipt readback pass.
+
+
+## Phase-bound universal-plan card provenance hardening (P0 #1440)
+
+General `planapproval-*` approvals now require a new 192-bit random
+`card_instance_challenge`, stored with its SHA-256 checksum in the immutable
+server-issued `ApprovalRequest`. The existing Teams Adaptive Card inserts the
+challenge as an `Action.Submit` field; the authenticated gateway must sign
+that selected field, and runtime independently verifies the exact issued
+challenge and digest **before** an approval can create a plan grant or enqueue
+execution. Missing, stale, mismatched, swapped, cross-tenant, malformed or
+unreviewed card submissions must fail closed; decision replay is still
+governed by the existing atomic ledger.
+
+**Trust boundary:** A card challenge is *not* an OAuth human JWT, proof of
+Microsoft Teams message-origin ID, MFA, or proof that the Owner personally
+clicked. The unresolved historical provenance case #1553 remains separately
+open. This source-only implementation does not enable
+`JASON_UNIVERSAL_APPROVAL_MODE=enforced`, provide a production routing policy,
+authorize any reboot/PO/client message, or substitute for live negative UAT,
+Owner approval, CCC, and governed release controls.

@@ -37,13 +37,20 @@ def render_approval_card(request: ApprovalRequest) -> TeamsApprovalCard:
     request.validate()
     presentation = request.presentation
     challenge = request.metadata.get("card_instance_challenge")
-    if challenge is not None and (
-        request.capability != "release.production.approve"
-        or not request.approval_id.startswith("relapproval-")
-        or type(challenge) is not str
-        or re.fullmatch(r"[0-9a-f]{48}", challenge) is None
-    ):
-        raise PermissionError("protected card-instance proof belongs only to an exact release request")
+    is_reviewed_release = (
+        request.capability == "release.production.approve"
+        and request.approval_id.startswith("relapproval-"))
+    is_universal_plan = request.approval_id.startswith("planapproval-")
+    if is_universal_plan and challenge is None:
+        raise PermissionError("universal plan card requires an issued card-instance proof")
+    if challenge is not None:
+        import hashlib
+        if (not (is_reviewed_release or is_universal_plan)
+                or type(challenge) is not str
+                or re.fullmatch(r"[0-9a-f]{48}", challenge) is None
+                or hashlib.sha256(challenge.encode("ascii")).hexdigest()
+                    != request.metadata.get("card_instance_challenge_sha256")):
+            raise PermissionError("card-instance proof must match its reviewed request")
     return TeamsApprovalCard(
         approval_id=request.approval_id,
         organization_id=request.organization_id,
