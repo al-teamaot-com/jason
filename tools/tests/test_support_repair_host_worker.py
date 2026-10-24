@@ -2804,7 +2804,7 @@ def _stale_clean_worktree_recovery_case(tmp_path, monkeypatch):
                                           'path': None, 'query': 'bounded_repair'}]},
     }))
     old_sha, main_sha = 'a' * 40, 'b' * 40
-    old_branch = worker.branch_name(item_id) + '-context-' + original_id[:12]
+    old_branch = worker.branch_name(item_id) + '-context-' + 'e' * 12
     old_tree, fresh_tree = tmp_path / 'old', tmp_path / 'current'
     old_tree.mkdir()
     fresh_tree.mkdir()
