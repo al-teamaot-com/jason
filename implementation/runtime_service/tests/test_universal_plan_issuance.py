@@ -140,7 +140,7 @@ def test_actual_adaptive_card_actions_are_accepted_by_actual_gateway_parser(tmp_
             intent=ConversationIntent('synthetic.resource.read'),identity=identity(),correlation_id='corr')
     card=TeamsGatewayPlaybookApprovalSender._adaptive_card(render_approval_card(delivery.requests[0]))
     values=[a['data'] for a in card['actions']]
-    assert all(set(v)=={'approval_id','decision'} for v in values)
+    assert all(set(v)=={'approval_id','decision','card_challenge'} for v in values)
     root=Path(__file__).resolve().parents[3]
     module=(root/'infrastructure/jason-teams-gateway/approval-submit.mjs')
     # Python is installed under implementation/runtime_service/tests; resolve repository root.
@@ -151,4 +151,29 @@ def test_actual_adaptive_card_actions_are_accepted_by_actual_gateway_parser(tmp_
         capture_output=True,text=True,timeout=10,check=True)
     parsed=json.loads(result.stdout)
     assert [v['decision'] for v in parsed]==['approve','deny','request_changes']
-    assert all(not v['selections'] for v in parsed)
+    assert all(set(v['selections']) == {'card_challenge'} for v in parsed)
+    issued = delivery.requests[0]
+    assert all(v['selections']['card_challenge'] ==
+               issued.metadata['card_instance_challenge'] for v in parsed)
+
+
+
+def test_real_universal_issuer_card_challenge_is_unique_and_bound_to_metadata(tmp_path):
+    from connectors.microsoft_graph.teams_approval_channel import render_approval_card
+    import hashlib
+    env=setup(tmp_path);delivery,issuer=with_issuer(env)
+    factory=GovernedTeamsOrchestrationRequestFactory(
+        authority=issuer.authority,capabilities=RegisteredCapabilities(),
+        approval_requester=env.handler)
+    with pytest.raises(ConversationGuidanceRequiredError):
+        factory.build(principal=BoundConversationPrincipal('requester-a','org','client'),
+            intent=ConversationIntent('synthetic.resource.read',{'resource_id':'controlled-test'}),
+            identity=identity(),correlation_id='new-bound-card')
+    issued=delivery.requests[0]
+    challenge=issued.metadata['card_instance_challenge']
+    assert len(challenge)==48 and all(c in '0123456789abcdef' for c in challenge)
+    assert issued.metadata['card_instance_challenge_sha256']==hashlib.sha256(
+        challenge.encode('ascii')).hexdigest()
+    rendered=render_approval_card(issued)
+    assert rendered.card_instance_challenge==challenge
+    assert not env.provider.calls

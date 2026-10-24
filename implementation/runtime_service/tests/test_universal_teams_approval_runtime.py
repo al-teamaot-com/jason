@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -91,13 +92,19 @@ def seed(env, requester='requester-a', *, extra_step=False):
         plan_fingerprint(steps,scope),scope)
     h.requests.store(proposal,steps,now=NOW)
     h.proposals.store(proposal)
+    challenge = hashlib.sha256(proposal.approval_id.encode('ascii')).hexdigest()[:48]
     h.service.teams_flow.approval_service.create(ApprovalRequest(proposal.approval_id,
         request.execution_id,request.correlation_id,'org','client',requester,'synthetic.resource.read','observe',
-        NOW-timedelta(seconds=1),NOW+timedelta(minutes=5),('approver-a','approver-b')),now=NOW)
+        NOW-timedelta(seconds=1),NOW+timedelta(minutes=5),('approver-a','approver-b'),
+        metadata={'card_instance_challenge':challenge,
+                  'card_instance_challenge_sha256':hashlib.sha256(
+                      challenge.encode('ascii')).hexdigest()}),now=NOW)
     return proposal
 
 
-def signed(env, proposal, *, approver='approver-a', decision='approve', **overrides):
+def signed(env, proposal, *, approver='approver-a', decision='approve', card_challenge=None, **overrides):
+    pending = env.handler.service.teams_flow.approval_service.repository.get(proposal.approval_id)
+    challenge = card_challenge if card_challenge is not None else pending.metadata.get('card_instance_challenge')
     envelope={'kind':'conversation.turn','request_id':'transport-'+proposal.approval_id,
         'correlation_id':'transport-correlation','issued_at':NOW.isoformat(),
         'expires_at':(NOW+timedelta(seconds=90)).isoformat(), 'nonce':'unique-nonce-'+proposal.approval_id,
@@ -106,7 +113,8 @@ def signed(env, proposal, *, approver='approver-a', decision='approve', **overri
                               'authentication_assurance':'botframework-authenticated'},
         'conversation_id':'conversation-'+approver,'message_id':'message-'+approver,
         'interaction':{'kind':'approval.submit','approval_id':proposal.approval_id,'decision':decision,
-                       'channel_response_id':'message-'+approver,'selections':{}},
+                       'channel_response_id':'message-'+approver,
+                       'selections':{'card_challenge':challenge}},
         'key_id':'gateway-key'}
     envelope.update(overrides)
     envelope['signature']=base64.b64encode(env.private.sign(canonical_signed_payload(envelope))).decode()
@@ -119,7 +127,8 @@ def click(env, envelope, **overrides):
         microsoft_tenant_id=envelope['transport_identity']['microsoft_tenant_id'],
         microsoft_object_id=envelope['transport_identity']['microsoft_object_id'],
         conversation_id=envelope['conversation_id'],channel_response_id=interaction['channel_response_id'],
-        decided_at=datetime.fromisoformat(envelope['issued_at']),selections={},signed_envelope=envelope)
+        decided_at=datetime.fromisoformat(envelope['issued_at']),
+        selections=envelope['interaction']['selections'],signed_envelope=envelope)
     kwargs.update(overrides)
     return env.handler.handle(**kwargs)
 
@@ -456,3 +465,95 @@ def test_callback_reports_durable_execution_state_not_queued(tmp_path, state, re
     assert result['executed'] is False
     assert 'queued' not in result['reply']['text']
     assert env.provider.calls == []
+
+
+
+def test_universal_issued_card_challenge_rejects_unaffiliated_signed_submit(tmp_path):
+    """Gateway signature alone cannot convert a bare approval ID into authority."""
+    env=setup(tmp_path);plan=seed(env)
+    import base64
+    from jason_openclaw.signed_transport import canonical_signed_payload
+    envelope=signed(env,plan)
+    envelope['interaction']['selections']={}
+    envelope['signature']=base64.b64encode(
+        env.private.sign(canonical_signed_payload(envelope))).decode()
+    with pytest.raises(PermissionError,match='card instance'):
+        click(env,envelope)
+    assert env.handler.service.teams_flow.approval_service.repository.get(
+        plan.approval_id).status is ApprovalRequestStatus.PENDING
+    assert env.approvals.get(plan.approval_id) is None and not env.provider.calls
+
+
+def test_universal_challenge_from_another_issued_card_is_rejected(tmp_path):
+    env=setup(tmp_path);plan_a=seed(env,'requester-a')
+    plan_b=seed(env,'requester-b')
+    other=env.handler.service.teams_flow.approval_service.repository.get(
+        plan_b.approval_id).metadata['card_instance_challenge']
+    current=env.handler.service.teams_flow.approval_service.repository.get(
+        plan_a.approval_id).metadata['card_instance_challenge']
+    assert current!=other
+    with pytest.raises(PermissionError,match='card instance'):
+        click(env,signed(env,plan_a,card_challenge=other))
+    assert env.approvals.get(plan_a.approval_id) is None
+    assert env.approvals.get(plan_b.approval_id) is None
+    assert not env.provider.calls
+
+
+@pytest.mark.parametrize('bad', ['b'*48, 'not-a-hex-token', ''])
+def test_universal_wrong_challenge_never_records_grant_or_execution(tmp_path,bad):
+    env=setup(tmp_path);plan=seed(env)
+    with pytest.raises(PermissionError,match='card instance'):
+        click(env,signed(env,plan,card_challenge=bad))
+    assert env.handler.service.teams_flow.approval_service.repository.get(
+        plan.approval_id).status is ApprovalRequestStatus.PENDING
+    assert not env.provider.calls and env.approvals.get(plan.approval_id) is None
+
+
+def test_universal_unsigned_selection_substitution_is_denied(tmp_path):
+    env=setup(tmp_path);plan=seed(env)
+    envelope=signed(env,plan)
+    with pytest.raises(PermissionError,match='card instance'):
+        click(env,envelope,selections={'card_challenge':'b'*48})
+    assert not env.provider.calls and env.approvals.get(plan.approval_id) is None
+
+
+def test_universal_card_renderer_refuses_missing_or_bad_binding(tmp_path):
+    from dataclasses import replace
+    from connectors.microsoft_graph.teams_approval_channel import render_approval_card
+    env=setup(tmp_path);plan=seed(env)
+    pending=env.handler.service.teams_flow.approval_service.repository.get(plan.approval_id)
+    result=render_approval_card(pending)
+    assert result.card_instance_challenge==pending.metadata['card_instance_challenge']
+    with pytest.raises(PermissionError,match='requires an issued'):
+        render_approval_card(replace(pending,metadata={}))
+    wrong=dict(pending.metadata)
+    wrong['card_instance_challenge_sha256']='0'*64
+    with pytest.raises(PermissionError,match='must match'):
+        render_approval_card(replace(pending,metadata=wrong))
+
+
+def test_universal_sender_generates_distinct_challenge_per_plan(tmp_path):
+    env=setup(tmp_path)
+    a=seed(env,'requester-a');b=seed(env,'requester-b')
+    repository=env.handler.service.teams_flow.approval_service.repository
+    challenge_a=repository.get(a.approval_id).metadata['card_instance_challenge']
+    challenge_b=repository.get(b.approval_id).metadata['card_instance_challenge']
+    assert len(challenge_a)==48 and len(challenge_b)==48
+    assert challenge_a!=challenge_b
+
+
+
+def test_universal_extra_signed_card_field_is_not_authority(tmp_path):
+    """Even a correctly gateway-signed extra selection is rejected."""
+    import base64
+    from jason_openclaw.signed_transport import canonical_signed_payload
+    env=setup(tmp_path);plan=seed(env)
+    envelope=signed(env,plan)
+    envelope['interaction']['selections']['unauthorized_flag']='true'
+    envelope['signature']=base64.b64encode(
+        env.private.sign(canonical_signed_payload(envelope))).decode()
+    with pytest.raises(PermissionError,match='unreviewed card data'):
+        click(env,envelope)
+    assert env.handler.service.teams_flow.approval_service.repository.get(
+        plan.approval_id).status is ApprovalRequestStatus.PENDING
+    assert env.approvals.get(plan.approval_id) is None and not env.provider.calls
