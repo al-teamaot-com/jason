@@ -291,6 +291,77 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
     )
 
 
+
+RENEWAL_LIMIT = 3
+
+
+def read_explicit_release_renewal(
+    state_root: Path, requests: Any, evidence: ExactRelease,
+    policy: MobileReleasePolicy, nonce: str, *, requested_at: datetime,
+) -> str:
+    """A fresh, owner-console-requested card is not an approval to deploy.
+
+    Old expired requests and signed evidence remain immutable. This checks
+    the recorded manual renewal lineage both during issuance and again when
+    the signed Teams callback and host consumer validate the new card.
+    """
+    if re.fullmatch(r"[0-9a-f]{32}", nonce) is None or requested_at.tzinfo is None:
+        raise PermissionError("release renewal nonce or time invalid")
+    root = Path(state_root)
+    folder = root / "mobile-release-renewals"
+    marker = folder / (evidence.release_id + "-renew-" + nonce + ".json")
+    parent = folder.lstat()
+    info = marker.lstat()
+    if (not stat.S_ISDIR(parent.st_mode) or stat.S_IMODE(parent.st_mode) & 0o077
+            or parent.st_uid != root.stat().st_uid
+            or not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_uid != root.stat().st_uid or info.st_size > 4096):
+        raise PermissionError("release renewal is not private owner-host evidence")
+    doc = json.loads(marker.read_text(encoding="utf-8"))
+    required = {
+        "schema_version", "release_id", "candidate_sha", "rollback_sha",
+        "manifest_sha256", "owner_policy_sha256", "renewal_nonce",
+        "previous_approval_id", "requested_at", "requester_identity",
+        "requester_os_account",
+    }
+    if (not isinstance(doc, dict) or set(doc) != required
+            or doc["schema_version"] != "1.0"
+            or doc["release_id"] != evidence.release_id
+            or doc["candidate_sha"] != evidence.candidate_sha
+            or doc["rollback_sha"] != evidence.rollback_sha
+            or doc["manifest_sha256"] != evidence.manifest_sha256
+            or doc["owner_policy_sha256"] != policy.policy_sha256
+            or doc["renewal_nonce"] != nonce
+            or doc["requester_identity"] != "person-al"
+            or doc["requester_os_account"] != "al"):
+        raise PermissionError("renewal owner intent no longer matches the exact release")
+    initiated_at = datetime.fromisoformat(str(doc["requested_at"]))
+    if (initiated_at.tzinfo is None
+            or not 0 <= (requested_at - initiated_at).total_seconds() <= 900):
+        raise PermissionError("manual renewal owner intent is stale or in future")
+    previous_id = str(doc["previous_approval_id"])
+    if re.fullmatch(r"relapproval-[0-9a-f]{32}", previous_id) is None:
+        raise PermissionError("renewal has no exact predecessor")
+    previous = requests.get(previous_id)
+    if (previous is None or previous.status is not ApprovalRequestStatus.EXPIRED
+            or previous.expires_at > initiated_at
+            or previous.expires_at > requested_at
+            or previous.organization_id != policy.organization_id
+            or previous.capability != CAPABILITY
+            or previous.requested_by != "svc-jason-release-manager"
+            or previous.authorized_approver_ids != policy.owner_identity_ids
+            or previous.metadata.get("release_id") != evidence.release_id
+            or previous.metadata.get("candidate_sha") != evidence.candidate_sha
+            or previous.metadata.get("rollback_sha") != evidence.rollback_sha
+            or previous.metadata.get("manifest_sha256") != evidence.manifest_sha256
+            or previous.metadata.get("owner_policy_sha256") != policy.policy_sha256
+            or requests.accepted_decision(previous_id) is not None):
+        raise PermissionError("renewal predecessor was not an expired undecided card")
+    return previous_id
+
+
+
+
 class MobileReleaseSignedEvidenceStore:
     """Private immutable signed-gateway payload retained for host revalidation.
 
