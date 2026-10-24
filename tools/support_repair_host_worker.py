@@ -2103,7 +2103,9 @@ def readmit_verified_stale_clean_source(
             evidence_policy = engineering_evidence_tools.load_policy(repo)
             excerpts, receipts = engineering_evidence_tools.execute_tools(
                 worktree=current_tree, requests=result['evidence_requests'],
-                gate=gate, repair_policy=policy, support=sys.modules[__name__],
+                gate=gate, repair_policy=policy, support=SimpleNamespace(
+                    safe_search=safe_search, source_excerpts_for_paths=source_excerpts_for_paths,
+                ),
                 policy=evidence_policy,
             )
             if not excerpts or not receipts:
