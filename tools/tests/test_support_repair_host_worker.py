@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import pytest
 import subprocess
 from pathlib import Path
 
@@ -2775,3 +2776,155 @@ def test_credit_reload_preserves_authority_handoff_and_engineering_capacity(tmp_
     assert worker.readmit_after_verified_credit_replenishment(
         state, [item], tmp_path, max_active=1, usage_ledger_path=ledger
     ) == []
+
+
+def _stale_clean_worktree_recovery_case(tmp_path, monkeypatch):
+    """Exercise the recovery contract without touching a real repository or provider."""
+    # Patch the exact module instance imported by this worker.
+    evidence = worker.engineering_evidence_tools
+
+    item_id = 'SUPPORT-OPS-100'
+    item = {'id': item_id, 'priority': 'P0', 'title': 'Bounded source recovery',
+            'evidence': 'Old source is stale', 'acceptance': 'A current-source proposal'}
+    raw = {'kind': 'edit_plan', 'support_item': item_id, 'title': item['title'],
+           'evidence': item['evidence'], 'acceptance': item['acceptance'],
+           'context': {'source_excerpts': [{'path': 'tools/stale.py', 'content': 'old'}]}}
+    original_id = worker.request_id(raw)
+    raw['request_id'] = original_id
+    spool = tmp_path / 'spool'
+    request_dir = spool / 'reasoning' / 'requests'
+    response_dir = spool / 'reasoning' / 'responses'
+    request_dir.mkdir(parents=True)
+    response_dir.mkdir(parents=True)
+    (request_dir / (original_id + '.json')).write_text(worker.json.dumps(raw))
+    (response_dir / (original_id + '.json')).write_text(worker.json.dumps({
+        'status': 'succeeded', 'request_id': original_id,
+        'kind': 'edit_plan', 'support_item': item_id,
+        'result': {'summary': 'Source changed', 'edits': [], 'test_paths': [],
+                   'blocked_reason': None,
+                   'evidence_requests': [{'tool': 'search_source',
+                                          'path': None, 'query': 'bounded_repair'}]},
+    }))
+    old_sha, main_sha = 'a' * 40, 'b' * 40
+    old_branch = worker.branch_name(item_id) + '-context-' + 'e' * 12
+    old_tree, fresh_tree = tmp_path / 'old', tmp_path / 'current'
+    old_tree.mkdir()
+    fresh_tree.mkdir()
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    state = {'items': {item_id: {
+        'phase': 'blocked',
+        'reason': 'EvidenceToolError: stale worktree requires governed clean-source recovery',
+        'branch': old_branch,
+        'reasoning_request_id': original_id,
+        'evidence_source_revision': old_sha,
+        'evidence_turn_count': 2,
+        'evidence_last_source_request': 'previous-read-only-turn',
+    }}}
+    switches = {'dirty': False, 'ancestor': True}
+    calls = []
+
+    def fake_run(args, *, cwd=None, **_kw):
+        args = list(args)
+        if args == ['git', 'branch', '--show-current']:
+            return old_branch if cwd == old_tree else (
+                worker.branch_name(item_id) + '-context-' + original_id[:12]
+                if cwd == fresh_tree else '')
+        if args == ['git', 'status', '--porcelain', '--untracked-files=all']:
+            return ' M tools/local.py' if cwd == old_tree and switches['dirty'] else ''
+        if args == ['git', 'rev-parse', 'HEAD']:
+            return old_sha if cwd == old_tree else main_sha
+        if args == ['git', 'rev-parse', 'origin/main']:
+            return main_sha
+        if args == ['git', 'fetch', '--no-tags', 'origin', 'main']:
+            return ''
+        if args == ['git', 'merge-base', '--is-ancestor', old_sha, main_sha]:
+            if not switches['ancestor']:
+                raise worker.WorkerError('old branch contains unmerged work')
+            return ''
+        raise AssertionError(f'unexpected git operation {args}')
+
+    monkeypatch.setattr(worker, 'run', fake_run)
+    monkeypatch.setattr(worker, 'support_worktree_path',
+                        lambda _item_id, _branch: old_tree)
+    monkeypatch.setattr(worker, 'ensure_worktree',
+                        lambda _repo, _item_id, _branch: fresh_tree)
+    monkeypatch.setattr(evidence, 'load_policy',
+                        lambda _repo: {'max_tool_requests_per_turn': 2})
+    monkeypatch.setattr(evidence, 'execute_tools',
+                        lambda **kw: (
+                            [{'path': 'tools/current.py', 'content': 'def repaired(): pass'}],
+                            [{'tool': 'search_source', 'path': 'tools/current.py',
+                              'sha256': 'c' * 64}],
+                        ))
+
+    def queue(spool, *, kind, item, context):
+        calls.append((kind, item, context))
+        return 'd' * 64
+    monkeypatch.setattr(worker, 'queue_reasoning', queue)
+    return (state, [item], repo, spool, old_tree, switches, calls, old_sha, main_sha, original_id)
+
+
+def test_stale_clean_source_recovery_uses_current_branch_and_retains_history(tmp_path, monkeypatch):
+    state, eligible, repo, spool, old_tree, switches, calls, old_sha, main_sha, old_id = (
+        _stale_clean_worktree_recovery_case(tmp_path, monkeypatch))
+    record = state['items']['SUPPORT-OPS-100']
+    assert worker.readmit_verified_stale_clean_source(
+        state, eligible, repo, spool, object(), {}, max_active=2
+    ) == ['SUPPORT-OPS-100']
+    assert record['phase'] == 'implementing'
+    assert record['reasoning_request_id'] == 'd' * 64
+    assert record['stale_source_recovery_original_request_id'] == old_id
+    assert record['stale_source_recovery_previous_revision'] == old_sha
+    assert record['stale_source_recovery_current_revision'] == main_sha
+    assert record['evidence_source_revision'] == main_sha
+    assert record['evidence_turn_count'] == 2  # The previous budget is not reset.
+    assert len(calls) == 1
+    assert calls[0][0] == 'edit_plan'
+    new_context = calls[0][2]
+    assert new_context['source_excerpts'][0]['path'] == 'tools/current.py'
+    assert 'old' not in str(new_context['source_excerpts'])
+    assert new_context['stale_clean_source_recovery']['retry_limit'] == 1
+    assert (spool / 'reasoning/requests' / (old_id + '.json')).is_file()
+    assert old_tree.is_dir()
+    assert worker.readmit_verified_stale_clean_source(
+        state, eligible, repo, spool, object(), {}, max_active=2
+    ) == []
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize('denial', [
+    'dirty_old_worktree', 'not_ancestor', 'already_recovered',
+    'existing_pr', 'external_handoff', 'not_p0', 'changed_reason',
+    'untrusted_response',
+])
+def test_stale_clean_source_recovery_refuses_unsafe_or_duplicate_state(
+    tmp_path, monkeypatch, denial,
+):
+    state, eligible, repo, spool, old_tree, switches, calls, old_sha, main_sha, old_id = (
+        _stale_clean_worktree_recovery_case(tmp_path, monkeypatch))
+    record = state['items']['SUPPORT-OPS-100']
+    if denial == 'dirty_old_worktree':
+        switches['dirty'] = True
+    elif denial == 'not_ancestor':
+        switches['ancestor'] = False
+    elif denial == 'already_recovered':
+        record['stale_source_recovery_request_id'] = 'e' * 64
+    elif denial == 'existing_pr':
+        record['pr_number'] = 9999
+    elif denial == 'external_handoff':
+        record['recovery_handoff_intake'] = {'status': 'awaiting_governed_repair'}
+    elif denial == 'not_p0':
+        eligible[0]['priority'] = 'P1'
+    elif denial == 'changed_reason':
+        record['reason'] = 'Unrelated blocker'
+    elif denial == 'untrusted_response':
+        target = spool / 'reasoning/responses' / (old_id + '.json')
+        d = worker.json.loads(target.read_text())
+        d['result']['edits'] = [{'path': 'tools/unsafe.py'}]
+        target.write_text(worker.json.dumps(d))
+    assert worker.readmit_verified_stale_clean_source(
+        state, eligible, repo, spool, object(), {}, max_active=2
+    ) == []
+    assert calls == []
+    assert record['phase'] == 'blocked'
