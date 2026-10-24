@@ -3205,6 +3205,7 @@ def approval_only_while_promotion_held(repo: Path, state_root: Path) -> bool:
 
 def request_expired_owner_card_renewal(
     repo: Path, state_root: Path, *, release_id: str, candidate_sha: str,
+    mobile_db: Path = Path("/var/lib/jason/openclaw/mobile-release-approvals.sqlite3"),
 ) -> dict[str, str]:
     """Interactive OS-owner request for a *new Teams card*, never approval.
 
@@ -3253,7 +3254,7 @@ def request_expired_owner_card_renewal(
     candidate = read_eligible_release(state_root, release_id, policy)
     if candidate.candidate_sha != candidate_sha or candidate.rollback_sha != live_sha:
         raise ReleaseManagerError("release rollback or signed source has changed")
-    db = Path("/var/lib/jason/openclaw/mobile-release-approvals.sqlite3")
+    db = Path(mobile_db)
     con = sqlite3.connect("file:" + str(db.absolute()) + "?mode=ro", uri=True, timeout=2)
     try:
         related = []
