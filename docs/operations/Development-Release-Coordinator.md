@@ -209,3 +209,39 @@ After this first evidence-only version proves reliable, future controlled increm
 - explicit release-candidate designation.
 
 Those increments must preserve the authority boundary above.
+
+
+## TODO bridge: authoritative phase and summary integrity (SUPPORT-OPS-059 / #1099)
+
+The TODO release bridge is a derived ledger, not an authority to invent a
+development phase, treat PR readiness as completion, or override an owner
+acceptance decision. For an owner-approved TODO with no merged development
+PR, every bridge pass follows the durable development worker: blocked maps
+to development_blocked; waiting_operational_acceptance,
+waiting_external_dependency and waiting_sequenced_work remain unchanged.
+Only an actual OPEN GitHub PR with an exact Development issue marker and
+a matching numeric PR ID can justify waiting_development_merge.
+No PR identity, a closed PR, a mismatched issue marker or invalid PR number
+fails closed as development_blocked; no merge, release or acceptance is
+inferred. The original owner-approved TODO-OPS-001 operational acceptance
+state must survive a bridge reconciliation without a new development PR.
+
+Record timestamps change only when record data changes. The final summary
+is recomputed from the final item phases just before atomic persistence; a
+source phase or summary inconsistency blocks publication. After writing,
+the bridge reads back the persisted snapshot and validates the same
+authoritative phase and count contract. Repeated no-op scans must preserve
+the exact file bytes, including timestamps.
+
+On a verified integrity contradiction, the bridge refuses to publish an
+unsafe control-board state and creates a bounded private support defect
+receipt under support-repair/todo-release-defects/. It updates existing
+GitHub Support issue #1099 once per unique invariant failure. A failed
+GitHub comment remains pending for a bounded future retry, without changing
+the TODO state or granting a release/provider action.
+
+Mixed-state regression covers blocked, sequenced, operational acceptance,
+real awaiting-merge PR, missing PR, new TODO and historically completed
+items. Production acceptance additionally requires MCP readback alignment,
+no unrelated record regression and a separate exact-verified closeout
+release; source-merge alone is not TODO completion.

@@ -185,7 +185,7 @@ def test_upstream_commitment_state_reports_real_development_blocker():
     )
     assert phase == 'development_blocked'
     assert reason == 'provider consent required'
-    phase, _ = module.upstream_commitment_state({'phase': 'pr_ready'})
+    phase, _ = module.upstream_commitment_state({'phase': 'pr_ready', 'pr_number': 1330})
     assert phase == 'waiting_development_merge'
     phase, reason = module.upstream_commitment_state(
         {'phase': 'waiting_external_dependency', 'reason': 'provider consent required'}
@@ -292,3 +292,284 @@ def test_release_without_verified_alignment_cannot_complete_todo(tmp_path):
             tmp_path, tmp_path, {'TODO-CONN-005': item})
     assert item['phase'] == 'development_blocked'
     gh.assert_not_called()
+
+
+class MixedPhaseReconciliationTests(unittest.TestCase):
+    """Reproduce #1099's real phase/summary corruption at the main entrypoint."""
+
+    def _issue(self, todo, number):
+        return {
+            'todo_id': todo, 'issue_number': number,
+            'source_fingerprint': f'issue-fingerprint-{number}',
+            'governing_dependencies': [],
+            'governing_operational_dependencies': [],
+            'title': todo, 'url': f'https://github.com/al-teamaot-com/jason/issues/{number}',
+        }
+
+    def test_main_preserves_mixed_authoritative_phases_and_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as td:
+            spool = Path(td) / 'spool'
+            spool.mkdir()
+            repo = Path(td) / 'repo'
+            repo.mkdir()
+            releases = Path(td) / 'releases'
+            releases.mkdir()
+            state_file = spool / 'todo-release-state.json'
+            initial = {
+                'schema_version': '1.0',
+                'items': {
+                    'TODO-GOV-002': {
+                        'phase': 'waiting_development_merge', 'issue_number': 866,
+                        'reason': 'stale false merge gate', 'updated_at': 'old',
+                    },
+                    'TODO-OPS-001': {
+                        'phase': 'waiting_development_merge', 'issue_number': 951,
+                        'reason': 'stale owner state', 'updated_at': 'old',
+                    },
+                    'TODO-OPS-002': {
+                        'phase': 'waiting_development_merge', 'issue_number': 952,
+                        'reason': 'stale dependency', 'updated_at': 'old',
+                    },
+                    'TODO-OPS-003': {
+                        'phase': 'waiting_development_merge', 'issue_number': 953,
+                        'reason': 'stale sequenced dependency', 'updated_at': 'old',
+                    },
+                    'TODO-CONN-020': {
+                        'phase': 'waiting_development_merge', 'issue_number': 1117,
+                        'reason': 'a real unmerged PR', 'updated_at': 'old',
+                    },
+                    'TODO-OPS-017': {
+                        'phase': 'waiting_development_merge', 'issue_number': 1017,
+                        'reason': 'claimed ready but missing PR', 'updated_at': 'old',
+                    },
+                    'TODO-COMPLETE-001': {
+                        'phase': 'complete', 'issue_number': 701,
+                        'reason': '', 'updated_at': 'completed-earlier',
+                    },
+                },
+                'summary': {
+                    'approved_commitment_count': 7,
+                    'phases': {'development_blocked': 6, 'complete': 1},
+                },
+            }
+            state_file.write_text(json.dumps(initial))
+            issues = [
+                self._issue('TODO-GOV-002', 866),
+                self._issue('TODO-OPS-001', 951),
+                self._issue('TODO-OPS-002', 952),
+                self._issue('TODO-OPS-003', 953),
+                self._issue('TODO-CONN-020', 1117),
+                self._issue('TODO-OPS-017', 1017),
+                self._issue('TODO-NEW-001', 1170),
+            ]
+            development = {
+                866: {'phase': 'blocked', 'reason': 'governing prerequisite hold'},
+                951: {'phase': 'waiting_operational_acceptance',
+                      'reason': 'Owner-approved; verify the existing deployment'},
+                952: {'phase': 'blocked', 'reason': 'provider credentials required'},
+                953: {'phase': 'waiting_sequenced_work',
+                      'reason': 'other development dependency remains'},
+                1117: {'phase': 'pr_ready', 'pr_number': 1330,
+                       'reason': 'real PR awaits protected merge checks'},
+                1017: {'phase': 'pr_ready', 'reason': 'claimed merge-ready with no PR'},
+            }
+            argv = [
+                'todo_release_bridge', '--repo', str(repo),
+                '--spool', str(spool), '--release-state', str(releases),
+            ]
+            gate = {
+                'dependency_recheck': 'not_applicable',
+                'operational_eligible': True, 'operational_recheck': 'not_applicable',
+                'retry_eligible': False, 'verified_operational_evidence': {},
+            }
+            with patch.object(sys, 'argv', argv), \
+                 patch.object(module, 'run', return_value=''), \
+                 patch.object(module, 'todo_issues', return_value=issues), \
+                 patch.object(module, 'merged_prs_by_issue', return_value={}), \
+                 patch.object(module, 'gh_json', return_value={
+                     'number': 1330, 'state': 'OPEN', 'mergedAt': None,
+                     'body': '- Development issue: #1117',
+                 }), \
+                 patch.object(module, 'development_records_by_issue',
+                              return_value=development), \
+                 patch.object(module, 'reconcile_verified_closed_issues'), \
+                 patch.object(module, 'dependency_state_for_item',
+                              return_value=gate), \
+                 patch.object(module, 'now', return_value='2026-10-24T19:33:00+00:00'):
+                self.assertEqual(module.main(), 0)
+            first = state_file.read_bytes()
+            state = json.loads(first)
+            items = state['items']
+            self.assertEqual(items['TODO-GOV-002']['phase'], 'development_blocked')
+            self.assertEqual(items['TODO-OPS-001']['phase'],
+                             'waiting_operational_acceptance')
+            self.assertEqual(items['TODO-OPS-002']['phase'], 'development_blocked')
+            self.assertEqual(items['TODO-OPS-003']['phase'], 'waiting_sequenced_work')
+            self.assertEqual(items['TODO-CONN-020']['phase'],
+                             'waiting_development_merge')
+            self.assertEqual(items['TODO-CONN-020']['development_pr'], 1330)
+            self.assertEqual(items['TODO-OPS-017']['phase'], 'development_blocked')
+            self.assertEqual(items['TODO-NEW-001']['phase'],
+                             'waiting_development_start')
+            self.assertEqual(items['TODO-COMPLETE-001']['phase'], 'complete')
+            self.assertEqual(items['TODO-COMPLETE-001']['updated_at'],
+                             'completed-earlier')
+            self.assertEqual(state['summary'], module.commitment_summary(items))
+            self.assertEqual(
+                state['summary']['phases'],
+                {
+                    'complete': 1, 'development_blocked': 3,
+                    'waiting_operational_acceptance': 1,
+                    'waiting_sequenced_work': 1,
+                    'waiting_development_merge': 1,
+                    'waiting_development_start': 1,
+                },
+            )
+            self.assertEqual(
+                state['summary']['outstanding_count'], 7,
+            )
+            # Distinct logical clock: a second pass must preserve exact bytes.
+            with patch.object(sys, 'argv', argv), \
+                 patch.object(module, 'run', return_value=''), \
+                 patch.object(module, 'todo_issues', return_value=issues), \
+                 patch.object(module, 'merged_prs_by_issue', return_value={}), \
+                 patch.object(module, 'gh_json', return_value={
+                     'number': 1330, 'state': 'OPEN', 'mergedAt': None,
+                     'body': '- Development issue: #1117',
+                 }), \
+                 patch.object(module, 'development_records_by_issue',
+                              return_value=development), \
+                 patch.object(module, 'reconcile_verified_closed_issues'), \
+                 patch.object(module, 'dependency_state_for_item',
+                              return_value=gate), \
+                 patch.object(module, 'now', return_value='2026-10-24T19:38:00+00:00'):
+                self.assertEqual(module.main(), 0)
+            self.assertEqual(state_file.read_bytes(), first)
+
+    def test_prepublication_summary_and_merge_gate_conflicts_fail_closed(self):
+        items = {
+            'TODO-OPS-001': {
+                'phase': 'waiting_operational_acceptance', 'issue_number': 951,
+            },
+            'TODO-GOV-002': {
+                'phase': 'development_blocked', 'issue_number': 866,
+            },
+        }
+        exact = module.commitment_summary(items)
+        with self.assertRaisesRegex(module.TodoReleaseBridgeError,
+                                   'summary does not match'):
+            module.require_consistent_commitment_summary(
+                items, {'phases': {'waiting_development_merge': 2}},
+                {'TODO-OPS-001': 'waiting_operational_acceptance'},
+            )
+        with self.assertRaisesRegex(module.TodoReleaseBridgeError,
+                                   'authoritative phase conflict'):
+            module.require_consistent_commitment_summary(
+                items, exact, {'TODO-OPS-001': 'waiting_development_merge'},
+            )
+        items['TODO-OPS-001']['phase'] = 'waiting_development_merge'
+        with self.assertRaisesRegex(module.TodoReleaseBridgeError,
+                                   'lacks durable development PR'):
+            module.require_consistent_commitment_summary(
+                items, module.commitment_summary(items),
+                {'TODO-OPS-001': 'waiting_development_merge'},
+            )
+
+    def test_no_development_pr_never_claims_pending_merge(self):
+        for phase in ('pr_ready', 'pr_validating', 'ci_repair_needed', 'ci_repairing'):
+            for number in (None, 0, True, '1330'):
+                phase_name, reason = module.upstream_commitment_state(
+                    {'phase': phase, 'pr_number': number}
+                )
+                self.assertEqual(phase_name, 'development_blocked')
+                self.assertIn('no valid PR', reason)
+            phase_name, _ = module.upstream_commitment_state(
+                {'phase': phase, 'pr_number': 1330}
+            )
+            self.assertEqual(phase_name, 'waiting_development_merge')
+
+
+    def test_awaiting_merge_requires_actual_open_same_issue_pr(self):
+        repo = Path('/tmp/untrusted-work')
+        record = {'phase': 'pr_ready', 'pr_number': 1330}
+        cases = [
+            ({'number': 1330, 'state': 'OPEN', 'mergedAt': None,
+              'body': '- Development issue: #1117'}, 1330),
+            ({'number': 1330, 'state': 'CLOSED', 'mergedAt': None,
+              'body': '- Development issue: #1117'}, None),
+            ({'number': 1330, 'state': 'MERGED',
+              'mergedAt': '2026-10-24T19:00Z',
+              'body': '- Development issue: #1117'}, None),
+            ({'number': 1330, 'state': 'OPEN', 'mergedAt': None,
+              'body': '- Development issue: #950'}, None),
+            ({'number': 1330, 'state': 'OPEN', 'mergedAt': None,
+              'body': 'unrelated work'}, None),
+            ({'number': 1331, 'state': 'OPEN', 'mergedAt': None,
+              'body': '- Development issue: #1117'}, None),
+            ({}, None),
+        ]
+        for reply, expected in cases:
+            with self.subTest(reply=reply), patch.object(
+                module, 'gh_json', return_value=reply,
+            ) as gh:
+                actual = module.verified_open_development_pr(repo, 1117, record)
+                self.assertEqual(actual, expected)
+                if reply:
+                    self.assertEqual(
+                        gh.call_args.args[0][:3], ['pr', 'view', '1330']
+                    )
+
+
+
+    def test_support_defect_self_report_is_durable_and_deduplicated(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / 'repo'
+            repo.mkdir()
+            spool = root / 'spool'
+            spool.mkdir()
+            failure = module.TodoReleaseBridgeError(
+                'TODO summary does not match final item phases (support issue #1099)'
+            )
+            with patch.object(module, 'run', return_value='') as notify:
+                record = module.report_commitment_integrity_defect(
+                    repo, spool, failure,
+                )
+                self.assertTrue(record.is_file())
+                payload = json.loads(record.read_text())
+                self.assertEqual(payload['support_issue'], 1099)
+                self.assertEqual(payload['support_id'], 'SUPPORT-OPS-059')
+                self.assertTrue(payload['notified'])
+                cmd = notify.call_args.args[0]
+                self.assertEqual(cmd[:4], ['gh', 'issue', 'comment', '1099'])
+                self.assertIn('SUPPORT-OPS-059', cmd[-1])
+                self.assertEqual(
+                    module.report_commitment_integrity_defect(
+                        repo, spool, failure,
+                    ), record
+                )
+                self.assertEqual(notify.call_count, 1)
+            self.assertEqual(len(list((spool / 'todo-release-defects').glob('*.json'))), 1)
+
+    def test_support_defect_github_notification_failure_can_retry_once(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / 'repo'
+            repo.mkdir()
+            spool = Path(td) / 'spool'
+            spool.mkdir()
+            failure = module.TodoReleaseBridgeError('TODO authoritative phase conflict')
+            with patch.object(
+                module, 'run',
+                side_effect=module.TodoReleaseBridgeError('GitHub temporarily offline'),
+            ):
+                record = module.report_commitment_integrity_defect(
+                    repo, spool, failure,
+                )
+            self.assertFalse(json.loads(record.read_text())['notified'])
+            with patch.object(module, 'run', return_value='') as notify:
+                self.assertEqual(
+                    module.report_commitment_integrity_defect(repo, spool, failure),
+                    record,
+                )
+                self.assertEqual(notify.call_count, 1)
+            self.assertTrue(json.loads(record.read_text())['notified'])
