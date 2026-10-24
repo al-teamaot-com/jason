@@ -419,6 +419,55 @@ def require_consistent_commitment_summary(
 
 
 
+
+def report_commitment_integrity_defect(
+    repo: Path, spool: Path, failure: TodoReleaseBridgeError,
+) -> Path:
+    """Durably self-report a phase/summary violation to existing Support #1099.
+
+    This never edits the TODO commitment ledger or creates release authority.
+    The stable fingerprint and private receipt suppress duplicate issue spam.
+    A failed GitHub notification remains pending for a later bounded retry.
+    """
+    detail = str(failure)[:400]
+    fingerprint = hashlib.sha256(detail.encode('utf-8')).hexdigest()[:20]
+    path = spool / 'todo-release-defects' / ('support-ops-059-' + fingerprint + '.json')
+    if path.exists():
+        stored = json.loads(path.read_text(encoding='utf-8'))
+        if (stored.get('support_issue') != 1099
+                or stored.get('failure') != detail
+                or stored.get('schema_version') != '1.0'):
+            raise TodoReleaseBridgeError('TODO bridge support defect receipt conflict')
+        if stored.get('notified') is True:
+            return path
+    else:
+        stored = {
+            'schema_version': '1.0', 'support_issue': 1099,
+            'support_id': 'SUPPORT-OPS-059',
+            'failure': detail, 'fingerprint': fingerprint,
+            'detected_at': now(), 'notified': False,
+        }
+        atomic_json(path, stored)
+    body = (
+        'Automatic TODO bridge fail-closed integrity alert for SUPPORT-OPS-059. '
+        'No TODO commitment state was accepted from this inconsistent pass. '
+        'Violation: ' + detail
+        + '. Durable local receipt: ' + str(path)
+        + '. Investigate authoritative development/PR phases and summary before retry.'
+    )
+    try:
+        run(['gh', 'issue', 'comment', '1099', '--body', body], cwd=repo)
+    except (OSError, TodoReleaseBridgeError) as exc:
+        print('TODO_BRIDGE_DEFECT_PENDING_SUPPORT_1099='
+              + type(exc).__name__, flush=True)
+    else:
+        stored['notified'] = True
+        stored['notified_at'] = now()
+        atomic_json(path, stored)
+    return path
+
+
+
 def merged_prs_by_issue(repo: Path) -> dict[int, dict[str, Any]]:
     prs = gh_json(
         [
@@ -956,9 +1005,13 @@ def main() -> int:
             item["source_decision_stale"] = True
             item["next_action"] = "request_governed_development_re_evaluation"
     state["summary"] = commitment_summary(state["items"])
-    require_consistent_commitment_summary(
-        state["items"], state["summary"], unmerged_authority,
-    )
+    try:
+        require_consistent_commitment_summary(
+            state["items"], state["summary"], unmerged_authority,
+        )
+    except TodoReleaseBridgeError as exc:
+        report_commitment_integrity_defect(repo, spool, exc)
+        raise
     # Preserve the prior file bytes (including timestamps) on a no-op pass.
     # The summary must be derived only from final item phases in this same
     # atomic publication; stale in-memory counters are never written.
@@ -966,9 +1019,13 @@ def main() -> int:
         state["updated_at"] = now()
         atomic_json(state_path, state)
         saved = load_state(state_path)
-        require_consistent_commitment_summary(
-            saved.get("items", {}), saved.get("summary", {}), unmerged_authority,
-        )
+        try:
+            require_consistent_commitment_summary(
+                saved.get("items", {}), saved.get("summary", {}), unmerged_authority,
+            )
+        except TodoReleaseBridgeError as exc:
+            report_commitment_integrity_defect(repo, spool, exc)
+            raise
     return 0
 
 
