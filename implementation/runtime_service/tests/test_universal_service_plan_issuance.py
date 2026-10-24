@@ -173,3 +173,23 @@ def test_workload_approval_executes_through_real_central_orchestrator(tmp_path):
     assert executed.principal_id == 'worker'
     assert issuer.authority.contexts.get_context(executed.authority_context_id).authentication_assurance == 'workload_identity'
     assert env.execution_ledger.evidence(executed.approval_id)['state'] == 'succeeded'
+
+
+def test_service_cannot_route_owner_card_to_a_different_tenant(tmp_path):
+    env, delivery, issuer, request = service_env(tmp_path)
+    doc=json.loads(env.policy.read_text())
+    doc['organizations']['org']['service_requesters']['worker']['microsoft_tenant_id']='other-tenant'
+    env.policy.write_text(json.dumps(doc))
+    with pytest.raises(PermissionError,match='tenant'):
+        issue(issuer,request)
+    assert not delivery.requests and not env.provider.calls
+
+
+def test_allowlist_never_accepts_extra_wildcard_authority_field(tmp_path):
+    env, delivery, issuer, request = service_env(tmp_path)
+    doc=json.loads(env.policy.read_text())
+    doc['organizations']['org']['request_allowlist'][0]['allow_all']=True
+    env.policy.write_text(json.dumps(doc))
+    with pytest.raises(ValueError,match='rule'):
+        issue(issuer,request)
+    assert not delivery.requests and not env.provider.calls
