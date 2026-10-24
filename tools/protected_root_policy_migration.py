@@ -49,15 +49,37 @@ APPROVED_DELTA = {
 }
 
 
-# Stage the timer as ALLOWED, never REQUIRED, until the root host script
-# confirms systemd activation. Other reviewed additions are also allowed.
-# This closes the watchdog race from installed-but-undeclared candidate units.
-STAGED_DELTA = {
+# Historical P0 #1974 root migration plus exactly one independent, reviewed
+# P0 #1993 held-only owner Teams approval OFFER pair. Never permit arbitrary
+# subsets or a union of plans: the protected Git diff must match ONE plan.
+APPROVED_HELD_OFFER_DELTA = {
     "required_system_units": frozenset(),
-    "allowed_system_units": APPROVED_DELTA["allowed_system_units"] | APPROVED_DELTA["required_system_units"],
-    "required_user_units": frozenset(),
-    "allowed_user_units": APPROVED_DELTA["allowed_user_units"],
+    "allowed_system_units": frozenset(),
+    "required_user_units": frozenset({"jason-release-approval-only.timer"}),
+    "allowed_user_units": frozenset({"jason-release-approval-only.service"}),
 }
+APPROVED_PLANS = (APPROVED_DELTA, APPROVED_HELD_OFFER_DELTA)
+
+
+def _staged_delta(plan: dict[str, frozenset[str]]) -> dict[str, frozenset[str]]:
+    """Allow new system/user timers without requiring them before installation."""
+    return {
+        "required_system_units": frozenset(),
+        "allowed_system_units": plan["allowed_system_units"] | plan["required_system_units"],
+        "required_user_units": frozenset(),
+        "allowed_user_units": plan["allowed_user_units"] | plan["required_user_units"],
+    }
+
+
+# The historical constant remains available for #1974 source/test compatibility.
+STAGED_DELTA = _staged_delta(APPROVED_DELTA)
+
+
+def _receipt_plan(receipt: dict) -> dict[str, frozenset[str]]:
+    for plan in APPROVED_PLANS:
+        if receipt.get("reviewed_delta") == {k: sorted(v) for k, v in plan.items()}:
+            return plan
+    raise MigrationRefused("root migration receipt has unreviewed unit delta")
 
 
 class MigrationRefused(RuntimeError):
@@ -170,20 +192,28 @@ def _source_policy(revision: str) -> dict:
     return policy
 
 
-def _planned_delta(previous: dict, candidate: dict) -> None:
+def _planned_delta(previous: dict, candidate: dict) -> dict[str, frozenset[str]]:
     _safe_units(previous)
     _safe_units(candidate)
     if set(previous) != set(candidate):
         raise MigrationRefused("candidate changed desired-state policy keys")
+    actual = {}
     for key in previous:
         if key not in UNIT_FIELDS:
             if previous[key] != candidate[key]:
                 raise MigrationRefused("unreviewed non-unit policy change: " + key)
             continue
-        original = set(previous[key])
-        after = set(candidate[key])
-        if original - after or after - original != APPROVED_DELTA[key]:
-            raise MigrationRefused("unapproved desired-state unit delta: " + key)
+        old = set(previous[key])
+        new = set(candidate[key])
+        if old - new:
+            raise MigrationRefused("unapproved desired-state unit removal: " + key)
+        actual[key] = frozenset(new - old)
+    for plan in APPROVED_PLANS:
+        if all(actual[key] == plan[key] for key in UNIT_FIELDS):
+            return plan
+    raise MigrationRefused("unapproved desired-state unit delta: " + ", ".join(
+        key for key in UNIT_FIELDS if actual[key]
+    ))
 
 
 def _approval(candidate_sha: str, rollback_sha: str) -> None:
@@ -266,7 +296,7 @@ def preview_exact_migration(candidate_sha: str, rollback_sha: str) -> str:
     # A root-only immutable release file is required later at actual APPLY.
     old = _reviewed_git_policy(rollback_sha)
     new = _reviewed_git_policy(candidate_sha)
-    _planned_delta(old, new)
+    plan = _planned_delta(old, new)
     original, root = _current_root_policy()
     if set(root) != set(old):
         raise MigrationRefused("root recovery policy shape differs from protected source")
@@ -278,7 +308,7 @@ def preview_exact_migration(candidate_sha: str, rollback_sha: str) -> str:
         actual = set(root[field])
         if not known.issubset(actual):
             raise MigrationRefused("root policy lost a known-good declaration: " + field)
-        if actual.intersection(APPROVED_DELTA[field]):
+        if actual.intersection(plan[field] | _staged_delta(plan)[field]):
             raise MigrationRefused("candidate-only unit already present without migration receipt")
     if ACTIVE.exists():
         raise MigrationRefused("preexisting root migration requires independent review")
@@ -292,12 +322,13 @@ def _overlay_policy(root_policy: dict, additions: dict[str, frozenset[str]]) -> 
     return (json.dumps(result, indent=2, sort_keys=True) + "\n").encode()
 
 
-def _receipt_match(receipt: dict, candidate_sha: str, rollback_sha: str) -> None:
+def _receipt_match(
+    receipt: dict, candidate_sha: str, rollback_sha: str,
+    plan: dict[str, frozenset[str]],
+) -> None:
     if (receipt.get("candidate_sha") != candidate_sha
             or receipt.get("rollback_sha") != rollback_sha
-            or receipt.get("reviewed_delta") != {
-                key: sorted(value) for key, value in APPROVED_DELTA.items()
-            }):
+            or _receipt_plan(receipt) != plan):
         raise MigrationRefused("root migration receipt belongs to another release")
 
 
@@ -312,11 +343,12 @@ def stage_for_candidate(candidate_sha: str, rollback_sha: str) -> str:
     _approval(candidate_sha, rollback_sha)
     previous = _source_policy(rollback_sha)
     candidate = _source_policy(candidate_sha)
-    _planned_delta(previous, candidate)
+    plan = _planned_delta(previous, candidate)
+    stage = _staged_delta(plan)
     _ledger_dir()
     if ACTIVE.exists():
         receipt = _json(_root_only(ACTIVE))
-        _receipt_match(receipt, candidate_sha, rollback_sha)
+        _receipt_match(receipt, candidate_sha, rollback_sha, plan)
         raw, _ = _current_root_policy()
         phase = receipt.get("phase")
         if phase == "staged" and digest(raw) == receipt.get("staged_sha256"):
@@ -335,11 +367,11 @@ def stage_for_candidate(candidate_sha: str, rollback_sha: str) -> str:
             current = set(root_policy[key])
             if not set(previous[key]).issubset(current):
                 raise MigrationRefused("root recovery overlay missing known-good units: " + key)
-            if current.intersection(STAGED_DELTA[key] | APPROVED_DELTA[key]):
+            if current.intersection(stage[key] | plan[key]):
                 raise MigrationRefused("candidate-specific root unit already present without ledger")
 
-    staged = _overlay_policy(root_policy, STAGED_DELTA)
-    final = _overlay_policy(root_policy, APPROVED_DELTA)
+    staged = _overlay_policy(root_policy, stage)
+    final = _overlay_policy(root_policy, plan)
     receipt = {
         "schema_version": "1.0", "candidate_sha": candidate_sha,
         "rollback_sha": rollback_sha, "phase": "prepared",
@@ -347,7 +379,7 @@ def stage_for_candidate(candidate_sha: str, rollback_sha: str) -> str:
         "applied_sha256": digest(final),
         "original_policy_base64": base64.b64encode(original).decode("ascii"),
         "authorized_by": "exact_owner_approval_and_ccc_material_review",
-        "reviewed_delta": {key: sorted(v) for key, v in APPROVED_DELTA.items()},
+        "reviewed_delta": {key: sorted(v) for key, v in plan.items()},
         "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
     # Durable undo receipt precedes any protected policy replacement.
@@ -365,13 +397,13 @@ def apply_for_candidate(candidate_sha: str, rollback_sha: str) -> str:
     _approval(candidate_sha, rollback_sha)
     previous = _source_policy(rollback_sha)
     candidate = _source_policy(candidate_sha)
-    _planned_delta(previous, candidate)
+    plan = _planned_delta(previous, candidate)
     _ledger_dir()
     if not ACTIVE.exists():
         raise MigrationRefused("approved root policy stage missing before final commit")
 
     receipt = _json(_root_only(ACTIVE))
-    _receipt_match(receipt, candidate_sha, rollback_sha)
+    _receipt_match(receipt, candidate_sha, rollback_sha, plan)
     raw, _ = _current_root_policy()
     if receipt.get("phase") == "applied" and digest(raw) == receipt.get("applied_sha256"):
         return "ALREADY_APPLIED"
@@ -384,7 +416,7 @@ def apply_for_candidate(candidate_sha: str, rollback_sha: str) -> str:
         raise MigrationRefused("root original-byte receipt checksum mismatch")
     baseline = _json(original)
     _safe_units(baseline)
-    final = _overlay_policy(baseline, APPROVED_DELTA)
+    final = _overlay_policy(baseline, plan)
     if digest(final) != receipt.get("applied_sha256"):
         raise MigrationRefused("root exact final policy hash mismatch")
     _atomic(POLICY, final)
@@ -402,8 +434,7 @@ def restore_for_baseline(target_sha: str) -> str:
     receipt = _json(_root_only(ACTIVE))
     if receipt.get("rollback_sha") != target_sha:
         raise MigrationRefused("rollback target differs from audited previous LKG")
-    if receipt.get("reviewed_delta") != {k: sorted(v) for k, v in APPROVED_DELTA.items()}:
-        raise MigrationRefused("root migration receipt does not match reviewed delta")
+    _receipt_plan(receipt)  # Only the two reviewed, separately scoped plans.
     original = base64.b64decode(receipt["original_policy_base64"], validate=True)
     if digest(original) != receipt.get("original_sha256"):
         raise MigrationRefused("original protected policy checksum mismatch")
@@ -440,10 +471,7 @@ def prepare_rollback(target_sha: str) -> str:
     receipt = _json(_root_only(ACTIVE))
     if receipt.get("rollback_sha") != target_sha:
         raise MigrationRefused("root rollback target differs from audited LKG")
-    if receipt.get("reviewed_delta") != {
-        k: sorted(v) for k, v in APPROVED_DELTA.items()
-    }:
-        raise MigrationRefused("root rollback reviewed unit delta differs from receipt")
+    plan = _receipt_plan(receipt)
     control = _json(_root_only(ROOT / "production-control-state.json"))
     if (((control.get("last_known_good") or {}).get("manifest") or {}).get("revision")
             != target_sha):
@@ -468,7 +496,7 @@ def prepare_rollback(target_sha: str) -> str:
             raise MigrationRefused("root rollback original policy checksum mismatch")
         baseline = _json(original)
         _safe_units(baseline)
-        allowed = _overlay_policy(baseline, STAGED_DELTA)
+        allowed = _overlay_policy(baseline, _staged_delta(plan))
         if digest(allowed) != receipt.get("staged_sha256"):
             raise MigrationRefused("root rollback allowed-only stage hash mismatch")
         _atomic(POLICY, allowed)
@@ -486,10 +514,11 @@ def complete_rollback(target_sha: str) -> str:
     receipt = _json(_root_only(ACTIVE))
     if receipt.get("rollback_sha") != target_sha or receipt.get("phase") != "rollback_prepared":
         raise MigrationRefused("root rollback completion not in approved phase")
-    for unit in APPROVED_DELTA["required_system_units"] | APPROVED_DELTA["allowed_system_units"]:
+    plan = _receipt_plan(receipt)
+    for unit in plan["required_system_units"] | plan["allowed_system_units"]:
         if (SYSTEMD_SYSTEM_UNITS / unit).exists():
             raise MigrationRefused("candidate system unit still installed during rollback")
-    for unit in APPROVED_DELTA["allowed_user_units"]:
+    for unit in plan["required_user_units"] | plan["allowed_user_units"]:
         if (SYSTEMD_USER_UNITS / unit).exists():
             raise MigrationRefused("candidate user unit still installed during rollback")
     # restore_for_baseline checks the root-protected LKG SHA, exact original

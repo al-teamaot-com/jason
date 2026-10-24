@@ -422,3 +422,94 @@ def test_immutable_file_gate_and_root_private_policy_gate_remain_distinct():
     # remain mode 0600 even though packaged immutable root:root files are 0664.
     assert 'st.st_mode & 0o077' in code
     assert 'getattr(os, "O_NOFOLLOW", 0)' in code
+
+
+def test_p0_1993_exact_held_owner_offer_migrates_and_rolls_back_symmetrically(monkeypatch, tmp_path):
+    """Old #1974 root declarations stay intact; only the held offer pair is new."""
+    prior = source(new=True)
+    candidate = {**prior,
+                 "required_user_units": prior["required_user_units"] + [
+                     "jason-release-approval-only.timer"],
+                 "allowed_user_units": prior["allowed_user_units"] + [
+                     "jason-release-approval-only.service"]}
+    policy, original, _ = configure(monkeypatch, tmp_path,
+                                     policy=prior, old=prior, candidate=candidate)
+    assert m.preview_exact_migration(CANDIDATE,BASE) == "OWNER_CCC_REVIEWED_DELTA_ONLY"
+    assert policy.read_bytes() == original
+    assert m.stage_for_candidate(CANDIDATE,BASE) == "STAGED_ALLOWED_ONLY"
+    staged = json.loads(policy.read_text())
+    assert "jason-release-approval-only.timer" in staged["allowed_user_units"]
+    assert "jason-release-approval-only.timer" not in staged["required_user_units"]
+    assert "jason-release-approval-only.service" in staged["allowed_user_units"]
+    assert m.apply_for_candidate(CANDIDATE,BASE) == "APPLIED_REQUIRED_AFTER_HEALTH"
+    final = json.loads(policy.read_text())
+    assert "jason-release-approval-only.timer" in final["required_user_units"]
+    assert "jason-release-approval-only.service" in final["allowed_user_units"]
+    receipt = json.loads(m.ACTIVE.read_text())
+    assert receipt["reviewed_delta"] == {
+        k: sorted(v) for k,v in m.APPROVED_HELD_OFFER_DELTA.items()
+    }
+    # The old, previously approved full-integrity system units are untouched.
+    assert set(final["required_system_units"]) == set(prior["required_system_units"])
+    assert m.prepare_rollback(BASE) == "ROLLBACK_ALLOWED_STAGE"
+    rollback_stage = json.loads(policy.read_text())
+    assert "jason-release-approval-only.timer" in rollback_stage["allowed_user_units"]
+    assert "jason-release-approval-only.timer" not in rollback_stage["required_user_units"]
+    # Candidate-only timer/service must have been removed by governed host
+    # reconciliation; do not silently restore a policy that would hide them.
+    timer=m.SYSTEMD_USER_UNITS/"jason-release-approval-only.timer"
+    timer.write_text("reviewed candidate timer")
+    with pytest.raises(m.MigrationRefused,match="candidate user unit still installed"):
+        m.complete_rollback(BASE)
+    timer.unlink()
+    assert m.complete_rollback(BASE) == "RESTORED"
+    assert policy.read_bytes() == original
+    assert not m.ACTIVE.exists()
+
+
+@pytest.mark.parametrize("invalid", ["union", "unexpected", "missing", "removed"])
+def test_p0_1993_rejects_unreviewed_or_mixed_unit_deltas(monkeypatch,tmp_path,invalid):
+    prior = source(new=True)
+    candidate = {**prior,
+                 "required_user_units": prior["required_user_units"] + [
+                     "jason-release-approval-only.timer"],
+                 "allowed_user_units": prior["allowed_user_units"] + [
+                     "jason-release-approval-only.service"]}
+    if invalid == "union":
+        # A release that combines the historical P0 #1974 additions with a
+        # fresh #1993 source delta must be independently reviewed, not matched.
+        prior = source()
+        candidate = {**source(new=True),
+                     "required_user_units": candidate["required_user_units"],
+                     "allowed_user_units": source(new=True)["allowed_user_units"] + [
+                         "jason-release-approval-only.service"]}
+    elif invalid == "unexpected":
+        candidate["allowed_user_units"] += ["jason-rogue.service"]
+    elif invalid == "missing":
+        candidate["allowed_user_units"] = prior["allowed_user_units"]
+    else:
+        candidate["required_system_units"] = prior["required_system_units"][:-1]
+    policy, original, _ = configure(monkeypatch,tmp_path,
+                                     policy=prior,old=prior,candidate=candidate)
+    with pytest.raises(m.MigrationRefused,match="unapproved desired-state"):
+        m.preview_exact_migration(CANDIDATE,BASE)
+    assert policy.read_bytes() == original
+    assert not m.ACTIVE.exists()
+
+
+def test_p0_1993_tampered_or_foreign_receipt_never_restores_as_trusted(monkeypatch,tmp_path):
+    prior=source(new=True)
+    candidate={**prior,
+               "required_user_units": prior["required_user_units"] + [
+                   "jason-release-approval-only.timer"],
+               "allowed_user_units": prior["allowed_user_units"] + [
+                   "jason-release-approval-only.service"]}
+    policy,original,_=configure(monkeypatch,tmp_path,
+                                policy=prior,old=prior,candidate=candidate)
+    assert m.stage_for_candidate(CANDIDATE,BASE)=="STAGED_ALLOWED_ONLY"
+    receipt=json.loads(m.ACTIVE.read_text())
+    receipt["reviewed_delta"]["allowed_user_units"]=["jason-fake.service"]
+    m.ACTIVE.write_text(json.dumps(receipt))
+    with pytest.raises(m.MigrationRefused,match="unreviewed"):
+        m.restore_for_baseline(BASE)
+    assert policy.read_bytes() != original
