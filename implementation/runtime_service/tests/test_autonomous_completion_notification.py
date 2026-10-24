@@ -176,7 +176,10 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
         self.assertEqual(event, "work_started")
         self.assertIn("TODO-COMM-004", text)
         self.assertEqual(card["type"], "AdaptiveCard")
-        self.assertEqual(card["body"][0]["color"], "Accent")
+        self.assertEqual(card["body"][0]["text"], "JASON \u00b7 AOT")
+        self.assertEqual(card["body"][1]["color"], "Accent")
+        self.assertEqual(card["body"][1]["size"], "Medium")
+        self.assertNotIn("actions", card)
         self.assertNotIn("health_metric:", json.dumps(card))
 
     def test_ticket_status_updated_uses_readable_adaptive_card(self):
@@ -189,7 +192,7 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
         self.assertEqual(event, "ticket_status_updated")
         self.assertIn("T20261009.0006", text)
         self.assertEqual(card["type"], "AdaptiveCard")
-        self.assertEqual(card["body"][0]["color"], "Accent")
+        self.assertEqual(card["body"][1]["color"], "Accent")
         self.assertIn("ticket updated", json.dumps(card).lower())
 
     def test_work_completed_render_is_green(self):
@@ -203,7 +206,7 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
         )
         self.assertEqual(event, "work_completed")
         self.assertIn("completed", text.casefold())
-        self.assertEqual(card["body"][0]["color"], "Good")
+        self.assertEqual(card["body"][1]["color"], "Good")
 
     def test_lifecycle_event_notifies_once_and_persists_message_id(self):
         with tempfile.TemporaryDirectory() as td:
@@ -351,7 +354,7 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
         self.assertEqual(event, "production_queue_entered")
         self.assertIn("Deploy fixed owner lifecycle notifications", text)
         self.assertIn(candidate[:12], text)
-        self.assertEqual(card["body"][0]["color"], "Accent")
+        self.assertEqual(card["body"][1]["color"], "Accent")
 
     def test_self_heal_escalation_render_is_bounded_and_actionable(self):
         event, text, card = _render(
@@ -369,9 +372,14 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
         self.assertIn("status surface failed twice", text)
         self.assertIn("restarted jason-mcp-pilot and rechecked", text)
         self.assertEqual(card["type"], "AdaptiveCard")
-        self.assertEqual(card["body"][0]["color"], "Attention")
-        self.assertEqual(card["body"][2]["facts"][0]["title"], "Degraded function")
-        self.assertEqual(card["body"][2]["facts"][3]["title"], "Owner action")
+        self.assertEqual(card["body"][1]["color"], "Attention")
+        self.assertEqual(card["body"][0]["text"], "JASON \u00b7 AOT")
+        self.assertEqual(card["body"][-1]["facts"][0]["title"], "Degraded function")
+        self.assertEqual(card["body"][3]["type"], "Container")
+        self.assertEqual(card["body"][3]["items"][0]["text"], "NEXT ACTION")
+        self.assertEqual(card["body"][3]["items"][1]["text"], "review missing external dependency")
+        self.assertNotIn("Owner action", [f["title"] for f in card["body"][-1]["facts"]])
+        self.assertNotIn("actions", card)
 
     def test_self_heal_escalation_notifies_once(self):
         with tempfile.TemporaryDirectory() as td:
