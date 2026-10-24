@@ -540,3 +540,20 @@ def test_universal_sender_generates_distinct_challenge_per_plan(tmp_path):
     challenge_b=repository.get(b.approval_id).metadata['card_instance_challenge']
     assert len(challenge_a)==48 and len(challenge_b)==48
     assert challenge_a!=challenge_b
+
+
+
+def test_universal_extra_signed_card_field_is_not_authority(tmp_path):
+    """Even a correctly gateway-signed extra selection is rejected."""
+    import base64
+    from jason_openclaw.signed_transport import canonical_signed_payload
+    env=setup(tmp_path);plan=seed(env)
+    envelope=signed(env,plan)
+    envelope['interaction']['selections']['unauthorized_flag']='true'
+    envelope['signature']=base64.b64encode(
+        env.private.sign(canonical_signed_payload(envelope))).decode()
+    with pytest.raises(PermissionError,match='unreviewed card data'):
+        click(env,envelope)
+    assert env.handler.service.teams_flow.approval_service.repository.get(
+        plan.approval_id).status is ApprovalRequestStatus.PENDING
+    assert env.approvals.get(plan.approval_id) is None and not env.provider.calls

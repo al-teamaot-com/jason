@@ -6,6 +6,8 @@ It deliberately performs no authority decision: Teams is transport/UI only.
 
 from __future__ import annotations
 
+import hashlib
+
 from dataclasses import dataclass
 import re
 from datetime import datetime
@@ -44,7 +46,6 @@ def render_approval_card(request: ApprovalRequest) -> TeamsApprovalCard:
     if is_universal_plan and challenge is None:
         raise PermissionError("universal plan card requires an issued card-instance proof")
     if challenge is not None:
-        import hashlib
         if (not (is_reviewed_release or is_universal_plan)
                 or type(challenge) is not str
                 or re.fullmatch(r"[0-9a-f]{48}", challenge) is None
