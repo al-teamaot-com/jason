@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -50,15 +51,23 @@ def main() -> int:
         0o644,
     )
 
-    # Independent safe owner-card path: the existing promotion service still
-    # carries the global incident hold, so approval-card issuance can proceed
-    # without lifting or modifying that production deployment guard.
-    for unit_name in ("jason-release-approval-only.service",
-                      "jason-release-approval-only.timer"):
-        copy_mode(
-            ROOT / "infrastructure" / "openclaw-operations" / "systemd"
-            / "user" / unit_name, UNIT_DIR / unit_name, 0o644,
-        )
+    # Two-phase protected root-policy bootstrap (#1993): stage the reviewed
+    # migrator without installing any new user unit before the root worker can
+    # independently recognize that exact owner/CCC reviewed unit delta.
+    desired = json.loads((ROOT / "config/production-desired-state.json").read_text())
+    approval_timer_declared = (
+        "jason-release-approval-only.timer" in desired["required_user_units"])
+    approval_service_declared = (
+        "jason-release-approval-only.service" in desired["allowed_user_units"])
+    if approval_timer_declared != approval_service_declared:
+        raise RuntimeError("held-only Teams approval systemd policy is incomplete")
+    if approval_timer_declared:
+        for unit_name in ("jason-release-approval-only.service",
+                          "jason-release-approval-only.timer"):
+            copy_mode(
+                ROOT / "infrastructure" / "openclaw-operations" / "systemd"
+                / "user" / unit_name, UNIT_DIR / unit_name, 0o644,
+            )
 
     uid = os.getuid()
     systemd_env = os.environ.copy()
@@ -73,8 +82,12 @@ def main() -> int:
         env=systemd_env,
     )
     if args.activate:
-        for timer_name in ("jason-release-manager.timer",
-                           "jason-release-approval-only.timer"):
+        # The new timer is not activated by the helper-bootstrap release:
+        # it must be both declared and root-migration-approved first.
+        timers = ["jason-release-manager.timer"]
+        if approval_timer_declared:
+            timers.append("jason-release-approval-only.timer")
+        for timer_name in timers:
             subprocess.run(
                 ["systemctl", "--user", "enable", "--now", timer_name],
                 check=True, env=systemd_env,
