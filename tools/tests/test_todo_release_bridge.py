@@ -386,6 +386,10 @@ class MixedPhaseReconciliationTests(unittest.TestCase):
                  patch.object(module, 'run', return_value=''), \
                  patch.object(module, 'todo_issues', return_value=issues), \
                  patch.object(module, 'merged_prs_by_issue', return_value={}), \
+                 patch.object(module, 'gh_json', return_value={
+                     'number': 1330, 'state': 'OPEN', 'mergedAt': None,
+                     'body': '- Development issue: #1117',
+                 }), \
                  patch.object(module, 'development_records_by_issue',
                               return_value=development), \
                  patch.object(module, 'reconcile_verified_closed_issues'), \
@@ -429,6 +433,10 @@ class MixedPhaseReconciliationTests(unittest.TestCase):
                  patch.object(module, 'run', return_value=''), \
                  patch.object(module, 'todo_issues', return_value=issues), \
                  patch.object(module, 'merged_prs_by_issue', return_value={}), \
+                 patch.object(module, 'gh_json', return_value={
+                     'number': 1330, 'state': 'OPEN', 'mergedAt': None,
+                     'body': '- Development issue: #1117',
+                 }), \
                  patch.object(module, 'development_records_by_issue',
                               return_value=development), \
                  patch.object(module, 'reconcile_verified_closed_issues'), \
@@ -479,3 +487,35 @@ class MixedPhaseReconciliationTests(unittest.TestCase):
                 {'phase': phase, 'pr_number': 1330}
             )
             self.assertEqual(phase_name, 'waiting_development_merge')
+
+
+    def test_awaiting_merge_requires_actual_open_same_issue_pr(self):
+        repo = Path('/tmp/untrusted-work')
+        record = {'phase': 'pr_ready', 'pr_number': 1330}
+        cases = [
+            ({'number': 1330, 'state': 'OPEN', 'mergedAt': None,
+              'body': '- Development issue: #1117'}, 1330),
+            ({'number': 1330, 'state': 'CLOSED', 'mergedAt': None,
+              'body': '- Development issue: #1117'}, None),
+            ({'number': 1330, 'state': 'MERGED',
+              'mergedAt': '2026-10-24T19:00Z',
+              'body': '- Development issue: #1117'}, None),
+            ({'number': 1330, 'state': 'OPEN', 'mergedAt': None,
+              'body': '- Development issue: #950'}, None),
+            ({'number': 1330, 'state': 'OPEN', 'mergedAt': None,
+              'body': 'unrelated work'}, None),
+            ({'number': 1331, 'state': 'OPEN', 'mergedAt': None,
+              'body': '- Development issue: #1117'}, None),
+            ({}, None),
+        ]
+        for reply, expected in cases:
+            with self.subTest(reply=reply), patch.object(
+                module, 'gh_json', return_value=reply,
+            ) as gh:
+                actual = module.verified_open_development_pr(repo, 1117, record)
+                self.assertEqual(actual, expected)
+                if reply:
+                    self.assertEqual(
+                        gh.call_args.args[0][:3], ['pr', 'view', '1330']
+                    )
+
