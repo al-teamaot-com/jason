@@ -118,6 +118,16 @@ def build_datto_rmm_manifest() -> IntegrationManifest:
                 selector_names=("resource_id",),
             ),
             IntegrationOperation(
+                operation_id="endpoint.patch.policy.read",
+                kind=OperationKind.READ,
+                capability_name="endpoint.patch.policy.read",
+                description=(
+                    "Read Patch Management policies assigned to the endpoint."
+                ),
+                read_only=True,
+                selector_names=("resource_id",),
+            ),
+            IntegrationOperation(
                 operation_id="endpoint.patch.search",
                 kind=OperationKind.SEARCH,
                 capability_name="endpoint.patch.search",

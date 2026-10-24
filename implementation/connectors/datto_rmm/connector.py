@@ -29,6 +29,7 @@ class DattoRmmConnector(ConnectorBase):
             "datto_rmm.device.audit.get",
             "datto_rmm.device.software.list",
             "datto_rmm.device.patches.list",
+            "datto_rmm.device.patch_policies.list",
         }
     )
 
@@ -41,6 +42,7 @@ class DattoRmmConnector(ConnectorBase):
             "datto_rmm.device.audit.get",
             "datto_rmm.device.software.list",
             "datto_rmm.device.patches.list",
+            "datto_rmm.device.patch_policies.list",
             "datto_rmm.account.alerts.open",
             "datto_rmm.site.search",
             "datto_rmm.alerts.list",
@@ -1314,6 +1316,14 @@ class DattoRmmConnector(ConnectorBase):
                 "page": max(int(arguments.get("page", 1)), 1),
                 "max": max(1, min(int(arguments.get("max", 50)), 50)),
             }
+
+        if capability == "datto_rmm.device.patch_policies.list":
+            device_uid = str(
+                arguments.get("device_uid") or arguments.get("resource_id") or ""
+            ).strip()
+            if not device_uid:
+                raise ValueError("device_uid or resource_id is required")
+            return f"/api/v2/device/{device_uid}/site/patch-management", None
 
         if capability == "datto_rmm.device.patches.list":
             device_uid = str(
