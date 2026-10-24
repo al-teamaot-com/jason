@@ -751,6 +751,7 @@ def test_expired_owner_card_requires_explicit_intent_then_sends_once(tmp_path):
 def test_renewed_card_is_signed_by_actual_owner_and_expired_card_cannot_grant(tmp_path):
     from jason_runtime.mobile_release_approval import MobileReleaseSignedEvidenceStore
     case = _expired_mobile_renewal_fixture(tmp_path)
+    prior_record = case.record.read_bytes()
     assert case.maintenance.tick()
     fresh = case.sender.sent[0]
     flow = MobileReleaseApprovalFlow(
@@ -772,7 +773,7 @@ def test_renewed_card_is_signed_by_actual_owner_and_expired_card_cannot_grant(tm
     assert case.repo.accepted_decision(fresh.approval_id).decided_by == "person-al"
     assert case.repo.get(case.prior.approval_id).status is ApprovalRequestStatus.EXPIRED
     assert case.repo.accepted_decision(case.prior.approval_id) is None
-    assert case.record.read_bytes() == case.record.read_bytes()
+    assert case.record.read_bytes() == prior_record
 
 
 @pytest.mark.parametrize("tamper", [
@@ -782,11 +783,14 @@ def test_renewed_card_is_signed_by_actual_owner_and_expired_card_cannot_grant(tm
 ])
 def test_expired_owner_renewal_fails_closed(tmp_path, tamper):
     from dataclasses import replace
-    case = _expired_mobile_renewal_fixture(tmp_path)
-    if tamper == "prior_denied":
-        case.repo.put(replace(case.prior, status=ApprovalRequestStatus.DENIED))
-    elif tamper == "prior_pending":
-        case.repo.put(replace(case.prior, status=ApprovalRequestStatus.PENDING))
+    case = _expired_mobile_renewal_fixture(
+        tmp_path,
+        previous_status=(ApprovalRequestStatus.DENIED if tamper == "prior_denied"
+                         else ApprovalRequestStatus.PENDING if tamper == "prior_pending"
+                         else ApprovalRequestStatus.EXPIRED),
+    )
+    if tamper in ("prior_denied", "prior_pending"):
+        pass
     elif tamper == "marker_missing":
         case.marker.unlink()
     elif tamper == "marker_world_readable":
