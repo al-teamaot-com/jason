@@ -3290,36 +3290,40 @@ def request_expired_owner_card_renewal(
     if (folder.is_symlink() or stat.S_IMODE(folder.stat().st_mode) != 0o700
             or folder.stat().st_uid != os.getuid()):
         raise ReleaseManagerError("renewal intent directory is not private")
-    existing = list(folder.glob(release_id + "-renew-*.json"))
-    if len(existing) >= RENEWAL_LIMIT:
-        raise ReleaseManagerError("maximum explicit owner renewals reached")
-    for file in existing:
-        data = json.loads(file.read_text(encoding="utf-8"))
-        if data.get("previous_approval_id") == prior["approval_id"]:
-            raise ReleaseManagerError("an owner renewal already exists for the latest expired card")
-    nonce = secrets.token_hex(16)
-    marker = folder / (release_id + "-renew-" + nonce + ".json")
-    record = {
-        "schema_version": "1.0", "release_id": release_id,
-        "candidate_sha": candidate_sha, "rollback_sha": live_sha,
-        "manifest_sha256": candidate.manifest_sha256,
-        "owner_policy_sha256": policy.policy_sha256, "renewal_nonce": nonce,
-        "previous_approval_id": prior["approval_id"],
-        "requested_at": instant.isoformat(),
-        "requester_identity": "person-al", "requester_os_account": "al",
-    }
-    # Exclusive creation: no timestamp bump, overwrite or second owner request.
-    fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        json.dump(record, handle, sort_keys=True)
-        handle.write("\n")
-        handle.flush()
-        os.fsync(handle.fileno())
-    dirfd = os.open(folder, os.O_DIRECTORY)
-    try:
-        os.fsync(dirfd)
-    finally:
-        os.close(dirfd)
+    lock_path = folder / "owner-renewal.lock"
+    lockfd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(lockfd, "r+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        existing = list(folder.glob(release_id + "-renew-*.json"))
+        if len(existing) >= RENEWAL_LIMIT:
+            raise ReleaseManagerError("maximum explicit owner renewals reached")
+        for file in existing:
+            data = json.loads(file.read_text(encoding="utf-8"))
+            if data.get("previous_approval_id") == prior["approval_id"]:
+                raise ReleaseManagerError("an owner renewal already exists for the latest expired card")
+        nonce = secrets.token_hex(16)
+        marker = folder / (release_id + "-renew-" + nonce + ".json")
+        record = {
+            "schema_version": "1.0", "release_id": release_id,
+            "candidate_sha": candidate_sha, "rollback_sha": live_sha,
+            "manifest_sha256": candidate.manifest_sha256,
+            "owner_policy_sha256": policy.policy_sha256, "renewal_nonce": nonce,
+            "previous_approval_id": prior["approval_id"],
+            "requested_at": instant.isoformat(),
+            "requester_identity": "person-al", "requester_os_account": "al",
+        }
+        # Exclusive creation: no timestamp bump, overwrite or second owner request.
+        fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(record, handle, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        dirfd = os.open(folder, os.O_DIRECTORY)
+        try:
+            os.fsync(dirfd)
+        finally:
+            os.close(dirfd)
     return {
         "release_id": release_id, "candidate_sha": candidate_sha,
         "previous_approval_id": prior["approval_id"],
