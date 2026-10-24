@@ -519,3 +519,57 @@ class MixedPhaseReconciliationTests(unittest.TestCase):
                         gh.call_args.args[0][:3], ['pr', 'view', '1330']
                     )
 
+
+
+    def test_support_defect_self_report_is_durable_and_deduplicated(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            repo = root / 'repo'
+            repo.mkdir()
+            spool = root / 'spool'
+            spool.mkdir()
+            failure = module.TodoReleaseBridgeError(
+                'TODO summary does not match final item phases (support issue #1099)'
+            )
+            with patch.object(module, 'run', return_value='') as notify:
+                record = module.report_commitment_integrity_defect(
+                    repo, spool, failure,
+                )
+                self.assertTrue(record.is_file())
+                payload = json.loads(record.read_text())
+                self.assertEqual(payload['support_issue'], 1099)
+                self.assertEqual(payload['support_id'], 'SUPPORT-OPS-059')
+                self.assertTrue(payload['notified'])
+                cmd = notify.call_args.args[0]
+                self.assertEqual(cmd[:4], ['gh', 'issue', 'comment', '1099'])
+                self.assertIn('SUPPORT-OPS-059', cmd[-1])
+                self.assertEqual(
+                    module.report_commitment_integrity_defect(
+                        repo, spool, failure,
+                    ), record
+                )
+                self.assertEqual(notify.call_count, 1)
+            self.assertEqual(len(list((spool / 'todo-release-defects').glob('*.json'))), 1)
+
+    def test_support_defect_github_notification_failure_can_retry_once(self):
+        with tempfile.TemporaryDirectory() as td:
+            repo = Path(td) / 'repo'
+            repo.mkdir()
+            spool = Path(td) / 'spool'
+            spool.mkdir()
+            failure = module.TodoReleaseBridgeError('TODO authoritative phase conflict')
+            with patch.object(
+                module, 'run',
+                side_effect=module.TodoReleaseBridgeError('GitHub temporarily offline'),
+            ):
+                record = module.report_commitment_integrity_defect(
+                    repo, spool, failure,
+                )
+            self.assertFalse(json.loads(record.read_text())['notified'])
+            with patch.object(module, 'run', return_value='') as notify:
+                self.assertEqual(
+                    module.report_commitment_integrity_defect(repo, spool, failure),
+                    record,
+                )
+                self.assertEqual(notify.call_count, 1)
+            self.assertTrue(json.loads(record.read_text())['notified'])
