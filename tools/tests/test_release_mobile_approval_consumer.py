@@ -30,7 +30,7 @@ RID = "release-" + SHA[:16]
 
 
 def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=None,
-            review_only=False):
+            review_only=False, renewed=False):
     from implementation.runtime_service.tests.test_mobile_release_approval import (
         policy_file, reviewed_policy_file, mark_release_high_impact, release_record,
     )
@@ -51,15 +51,42 @@ def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=N
     ccc = tmp_path / "ccc"
     ccc.mkdir()
     policy = read_mobile_release_policy(policy_path)
+    evidence = read_eligible_release(
+        root, RID, policy, allow_existing_owner_approval=review_only,
+    )
+    old_request = (
+        create_mobile_release_request(evidence, policy, now=NOW - timedelta(minutes=20))
+        if renewed else None
+    )
+    renewal_nonce = "e" * 32 if renewed else None
     request = create_mobile_release_request(
-        read_eligible_release(
-            root, RID, policy, allow_existing_owner_approval=review_only,
-        ),
-        policy, now=NOW,
+        evidence, policy, now=NOW,
+        renewed_from=(old_request.approval_id if old_request else None),
+        renewal_nonce=renewal_nonce,
     )
     path = tmp_path / "approvals.sqlite3"
     repo = SQLiteApprovalRequestRepository(path)
     svc = ApprovalRequestService(repo, MobileReleaseOwnerAuthority(policy_path))
+    if renewed:
+        from dataclasses import replace
+        from connectors.src.jason_connectors.approval_requests import ApprovalRequestStatus
+        svc.create(old_request, now=NOW - timedelta(minutes=20))
+        repo.put(replace(old_request, status=ApprovalRequestStatus.EXPIRED))
+        folder = root / "mobile-release-renewals"
+        folder.mkdir(mode=0o700)
+        marker = folder / (RID + "-renew-" + renewal_nonce + ".json")
+        marker.write_text(json.dumps({
+            "schema_version": "1.0",
+            "release_id": RID, "candidate_sha": SHA, "rollback_sha": ROLLBACK,
+            "manifest_sha256": evidence.manifest_sha256,
+            "owner_policy_sha256": policy.policy_sha256,
+            "renewal_nonce": renewal_nonce,
+            "previous_approval_id": old_request.approval_id,
+            "requested_at": (NOW - timedelta(seconds=5)).isoformat(),
+            "requester_identity": "person-al",
+            "requester_os_account": "al",
+        }))
+        marker.chmod(0o600)
     svc.create(request, now=NOW)
     private = Ed25519PrivateKey.generate()
     public = private.public_key().public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
@@ -695,4 +722,68 @@ def test_review_only_preexisting_different_signed_ccc_review_is_not_overwritten(
     with pytest.raises(PermissionError, match="conflicts with an existing owner review"):
         consume_mobile_release_decisions(**opts)
     assert json.loads(named.read_text()) == prior
+    assert not (opts["ccc_root"] / "material-review.json").exists()
+
+
+
+@pytest.mark.parametrize("reviewed", [False, True])
+def test_signed_renewal_records_one_exact_owner_and_ccc_attestation(tmp_path, reviewed):
+    from connectors.src.jason_connectors.approval_requests import ApprovalRequestStatus
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=reviewed, renewed=True,
+    )
+    prior_id = request.metadata["renewed_from_approval_id"]
+    before = release_path.read_bytes()
+    assert repo.get(prior_id).status is ApprovalRequestStatus.EXPIRED
+    assert repo.accepted_decision(prior_id) is None
+    decision = flow.handle(**args)
+    assert decision["approval_status"] == "approved"
+    assert decision["executed"] is False
+    assert release_path.read_bytes() == before
+    approvals = []
+    opts["approve_release"] = lambda _repo, _state, *, release_id, candidate_sha, source: (
+        approvals.append((release_id, candidate_sha, source))
+    )
+    assert consume_mobile_release_decisions(**opts) == 1
+    assert approvals == [(RID, SHA, "authenticated_mobile_teams_owner:" + request.approval_id)]
+    assert repo.get(prior_id).status is ApprovalRequestStatus.EXPIRED
+    assert repo.accepted_decision(prior_id) is None
+    assert consume_mobile_release_decisions(**opts) == 0
+    assert len(approvals) == 1
+    review = json.loads((opts["ccc_root"] / "material-review.json").read_text())
+    assert review["mobile_approval_id"] == request.approval_id
+
+
+def test_renewal_denied_creates_no_owner_or_ccc_authority(tmp_path):
+    from connectors.src.jason_connectors.approval_requests import ApprovalRequestStatus
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, renewed=True, approve=False,
+    )
+    old_id = request.metadata["renewed_from_approval_id"]
+    assert flow.handle(**args)["approval_status"] == "denied"
+    opts["approve_release"] = lambda *_args, **_kwargs: pytest.fail(
+        "a denied renewed card cannot approve the release"
+    )
+    assert consume_mobile_release_decisions(**opts) == 0
+    assert repo.get(old_id).status is ApprovalRequestStatus.EXPIRED
+    assert repo.accepted_decision(old_id) is None
+    assert not (opts["ccc_root"] / "material-review.json").exists()
+
+
+def test_renewal_host_consumer_rejects_modified_private_owner_intent(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, renewed=True,
+    )
+    assert flow.handle(**args)["approval_status"] == "approved"
+    nonce = request.metadata["renewal_nonce"]
+    marker = (opts["state_root"] / "mobile-release-renewals" /
+              (RID + "-renew-" + nonce + ".json"))
+    data = json.loads(marker.read_text())
+    data["requester_os_account"] = "another-user"
+    marker.write_text(json.dumps(data))
+    opts["approve_release"] = lambda *_args, **_kwargs: pytest.fail(
+        "tampered owner console intent cannot become release authority"
+    )
+    with pytest.raises(PermissionError, match="renewal"):
+        consume_mobile_release_decisions(**opts)
     assert not (opts["ccc_root"] / "material-review.json").exists()
