@@ -557,3 +557,51 @@ def test_universal_extra_signed_card_field_is_not_authority(tmp_path):
     assert env.handler.service.teams_flow.approval_service.repository.get(
         plan.approval_id).status is ApprovalRequestStatus.PENDING
     assert env.approvals.get(plan.approval_id) is None and not env.provider.calls
+
+
+def test_sdk_reply_to_is_transport_observation_not_an_approval_grant(tmp_path):
+    import base64
+    from jason_openclaw.signed_transport import canonical_signed_payload
+    env=setup(tmp_path);plan=seed(env)
+    envelope=signed(env,plan)
+    envelope['interaction']['callback_reply_to_id']='f:observed-card-123'
+    envelope['signature']=base64.b64encode(
+        env.private.sign(canonical_signed_payload(envelope))).decode()
+    _, parsed=env.handler.evidence_verifier.parse(json.dumps(envelope))
+    assert parsed.approval_submit.callback_reply_to_id=='f:observed-card-123'
+    assert not env.provider.calls and env.approvals.get(plan.approval_id) is None
+    forged=json.loads(json.dumps(envelope))
+    forged['interaction']['callback_reply_to_id']='f:forged'
+    with pytest.raises(PermissionError,match='signature'):
+        env.handler.evidence_verifier.parse(json.dumps(forged))
+
+
+@pytest.mark.parametrize('bad', ['', 'line\nbreak', 'x'*257, 123, {}, []])
+def test_signed_reply_to_rejects_invalid_card_origin_metadata(tmp_path,bad):
+    import base64
+    from jason_openclaw.signed_transport import canonical_signed_payload
+    env=setup(tmp_path);plan=seed(env)
+    envelope=signed(env,plan)
+    envelope['interaction']['callback_reply_to_id']=bad
+    envelope['signature']=base64.b64encode(
+        env.private.sign(canonical_signed_payload(envelope))).decode()
+    with pytest.raises(PermissionError,match='envelope'):
+        env.handler.evidence_verifier.parse(json.dumps(envelope))
+    assert not env.provider.calls and env.approvals.get(plan.approval_id) is None
+
+
+
+def test_callback_reply_to_proof_not_accepted_on_other_interaction_kinds(tmp_path):
+    import base64
+    from jason_openclaw.signed_transport import canonical_signed_payload
+    env=setup(tmp_path);plan=seed(env)
+    envelope=signed(env,plan)
+    envelope['interaction']={
+        'kind':'procurement.submit', 'submission_id':'fake-item',
+        'channel_response_id':envelope['message_id'],
+        'selections':{}, 'callback_reply_to_id':'f:approval-card-123'}
+    envelope['signature']=base64.b64encode(
+        env.private.sign(canonical_signed_payload(envelope))).decode()
+    with pytest.raises(PermissionError,match='envelope'):
+        env.handler.evidence_verifier.parse(json.dumps(envelope))
+    assert not env.provider.calls and env.approvals.get(plan.approval_id) is None

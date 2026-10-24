@@ -107,3 +107,12 @@ test("queued universal plan acceptance finalizes the decision without claiming e
   assert.match(source,/approvalSubmit\.approvalId\.startsWith\("planapproval-"\)/);
   assert.match(source,/result\?\.payload\?\.status === "approved" && result\?\.payload\?\.executed === false/);
 });
+
+
+test('SDK observed replyToId is signed only as optional metadata, never as card authority', () => {
+  assert.match(source, /activity\?\.replyToId/);
+  assert.match(source, /callback_reply_to_id: callbackReplyToId/);
+  assert.doesNotMatch(source, /callback_reply_to_id: approvalSubmit\.selections/);
+  const parser = readFileSync(new URL('../approval-submit.mjs', import.meta.url),'utf8');
+  assert.match(parser, /"callback_reply_to_id"/);
+});
