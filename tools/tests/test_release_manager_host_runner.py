@@ -3485,3 +3485,144 @@ def test_root_policy_and_host_install_are_always_protected_core_risk():
         assert runner.classify_change_risk("feature", [path]) == "production_control_core"
         assert runner.classify_change_risk("support", [path]) == "production_control_core"
     assert runner.classify_change_risk("feature", ["docs/operations/readme.md"]) == "normal"
+
+
+
+def _owner_expired_console_case(tmp_path, monkeypatch, *, previous_status="expired"):
+    import json
+    from dataclasses import replace
+    from datetime import timedelta
+    from types import SimpleNamespace
+    from implementation.runtime_service.tests.test_mobile_release_approval import (
+        SHA, ROLLBACK, RELEASE, policy_file, release_record,
+    )
+    from jason_runtime.mobile_release_approval import (
+        read_mobile_release_policy, read_eligible_release,
+        create_mobile_release_request, MobileReleaseOwnerAuthority,
+    )
+    from connectors.src.jason_connectors.approval_requests import (
+        ApprovalRequestService, ApprovalRequestStatus, SQLiteApprovalRequestRepository,
+    )
+    policy_path = policy_file(tmp_path)
+    policy = read_mobile_release_policy(policy_path)
+    root, record = release_record(tmp_path)
+    (root / "auto-promotion-incident-hold").write_text("held")
+    evidence = read_eligible_release(root, RELEASE, policy)
+    now = datetime.now(timezone.utc)
+    previous = create_mobile_release_request(
+        evidence, policy, now=now - timedelta(minutes=20),
+    )
+    db = tmp_path / "owner-approvals.sqlite3"
+    repo = SQLiteApprovalRequestRepository(db)
+    service = ApprovalRequestService(repo, MobileReleaseOwnerAuthority(policy_path))
+    service.create(previous, now=now - timedelta(minutes=20))
+    repo.put(replace(previous, status=ApprovalRequestStatus(previous_status)))
+    monkeypatch.setattr(runner, "DEFAULT_STATE", root)
+    monkeypatch.setattr(runner, "MOBILE_APPROVAL_POLICY", policy_path)
+    monkeypatch.setattr(runner, "_read_protected_snapshot",
+                        lambda root, name: ({
+                            "circuit_breaker": {"state": "closed"},
+                            "last_known_good": {"manifest": {"revision": ROLLBACK}},
+                        } if name == "production-control-state.json"
+                            else {"status": "pass", "problems": []}))
+    monkeypatch.setattr(runner, "live_runtime",
+                        lambda: {"revision": ROLLBACK, "inspect": {}})
+    monkeypatch.setattr(runner, "live_production_alignment", lambda sha: None)
+    monkeypatch.setattr(runner, "authoritative_auto_promotion_head",
+                        lambda repo: SHA)
+    monkeypatch.setattr(runner, "live_release_mobile_approval_mode",
+                        lambda live: "owner_only_pilot")
+    monkeypatch.setattr(runner.pwd, "getpwuid",
+                        lambda uid: SimpleNamespace(pw_name="al"))
+    return SimpleNamespace(
+        root=root, path=tmp_path, db=db, policy_path=policy_path,
+        original=previous, repo=repo, service=service,
+        evidence=evidence, SHA=SHA, RELEASE=RELEASE, ROLLBACK=ROLLBACK,
+        policy=policy, record=record,
+    )
+
+
+def _owner_console_renewal(case, monkeypatch):
+    from types import SimpleNamespace
+    with monkeypatch.context() as isolated:
+        isolated.setattr(runner.sys, "stdin", SimpleNamespace(isatty=lambda: True))
+        return runner.request_expired_owner_card_renewal(
+            case.path, case.root, release_id=case.RELEASE,
+            candidate_sha=case.SHA, mobile_db=case.db,
+        )
+
+
+def test_owner_console_mints_one_renewal_marker_without_grant(tmp_path, monkeypatch):
+    import json
+    import stat
+    case = _owner_expired_console_case(tmp_path, monkeypatch)
+    original_release = case.record.read_bytes()
+    issued = _owner_console_renewal(case, monkeypatch)
+    assert issued["status"] == "fresh_card_requested_not_authorized"
+    assert issued["previous_approval_id"] == case.original.approval_id
+    folder = case.root / "mobile-release-renewals"
+    files = list(folder.glob("*.json"))
+    assert len(files) == 1
+    assert stat.S_IMODE(files[0].stat().st_mode) == 0o600
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+    marker = json.loads(files[0].read_text())
+    assert marker["candidate_sha"] == case.SHA
+    assert marker["renewal_nonce"] in files[0].name
+    assert case.repo.accepted_decision(case.original.approval_id) is None
+    assert case.record.read_bytes() == original_release
+    with __import__("pytest").raises(runner.ReleaseManagerError, match="already exists"):
+        _owner_console_renewal(case, monkeypatch)
+    assert len(list(folder.glob("*.json"))) == 1
+
+
+def test_owner_console_does_not_mint_from_noninteractive_session(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    case = _owner_expired_console_case(tmp_path, monkeypatch)
+    monkeypatch.setattr(runner.sys, "stdin", SimpleNamespace(isatty=lambda: False))
+    with __import__("pytest").raises(runner.ReleaseManagerError, match="interactive"):
+        runner.request_expired_owner_card_renewal(
+            case.path, case.root, release_id=case.RELEASE,
+            candidate_sha=case.SHA, mobile_db=case.db,
+        )
+    assert not (case.root / "mobile-release-renewals").exists()
+
+
+@__import__("pytest").mark.parametrize("mode", [
+    "not_expired", "denied", "wrong_main", "wrong_baseline",
+    "open_breaker", "wrong_mode", "unsafe_policy", "missing_hold",
+])
+def test_owner_console_denies_replayed_or_unsafe_renewal(
+    tmp_path, monkeypatch, mode,
+):
+    import json
+    from dataclasses import replace
+    from connectors.src.jason_connectors.approval_requests import ApprovalRequestStatus
+    from implementation.runtime_service.tests.test_mobile_release_approval import policy_file
+    case = _owner_expired_console_case(
+        tmp_path, monkeypatch,
+        previous_status=("pending" if mode == "not_expired"
+                         else "denied" if mode == "denied" else "expired"),
+    )
+    if mode == "wrong_main":
+        monkeypatch.setattr(runner, "authoritative_auto_promotion_head",
+                            lambda repo: "a" * 40)
+    elif mode == "wrong_baseline":
+        monkeypatch.setattr(runner, "live_production_alignment",
+                            lambda revision: (_ for _ in ()).throw(
+                                runner.ReleaseManagerError("unaligned")))
+    elif mode == "open_breaker":
+        monkeypatch.setattr(runner, "_read_protected_snapshot",
+                            lambda root, name: (
+                                {"circuit_breaker": {"state": "open"}}
+                                if name == "production-control-state.json"
+                                else {"status": "pass", "problems": []}))
+    elif mode == "wrong_mode":
+        monkeypatch.setattr(runner, "live_release_mobile_approval_mode",
+                            lambda live: "off")
+    elif mode == "unsafe_policy":
+        policy_file(tmp_path, allowed_risk_profiles=["production_control_core"])
+    elif mode == "missing_hold":
+        (case.root / "auto-promotion-incident-hold").unlink()
+    with __import__("pytest").raises((runner.ReleaseManagerError, PermissionError)):
+        _owner_console_renewal(case, monkeypatch)
+    assert not (case.root / "mobile-release-renewals").exists()
