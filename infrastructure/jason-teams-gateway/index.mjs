@@ -412,6 +412,12 @@ agent.onActivity("message", async (context) => {
   const submitValue = activity?.value && typeof activity.value === "object" ? activity.value : null;
   const conversationId = nonBlank(activity?.conversation?.id);
   const messageId = nonBlank(activity?.id);
+  // Observed from the SDK authenticated activity, never from editable
+  // Adaptive Card value. Not proof of a verified original Teams card.
+  const callbackReplyToId =
+    typeof activity?.replyToId === "string" &&
+    /^[A-Za-z0-9:._/-]{1,256}$/.test(activity.replyToId)
+      ? activity.replyToId : null;
   const tenantId = activityTenantId(activity) ?? auth.tenantId;
 
   if (!tenantId || tenantId.toLowerCase() !== auth.tenantId.toLowerCase()) {
@@ -500,6 +506,7 @@ agent.onActivity("message", async (context) => {
             decision: approvalSubmit.decision,
             selections: approvalSubmit.selections,
             channel_response_id: messageId,
+            ...(callbackReplyToId ? { callback_reply_to_id: callbackReplyToId } : {}),
           }
         : procurementSubmit
           ? {

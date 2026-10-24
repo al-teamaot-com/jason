@@ -23,3 +23,12 @@ test('all supported decisions and existing non-authoritative selections remain c
   }
   assert.equal(parseApprovalSubmit({approval_id:'procapproval-existing',decision:'approve',price_choice:'standard'}).selections.price_choice,'standard');
 });
+
+
+test('card data cannot impersonate SDK source activity replyToId', () => {
+  assert.equal(parseApprovalSubmit({
+    approval_id: 'planapproval-1', decision: 'approve',
+    card_challenge: 'a'.repeat(48),
+    callback_reply_to_id: 'forged-original-card',
+  }), null);
+});

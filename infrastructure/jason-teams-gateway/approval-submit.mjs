@@ -18,6 +18,7 @@ export function parseApprovalSubmit(value) {
     "connector_id", "authority_context_id", "requested_by",
     "token", "access_token", "id_token", "refresh_token",
     "authorization", "bearer", "sso_token",
+    "callback_reply_to_id",
   ]);
   const selections = {};
   for (const [key, raw] of Object.entries(value)) {

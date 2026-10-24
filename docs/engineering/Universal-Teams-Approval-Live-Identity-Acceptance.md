@@ -59,3 +59,26 @@ A genuine provider message ID is not proof of device notification, Adaptive
 Card rendering, MFA, human presence, or a click. The historically disputed
 approval #1553 remains unproven. General approval mode stays off. Separately
 verify original message IDs, user interaction, identity and negative cases.
+
+
+## Signed SDK callback reply-to evidence — observation only (#1553)
+
+For an actual approval submit, the existing Microsoft Agents SDK gateway
+now checks the authenticated activity's own replyToId property (never the
+editable Adaptive Card Action.Submit value). If well formed and present,
+the gateway includes it as callback_reply_to_id in its Ed25519-signed
+approval interaction. The existing bridge bounds it and the Python
+transport parser retains it as read-only approval evidence. Missing
+replyToId is recorded as absent; it is not replaced with the callback
+message ID or an invented original-card ID. Attempts to assert this
+field through card input are rejected.
+
+**This is NOT human MFA, proof of physical click, guaranteed Graph
+origin-card ID, or permission to approve actions.** An SDK activity can
+omit replyToId, and no live callback-to-original-message linkage has
+yet been demonstrated. General UTA authorization remains OFF. Before
+a future trust decision, compare this observed SDK field against a
+genuine provider-returned, durable original outbound Teams card
+message ID, exact recipient/chat, immutable approval, authorized
+actor/tenant, and bounded TTL under controlled negative UAT.
+Do not infer linkage from an arbitrary signed string alone.

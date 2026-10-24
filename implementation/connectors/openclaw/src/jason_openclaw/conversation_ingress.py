@@ -108,6 +108,8 @@ class ApprovalSubmitEvidence:
     decision: str
     selections: Mapping[str, str]
     channel_response_id: str
+    # Transport-side SDK replyToId observation, NOT cryptographic card proof.
+    callback_reply_to_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -360,9 +362,12 @@ class OpenClawTeamsConversationEnvelope:
             if not isinstance(interaction, Mapping):
                 raise ValueError("conversation interaction object is invalid")
             kind = str(interaction.get("kind") or "").strip()
+            if kind != "approval.submit" and "callback_reply_to_id" in interaction:
+                raise PermissionError("callback reply-to evidence belongs only to signed approval submit")
             allowed_interaction_keys = {
                 "kind", "approval_id", "decision", "submission_id",
                 "case_key", "disposition", "selections", "channel_response_id",
+                "callback_reply_to_id",
             }
             if set(interaction) - allowed_interaction_keys:
                 raise PermissionError(
@@ -384,11 +389,19 @@ class OpenClawTeamsConversationEnvelope:
                     raise ValueError("approval interaction id is invalid")
                 if decision not in {"approve", "deny", "request_changes"}:
                     raise ValueError("approval interaction decision is invalid")
+                reply_to = interaction.get("callback_reply_to_id")
+                if reply_to is not None and (
+                    not isinstance(reply_to, str)
+                    or len(reply_to) > 256
+                    or not re.fullmatch(r"[A-Za-z0-9:._/-]{1,256}", reply_to)
+                ):
+                    raise ValueError("approval callback reply-to ID is invalid")
                 approval_submit = ApprovalSubmitEvidence(
                     approval_id=approval_id,
                     decision=decision,
                     selections=selections,
                     channel_response_id=channel_response_id,
+                    callback_reply_to_id=reply_to,
                 )
             elif kind == "procurement.submit":
                 submission_id = str(
