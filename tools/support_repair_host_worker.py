@@ -2122,6 +2122,159 @@ def readmit_missing_support_source_context(
     return resumed
 
 
+
+def readmit_stale_evidence_after_main_advanced(
+    state: dict[str, Any], eligible: list[dict[str, str]],
+    repo: Path, spool: Path, gate, policy: Mapping[str, Any],
+    *, max_active: int,
+) -> list[str]:
+    """One read-only source rebase after a verified P0 evidence turn went stale.
+
+    Keep the original request, model reply, source revision, branch, and retry
+    budget intact. Re-read only model-requested authorized tracked source from
+    a separate clean worktree on authoritative main. No code edits or releases
+    occur here; the normal worker still owns those gated decisions.
+    """
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active = sum(
+        1 for value in records.values()
+        if isinstance(value, Mapping)
+        and value.get('phase') in {'diagnosing', 'implementing', 'ci_repair_needed', 'ci_repairing'}
+    )
+    slots = max(0, max(1, int(max_active)) - active)
+    resumed: list[str] = []
+    for item in eligible:
+        if slots <= 0:
+            break
+        item_id = str(item.get('id') or '')
+        record = records.get(item_id)
+        if (
+            item.get('priority') != 'P0' or not isinstance(record, dict)
+            or record.get('phase') != 'blocked'
+            or record.get('reason') != 'EvidenceToolError: stale worktree requires governed clean-source recovery'
+            or record.get('stale_evidence_recovery_request_id')
+            or record.get('pr_number')
+            or record.get('blocker_class') in {'external_authority', 'blocked_by_dependency'}
+            or (isinstance(record.get('recovery_handoff_intake'), Mapping)
+                and record['recovery_handoff_intake'].get('status') == 'awaiting_governed_repair')
+        ):
+            continue
+        request = str(record.get('reasoning_request_id') or '')
+        previous = str(record.get('evidence_last_source_request') or '')
+        old_sha = str(record.get('evidence_source_revision') or '')
+        branch = str(record.get('branch') or '')
+        turns = record.get('evidence_turn_count')
+        normal = branch_name(item_id)
+        if (
+            re.fullmatch(r'[a-f0-9]{64}', request) is None
+            or re.fullmatch(r'[a-f0-9]{64}', previous) is None
+            or re.fullmatch(r'[a-f0-9]{40}', old_sha) is None
+            or (branch != normal and re.fullmatch(
+                re.escape(normal) + r'-(?:anchor|context|evidence)-[a-f0-9]{12}', branch
+            ) is None)
+            or type(turns) is not int or turns < 1
+        ):
+            continue
+        try:
+            old = support_worktree_path(item_id, branch)
+            if (
+                not old.is_dir() or old.is_symlink()
+                or run(['git', 'rev-parse', '--show-toplevel'], cwd=old) != str(old.resolve())
+                or run(['git', 'branch', '--show-current'], cwd=old) != branch
+                or run(['git', 'rev-parse', 'HEAD'], cwd=old) != old_sha
+                or run(['git', 'status', '--porcelain', '--untracked-files=all'], cwd=old)
+            ):
+                continue
+            head = run(['git', 'rev-parse', 'origin/main'], cwd=repo)
+            if (
+                re.fullmatch(r'[a-f0-9]{40}', head) is None or head == old_sha
+                or run(['git', 'merge-base', old_sha, head], cwd=repo) != old_sha
+            ):
+                continue
+            req_path = spool / 'reasoning/requests' / (request + '.json')
+            if not req_path.is_file() or req_path.stat().st_size > 250000:
+                continue
+            original = json.loads(req_path.read_text(encoding='utf-8'))
+            response = reasoning_response(spool, request)
+            if (
+                not isinstance(original, dict)
+                or original.get('request_id') != request
+                or request_id(original) != request
+                or original.get('kind') != 'edit_plan'
+                or original.get('support_item') != item_id
+                or not isinstance(original.get('context'), dict)
+                or original['context'].get('pinned_source_revision') != old_sha
+                or original['context'].get('previous_reasoning_request_id') != previous
+                or original['context'].get('evidence_turn') != turns
+                or not isinstance(original['context'].get('source_excerpts'), list)
+                or not isinstance(response, Mapping)
+                or response.get('status') != 'succeeded'
+                or response.get('request_id') != request
+                or response.get('kind') != 'edit_plan'
+                or response.get('support_item') != item_id
+                or not isinstance(response.get('result'), Mapping)
+                or response['result'].get('blocked_reason')
+                or response['result'].get('edits')
+                or response['result'].get('test_paths')
+                or not response['result'].get('evidence_requests')
+            ):
+                continue
+            recovery_branch = normal + '-context-' + request[:12]
+            fresh = ensure_worktree(repo, item_id, recovery_branch)
+            if (
+                run(['git', 'branch', '--show-current'], cwd=fresh) != recovery_branch
+                or run(['git', 'status', '--porcelain', '--untracked-files=all'], cwd=fresh)
+                or run(['git', 'rev-parse', 'HEAD'], cwd=fresh) != head
+                or run(['git', 'rev-parse', 'origin/main'], cwd=repo) != head
+            ):
+                continue
+            base = dict(original['context'])
+            base['verified_clean_source_recovery'] = {
+                'failed_request_id': request,
+                'previous_source_revision': old_sha,
+                'current_source_revision': head,
+                'retry_limit': 1,
+            }
+            base['validation_feedback'] = (
+                'Authoritative main advanced while earlier source evidence was read. '
+                'Use only the newly checked-out tracked source and independently '
+                'verified read-only tool receipts. Do not reuse old excerpts as '
+                'trusted bytes, assume an old edit anchor still matches, issue '
+                'new authority or bypass the normal tests and review.'
+            )
+            next_record = dict(record)
+            progressed = engineering_evidence_tools.continue_evidence_session(
+                response_result=response['result'], record=next_record,
+                item=item, spool=spool, worktree=fresh, repo=repo,
+                gate=gate, repair_policy=policy,
+                support=sys.modules[__name__], queue_reasoning=queue_reasoning,
+                context_base=base,
+            )
+            if (
+                not progressed
+                or next_record.get('reasoning_request_id') == request
+                or next_record.get('evidence_source_revision') != head
+                or next_record.get('evidence_turn_count') != turns + 1
+            ):
+                continue
+            record.update(next_record)
+            record.update({
+                'phase': 'implementing',
+                'branch': recovery_branch,
+                'stale_evidence_recovery_request_id': next_record['reasoning_request_id'],
+                'stale_evidence_recovery_original_request_id': request,
+                'stale_evidence_recovery_revision': head,
+                'reason': 'One verified clean-source evidence turn queued; old worktree preserved.',
+                'updated_at': now(),
+            })
+            resumed.append(item_id)
+            slots -= 1
+        except (WorkerError, engineering_evidence_tools.EvidenceToolError,
+                OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+    return resumed
+
+
 def readmit_verified_evidence_starvation_after_upgrade(
     state: dict[str, Any], eligible: list[dict[str, str]],
     repo: Path, spool: Path, gate, policy: Mapping[str, Any],
@@ -3075,6 +3228,9 @@ def main() -> int:
     readmit_after_verified_transport_recovery(state, support, spool, max_active=args.max_active)
     readmit_after_verified_credit_replenishment(state, support, spool, max_active=args.max_active)
     readmit_missing_support_source_context(
+        state, support, repo, spool, gate, policy, max_active=args.max_active,
+    )
+    readmit_stale_evidence_after_main_advanced(
         state, support, repo, spool, gate, policy, max_active=args.max_active,
     )
     readmit_verified_evidence_starvation_after_upgrade(
