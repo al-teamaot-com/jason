@@ -108,3 +108,9 @@ def test_pilot_cli_preserves_pending_request_and_requires_actual_deny_first(tmp_
     assert len(env.provider.calls)==1
     assert issue_case(app,campaign,'approve')['reissued'] is False
     assert len(delivery.requests)==2 and len(env.provider.calls)==1
+
+
+def test_source_pilot_does_not_activate_in_embedded_mcp_application(tmp_path):
+    root=source_config(tmp_path)
+    env={'JASON_SOURCE_REVISION':'a'*40,'JASON_MCP_RESOURCE_URL':'https://example.invalid/mcp'}
+    assert settings_defaults(env,root,now=datetime(2026,10,24,tzinfo=timezone.utc))==('off',DEFAULT_POLICY)

@@ -475,3 +475,8 @@ three short retries. Host reconciliation now allows one bounded 150-second
 observation window, running the actual checker and requiring its success. It
 does not skip file/datasource/metric checks or clear a failed unit manually. The
 existing 360-second host budget remains unchanged; persistent failure rolls back.
+
+The source-pinned pilot default is runtime-only. The MCP application embeds the
+same composition but has its own registered MCP resource URL; its unset approval
+mode remains OFF. It does not instantiate the pilot just because it shares a
+source revision. Explicit operator-selected modes retain their existing semantics.
