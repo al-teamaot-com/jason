@@ -3439,3 +3439,27 @@ def test_approval_only_held_unit_does_not_disable_or_invoke_promotion():
     desired=runner.gate.load_json(ROOT/"config/production-desired-state.json")
     assert "jason-release-approval-only.timer" in desired["required_user_units"]
     assert "jason-release-approval-only.service" in desired["allowed_user_units"]
+
+
+def test_held_offer_absent_owner_policy_never_reads_signed_decisions(tmp_path):
+    from unittest.mock import patch
+    import release_mobile_approval_consumer as mobile_consumer
+    (tmp_path / "auto-promotion-incident-hold").touch()
+    control={"schema_version":"1.0","circuit_breaker":{"state":"closed"},
+             "last_known_good":{"manifest":{"revision":SHA_B}}}
+    drift={"schema_version":"1.0","status":"pass","problems":[]}
+    with (
+        patch.object(runner,"DEFAULT_STATE",tmp_path),
+        patch.object(runner,"MOBILE_APPROVAL_POLICY",tmp_path / "missing-policy.json"),
+        patch.object(runner,"_read_protected_snapshot",
+                     side_effect=lambda root,name: (
+                         control if name=="production-control-state.json" else drift)),
+        patch.object(runner,"live_runtime",return_value={"revision":SHA_B}),
+        patch.object(runner,"live_production_alignment",return_value={}),
+        patch.object(mobile_consumer,"consume_mobile_release_decisions") as consume,
+        patch.object(runner,"deploy_production") as deploy,
+    ):
+        assert runner.approval_only_while_promotion_held(ROOT,tmp_path) is False
+        assert not (tmp_path/"mobile-release-offers").exists()
+        consume.assert_not_called()
+        deploy.assert_not_called()
