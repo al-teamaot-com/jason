@@ -113,3 +113,21 @@ def test_service_plan_status_never_infers_a_tenant_without_current_policy(tmp_pa
     env.policy.write_text(json.dumps(policy))
     assert maintenance(env).tick() is False
     assert Sender.calls == []
+
+
+def test_service_plan_disabled_decider_does_not_receive_terminal_status(tmp_path):
+    Sender.calls=[]; Sender.fail=False
+    env, _ = _service_result(tmp_path)
+    decider=env.identities.get('approver-a')
+    env.identities.put(replace(decider,status='disabled'))
+    assert maintenance(env).tick() is False
+    assert Sender.calls == []
+
+
+def test_service_plan_disabled_requester_cannot_send_terminal_status(tmp_path):
+    Sender.calls=[]; Sender.fail=False
+    env, _ = _service_result(tmp_path)
+    worker=env.identities.get('worker')
+    env.identities.put(replace(worker,status='disabled'))
+    assert maintenance(env).tick() is False
+    assert Sender.calls == []
