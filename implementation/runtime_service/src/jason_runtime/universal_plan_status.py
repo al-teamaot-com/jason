@@ -53,19 +53,48 @@ class UniversalPlanStatusMaintenance:
             requester=self.identities.get(proposal.requester_id)
             if requester is None or requester.status!='active' or requester.organization_id!=proposal.organization_id:
                 continue
-            origin=self.bindings.find_active_by_jason_identity(jason_identity_id=proposal.requester_id)
-            if origin is None or origin.status!='active':
-                continue
-            recipients={proposal.requester_id}
             decision=self.handler.service.teams_flow.approval_service.repository.accepted_decision(approval_id)
-            if decision is not None:
-                recipients.add(decision.decided_by)
+            if requester.identity_type=='service':
+                # A registered workload has no personal Teams conversation. Its
+                # actual authenticated human decider still needs the outcome.
+                # Never infer a tenant or recipient from a service account name.
+                pending=self.handler.service.teams_flow.approval_service.repository.get(approval_id)
+                if (decision is None or pending is None
+                        or pending.requested_by!=proposal.requester_id
+                        or pending.organization_id!=proposal.organization_id
+                        or pending.metadata.get('requester_authentication_assurance')!='workload_identity'
+                        or self.handler.policy is None):
+                    continue
+                try:
+                    policy=self.handler.policy.for_organization(proposal.organization_id)
+                    requesters=policy.get('service_requesters')
+                    entry=(requesters.get(proposal.requester_id)
+                           if isinstance(requesters,dict) else None)
+                except (ValueError,TypeError,PermissionError,KeyError):
+                    continue
+                if (not isinstance(entry,dict)
+                        or set(entry)!={'microsoft_tenant_id','maximum_plan_steps'}
+                        or not isinstance(entry['microsoft_tenant_id'],str)
+                        or not entry['microsoft_tenant_id']):
+                    continue
+                tenant=entry['microsoft_tenant_id']
+                recipients={decision.decided_by}
+            elif requester.identity_type=='human':
+                origin=self.bindings.find_active_by_jason_identity(jason_identity_id=proposal.requester_id)
+                if origin is None or origin.status!='active':
+                    continue
+                tenant=origin.microsoft_tenant_id
+                recipients={proposal.requester_id}
+                if decision is not None:
+                    recipients.add(decision.decided_by)
+            else:
+                continue
             for actor in sorted(recipients):
                 principal=self.identities.get(actor)
                 binding=self.bindings.find_active_by_jason_identity(jason_identity_id=actor)
                 if (principal is None or principal.status!='active' or principal.organization_id!=proposal.organization_id
                         or binding is None or binding.status!='active'
-                        or binding.microsoft_tenant_id!=origin.microsoft_tenant_id):
+                        or binding.microsoft_tenant_id!=tenant):
                     continue
                 if not self.handler.requests.claim_status_delivery(approval_id,state,actor,now=now):
                     continue
