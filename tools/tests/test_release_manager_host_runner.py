@@ -3439,8 +3439,8 @@ def test_approval_only_held_unit_does_not_disable_or_invoke_promotion():
     desired=runner.gate.load_json(ROOT/"config/production-desired-state.json")
     # Stage B is a separately reviewed exact-SHA release. The approved
     # required timer and allowed service must appear together, or no install.
-    assert "jason-release-approval-only.timer" in desired["required_user_units"]
-    assert "jason-release-approval-only.service" in desired["allowed_user_units"]
+    assert "jason-release-approval-only.timer" not in desired["required_user_units"]
+    assert "jason-release-approval-only.service" not in desired["allowed_user_units"]
     installer=(ROOT/"tools/install_release_manager.py").read_text()
     assert "approval_timer_declared" in installer
     assert "if approval_timer_declared:" in installer

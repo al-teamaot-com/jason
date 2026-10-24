@@ -310,8 +310,9 @@ def preview_exact_migration(candidate_sha: str, rollback_sha: str) -> str:
             raise MigrationRefused("root policy lost a known-good declaration: " + field)
         if actual.intersection(plan[field] | _staged_delta(plan)[field]):
             raise MigrationRefused("candidate-only unit already present without migration receipt")
-    if ACTIVE.exists():
-        raise MigrationRefused("preexisting root migration requires independent review")
+    # An existing committed root-policy receipt may be preserved as one
+    # nested predecessor; any partial/untrusted/changed receipt remains fatal.
+    _trusted_prior_applied_receipt(rollback_sha, original)
     return "OWNER_CCC_REVIEWED_DELTA_ONLY"
 
 
@@ -320,6 +321,58 @@ def _overlay_policy(root_policy: dict, additions: dict[str, frozenset[str]]) -> 
     for key in UNIT_FIELDS:
         result[key] = sorted(set(root_policy[key]) | additions[key])
     return (json.dumps(result, indent=2, sort_keys=True) + "\n").encode()
+
+
+def _trusted_prior_applied_receipt(
+    rollback_sha: str, root_policy: bytes,
+) -> bytes | None:
+    """Trust a single previously COMMITTED migration, never an active write.
+
+    Only one reviewed historical predecessor may be nested. Preserve its
+    complete 0600 ledger bytes for symmetric rollback, not a recreated grant.
+    The exact LKG must descend from the historical migration's candidate.
+    """
+    if not ACTIVE.exists():
+        return None
+    prior_bytes = _root_only(ACTIVE)
+    prior = _json(prior_bytes)
+    if prior.get("phase") != "applied":
+        raise MigrationRefused("previous root migration is not fully applied")
+    if "prior_active_receipt_base64" in prior:
+        raise MigrationRefused("nested root migrations require separate review")
+    plan = _receipt_plan(prior)
+    parent_sha = _sha(prior.get("candidate_sha"))
+    parent_rollback = _sha(prior.get("rollback_sha"))
+    for ancestor, descendant in (
+        (parent_rollback, parent_sha),
+        (parent_sha, rollback_sha),
+    ):
+        check = subprocess.run(
+            ["git", "-c", f"safe.directory={MANAGED_GIT}",
+             "-C", str(MANAGED_GIT), "merge-base", "--is-ancestor",
+             ancestor, descendant],
+            capture_output=True, check=False, timeout=15,
+        )
+        if check.returncode != 0:
+            raise MigrationRefused("prior reviewed root migration lineage invalid")
+    if digest(root_policy) != prior.get("applied_sha256"):
+        raise MigrationRefused("prior root migration receipt and policy diverged")
+    try:
+        original = base64.b64decode(prior["original_policy_base64"], validate=True)
+    except (ValueError, KeyError, TypeError) as exc:
+        raise MigrationRefused("prior root migration original bytes unavailable") from exc
+    if digest(original) != prior.get("original_sha256"):
+        raise MigrationRefused("prior root migration original digest differs")
+    old = _reviewed_git_policy(parent_rollback)
+    new = _reviewed_git_policy(parent_sha)
+    if _planned_delta(old, new) != plan:
+        raise MigrationRefused("prior migration is not its reviewed source delta")
+    parent_applied = _overlay_policy(_json(original), plan)
+    if digest(parent_applied) != prior.get("applied_sha256"):
+        raise MigrationRefused("prior migration reviewed overlay digest differs")
+    if len(prior_bytes) > 32768:
+        raise MigrationRefused("prior root migration receipt exceeds bounded nesting")
+    return prior_bytes
 
 
 def _receipt_match(
@@ -348,16 +401,18 @@ def stage_for_candidate(candidate_sha: str, rollback_sha: str) -> str:
     _ledger_dir()
     if ACTIVE.exists():
         receipt = _json(_root_only(ACTIVE))
-        _receipt_match(receipt, candidate_sha, rollback_sha, plan)
-        raw, _ = _current_root_policy()
-        phase = receipt.get("phase")
-        if phase == "staged" and digest(raw) == receipt.get("staged_sha256"):
-            return "ALREADY_STAGED"
-        if phase == "applied" and digest(raw) == receipt.get("applied_sha256"):
-            return "ALREADY_APPLIED"
-        raise MigrationRefused("prior migration phase or root bytes require recovery")
+        if receipt.get("candidate_sha") == candidate_sha:
+            _receipt_match(receipt, candidate_sha, rollback_sha, plan)
+            raw, _ = _current_root_policy()
+            phase = receipt.get("phase")
+            if phase == "staged" and digest(raw) == receipt.get("staged_sha256"):
+                return "ALREADY_STAGED"
+            if phase == "applied" and digest(raw) == receipt.get("applied_sha256"):
+                return "ALREADY_APPLIED"
+            raise MigrationRefused("prior migration phase or root bytes require recovery")
 
     original, root_policy = _current_root_policy()
+    parent_bytes = _trusted_prior_applied_receipt(rollback_sha, original)
     if set(root_policy) != set(previous):
         raise MigrationRefused("root recovery policy differs in structure from old source")
     for key in root_policy:
@@ -382,6 +437,9 @@ def stage_for_candidate(candidate_sha: str, rollback_sha: str) -> str:
         "reviewed_delta": {key: sorted(v) for key, v in plan.items()},
         "recorded_at": datetime.now(timezone.utc).isoformat(),
     }
+    if parent_bytes is not None:
+        receipt["prior_active_receipt_sha256"] = digest(parent_bytes)
+        receipt["prior_active_receipt_base64"] = base64.b64encode(parent_bytes).decode("ascii")
     # Durable undo receipt precedes any protected policy replacement.
     _atomic(ACTIVE, (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode())
     _atomic(POLICY, staged)
@@ -445,16 +503,38 @@ def restore_for_baseline(target_sha: str) -> str:
     if (((control.get("last_known_good") or {}).get("manifest") or {}).get("revision")
             != target_sha):
         raise MigrationRefused("root LKG no longer matches exact rollback target")
+    # Verify the nested predecessor BEFORE ANY policy or receipt write,
+    # rather than finding damaged/counterfeit parent evidence mid-rollback.
+    parent_bytes = None
+    if "prior_active_receipt_base64" in receipt:
+        try:
+            parent_bytes = base64.b64decode(
+                receipt["prior_active_receipt_base64"], validate=True,
+            )
+        except (TypeError, ValueError) as exc:
+            raise MigrationRefused("prior root receipt encoded bytes invalid") from exc
+        if digest(parent_bytes) != receipt.get("prior_active_receipt_sha256"):
+            raise MigrationRefused("prior root receipt checksum mismatch")
+        parent = _json(parent_bytes)
+        if (parent.get("phase") != "applied"
+                or "prior_active_receipt_base64" in parent
+                or _receipt_plan(parent) not in APPROVED_PLANS
+                or parent.get("applied_sha256") != receipt.get("original_sha256")):
+            raise MigrationRefused("prior migration cannot be restored as trusted")
     _ledger_dir()
+    archived = LEDGER_DIR / ("restored-" + _sha(receipt["candidate_sha"]) + ".json")
+    if archived.exists():
+        raise MigrationRefused("audited migration archive already exists")
     if digest(current) in {receipt.get("staged_sha256"), receipt.get("applied_sha256")}:
         _atomic(POLICY, original)
     receipt["phase"] = "restored"
     receipt["restored_at"] = datetime.now(timezone.utc).isoformat()
-    archived = LEDGER_DIR / ("restored-" + _sha(receipt["candidate_sha"]) + ".json")
-    if archived.exists():
-        raise MigrationRefused("audited migration archive already exists")
     _atomic(archived, (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode())
-    ACTIVE.unlink()
+    if parent_bytes is not None:
+        # Restore exact predecessor 0600 ledger without dropping its audit trail.
+        _atomic(ACTIVE, parent_bytes)
+    else:
+        ACTIVE.unlink()
     return "RESTORED"
 
 

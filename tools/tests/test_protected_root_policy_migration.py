@@ -513,3 +513,103 @@ def test_p0_1993_tampered_or_foreign_receipt_never_restores_as_trusted(monkeypat
     with pytest.raises(m.MigrationRefused,match="unreviewed"):
         m.restore_for_baseline(BASE)
     assert policy.read_bytes() != original
+
+
+def test_nested_reviewed_root_migration_restores_parent_receipt_exactly(monkeypatch, tmp_path):
+    """Historical applied #1974 root policy remains durable under #1993 child."""
+    from types import SimpleNamespace
+    previous = source()
+    first = source(new=True)
+    second = {**first,
+              "required_user_units": first["required_user_units"] + [
+                  "jason-release-approval-only.timer"],
+              "allowed_user_units": first["allowed_user_units"] + [
+                  "jason-release-approval-only.service"]}
+    policy, before, _ = configure(monkeypatch, tmp_path,
+                                   policy=previous, old=previous, candidate=first)
+    assert m.stage_for_candidate(CANDIDATE, BASE) == "STAGED_ALLOWED_ONLY"
+    assert m.apply_for_candidate(CANDIDATE, BASE) == "APPLIED_REQUIRED_AFTER_HEALTH"
+    parent_receipt=m.ACTIVE.read_bytes()
+    parent_policy=policy.read_bytes()
+    CHILD="c"*40
+    sources={BASE:previous,CANDIDATE:first,CHILD:second}
+    monkeypatch.setattr(m,"_source_policy",lambda sha:sources[sha])
+    monkeypatch.setattr(m,"_reviewed_git_policy",lambda sha:sources[sha])
+    monkeypatch.setattr(m.subprocess,"run",lambda *args,**kw:SimpleNamespace(returncode=0))
+    (tmp_path/"production-control-state.json").write_text(json.dumps({
+        "schema_version":"1.0","last_known_good":{"manifest":{"revision":CANDIDATE}}}))
+    assert m.preview_exact_migration(CHILD,CANDIDATE)=="OWNER_CCC_REVIEWED_DELTA_ONLY"
+    assert m.stage_for_candidate(CHILD,CANDIDATE)=="STAGED_ALLOWED_ONLY"
+    child_receipt=json.loads(m.ACTIVE.read_text())
+    assert child_receipt["prior_active_receipt_sha256"] == hashlib.sha256(parent_receipt).hexdigest()
+    assert m.apply_for_candidate(CHILD,CANDIDATE)=="APPLIED_REQUIRED_AFTER_HEALTH"
+    assert m.prepare_rollback(CANDIDATE)=="ROLLBACK_ALLOWED_STAGE"
+    # Candidate-only user units must not remain installed at final restoration.
+    assert m.complete_rollback(CANDIDATE)=="RESTORED"
+    assert policy.read_bytes()==parent_policy
+    assert m.ACTIVE.read_bytes()==parent_receipt
+    assert (tmp_path/"recovery/approved-migrations"/("restored-"+CHILD+".json")).exists()
+    assert before != policy.read_bytes()
+
+
+@pytest.mark.parametrize("fault",["staged","bad_digest","bad_lineage","already_nested"])
+def test_nested_reviewed_root_migration_rejects_untrusted_parent(monkeypatch,tmp_path,fault):
+    from types import SimpleNamespace
+    previous=source()
+    first=source(new=True)
+    second={**first,
+            "required_user_units":first["required_user_units"]+["jason-release-approval-only.timer"],
+            "allowed_user_units":first["allowed_user_units"]+["jason-release-approval-only.service"]}
+    policy,_,_=configure(monkeypatch,tmp_path,policy=previous,old=previous,candidate=first)
+    assert m.stage_for_candidate(CANDIDATE,BASE)=="STAGED_ALLOWED_ONLY"
+    if fault!="staged":
+        assert m.apply_for_candidate(CANDIDATE,BASE)=="APPLIED_REQUIRED_AFTER_HEALTH"
+    parent=json.loads(m.ACTIVE.read_text())
+    if fault=="bad_digest":parent["applied_sha256"]="0"*64
+    if fault=="already_nested":parent["prior_active_receipt_base64"]="ZmFrZQ=="
+    m.ACTIVE.write_text(json.dumps(parent))
+    original=policy.read_bytes()
+    CHILD="c"*40
+    sources={BASE:previous,CANDIDATE:first,CHILD:second}
+    monkeypatch.setattr(m,"_source_policy",lambda sha:sources[sha])
+    monkeypatch.setattr(m,"_reviewed_git_policy",lambda sha:sources[sha])
+    monkeypatch.setattr(m.subprocess,"run",
+                        lambda *args,**kw:SimpleNamespace(
+                            returncode=1 if fault=="bad_lineage" else 0))
+    (tmp_path/"production-control-state.json").write_text(json.dumps({
+        "schema_version":"1.0","last_known_good":{"manifest":{"revision":CANDIDATE}}}))
+    with pytest.raises(m.MigrationRefused):
+        m.preview_exact_migration(CHILD,CANDIDATE)
+    with pytest.raises(m.MigrationRefused):
+        m.stage_for_candidate(CHILD,CANDIDATE)
+    assert policy.read_bytes()==original
+
+
+
+def test_nested_root_rollback_rejects_parent_digest_before_policy_write(monkeypatch,tmp_path):
+    from types import SimpleNamespace
+    previous=source()
+    first=source(new=True)
+    second={**first,
+            "required_user_units":first["required_user_units"]+["jason-release-approval-only.timer"],
+            "allowed_user_units":first["allowed_user_units"]+["jason-release-approval-only.service"]}
+    policy,_,_=configure(monkeypatch,tmp_path,policy=previous,old=previous,candidate=first)
+    assert m.stage_for_candidate(CANDIDATE,BASE)=="STAGED_ALLOWED_ONLY"
+    assert m.apply_for_candidate(CANDIDATE,BASE)=="APPLIED_REQUIRED_AFTER_HEALTH"
+    child="c"*40
+    sources={BASE:previous,CANDIDATE:first,child:second}
+    monkeypatch.setattr(m,"_source_policy",lambda sha:sources[sha])
+    monkeypatch.setattr(m,"_reviewed_git_policy",lambda sha:sources[sha])
+    monkeypatch.setattr(m.subprocess,"run",lambda *args,**kw:SimpleNamespace(returncode=0))
+    (tmp_path/"production-control-state.json").write_text(json.dumps({
+        "schema_version":"1.0","last_known_good":{"manifest":{"revision":CANDIDATE}}}))
+    assert m.stage_for_candidate(child,CANDIDATE)=="STAGED_ALLOWED_ONLY"
+    assert m.apply_for_candidate(child,CANDIDATE)=="APPLIED_REQUIRED_AFTER_HEALTH"
+    receipt=json.loads(m.ACTIVE.read_text())
+    receipt["prior_active_receipt_sha256"]="0"*64
+    m.ACTIVE.write_text(json.dumps(receipt))
+    before=policy.read_bytes()
+    with pytest.raises(m.MigrationRefused,match="prior root receipt checksum"):
+        m.restore_for_baseline(CANDIDATE)
+    assert policy.read_bytes()==before
+    assert not (tmp_path/"recovery/approved-migrations"/("restored-"+child+".json")).exists()

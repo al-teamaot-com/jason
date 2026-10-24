@@ -17,16 +17,14 @@ spec.loader.exec_module(migration)
 
 
 def test_stage_b_declares_exactly_one_reviewed_user_unit_plan():
-    candidate = json.loads((ROOT / "config/production-desired-state.json").read_text())
-    old = {**candidate}
-    old["required_user_units"] = [
-        x for x in candidate["required_user_units"]
-        if x != "jason-release-approval-only.timer"
-    ]
-    old["allowed_user_units"] = [
-        x for x in candidate["allowed_user_units"]
-        if x != "jason-release-approval-only.service"
-    ]
+    # Bootstrap upgrades only the root helper. The next Stage B exact SHA
+    # must separately declare both timer and service in desired state.
+    old = json.loads((ROOT / "config/production-desired-state.json").read_text())
+    assert "jason-release-approval-only.timer" not in old["required_user_units"]
+    assert "jason-release-approval-only.service" not in old["allowed_user_units"]
+    candidate = {**old,
+        "required_user_units": old["required_user_units"] + ["jason-release-approval-only.timer"],
+        "allowed_user_units": old["allowed_user_units"] + ["jason-release-approval-only.service"]}
     assert migration._planned_delta(old, candidate) == migration.APPROVED_HELD_OFFER_DELTA
     assert migration.APPROVED_HELD_OFFER_DELTA["required_system_units"] == frozenset()
     assert migration.APPROVED_HELD_OFFER_DELTA["allowed_system_units"] == frozenset()
