@@ -65,6 +65,70 @@ class UniversalPlanIssuer:
     def submit_plan(self, *, requests: tuple[OrchestrationRequest,...], identity,
                     title: str, summary: str, production: bool,
                     ttl_seconds: int = 1800) -> dict:
+        """Issue a plan for the independently authenticated Teams requester."""
+        if not 1 <= len(requests) <= 32:
+            raise ValueError('approval plan requires one to 32 explicit steps')
+        first = requests[0]
+        if identity.authentication_assurance!='botframework-authenticated':
+            raise PermissionError('authenticated Teams requester required')
+        binding=self.bindings.find(microsoft_tenant_id=identity.microsoft_tenant_id,
+                                   microsoft_object_id=identity.microsoft_object_id)
+        if binding is None or binding.status!='active' or binding.jason_identity_id!=first.principal_id:
+            raise PermissionError('requester does not match active Teams identity binding')
+        return self._submit_plan(
+            requests=requests, title=title, summary=summary, production=production,
+            ttl_seconds=ttl_seconds, tenant_id=identity.microsoft_tenant_id,
+            authentication_assurance=identity.authentication_assurance)
+
+    def submit_service_plan(self, *, requests: tuple[OrchestrationRequest,...],
+                            principal, title: str, summary: str, production: bool,
+                            ttl_seconds: int = 1800) -> dict:
+        """Internal workload entry point; never impersonate a human requester.
+
+        The existing AutonomousPrincipal identifies this trusted in-process
+        caller, not business authority. Live JKD identity/grants and a versioned
+        exact-request allowlist are independently required. This method is not
+        exposed as an unauthenticated HTTP/MCP route and never approves a plan.
+        """
+        from autonomous_remediation.autonomous_principal import AutonomousPrincipal
+        if (not isinstance(principal, AutonomousPrincipal)
+                or principal.authentication_assurance != 'workload_identity'
+                or not 1 <= len(requests) <= 32):
+            raise PermissionError('registered workload identity required')
+        record = self.authority.identities.get(principal.principal_id)
+        if (record is None or record.identity_type != 'service'
+                or record.status != 'active'
+                or record.organization_id != principal.organization_id):
+            raise PermissionError('workload identity is not active in this organization')
+        policy = self.policy.for_organization(principal.organization_id)
+        configured = policy.get('service_requesters', {})
+        entry = configured.get(principal.principal_id) if isinstance(configured, dict) else None
+        if (not isinstance(entry, dict)
+                or set(entry) != {'microsoft_tenant_id', 'maximum_plan_steps'}
+                or type(entry['microsoft_tenant_id']) is not str
+                or not 1 <= len(entry['microsoft_tenant_id']) <= 128
+                or any(c.isspace() for c in entry['microsoft_tenant_id'])
+                or type(entry['maximum_plan_steps']) is not int
+                or not 1 <= entry['maximum_plan_steps'] <= 32
+                or len(requests) > entry['maximum_plan_steps']
+                or principal.principal_id in policy.get('disabled_principals', [])):
+            raise PermissionError('workload is outside explicit service approval policy')
+        for request in requests:
+            if (request.requester_kind != 'service'
+                    or request.principal_id != principal.principal_id
+                    or request.organization_id != principal.organization_id
+                    or request.permission_mode not in {'observe', 'execute'}):
+                raise PermissionError('workload plan requester or permission mismatch')
+            self.policy.assert_request_allowed(request, required=True)
+        return self._submit_plan(
+            requests=requests, title=title, summary=summary, production=production,
+            ttl_seconds=ttl_seconds, tenant_id=entry['microsoft_tenant_id'],
+            authentication_assurance=principal.authentication_assurance)
+
+    def _submit_plan(self, *, requests: tuple[OrchestrationRequest,...],
+                     tenant_id: str, authentication_assurance: str,
+                     title: str, summary: str, production: bool,
+                     ttl_seconds: int) -> dict:
         if not 1<=len(requests)<=32:
             raise ValueError('approval plan requires one to 32 explicit steps')
         now=self.clock()
@@ -73,14 +137,9 @@ class UniversalPlanIssuer:
         if (not isinstance(title,str) or not 1<=len(title)<=180
                 or not isinstance(summary,str) or not 1<=len(summary)<=1200):
             raise ValueError('bounded approval title and summary required')
-        if identity.authentication_assurance!='botframework-authenticated':
-            raise PermissionError('authenticated Teams requester required')
-        binding=self.bindings.find(microsoft_tenant_id=identity.microsoft_tenant_id,
-                                   microsoft_object_id=identity.microsoft_object_id)
         first=requests[0]
-        if binding is None or binding.status!='active' or binding.jason_identity_id!=first.principal_id:
-            raise PermissionError('requester does not match active Teams identity binding')
         policy=self.policy.for_organization(first.organization_id)
+        policy_digest=self.policy.digest()
         if not policy['request_retention_allowed']:
             raise PermissionError('approval policy has not authorized request-material retention')
         if production and not policy['production_allowed']:
@@ -92,6 +151,7 @@ class UniversalPlanIssuer:
         for request in requests:
             if request.principal_id!=first.principal_id or request.organization_id!=first.organization_id:
                 raise PermissionError('approval plan cannot mix requesters or organizations')
+            self.policy.assert_request_allowed(request)
             cap=self.capabilities.get_current(capability_name=request.capability_name,allow_pilot=True)
             if cap.lifecycle_status not in {CapabilityLifecycle.ACTIVE,CapabilityLifecycle.PILOT}:
                 raise PermissionError('approval plan capability is not executable')
@@ -107,7 +167,7 @@ class UniversalPlanIssuer:
                 principal_id=request.principal_id,organization_id=request.organization_id,
                 client_id=request.client_id,capability=request.capability_name,
                 requested_mode=PermissionMode(request.permission_mode),
-                authentication_assurance=identity.authentication_assurance))
+                authentication_assurance=authentication_assurance))
             if decision.outcome not in {AuthorityOutcome.ALLOWED,AuthorityOutcome.APPROVAL_REQUIRED}:
                 raise PermissionError('requester lacks authority for reviewed plan step')
             # Explicit versioned retention policy allows the minimum reviewed material;
@@ -133,14 +193,16 @@ class UniversalPlanIssuer:
         # routing based on an email string or a client-editable card field.
         for actor in eligible:
             recipient=self.bindings.find_active_by_jason_identity(jason_identity_id=actor)
-            if recipient is None or recipient.status!='active' or recipient.microsoft_tenant_id!=identity.microsoft_tenant_id:
+            if recipient is None or recipient.status!='active' or recipient.microsoft_tenant_id!=tenant_id:
                 raise PermissionError('approver delivery binding is unavailable or outside request tenant')
         pinned=tuple(pinned)
         first=pinned[0]
         approval_id=self.approval_id_factory()
         if not approval_id.startswith('planapproval-') or len(approval_id)>256:
             raise ValueError('bounded universal approval identifier required')
-        scope=ApprovedPlanScope('plan-'+approval_id,first.organization_id,self.policy.digest(),
+        if self.policy.digest()!=policy_digest:
+            raise PermissionError('approval policy changed during plan issuance')
+        scope=ApprovedPlanScope('plan-'+approval_id,first.organization_id,policy_digest,
             frozenset(r.capability_name for r in pinned),
             frozenset(r.client_id for r in pinned if r.client_id is not None),
             max(_RISK[r.risk] for r in pinned),production,now+timedelta(seconds=ttl_seconds))
@@ -169,6 +231,7 @@ class UniversalPlanIssuer:
             metadata={
                 'plan_fingerprint':fingerprint,'plan_id':scope.plan_id,
                 'policy_digest':scope.policy_digest,
+                'requester_authentication_assurance':authentication_assurance,
                 'card_instance_challenge':card_challenge,
                 'card_instance_challenge_sha256':hashlib.sha256(
                     card_challenge.encode('ascii')).hexdigest(),

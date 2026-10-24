@@ -136,6 +136,13 @@ class ApprovalResumeBridge:
             )
         except ValueError as exc:
             raise PermissionError("orchestration requested mode is not a JKD-001 mode") from exc
+        # The verified human authorizes the action; they do not become the
+        # executing workload. Preserve the existing autonomous identity model
+        # instead of claiming that a service authenticated as a Teams human.
+        requester_assurance = (
+            'workload_identity' if original_request.requester_kind == 'service'
+            else authentication_assurance
+        )
         decision = self.authority.evaluate(AuthorityRequest(
             request_id=original_request.execution_id,
             correlation_id=original_request.correlation_id,
@@ -144,7 +151,7 @@ class ApprovalResumeBridge:
             client_id=original_request.client_id,
             capability=original_request.capability_name,
             requested_mode=mode,
-            authentication_assurance=authentication_assurance,
+            authentication_assurance=requester_assurance,
             approval_id=accepted.approval_id,
         ))
         if decision.outcome is not AuthorityOutcome.ALLOWED or decision.execution_context is None:

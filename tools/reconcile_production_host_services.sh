@@ -686,16 +686,24 @@ step_pass observability_reconciliation
 step_start post_exporter_grafana_assurance
 if systemctl cat jason-grafana-assurance.service >/dev/null 2>&1; then
   GRAFANA_REVALIDATION_PASS=0
-  for attempt in 1 2 3; do
-    if timeout --signal=TERM --kill-after=5s 20s \
+  # The existing usage-attribution scrape interval is 120s. A healthy exporter
+  # restart must be followed by a real scrape, not only three 10s pauses.
+  # Bound the whole observation window; no check is skipped or forced PASS.
+  GRAFANA_REVALIDATION_DEADLINE=$((SECONDS + 150))
+  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+    remaining=$((GRAFANA_REVALIDATION_DEADLINE - SECONDS))
+    if [ "$remaining" -le 0 ]; then break; fi
+    check_timeout=$((remaining < 20 ? remaining : 20))
+    if timeout --signal=TERM --kill-after=5s "${check_timeout}s" \
         systemctl start jason-grafana-assurance.service \
         && [ "$(systemctl show jason-grafana-assurance.service -p Result --value)" = "success" ]; then
       echo "GRAFANA_POST_EXPORTER_ASSURANCE=PASS attempt=$attempt"
       GRAFANA_REVALIDATION_PASS=1
       break
     fi
-    if [ "$attempt" -lt 3 ]; then
-      sleep 10
+    remaining=$((GRAFANA_REVALIDATION_DEADLINE - SECONDS))
+    if [ "$attempt" -lt 12 ] && [ "$remaining" -gt 0 ]; then
+      sleep "$((remaining < 15 ? remaining : 15))"
     fi
   done
   if [ "$GRAFANA_REVALIDATION_PASS" -ne 1 ]; then
