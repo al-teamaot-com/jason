@@ -3326,3 +3326,140 @@ def test_preprod_ephemeral_container_is_guarded_by_serialized_release_lock(
 def test_preprod_health_failure_still_removes_container_and_releases_lock(
         monkeypatch, tmp_path):
     _exercise_serialized_preprod(monkeypatch, tmp_path, fail_health=True)
+
+
+
+def test_held_owner_approval_only_publishes_once_never_promotes(tmp_path):
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    import pytest
+    import release_mobile_approval_consumer as mobile_consumer
+    mobile_consumer._install_repo_modules(ROOT)
+    import jason_runtime.mobile_release_approval as mobile_policy
+    import jason_runtime.owner_release_approval_containment as containment
+    hold=tmp_path / "auto-promotion-incident-hold"
+    hold.touch()
+    policy=tmp_path / "mobile-approval-policy.json"
+    policy.write_text("{}")
+    (tmp_path / "records").mkdir()
+    record_id=runner.record_id(SHA_A)
+    record={
+        "release_id":record_id,"state":"production_eligible",
+        "risk_profile":"normal","rollback_sha":SHA_B,
+        "release_candidate":{"candidate_sha":SHA_A},
+        "release_manifest":{"candidate_sha":SHA_A,"rollback_sha":SHA_B},
+        "preproduction":{"acceptance_passed":True,"rollback_readiness_passed":True},
+        "development":{"required_checks_passed":True},
+        "owner_approval":{"approved":False},
+    }
+    runner.atomic_json(tmp_path / "records" / (record_id+".json"),record)
+    reviewed=SimpleNamespace(schema_version="1.0",
+                              allowed_risk_profiles=frozenset({"normal"}))
+    live={"revision":SHA_B,
+          "inspect":{"Config":{"Env":["JASON_RELEASE_MOBILE_APPROVAL_MODE=owner_only_pilot"]}}}
+    control={"schema_version":"1.0","circuit_breaker":{"state":"closed"},
+             "last_known_good":{"manifest":{"revision":SHA_B}}}
+    drift={"schema_version":"1.0","status":"pass","problems":[]}
+    def snapshot(state,filename):
+        return control if filename=="production-control-state.json" else drift
+    with (
+        patch.object(runner,"DEFAULT_STATE",tmp_path),
+        patch.object(runner,"MOBILE_APPROVAL_POLICY",policy),
+        patch.object(runner,"_read_protected_snapshot",side_effect=snapshot),
+        patch.object(runner,"live_runtime",return_value=live),
+        patch.object(runner,"live_production_alignment",return_value={}),
+        patch.object(runner,"authoritative_auto_promotion_head",return_value=SHA_A),
+        patch.object(mobile_consumer,"_install_repo_modules"),
+        patch.object(mobile_consumer,"consume_mobile_release_decisions") as consume,
+        patch.object(mobile_policy,"read_mobile_release_policy",return_value=reviewed),
+        patch.object(containment,"read_release_approval_containment",return_value=SimpleNamespace(active=False)),
+        patch.object(runner,"deploy_production") as deploy,
+        patch.object(runner,"approve_release") as manual_approve,
+    ):
+        assert runner.approval_only_while_promotion_held(ROOT,tmp_path)
+        published=(tmp_path/"mobile-release-offers"/(record_id+".json"))
+        first=published.read_bytes()
+        assert json.loads(first)["live_rollback_sha"]==SHA_B
+        assert json.loads(first)["protected_main_sha"]==SHA_A
+        assert not runner.approval_only_while_promotion_held(ROOT,tmp_path)
+        assert published.read_bytes()==first
+        assert consume.call_count==2
+        deploy.assert_not_called()
+        manual_approve.assert_not_called()
+        hold.unlink()
+        assert not runner.approval_only_while_promotion_held(ROOT,tmp_path)
+        assert consume.call_count==2
+        deploy.assert_not_called()
+
+
+def test_held_owner_approval_only_rejects_unsafe_state_before_any_signed_consumption(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    import pytest
+    import release_mobile_approval_consumer as mobile_consumer
+    hold=tmp_path/"auto-promotion-incident-hold"
+    hold.touch()
+    healthy={"schema_version":"1.0","circuit_breaker":{"state":"closed"},
+             "last_known_good":{"manifest":{"revision":SHA_B}}}
+    drift={"schema_version":"1.0","status":"pass","problems":[]}
+    for unsafe_control,unsafe_drift in [
+        ({**healthy,"circuit_breaker":{"state":"open"}},drift),
+        (healthy,{**drift,"status":"fail","problems":["drift"]}),
+        ({**healthy,"last_known_good":{"manifest":{"revision":SHA_A}}},drift),
+    ]:
+        def snapshot(state,filename):
+            return (unsafe_control if filename=="production-control-state.json"
+                    else unsafe_drift)
+        with (
+            patch.object(runner,"DEFAULT_STATE",tmp_path),
+            patch.object(runner,"_read_protected_snapshot",side_effect=snapshot),
+            patch.object(runner,"live_runtime",return_value={"revision":SHA_B}),
+            patch.object(runner,"live_production_alignment",return_value={}),
+            patch.object(mobile_consumer,"consume_mobile_release_decisions") as consume,
+            patch.object(runner,"deploy_production") as deploy,
+        ):
+            with pytest.raises(runner.ReleaseManagerError):
+                runner.approval_only_while_promotion_held(ROOT,tmp_path)
+        consume.assert_not_called()
+        deploy.assert_not_called()
+
+
+def test_approval_only_held_unit_does_not_disable_or_invoke_promotion():
+    service=(ROOT / "infrastructure/openclaw-operations/systemd/user/jason-release-approval-only.service").read_text()
+    promotion=(ROOT / "infrastructure/openclaw-operations/systemd/user/jason-release-manager.service").read_text()
+    timer=(ROOT / "infrastructure/openclaw-operations/systemd/user/jason-release-approval-only.timer").read_text()
+    assert "ConditionPathExists=/var/lib/jason/openclaw/release-manager/auto-promotion-incident-hold" in service
+    assert "approval-only-held" in service
+    assert "promote-eligible" not in next(
+        line for line in service.splitlines() if line.startswith("ExecStart="))
+    assert "Unit=jason-release-approval-only.service" in timer
+    assert "promote-eligible" in promotion
+    assert "approval-only-held" not in promotion
+    desired=runner.gate.load_json(ROOT/"config/production-desired-state.json")
+    assert "jason-release-approval-only.timer" in desired["required_user_units"]
+    assert "jason-release-approval-only.service" in desired["allowed_user_units"]
+
+
+def test_held_offer_absent_owner_policy_never_reads_signed_decisions(tmp_path):
+    from unittest.mock import patch
+    import release_mobile_approval_consumer as mobile_consumer
+    (tmp_path / "auto-promotion-incident-hold").touch()
+    control={"schema_version":"1.0","circuit_breaker":{"state":"closed"},
+             "last_known_good":{"manifest":{"revision":SHA_B}}}
+    drift={"schema_version":"1.0","status":"pass","problems":[]}
+    with (
+        patch.object(runner,"DEFAULT_STATE",tmp_path),
+        patch.object(runner,"MOBILE_APPROVAL_POLICY",tmp_path / "missing-policy.json"),
+        patch.object(runner,"_read_protected_snapshot",
+                     side_effect=lambda root,name: (
+                         control if name=="production-control-state.json" else drift)),
+        patch.object(runner,"live_runtime",return_value={"revision":SHA_B}),
+        patch.object(runner,"live_production_alignment",return_value={}),
+        patch.object(mobile_consumer,"consume_mobile_release_decisions") as consume,
+        patch.object(runner,"deploy_production") as deploy,
+    ):
+        assert runner.approval_only_while_promotion_held(ROOT,tmp_path) is False
+        assert not (tmp_path/"mobile-release-offers").exists()
+        consume.assert_not_called()
+        deploy.assert_not_called()
