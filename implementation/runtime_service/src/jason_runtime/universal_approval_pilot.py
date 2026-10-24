@@ -56,6 +56,10 @@ def settings_defaults(environ: Mapping[str, str], config: Path = CONFIG, *, now=
     if 'JASON_UNIVERSAL_APPROVAL_MODE' in environ:
         return (environ['JASON_UNIVERSAL_APPROVAL_MODE'].strip().lower(),
                 environ.get('JASON_UNIVERSAL_APPROVAL_POLICY', DEFAULT_POLICY))
+    # MCP embeds the same composition for governed tools, not the Teams
+    # callback/maintenance service. Never activate this runtime-only default there.
+    if 'JASON_MCP_RESOURCE_URL' in environ:
+        return 'off', DEFAULT_POLICY
     if re.fullmatch(r'[0-9a-f]{40}', environ.get('JASON_SOURCE_REVISION', '')) is None:
         return 'off', DEFAULT_POLICY
     campaign = load_campaign(config, now=now)
