@@ -301,3 +301,41 @@ installer and root release transition installer as production_control_core
 for any change class. This prevents release-offer automation from treating
 systemd and root-policy edits as routine normal releases. Protected CI and
 fresh exact SHA Owner + CCC approval still apply independently.
+
+## Protected migration ledger chaining - root-helper bootstrap (#1993)
+
+The exact Stage B attempt e1f7016838ffec71e2667d9129012b0e0077d0bc
+was legitimately approved and CCC-reviewed. Preproduction passed, but native
+production host reconciliation refused to install new user units because
+of a preexisting root migration receipt requiring independent review.
+The independent root-approved policy can retain an earlier reviewed,
+committed migration receipt (such as #1974). The installed helper was
+hard-coded to reject all subsequent reviewed delta plans whenever that
+root-only receipt existed. It is not permissible to delete an old
+applied receipt, turn off the auto-promotion hold or install user units by
+running privileged commands outside the release reconciler.
+
+The new root helper, introduced in a distinct bootstrap release with no
+new user-unit declarations, supports exactly one nested previously
+committed reviewed migration. Only a root-owned receipt with phase=applied,
+the exact current independent root-policy digest, valid original bytes,
+reviewed fixed delta, immutable parent source ancestry and protected
+last-known-good lineage can be nested. Any partial migration, malformed
+receipt, wrong ancestry, already nested receipt, unexpected source delta
+or root-policy mismatch remains a denial. The later separately reviewed
+Stage B release preserves the complete root-only parent receipt, its digest,
+source IDs and review metadata inside a new root-only child receipt before
+the new root policy is staged. Only the exact independently approved new
+unit plan can be staged and committed. On child rollback, the parent bytes
+are independently verified before any protected-policy write and then
+restored byte-for-byte, retaining the original parent audit chain. The
+original systemd incident hold remains active throughout.
+
+This design must first pass protected CI, new exact-source Owner/CCC approval,
+native preproduction and postdeployment CCC at the no-units bootstrap.
+Only then may a separate Stage B timer declaration be prepared, reviewed,
+approved and deployed. A verified installed timer does not prove the
+Universal Teams Approver is operational. The total rollout remains 0 of 3
+representative live approval workflows certified until genuine Teams human
+callback, origin card identity, Deny/expiry/replay, authorized bounded
+execution and audit are all independently proven.
