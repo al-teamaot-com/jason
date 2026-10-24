@@ -17,27 +17,43 @@ spec.loader.exec_module(migration)
 
 
 def test_stage_b_declares_exactly_one_reviewed_user_unit_plan():
-    # Bootstrap upgrades only the root helper. The next Stage B exact SHA
-    # must separately declare both timer and service in desired state.
-    old = json.loads((ROOT / "config/production-desired-state.json").read_text())
-    assert "jason-release-approval-only.timer" not in old["required_user_units"]
-    assert "jason-release-approval-only.service" not in old["allowed_user_units"]
-    candidate = {**old,
-        "required_user_units": old["required_user_units"] + ["jason-release-approval-only.timer"],
-        "allowed_user_units": old["allowed_user_units"] + ["jason-release-approval-only.service"]}
-    assert migration._planned_delta(old, candidate) == migration.APPROVED_HELD_OFFER_DELTA
+    # Accept both exact stages: bootstrap (units absent) and reviewed Stage B
+    # (units declared together). Always compare against the original baseline.
+    observed = json.loads((ROOT / "config/production-desired-state.json").read_text())
+    timer = "jason-release-approval-only.timer"
+    service = "jason-release-approval-only.service"
+    timer_present = timer in observed["required_user_units"]
+    service_present = service in observed["allowed_user_units"]
+    assert timer_present == service_present, "approval timer/service must be declared together"
+
+    if timer_present:
+        stage_b = observed
+        stage_a = {
+            **observed,
+            "required_user_units": [x for x in observed["required_user_units"] if x != timer],
+            "allowed_user_units": [x for x in observed["allowed_user_units"] if x != service],
+        }
+    else:
+        stage_a = observed
+        stage_b = {
+            **observed,
+            "required_user_units": observed["required_user_units"] + [timer],
+            "allowed_user_units": observed["allowed_user_units"] + [service],
+        }
+
+    assert migration._planned_delta(stage_a, stage_b) == migration.APPROVED_HELD_OFFER_DELTA
     assert migration.APPROVED_HELD_OFFER_DELTA["required_system_units"] == frozenset()
     assert migration.APPROVED_HELD_OFFER_DELTA["allowed_system_units"] == frozenset()
 
     for wrong in (
-        {**candidate, "allowed_user_units": old["allowed_user_units"]},
-        {**candidate, "required_user_units": old["required_user_units"]},
-        {**candidate, "allowed_system_units": candidate["allowed_system_units"] + ["jason-unsafe.service"]},
+        {**stage_b, "allowed_user_units": stage_a["allowed_user_units"]},
+        {**stage_b, "required_user_units": stage_a["required_user_units"]},
+        {**stage_b, "allowed_system_units": stage_b["allowed_system_units"] + ["jason-unsafe.service"]},
     ):
         with pytest.raises(migration.MigrationRefused):
-            migration._planned_delta(old, wrong)
+            migration._planned_delta(stage_a, wrong)
     with pytest.raises(migration.MigrationRefused):
-        migration._planned_delta(candidate, old)
+        migration._planned_delta(stage_b, stage_a)
 
 
 def test_stage_b_root_scripts_run_exact_plan_stage_before_install_and_apply_after():
