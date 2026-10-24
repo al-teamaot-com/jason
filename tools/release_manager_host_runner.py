@@ -619,7 +619,13 @@ def classify_change_risk(change_class: str, files: list[str]) -> str:
     paths = [str(value) for value in files]
     if any(
         path.startswith("tools/release_manager")
-        or path == "config/release-manager-policy.json"
+        or path in {
+            "config/release-manager-policy.json",
+            "config/production-desired-state.json",
+            "tools/install_release_host_reconciler.py",
+            "tools/install_release_control_transition.py",
+            "tools/protected_root_policy_migration.py",
+        }
         or path in {".dockerignore", "infrastructure/jason-runtime/Dockerfile"}
         or path in {
             "tools/reconcile_production_host_services.sh",

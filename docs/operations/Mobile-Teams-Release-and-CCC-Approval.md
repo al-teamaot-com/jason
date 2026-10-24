@@ -288,3 +288,16 @@ production promotion. A card sent is NOT proof of a human Teams click;
 live recipient/card origin, signed callback, Approve, Deny, expiry and
 replay remain separate measured acceptance criteria. **Stage B being
 deployed does not mean the Universal Teams Approver is complete.**
+
+## Root/host unit changes must never be normal risk
+
+Stage B contains root-protected desired-state declarations and trusted
+host migration steps. The original Release Manager risk classifier omitted
+some of these files and initially classified the first preproduction
+candidate as normal risk. That was detected before release approval or
+promotion. The protected policy and runtime classifier now categorize
+config/production-desired-state.json, root migrator, root host reconciler
+installer and root release transition installer as production_control_core
+for any change class. This prevents release-offer automation from treating
+systemd and root-policy edits as routine normal releases. Protected CI and
+fresh exact SHA Owner + CCC approval still apply independently.

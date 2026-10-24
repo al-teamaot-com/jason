@@ -3469,3 +3469,16 @@ def test_held_offer_absent_owner_policy_never_reads_signed_decisions(tmp_path):
         assert not (tmp_path/"mobile-release-offers").exists()
         consume.assert_not_called()
         deploy.assert_not_called()
+
+def test_root_policy_and_host_install_are_always_protected_core_risk():
+    """No normal-risk Teams offer for a root/approval unit-policy change."""
+    protected = (
+        "config/production-desired-state.json",
+        "tools/install_release_host_reconciler.py",
+        "tools/install_release_control_transition.py",
+        "tools/protected_root_policy_migration.py",
+    )
+    for path in protected:
+        assert runner.classify_change_risk("feature", [path]) == "production_control_core"
+        assert runner.classify_change_risk("support", [path]) == "production_control_core"
+    assert runner.classify_change_risk("feature", ["docs/operations/readme.md"]) == "normal"
