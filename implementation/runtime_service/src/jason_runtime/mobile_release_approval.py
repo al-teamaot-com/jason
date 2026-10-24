@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import fcntl
 import logging
 import os
 from pathlib import Path
@@ -609,6 +610,71 @@ class MobileReleaseApprovalMaintenance:
             for request in self.requests.list_all()
             if request.capability == CAPABILITY
         }
+        # The normal offer remains one-shot. A *separate* owner-console
+        # renewal marker permits one NEW card, never replay of an expired one.
+        # Serialize across runtime workers and re-read the ledger while locked.
+        renewal_dir = self.state_root / "mobile-release-renewals"
+        if renewal_dir.is_dir():
+            for marker in sorted(renewal_dir.glob("release-*-renew-*.json"),
+                                 key=lambda item: item.stat().st_mtime, reverse=True)[:30]:
+                matched = re.fullmatch(
+                    r"(release-[0-9a-f]{16})-renew-([0-9a-f]{32})\.json",
+                    marker.name,
+                )
+                if matched is None:
+                    continue
+                release_id, nonce = matched.groups()
+                try:
+                    with marker.open("rb") as handle:
+                        try:
+                            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        except BlockingIOError:
+                            continue
+                        related = [
+                            req for req in self.requests.list_all()
+                            if req.capability == CAPABILITY
+                            and req.metadata.get("release_id") == release_id
+                        ]
+                        if (not related or len(related) > RENEWAL_LIMIT
+                                or any(req.status is not ApprovalRequestStatus.EXPIRED
+                                       for req in related)
+                                or any(req.metadata.get("renewal_nonce") == nonce
+                                       for req in related)):
+                            continue
+                        previous = max(related, key=lambda req: req.requested_at)
+                        candidate = read_eligible_release(self.state_root, release_id, policy)
+                        parent_id = read_explicit_release_renewal(
+                            self.state_root, self.requests, candidate, policy,
+                            nonce, requested_at=now,
+                        )
+                        if parent_id != previous.approval_id:
+                            continue
+                        read_release_approval_containment(
+                            self.state_root
+                        ).require_request_eligible(now)
+                        request = create_mobile_release_request(
+                            candidate, policy, now=now,
+                            renewed_from=parent_id, renewal_nonce=nonce,
+                        )
+                        # Create BEFORE network delivery. A crash after this
+                        # point blocks unattended replay or duplicate sends.
+                        self.approvals.create(request, now=now)
+                        read_release_approval_containment(
+                            self.state_root
+                        ).require_request_eligible(request.requested_at)
+                        receipts = self.sender.send(request)
+                        if len(receipts) != len(policy.owner_identity_ids):
+                            raise RuntimeError("renewed Teams card delivery not confirmed")
+                        self.requests.put(replace(
+                            request, metadata={
+                                **request.metadata,
+                                "delivery_message_ids": ",".join(receipts),
+                            },
+                        ))
+                        return True
+                except (OSError, ValueError, TypeError, PermissionError,
+                        json.JSONDecodeError):
+                    continue
         for path in paths:
             try:
                 offer = json.loads(path.read_text(encoding="utf-8"))
