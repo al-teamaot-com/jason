@@ -2007,6 +2007,147 @@ def verified_support_context_recipe(item: Mapping[str, str]) -> tuple[list[str],
     return None
 
 
+def readmit_verified_stale_clean_source(
+    state: dict[str, Any], eligible: list[dict[str, str]],
+    repo: Path, spool: Path, gate, policy: Mapping[str, Any],
+    *, max_active: int,
+) -> list[str]:
+    """Reissue one source-only P0 edit turn after a clean worktree becomes stale.
+
+    Never fast-forward, reset, delete or reuse the old worktree; its immutable
+    source/reasoning evidence remains available. A new isolated branch must
+    match current origin/main, and the original model's requests pass the
+    existing read-only source gates again before a new request is admitted.
+    """
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active = sum(
+        1 for rec in records.values()
+        if isinstance(rec, Mapping)
+        and rec.get('phase') in {'diagnosing', 'implementing', 'ci_repair_needed', 'ci_repairing'}
+    )
+    slots = max(0, max(1, int(max_active)) - active)
+    resumed: list[str] = []
+    for item in eligible:
+        if not slots:
+            break
+        item_id = str(item.get('id') or '')
+        record = records.get(item_id)
+        if (item.get('priority') != 'P0'
+                or not isinstance(record, dict)
+                or record.get('phase') != 'blocked'
+                or record.get('reason') !=
+                    'EvidenceToolError: stale worktree requires governed clean-source recovery'
+                or record.get('stale_source_recovery_request_id')
+                or record.get('pr_number')
+                or record.get('blocker_class') in {'external_authority', 'blocked_by_dependency'}
+                or (isinstance(record.get('recovery_handoff_intake'), Mapping)
+                    and record['recovery_handoff_intake'].get('status') == 'awaiting_governed_repair')):
+            continue
+        previous_id = str(record.get('reasoning_request_id') or '')
+        old_sha = str(record.get('evidence_source_revision') or '')
+        old_branch = str(record.get('branch') or '')
+        allowed_branch = (re.escape(branch_name(item_id))
+                          + r'-(?:anchor|context|evidence)-[0-9a-f]{12}')
+        if (re.fullmatch(r'[0-9a-f]{64}', previous_id) is None
+                or re.fullmatch(r'[0-9a-f]{40}', old_sha) is None
+                or re.fullmatch(allowed_branch, old_branch) is None):
+            continue
+        try:
+            path = spool / 'reasoning' / 'requests' / (previous_id + '.json')
+            if not path.is_file() or path.stat().st_size > 200000:
+                continue
+            old_request = json.loads(path.read_text(encoding='utf-8'))
+            old_response = reasoning_response(spool, previous_id)
+            if (not isinstance(old_request, dict)
+                    or old_request.get('request_id') != previous_id
+                    or request_id(old_request) != previous_id
+                    or old_request.get('kind') != 'edit_plan'
+                    or old_request.get('support_item') != item_id
+                    or not isinstance(old_request.get('context'), dict)
+                    or 'stale_clean_source_recovery' in old_request['context']
+                    or not isinstance(old_response, Mapping)
+                    or old_response.get('status') != 'succeeded'
+                    or old_response.get('request_id') != previous_id
+                    or old_response.get('kind') != 'edit_plan'
+                    or old_response.get('support_item') != item_id):
+                continue
+            result = old_response.get('result')
+            if (not isinstance(result, Mapping)
+                    or result.get('edits') or result.get('test_paths')
+                    or result.get('blocked_reason')
+                    or not isinstance(result.get('evidence_requests'), list)
+                    or not result['evidence_requests']):
+                continue
+
+            previous_tree = support_worktree_path(item_id, old_branch)
+            if (previous_tree.is_symlink() or not previous_tree.is_dir()
+                    or run(['git', 'branch', '--show-current'], cwd=previous_tree) != old_branch
+                    or run(['git', 'status', '--porcelain', '--untracked-files=all'], cwd=previous_tree)
+                    or run(['git', 'rev-parse', 'HEAD'], cwd=previous_tree) != old_sha):
+                continue
+            run(['git', 'fetch', '--no-tags', 'origin', 'main'], cwd=repo)
+            current_sha = run(['git', 'rev-parse', 'origin/main'], cwd=repo)
+            if (re.fullmatch(r'[0-9a-f]{40}', current_sha) is None
+                    or current_sha == old_sha):
+                continue
+            run(['git', 'merge-base', '--is-ancestor', old_sha, current_sha], cwd=repo)
+
+            branch = branch_name(item_id) + '-context-' + previous_id[:12]
+            current_tree = ensure_worktree(repo, item_id, branch)
+            if (run(['git', 'branch', '--show-current'], cwd=current_tree) != branch
+                    or run(['git', 'status', '--porcelain', '--untracked-files=all'], cwd=current_tree)
+                    or run(['git', 'rev-parse', 'HEAD'], cwd=current_tree) != current_sha):
+                continue
+            evidence_policy = engineering_evidence_tools.load_policy(repo)
+            excerpts, receipts = engineering_evidence_tools.execute_tools(
+                worktree=current_tree, requests=result['evidence_requests'],
+                gate=gate, repair_policy=policy, support=sys.modules[__name__],
+                policy=evidence_policy,
+            )
+            if not excerpts or not receipts:
+                continue
+            context = {
+                'stale_clean_source_recovery': {
+                    'previous_request_id': previous_id,
+                    'previous_source_revision': old_sha,
+                    'current_source_revision': current_sha,
+                    'retry_limit': 1,
+                },
+                'validation_feedback': (
+                    'Source changed while previously reviewed evidence was waiting. '
+                    'Only the newly read, policy-filtered current-source excerpts '
+                    'are authoritative. Preserve all approvals, provider boundaries '
+                    'and independent test/release gates. If these exact excerpts '
+                    'are insufficient, return a genuine blocker, not imagined edits.'
+                ),
+                'source_excerpts': excerpts,
+                'read_only_tool_receipts': receipts,
+                'pinned_source_revision': current_sha,
+            }
+            new_id = queue_reasoning(spool, kind='edit_plan', item=item, context=context)
+            if new_id == previous_id or re.fullmatch(r'[0-9a-f]{64}', new_id) is None:
+                continue
+            record.update({
+                'phase': 'implementing',
+                'branch': branch,
+                'reasoning_request_id': new_id,
+                'evidence_source_revision': current_sha,
+                'evidence_last_receipts': receipts,
+                'stale_source_recovery_request_id': new_id,
+                'stale_source_recovery_original_request_id': previous_id,
+                'stale_source_recovery_previous_revision': old_sha,
+                'stale_source_recovery_current_revision': current_sha,
+                'reason': 'One bounded clean-source re-evaluation queued; old evidence preserved.',
+                'updated_at': now(),
+            })
+            resumed.append(item_id)
+            slots -= 1
+        except (WorkerError, OSError, ValueError, TypeError, json.JSONDecodeError,
+                engineering_evidence_tools.EvidenceToolError):
+            continue
+    return resumed
+
+
 def readmit_missing_support_source_context(
     state: dict[str, Any], eligible: list[dict[str, str]],
     repo: Path, spool: Path, gate, policy: Mapping[str, Any],
@@ -3074,6 +3215,9 @@ def main() -> int:
     readmit_recovered_reasoning(state, support, spool, max_active=args.max_active)
     readmit_after_verified_transport_recovery(state, support, spool, max_active=args.max_active)
     readmit_after_verified_credit_replenishment(state, support, spool, max_active=args.max_active)
+    readmit_verified_stale_clean_source(
+        state, support, repo, spool, gate, policy, max_active=args.max_active,
+    )
     readmit_missing_support_source_context(
         state, support, repo, spool, gate, policy, max_active=args.max_active,
     )
