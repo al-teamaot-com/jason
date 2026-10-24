@@ -2093,6 +2093,8 @@ def readmit_verified_stale_clean_source(
             run(['git', 'merge-base', '--is-ancestor', old_sha, current_sha], cwd=repo)
 
             branch = branch_name(item_id) + '-context-' + previous_id[:12]
+            if branch == old_branch:
+                continue  # A recovery must never reuse the existing stale worktree.
             current_tree = ensure_worktree(repo, item_id, branch)
             if (run(['git', 'branch', '--show-current'], cwd=current_tree) != branch
                     or run(['git', 'status', '--porcelain', '--untracked-files=all'], cwd=current_tree)
