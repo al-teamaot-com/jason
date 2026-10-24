@@ -3587,42 +3587,43 @@ def test_owner_console_does_not_mint_from_noninteractive_session(tmp_path, monke
     assert not (case.root / "mobile-release-renewals").exists()
 
 
-@__import__("pytest").mark.parametrize("mode", [
-    "not_expired", "denied", "wrong_main", "wrong_baseline",
-    "open_breaker", "wrong_mode", "unsafe_policy", "missing_hold",
-])
-def test_owner_console_denies_replayed_or_unsafe_renewal(
-    tmp_path, monkeypatch, mode,
-):
-    import json
-    from dataclasses import replace
-    from connectors.src.jason_connectors.approval_requests import ApprovalRequestStatus
+def test_owner_console_denies_replayed_or_unsafe_renewal(tmp_path, monkeypatch):
     from implementation.runtime_service.tests.test_mobile_release_approval import policy_file
-    case = _owner_expired_console_case(
-        tmp_path, monkeypatch,
-        previous_status=("pending" if mode == "not_expired"
-                         else "denied" if mode == "denied" else "expired"),
+    cases = (
+        "not_expired", "denied", "wrong_main", "wrong_baseline",
+        "open_breaker", "wrong_mode", "unsafe_policy", "missing_hold",
     )
-    if mode == "wrong_main":
-        monkeypatch.setattr(runner, "authoritative_auto_promotion_head",
-                            lambda repo: "a" * 40)
-    elif mode == "wrong_baseline":
-        monkeypatch.setattr(runner, "live_production_alignment",
-                            lambda revision: (_ for _ in ()).throw(
-                                runner.ReleaseManagerError("unaligned")))
-    elif mode == "open_breaker":
-        monkeypatch.setattr(runner, "_read_protected_snapshot",
-                            lambda root, name: (
-                                {"circuit_breaker": {"state": "open"}}
-                                if name == "production-control-state.json"
-                                else {"status": "pass", "problems": []}))
-    elif mode == "wrong_mode":
-        monkeypatch.setattr(runner, "live_release_mobile_approval_mode",
-                            lambda live: "off")
-    elif mode == "unsafe_policy":
-        policy_file(tmp_path, allowed_risk_profiles=["production_control_core"])
-    elif mode == "missing_hold":
-        (case.root / "auto-promotion-incident-hold").unlink()
-    with __import__("pytest").raises((runner.ReleaseManagerError, PermissionError)):
-        _owner_console_renewal(case, monkeypatch)
-    assert not (case.root / "mobile-release-renewals").exists()
+    for mode in cases:
+        with monkeypatch.context() as local:
+            root = tmp_path / mode
+            root.mkdir()
+            case = _owner_expired_console_case(
+                root, local,
+                previous_status=("pending" if mode == "not_expired"
+                                 else "denied" if mode == "denied" else "expired"),
+            )
+            if mode == "wrong_main":
+                local.setattr(runner, "authoritative_auto_promotion_head",
+                              lambda repo: "a" * 40)
+            elif mode == "wrong_baseline":
+                local.setattr(runner, "live_production_alignment",
+                              lambda revision: (_ for _ in ()).throw(
+                                  runner.ReleaseManagerError("unaligned")))
+            elif mode == "open_breaker":
+                local.setattr(runner, "_read_protected_snapshot",
+                              lambda root, name: (
+                                  {"circuit_breaker": {"state": "open"}}
+                                  if name == "production-control-state.json"
+                                  else {"status": "pass", "problems": []}))
+            elif mode == "wrong_mode":
+                local.setattr(runner, "live_release_mobile_approval_mode",
+                              lambda live: "off")
+            elif mode == "unsafe_policy":
+                policy_file(root, allowed_risk_profiles=["production_control_core"])
+            elif mode == "missing_hold":
+                (case.root / "auto-promotion-incident-hold").unlink()
+            with unittest.TestCase().assertRaises((
+                runner.ReleaseManagerError, PermissionError,
+            )):
+                _owner_console_renewal(case, local)
+            assert not (case.root / "mobile-release-renewals").exists()
