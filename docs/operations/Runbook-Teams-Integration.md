@@ -402,3 +402,11 @@ identity verification, or clear an unresolved delivery block. Verify the deploye
 gateway source, then read the actual newly sent card and signed response before
 marking end-to-end acceptance. Existing uncertain requests must not be blindly
 resent.
+
+The shared deploy_live_container.py supports --health-runtime node for this
+existing Node gateway. Python stays the default for runtime/MCP. Both modes
+require HTTP 200 with a bounded timeout and use the same failure rollback.
+For an exact-source gateway image replacement, preserve the current container
+settings, signing-key/token mounts, network, public port and durable decision
+store. Use the shared preflight and rollback mechanism; do not rerun the
+historical initial OpenClaw port cutover to update an already direct gateway.
