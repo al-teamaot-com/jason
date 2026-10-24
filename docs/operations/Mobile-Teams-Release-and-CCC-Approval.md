@@ -367,3 +367,46 @@ bootstrap, controller preservation, host stage ordering, exact-pair removal,
 stop-failure retention, and wrong-target rejection. A passing source test is not
 live Teams acceptance; the deployed timer and actual approval flow still require
 independent verification.
+
+
+## Expired owner-card renewal (P0 #2015)
+
+A signed Teams Approve received after a card expires cannot grant release
+authority. The old approval must remain terminal and immutable. Do not
+change its SQLite status, extend its expiry, reuse its ID or replace the
+original source-bound release offer. The five-minute worker does not
+automatically issue a new approval for an expired card.
+
+After this code is deployed through a separately reviewed high-impact
+production release, the authenticated owner can request a NEW card only
+from an interactive Jason shell running as operating-system user al:
+
+    python3 /home/al/.local/lib/jason/release_manager_host_runner.py renew-expired-owner-card --release-id release-<16-hex-SHA-prefix> --candidate-sha <full-40-character-SHA>
+
+Only card issuance is requested; this command does not grant owner/CCC
+authority and never deploys. It requires actual terminal authentication,
+the current protected-main SHA, unchanged release manifest and rollback
+baseline, a closed breaker, clean drift, the existing manual promotion
+hold, an active matching owner policy, and a prior expired undecided Teams
+card. Pending, denied, approved, changed, or not-yet-expired cards block
+renewal. At most three separate owner-initiated renewals are possible.
+
+The host writes an exclusive, owner-bound private nonce record under
+/var/lib/jason/openclaw/release-manager/mobile-release-renewals/.
+On its regular scan, the existing Teams maintenance worker checks this
+record and old expired request, then issues a distinct random approval
+ID, a fresh expiry, and source-bound immutable renewal lineage.
+An uncertain transport response cannot silently resend the same card.
+Both the signed Teams callback and independent host CCC consumer verify
+the original expired card and immutable renewal record. Deny never
+authorizes action; a valid NEW signed Approve grants exactly one same-SHA
+owner/CCC authorization under the original independent release gates.
+Old cards remain permanently unusable.
+
+Security/release restriction: mobile_release_approval.py, the independent
+host consumer, and the Release Manager host runner are classified as
+production_control_core. The active V1 owner-only Teams pilot cannot
+authorize deploying changes to those files. Activation therefore needs
+the separately reviewed owner high-impact release path. Neither a
+generic chat instruction nor editing the risk/TTL policy is a substitute
+for the exact-release authorization.

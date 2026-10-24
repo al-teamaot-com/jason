@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import fcntl
 import logging
 import os
 from pathlib import Path
@@ -191,7 +192,9 @@ def read_eligible_release(
 
 def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleasePolicy,
                                   *, now: datetime | None = None,
-                                  card_challenge: str | None = None) -> ApprovalRequest:
+                                  card_challenge: str | None = None,
+                                  renewed_from: str | None = None,
+                                  renewal_nonce: str | None = None) -> ApprovalRequest:
     instant = now or datetime.now(timezone.utc)
     if instant.tzinfo is None:
         raise ValueError("mobile approval clock must be timezone-aware")
@@ -215,6 +218,13 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
         raise PermissionError("legacy release cannot supply a protected card challenge")
     else:
         challenge = None
+    if (renewed_from is None) != (renewal_nonce is None):
+        raise PermissionError("incomplete owner renewal lineage")
+    if renewal_nonce is not None and (
+        re.fullmatch(r"[0-9a-f]{32}", renewal_nonce) is None
+        or re.fullmatch(r"relapproval-[0-9a-f]{32}", renewed_from or "") is None
+    ):
+        raise PermissionError("invalid owner renewal lineage")
     intent = {
         "release_id": evidence.release_id,
         "candidate_sha": evidence.candidate_sha,
@@ -229,10 +239,14 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
         if policy.schema_version != "2.0":
             raise PermissionError("CCC-only Teams material review requires owner-reviewed V2 mode")
         intent["review_only"] = True
+    if renewal_nonce is not None:
+        intent["renewed_from_approval_id"] = renewed_from
+        intent["renewal_nonce"] = renewal_nonce
+    suffix = ":renewal:" + renewal_nonce if renewal_nonce is not None else ""
     return ApprovalRequest(
         approval_id=REQUEST_PREFIX + secrets.token_hex(16),
-        request_id="mobile-release:" + evidence.release_id,
-        correlation_id="mobile-release:" + evidence.candidate_sha,
+        request_id="mobile-release:" + evidence.release_id + suffix,
+        correlation_id="mobile-release:" + evidence.candidate_sha + suffix,
         organization_id=policy.organization_id,
         client_id=None,
         requested_by="svc-jason-release-manager",
@@ -260,6 +274,7 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
                 ("Affected services", ", ".join(evidence.affected_surfaces)),
                 ("Changed files", shown),
                 ("Rollback", evidence.rollback_sha),
+                *((("Replaces expired approval", renewed_from),) if renewed_from else ()),
                 ("Preproduction and rollback", "Passed"),
                 ("Release policy", evidence.policy_sha256),
                 ("Manifest fingerprint", evidence.manifest_sha256),
@@ -275,6 +290,77 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
             } if challenge is not None else {}),
         },
     )
+
+
+
+RENEWAL_LIMIT = 3
+
+
+def read_explicit_release_renewal(
+    state_root: Path, requests: Any, evidence: ExactRelease,
+    policy: MobileReleasePolicy, nonce: str, *, requested_at: datetime,
+) -> str:
+    """A fresh, owner-console-requested card is not an approval to deploy.
+
+    Old expired requests and signed evidence remain immutable. This checks
+    the recorded manual renewal lineage both during issuance and again when
+    the signed Teams callback and host consumer validate the new card.
+    """
+    if re.fullmatch(r"[0-9a-f]{32}", nonce) is None or requested_at.tzinfo is None:
+        raise PermissionError("release renewal nonce or time invalid")
+    root = Path(state_root)
+    folder = root / "mobile-release-renewals"
+    marker = folder / (evidence.release_id + "-renew-" + nonce + ".json")
+    parent = folder.lstat()
+    info = marker.lstat()
+    if (not stat.S_ISDIR(parent.st_mode) or stat.S_IMODE(parent.st_mode) & 0o077
+            or parent.st_uid != root.stat().st_uid
+            or not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_uid != root.stat().st_uid or info.st_size > 4096):
+        raise PermissionError("release renewal is not private owner-host evidence")
+    doc = json.loads(marker.read_text(encoding="utf-8"))
+    required = {
+        "schema_version", "release_id", "candidate_sha", "rollback_sha",
+        "manifest_sha256", "owner_policy_sha256", "renewal_nonce",
+        "previous_approval_id", "requested_at", "requester_identity",
+        "requester_os_account",
+    }
+    if (not isinstance(doc, dict) or set(doc) != required
+            or doc["schema_version"] != "1.0"
+            or doc["release_id"] != evidence.release_id
+            or doc["candidate_sha"] != evidence.candidate_sha
+            or doc["rollback_sha"] != evidence.rollback_sha
+            or doc["manifest_sha256"] != evidence.manifest_sha256
+            or doc["owner_policy_sha256"] != policy.policy_sha256
+            or doc["renewal_nonce"] != nonce
+            or doc["requester_identity"] != "person-al"
+            or doc["requester_os_account"] != "al"):
+        raise PermissionError("renewal owner intent no longer matches the exact release")
+    initiated_at = datetime.fromisoformat(str(doc["requested_at"]))
+    if (initiated_at.tzinfo is None
+            or not 0 <= (requested_at - initiated_at).total_seconds() <= 900):
+        raise PermissionError("manual renewal owner intent is stale or in future")
+    previous_id = str(doc["previous_approval_id"])
+    if re.fullmatch(r"relapproval-[0-9a-f]{32}", previous_id) is None:
+        raise PermissionError("renewal has no exact predecessor")
+    previous = requests.get(previous_id)
+    if (previous is None or previous.status is not ApprovalRequestStatus.EXPIRED
+            or previous.expires_at > initiated_at
+            or previous.expires_at > requested_at
+            or previous.organization_id != policy.organization_id
+            or previous.capability != CAPABILITY
+            or previous.requested_by != "svc-jason-release-manager"
+            or previous.authorized_approver_ids != policy.owner_identity_ids
+            or previous.metadata.get("release_id") != evidence.release_id
+            or previous.metadata.get("candidate_sha") != evidence.candidate_sha
+            or previous.metadata.get("rollback_sha") != evidence.rollback_sha
+            or previous.metadata.get("manifest_sha256") != evidence.manifest_sha256
+            or previous.metadata.get("owner_policy_sha256") != policy.policy_sha256
+            or requests.accepted_decision(previous_id) is not None):
+        raise PermissionError("renewal predecessor was not an expired undecided card")
+    return previous_id
+
+
 
 
 class MobileReleaseSignedEvidenceStore:
@@ -387,6 +473,17 @@ class MobileReleaseApprovalFlow:
         )
         if current.review_only != (request.metadata.get("review_only") is True):
             raise PermissionError("CCC-only review purpose changed after card issuance")
+        renewal_nonce = request.metadata.get("renewal_nonce")
+        renewed_from = request.metadata.get("renewed_from_approval_id")
+        if renewal_nonce is not None or renewed_from is not None:
+            if renewal_nonce is None or renewed_from is None:
+                raise PermissionError("incomplete signed owner renewal")
+            previous_id = read_explicit_release_renewal(
+                self.state_root, self.requests, current, policy,
+                renewal_nonce, requested_at=request.requested_at,
+            )
+            if previous_id != renewed_from:
+                raise PermissionError("owner renewal predecessor does not match")
         if policy.schema_version == "2.0":
             proof = request.metadata.get("card_instance_challenge")
             if (type(proof) is not str or re.fullmatch(r"[0-9a-f]{48}", proof) is None
@@ -396,11 +493,15 @@ class MobileReleaseApprovalFlow:
                 raise PermissionError("signed Teams decision is not bound to the issued card instance")
             expected = create_mobile_release_request(
                 current, policy, now=request.requested_at, card_challenge=proof,
+                renewed_from=renewed_from, renewal_nonce=renewal_nonce,
             )
         else:
             if submit.selections:
                 raise PermissionError("legacy release approval cannot change immutable card material")
-            expected = create_mobile_release_request(current, policy, now=request.requested_at)
+            expected = create_mobile_release_request(
+                current, policy, now=request.requested_at,
+                renewed_from=renewed_from, renewal_nonce=renewal_nonce,
+            )
         # The issuer durably records the *transport receipt* after calling
         # TeamsGatewayPlaybookApprovalSender.send(). That single field cannot
         # appear in the immutable reviewed intent reconstructed above. Do not
@@ -414,6 +515,8 @@ class MobileReleaseApprovalFlow:
         ):
             raise PermissionError("mobile Teams delivery receipt is invalid")
         if (expected.requested_mode != request.requested_mode
+                or expected.request_id != request.request_id
+                or expected.correlation_id != request.correlation_id
                 or expected.metadata != verified_metadata
                 or expected.presentation != request.presentation
                 or expected.expires_at != request.expires_at):
@@ -507,6 +610,71 @@ class MobileReleaseApprovalMaintenance:
             for request in self.requests.list_all()
             if request.capability == CAPABILITY
         }
+        # The normal offer remains one-shot. A *separate* owner-console
+        # renewal marker permits one NEW card, never replay of an expired one.
+        # Serialize across runtime workers and re-read the ledger while locked.
+        renewal_dir = self.state_root / "mobile-release-renewals"
+        if renewal_dir.is_dir():
+            for marker in sorted(renewal_dir.glob("release-*-renew-*.json"),
+                                 key=lambda item: item.stat().st_mtime, reverse=True)[:30]:
+                matched = re.fullmatch(
+                    r"(release-[0-9a-f]{16})-renew-([0-9a-f]{32})\.json",
+                    marker.name,
+                )
+                if matched is None:
+                    continue
+                release_id, nonce = matched.groups()
+                try:
+                    with marker.open("rb") as handle:
+                        try:
+                            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        except BlockingIOError:
+                            continue
+                        related = [
+                            req for req in self.requests.list_all()
+                            if req.capability == CAPABILITY
+                            and req.metadata.get("release_id") == release_id
+                        ]
+                        if (not related or len(related) > RENEWAL_LIMIT
+                                or any(req.status is not ApprovalRequestStatus.EXPIRED
+                                       for req in related)
+                                or any(req.metadata.get("renewal_nonce") == nonce
+                                       for req in related)):
+                            continue
+                        previous = max(related, key=lambda req: req.requested_at)
+                        candidate = read_eligible_release(self.state_root, release_id, policy)
+                        parent_id = read_explicit_release_renewal(
+                            self.state_root, self.requests, candidate, policy,
+                            nonce, requested_at=now,
+                        )
+                        if parent_id != previous.approval_id:
+                            continue
+                        read_release_approval_containment(
+                            self.state_root
+                        ).require_request_eligible(now)
+                        request = create_mobile_release_request(
+                            candidate, policy, now=now,
+                            renewed_from=parent_id, renewal_nonce=nonce,
+                        )
+                        # Create BEFORE network delivery. A crash after this
+                        # point blocks unattended replay or duplicate sends.
+                        self.approvals.create(request, now=now)
+                        read_release_approval_containment(
+                            self.state_root
+                        ).require_request_eligible(request.requested_at)
+                        receipts = self.sender.send(request)
+                        if len(receipts) != len(policy.owner_identity_ids):
+                            raise RuntimeError("renewed Teams card delivery not confirmed")
+                        self.requests.put(replace(
+                            request, metadata={
+                                **request.metadata,
+                                "delivery_message_ids": ",".join(receipts),
+                            },
+                        ))
+                        return True
+                except (OSError, ValueError, TypeError, PermissionError,
+                        json.JSONDecodeError):
+                    continue
         for path in paths:
             try:
                 offer = json.loads(path.read_text(encoding="utf-8"))
