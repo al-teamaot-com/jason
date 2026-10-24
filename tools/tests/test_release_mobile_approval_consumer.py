@@ -30,7 +30,7 @@ RID = "release-" + SHA[:16]
 
 
 def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=None,
-            review_only=False):
+            review_only=False, renewed=False):
     from implementation.runtime_service.tests.test_mobile_release_approval import (
         policy_file, reviewed_policy_file, mark_release_high_impact, release_record,
     )
@@ -51,15 +51,42 @@ def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=N
     ccc = tmp_path / "ccc"
     ccc.mkdir()
     policy = read_mobile_release_policy(policy_path)
+    evidence = read_eligible_release(
+        root, RID, policy, allow_existing_owner_approval=review_only,
+    )
+    old_request = (
+        create_mobile_release_request(evidence, policy, now=NOW - timedelta(minutes=20))
+        if renewed else None
+    )
+    renewal_nonce = "e" * 32 if renewed else None
     request = create_mobile_release_request(
-        read_eligible_release(
-            root, RID, policy, allow_existing_owner_approval=review_only,
-        ),
-        policy, now=NOW,
+        evidence, policy, now=NOW,
+        renewed_from=(old_request.approval_id if old_request else None),
+        renewal_nonce=renewal_nonce,
     )
     path = tmp_path / "approvals.sqlite3"
     repo = SQLiteApprovalRequestRepository(path)
     svc = ApprovalRequestService(repo, MobileReleaseOwnerAuthority(policy_path))
+    if renewed:
+        from dataclasses import replace
+        from connectors.src.jason_connectors.approval_requests import ApprovalRequestStatus
+        svc.create(old_request, now=NOW - timedelta(minutes=20))
+        repo.put(replace(old_request, status=ApprovalRequestStatus.EXPIRED))
+        folder = root / "mobile-release-renewals"
+        folder.mkdir(mode=0o700)
+        marker = folder / (RID + "-renew-" + renewal_nonce + ".json")
+        marker.write_text(json.dumps({
+            "schema_version": "1.0",
+            "release_id": RID, "candidate_sha": SHA, "rollback_sha": ROLLBACK,
+            "manifest_sha256": evidence.manifest_sha256,
+            "owner_policy_sha256": policy.policy_sha256,
+            "renewal_nonce": renewal_nonce,
+            "previous_approval_id": old_request.approval_id,
+            "requested_at": (NOW - timedelta(seconds=5)).isoformat(),
+            "requester_identity": "person-al",
+            "requester_os_account": "al",
+        }))
+        marker.chmod(0o600)
     svc.create(request, now=NOW)
     private = Ed25519PrivateKey.generate()
     public = private.public_key().public_bytes(Encoding.PEM, PublicFormat.SubjectPublicKeyInfo)
