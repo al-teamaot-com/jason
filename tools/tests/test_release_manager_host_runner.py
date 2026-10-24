@@ -3690,7 +3690,7 @@ class BoundSupportReleaseIdentityTests(unittest.TestCase):
         )
         self.assertEqual(matches, ['SUPPORT-OPS-059'])
         self.assertIsNone(
-            runner.SUPPORT_ID_IN_TITLE.search("X-SUPPORT-OPS-059")
+            runner.SUPPORT_ID_IN_TITLE.search("XSUPPORT-OPS-059")
         )
 
     def test_support_release_accepts_exact_merged_pr_open_issue_and_support_row(self):
