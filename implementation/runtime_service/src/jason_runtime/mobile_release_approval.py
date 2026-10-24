@@ -191,7 +191,9 @@ def read_eligible_release(
 
 def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleasePolicy,
                                   *, now: datetime | None = None,
-                                  card_challenge: str | None = None) -> ApprovalRequest:
+                                  card_challenge: str | None = None,
+                                  renewed_from: str | None = None,
+                                  renewal_nonce: str | None = None) -> ApprovalRequest:
     instant = now or datetime.now(timezone.utc)
     if instant.tzinfo is None:
         raise ValueError("mobile approval clock must be timezone-aware")
@@ -215,6 +217,13 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
         raise PermissionError("legacy release cannot supply a protected card challenge")
     else:
         challenge = None
+    if (renewed_from is None) != (renewal_nonce is None):
+        raise PermissionError("incomplete owner renewal lineage")
+    if renewal_nonce is not None and (
+        re.fullmatch(r"[0-9a-f]{32}", renewal_nonce) is None
+        or re.fullmatch(r"relapproval-[0-9a-f]{32}", renewed_from or "") is None
+    ):
+        raise PermissionError("invalid owner renewal lineage")
     intent = {
         "release_id": evidence.release_id,
         "candidate_sha": evidence.candidate_sha,
@@ -229,10 +238,14 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
         if policy.schema_version != "2.0":
             raise PermissionError("CCC-only Teams material review requires owner-reviewed V2 mode")
         intent["review_only"] = True
+    if renewal_nonce is not None:
+        intent["renewed_from_approval_id"] = renewed_from
+        intent["renewal_nonce"] = renewal_nonce
+    suffix = ":renewal:" + renewal_nonce if renewal_nonce is not None else ""
     return ApprovalRequest(
         approval_id=REQUEST_PREFIX + secrets.token_hex(16),
-        request_id="mobile-release:" + evidence.release_id,
-        correlation_id="mobile-release:" + evidence.candidate_sha,
+        request_id="mobile-release:" + evidence.release_id + suffix,
+        correlation_id="mobile-release:" + evidence.candidate_sha + suffix,
         organization_id=policy.organization_id,
         client_id=None,
         requested_by="svc-jason-release-manager",
@@ -260,6 +273,7 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
                 ("Affected services", ", ".join(evidence.affected_surfaces)),
                 ("Changed files", shown),
                 ("Rollback", evidence.rollback_sha),
+                *((("Replaces expired approval", renewed_from),) if renewed_from else ()),
                 ("Preproduction and rollback", "Passed"),
                 ("Release policy", evidence.policy_sha256),
                 ("Manifest fingerprint", evidence.manifest_sha256),
