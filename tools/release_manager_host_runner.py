@@ -2967,8 +2967,16 @@ def prepare_release(
     *,
     owner_approved: bool = False,
     reissue_rolled_back: bool = False,
+    support_item: str | None = None,
+    support_pr_number: int | None = None,
 ) -> dict[str, Any]:
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    if change_class == 'support':
+        verify_support_release_binding(
+            repo, candidate_sha, support_item, support_pr_number,
+        )
+    elif support_item is not None or support_pr_number is not None:
+        raise ReleaseManagerError('non-Support release cannot claim Support identity')
     # Routine promotion and explicit owner-authorized preparation must share the
     # same bounded, stopped-container-only retention hygiene. It must run
     # before breaker revalidation (which checks drift including retention).
@@ -3000,6 +3008,13 @@ def prepare_release(
 
     if path.exists():
         record = load_record(state_root, release_id)
+        if record.get('change_class') != change_class:
+            raise ReleaseManagerError('existing release changed its reviewed change class')
+        if change_class == 'support' and (
+            record.get('support_item') != support_item
+            or record.get('support_pr_number') != support_pr_number
+        ):
+            raise ReleaseManagerError('existing release Support identity does not match')
         state = str(record.get("state") or "")
         if state in {
             "production_eligible",
@@ -3025,6 +3040,8 @@ def prepare_release(
                 rollback_sha=rollback_sha,
                 change_class=str(record.get("change_class") or change_class),
                 owner_approved=bool((record.get("owner_approval") or {}).get("approved")),
+                support_item=support_item,
+                support_pr_number=support_pr_number,
             )
             rebuilt["prior_revalidation"] = previous
             save_record(state_root, rebuilt)
@@ -3042,6 +3059,8 @@ def prepare_release(
         rollback_sha=rollback_sha,
         change_class=change_class,
         owner_approved=owner_approved,
+        support_item=support_item,
+        support_pr_number=support_pr_number,
         release_id_override=release_id if reissue_rolled_back else None,
     )
     if reissue_rolled_back:
@@ -3646,11 +3665,15 @@ def main() -> int:
     create.add_argument("--candidate-sha", required=True)
     create.add_argument("--rollback-sha", required=True)
     create.add_argument("--change-class", default="feature")
+    create.add_argument("--support-item")
+    create.add_argument("--support-pr-number", type=int)
     create.add_argument("--owner-approved", action="store_true")
 
     prepare = sub.add_parser("prepare")
     prepare.add_argument("--candidate-sha", required=True)
     prepare.add_argument("--change-class", default="feature")
+    prepare.add_argument("--support-item")
+    prepare.add_argument("--support-pr-number", type=int)
     prepare.add_argument("--owner-approved", action="store_true")
     prepare.add_argument("--reissue-rolled-back", action="store_true")
 
@@ -3690,6 +3713,8 @@ def main() -> int:
             rollback_sha=args.rollback_sha,
             change_class=args.change_class,
             owner_approved=args.owner_approved,
+            support_item=args.support_item,
+            support_pr_number=args.support_pr_number,
         )
         print(json.dumps(record, indent=2))
         return 0
@@ -3704,6 +3729,8 @@ def main() -> int:
             change_class=args.change_class,
             owner_approved=args.owner_approved,
             reissue_rolled_back=args.reissue_rolled_back,
+            support_item=args.support_item,
+            support_pr_number=args.support_pr_number,
         )
         print(json.dumps(record, indent=2))
         return 0
