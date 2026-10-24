@@ -2775,3 +2775,191 @@ def test_credit_reload_preserves_authority_handoff_and_engineering_capacity(tmp_
     assert worker.readmit_after_verified_credit_replenishment(
         state, [item], tmp_path, max_active=1, usage_ledger_path=ledger
     ) == []
+
+
+
+def _stale_evidence_fixture(tmp_path, monkeypatch):
+    repo = tmp_path / 'repo'
+    repo.mkdir()
+    source = repo / 'tools/example.py'
+    source.parent.mkdir(parents=True)
+    source.write_text("def recovered_source():\n    return 'old revision'\n")
+    policy = repo / 'config/engineering-supervisor-policy.json'
+    policy.parent.mkdir(parents=True)
+    policy.write_text(
+        (MODULE.parents[1] / policy.relative_to(repo)).read_text()
+    )
+
+    def git(*args):
+        return subprocess.run(
+            ['git', *args], cwd=repo, check=True, text=True,
+            capture_output=True,
+        ).stdout.strip()
+
+    git('init', '-b', 'main')
+    git('config', 'user.name', 'Test Fixture')
+    git('config', 'user.email', 'fixture@example.invalid')
+    git('add', '.')
+    git('commit', '-m', 'original source')
+    old_sha = git('rev-parse', 'HEAD')
+
+    item = {
+        'id': 'SUPPORT-OPS-059', 'priority': 'P0',
+        'title': 'Bounded support repair source recovery',
+        'evidence': 'Source moved after model asked for more evidence',
+        'acceptance': 'Reissue on clean current source; do not replay',
+    }
+    spool = tmp_path / 'spool'
+    ancestor = worker.queue_reasoning(
+        spool, kind='edit_plan', item=item, context={'source_excerpts': []}
+    )
+    request = worker.queue_reasoning(
+        spool, kind='edit_plan', item=item, context={
+            'pinned_source_revision': old_sha,
+            'previous_reasoning_request_id': ancestor,
+            'evidence_turn': 1,
+            'source_excerpts': [{
+                'path': 'tools/example.py',
+                'content': "def recovered_source():\n    return 'old revision'\n",
+            }],
+        },
+    )
+    response_root = spool / 'reasoning' / 'responses'
+    response_root.mkdir(parents=True)
+    (response_root / (request + '.json')).write_text(json.dumps({
+        'status': 'succeeded', 'request_id': request,
+        'kind': 'edit_plan', 'support_item': item['id'],
+        'result': {
+            'blocked_reason': None, 'edits': [], 'test_paths': [],
+            'evidence_requests': [{
+                'tool': 'read_source', 'query': 'recovered_source',
+                'path': 'tools/example.py',
+            }],
+        },
+    }))
+    old_branch = worker.branch_name(item['id']) + '-context-' + ancestor[:12]
+    git('branch', old_branch, old_sha)
+    original = tmp_path / 'original'
+    git('worktree', 'add', str(original), old_branch)
+    source.write_text("def recovered_source():\n    return 'new verified revision'\n")
+    git('add', '.')
+    git('commit', '-m', 'new main source')
+    head = git('rev-parse', 'HEAD')
+    git('update-ref', 'refs/remotes/origin/main', head)
+
+    new_branch = worker.branch_name(item['id']) + '-context-' + request[:12]
+    fresh = tmp_path / 'fresh'
+    git('worktree', 'add', '-b', new_branch, str(fresh), head)
+
+    def path_for(item_id, branch):
+        assert item_id == item['id']
+        return original if branch == old_branch else fresh
+
+    def ensure(repo_path, item_id, branch):
+        assert repo_path == repo
+        assert item_id == item['id'] and branch == new_branch
+        return fresh
+
+    monkeypatch.setattr(worker, 'support_worktree_path', path_for)
+    monkeypatch.setattr(worker, 'ensure_worktree', ensure)
+
+    class AllowRead:
+        def path_denial_reason(self, path, policy):
+            return None
+
+    record = {
+        'phase': 'blocked',
+        'reason': 'EvidenceToolError: stale worktree requires governed clean-source recovery',
+        'branch': old_branch,
+        'reasoning_request_id': request,
+        'evidence_last_source_request': ancestor,
+        'evidence_source_revision': old_sha,
+        'evidence_turn_count': 1,
+    }
+    return repo, spool, item, record, AllowRead(), original, old_sha, head, request
+
+
+def test_stale_evidence_resumes_once_on_clean_main(tmp_path, monkeypatch):
+    repo, spool, item, record, gate, original, old_sha, head, prior = (
+        _stale_evidence_fixture(tmp_path, monkeypatch)
+    )
+    state = {'items': {item['id']: record}}
+    assert worker.readmit_stale_evidence_after_main_advanced(
+        state, [item], repo, spool, gate, {}, max_active=2
+    ) == [item['id']]
+    rid = record['reasoning_request_id']
+    assert rid != prior
+    assert record['phase'] == 'implementing'
+    assert record['evidence_source_revision'] == head
+    assert record['evidence_turn_count'] == 2
+    assert record['stale_evidence_recovery_request_id'] == rid
+    assert record['stale_evidence_recovery_original_request_id'] == prior
+    next_req = json.loads((spool / 'reasoning/requests' / (rid + '.json')).read_text())
+    ctx = next_req['context']
+    assert ctx['pinned_source_revision'] == head
+    assert ctx['verified_clean_source_recovery'] == {
+        'failed_request_id': prior,
+        'previous_source_revision': old_sha,
+        'current_source_revision': head,
+        'retry_limit': 1,
+    }
+    assert 'new verified revision' in ctx['source_excerpts'][0]['content']
+    assert 'old revision' not in ctx['source_excerpts'][0]['content']
+    assert subprocess.run(
+        ['git', 'rev-parse', 'HEAD'], cwd=original,
+        text=True, capture_output=True, check=True,
+    ).stdout.strip() == old_sha
+    assert worker.reasoning_response(spool, prior)['status'] == 'succeeded'
+    record['phase'] = 'blocked'
+    assert worker.readmit_stale_evidence_after_main_advanced(
+        state, [item], repo, spool, gate, {}, max_active=2
+    ) == []
+
+
+def test_stale_evidence_refuses_dirty_original_or_wrong_identity(tmp_path, monkeypatch):
+    repo, spool, item, record, gate, old, _, _, prior = (
+        _stale_evidence_fixture(tmp_path, monkeypatch)
+    )
+    old_file = old / 'tools/example.py'
+    old_file.write_text(old_file.read_text() + '\n# unrelated technician work\n')
+    assert worker.readmit_stale_evidence_after_main_advanced(
+        {'items': {item['id']: record}}, [item], repo, spool, gate, {}, max_active=2
+    ) == []
+    assert record['reasoning_request_id'] == prior
+    old_file.write_text("def recovered_source():\n    return 'old revision'\n")
+    path = spool / 'reasoning/responses' / (prior + '.json')
+    payload = json.loads(path.read_text())
+    payload['support_item'] = 'SUPPORT-OPS-OTHER'
+    path.write_text(json.dumps(payload))
+    assert worker.readmit_stale_evidence_after_main_advanced(
+        {'items': {item['id']: record}}, [item], repo, spool, gate, {}, max_active=2
+    ) == []
+    assert record['phase'] == 'blocked'
+
+
+def test_stale_evidence_refuses_model_edits_and_capacity_bypass(tmp_path, monkeypatch):
+    repo, spool, item, record, gate, _, _, _, prior = (
+        _stale_evidence_fixture(tmp_path, monkeypatch)
+    )
+    state = {'items': {item['id']: record}}
+    item['priority'] = 'P1'
+    assert worker.readmit_stale_evidence_after_main_advanced(
+        state, [item], repo, spool, gate, {}, max_active=2
+    ) == []
+    item['priority'] = 'P0'
+    state['items']['other-active'] = {'phase': 'implementing'}
+    assert worker.readmit_stale_evidence_after_main_advanced(
+        state, [item], repo, spool, gate, {}, max_active=1
+    ) == []
+    del state['items']['other-active']
+    path = spool / 'reasoning/responses' / (prior + '.json')
+    payload = json.loads(path.read_text())
+    payload['result']['edits'] = [{
+        'path': 'tools/example.py', 'old_text': 'old',
+        'new_text': 'unreviewed',
+    }]
+    path.write_text(json.dumps(payload))
+    assert worker.readmit_stale_evidence_after_main_advanced(
+        state, [item], repo, spool, gate, {}, max_active=2
+    ) == []
+    assert record.get('stale_evidence_recovery_request_id') is None
