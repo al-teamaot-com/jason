@@ -177,3 +177,70 @@ def test_real_universal_issuer_card_challenge_is_unique_and_bound_to_metadata(tm
     rendered=render_approval_card(issued)
     assert rendered.card_instance_challenge==challenge
     assert not env.provider.calls
+
+
+
+@pytest.mark.parametrize('returned', [
+    ('accepted:synthetic-1','provider-msg-2'),
+    ('provider-msg-1','accepted:synthetic-2'),
+    ('accepted:synthetic-1','accepted:synthetic-2'),
+    ('provider-msg-1','provider-msg-1'),
+    ('','provider-msg-2'),
+    (None,'provider-msg-2'),
+])
+def test_unverified_gateway_receipt_never_claims_general_plan_delivery(tmp_path,returned):
+    env=setup(tmp_path);delivery,issuer=with_issuer(env)
+    class Sender:
+        def __init__(self,**kwargs):pass
+        def send(self,request):return returned
+    channel=ExistingTeamsApprovalDelivery('http://synthetic-gateway',
+        tmp_path/'no-token-needed',env.bindings,Sender,lambda:NOW)
+    issuer=replace(issuer,delivery=channel)
+    env.handler=replace(env.handler,issuer=issuer)
+    factory=GovernedTeamsOrchestrationRequestFactory(
+        authority=issuer.authority,capabilities=RegisteredCapabilities(),
+        approval_requester=env.handler)
+    with pytest.raises(RuntimeError,match='message ID is unverified'):
+        factory.build(principal=BoundConversationPrincipal('requester-a','org','client'),
+            intent=ConversationIntent('synthetic.resource.read'),identity=identity(),
+            correlation_id='corr')
+    progress=env.handler.requests.progress('planapproval-issued')
+    assert progress['state']=='blocked'
+    assert progress['reason_code']=='approval_delivery_RuntimeError'
+    assert not env.provider.calls
+    assert env.approvals.get('planapproval-issued') is None
+    # Even if a real card surfaced despite an unknown send result and its
+    # gateway callback is validly signed, do not grant execution from it.
+    plan=env.handler.proposals.require('planapproval-issued')
+    with pytest.raises(PermissionError,match='delivery remains unverified'):
+        click(env,signed(env,plan))
+    assert env.handler.requests.progress('planapproval-issued')['state']=='blocked'
+    assert env.approvals.get('planapproval-issued') is None
+    from orchestrator.approval_audit import ApprovalAuditEventType
+    events=env.handler.service.teams_flow.audit.sink.list_for_approval(
+        approval_id='planapproval-issued',organization_id='org')
+    assert ApprovalAuditEventType.DELIVERY_RECORDED not in [e.event_type for e in events]
+    assert ApprovalAuditEventType.PROCESSING_FAILED in [e.event_type for e in events]
+
+
+def test_verified_provider_ids_preserve_general_plan_delivery(tmp_path):
+    env=setup(tmp_path);delivery,issuer=with_issuer(env)
+    class Sender:
+        def __init__(self,**kwargs):pass
+        def send(self,request):return ('provider-msg-1','provider-msg-2')
+    channel=ExistingTeamsApprovalDelivery('http://synthetic-gateway',
+        tmp_path/'no-token-needed',env.bindings,Sender,lambda:NOW)
+    issuer=replace(issuer,delivery=channel)
+    env.handler=replace(env.handler,issuer=issuer)
+    factory=GovernedTeamsOrchestrationRequestFactory(
+        authority=issuer.authority,capabilities=RegisteredCapabilities(),
+        approval_requester=env.handler)
+    with pytest.raises(ConversationGuidanceRequiredError,match='universal_approval_requested'):
+        factory.build(principal=BoundConversationPrincipal('requester-a','org','client'),
+            intent=ConversationIntent('synthetic.resource.read'),
+            identity=identity(),correlation_id='verified-provider')
+    from orchestrator.approval_audit import ApprovalAuditEventType
+    events=env.handler.service.teams_flow.audit.sink.list_for_approval(
+        approval_id='planapproval-issued',organization_id='org')
+    assert ApprovalAuditEventType.DELIVERY_RECORDED in [e.event_type for e in events]
+    assert env.handler.requests.progress('planapproval-issued')['state']=='awaiting_approval'

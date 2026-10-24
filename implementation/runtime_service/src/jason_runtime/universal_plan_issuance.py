@@ -43,6 +43,11 @@ class ExistingTeamsApprovalDelivery:
         message_ids=sender.send(request)
         if not message_ids or len(message_ids)!=len(request.authorized_approver_ids):
             raise RuntimeError('approval delivery did not confirm every selected recipient')
+        # Bot Framework can accept a card send without returning a provider
+        # message ID: accepted:<uuid> is synthetic, not a delivery witness.
+        if (any(type(v) is not str or not v.strip() or v.startswith('accepted:')
+                for v in message_ids) or len(set(message_ids))!=len(message_ids)):
+            raise RuntimeError('approval provider message ID is unverified; delivery outcome unknown')
         return ApprovalDeliveryReceipt('microsoft_teams',','.join(message_ids),self.clock())
 
 
