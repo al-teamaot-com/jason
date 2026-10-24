@@ -671,3 +671,165 @@ def test_v1_can_never_issue_owner_reviewed_ccc_only_card(tmp_path):
     p.write_text(json.dumps(record))
     with pytest.raises(PermissionError, match="exact CCC-only card"):
         read_eligible_release(root, RELEASE, policy, allow_existing_owner_approval=True)
+
+
+
+def _expired_mobile_renewal_fixture(tmp_path, *, previous_status=ApprovalRequestStatus.EXPIRED):
+    from dataclasses import replace
+    from jason_runtime.mobile_release_approval import MobileReleaseApprovalMaintenance, MobileReleaseOwnerAuthority
+    policy_path = policy_file(tmp_path)
+    policy = read_mobile_release_policy(policy_path)
+    root, record = release_record(tmp_path)
+    evidence = read_eligible_release(root, RELEASE, policy)
+    repo = SQLiteApprovalRequestRepository(tmp_path / "renewal-requests.sqlite3")
+    service = ApprovalRequestService(repo, MobileReleaseOwnerAuthority(policy_path))
+    previous = create_mobile_release_request(
+        evidence, policy, now=NOW - timedelta(minutes=20),
+    )
+    service.create(previous, now=NOW - timedelta(minutes=20))
+    repo.put(replace(previous, status=previous_status))
+    nonce = "d" * 32
+    folder = root / "mobile-release-renewals"
+    folder.mkdir(mode=0o700)
+    marker = folder / (RELEASE + "-renew-" + nonce + ".json")
+    marker.write_text(json.dumps({
+        "schema_version": "1.0",
+        "release_id": RELEASE,
+        "candidate_sha": SHA,
+        "rollback_sha": ROLLBACK,
+        "manifest_sha256": evidence.manifest_sha256,
+        "owner_policy_sha256": policy.policy_sha256,
+        "renewal_nonce": nonce,
+        "previous_approval_id": previous.approval_id,
+        "requested_at": (NOW - timedelta(seconds=5)).isoformat(),
+        "requester_identity": "person-al",
+        "requester_os_account": "al",
+    }))
+    marker.chmod(0o600)
+    # The old offer is no longer fresh. Only explicit private renewal may send.
+    make_eligible_main_offer(root, policy_path, published_at=NOW - timedelta(minutes=30))
+    class Sender:
+        def __init__(self):
+            self.sent = []
+        def send(self, request):
+            self.sent.append(request)
+            return ("provider-message-renewal",)
+    sender = Sender()
+    maintenance = MobileReleaseApprovalMaintenance(
+        enabled=True, policy_path=policy_path, state_root=root,
+        requests=repo, approvals=service, sender=sender,
+        interval_seconds=60, clock=lambda: NOW,
+    )
+    return SimpleNamespace(
+        policy_path=policy_path, policy=policy, root=root, record=record,
+        evidence=evidence, repo=repo, service=service, prior=previous,
+        marker=marker, nonce=nonce, sender=sender, maintenance=maintenance,
+    )
+
+
+def test_expired_owner_card_requires_explicit_intent_then_sends_once(tmp_path):
+    case = _expired_mobile_renewal_fixture(tmp_path)
+    original_release = case.record.read_bytes()
+    assert case.maintenance.tick() is True
+    assert len(case.sender.sent) == 1
+    fresh = case.sender.sent[0]
+    assert fresh.approval_id != case.prior.approval_id
+    assert fresh.metadata["renewed_from_approval_id"] == case.prior.approval_id
+    assert fresh.metadata["renewal_nonce"] == case.nonce
+    assert fresh.request_id.endswith(":renewal:" + case.nonce)
+    assert fresh.correlation_id.endswith(":renewal:" + case.nonce)
+    assert fresh.expires_at == NOW + timedelta(minutes=15)
+    assert case.repo.get(case.prior.approval_id).status is ApprovalRequestStatus.EXPIRED
+    assert case.repo.accepted_decision(case.prior.approval_id) is None
+    assert case.repo.get(fresh.approval_id).metadata["delivery_message_ids"] == "provider-message-renewal"
+    assert case.record.read_bytes() == original_release
+    case.maintenance._next_due = NOW
+    assert case.maintenance.tick() is False
+    assert len(case.sender.sent) == 1
+
+
+def test_renewed_card_is_signed_by_actual_owner_and_expired_card_cannot_grant(tmp_path):
+    from jason_runtime.mobile_release_approval import MobileReleaseSignedEvidenceStore
+    case = _expired_mobile_renewal_fixture(tmp_path)
+    assert case.maintenance.tick()
+    fresh = case.sender.sent[0]
+    flow = MobileReleaseApprovalFlow(
+        case.service, case.repo, case.policy_path, case.root,
+        SimpleNamespace(find=lambda **kw: SimpleNamespace(
+            status="active", jason_identity_id="person-al")),
+        SimpleNamespace(get=lambda identity: SimpleNamespace(
+            status="active", identity_id=identity, organization_id="aot")),
+        FakeVerifier(aid=fresh.approval_id, decision="approve", now=NOW),
+        MobileReleaseSignedEvidenceStore(case.repo.path),
+    )
+    assert flow.handle(
+        approval_id=fresh.approval_id, decision="approve",
+        microsoft_tenant_id="tenant-a", microsoft_object_id="object-al",
+        conversation_id="owner-chat", channel_response_id="teams-response-1",
+        decided_at=NOW, signed_envelope={"signed": True}, selections={},
+    )["executed"] is False
+    assert case.repo.get(fresh.approval_id).status is ApprovalRequestStatus.APPROVED
+    assert case.repo.accepted_decision(fresh.approval_id).decided_by == "person-al"
+    assert case.repo.get(case.prior.approval_id).status is ApprovalRequestStatus.EXPIRED
+    assert case.repo.accepted_decision(case.prior.approval_id) is None
+    assert case.record.read_bytes() == case.record.read_bytes()
+
+
+@pytest.mark.parametrize("tamper", [
+    "prior_denied", "prior_pending", "marker_missing", "marker_world_readable",
+    "different_policy", "changed_manifest", "old_owner", "no_owner_intent",
+    "stale_intent", "wrong_nonce", "unexpected_metadata",
+])
+def test_expired_owner_renewal_fails_closed(tmp_path, tamper):
+    from dataclasses import replace
+    case = _expired_mobile_renewal_fixture(tmp_path)
+    if tamper == "prior_denied":
+        case.repo.put(replace(case.prior, status=ApprovalRequestStatus.DENIED))
+    elif tamper == "prior_pending":
+        case.repo.put(replace(case.prior, status=ApprovalRequestStatus.PENDING))
+    elif tamper == "marker_missing":
+        case.marker.unlink()
+    elif tamper == "marker_world_readable":
+        case.marker.chmod(0o644)
+    elif tamper == "different_policy":
+        policy_file(tmp_path, ttl_seconds=1200)
+    elif tamper == "changed_manifest":
+        data = json.loads(case.record.read_text())
+        data["release_manifest"]["changed_files"].append("tools/foreign.py")
+        case.record.write_text(json.dumps(data))
+    elif tamper == "old_owner":
+        doc = json.loads(case.marker.read_text())
+        doc["requester_os_account"] = "worker"
+        case.marker.write_text(json.dumps(doc))
+    elif tamper == "no_owner_intent":
+        doc = json.loads(case.marker.read_text())
+        doc["requester_identity"] = "svc-jason"
+        case.marker.write_text(json.dumps(doc))
+    elif tamper == "stale_intent":
+        doc = json.loads(case.marker.read_text())
+        doc["requested_at"] = (NOW - timedelta(hours=2)).isoformat()
+        case.marker.write_text(json.dumps(doc))
+    elif tamper == "wrong_nonce":
+        doc = json.loads(case.marker.read_text())
+        doc["renewal_nonce"] = "a" * 32
+        case.marker.write_text(json.dumps(doc))
+    elif tamper == "unexpected_metadata":
+        doc = json.loads(case.marker.read_text())
+        doc["owner_override"] = "true"
+        case.marker.write_text(json.dumps(doc))
+    assert case.maintenance.tick() is False
+    assert not case.sender.sent
+    assert case.repo.get(case.prior.approval_id).status is not ApprovalRequestStatus.APPROVED
+
+
+def test_pending_or_approved_card_blocks_new_renewal(tmp_path):
+    from dataclasses import replace
+    case = _expired_mobile_renewal_fixture(tmp_path)
+    assert case.maintenance.tick() is True
+    fresh = case.sender.sent[0]
+    case.maintenance._next_due = NOW
+    assert case.maintenance.tick() is False
+    case.repo.put(replace(fresh, status=ApprovalRequestStatus.APPROVED))
+    case.maintenance._next_due = NOW
+    assert case.maintenance.tick() is False
+    assert len(case.sender.sent) == 1
