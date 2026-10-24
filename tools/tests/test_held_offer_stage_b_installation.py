@@ -52,6 +52,13 @@ def test_stage_b_declares_exactly_one_reviewed_user_unit_plan():
     ):
         with pytest.raises(migration.MigrationRefused):
             migration._planned_delta(stage_a, wrong)
+    # Duplicate declarations must also reject before root policy migration.
+    duplicate_timer = {
+        **stage_b,
+        "required_user_units": stage_b["required_user_units"] + [timer],
+    }
+    with pytest.raises(migration.MigrationRefused):
+        migration._planned_delta(stage_a, duplicate_timer)
     with pytest.raises(migration.MigrationRefused):
         migration._planned_delta(stage_b, stage_a)
 
