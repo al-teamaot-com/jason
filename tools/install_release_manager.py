@@ -50,6 +50,16 @@ def main() -> int:
         0o644,
     )
 
+    # Independent safe owner-card path: the existing promotion service still
+    # carries the global incident hold, so approval-card issuance can proceed
+    # without lifting or modifying that production deployment guard.
+    for unit_name in ("jason-release-approval-only.service",
+                      "jason-release-approval-only.timer"):
+        copy_mode(
+            ROOT / "infrastructure" / "openclaw-operations" / "systemd"
+            / "user" / unit_name, UNIT_DIR / unit_name, 0o644,
+        )
+
     uid = os.getuid()
     systemd_env = os.environ.copy()
     systemd_env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{uid}")
@@ -63,11 +73,12 @@ def main() -> int:
         env=systemd_env,
     )
     if args.activate:
-        subprocess.run(
-            ["systemctl", "--user", "enable", "--now", "jason-release-manager.timer"],
-            check=True,
-            env=systemd_env,
-        )
+        for timer_name in ("jason-release-manager.timer",
+                           "jason-release-approval-only.timer"):
+            subprocess.run(
+                ["systemctl", "--user", "enable", "--now", timer_name],
+                check=True, env=systemd_env,
+            )
     print("JASON_RELEASE_MANAGER_INSTALL=PASS")
     print("STATE_ROOT=" + str(STATE))
     print("TIMER_ACTIVATED=" + ("YES" if args.activate else "NO"))

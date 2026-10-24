@@ -32,6 +32,7 @@ import worker_execution_enrollment as worker_enrollment
 
 DEFAULT_REPO = Path("/home/al/.local/lib/jason/engineering-worker-source")
 DEFAULT_STATE = Path("/var/lib/jason/openclaw/release-manager")
+MOBILE_APPROVAL_POLICY = Path("/var/lib/jason/authority/mobile-release-approval-policy.json")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 MUTATION_ENV_OVERRIDES = {
     "JASON_AUTOTASK_MUTATION_ENABLED": "false",
@@ -3068,6 +3069,130 @@ def signed_owner_offer_purpose(
     return "ccc_material_review_only"
 
 
+def approval_only_while_promotion_held(repo: Path, state_root: Path) -> bool:
+    """Issue nonexecuting owner Teams offers and consume signed decisions, NEVER deploy.
+
+    Runs via a distinct systemd timer only while the legacy automatic-promotion
+    incident hold remains installed. The production timer retains its explicit
+    systemd hold condition; this function has no deploy/host/root-control call.
+    No isolated preproduction state may read live owner decisions or issue cards.
+    """
+    if Path(state_root).resolve() != DEFAULT_STATE.resolve():
+        raise ReleaseManagerError("approval-only worker requires canonical live state")
+    if not (state_root / "auto-promotion-incident-hold").is_file():
+        print("RELEASE_APPROVAL_ONLY=HOLD_NOT_ACTIVE", flush=True)
+        return False
+
+    # Trust only fresh root-published evidence and a healthy, aligned live
+    # production baseline; never revalidate or close an opened breaker here.
+    control = _read_protected_snapshot(state_root, "production-control-state.json")
+    drift = _read_protected_snapshot(state_root, "production-drift.json")
+    if ((control.get("circuit_breaker") or {}).get("state") != "closed"
+            or drift.get("status") != "pass" or drift.get("problems")):
+        raise ReleaseManagerError("approval-only release safety readback blocked")
+    live = live_runtime()
+    live_sha = exact_sha(live["revision"], "live_production_sha")
+    live_production_alignment(live_sha)
+    lkg = ((control.get("last_known_good") or {}).get("manifest") or {}).get("revision")
+    if lkg != live_sha:
+        raise ReleaseManagerError("approval-only production baseline does not match LKG")
+
+    policy_path = MOBILE_APPROVAL_POLICY
+    if not policy_path.is_file():
+        print("RELEASE_APPROVAL_ONLY=OWNER_POLICY_UNAVAILABLE", flush=True)
+        return False
+    tools_root = str(repo / "tools")
+    if tools_root not in sys.path:
+        sys.path.insert(0, tools_root)
+    from release_mobile_approval_consumer import (
+        MobileReleaseEvidenceBusy, _install_repo_modules, consume_mobile_release_decisions,
+    )
+    _install_repo_modules(Path(repo))
+    from jason_runtime.mobile_release_approval import read_mobile_release_policy
+    from jason_runtime.owner_release_approval_containment import read_release_approval_containment
+    containment = read_release_approval_containment(state_root)
+    if containment.active:
+        print("RELEASE_APPROVAL_ONLY=OWNER_APPROVAL_CONTAINMENT", flush=True)
+        return False
+    reviewed_policy = read_mobile_release_policy(policy_path)
+    mode = live_release_mobile_approval_mode(live)
+    expected_mode = ("owner_only_pilot" if reviewed_policy.schema_version == "1.0"
+                     else "owner_reviewed")
+    if mode != expected_mode:
+        print("RELEASE_APPROVAL_ONLY=REVIEWED_MODE_NOT_ACTIVE", flush=True)
+        return False
+
+    # This consumer independently verifies original signed owner evidence,
+    # release record, role/binding, policy, replay and CCC material review. It
+    # records only the existing exact-SHA owner/CCC authorization; it does not
+    # call deploy_production or change the incident hold.
+    try:
+        consume_mobile_release_decisions(
+            repo=repo, state_root=state_root, approve_release=approve_release,
+        )
+    except MobileReleaseEvidenceBusy:
+        print("RELEASE_APPROVAL_ONLY=SIGNED_OWNER_EVIDENCE_BUSY", flush=True)
+        return False
+
+    # A newer protected HEAD or changed baseline makes old offers invalid.
+    main_sha = authoritative_auto_promotion_head(repo)
+    record_file = record_path(state_root, record_id(main_sha))
+    if not record_file.is_file():
+        print("RELEASE_APPROVAL_ONLY=NO_CURRENT_ELIGIBLE_RELEASE", flush=True)
+        return False
+    record = load_record(state_root, record_id(main_sha))
+    if (record.get("state") != "production_eligible"
+            or (record.get("release_candidate") or {}).get("candidate_sha") != main_sha
+            or (record.get("release_manifest") or {}).get("candidate_sha") != main_sha
+            or record.get("rollback_sha") != live_sha
+            or not (record.get("preproduction") or {}).get("acceptance_passed")
+            or not (record.get("preproduction") or {}).get("rollback_readiness_passed")
+            or not (record.get("development") or {}).get("required_checks_passed")):
+        print("RELEASE_APPROVAL_ONLY=NO_CURRENT_ELIGIBLE_RELEASE", flush=True)
+        return False
+    purpose = signed_owner_offer_purpose(
+        record, main_sha, reviewed_policy, mode,
+        ccc_root=Path("/var/lib/jason/ccc"),
+    )
+    if purpose is None:
+        print("RELEASE_APPROVAL_ONLY=NO_OWNER_ACTION_REQUIRED", flush=True)
+        return False
+
+    # Recheck hold and protected source before durable offer publication.
+    if (not (state_root / "auto-promotion-incident-hold").is_file()
+            or authoritative_auto_promotion_head(repo) != main_sha
+            or exact_sha(live_runtime()["revision"], "live_production_sha") != live_sha):
+        raise ReleaseManagerError("approval-only offer source, hold or baseline changed")
+    offer_root = state_root / "mobile-release-offers"
+    offer = offer_root / (record_id(main_sha) + ".json")
+    if offer.exists():
+        existing = json.loads(offer.read_text(encoding="utf-8"))
+        if (existing.get("candidate_sha") != main_sha
+                or existing.get("live_rollback_sha") != live_sha
+                or existing.get("release_id") != record_id(main_sha)):
+            raise ReleaseManagerError("existing Teams owner offer conflicts with exact release")
+        # Never bump an old offer TTL, reissue a card or overwrite evidence
+        # after an uncertain transport outcome or a previous owner decision.
+        print("RELEASE_APPROVAL_ONLY=EXISTING_OFFER_PRESERVED", flush=True)
+        return False
+    manifest_digest = hashlib.sha256(json.dumps(
+        record["release_manifest"], sort_keys=True, separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")).hexdigest()
+    atomic_json(offer, {
+        "schema_version": "1.0",
+        "release_id": record_id(main_sha),
+        "candidate_sha": main_sha,
+        "manifest_sha256": manifest_digest,
+        "protected_main_sha": main_sha,
+        "live_rollback_sha": live_sha,
+        **({"review_only": True} if purpose == "ccc_material_review_only" else {}),
+        "published_at": now(),
+    })
+    print("RELEASE_APPROVAL_ONLY=OFFER_PUBLISHED_NONEXECUTING", flush=True)
+    return True
+
+
 def promote_eligible(repo: Path, state_root: Path) -> bool:
     # Keep the required five-minute timer active, but do not allow it to
     # execute a production promotion while Owner has selected manual mode.
@@ -3323,6 +3448,7 @@ def main() -> int:
     recovery.add_argument("--owner-approved", action="store_true")
 
     sub.add_parser("promote-eligible")
+    sub.add_parser("approval-only-held")
     status = sub.add_parser("status")
     status.add_argument("--release-id")
 
@@ -3373,6 +3499,11 @@ def main() -> int:
     if args.command == "promote":
         record = deploy_production(repo, state_root, load_record(state_root, args.release_id))
         print(json.dumps(record, indent=2))
+        return 0
+    if args.command == "approval-only-held":
+        print("RELEASE_APPROVAL_ONLY=" + (
+            "PUBLISHED" if approval_only_while_promotion_held(repo, state_root)
+            else "IDLE"))
         return 0
     if args.command == "promote-eligible":
         if not production_window_open():

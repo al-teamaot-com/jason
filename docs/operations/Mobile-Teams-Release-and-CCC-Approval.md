@@ -165,3 +165,38 @@ fallback**, not a routine requirement.
    releases are terminal-free during the owner's travel.
 
 Tracked parent: https://github.com/al-teamaot-com/jason/issues/1440
+
+
+
+## Held production promotion - independent owner-card issuance (P0 #1993)
+
+The automatic promotion incident hold is intentionally preserved. Its
+20-release-stability-hold.conf systemd condition continues to skip
+jason-release-manager.service, which may deploy production. A separate
+user timer jason-release-approval-only.timer and service run **only while
+that hold file exists**, calling the native Release Manager
+approval-only-held command. The command cannot invoke deployment, root
+transitions or customer/provider actions.
+
+The bounded worker reads fresh root-protected breaker and drift snapshots,
+verifies runtime/MCP/host and protected last-known-good alignment, checks
+live owner_only_pilot or separately reviewed v2 mode, versioned 0600
+policy, signed owner containment and exact protected main. The existing
+independent signed owner decision consumer can record the exact owner
+approval and CCC material review only after verifying durable decision
+evidence. A current-main, preproduction-eligible, appropriately risk-scoped
+release with unchanged production rollback gets one immutable offer for
+the existing owner Teams sender. Existing offers are never refreshed or
+rewritten after an unknown/partial send or expired card. The issuer's
+existing durable request ledger prevents repeat card sends.
+
+The offer-only timer is installed by the normal native immutable-release
+installer, activated alongside the preexisting 5-minute production
+timer, and registered as a required user timer in desired state. It never
+removes or overrides the incident hold or the root-protected deployment
+breaker. Approve is not a deploy instruction while the hold is active.
+A separate supervised, audited recovery is required to reactivate
+unattended production promotion; manual exact-SHA promotion remains
+governed by existing owner/CCC root checks. This is not a broad Universal
+Teams Approver activation. Existing #1553 original-card human-origin
+provenance remains a separate acceptance gate.
