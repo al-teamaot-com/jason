@@ -3437,8 +3437,14 @@ def test_approval_only_held_unit_does_not_disable_or_invoke_promotion():
     assert "promote-eligible" in promotion
     assert "approval-only-held" not in promotion
     desired=runner.gate.load_json(ROOT/"config/production-desired-state.json")
-    assert "jason-release-approval-only.timer" in desired["required_user_units"]
-    assert "jason-release-approval-only.service" in desired["allowed_user_units"]
+    # Stage A intentionally does NOT activate the timer or widen the root
+    # policy. Stage B will add both declarations as a separate reviewed SHA.
+    assert "jason-release-approval-only.timer" not in desired["required_user_units"]
+    assert "jason-release-approval-only.service" not in desired["allowed_user_units"]
+    installer=(ROOT/"tools/install_release_manager.py").read_text()
+    assert "approval_timer_declared" in installer
+    assert "if approval_timer_declared:" in installer
+    assert 'timers.append("jason-release-approval-only.timer")' in installer
 
 
 def test_held_offer_absent_owner_policy_never_reads_signed_decisions(tmp_path):

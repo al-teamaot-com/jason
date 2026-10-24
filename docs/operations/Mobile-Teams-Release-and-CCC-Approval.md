@@ -230,3 +230,34 @@ restores the exact original protected root-policy bytes. Candidate
 source still cannot edit arbitrary root units, release approvals,
 production breaker, auto-promotion incident hold or unrelated provider
 permissions. An old approved SHA does not authorize a new changed SHA.
+
+
+## Mandatory root-helper bootstrap phase (#1993)
+
+The first guarded deploy of the held-only Teams timer correctly failed at the
+*installed root worker's preflight*: that worker executes the **previous**
+root-owned migration helper to evaluate a newly introduced timer before the
+candidate's helper can be installed. Simply shipping an updated migrator
+alongside newly required user units does not repair that ordering defect.
+Never manually replace the root-only file or bypass its root policy gate.
+
+The rollout must therefore be split into **two distinct immutable releases**:
+
+- **Stage A — trusted-helper bootstrap.** Ship the already reviewed bounded
+  root migration helper plus the ordinary approval-only application code,
+  but keep config/production-desired-state.json identical to the protected
+  known-good baseline. The Release Manager installer reads that immutable
+  policy and neither copies nor activates the new user timer/service while
+  they are undeclared. The existing root preflight has no new unit delta to
+  authorize and can install the newer reviewed root migration helper through
+  its normal native host reconciliation.
+- **Stage B — approval-only timer declaration.** Only after Stage A is fully
+  production-verified and its reviewed migrator is the trusted installed root
+  helper may a second exact-SHA PR add the **two** held-only approval systemd
+  declarations to desired state. The same installer will then activate the
+  declared timer. The *installed* root helper recognizes that exact reviewed
+  plan; its root-owned 0600 receipt and staging/rollback gates remain in force.
+
+Each stage requires independent protected GitHub/CCC and exact SHA Owner
+approval. The auto-promotion incident hold is never removed by either stage.
+If Stage A cannot complete its host verification, do not attempt Stage B.
