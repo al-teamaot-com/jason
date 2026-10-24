@@ -261,3 +261,30 @@ The rollout must therefore be split into **two distinct immutable releases**:
 Each stage requires independent protected GitHub/CCC and exact SHA Owner
 approval. The auto-promotion incident hold is never removed by either stage.
 If Stage A cannot complete its host verification, do not attempt Stage B.
+
+
+## Stage B: governed held-only Teams approval timer declaration (#1993)
+
+Stage A bootstrapped and independently verified the new root-owned migration
+helper at the exact production/LKG SHA. Stage B now introduces ONLY the two
+source-reviewed user unit declarations:
+- required_user_units = jason-release-approval-only.timer
+- allowed_user_units = jason-release-approval-only.service
+
+Both native installers detect a nonempty four-category unit delta rather
+than looking for the old #1974 system timer. They pass the exact candidate
+and root-protected LKG revision into the already-installed, root-owned
+reviewed migrator. It checks the **entire** unit delta against one of only
+two fully specified plans, the owner exact-SHA grant, CCC review, root
+policy bytes and rollback state. It stages the user timer as ALLOWED
+*before* unit installation, then commits to REQUIRED after the candidate
+install has completed. No new system units, provider mutations, generic
+approval execution, self-issued authority or changes to the automatic
+promotion incident-hold are authorized.
+
+The new 5-minute user timer schedules only approval-offer publication and
+independent consumption of signed owner decisions, never unattended
+production promotion. A card sent is NOT proof of a human Teams click;
+live recipient/card origin, signed callback, Approve, Deny, expiry and
+replay remain separate measured acceptance criteria. **Stage B being
+deployed does not mean the Universal Teams Approver is complete.**

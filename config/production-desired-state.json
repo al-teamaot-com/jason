@@ -70,7 +70,8 @@
     "jason-support-repair-worker.timer",
     "jason-self-heal-watchdog.timer",
     "jason-dnsfilter-boundary-reconcile.timer",
-    "jason-kfs-collector.timer"
+    "jason-kfs-collector.timer",
+    "jason-release-approval-only.timer"
   ],
   "allowed_user_units": [
     "jason-release-manager.service",
@@ -79,7 +80,8 @@
     "jason-dnsfilter-boundary-reconcile.service",
     "jason-kfs-collector.service",
     "jason-openclaw-recovery-source-bridge.service",
-    "jason-openclaw-recovery-source-bridge.timer"
+    "jason-openclaw-recovery-source-bridge.timer",
+    "jason-release-approval-only.service"
   ],
   "rollback_container_prefixes": [
     "jason-runtime-rollback-",
