@@ -12,6 +12,9 @@ import argparse
 import fcntl
 import hashlib
 import json
+import pwd
+import secrets
+import sqlite3
 import os
 import stat
 import re
@@ -3199,6 +3202,131 @@ def approval_only_while_promotion_held(repo: Path, state_root: Path) -> bool:
     return True
 
 
+
+def request_expired_owner_card_renewal(
+    repo: Path, state_root: Path, *, release_id: str, candidate_sha: str,
+) -> dict[str, str]:
+    """Interactive OS-owner request for a *new Teams card*, never approval.
+
+    Requires owner account at an actual terminal. Revalidates protected main,
+    root safety, live rollback baseline, risk/policy and every previous terminal
+    card. Writes one new immutable private intent; no database expiry resets.
+    """
+    if (state_root.resolve() != DEFAULT_STATE.resolve()
+            or pwd.getpwuid(os.getuid()).pw_name != "al"
+            or not sys.stdin.isatty() or os.getuid() != state_root.stat().st_uid):
+        raise ReleaseManagerError("a local interactive authenticated al owner session is required")
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    if release_id != record_id(candidate_sha):
+        raise ReleaseManagerError("renewal release ID and exact SHA do not match")
+    if not (state_root / "auto-promotion-incident-hold").is_file():
+        raise ReleaseManagerError("manual-promotion incident hold is not active")
+    control = _read_protected_snapshot(state_root, "production-control-state.json")
+    drift = _read_protected_snapshot(state_root, "production-drift.json")
+    if ((control.get("circuit_breaker") or {}).get("state") != "closed"
+            or drift.get("status") != "pass" or drift.get("problems")):
+        raise ReleaseManagerError("host baseline or release breaker is not safe")
+    live = live_runtime()
+    live_sha = exact_sha(live["revision"], "live_sha")
+    live_production_alignment(live_sha)
+    if (control.get("last_known_good") or {}).get("manifest", {}).get("revision") != live_sha:
+        raise ReleaseManagerError("live production is not the last-known-good revision")
+    if authoritative_auto_promotion_head(repo) != candidate_sha:
+        raise ReleaseManagerError("source is not the current protected main SHA")
+    policy_path = MOBILE_APPROVAL_POLICY
+    if not policy_path.is_file():
+        raise ReleaseManagerError("the approved owner Teams policy is unavailable")
+    from release_mobile_approval_consumer import _install_repo_modules
+    _install_repo_modules(repo)
+    from jason_runtime.mobile_release_approval import (
+        CAPABILITY, RENEWAL_LIMIT, read_eligible_release, read_mobile_release_policy,
+    )
+    from jason_runtime.owner_release_approval_containment import read_release_approval_containment
+    containment = read_release_approval_containment(state_root)
+    if containment.active:
+        raise ReleaseManagerError("owner Teams release approval is contained")
+    policy = read_mobile_release_policy(policy_path)
+    expected_mode = ("owner_only_pilot" if policy.schema_version == "1.0"
+                     else "owner_reviewed")
+    if live_release_mobile_approval_mode(live) != expected_mode:
+        raise ReleaseManagerError("reviewed Teams approval mode does not match live runtime")
+    candidate = read_eligible_release(state_root, release_id, policy)
+    if candidate.candidate_sha != candidate_sha or candidate.rollback_sha != live_sha:
+        raise ReleaseManagerError("release rollback or signed source has changed")
+    db = Path("/var/lib/jason/openclaw/mobile-release-approvals.sqlite3")
+    con = sqlite3.connect("file:" + str(db.absolute()) + "?mode=ro", uri=True, timeout=2)
+    try:
+        related = []
+        for raw, in con.execute("SELECT payload FROM approval_requests"):
+            doc = json.loads(raw)
+            if (doc.get("capability") == CAPABILITY
+                    and (doc.get("metadata") or {}).get("release_id") == release_id):
+                related.append(doc)
+        if not related or len(related) > RENEWAL_LIMIT:
+            raise ReleaseManagerError("no expired request or owner renewal limit reached")
+        if any(doc.get("status") != "expired" for doc in related):
+            raise ReleaseManagerError("existing owner Teams request is not an expired undecided card")
+        prior = max(related, key=lambda doc: doc["requested_at"])
+        if (any((doc.get("metadata") or {}).get(k) != expected
+                for k, expected in (
+                    ("candidate_sha", candidate_sha),
+                    ("rollback_sha", live_sha),
+                    ("manifest_sha256", candidate.manifest_sha256),
+                    ("owner_policy_sha256", policy.policy_sha256),
+                ) for doc in related)):
+            raise ReleaseManagerError("previous Teams request does not match exact current release")
+        for doc in related:
+            if con.execute("SELECT 1 FROM approval_decision_receipts WHERE approval_id=?",
+                           (doc["approval_id"],)).fetchone():
+                raise ReleaseManagerError("a previous signed Teams decision already exists")
+    finally:
+        con.close()
+    instant = datetime.now(timezone.utc)
+    if datetime.fromisoformat(prior["expires_at"]) >= instant:
+        raise ReleaseManagerError("previous owner request is not past its expiration")
+    folder = state_root / "mobile-release-renewals"
+    folder.mkdir(mode=0o700, parents=False, exist_ok=True)
+    if (folder.is_symlink() or stat.S_IMODE(folder.stat().st_mode) != 0o700
+            or folder.stat().st_uid != os.getuid()):
+        raise ReleaseManagerError("renewal intent directory is not private")
+    existing = list(folder.glob(release_id + "-renew-*.json"))
+    if len(existing) >= RENEWAL_LIMIT:
+        raise ReleaseManagerError("maximum explicit owner renewals reached")
+    for file in existing:
+        data = json.loads(file.read_text(encoding="utf-8"))
+        if data.get("previous_approval_id") == prior["approval_id"]:
+            raise ReleaseManagerError("an owner renewal already exists for the latest expired card")
+    nonce = secrets.token_hex(16)
+    marker = folder / (release_id + "-renew-" + nonce + ".json")
+    record = {
+        "schema_version": "1.0", "release_id": release_id,
+        "candidate_sha": candidate_sha, "rollback_sha": live_sha,
+        "manifest_sha256": candidate.manifest_sha256,
+        "owner_policy_sha256": policy.policy_sha256, "renewal_nonce": nonce,
+        "previous_approval_id": prior["approval_id"],
+        "requested_at": instant.isoformat(),
+        "requester_identity": "person-al", "requester_os_account": "al",
+    }
+    # Exclusive creation: no timestamp bump, overwrite or second owner request.
+    fd = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(record, handle, sort_keys=True)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    dirfd = os.open(folder, os.O_DIRECTORY)
+    try:
+        os.fsync(dirfd)
+    finally:
+        os.close(dirfd)
+    return {
+        "release_id": release_id, "candidate_sha": candidate_sha,
+        "previous_approval_id": prior["approval_id"],
+        "status": "fresh_card_requested_not_authorized",
+        "requested_at": record["requested_at"],
+    }
+
+
 def promote_eligible(repo: Path, state_root: Path) -> bool:
     # Keep the required five-minute timer active, but do not allow it to
     # execute a production promotion while Owner has selected manual mode.
@@ -3455,6 +3583,9 @@ def main() -> int:
 
     sub.add_parser("promote-eligible")
     sub.add_parser("approval-only-held")
+    renew = sub.add_parser("renew-expired-owner-card")
+    renew.add_argument("--release-id", required=True)
+    renew.add_argument("--candidate-sha", required=True)
     status = sub.add_parser("status")
     status.add_argument("--release-id")
 
@@ -3510,6 +3641,12 @@ def main() -> int:
         print("RELEASE_APPROVAL_ONLY=" + (
             "PUBLISHED" if approval_only_while_promotion_held(repo, state_root)
             else "IDLE"))
+        return 0
+    if args.command == "renew-expired-owner-card":
+        print(json.dumps(request_expired_owner_card_renewal(
+            repo, state_root, release_id=args.release_id,
+            candidate_sha=args.candidate_sha,
+        ), indent=2))
         return 0
     if args.command == "promote-eligible":
         if not production_window_open():
