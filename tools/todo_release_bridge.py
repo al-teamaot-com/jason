@@ -204,6 +204,28 @@ def upstream_commitment_state(record: Mapping[str, Any] | None) -> tuple[str, st
     return 'development_in_progress', reason
 
 
+
+def verified_open_development_pr(
+    repo: Path, issue_number: int, worker_record: Mapping[str, Any],
+) -> int | None:
+    """Require actual open, same-issue GitHub PR before claiming merge wait."""
+    number = worker_record.get('pr_number')
+    if type(number) is not int or number < 1:
+        return None
+    pr = gh_json([
+        'pr', 'view', str(number), '--json', 'number,state,body,mergedAt',
+    ], cwd=repo) or {}
+    if not isinstance(pr, Mapping):
+        return None
+    marker = DEV_META.search(str(pr.get('body') or ''))
+    if (type(pr.get('number')) is not int or pr['number'] != number
+            or pr.get('state') != 'OPEN' or pr.get('mergedAt')
+            or marker is None or int(marker.group(1)) != issue_number):
+        return None
+    return number
+
+
+
 def next_work_gate(phase: str, reason: str) -> dict[str, str]:
     """Classify a pending commitment without granting execution authority."""
     reason_lower = reason.casefold()
@@ -823,7 +845,18 @@ def main() -> int:
             phase, reason = upstream_commitment_state(authoritative)
             changes: dict[str, Any] = {"phase": phase, "reason": reason}
             if phase == 'waiting_development_merge':
-                changes['development_pr'] = authoritative['pr_number']
+                verified_pr = verified_open_development_pr(
+                    repo, issue['issue_number'], authoritative,
+                )
+                if verified_pr is None:
+                    phase = 'development_blocked'
+                    reason = (
+                        'Development PR is not verified open and bound to this '
+                        'exact issue; cannot claim an awaiting-merge state.'
+                    )
+                    changes = {'phase': phase, 'reason': reason}
+                else:
+                    changes['development_pr'] = verified_pr
             update_commitment(record, changes)
             unmerged_authority[todo_id] = phase
             continue
