@@ -410,3 +410,14 @@ For an exact-source gateway image replacement, preserve the current container
 settings, signing-key/token mounts, network, public port and durable decision
 store. Use the shared preflight and rollback mechanism; do not rerun the
 historical initial OpenClaw port cutover to update an already direct gateway.
+
+
+### Non-root image source permissions (2026-10-24)
+
+The release builder can check out source with mode 0600. Docker COPY preserves
+that mode while assigning root ownership; the existing USER node cannot read
+the application. Normalize only packaged non-secret /app JavaScript modules
+and package.json to mode 0644 and /app to 0755 at image build time. Keep
+USER node and all mounted credential permissions unchanged. Before rollout,
+run an import/syntax smoke test as the image's default user with no network
+and a read-only root filesystem. Never compensate by running the bot as root.

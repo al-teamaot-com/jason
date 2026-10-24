@@ -16,6 +16,11 @@ COPY infrastructure/jason-teams-gateway/proactive-send-result.mjs ./proactive-se
 COPY infrastructure/jason-teams-gateway/teams-user-bootstrap.mjs ./teams-user-bootstrap.mjs
 COPY infrastructure/openclaw-jason-bridge/bridge-core.mjs ./bridge-core.mjs
 
+# Source checkouts may use umask 077. Packaged public code must remain
+# readable by the existing non-root node user, without granting write access.
+RUN chmod 0755 /app \
+    && chmod 0644 /app/package.json /app/*.mjs
+
 ENV NODE_ENV=production
 ENV PORT=3979
 
