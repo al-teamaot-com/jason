@@ -46,6 +46,7 @@ def test_diagnostic_calls_existing_ledger_with_attribution(monkeypatch, capsys):
     assert observed['context'].workflow_id == 'provider-credit-verify'
     assert observed['context'].routing_profile == 'operator-authorized-diagnostic'
     assert observed['client']['model'] == 'gpt-5.4-mini'
+    assert observed['client']['reasoning_effort'] == 'low'
     assert observed['client']['api_key'] == 'test-only'
     assert 'test-only' not in capsys.readouterr().out
 
@@ -103,3 +104,45 @@ def test_diagnostic_rejects_success_without_metered_receipt(monkeypatch, capsys)
     monkeypatch.setattr(mod, 'metered_receipt', lambda path, rid: False)
     assert mod.run() == 3
     assert 'no matching provider-reported metered completion' in capsys.readouterr().out
+
+
+def test_transport_status_reported_without_secret_message(monkeypatch, capsys):
+    from connectors.core.contracts import ConnectorTransportError
+    mod = load_module()
+    monkeypatch.setenv('JASON_OPENAI_CONVERSATION_MODEL', 'gpt-5.4-mini')
+    class Resolver:
+        def __init__(self, **kwargs): pass
+        def resolve(self, *args): return {'api_key':'private-api-key'}
+    class Client:
+        def __init__(self, **kwargs): pass
+        def complete(self, **kwargs):
+            raise ConnectorTransportError('private-api-key sensitive provider response',
+                                          status_code=429,provider_error_code='credit_balance_exhausted')
+    monkeypatch.setattr(mod, 'OpenBaoSecretResolver', Resolver)
+    monkeypatch.setattr(mod, 'OpenAIStructuredJsonClient', Client)
+    monkeypatch.setattr(mod, 'SQLiteUsageLedger', lambda path: SimpleNamespace(path=path))
+    assert mod.run() == 4
+    output = capsys.readouterr().out
+    assert 'http_status=429' in output and 'code=credit_balance_exhausted' in output
+    assert 'private-api-key' not in output and 'sensitive provider response' not in output
+
+
+def test_unrecognized_provider_code_is_never_printed(monkeypatch, capsys):
+    from connectors.core.contracts import ConnectorTransportError
+    mod = load_module()
+    monkeypatch.setenv('JASON_OPENAI_CONVERSATION_MODEL', 'gpt-5.4-mini')
+    class Resolver:
+        def __init__(self, **kwargs): pass
+        def resolve(self, *args): return {'api_key':'private-api-key'}
+    class Client:
+        def __init__(self, **kwargs): pass
+        def complete(self, **kwargs):
+            raise ConnectorTransportError('sensitive text',status_code=400,
+                provider_error_code='sensitive-unknown-provider-code')
+    monkeypatch.setattr(mod, 'OpenBaoSecretResolver', Resolver)
+    monkeypatch.setattr(mod, 'OpenAIStructuredJsonClient', Client)
+    monkeypatch.setattr(mod, 'SQLiteUsageLedger', lambda path: SimpleNamespace(path=path))
+    assert mod.run() == 4
+    output = capsys.readouterr().out
+    assert 'http_status=400' in output and 'code=unclassified' in output
+    assert 'sensitive' not in output
