@@ -1387,6 +1387,115 @@ def readmit_development_after_verified_transport_recovery(
     return resumed
 
 
+
+def readmit_development_after_verified_credit_replenishment(
+    state: dict[str, Any], admitted: list[dict[str, Any]], spool: Path,
+    *, max_active: int, usage_ledger_path: Path | None = None,
+) -> list[str]:
+    """One bounded owner-approved request after independently metered credits.
+
+    A credit 429 is a hard, nonretryable provider failure until the trusted
+    existing support credit verification helper proves a NEW operator-approved
+    OpenAI diagnostic completed with provider-reported token usage. No
+    resubmission of the old request, no automatic billing, provider writes,
+    new authority, or retry loops are permitted.
+    """
+    records = state.get('items') if isinstance(state.get('items'), Mapping) else {}
+    active = sum(
+        1 for record in records.values()
+        if isinstance(record, Mapping) and record.get('phase') in ACTIVE_PHASES
+    )
+    slots = max(0, max(1, int(max_active)) - active_support_count(spool) - active)
+    usage_path = (Path(usage_ledger_path) if usage_ledger_path is not None
+                  else spool.parent / 'model-usage.sqlite3')
+    resumed: list[str] = []
+    for item in admitted:
+        if not slots:
+            break
+        record = records.get(item['id'])
+        if (not isinstance(record, dict) or record.get('phase') != 'blocked'
+                or record.get('provider_credit_requeue_id') or record.get('pr_number')
+                or record.get('blocker_class') in {'blocked_by_dependency'}
+                or (isinstance(record.get('recovery_handoff_intake'), Mapping)
+                    and record['recovery_handoff_intake'].get('status') == 'awaiting_governed_repair')):
+            continue
+        reason = str(record.get('reason') or '')
+        if reason.startswith('development reasoning failed: Hosted reasoning blocked: credit_balance_exhausted'):
+            kind, phase = 'search_plan', 'diagnosing'
+        elif reason.startswith('development edit reasoning failed: Hosted reasoning blocked: credit_balance_exhausted'):
+            kind, phase = 'edit_plan', 'implementing'
+        else:
+            continue
+        failed_id = str(record.get('reasoning_request_id') or '')
+        if re.fullmatch(r'[a-f0-9]{64}', failed_id) is None:
+            continue
+        req_path = spool / 'reasoning' / 'requests' / (failed_id + '.json')
+        try:
+            if not req_path.is_file() or req_path.stat().st_size > 200000:
+                continue
+            request = json.loads(req_path.read_text(encoding='utf-8'))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+        context = request.get('context') if isinstance(request, Mapping) else None
+        if (not isinstance(request, Mapping)
+                or request.get('request_id') != failed_id
+                or support.request_id(request) != failed_id
+                or request.get('kind') != kind
+                or request.get('support_item') != item['id']
+                or not isinstance(context, dict)
+                or context.get('work_class') != 'owner_approved_development'
+                or context.get('approval_source') != item.get('approval_source')
+                or context.get('approved_scope') != approved_scope(item)
+                or 'verified_credit_recovery' in context):
+            continue
+        failure = support.reasoning_response(spool, failed_id)
+        if (not isinstance(failure, Mapping)
+                or failure.get('request_id') != failed_id
+                or failure.get('status') != 'failed'
+                or failure.get('primary_provider_error_code') != 'credit_balance_exhausted'
+                or failure.get('required_owner_action') != 'restore_provider_credits'
+                or failure.get('primary_http_status') != 429
+                or failure.get('retryable') is not False):
+            continue
+        try:
+            failed_at = datetime.fromisoformat(
+                str(failure.get('completed_at') or '').replace('Z', '+00:00')
+            )
+            receipt = support.verified_credit_reload_receipt(
+                usage_path, failed_at=failed_at
+            )
+        except (ValueError, TypeError, OSError):
+            continue
+        if not isinstance(receipt, Mapping) or not receipt.get('entry_id'):
+            continue
+        renewed_context = dict(context)
+        renewed_context['verified_credit_recovery'] = {
+            'failed_request_id': failed_id,
+            'provider_credit_receipt_id': str(receipt['entry_id']),
+            'provider_model': str(receipt.get('model') or ''),
+            'retry_limit': 1,
+            'purpose': 'same_approved_scope_after_metered_credit_recovery',
+        }
+        new_id = queue_reasoning(
+            spool, kind=kind, item=item, context=renewed_context
+        )
+        if new_id == failed_id:
+            continue
+        record.update({
+            'phase': phase,
+            'reason': 'One bounded development reasoning request after verified hosted API credit replenishment.',
+            'provider_credit_original_failure_id': failed_id,
+            'provider_credit_receipt_id': str(receipt['entry_id']),
+            'provider_credit_requeue_id': new_id,
+            'reasoning_request_id': new_id,
+            'updated_at': now(),
+        })
+        resumed.append(item['id'])
+        slots -= 1
+    return resumed
+
+
+
 def blocked_work_next_action(reason: str) -> dict[str, str]:
     text = str(reason or "").casefold()
     if any(x in text for x in ("approval", "authorization", "credential")):
@@ -1490,6 +1599,9 @@ def main() -> int:
     readmit_explicit_verified_dependencies(state, admitted, spool, max_active=max(1, int(args.max_active)))
     readmit_recovered_development_reasoning(state, admitted, spool, max_active=max(1, int(args.max_active)))
     readmit_development_after_verified_transport_recovery(
+        state, admitted, spool, max_active=max(1, int(args.max_active)),
+    )
+    readmit_development_after_verified_credit_replenishment(
         state, admitted, spool, max_active=max(1, int(args.max_active)),
     )
     state['discovery'] = {
