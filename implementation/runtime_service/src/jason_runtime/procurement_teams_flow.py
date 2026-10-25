@@ -64,7 +64,9 @@ from orchestrator.teams_conversation_flow import (
 from orchestrator.teams_request_factory import GovernedTeamsOrchestrationRequestFactory
 from .procurement_web_read import CAPABILITY as PROCUREMENT_WEB_PRODUCT_READ
 from .procurement_inventory_billing import AllocationPlan
-from .procurement_supervisor_policy import SupervisorSpendingPolicy, SupervisorPolicyError, money
+from .procurement_supervisor_policy import (
+    SupervisorSpendingPolicy, SupervisorPolicyError, money, require_signed_purchase_approval,
+)
 
 PROCUREMENT_APPROVAL_CAPABILITY = "procurement.submission.execute"
 PROCUREMENT_WORKER_ID = "jason-procurement-worker"
@@ -2564,24 +2566,11 @@ class ProcurementTeamsFlow:
             if commitment > threshold and not owner_approval_id:
                 raise PermissionError('over-limit PO requires canonical Teams approval receipt')
             if owner_approval_id:
-                request = self.approval_service.repository.get(owner_approval_id)
-                receipt_lookup = getattr(self.approval_service.repository, 'accepted_decision', None)
-                receipt = receipt_lookup(owner_approval_id) if callable(receipt_lookup) else None
-                if (request is None or request.status is not ApprovalRequestStatus.APPROVED
-                        or request.capability != PROCUREMENT_APPROVAL_CAPABILITY
-                        or request.organization_id != 'aot' or request.client_id is not None
-                        or request.requested_mode != 'purchase'
-                        or request.requested_by != current.get('requester_principal_id')
-                        or request.metadata.get('submission_id') != current.get('submission_id')
-                        or request.metadata.get('submission_digest') != current.get('digest')
-                        or request.metadata.get('supervisor_policy_digest')
-                           != str(current.get('supervisor_policy_digest') or 'owner-udf-only')
-                        or receipt is None or receipt.status != 'approved'
-                        or receipt.decided_by == request.requested_by
-                        or receipt.decided_by not in request.authorized_approver_ids
-                        or receipt.channel != 'microsoft_teams'
-                        or not receipt.authentication_evidence_hash):
-                    raise PermissionError('canonical signed Teams purchase approval receipt not verified')
+                require_signed_purchase_approval(
+                    service=self.approval_service,
+                    approval_id=owner_approval_id,
+                    submission=current,
+                )
 
         po_plan = (
             _po_execution_plan(submission)

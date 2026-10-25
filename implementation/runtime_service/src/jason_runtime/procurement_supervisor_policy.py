@@ -175,3 +175,35 @@ class SupervisorSpendingPolicy:
     def revalidate(self, *, digest: str) -> None:
         if not isinstance(digest,str) or digest!=self.canonical_digest:
             raise PermissionError('supervisor policy changed; previous approval invalid')
+
+
+def require_signed_purchase_approval(*, service: Any, approval_id: str,
+                                     submission: Mapping[str, Any]) -> Any:
+    """Reusable, canonical signed Teams approval receipt guard for PO/parts.
+
+    The same immutable ApprovalRequestService used for production-style cards
+    is required. A bare approval ID or local record cannot grant write access.
+    """
+    from connectors.src.jason_connectors.approval_requests import ApprovalRequestStatus
+    if not approval_id or service is None:
+        raise PermissionError('canonical signed Teams purchase approval required')
+    repository = service.repository
+    request = repository.get(approval_id)
+    fetch = getattr(repository,'accepted_decision',None)
+    receipt = fetch(approval_id) if callable(fetch) else None
+    if (request is None or request.status is not ApprovalRequestStatus.APPROVED
+            or request.capability != 'procurement.submission.execute'
+            or request.organization_id != 'aot' or request.client_id is not None
+            or request.requested_mode != 'purchase'
+            or request.requested_by != submission.get('requester_principal_id')
+            or request.metadata.get('submission_id') != submission.get('submission_id')
+            or request.metadata.get('submission_digest') != submission.get('digest')
+            or request.metadata.get('supervisor_policy_digest')
+                != str(submission.get('supervisor_policy_digest') or 'owner-udf-only')
+            or receipt is None or receipt.status != 'approved'
+            or receipt.decided_by == request.requested_by
+            or receipt.decided_by not in request.authorized_approver_ids
+            or receipt.channel != 'microsoft_teams'
+            or not receipt.authentication_evidence_hash):
+        raise PermissionError('canonical signed Teams purchase approval receipt not verified')
+    return receipt
