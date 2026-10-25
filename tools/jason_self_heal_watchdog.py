@@ -892,6 +892,23 @@ def main() -> int:
     state = read_json(state_path)
 
     failures, evidence = bounded_detect(root)
+    # The detector remains read-only. A distinct, Owner-authorized and strictly
+    # allowlisted repair routine may archive only clean detached merged Git
+    # worktrees when the second physical filesystem has safe headroom.
+    # This executes only in the installed production watchdog, never tests or
+    # arbitrary local roots, and never manipulates live audit/SQLite services.
+    storage_repair = None
+    if root == DEFAULT_ROOT and any(
+            f.startswith('host_storage_capacity_') for f in failures):
+        try:
+            from jason_storage_autorepair import repair as bounded_storage_repair
+            storage_repair = bounded_storage_repair()
+            if storage_repair.get('archived_count', 0):
+                failures, evidence = bounded_detect(root)
+            evidence['host_storage_autorepair'] = storage_repair
+        except (OSError,ValueError,RuntimeError,subprocess.TimeoutExpired) as exc:
+            evidence['host_storage_autorepair'] = {
+                'status':'blocked','error_type':type(exc).__name__}
     if not failures:
         update_recurrence_memory(memory_path, [])
         atomic_json(state_path, {
@@ -935,7 +952,13 @@ def main() -> int:
         incident_path = queue_resolution_incident(root, incident, evidence)
         incident_paths.append(str(incident_path))
         repair = incident.get("repair") if isinstance(incident.get("repair"), Mapping) else {}
-        if attempts >= max(1, int(args.max_attempts)) and bool(repair.get("requires_owner_action")):
+        # No repeating owner approval prompts while this known-safe archival
+        # process is making measurable progress and the other disk is healthy.
+        autorepair_progress = (str(incident.get('family')) == 'host_storage_capacity'
+                               and isinstance(storage_repair, dict)
+                               and int(storage_repair.get('archived_count') or 0) > 0)
+        if (not autorepair_progress and attempts >= max(1, int(args.max_attempts))
+                and bool(repair.get("requires_owner_action"))):
             escalation = write_incident_escalation(
                 root, incident=incident, attempts=attempts, actions=actions
             )
