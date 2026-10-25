@@ -12,7 +12,7 @@ WORKFLOW_RUN_ID="${3:-}"
 WORKFLOW_URL="${4:-}"
 REPO_ROOT="${JASON_DOCUMENTATION_REPO_ROOT:-/home/al/projects/jason}"
 SHORT_REVISION="${SOURCE_REVISION:0:12}"
-BRANCH="automation/documentation-reconcile-${SHORT_REVISION}"
+BRANCH="automation/documentation-reconcile-current"
 WORKTREE_ROOT="${JASON_DOCUMENTATION_WORKTREE_ROOT:-/home/al/jason-worktrees}"
 WORKTREE="$WORKTREE_ROOT/documentation-reconcile-${SHORT_REVISION}"
 
@@ -43,8 +43,13 @@ if [ "$PR_COUNT" -eq 1 ]; then
   done <<< "$CHANGED_PATHS"
 fi
 git fetch origin main >/dev/null 2>&1
-if [ "$PR_COUNT" -eq 1 ]; then
+# Fetch the expected remote head before force-with-lease, even when the prior
+# generated PR was already merged/closed. A stable branch prevents two hosts
+# from creating distinct revision-named branches during the first publication.
+if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
   git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" >/dev/null 2>&1
+fi
+if [ "$PR_COUNT" -eq 1 ]; then
   # A delayed invocation must not replace a newer revision already offered.
   PRIOR_REVISION="$(git show "origin/$BRANCH:docs/control/AUTOMATED-CHANGE-STATE.json" | jq -r --arg mode "$MODE" 'if $mode == "source" then .validated_source.revision // "" else .production.revision // "" end')"
   if [ -n "$PRIOR_REVISION" ] && [ "$PRIOR_REVISION" != "$SOURCE_REVISION" ]; then
@@ -99,6 +104,14 @@ fi
 gh issue edit 526 --repo al-teamaot-com/jason --body-file "$CONTROL_BOARD_FILE" >/dev/null
 echo "CONTROL_BOARD_PUBLICATION=PASS"
 
+# A replay of an already-open candidate must not rewrite its branch or
+# retrigger CI if neither generated file changed.
+if [ "$PR_COUNT" -eq 1 ] &&
+   cmp -s docs/control/AUTOMATED-CHANGE-STATE.json <(git show "origin/$BRANCH:docs/control/AUTOMATED-CHANGE-STATE.json") &&
+   cmp -s docs/control/AUTOMATED-CHANGE-STATE.md <(git show "origin/$BRANCH:docs/control/AUTOMATED-CHANGE-STATE.md"); then
+  echo "DOCUMENTATION_PUBLICATION=NO_CHANGE"
+  exit 0
+fi
 if git diff --quiet -- docs/control/AUTOMATED-CHANGE-STATE.json docs/control/AUTOMATED-CHANGE-STATE.md; then
   echo "DOCUMENTATION_PUBLICATION=NO_CHANGE"
   exit 0
