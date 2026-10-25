@@ -70,6 +70,7 @@ SERVICE_NOTIFICATION_HISTORY_SEARCH = "service.notification.history.search"
 SERVICE_PRODUCT_SEARCH = "service.product.search"
 SERVICE_PRODUCT_READ = "service.product.read"
 SERVICE_PRODUCT_VENDOR_SEARCH = "service.product.vendor.search"
+SERVICE_INVENTORY_ITEM_SEARCH = "service.inventory.item.search"
 SERVICE_SERVICE_SEARCH = "service.service.search"
 SERVICE_SERVICE_READ = "service.service.read"
 SERVICE_SERVICE_BUNDLE_SEARCH = "service.service.bundle.search"
@@ -146,6 +147,7 @@ AUTOTASK_CAPABILITIES = frozenset(
         SERVICE_PRODUCT_SEARCH,
         SERVICE_PRODUCT_READ,
         SERVICE_PRODUCT_VENDOR_SEARCH,
+        SERVICE_INVENTORY_ITEM_SEARCH,
         SERVICE_SERVICE_SEARCH,
         SERVICE_SERVICE_READ,
         SERVICE_SERVICE_BUNDLE_SEARCH,
@@ -789,6 +791,19 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             selector_keys="resource_id",
             fact_hints="product,catalog item,sku,part number,unit cost,unit price,inventory",
             authoritative_change_sources=at,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_INVENTORY_ITEM_SEARCH,
+            display_name='Read Exact Autotask Inventory by Product and Location',
+            business_purpose=('Read-only product/location quantity-on-hand, picked and reserved evidence; '
+                              'no stock mutation or reservation implied.'),
+            resource_types='service_inventory_item,autotask_inventory_item',
+            operation='search',
+            selector_keys='product_id,inventory_location_id',
+            fact_hints='Autotask InventoryItems quantityOnHand, quantityPicked, quantityReserved, stock location',
+            authoritative_change_sources=at,
+            collection_fact='inventory items',
         ),
         _read_capability(
             now=now,

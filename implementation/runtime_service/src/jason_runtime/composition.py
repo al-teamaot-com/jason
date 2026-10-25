@@ -326,6 +326,7 @@ from .procurement_billing_audit_maintenance import (
 )
 from .procurement_supervisor_policy import SupervisorSpendingPolicy
 from .procurement_approval_maintenance import ProcurementApprovalMaintenance
+from .parts_inventory_lifecycle import SQLitePartsLifecycleLedger
 from .procurement_inventory_billing import (
     HardwareBillingDispositionFlow,
     SQLiteBillingLeakageStore,
@@ -580,6 +581,9 @@ class RuntimeSettings:
     # Explicit opt-in: missing/unreviewed supervisor policy never silently grants
     # staff purchasing authority. Existing Autotask UDF + owner approval remains.
     procurement_supervisor_policy_path: Path | None = None
+    procurement_parts_evidence_db: Path = Path(
+        '/var/lib/jason/openclaw/procurement/parts-lifecycle.sqlite3'
+    )
     procurement_billing_audit_db: Path = Path(
         "/var/lib/jason/openclaw/procurement/billing-audit.sqlite3"
     )
@@ -1056,6 +1060,9 @@ class RuntimeSettings:
                 if os.getenv('JASON_PROCUREMENT_SUPERVISOR_POLICY_PATH','').strip()
                 else None
             ),
+            procurement_parts_evidence_db=Path(os.getenv(
+                'JASON_PROCUREMENT_PARTS_EVIDENCE_DB',
+                '/var/lib/jason/openclaw/procurement/parts-lifecycle.sqlite3')),
             universal_approval_mode=pilot_mode,
             universal_approval_worker_enabled=os.getenv(
                 "JASON_UNIVERSAL_APPROVAL_WORKER_ENABLED", "true"
@@ -2454,6 +2461,7 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
             approval_sender=procurement_approval_sender,
             owner_ids=tuple(procurement_owner_ids),
             supervisor_policy=supervisor_policy,
+            parts_ledger=SQLitePartsLifecycleLedger(settings.procurement_parts_evidence_db),
             structured_client=hosted_conversation_client or ollama_client,
             inventory_location_id=settings.procurement_inventory_location_id,
         )

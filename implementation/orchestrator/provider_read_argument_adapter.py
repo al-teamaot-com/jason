@@ -55,6 +55,7 @@ from .provider_read_capability_catalog import (
     SERVICE_PRODUCT_SEARCH,
     SERVICE_PRODUCT_READ,
     SERVICE_PRODUCT_VENDOR_SEARCH,
+    SERVICE_INVENTORY_ITEM_SEARCH,
     SERVICE_SERVICE_SEARCH,
     SERVICE_SERVICE_READ,
     SERVICE_SERVICE_BUNDLE_SEARCH,
@@ -192,6 +193,10 @@ _AUTOTASK_SEARCH_FIELDS: Mapping[str, Mapping[str, str]] = {
         "resource_id": "id",
         "name": "name",
         "sku": "sku",
+    },
+    SERVICE_INVENTORY_ITEM_SEARCH: {
+        'product_id':'productID',
+        'inventory_location_id':'inventoryLocationID',
     },
     SERVICE_PRODUCT_VENDOR_SEARCH: {
         "resource_id": "id",
@@ -687,6 +692,17 @@ def adapt_autotask_arguments(
         if company_id is None or not str(company_id).strip():
             raise ValueError("company_id is required for contract search")
         return {"entity": "Contracts", "search": _autotask_search(capability_name, arguments)}
+    if capability_name == SERVICE_INVENTORY_ITEM_SEARCH:
+        if (set(arguments)!={'product_id','inventory_location_id'}
+                or any(type(arguments[k]) is not int or arguments[k]<1
+                       for k in ('product_id','inventory_location_id'))):
+            raise ValueError('inventory query requires only exact positive product/location IDs')
+        return {'entity':'InventoryItems','search':json.dumps({
+            'MaxRecords':2,
+            'filter':[
+                {'op':'eq','field':'productID','value':arguments['product_id']},
+                {'op':'eq','field':'inventoryLocationID','value':arguments['inventory_location_id']},
+            ]},sort_keys=True,separators=(',',':'))}
     if capability_name == SERVICE_RESOURCE_READ:
         return {"entity": "Resources", "entity_id": _resource_id(arguments)}
     if capability_name == SERVICE_PRODUCT_READ:

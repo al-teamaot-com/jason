@@ -67,6 +67,8 @@ from .procurement_inventory_billing import AllocationPlan
 from .procurement_supervisor_policy import (
     SupervisorSpendingPolicy, SupervisorPolicyError, money, require_signed_purchase_approval,
 )
+from .parts_inventory_lifecycle import PartsScope, SQLitePartsLifecycleLedger
+from .parts_availability_workflow import GovernedPartsAvailabilityWorkflow
 
 PROCUREMENT_APPROVAL_CAPABILITY = "procurement.submission.execute"
 PROCUREMENT_WORKER_ID = "jason-procurement-worker"
@@ -1180,6 +1182,7 @@ class ProcurementTeamsFlow:
     approval_sender: Any
     owner_ids: tuple[str, ...]
     supervisor_policy: SupervisorSpendingPolicy | None = None
+    parts_ledger: SQLitePartsLifecycleLedger | None = None
     structured_client: Any | None = None
     inventory_location_id: int = 1
     ship_to_name: str = "Atlantic Office Technologies"
@@ -1207,6 +1210,21 @@ class ProcurementTeamsFlow:
         if principal is None or principal.organization_id != "aot":
             raise PermissionError("procurement intake is restricted to AOT staff")
         return principal, evidence
+
+    def check_parts_stock(self, *, scope:PartsScope,
+                          principal:BoundConversationPrincipal,
+                          evidence:TeamsConversationPrincipalEvidence,
+                          correlation_id:str, now:datetime):
+        """Read one exact Autotask product/location using canonical auth.
+
+        A stock lookup does not reserve, spend, stage, or release parts.
+        """
+        if self.parts_ledger is None:
+            raise ProcurementFlowError('governed parts evidence ledger unavailable')
+        return GovernedPartsAvailabilityWorkflow(
+            provider_reads=self._read,ledger=self.parts_ledger,
+        ).check(scope=scope,principal=principal,signed_identity=evidence,
+                correlation_id=correlation_id,now=now)
 
     def _read(
         self,
