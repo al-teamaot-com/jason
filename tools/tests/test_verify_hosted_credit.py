@@ -41,6 +41,7 @@ def test_diagnostic_calls_existing_ledger_with_attribution(monkeypatch, capsys):
     monkeypatch.setattr(mod, 'OpenBaoSecretResolver', Resolver)
     monkeypatch.setattr(mod, 'OpenAIStructuredJsonClient', Client)
     monkeypatch.setattr(mod, 'SQLiteUsageLedger', lambda path: SimpleNamespace(path=path))
+    monkeypatch.setattr(mod, 'metered_receipt', lambda path, rid: True)
     assert mod.run() == 0
     assert observed['context'].workflow_id == 'provider-credit-verify'
     assert observed['context'].routing_profile == 'operator-authorized-diagnostic'
@@ -60,3 +61,28 @@ def test_error_does_not_leak_secret(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert 'RuntimeError' in output
     assert 'sensitive-private-token' not in output
+
+
+def test_metered_receipt_rejects_other_request_and_unmetered(tmp_path):
+    import json
+    import sqlite3
+    mod = load_module()
+    path = tmp_path / 'ledger.sqlite3'
+    db = sqlite3.connect(path)
+    db.execute('CREATE TABLE model_usage_entries (payload_json TEXT)')
+    base = {'provider':'openai','outcome':'completed','usage_source':'provider_reported',
+        'tokens':{'total_tokens':3},'context':{'request_id':'wrong',
+        'workflow_id':'provider-credit-verify','routing_profile':'operator-authorized-diagnostic'}}
+    db.execute('INSERT INTO model_usage_entries VALUES (?)', (json.dumps(base),))
+    db.commit()
+    assert mod.metered_receipt(path, 'correct') is False
+    base['context']['request_id'] = 'correct'
+    base['tokens']['total_tokens'] = 0
+    db.execute('INSERT INTO model_usage_entries VALUES (?)', (json.dumps(base),))
+    db.commit()
+    assert mod.metered_receipt(path, 'correct') is False
+    base['tokens']['total_tokens'] = 9
+    db.execute('INSERT INTO model_usage_entries VALUES (?)', (json.dumps(base),))
+    db.commit()
+    assert mod.metered_receipt(path, 'correct') is True
+    db.close()

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import sys
 from pathlib import Path
 from uuid import uuid4
@@ -18,6 +19,28 @@ from orchestrator.openai_reasoning import OpenAIStructuredJsonClient
 from usage_ledger.contracts import UsageContext
 from usage_ledger.ledger import SQLiteUsageLedger
 from usage_ledger.runtime_context import bind_usage_context
+
+
+def metered_receipt(ledger_path: Path, request_id: str) -> bool:
+    """Require a real, same-request provider-reported metered completion."""
+    db = sqlite3.connect(ledger_path.as_uri() + '?mode=ro', uri=True, timeout=2)
+    try:
+        rows = db.execute('SELECT payload_json FROM model_usage_entries ORDER BY rowid DESC LIMIT 256').fetchall()
+    finally:
+        db.close()
+    for (raw,) in rows:
+        entry = json.loads(raw)
+        context = entry.get('context') or {}
+        tokens = entry.get('tokens') or {}
+        if (context.get('request_id') == request_id
+                and context.get('workflow_id') == 'provider-credit-verify'
+                and context.get('routing_profile') == 'operator-authorized-diagnostic'
+                and entry.get('provider') == 'openai'
+                and entry.get('outcome') == 'completed'
+                and entry.get('usage_source') == 'provider_reported'
+                and int(tokens.get('total_tokens') or 0) > 0):
+            return True
+    return False
 
 
 def run() -> int:
@@ -37,7 +60,8 @@ def run() -> int:
             client_id=None, capability='conversation.reason', mode='observe')))
         try:
             key = secrets['api_key']
-            ledger = SQLiteUsageLedger(Path(os.getenv('JASON_MODEL_USAGE_DB', '/var/lib/jason/openclaw/model-usage.sqlite3')))
+            ledger_path = Path(os.getenv('JASON_MODEL_USAGE_DB', '/var/lib/jason/openclaw/model-usage.sqlite3'))
+            ledger = SQLiteUsageLedger(ledger_path)
             client = OpenAIStructuredJsonClient(
                 api_key=key, transport=UrlLibJsonHttpTransport(), model=model,
                 usage_ledger=ledger, reasoning_effort='minimal', timeout_seconds=30.0,
@@ -56,8 +80,8 @@ def run() -> int:
                     schema={'type':'object','properties':{'ok':{'type':'boolean'}},'required':['ok'],'additionalProperties':False},
                     max_output_tokens=64,
                 )
-            if result.get('ok') is not True:
-                print('BLOCKED: diagnostic did not return expected result')
+            if result.get('ok') is not True or not metered_receipt(ledger_path, receipt):
+                print('BLOCKED: no matching provider-reported metered completion')
                 return 3
             print(json.dumps({'result':'provider_call_completed','request_id':receipt,'model':model}))
             return 0
