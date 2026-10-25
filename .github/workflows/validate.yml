@@ -171,6 +171,8 @@ jobs:
         run: python3 tools/documentation_impact_gate.py --event "$GITHUB_EVENT_PATH"
       - name: Test documentation single-flight publisher
         run: python3 -B -m unittest discover -s tests -p test_documentation_single_flight.py
+      - name: Test documentation publisher in disposable Git remotes
+        run: python3 -B -m unittest discover -s tests -p test_documentation_publisher_e2e.py
       - name: Validate documentation control plane
         run: python3 tools/validate_documentation_control.py
       - name: Build documentation directly from canonical docs tree
