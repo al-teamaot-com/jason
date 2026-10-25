@@ -262,6 +262,49 @@ class DocumentationPublisherE2ETest(unittest.TestCase):
         self.assertEqual(len(self.state()["prs"]), 1)
         self.assertEqual(self.published_state()["validated_source"]["revision"], self.rev_b)
 
+    def test_closed_branch_with_non_generated_changes_is_never_overwritten(self):
+        self.assert_published(self.invoke(self.rev_a))
+        data = self.state()
+        data["prs"][0]["state"] = "closed"
+        self.gh_state.write_text(json.dumps(data))
+        other = self.root / "unrelated-branch-client"
+        self.git("clone", str(self.remote), str(other))
+        self.git("-C", str(other), "config", "user.name", "Fixture")
+        self.git("-C", str(other), "config", "user.email", "fixture@example.invalid")
+        self.git("-C", str(other), "checkout", "-b", "current", "origin/" + BRANCH)
+        (other / "tools").mkdir(exist_ok=True)
+        (other / "tools/unrelated.py").write_text("print('unrelated')\n")
+        self.git("-C", str(other), "add", ".")
+        self.git("-C", str(other), "commit", "-m", "unrelated edit")
+        self.git("-C", str(other), "push", "origin", "HEAD:" + BRANCH)
+        sha = self.branch_sha()
+        rejected = self.invoke(self.rev_b)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("BLOCKED_NON_GENERATED_BRANCH", rejected.stderr)
+        self.assertEqual(self.branch_sha(), sha)
+
+    def test_two_hosts_racing_old_and_new_revision_preserve_newest(self):
+        self.assert_published(self.invoke(self.rev_a))
+        other = self.root / "second-host-repo"
+        self.git("clone", str(self.remote), str(other))
+        self.git("-C", str(other), "config", "user.name", "Fixture")
+        self.git("-C", str(other), "config", "user.email", "fixture@example.invalid")
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            old = workers.submit(
+                self.invoke, self.rev_a, repo=other, tree=self.root / "trees-old"
+            )
+            new = workers.submit(
+                self.invoke, self.rev_b, run_id="124",
+                repo=self.repo, tree=self.root / "trees"
+            )
+            outcomes = (old.result(), new.result())
+        self.assertEqual(
+            outcomes[1].returncode, 0,
+            outcomes[1].stdout + "\n" + outcomes[1].stderr
+        )
+        self.assertEqual(self.published_state()["validated_source"]["revision"], self.rev_b)
+        self.assertEqual(len(self.state()["prs"]), 1)
+
     def test_two_hosts_initial_publication_can_create_at_most_one_pr(self):
         other = self.root / "another-host-repo"
         self.git("clone", str(self.remote), str(other))
