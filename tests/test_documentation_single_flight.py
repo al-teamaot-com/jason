@@ -49,6 +49,9 @@ class DocumentationSingleFlightTests(unittest.TestCase):
         self.assertIn('.validated_source.revision', self.script)
         self.assertIn('.production.revision', self.script)
 
+    def test_pending_cross_mode_evidence_is_preserved(self):
+        self.assertIn('git show "origin/$BRANCH:docs/control/AUTOMATED-CHANGE-STATE.json" > docs/control/AUTOMATED-CHANGE-STATE.json', self.script)
+
     def test_push_uses_lease(self):
         self.assertIn('git push --force-with-lease', self.script)
 
