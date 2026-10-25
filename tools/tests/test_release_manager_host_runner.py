@@ -3420,10 +3420,16 @@ def test_held_owner_approval_only_rejects_unsafe_state_before_any_signed_consump
             patch.object(mobile_consumer,"consume_mobile_release_decisions") as consume,
             patch.object(runner,"deploy_production") as deploy,
         ):
-            with pytest.raises(runner.ReleaseManagerError):
-                runner.approval_only_while_promotion_held(ROOT,tmp_path)
+            if unsafe_control["circuit_breaker"]["state"] == "open" or unsafe_drift["status"] != "pass":
+                # Root breaker/drift is a deliberate no-op. It must not be
+                # reported as a failed systemd unit that trips that breaker.
+                assert runner.approval_only_while_promotion_held(ROOT,tmp_path) is False
+            else:
+                with pytest.raises(runner.ReleaseManagerError):
+                    runner.approval_only_while_promotion_held(ROOT,tmp_path)
         consume.assert_not_called()
         deploy.assert_not_called()
+        assert not (tmp_path / "mobile-release-offers").exists()
 
 
 def test_approval_only_held_unit_does_not_disable_or_invoke_promotion():

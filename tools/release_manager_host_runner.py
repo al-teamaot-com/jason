@@ -3200,7 +3200,12 @@ def approval_only_while_promotion_held(repo: Path, state_root: Path) -> bool:
     drift = _read_protected_snapshot(state_root, "production-drift.json")
     if ((control.get("circuit_breaker") or {}).get("state") != "closed"
             or drift.get("status") != "pass" or drift.get("problems")):
-        raise ReleaseManagerError("approval-only release safety readback blocked")
+        # Expected safety hold is NOT a broken systemd service: returning
+        # nonzero makes this failed user unit show up as production drift,
+        # which opens the root breaker again indefinitely. Stay completely
+        # nonexecuting, but report the blocked condition for supervision.
+        print("RELEASE_APPROVAL_ONLY=SAFETY_GATE_BLOCKED", flush=True)
+        return False
     live = live_runtime()
     live_sha = exact_sha(live["revision"], "live_production_sha")
     live_production_alignment(live_sha)
