@@ -40,6 +40,15 @@ class DocumentationSingleFlightTests(unittest.TestCase):
         self.assertIn('refs/heads/$BRANCH:refs/remotes/origin/$BRANCH', self.script)
         self.assertIn('git worktree add -B "$BRANCH" "$WORKTREE" origin/main', self.script)
 
+    def test_stale_or_divergent_release_is_blocked(self):
+        self.assertIn('git merge-base --is-ancestor "$PRIOR_REVISION" "$SOURCE_REVISION"', self.script)
+        self.assertIn('BLOCKED_STALE_OR_DIVERGENT_REVISION', self.script)
+        self.assertIn('BLOCKED_UNVERIFIABLE_PRIOR', self.script)
+
+    def test_source_and_production_are_checked_independently(self):
+        self.assertIn('.validated_source.revision', self.script)
+        self.assertIn('.production.revision', self.script)
+
     def test_push_uses_lease(self):
         self.assertIn('git push --force-with-lease', self.script)
 
