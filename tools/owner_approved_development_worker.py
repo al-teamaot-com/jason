@@ -320,6 +320,36 @@ def ensure_stale_source_clone(repo: Path, issue_number: int, revision: str) -> P
     return path
 
 
+def owner_development_search_context(item: Mapping[str, Any], record: Mapping[str, Any]) -> dict[str, Any]:
+    """Version a recovered search-plan receipt to prevent old response replay.
+
+    Requests are SHA256 hashes of their immutable JSON content. Merely clearing
+    reasoning_request_id while reusing the old context can silently reopen an
+    ancient failed response rather than issuing a new provider request.
+    """
+    context: dict[str, Any] = {
+        'work_class': 'owner_approved_development',
+        'approved_scope': approved_scope(item),
+        'approval_source': item['approval_source'],
+    }
+    revision = str(record.get('stale_source_recovery_revision') or '')
+    if revision:
+        prior = str(record.get('stale_source_recovery_prior_request_id') or '')
+        prev_sha = str(record.get('stale_source_recovery_prior_revision') or '')
+        if (not re.fullmatch(r'[0-9a-f]{40}', revision)
+                or not re.fullmatch(r'[0-9a-f]{64}', prior)
+                or not re.fullmatch(r'[0-9a-f]{40}', prev_sha)):
+            raise support.WorkerError('stale-source reasoning receipt lacks verified source provenance')
+        context['stale_clean_source_recovery'] = {
+            'current_source_revision': revision,
+            'previous_source_revision': prev_sha,
+            'previous_successful_edit_request_id': prior,
+            'retry_limit': 1,
+            'fresh_source_evidence_only': True,
+        }
+    return context
+
+
 def phase_for_existing_pr(phase: str) -> str:
     """An existing PR must not erase a pending/in-progress CI repair.
 
@@ -1346,6 +1376,94 @@ def readmit_stale_clean_development_source(
     return resumed
 
 
+def readmit_verified_cached_stale_response_replay(
+    state: dict[str, Any], admitted: list[dict[str, Any]], spool: Path, repo: Path,
+    *, max_active: int,
+) -> list[str]:
+    """One bounded recovery of legacy pre-replenishment search-plan cache replay.
+
+    The new stale-source worker correctly created clean clones, but its
+    subsequent search_plan omitted source SHA from hashed context, causing an
+    old 429 receipt to be reused. This fixes only exact provable OLD receipts,
+    never genuine new credit failures or disallowed owner dependencies.
+    """
+    records=state.get('items') if isinstance(state.get('items'), dict) else {}
+    active=sum(1 for r in records.values() if isinstance(r,Mapping) and r.get('phase') in ACTIVE_PHASES)
+    slots=max(0,max(1,int(max_active))-active_support_count(spool)-active)
+    if not slots:
+        return []
+    live_sha=support.run(['git','rev-parse','origin/main'],cwd=repo)
+    if not re.fullmatch(r'[0-9a-f]{40}',live_sha):
+        return []
+    resumed=[]
+    for item in admitted:
+        if not slots:break
+        issue=item.get('issue_number')
+        item_id=str(item.get('id') or '')
+        record=records.get(item_id)
+        if (not isinstance(issue,int) or item_id != f'DEV-{issue}'
+                or not isinstance(record,dict) or record.get('phase')!='blocked'
+                or record.get('reason') != 'development reasoning failed: Hosted reasoning blocked: credit_balance_exhausted; Owner action: restore_provider_credits'
+                or not record.get('stale_source_recovery_revision')
+                or record.get('stale_source_replay_recovered_request_id')
+                or record.get('pr_number') or issue_has_closed_dependency_gate(item)
+                or record.get('blocker_class') in ('blocked_by_dependency','external_authority','internal_retry_exhausted')):
+            continue
+        prior_sha=str(record.get('stale_source_recovery_revision'))
+        rid=str(record.get('reasoning_request_id') or '')
+        old_at=str(record.get('stale_source_recovery_at') or '')
+        if (not re.fullmatch(r'[0-9a-f]{40}',prior_sha)
+                or not re.fullmatch(r'[0-9a-f]{64}',rid)):
+            continue
+        old_tree=WORKTREE_ROOT / f'issue-{issue}-stale-{prior_sha[:12]}'
+        if (record.get('worktree')!=str(old_tree)
+                or record.get('branch')!=f'develop/owner-approved-issue-{issue}-stale-{prior_sha[:12]}'):
+            continue
+        request_path=spool/'reasoning'/'requests'/(rid+'.json')
+        if not request_path.is_file() or request_path.stat().st_size>200000:
+            continue
+        try:
+            req=json.loads(request_path.read_text(encoding='utf-8'))
+            rsp=support.reasoning_response(spool,rid)
+            if (not isinstance(req,dict) or req.get('request_id')!=rid
+                    or support.request_id(req)!=rid or req.get('kind')!='search_plan'
+                    or req.get('support_item')!=item_id
+                    or not isinstance(req.get('context'),dict)
+                    or req['context'].get('work_class')!='owner_approved_development'
+                    or 'stale_clean_source_recovery' in req['context']
+                    or not isinstance(rsp,Mapping)
+                    or rsp.get('request_id')!=rid or rsp.get('status')!='failed'
+                    or rsp.get('primary_http_status')!=429
+                    or rsp.get('primary_provider_error_code')!='credit_balance_exhausted'):
+                continue
+            received=datetime.fromisoformat(str(rsp.get('completed_at') or ''))
+            recovered=datetime.fromisoformat(old_at)
+            if received.tzinfo is None or recovered.tzinfo is None or received >= recovered:
+                continue
+            ensure_stale_source_clone(repo,issue,prior_sha)
+            new_tree=ensure_stale_source_clone(repo,issue,live_sha)
+            record.update({
+                'phase':'diagnosing',
+                'reason':'Discarded historical pre-recovery 429 receipt; fresh revision-bound source search required.',
+                'reasoning_request_id':'',
+                'stale_source_replay_recovered_request_id':rid,
+                'stale_source_replay_recovered_at':now(),
+                'stale_source_replay_previous_revision':prior_sha,
+                'stale_source_recovery_revision':live_sha,
+                'stale_source_recovery_at':now(),
+                'source_paths':[], 'source_history':[],
+                'context_expansion_attempts':0,
+                'worktree':str(new_tree),
+                'branch':support.run(['git','branch','--show-current'],cwd=new_tree),
+                'updated_at':now(),
+            })
+            resumed.append(item_id)
+            slots-=1
+        except (OSError,ValueError,TypeError,subprocess.TimeoutExpired,support.WorkerError):
+            continue
+    return resumed
+
+
 def readmit_explicit_verified_dependencies(
     state: dict[str, Any], eligible: list[dict[str, Any]], spool: Path,
     *, max_active: int,
@@ -1744,6 +1862,9 @@ def main() -> int:
     readmit_stale_clean_development_source(
         state, admitted, spool, repo, max_active=max(1, int(args.max_active)),
     )
+    readmit_verified_cached_stale_response_replay(
+        state, admitted, spool, repo, max_active=max(1, int(args.max_active)),
+    )
     state['discovery'] = {
         'observed_at': now(),
         'approved_issue_numbers': [item['issue_number'] for item in eligible],
@@ -1956,11 +2077,7 @@ def main() -> int:
                         spool,
                         kind='search_plan',
                         item=item,
-                        context={
-                            'work_class': 'owner_approved_development',
-                            'approved_scope': approved_scope(item),
-                            'approval_source': item['approval_source'],
-                        },
+                        context=owner_development_search_context(item,record),
                     )
                     record.update({
                         'phase': 'diagnosing',
