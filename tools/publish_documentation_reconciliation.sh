@@ -45,6 +45,17 @@ fi
 git fetch origin main >/dev/null 2>&1
 if [ "$PR_COUNT" -eq 1 ]; then
   git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" >/dev/null 2>&1
+  # A delayed invocation must not replace a newer revision already offered.
+  PRIOR_REVISION="$(git show "origin/$BRANCH:docs/control/AUTOMATED-CHANGE-STATE.json" | jq -r --arg mode "$MODE" 'if $mode == "source" then .validated_source.revision // "" else .production.revision // "" end')"
+  if [ -n "$PRIOR_REVISION" ] && [ "$PRIOR_REVISION" != "$SOURCE_REVISION" ]; then
+    if ! git cat-file -e "$PRIOR_REVISION^{commit}" 2>/dev/null; then
+      git fetch origin "$PRIOR_REVISION" >/dev/null 2>&1 || { echo "DOCUMENTATION_PUBLICATION=BLOCKED_UNVERIFIABLE_PRIOR" >&2; exit 1; }
+    fi
+    if ! git merge-base --is-ancestor "$PRIOR_REVISION" "$SOURCE_REVISION"; then
+      echo "DOCUMENTATION_PUBLICATION=BLOCKED_STALE_OR_DIVERGENT_REVISION" >&2
+      exit 1
+    fi
+  fi
 fi
 
 if [ -d "$WORKTREE/.git" ] || [ -f "$WORKTREE/.git" ]; then
