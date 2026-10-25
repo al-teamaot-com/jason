@@ -232,3 +232,29 @@ class TodoEngineeringIntakeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FullRepositoryTodoIntakeInventoryTests(unittest.TestCase):
+    def _item(self, number, body='- TODO item: TODO-OPS-002', title='BackupIQ'):
+        return {'number':number,'body':body,'title':title,'url':f'https://github.com/test/issues/{number}'}
+
+    def test_older_canonical_issue_is_included_beyond_default_window(self):
+        from unittest.mock import patch
+        issues=[self._item(2021),self._item(952)]+[self._item(n,'', 'unrelated') for n in range(2000,2300)]
+        with patch.object(module,'gh_json',return_value=issues) as gh:
+            result=module.open_todo_issue_map(Path('/tmp/repo'))
+        self.assertEqual(result['TODO-OPS-002']['number'],952)
+        self.assertIn('5000',gh.call_args.args[0])
+
+    def test_changed_duplicate_source_fails_closed(self):
+        from unittest.mock import patch
+        issues=[self._item(952),self._item(2021,'- TODO item: TODO-OPS-002\nOther instruction')]
+        with patch.object(module,'gh_json',return_value=issues):
+            with self.assertRaisesRegex(RuntimeError,'Conflicting GitHub TODO identities'):
+                module.open_todo_issue_map(Path('/tmp/repo'))
+
+    def test_saturated_inventory_never_authorizes_new_issue(self):
+        from unittest.mock import patch
+        with patch.object(module,'gh_json',return_value=[{} for _ in range(5000)]):
+            with self.assertRaisesRegex(RuntimeError,'safe limit'):
+                module.open_todo_issue_map(Path('/tmp/repo'))

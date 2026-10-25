@@ -410,3 +410,24 @@ authorize deploying changes to those files. Activation therefore needs
 the separately reviewed owner high-impact release path. Neither a
 generic chat instruction nor editing the risk/TTL policy is a substitute
 for the exact-release authorization.
+
+## Engineering intake duplicate prevention (October 25, 2026)
+
+The five-minute engineering worker repeatedly failed the TODO release bridge
+because the older canonical task issues were omitted by the intake's
+200-open-issue GitHub discovery window. It recreated identical issue bodies
+under new issue numbers, then the release bridge correctly refused the
+conflicting TODO-to-issue binding. Production issue evidence: TODO-OPS-002
+canonical #952 and generated #1491/#1899; TODO-KNOW-001 canonical #1131
+and generated #1674/#1883/#2021. Closing generated duplicates alone does
+not fix the underlying intake bug.
+
+The intake now enumerates a bounded 5000-open-issue inventory, refuses
+saturated discovery, retains the lowest-numbered canonical issue for
+identical duplicated bodies, rejects conflicting scopes and checks the
+provider issue inventory again before creation. Canonical task scope and
+durable development/release authority remain unchanged. These controls
+prevent low-risk duplicate bookkeeping from blocking higher-priority
+Universal Teams Approver, staff purchasing and QBO work. Protected source
+checks and exact release approval are still mandatory; this note is not
+permission to bypass the root breaker or production incident hold.
