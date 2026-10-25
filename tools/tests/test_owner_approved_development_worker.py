@@ -2358,3 +2358,169 @@ def test_cached_replay_requires_owner_approved_dependency_gate(tmp_path,monkeypa
     monkeypatch.setattr(module,'issue_has_closed_dependency_gate',lambda item:True)
     assert module.readmit_verified_cached_stale_response_replay(state,[item],spool,repo,max_active=3)==[]
     assert state['items']['DEV-42']['phase']=='blocked'
+
+
+class _BudgetGate:
+    def __init__(self, deny=False):
+        self.deny=deny
+    def path_denial_reason(self,path,policy):
+        return 'denied' if self.deny else None
+
+
+def _exhausted_evidence_fixture(tmp_path,monkeypatch):
+    import json
+    repo,spool,item,state,old,old_sha,first_sha,git=_stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==['DEV-42']
+    rec=state['items']['DEV-42']
+    old_clone=module.ensure_stale_source_clone(repo,42,first_sha)
+    ctx={'work_class':'owner_approved_development','approved_scope':item['body'],
+         'pinned_source_revision':first_sha,'evidence_turn':4,
+         'source_excerpts':[{'path':'code.txt','content':'new tracked code'}]}
+    rid=module.support.queue_reasoning(spool,kind='edit_plan',item=item,context=ctx)
+    reply={'request_id':rid,'kind':'edit_plan','support_item':'DEV-42',
+           'status':'succeeded','result':{'edits':[],'test_paths':[],'blocked_reason':None,
+           'evidence_requests':[{'tool':'read_source','path':'code.txt','query':None}]}}
+    resp=spool/'reasoning'/'responses'/f'{rid}.json';resp.parent.mkdir(parents=True,exist_ok=True)
+    resp.write_text(json.dumps(reply))
+    rec.update({'phase':'blocked','reason':'EvidenceToolError: source evidence turn budget exhausted',
+                'reasoning_request_id':rid,'evidence_turn_count':4})
+    (repo/'tools').mkdir()
+    (repo/'tools'/'engineering_evidence_tools.py').write_text('# repaired bounded evidence\n')
+    git('add','.');git('commit','-m','fix existing evidence worker')
+    git('fetch','origin','main');newsha=git('rev-parse','origin/main')
+    root=spool.parent/'release-manager'
+    (root/'protected-readback').mkdir(parents=True)
+    (root/'records').mkdir()
+    import datetime
+    for rel,payload in (
+        ('protected-readback/production-control-state.json',{
+            'circuit_breaker':{'state':'closed'},
+            'last_known_good':{'manifest':{'revision':newsha}}}),
+        ('protected-readback/production-drift.json',{
+            'status':'pass','problems':[],
+            'observed_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}),
+        ('records/release-'+newsha[:16]+'.json',{
+            'state':'closed','release_candidate':{'candidate_sha':newsha},
+            'ccc_post_mutation_gate':{'status':'PASS'},
+            'preproduction':{'acceptance_passed':True},
+            'changed_files':['tools/engineering_evidence_tools.py']}),
+    ):
+        target=root/rel;target.write_text(json.dumps(payload));target.chmod(0o600)
+    releases=tmp_path/'releases';releases.mkdir()
+    (releases/newsha).mkdir()
+    (tmp_path/'current').symlink_to(releases/newsha, target_is_directory=True)
+    return repo,spool,item,state,old_clone,first_sha,newsha,git,rid,resp
+
+
+def test_exhausted_evidence_recover_once_from_clean_new_source(tmp_path,monkeypatch):
+    import json
+    repo,spool,item,state,old,prior_sha,current_sha,git,old_id,resp=_exhausted_evidence_fixture(tmp_path,monkeypatch)
+    result=module.readmit_verified_exhausted_evidence_synthesis(
+        state,[item],spool,repo,_BudgetGate(),{},max_active=3,current_link=tmp_path/'current')
+    assert result==['DEV-42']
+    rec=state['items']['DEV-42']
+    assert rec['phase']=='implementing'
+    assert rec['evidence_turn_count']==4
+    assert rec['evidence_synthesis_previous_request_id']==old_id
+    assert rec['reasoning_request_id']!=old_id
+    assert rec['evidence_synthesis_recovered_request_id']==rec['reasoning_request_id']
+    q=json.loads((spool/'reasoning'/'requests'/f"{rec['reasoning_request_id']}.json").read_text())
+    ctx=q['context']
+    assert ctx['final_evidence_turn'] is True
+    assert ctx['evidence_turns_remaining']==0
+    assert ctx['pinned_source_revision']==current_sha
+    assert ctx['historical_evidence_budget_exhausted'] is True
+    assert ctx['source_excerpts'][0]['path']=='code.txt'
+    assert 'new tracked code' in ctx['source_excerpts'][0]['content']
+    assert not (spool/'reasoning'/'responses'/f"{rec['reasoning_request_id']}.json").exists()
+    assert git('rev-parse','HEAD',cwd=old)==prior_sha
+    assert module.readmit_verified_exhausted_evidence_synthesis(
+        state,[item],spool,repo,_BudgetGate(),{},max_active=3,current_link=tmp_path/'current')==[]
+
+
+def test_exhausted_budget_recovery_never_reopens_unrelated_or_untrusted_failures(tmp_path,monkeypatch):
+    import json
+    repo,spool,item,state,old,prior_sha,current_sha,git,old_id,resp=_exhausted_evidence_fixture(tmp_path,monkeypatch)
+    rec=state['items']['DEV-42']
+    for reason in ('EvidenceToolError: source path not authorized','Provider billing issue'):
+        rec['reason']=reason
+        assert module.readmit_verified_exhausted_evidence_synthesis(
+            state,[item],spool,repo,_BudgetGate(),{},max_active=3,current_link=tmp_path/'current')==[]
+    rec['reason']='EvidenceToolError: source evidence turn budget exhausted'
+    rec['evidence_turn_count']=3
+    assert module.readmit_verified_exhausted_evidence_synthesis(
+        state,[item],spool,repo,_BudgetGate(),{},max_active=3,current_link=tmp_path/'current')==[]
+    rec['evidence_turn_count']=4
+    monkeypatch.setattr(module,'issue_has_closed_dependency_gate',lambda item:True)
+    assert module.readmit_verified_exhausted_evidence_synthesis(
+        state,[item],spool,repo,_BudgetGate(),{},max_active=3,current_link=tmp_path/'current')==[]
+    monkeypatch.setattr(module,'issue_has_closed_dependency_gate',lambda item:False)
+    rec['reasoning_request_id']='f'*64
+    assert module.readmit_verified_exhausted_evidence_synthesis(
+        state,[item],spool,repo,_BudgetGate(),{},max_active=3,current_link=tmp_path/'current')==[]
+
+
+def test_exhausted_budget_recovery_refuses_denied_or_dirty_source(tmp_path,monkeypatch):
+    repo,spool,item,state,old,prior_sha,current_sha,git,old_id,resp=_exhausted_evidence_fixture(tmp_path,monkeypatch)
+    assert module.readmit_verified_exhausted_evidence_synthesis(
+        state,[item],spool,repo,_BudgetGate(deny=True),{},max_active=3,current_link=tmp_path/'current')==[]
+    (old/'code.txt').write_text('dirty old checkout')
+    assert module.readmit_verified_exhausted_evidence_synthesis(
+        state,[item],spool,repo,_BudgetGate(),{},max_active=3,current_link=tmp_path/'current')==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_exhausted_budget_recovery_requires_capacity(tmp_path,monkeypatch):
+    repo,spool,item,state,old,prior_sha,current_sha,git,old_id,resp=_exhausted_evidence_fixture(tmp_path,monkeypatch)
+    state['items']['DEV-999']={'phase':'implementing'}
+    assert module.readmit_verified_exhausted_evidence_synthesis(
+        state,[item],spool,repo,_BudgetGate(),{},max_active=1,current_link=tmp_path/'current')==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_evidence_recovery_denies_unreleased_main_and_root_drift(tmp_path,monkeypatch):
+    import json
+    repo,spool,item,state,old,prior_sha,sha,git,old_id,resp=_exhausted_evidence_fixture(tmp_path,monkeypatch)
+    root=spool.parent/'release-manager'
+    current=tmp_path/'current'
+    assert module.verified_live_evidence_recovery_release(spool,sha,current)
+    # GitHub main alone cannot authorize source recovery.
+    current.unlink()
+    current.symlink_to(tmp_path/'releases'/'not-deployed',target_is_directory=True)
+    assert not module.verified_live_evidence_recovery_release(spool,sha,current)
+    current.unlink();current.symlink_to(tmp_path/'releases'/sha,target_is_directory=True)
+    control=root/'protected-readback/production-control-state.json'
+    data=json.loads(control.read_text());data['circuit_breaker']['state']='open'
+    control.write_text(json.dumps(data))
+    assert not module.verified_live_evidence_recovery_release(spool,sha,current)
+    data['circuit_breaker']['state']='closed';control.write_text(json.dumps(data))
+    drift=root/'protected-readback/production-drift.json'
+    data=json.loads(drift.read_text());data['status']='failed';drift.write_text(json.dumps(data))
+    assert not module.verified_live_evidence_recovery_release(spool,sha,current)
+    data['status']='pass';data['problems']=[];drift.write_text(json.dumps(data))
+    release=root/'records'/f'release-{sha[:16]}.json'
+    data=json.loads(release.read_text());data['state']='production_eligible'
+    release.write_text(json.dumps(data))
+    assert not module.verified_live_evidence_recovery_release(spool,sha,current)
+    data['state']='closed';release.write_text(json.dumps(data))
+    assert module.verified_live_evidence_recovery_release(spool,sha,current)
+
+
+def test_evidence_recovery_requires_protected_recent_release_readbacks(tmp_path,monkeypatch):
+    import json
+    from datetime import datetime,timedelta,timezone
+    repo,spool,item,state,old,prior_sha,sha,git,old_id,resp=_exhausted_evidence_fixture(tmp_path,monkeypatch)
+    root=spool.parent/'release-manager'
+    current=tmp_path/'current'
+    assert module.verified_live_evidence_recovery_release(spool,sha,current)
+    drift=root/'protected-readback/production-drift.json'
+    d=json.loads(drift.read_text())
+    d['observed_at']=(datetime.now(timezone.utc)-timedelta(minutes=4)).isoformat()
+    drift.write_text(json.dumps(d))
+    assert not module.verified_live_evidence_recovery_release(spool,sha,current)
+    d['observed_at']=datetime.now(timezone.utc).isoformat()
+    drift.write_text(json.dumps(d))
+    drift.chmod(0o644)
+    assert not module.verified_live_evidence_recovery_release(spool,sha,current)
+    drift.chmod(0o600)
+    assert module.verified_live_evidence_recovery_release(spool,sha,current)

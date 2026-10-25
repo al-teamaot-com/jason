@@ -390,3 +390,23 @@ def test_multi_symbol_prose_requires_real_definitions_in_safe_tracked_path(tmp_p
         ])
     assert record["reasoning_request_id"] == prior_id
     assert not record.get("evidence_last_receipts")
+
+
+def test_final_evidence_turn_explicitly_forbids_model_tool_requests(tmp_path):
+    repo, spool, item, record = setup_session(tmp_path)
+    for turn in range(4):
+        assert call(repo, spool, item, record, [
+            {'tool': 'read_source', 'path': 'tools/source.py', 'query': None},
+        ])
+        request = json.loads((spool / 'reasoning/requests' /
+                              (record['reasoning_request_id'] + '.json')).read_text())
+        context = request['context']
+        assert context['evidence_turn'] == turn + 1
+        assert context['evidence_turns_remaining'] == 3 - turn
+        assert context['final_evidence_turn'] is (turn == 3)
+    old_rid = record['reasoning_request_id']
+    with pytest.raises(evidence.EvidenceToolError, match='budget exhausted'):
+        call(repo, spool, item, record, [
+            {'tool': 'read_source', 'path': 'tools/source.py', 'query': None},
+        ])
+    assert record['reasoning_request_id'] == old_rid

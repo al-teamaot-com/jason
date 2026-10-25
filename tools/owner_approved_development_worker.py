@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import tempfile
@@ -1464,6 +1465,213 @@ def readmit_verified_cached_stale_response_replay(
     return resumed
 
 
+def verified_live_evidence_recovery_release(
+    spool: Path, candidate_sha: str, current_link: Path,
+) -> bool:
+    """Only a separately Owner-approved, CCC-closed live worker can readmit.
+
+    The engineering source ref may advance ahead of approved production.
+    Never interpret that GitHub movement as authority to resume or execute
+    unreleased code. All readback is from the independent protected root.
+    """
+    if not re.fullmatch(r'[0-9a-f]{40}', candidate_sha):
+        return False
+    try:
+        if (not current_link.is_symlink()
+                or current_link.resolve().name != candidate_sha):
+            return False
+        root = spool.parent / 'release-manager'
+        def read_private(relative: str) -> dict[str, Any]:
+            path = root / relative
+            if path.is_symlink() or not path.is_file():
+                raise ValueError('missing root-owned production evidence')
+            st = path.stat()
+            if st.st_uid != os.getuid() or st.st_mode & 0o077 or st.st_size > 2000000:
+                raise ValueError('unprotected production evidence')
+            result = json.loads(path.read_text(encoding='utf-8'))
+            if not isinstance(result, dict):
+                raise ValueError('invalid production evidence')
+            return result
+        control = read_private('protected-readback/production-control-state.json')
+        drift = read_private('protected-readback/production-drift.json')
+        release = read_private('records/release-' + candidate_sha[:16] + '.json')
+        stamped = datetime.fromisoformat(str(drift['observed_at']).replace('Z', '+00:00'))
+        if (stamped.tzinfo is None or not 0 <=
+                (datetime.now(timezone.utc) - stamped).total_seconds() <= 180
+                or drift.get('status') != 'pass' or drift.get('problems')
+                or (control.get('circuit_breaker') or {}).get('state') != 'closed'
+                or ((control.get('last_known_good') or {}).get('manifest') or {}).get('revision') != candidate_sha
+                or release.get('state') != 'closed'
+                or (release.get('release_candidate') or {}).get('candidate_sha') != candidate_sha
+                or (release.get('ccc_post_mutation_gate') or {}).get('status') != 'PASS'
+                or (release.get('preproduction') or {}).get('acceptance_passed') is not True
+                or not set(release.get('changed_files') or []).intersection({
+                    'tools/engineering_evidence_tools.py',
+                    'tools/owner_approved_development_worker.py',
+                    'implementation/runtime_service/src/jason_runtime/support_repair_reasoning.py',
+                })):
+            return False
+        return True
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return False
+
+
+def readmit_verified_exhausted_evidence_synthesis(
+    state: dict[str, Any], admitted: list[dict[str, Any]], spool: Path,
+    repo: Path, gate, policy: Mapping[str, Any], *, max_active: int,
+    current_link: Path = Path('/opt/jason/current'),
+) -> list[str]:
+    """One final source-bound proposal after the old worker exhausted its reads.
+
+    This is not a reset of the evidence budget: a fifth evidence request still
+    fails closed. Preserve the original clean clone and receipts, reread only
+    eligible tracked code from new approved source, and require one final
+    patch OR an honest blocker. New authority, approval and provider actions
+    are never permitted by this transition.
+    """
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active = sum(1 for rec in records.values() if isinstance(rec, Mapping)
+                 and rec.get('phase') in ACTIVE_PHASES)
+    slots = max(0, max(1, int(max_active)) - active_support_count(spool) - active)
+    if not slots:
+        return []
+    live_sha = support.run(['git', 'rev-parse', 'origin/main'], cwd=repo)
+    if not verified_live_evidence_recovery_release(spool, live_sha, current_link):
+        return []
+    result: list[str] = []
+    for item in admitted:
+        if slots < 1:
+            break
+        issue = item.get('issue_number')
+        item_id = str(item.get('id') or '')
+        rec = records.get(item_id)
+        if (not isinstance(issue, int) or issue < 1
+                or item_id != f'DEV-{issue}' or not isinstance(rec, dict)
+                or rec.get('phase') != 'blocked'
+                or rec.get('reason') != 'EvidenceToolError: source evidence turn budget exhausted'
+                or rec.get('evidence_turn_count') != 4
+                or rec.get('evidence_synthesis_recovered_request_id')
+                or rec.get('pr_number') or issue_has_closed_dependency_gate(item)
+                or rec.get('blocker_class') in ('external_authority', 'blocked_by_dependency', 'internal_retry_exhausted')):
+            continue
+        prior_sha = str(rec.get('stale_source_recovery_revision') or '')
+        old_id = str(rec.get('reasoning_request_id') or '')
+        original = WORKTREE_ROOT / f'issue-{issue}-stale-{prior_sha[:12]}'
+        branch = f'develop/owner-approved-issue-{issue}-stale-{prior_sha[:12]}'
+        if (not re.fullmatch(r'[0-9a-f]{40}', prior_sha) or live_sha == prior_sha
+                or not re.fullmatch(r'[0-9a-f]{64}', old_id)
+                or rec.get('worktree') != str(original)
+                or rec.get('branch') != branch):
+            continue
+        request_path = spool / 'reasoning' / 'requests' / f'{old_id}.json'
+        if not request_path.is_file() or request_path.stat().st_size > 250000:
+            continue
+        try:
+            old_req = json.loads(request_path.read_text(encoding='utf-8'))
+            old_rsp = support.reasoning_response(spool, old_id)
+            old_context = old_req.get('context') if isinstance(old_req, dict) else None
+            old_result = old_rsp.get('result') if isinstance(old_rsp, Mapping) else None
+            if (not isinstance(old_context, dict)
+                    or old_req.get('request_id') != old_id
+                    or support.request_id(old_req) != old_id
+                    or old_req.get('kind') != 'edit_plan'
+                    or old_req.get('support_item') != item_id
+                    or old_context.get('work_class') != 'owner_approved_development'
+                    or old_context.get('pinned_source_revision') != prior_sha
+                    or old_context.get('evidence_turn') != 4
+                    or not isinstance(old_rsp, Mapping)
+                    or old_rsp.get('request_id') != old_id
+                    or old_rsp.get('kind') != 'edit_plan'
+                    or old_rsp.get('support_item') != item_id
+                    or old_rsp.get('status') != 'succeeded'
+                    or not isinstance(old_result, Mapping)
+                    or not isinstance(old_result.get('evidence_requests'), list)
+                    or not old_result['evidence_requests']
+                    or old_result.get('edits') or old_result.get('test_paths')
+                    or old_result.get('blocked_reason')):
+                continue
+            # Verify both the immutable prior clone and the latest source.
+            ensure_stale_source_clone(repo, issue, prior_sha)
+            if subprocess.run(
+                ['git', '-C', str(repo), 'merge-base', '--is-ancestor', prior_sha, live_sha],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20,
+                check=False,
+            ).returncode:
+                continue
+            upgraded = subprocess.run(
+                ['git', '-C', str(repo), 'diff', '--quiet', prior_sha,
+                 live_sha, '--', 'tools/engineering_evidence_tools.py',
+                 'tools/owner_approved_development_worker.py',
+                 'implementation/runtime_service/src/jason_runtime/support_repair_reasoning.py'],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20,
+                check=False,
+            )
+            if upgraded.returncode != 1:
+                continue
+            new_tree = ensure_stale_source_clone(repo, issue, live_sha)
+            old_paths = []
+            for entry in old_context.get('source_excerpts') or []:
+                path = entry.get('path') if isinstance(entry, Mapping) else None
+                if (isinstance(path, str) and path not in old_paths
+                        and engineering_evidence_tools._safe_path(new_tree, path, gate, policy)):
+                    old_paths.append(path)
+                if len(old_paths) >= 5:
+                    break
+            # Never import source bytes from reasoning spool. Reread only
+            # policy-eligible files tracked in the independently pinned clone.
+            query_terms = [str(x.get('query') or '') for x in old_result['evidence_requests']
+                           if isinstance(x, Mapping) and x.get('query')]
+            reread = support.source_excerpts_for_paths(
+                new_tree, old_paths, gate, policy,
+                terms=[*exact_approved_symbols(approved_scope(item))[:5], *query_terms[:3]],
+                limit=5, content_limit=14000,
+            )
+            total = 0
+            excerpts = []
+            for entry in reread:
+                content = str(entry.get('content') or '')[:14000]
+                if not content or total + len(content) > 56000:
+                    break
+                excerpts.append({'path': entry['path'], 'content': content})
+                total += len(content)
+            if not excerpts:
+                continue
+            context = {
+                'work_class': 'owner_approved_development',
+                'approved_scope': approved_scope(item),
+                'diagnosis': 'One final exact-source patch proposal following bounded evidence exhaustion; source-only, no expanded approvals.',
+                'source_excerpts': excerpts,
+                'pinned_source_revision': live_sha,
+                'previous_reasoning_request_id': old_id,
+                'evidence_turn': 4,
+                'evidence_turns_remaining': 0,
+                'final_evidence_turn': True,
+                'historical_evidence_budget_exhausted': True,
+            }
+            new_id = queue_reasoning(spool, kind='edit_plan', item=item, context=context)
+            if not re.fullmatch(r'[a-f0-9]{64}', new_id) or new_id == old_id:
+                raise support.WorkerError('final evidence synthesis request did not advance')
+            rec.update({
+                'phase': 'implementing',
+                'reason': 'Source-verified one-time final patch-or-blocker synthesis; evidence budget remains exhausted.',
+                'reasoning_request_id': new_id,
+                'evidence_synthesis_recovered_request_id': new_id,
+                'evidence_synthesis_previous_request_id': old_id,
+                'evidence_synthesis_recovered_at': now(),
+                'stale_source_recovery_revision': live_sha,
+                'worktree': str(new_tree),
+                'branch': support.run(['git', 'branch', '--show-current'], cwd=new_tree),
+                'source_paths': [str(e['path']) for e in excerpts],
+                'updated_at': now(),
+            })
+            result.append(item_id)
+            slots -= 1
+        except (OSError, ValueError, TypeError, KeyError,
+                subprocess.TimeoutExpired, support.WorkerError):
+            continue
+    return result
+
+
 def readmit_explicit_verified_dependencies(
     state: dict[str, Any], eligible: list[dict[str, Any]], spool: Path,
     *, max_active: int,
@@ -1871,18 +2079,6 @@ def main() -> int:
         'approval_rule': 'exact owner-authored Autonomous development: owner-approved marker',
     }
 
-    support_active = active_support_count(spool)
-    development_active = sum(
-        1 for record in state['items'].values()
-        if isinstance(record, Mapping) and str(record.get('phase') or '') in ACTIVE_PHASES
-    )
-    capacity = max(
-        0,
-        max(1, int(args.max_active)) - support_active - development_active,
-    )
-    selected = [item_id for item_id in select_items(state, admitted, capacity=capacity)
-                if item_id not in monitored_ids]
-    by_id = {item['id']: item for item in admitted}
     try:
         prs = support.open_prs(repo)
     except support.WorkerError as exc:
@@ -1900,9 +2096,26 @@ def main() -> int:
         print('DEVELOPMENT_DEFERRED=github_transient_pr_listing_error')
         return 0
     state.pop('upstream_deferred', None)
+    # Do not run the recovery admission or load policy before GitHub PR
+    # inventory is proved complete: transient PR faults must defer ALL edits.
     gate = support.load_gate(repo)
     policy = gate.load_json(repo / 'config' / 'autonomous-repair-release-policy.json')
-
+    readmit_verified_exhausted_evidence_synthesis(
+        state, admitted, spool, repo, gate, policy,
+        max_active=max(1, int(args.max_active)),
+    )
+    support_active = active_support_count(spool)
+    development_active = sum(
+        1 for record in state['items'].values()
+        if isinstance(record, Mapping) and str(record.get('phase') or '') in ACTIVE_PHASES
+    )
+    capacity = max(
+        0,
+        max(1, int(args.max_active)) - support_active - development_active,
+    )
+    selected = [item_id for item_id in select_items(state, admitted, capacity=capacity)
+                if item_id not in monitored_ids]
+    by_id = {item['id']: item for item in admitted}
     for item_id in selected:
         item = by_id[item_id]
         record = state['items'].setdefault(item_id, {

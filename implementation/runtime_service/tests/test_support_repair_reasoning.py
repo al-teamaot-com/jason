@@ -423,3 +423,45 @@ def test_engineering_edit_prompt_requests_source_evidence_instead_of_guessing(tm
     assert 'read-only evidence_requests' in client.calls[0]['system']
     assert 'read_source' in client.calls[0]['system']
     assert 'Do not' in client.calls[0]['system']
+
+
+def test_owner_development_last_evidence_turn_requires_patch_or_genuine_blocker(tmp_path):
+    request_dir = tmp_path / 'reasoning' / 'requests'
+    request_dir.mkdir(parents=True)
+    request = _request('edit_plan')
+    request['support_item'] = 'DEV-1545'
+    request['context'] = {
+        'work_class': 'owner_approved_development',
+        'source_excerpts': [{'path': 'tools/example.py', 'content': 'def task(): pass'}],
+        'evidence_turn': 4,
+        'evidence_turns_remaining': 0,
+        'final_evidence_turn': True,
+    }
+    request['request_id'] = _request_id(request)
+    (request_dir / (request['request_id']+'.json')).write_text(json.dumps(request))
+    client = Client()
+    maint = SupportRepairReasoningMaintenance(
+        structured_client=client, spool=tmp_path,
+    )
+    assert maint.tick()
+    system = client.calls[0]['system']
+    assert 'LAST authorized source-evidence turn' in system
+    assert 'DO NOT return any evidence_requests' in system
+    assert 'blocked_reason' in system
+    assert 'Do not guess unseen text' in system
+
+
+def test_normal_development_edit_turn_allows_bounded_evidence_requests(tmp_path):
+    request_dir = tmp_path / 'reasoning' / 'requests'
+    request_dir.mkdir(parents=True)
+    request = _request('edit_plan')
+    request['support_item'] = 'DEV-759'
+    request['context'] = {'work_class':'owner_approved_development', 'evidence_turn':1}
+    request['request_id'] = _request_id(request)
+    (request_dir / (request['request_id']+'.json')).write_text(json.dumps(request))
+    client=Client()
+    maint=SupportRepairReasoningMaintenance(structured_client=client,spool=tmp_path)
+    assert maint.tick()
+    system=client.calls[0]['system']
+    assert 'read-only evidence_requests' in system
+    assert 'LAST authorized source-evidence turn' not in system

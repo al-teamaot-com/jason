@@ -331,6 +331,10 @@ def continue_evidence_session(
         "previous_reasoning_request_id": previous_id,
         "pinned_source_revision": head,
         "read_only_tool_receipts": receipts,
+        # The model must not spend a fifth, forbidden evidence turn. Its next
+        # response must contain a real patch proposal or an explicit blocker.
+        "final_evidence_turn": round_count + 1 >= policy["max_evidence_turns_per_item"],
+        "evidence_turns_remaining": max(0, policy["max_evidence_turns_per_item"] - round_count - 1),
     })
     # The only permitted output is a new content-addressed model request.
     new_id = queue_reasoning(spool, kind="edit_plan", item=item, context=base)

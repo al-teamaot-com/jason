@@ -244,6 +244,17 @@ class SupportRepairReasoningMaintenance:
                     'for final edits or a genuine block return an empty evidence_requests array. '
                     'Do not invent unseen code, and do not weaken governance.'
                 )
+            if is_development and context.get('final_evidence_turn') is True:
+                system += (
+                    ' This is the LAST authorized source-evidence turn. '
+                    'The independent host has exhausted its bounded read-only evidence budget: '
+                    'DO NOT return any evidence_requests. '
+                    'Use only the supplied, pinned, policy-eligible source excerpts to '
+                    'propose a narrowly scoped exact-text code AND regression-test patch; '
+                    'if the source is still insufficient, return no edits and set '
+                    'blocked_reason to the precise missing source and why it is needed. '
+                    'Do not guess unseen text, fabricate success, or ask for more tools.'
+                )
             schema = _edit_schema()
         else:
             system = (
