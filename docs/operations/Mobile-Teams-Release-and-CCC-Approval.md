@@ -411,6 +411,22 @@ the separately reviewed owner high-impact release path. Neither a
 generic chat instruction nor editing the risk/TTL policy is a substitute
 for the exact-release authorization.
 
+## Owner-only offer safety gate must not self-trigger production drift
+
+An observed Oct 25 production failure loop made the held-only approval
+service exit status 1 whenever the root release breaker or protected drift
+readback was unsafe. Systemd then marked this *nonexecuting* issuer service
+FAILED, which the independent drift watchdog treated as production drift
+and reopened the breaker. That deadlocked automatic breaker recovery while
+all legitimate runtime/MCP resources remained healthy. The native
+approval-only function now fails CLOSED in the same case without marking
+its own systemd unit failed: it logs `SAFETY_GATE_BLOCKED`, consumes NO
+owner decision, publishes NO offer and exits successfully as a deliberate
+nonaction. Truly malformed protected snapshots and baseline mismatches
+remain errors. Never interpret service success as authorization or a
+positive production release/CCC/Teams decision. Root incident hold and
+revalidation remain independently enforced.
+
 ## Engineering intake duplicate prevention (October 25, 2026)
 
 The five-minute engineering worker repeatedly failed the TODO release bridge
