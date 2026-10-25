@@ -225,6 +225,22 @@ class DocumentationPublisherE2ETest(unittest.TestCase):
         self.assertIn("BLOCKED_STALE_OR_DIVERGENT_REVISION", stale.stderr)
         self.assertEqual(self.state()["prs"], [])
 
+    def test_main_newer_than_open_pr_also_blocks_stale_event(self):
+        self.assert_published(self.invoke(self.rev_a))
+        existing = self.branch_sha()
+        path = self.repo / JSON_PATH
+        path.write_text(json.dumps({
+            "schema_version": "1.0",
+            "validated_source": {"revision": self.rev_b, "status": "ci_passed"},
+        }) + "\n")
+        self.git("-C", str(self.repo), "add", JSON_PATH)
+        self.git("-C", str(self.repo), "commit", "-m", "newer canonical main evidence")
+        self.git("-C", str(self.repo), "push", "origin", "main")
+        rejected = self.invoke(self.rev_a)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("BLOCKED_STALE_OR_DIVERGENT_REVISION", rejected.stderr)
+        self.assertEqual(self.branch_sha(), existing)
+
     def test_closed_pr_remote_branch_rejects_stale_history(self):
         self.assert_published(self.invoke(self.rev_a))
         self.assert_published(self.invoke(self.rev_b, run_id="124"))
