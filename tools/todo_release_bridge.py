@@ -1004,13 +1004,23 @@ def main() -> int:
                 "reason": "",
             })
 
-    reconcile_verified_closed_issues(repo, args.release_state.resolve(), state["items"])
-    for item in state["items"].values():
+    # Never retrospectively close/complete a mismatched issue from a
+    # previous release receipt. Pass references only for the safe subset.
+    reconcilable = {
+        key: item for key, item in state["items"].items()
+        if key not in identity_holds
+    }
+    reconcile_verified_closed_issues(repo, args.release_state.resolve(), reconcilable)
+    for key, item in state["items"].items():
+        if key in identity_holds:
+            continue
         if isinstance(item, dict):
             item.update(next_work_gate(str(item.get("phase") or ""), str(item.get("reason") or "")))
     # Read authoritative protected release records, without changing a worker
     # admission decision, modifying dependencies, or granting new authority.
-    for item in state["items"].values():
+    for key, item in state["items"].items():
+        if key in identity_holds:
+            continue
         if isinstance(item, dict):
             item.update(dependency_state_for_item(item, args.release_state.resolve()))
     for item in state["items"].values():

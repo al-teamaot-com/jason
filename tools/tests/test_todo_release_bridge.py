@@ -625,9 +625,10 @@ class IdentityConflictItemQuarantineTests(unittest.TestCase):
                   patch.object(module,'merged_prs_by_issue',return_value={}),
                   patch.object(module,'development_records_by_issue',
                                return_value={952:{'phase':'blocked','reason':'provider API prerequisite'}}),
-                  patch.object(module,'reconcile_verified_closed_issues'),
+                  patch.object(module,'reconcile_verified_closed_issues') as reconcile,
                   patch.object(module,'dependency_state_for_item',return_value=gate)):
                 self.assertEqual(module.main(),0)
+                self.assertNotIn('TODO-OPS-013', reconcile.call_args.args[2])
                 result=json.loads(state_path.read_text())
                 held=result['items']['TODO-OPS-013']
                 self.assertEqual(held['issue_number'],1459)
