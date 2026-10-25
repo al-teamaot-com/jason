@@ -2274,3 +2274,87 @@ def test_stale_clone_refuses_wrong_current_main_without_reset(tmp_path,monkeypat
     with pytest.raises(module.support.WorkerError,match='source changed'):
         module.ensure_stale_source_clone(repo,42,old_sha)
     assert git('rev-parse','HEAD',cwd=old)==old_sha
+
+
+def test_stale_recovery_search_plan_hash_includes_immutable_source_revision(tmp_path):
+    import json
+    item={'id':'DEV-42','title':'Approved Teams request','evidence':'review','acceptance':'pass',
+          'approval_source':'owner-exact-issue','body':'- **Autonomous development:** owner-approved'}
+    old=module.owner_development_search_context(item,{})
+    record={'stale_source_recovery_revision':'b'*40,'stale_source_recovery_prior_revision':'a'*40,
+            'stale_source_recovery_prior_request_id':'c'*64}
+    fresh=module.owner_development_search_context(item,record)
+    assert old != fresh
+    assert fresh['stale_clean_source_recovery']['current_source_revision']=='b'*40
+    assert fresh['stale_clean_source_recovery']['previous_successful_edit_request_id']=='c'*64
+    old_id=module.support.queue_reasoning(tmp_path,kind='search_plan',item=item,context=old)
+    new_id=module.support.queue_reasoning(tmp_path,kind='search_plan',item=item,context=fresh)
+    assert old_id != new_id
+    second=dict(record,stale_source_recovery_revision='d'*40)
+    newer=module.support.queue_reasoning(tmp_path,kind='search_plan',item=item,
+                                         context=module.owner_development_search_context(item,second))
+    assert new_id != newer
+
+
+def test_malformed_recovery_provenance_must_not_queue_reasoning():
+    import pytest
+    item={'approval_source':'approved','body':'approved'}
+    with pytest.raises(module.support.WorkerError,match='provenance'):
+        module.owner_development_search_context(item,{'stale_source_recovery_revision':'bad'})
+
+
+def _cached_replay_receipt(tmp_path,monkeypatch,*,after_recovery=False):
+    import json
+    from datetime import datetime,timedelta,timezone
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==['DEV-42']
+    record=state['items']['DEV-42']
+    req=module.support.queue_reasoning(spool,kind='search_plan',item=item,
+                                       context=module.owner_development_search_context(item,{}))
+    response_time=datetime.now(timezone.utc)+(timedelta(minutes=1) if after_recovery else -timedelta(hours=1))
+    rsp={'request_id':req,'status':'failed',
+         'error':'Hosted reasoning blocked: credit_balance_exhausted; Owner action: restore_provider_credits',
+         'primary_http_status':429,'primary_provider_error_code':'credit_balance_exhausted',
+         'completed_at':response_time.isoformat()}
+    path=spool/'reasoning'/'responses'/(req+'.json')
+    path.write_text(json.dumps(rsp))
+    record.update({'phase':'blocked','reason':'development reasoning failed: '+rsp['error'],
+                   'reasoning_request_id':req})
+    return repo,spool,item,state,old,old_sha,current,git,req,path
+
+
+def test_old_credit_receipt_replay_is_recovered_once_with_pinned_source(tmp_path,monkeypatch):
+    repo,spool,item,state,old,old_sha,current,git,rid,path=_cached_replay_receipt(tmp_path,monkeypatch)
+    assert module.readmit_verified_cached_stale_response_replay(state,[item],spool,repo,max_active=3)==['DEV-42']
+    rec=state['items']['DEV-42']
+    assert rec['phase']=='diagnosing'
+    assert rec['reasoning_request_id']==''
+    assert rec['stale_source_replay_recovered_request_id']==rid
+    ctx=module.owner_development_search_context(item,rec)
+    fresh=module.support.queue_reasoning(spool,kind='search_plan',item=item,context=ctx)
+    assert fresh != rid
+    assert not (spool/'reasoning'/'responses'/(fresh+'.json')).exists()
+    assert git('rev-parse','HEAD',cwd=old)==old_sha
+    assert module.readmit_verified_cached_stale_response_replay(state,[item],spool,repo,max_active=3)==[]
+
+
+def test_new_credit_failure_after_recovery_is_not_replayed(tmp_path,monkeypatch):
+    repo,spool,item,state,old,old_sha,current,git,rid,path=_cached_replay_receipt(tmp_path,monkeypatch,after_recovery=True)
+    assert module.readmit_verified_cached_stale_response_replay(state,[item],spool,repo,max_active=3)==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_unverified_old_reply_never_grants_one_shot_replay(tmp_path,monkeypatch):
+    import json
+    repo,spool,item,state,old,old_sha,current,git,rid,path=_cached_replay_receipt(tmp_path,monkeypatch)
+    rsp=json.loads(path.read_text());rsp['primary_provider_error_code']='rate_limit_exceeded'
+    path.write_text(json.dumps(rsp))
+    assert module.readmit_verified_cached_stale_response_replay(state,[item],spool,repo,max_active=3)==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_cached_replay_requires_owner_approved_dependency_gate(tmp_path,monkeypatch):
+    repo,spool,item,state,old,old_sha,current,git,rid,path=_cached_replay_receipt(tmp_path,monkeypatch)
+    monkeypatch.setattr(module,'issue_has_closed_dependency_gate',lambda item:True)
+    assert module.readmit_verified_cached_stale_response_replay(state,[item],spool,repo,max_active=3)==[]
+    assert state['items']['DEV-42']['phase']=='blocked'

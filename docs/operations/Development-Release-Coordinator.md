@@ -309,3 +309,34 @@ The new checkout and provenance fields are persisted for idempotent retries.
 Existing independent CI, guarded PR integration, CCC and exact-SHA production
 release authority remain unchanged. Source-only fixes are not proof of live
 Teams approval or disk repair acceptance.
+
+## Source-bound reasoning receipts and historical 429 replay
+
+The content-addressed reasoning queue deduplicates requests by their exact
+`kind`, `support_item`, `title`, `evidence`, `acceptance`, and `context` JSON.
+A restarted development worker must **not** treat clearing a persisted request
+ID as proof that a fresh provider call will run: reissuing an unchanged search
+plan can immediately consume a previously failed response, including an old
+`credit_balance_exhausted` error from before the independently verified credit
+replenishment. This is *not* evidence of a new current billing failure.
+
+The first diagnosing `search_plan` of any stale-clean-source recovery therefore
+adds an immutable `stale_clean_source_recovery` context binding the verified
+current main revision, previously verified source revision, exact previous
+successful edit-plan request ID, and a single-retry limit. It is a new hashed
+request even when an older model result used the same owner-approved scope.
+New source SHA creates a distinct ID; old model edits are never reused.
+
+For releases that already attempted the initial recovery before this fix,
+`readmit_verified_cached_stale_response_replay()` accepts **one** additional
+bounded retry only when the existing record proves: current owner approval
+and dependency scope; a previously verified clean recovery checkout; an exact
+hash-valid `search_plan` request; an attached failed response whose
+`primary_provider_error_code=credit_balance_exhausted` and HTTP status 429;
+its completion time strictly *before* the original recovery; and remaining
+shared support/development capacity. The worker makes a separate current-source
+clone, preserves all earlier evidence, and stores a one-use replay key.
+A new 429 occurring after recovery, any malformed response, stale/dirty clone,
+missing approval, or exhausted slot stays blocked. Provider bills and worker
+responses are not rewritten. Source patch acceptance and release/CCC gates
+remain independent; only exact-SHA Owner approval allows production activation.
