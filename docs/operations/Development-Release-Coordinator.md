@@ -160,7 +160,10 @@ docker exec jason-runtime python -m jason_runtime.verify_hosted_credit
 
 This command uses Jason's configured conversation model, approved OpenBao
 `openai.semantic_intent` secret, existing structured-model client, and append-only
-model-usage ledger. It never prints credentials or response bodies. Success is
+model-usage ledger. It never prints credentials or response bodies. On failure it emits only a
+sanitized HTTP status and allowlisted provider error code so an operator can
+distinguish billing (429) from request-contract errors (400). It uses the same
+low reasoning-effort setting as the running OpenAI client. Success is
 reported only after the same request has a positive-token, provider-reported
 completed receipt carrying `workflow_id=provider-credit-verify` and
 `routing_profile=operator-authorized-diagnostic`. A blocked result must not be

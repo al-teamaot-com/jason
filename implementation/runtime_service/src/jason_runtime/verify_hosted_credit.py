@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from uuid import uuid4
 
-from connectors.core.contracts import ConnectorContext
+from connectors.core.contracts import ConnectorContext, ConnectorTransportError
 from connectors.core.http_transport import UrlLibJsonHttpTransport
 from connectors.core.openbao_secrets import OpenBaoSecretResolver
 from orchestrator.openai_reasoning import OpenAIStructuredJsonClient
@@ -64,7 +64,7 @@ def run() -> int:
             ledger = SQLiteUsageLedger(ledger_path)
             client = OpenAIStructuredJsonClient(
                 api_key=key, transport=UrlLibJsonHttpTransport(), model=model,
-                usage_ledger=ledger, reasoning_effort='minimal', timeout_seconds=30.0,
+                usage_ledger=ledger, reasoning_effort='low', timeout_seconds=30.0,
             )
             context = UsageContext(
                 workflow_id='provider-credit-verify', request_id=receipt,
@@ -87,6 +87,14 @@ def run() -> int:
             return 0
         finally:
             secrets.clear()
+    except ConnectorTransportError as error:
+        # Diagnostics may reveal only sanitized transport metadata, never
+        # exception messages, response bodies, headers or credential values.
+        status = error.status_code if isinstance(error.status_code, int) and 100 <= error.status_code <= 599 else 'unknown'
+        safe_codes = {'credit_balance_exhausted', 'insufficient_quota', 'rate_limit_exceeded'}
+        code = error.provider_error_code if error.provider_error_code in safe_codes else 'unclassified'
+        print(f'BLOCKED: provider transport failed (http_status={status}, code={code})')
+        return 4
     except Exception as error:
         print('BLOCKED: diagnostic failed (' + type(error).__name__ + ')')
         return 4
