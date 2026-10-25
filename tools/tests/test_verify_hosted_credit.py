@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 
 def load_module():
-    path = Path(__file__).resolve().parents[1] / 'verify_hosted_credit.py'
+    path = Path(__file__).resolve().parents[2] / 'implementation/runtime_service/src/jason_runtime/verify_hosted_credit.py'
     spec = importlib.util.spec_from_file_location('verify_hosted_credit', path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
