@@ -2,13 +2,15 @@
   "schema_version": "1.0",
   "enabled": true,
   "issue_numbers": [
-    1440,
     1545,
+    759,
+    1470,
+    1440,
     1553,
     1468,
     1566,
     1493
   ],
-  "directive": "Exclusive owner-approved engineering priority: finish real, tested Universal Teams Approvals #1440 and directly necessary #1545 live acceptance, #1553 callback/delivery provenance, #1468/#1566 shared approval and Teams communications only to enable UTA, and #1493 reasoning transport only if it blocks this delivery. No new unrelated TODO, PO/invoice, QuickBooks, general Production Manager, or refactoring development until UTA works end-to-end. Keep critical operational safety/support services and let already-running unrelated work reach a safe checkpoint, then park it. Do not treat source merge as production activation.",
-  "authority_source": "https://github.com/al-teamaot-com/jason/issues/1440#issuecomment-6341481471"
+  "directive": "Current Owner-approved functional-first P0 delivery order, October 25 2026: (1) Universal Teams Approver #1545/#1440 with real authenticated Approve/Deny and pilot acceptance, (2) all-staff PO/invoice intake #759 through existing governed Teams/Autotask UDF capability, (3) QuickBooks bank and credit-card reconciliation read-only evidence #1470. Admit these three bounded existing Owner-authored issues concurrently up to the three-slot engineering cap, without admitting unrelated feature work or using an EPIC as blanket authorization. Already active work reaches a safe checkpoint. Work first, then harden, while preserving no-financial-write/no-user-disruption without specific approval, identity verification, audit, provider isolation, native protected CI and exact-SHA release gates. Do not claim source merge is production completion.",
+  "authority_source": "https://github.com/al-teamaot-com/jason/issues/1467"
 }

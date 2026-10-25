@@ -447,3 +447,29 @@ prevent low-risk duplicate bookkeeping from blocking higher-priority
 Universal Teams Approver, staff purchasing and QBO work. Protected source
 checks and exact release approval are still mandatory; this note is not
 permission to bypass the root breaker or production incident hold.
+
+## Oct 25 Owner correction: actively develop the Big Three concurrently
+
+The prior single-feature engineering focus explicitly excluded PO/invoicing and
+QuickBooks until Universal Teams Approver was fully accepted. That was superseded
+by the Owner's October 22-25 direction to get the THREE priorities working
+before optional hardening, with usable Teams approvals first, staff-wide
+PO/invoice workflow second, and bank/credit-card QuickBooks reconciliation
+third. The old developer focus suppressed valid owner-authored issues #759,
+#1470 and #1545 even though source workers ran every five minutes.
+
+The updated pinned engineering focus now admits only the existing,
+individually owner-authorized bounded engineering scope for #1545 (Teams),
+#759 (PO/invoicing) and #1470 (read-only reconciliation evidence), plus
+necessary earlier Teams dependencies. The exact approved issue bodies carry
+the worker's established owner-approved development marker, never an
+approval to execute financial/provider writes. The existing development
+worker subtracts active critical support tasks from the shared 3-slot cap
+before claiming bounded new work; previously completed DEV-1440 does not
+consume capacity and broad EPIC #1467 remains excluded. This is not a waiver
+of human approvals for spending, disruptive operations, CCC, guarded releases,
+tenant authorization, or independent production verification.
+
+Do not report active work as completed functionality. New diagnosing or
+implementing states show only productive admission; the three Big Three
+workflows remain outstanding until real end-to-end acceptance passes.
