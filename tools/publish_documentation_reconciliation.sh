@@ -67,6 +67,11 @@ git branch -D "$BRANCH" >/dev/null 2>&1 || true
 git worktree add -B "$BRANCH" "$WORKTREE" origin/main
 
 cd "$WORKTREE"
+# Preserve the other mode's pending evidence when reusing the single PR.
+# The generated Markdown is re-rendered from this canonical JSON below.
+if [ "$PR_COUNT" -eq 1 ]; then
+  git show "origin/$BRANCH:docs/control/AUTOMATED-CHANGE-STATE.json" > docs/control/AUTOMATED-CHANGE-STATE.json
+fi
 git config user.name "Project Jason Documentation Automation"
 git config user.email "jason@teamaot.com"
 ARGS=("$MODE" --source-revision "$SOURCE_REVISION")
