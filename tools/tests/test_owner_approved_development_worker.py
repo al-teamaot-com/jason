@@ -2504,3 +2504,23 @@ def test_evidence_recovery_denies_unreleased_main_and_root_drift(tmp_path,monkey
     assert not module.verified_live_evidence_recovery_release(spool,sha,current)
     data['state']='closed';release.write_text(json.dumps(data))
     assert module.verified_live_evidence_recovery_release(spool,sha,current)
+
+
+def test_evidence_recovery_requires_protected_recent_release_readbacks(tmp_path,monkeypatch):
+    import json
+    from datetime import datetime,timedelta,timezone
+    repo,spool,item,state,old,prior_sha,sha,git,old_id,resp=_exhausted_evidence_fixture(tmp_path,monkeypatch)
+    root=spool.parent/'release-manager'
+    current=tmp_path/'current'
+    assert module.verified_live_evidence_recovery_release(spool,sha,current)
+    drift=root/'protected-readback/production-drift.json'
+    d=json.loads(drift.read_text())
+    d['observed_at']=(datetime.now(timezone.utc)-timedelta(minutes=4)).isoformat()
+    drift.write_text(json.dumps(d))
+    assert not module.verified_live_evidence_recovery_release(spool,sha,current)
+    d['observed_at']=datetime.now(timezone.utc).isoformat()
+    drift.write_text(json.dumps(d))
+    drift.chmod(0o644)
+    assert not module.verified_live_evidence_recovery_release(spool,sha,current)
+    drift.chmod(0o600)
+    assert module.verified_live_evidence_recovery_release(spool,sha,current)
