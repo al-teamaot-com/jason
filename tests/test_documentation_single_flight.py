@@ -104,9 +104,9 @@ class DocumentationSingleFlightTests(unittest.TestCase):
             bin_dir.mkdir()
             gh = bin_dir / "gh"
             gh.write_text(
-                '#!/bin/sh\\n'
-                'printf \'%s\\n\' \'[{"number":100,"headRefName":"automation/documentation-reconcile-a"},'
-                '{"number":101,"headRefName":"automation/documentation-reconcile-b"}]\'\\n'
+                "#!/bin/sh\n"
+                "printf '%s\\n' '[{\"number\":100,\"headRefName\":\"automation/documentation-reconcile-a\"},"
+                "{\"number\":101,\"headRefName\":\"automation/documentation-reconcile-b\"}]'\n"
             )
             gh.chmod(0o755)
             env = os.environ.copy()
