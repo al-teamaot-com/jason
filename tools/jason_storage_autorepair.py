@@ -34,14 +34,18 @@ def policy(path: Path = POLICY) -> dict[str, Any]:
                    'destination_max_used_percent','minimum_age_days','max_worktrees_per_cycle',
                    'max_bytes_per_cycle','max_bytes_per_worktree','source_worktree_root',
                    'archive_worktree_root','archive_mount','protected_paths','allow_actions',
-                   'require_ancestor_of_protected_main','no_service_signals','no_live_data_mutations'}
+                   'require_ancestor_of_protected_main','no_service_signals','no_live_data_mutations',
+                   'builder','minimum_unused_cache_age_hours','maximum_cache_cleanup_seconds'}
             or p['schema_version'] != '1.0' or p['enabled'] is not True
             or p['owner_authority'] != 'owner-2026-10-25-conditional-dual-drive-safe-maintenance'
             or p['source_worktree_root'] != '/home/al/jason-worktrees'
             or p['archive_worktree_root'] != '/srv/jason/archive/historical/retired-git-worktrees/auto'
             or p['archive_mount'] != '/srv/jason/archive'
             or p['protected_paths'] != ['/var/lib/jason','/opt/jason','/var/lib/docker','/opt/jason/infrastructure/openbao/audit']
-            or p['allow_actions'] != ['archive_reconstructible_clean_detached_worktree']
+            or p['allow_actions'] != ['archive_reconstructible_clean_detached_worktree','scoped_unused_buildx_cache_cleanup']
+            or p['builder'] != 'default'
+            or p['minimum_unused_cache_age_hours'] != 24
+            or p['maximum_cache_cleanup_seconds'] != 90
             or p['require_ancestor_of_protected_main'] is not True
             or p['no_service_signals'] is not True or p['no_live_data_mutations'] is not True):
         raise ValueError('unreviewed storage autonomy policy')
@@ -188,10 +192,44 @@ def atomic_manifest(target: Path, data: dict[str,Any]) -> None:
         if os.path.exists(tmp):os.unlink(tmp)
 
 
+def active_build_processes() -> bool:
+    for proc in Path('/proc').iterdir():
+        if not proc.name.isdigit():continue
+        try:
+            argv=(proc/'cmdline').read_bytes()[:16000].replace(b'\x00',b' ').decode('utf-8','replace')
+        except (OSError,PermissionError,ProcessLookupError):
+            continue
+        if ('docker buildx build ' in argv or 'docker build ' in argv
+                or 'buildctl build ' in argv):
+            return True
+    return False
+
+
+def unused_build_cache_prune(*, hours: int = 24, timeout: int = 90) -> int:
+    """Clear only *unused* stale build-cache records; never images/volumes.
+
+    The command is structurally fixed, has no --all, no running-container or
+    image prune, and observes host free bytes before and after.
+    """
+    if hours != 24 or timeout != 90:
+        raise ValueError('unreviewed build-cache cleanup parameters')
+    if active_build_processes():
+        return 0
+    available_before=usage(Path('/'))[1]
+    done=subprocess.run(
+        ['docker','buildx','prune','--builder','default',
+         '--filter','until=24h','--force'],
+        text=True,capture_output=True,timeout=timeout,check=False,
+    )
+    if done.returncode:
+        raise RuntimeError('scoped build-cache cleanup failed')
+    return max(0,usage(Path('/'))[1]-available_before)
+
+
 def repair(*, policy_path: Path=POLICY, dry_run: bool=False) -> dict[str,Any]:
     p=policy(policy_path)
     status,ev=capacity_gate(p)
-    report={'schema_version':'1.0','status':status,'capacity':ev,'archived_count':0,'archived_bytes':0,'checked_at':datetime.now(timezone.utc).isoformat()}
+    report={'schema_version':'1.0','status':status,'capacity':ev,'archived_count':0,'archived_bytes':0,'cache_reclaimed_bytes':0,'checked_at':datetime.now(timezone.utc).isoformat()}
     if status!='repair_allowed':return report
     if dry_run:
         report['status']='eligible_dry_run'
@@ -208,6 +246,17 @@ def repair(*, policy_path: Path=POLICY, dry_run: bool=False) -> dict[str,Any]:
         try:fcntl.flock(handle,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:
             report['status']='already_running';return report
+        try:
+            report['cache_reclaimed_bytes']=unused_build_cache_prune(
+                hours=p['minimum_unused_cache_age_hours'],
+                timeout=p['maximum_cache_cleanup_seconds'])
+        except (OSError,RuntimeError,subprocess.TimeoutExpired):
+            report['cache_cleanup_status']='failed_closed'
+        current,_=capacity_gate(p)
+        if current!='repair_allowed':
+            report['capacity_after']=capacity_gate(p)[1]
+            report['status']='completed_no_more_root_pressure' if current=='root_below_80' else current
+            return report
         for path,sha in candidates(Path(p['source_worktree_root']),minimum_age_days=p['minimum_age_days']):
             if report['archived_count']>=p['max_worktrees_per_cycle']:break
             capacity,ev=capacity_gate(p)
@@ -238,7 +287,9 @@ def repair(*, policy_path: Path=POLICY, dry_run: bool=False) -> dict[str,Any]:
                 report['status']='partial_archive_halted';break
         report['capacity_after']=capacity_gate(p)[1]
         if report['status']=='repair_allowed':
-            report['status']='archived_and_verified' if report['archived_count'] else 'no_safe_cold_worktree_available'
+            report['status']=('archived_and_verified' if report['archived_count'] else
+                              'cache_reclaimed_and_verified' if report['cache_reclaimed_bytes'] else
+                              'no_safe_cold_worktree_available')
         return report
 
 

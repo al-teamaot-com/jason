@@ -17,7 +17,7 @@ def test_reviewed_policy_is_bounded():
     p=storage.policy()
     assert p['intervention_used_percent']==80
     assert p['destination_max_used_percent']==80
-    assert p['allow_actions']==['archive_reconstructible_clean_detached_worktree']
+    assert p['allow_actions']==['archive_reconstructible_clean_detached_worktree','scoped_unused_buildx_cache_cleanup']
     assert p['no_service_signals'] is True
     assert p['no_live_data_mutations'] is True
 
@@ -78,6 +78,7 @@ def test_archived_clean_old_worktree_has_durable_manifest(monkeypatch,tmp_path):
     monkeypatch.setattr(storage,'policy',lambda _:reviewed)
     monkeypatch.setattr(storage,'capacity_gate',lambda p:('repair_allowed',{'root_percent':95,'archive_percent':5}))
     monkeypatch.setattr(storage,'ROOT',spool)
+    monkeypatch.setattr(storage,'unused_build_cache_prune',lambda **kwargs:0)
     monkeypatch.setattr(storage,'candidates',lambda *a,**k:[(item,'a'*40)])
     monkeypatch.setattr(storage,'qualified',lambda *a,**k:True)
     monkeypatch.setattr(storage,'usage',lambda path:(5.0,200*storage.GIB,210*storage.GIB))
@@ -124,3 +125,28 @@ def test_locked_with_reason_is_excluded(monkeypatch,tmp_path):
     out=f'worktree {item}\nHEAD {"a"*40}\ndetached\nlocked used-by-authorized-worker\n'
     monkeypatch.setattr(storage,'git',lambda *a,**k:subprocess.CompletedProcess(a,0,out,''))
     assert storage.candidates(root)==[]
+
+
+def test_cache_prune_uses_exact_bounded_builder_and_validates_free_bytes(monkeypatch):
+    calls=[]
+    monkeypatch.setattr(storage,'active_build_processes',lambda:False)
+    samples=iter([(95.0,10*storage.GIB,200*storage.GIB),(92.0,13*storage.GIB,200*storage.GIB)])
+    monkeypatch.setattr(storage,'usage',lambda path:next(samples))
+    def mockrun(args,**kwargs):
+        calls.append((args,kwargs))
+        return subprocess.CompletedProcess(args,0,'Total: 3GB','')
+    monkeypatch.setattr(storage.subprocess,'run',mockrun)
+    assert storage.unused_build_cache_prune()==3*storage.GIB
+    assert calls[0][0]==['docker','buildx','prune','--builder','default','--filter','until=24h','--force']
+    assert calls[0][1]['timeout']==90
+
+
+def test_cache_prune_skips_active_build_without_mutation(monkeypatch):
+    monkeypatch.setattr(storage,'active_build_processes',lambda:True)
+    monkeypatch.setattr(storage.subprocess,'run',lambda *a,**k:pytest.fail('must not prune while build active'))
+    assert storage.unused_build_cache_prune()==0
+
+
+def test_cache_prune_rejects_unreviewed_parameters():
+    with pytest.raises(ValueError,match='unreviewed'):
+        storage.unused_build_cache_prune(hours=1)
