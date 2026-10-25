@@ -175,10 +175,7 @@ class AutonomousRepairDeploymentMaintenance:
         )
         result = self.orchestrator.execute(request)
         if result.status.value != "succeeded":
-            raise RuntimeError(
-                "autonomous repair queue request failed: "
-                + (result.error_code or ",".join(result.reason_codes) or result.status.value)
-            )
+            return False
         return True
 
 
