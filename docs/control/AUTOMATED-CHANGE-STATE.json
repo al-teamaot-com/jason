@@ -1,7 +1,7 @@
 {
   "production": {
     "failed_systemd_units": 0,
-    "host_release": "/opt/jason/releases/7e7b13af05881201a683624a2e40509ebbd79b78",
+    "host_release": "/opt/jason/releases/ee0ef9457b4b4d6b1d21b46f412cc4575b18d3c8",
     "host_units": {
       "jason-client-posture-exporter.service": "active",
       "jason-delegation-maintenance.timer": "active",
@@ -16,15 +16,15 @@
     },
     "mcp": {
       "restart_policy": "unless-stopped",
-      "source_revision": "7e7b13af05881201a683624a2e40509ebbd79b78",
+      "source_revision": "ee0ef9457b4b4d6b1d21b46f412cc4575b18d3c8",
       "state": "running"
     },
-    "observed_at": "2026-10-24T15:09:27+00:00",
-    "revision": "7e7b13af05881201a683624a2e40509ebbd79b78",
+    "observed_at": "2026-10-25T12:33:48+00:00",
+    "revision": "ee0ef9457b4b4d6b1d21b46f412cc4575b18d3c8",
     "runtime": {
       "health": "healthy",
       "restart_count": 0,
-      "source_revision": "7e7b13af05881201a683624a2e40509ebbd79b78"
+      "source_revision": "ee0ef9457b4b4d6b1d21b46f412cc4575b18d3c8"
     },
     "status": "aligned_and_healthy"
   },
