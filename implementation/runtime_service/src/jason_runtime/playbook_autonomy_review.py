@@ -135,6 +135,22 @@ class OwnerOnlyPlaybookAutonomyAuthority:
         )
 
 
+def _focused_teams_approval_card(*, heading: str, title: str, explanation: str,
+                                 facts: list[dict[str, str]]) -> tuple[list[dict], tuple[tuple[str, str], ...]]:
+    """One compact production-style Teams Approve/Deny presentation.
+
+    Neither UI text nor card controls grant authority. The immutable
+    ApprovalRequest, signed gateway response and shared approval repository do.
+    """
+    body = [
+        {"type": "TextBlock", "text": heading, "weight": "Bolder", "wrap": True},
+        {"type": "TextBlock", "text": title, "weight": "Bolder", "wrap": True},
+        {"type": "TextBlock", "text": explanation, "wrap": True},
+        {"type": "FactSet", "facts": facts},
+    ]
+    return body, (("Approve", "approve"), ("Deny", "deny"))
+
+
 class TeamsGatewayPlaybookApprovalSender:
     def __init__(
         self,
@@ -157,20 +173,29 @@ class TeamsGatewayPlaybookApprovalSender:
     def send(self, request: ApprovalRequest) -> tuple[str, ...]:
         card = render_approval_card(request)
         adaptive = self._adaptive_card(card)
-        receipts: list[str] = []
-        transport = self._existing_transport()
-        for owner_id in self.owner_identity_ids:
-            # The persisted ApprovalRequest is authoritative for audience.
-            if (request.organization_id and owner_id not in request.authorized_approver_ids):
-                raise PermissionError("Teams approver is not authorized for this approval")
+        # Every approval type uses one canonical card renderer + gateway.
+        # Select recipients from the persisted immutable ApprovalRequest, not
+        # from user-supplied Teams data or a separate procurement sender.
+        # The configured sender allowlist must cover the exact request set.
+        requested = tuple(request.authorized_approver_ids)
+        allowlist = frozenset(self.owner_identity_ids)
+        if (not requested or len(set(requested)) != len(requested)
+                or any(identity not in allowlist for identity in requested)):
+            raise PermissionError("Teams recipient is outside configured approval audience")
+        bindings = []
+        # Fail before sending *any* card if one authorized recipient lacks a
+        # trusted Microsoft binding, preventing partial fan-out on bad policy.
+        for identity in requested:
             binding = self.bindings.find_active_by_jason_identity(
-                jason_identity_id=owner_id)
+                jason_identity_id=identity)
             if binding is None or getattr(binding, "status", None) != "active":
                 raise PermissionError(
-                    f"owner Microsoft identity binding unavailable: {owner_id}")
-            receipt = transport.send(binding=binding, text=card.summary, card=adaptive)
-            receipts.append(receipt.message_id)
-        return tuple(receipts)
+                    f"authorized Microsoft identity binding unavailable: {identity}")
+            bindings.append(binding)
+        transport = self._existing_transport()
+        return tuple(transport.send(binding=binding, text=card.summary,
+                                    card=adaptive).message_id
+                     for binding in bindings)
 
     def send_status(self, *, text: str) -> tuple[str, ...]:
         """Existing governed owner status messaging, no approval implied."""
@@ -218,20 +243,30 @@ class TeamsGatewayPlaybookApprovalSender:
             facts = [{"title": label, "value": str(review[key])}
                      for key, label in keys if key in review]
             facts.append({"title": "Expires", "value": card.expires_at})
-            actions = (
-                ("Approve", "approve"), ("Deny", "deny"),
+            body, actions = _focused_teams_approval_card(
+                heading="ACTION REQUIRED: PRODUCTION + CCC",
+                title=card.title,
+                explanation=("Review this exact release. The Approve and Deny buttons "
+                             "are below the details. Approve authorizes only this SHA; "
+                             "independent deployment, CCC and rollback gates still apply."),
+                facts=facts,
             )
-            body = [
-                {"type": "TextBlock", "text": "ACTION REQUIRED: PRODUCTION + CCC",
-                 "weight": "Bolder", "wrap": True},
-                {"type": "TextBlock", "text": card.title, "weight": "Bolder", "wrap": True},
-                {"type": "TextBlock",
-                 "text": ("Review this exact release. The Approve and Deny buttons "
-                          "are below the details. Approve authorizes only this SHA; "
-                          "independent deployment, CCC and rollback gates still apply."),
-                 "wrap": True},
-                {"type": "FactSet", "facts": facts},
-            ]
+        elif (card.capability == "procurement.submission.execute"
+                and card.approval_id.startswith("procapproval-")
+                and card.requested_mode == "purchase"):
+            # Exactly the same focused card pattern, authenticated gateway,
+            # persisted request and signed actions as a production release.
+            # Financial approvals never authorize release or CCC actions.
+            facts = [{"title": str(k), "value": str(v)} for k,v in card.facts]
+            facts.append({"title": "Expires", "value": card.expires_at})
+            body, actions = _focused_teams_approval_card(
+                heading="ACTION REQUIRED: PURCHASE APPROVAL",
+                title=card.title,
+                explanation=("Review the exact vendor, items, customer, ticket, and total. "
+                             "Approve authorizes only this purchase request; "
+                             "independent Autotask execution and audit checks still apply."),
+                facts=facts,
+            )
         elif is_owner_uat:
             # This is a TWO-STAGE scripted nonexecuting acceptance test.
             # Never display both buttons when only one result can advance the

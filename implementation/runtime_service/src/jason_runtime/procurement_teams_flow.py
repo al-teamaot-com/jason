@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from hashlib import sha256
+import hmac
+import secrets
 import json
 import os
 from pathlib import Path
@@ -14,6 +16,7 @@ from uuid import uuid4
 
 from connectors.src.jason_connectors.approval_requests import (
     ApprovalDecision,
+    ApprovalRequestStatus,
     ApprovalPresentation,
     ApprovalRequest,
     ApprovalRequestService,
@@ -61,6 +64,7 @@ from orchestrator.teams_conversation_flow import (
 from orchestrator.teams_request_factory import GovernedTeamsOrchestrationRequestFactory
 from .procurement_web_read import CAPABILITY as PROCUREMENT_WEB_PRODUCT_READ
 from .procurement_inventory_billing import AllocationPlan
+from .procurement_supervisor_policy import SupervisorSpendingPolicy, SupervisorPolicyError, money
 
 PROCUREMENT_APPROVAL_CAPABILITY = "procurement.submission.execute"
 PROCUREMENT_WORKER_ID = "jason-procurement-worker"
@@ -1150,6 +1154,19 @@ class OwnerOnlyProcurementAuthority:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class ConfiguredProcurementApprovalAuthority:
+    """Same canonical ApprovalRequestService as production approvals, scope-separated."""
+    approver_ids: frozenset[str]
+
+    def can_approve(self, *, approver_identity_id: str, organization_id: str,
+                    client_id: str | None, capability: str, requested_mode: str) -> bool:
+        return (organization_id == 'aot' and client_id is None
+                and capability == PROCUREMENT_APPROVAL_CAPABILITY
+                and requested_mode == 'purchase'
+                and approver_identity_id in self.approver_ids)
+
+
 @dataclass
 class ProcurementTeamsFlow:
     identity_binder: Any
@@ -1160,6 +1177,7 @@ class ProcurementTeamsFlow:
     approval_service: ApprovalRequestService
     approval_sender: Any
     owner_ids: tuple[str, ...]
+    supervisor_policy: SupervisorSpendingPolicy | None = None
     structured_client: Any | None = None
     inventory_location_id: int = 1
     ship_to_name: str = "Atlantic Office Technologies"
@@ -2321,11 +2339,40 @@ class ProcurementTeamsFlow:
             "total_commitment": f"{commitment:.2f}",
             "quote_context": quote_context,
         }
-        submitted["digest"] = _submission_digest(submitted)
+        # The authenticated technician's exact Autotask Contact "Spending limit"
+        # UDF is the ceiling. Reviewed supervisor rules may LOWER but never
+        # raise it. The canonical requester principal comes from signed Teams
+        # identity binding, not form selections. No policy means the existing
+        # Owner-only UDF-over-limit route remains intact.
+        approval_needed = bool(create_po and commitment > spending_limit)
+        if create_po and self.supervisor_policy is not None:
+            try:
+                route = self.supervisor_policy.decide_from_reviewed_identities(
+                    requester_id=principal.principal_id,
+                    purchase_type=item_class,
+                    amount=money(commitment),
+                    autotask_contact_udf_limit=money(spending_limit),
+                )
+            except SupervisorPolicyError as exc:
+                raise ProcurementFlowError('Supervisor spending policy requires Human Review: '
+                                           + str(exc)) from exc
+            approval_needed = route.requires_approval
+            submitted.update({
+                'supervisor_policy_digest': route.policy_digest,
+                'spending_authority_rule': route.rule_key,
+                'effective_spending_threshold': f'{route.threshold:.2f}',
+                'supervisor_approver_ids': list(route.approver_ids),
+                'owner_escalation_ids': list(route.fallback_approver_ids),
+                'approval_ttl_minutes': route.ttl_minutes,
+            })
+        else:
+            submitted['effective_spending_threshold'] = f'{spending_limit:.2f}'
+        submitted['spending_authority_source'] = 'autotask_contact_udf:Spending limit'
+        submitted['digest'] = _submission_digest(submitted)
 
         # Spend authority governs the purchase branch only. Catalog/client quote
         # creation does not itself commit AOT funds.
-        if create_po and commitment > spending_limit:
+        if approval_needed:
             approval = self._create_owner_approval(submitted)
             self.store.update(
                 submission_id,
@@ -2335,7 +2382,21 @@ class ProcurementTeamsFlow:
                     "approval_id": approval.approval_id,
                 },
             )
-            self.approval_sender.send(approval)
+            try:
+                self.approval_sender.send(approval)
+            except (PermissionError, RuntimeError, OSError, ValueError) as exc:
+                # The canonical approval remains pending; no PO is executed.
+                # A bounded maintenance cycle can route this same immutable
+                # scope to the configured owner fallback or Human Review.
+                self.store.update(submission_id, {
+                    **submitted, 'status': 'approval_delivery_blocked',
+                    'approval_id': approval.approval_id,
+                    'delivery_error_type': type(exc).__name__,
+                })
+                return {
+                    'status':'blocked', 'submission_id':submission_id,
+                    'reply':{'text': 'Teams approval delivery is unverified; no purchase was placed. The approved fallback process will review this request.'},
+                }
             return {
                 "status": "completed",
                 "submission_id": submission_id,
@@ -2345,9 +2406,10 @@ class ProcurementTeamsFlow:
                         + f"{commitment:.2f}"
                         + " exceeds "
                         + requester_name
-                        + "'s Autotask Spending limit of $"
-                        + f"{spending_limit:.2f}"
-                        + "; owner approval was sent."
+                        + "'s effective spending threshold of $"
+                        + str(submitted['effective_spending_threshold'])
+                        + " (capped by the Autotask Contact Spending limit UDF)"
+                        + "; a Teams approval request was sent."
                     )
                 },
             }
@@ -2365,8 +2427,17 @@ class ProcurementTeamsFlow:
             },
         }
 
-    def _create_owner_approval(self, submission: Mapping[str, Any]) -> ApprovalRequest:
-        now = datetime.now(timezone.utc)
+    def _create_owner_approval(self, submission: Mapping[str, Any], *,
+            approver_override: tuple[str,...] | None = None,
+            escalation_from: str | None = None,
+            approval_now: datetime | None = None) -> ApprovalRequest:
+        now = approval_now or datetime.now(timezone.utc)
+        approvers = tuple(approver_override if approver_override is not None
+                          else (submission.get('supervisor_approver_ids') or self.owner_ids))
+        if not approvers or str(submission['requester_principal_id']) in approvers:
+            raise PermissionError('procurement requester cannot authorize their own purchase')
+        ttl = int(submission.get('approval_ttl_minutes') or 2880)
+        challenge = secrets.token_hex(24)
         approval = ApprovalRequest(
             approval_id=f"procapproval-{uuid4().hex}",
             request_id=f"procreq-{uuid4().hex}",
@@ -2377,11 +2448,11 @@ class ProcurementTeamsFlow:
             capability=PROCUREMENT_APPROVAL_CAPABILITY,
             requested_mode="purchase",
             requested_at=now,
-            expires_at=now + timedelta(days=2),
-            authorized_approver_ids=tuple(self.owner_ids),
+            expires_at=now + timedelta(minutes=ttl),
+            authorized_approver_ids=approvers,
             presentation=ApprovalPresentation(
                 title="Procurement Approval",
-                summary=str(submission["requester_name"]) + " submitted an AOT purchase above their current spending authority.",
+                summary=str(submission["requester_name"]) + " requested an AOT purchase approval for this exact commitment.",
                 facts=(
                     ("Submitted by", str(submission["requester_name"])),
                     ("Vendor", str(submission["vendor"]["name"])),
@@ -2400,7 +2471,9 @@ class ProcurementTeamsFlow:
                         + ")",
                     ),
                     ("Total Commitment", "$" + str(submission["total_commitment"])),
-                    ("Spending Limit", "$" + str(submission["spending_limit"])),
+                    ("Autotask Contact UDF limit", "$" + str(submission["spending_limit"])),
+                    ("Effective threshold", "$" + str(submission['effective_spending_threshold'])),
+                    ("Customer", str(submission.get('selected_company_name') or submission.get('ticket_company_id') or 'AOT internal')),
                     ("Allocation", (
                         str(submission.get("customer_quantity", 0)) + " customer / "
                         + str(submission.get("aot_stock_quantity", 0)) + " AOT stock"
@@ -2414,6 +2487,11 @@ class ProcurementTeamsFlow:
             metadata={
                 "submission_id": str(submission["submission_id"]),
                 "submission_digest": str(submission["digest"]),
+                "supervisor_policy_digest": str(submission.get('supervisor_policy_digest') or 'owner-udf-only'),
+                "spending_authority_source": 'autotask_contact_udf:Spending limit',
+                "card_instance_challenge": challenge,
+                "card_instance_challenge_sha256": sha256(challenge.encode('ascii')).hexdigest(),
+                **({'escalated_from':escalation_from} if escalation_from else {}),
             },
         )
         return self.approval_service.create(approval, now=now)
@@ -2470,6 +2548,40 @@ class ProcurementTeamsFlow:
             raise ProcurementFlowError("procurement submission disappeared")
         if str(current.get("digest")) != str(submission.get("digest")):
             raise PermissionError("procurement submission changed after authorization")
+        stored_policy = current.get('supervisor_policy_digest')
+        if stored_policy:
+            if self.supervisor_policy is None:
+                raise PermissionError('supervisor spending policy unavailable at execution')
+            self.supervisor_policy.revalidate(digest=str(stored_policy))
+        if current.get('create_po'):
+            # No execution may increase a committed amount beyond the recorded
+            # technician UDF or immutable approval decision threshold.
+            original_udf = money(current.get('spending_limit'))
+            threshold = money(current.get('effective_spending_threshold') or original_udf)
+            commitment = money(current.get('total_commitment'))
+            if threshold > original_udf:
+                raise PermissionError('spending rule exceeds technician Contact UDF cap')
+            if commitment > threshold and not owner_approval_id:
+                raise PermissionError('over-limit PO requires canonical Teams approval receipt')
+            if owner_approval_id:
+                request = self.approval_service.repository.get(owner_approval_id)
+                receipt_lookup = getattr(self.approval_service.repository, 'accepted_decision', None)
+                receipt = receipt_lookup(owner_approval_id) if callable(receipt_lookup) else None
+                if (request is None or request.status is not ApprovalRequestStatus.APPROVED
+                        or request.capability != PROCUREMENT_APPROVAL_CAPABILITY
+                        or request.organization_id != 'aot' or request.client_id is not None
+                        or request.requested_mode != 'purchase'
+                        or request.requested_by != current.get('requester_principal_id')
+                        or request.metadata.get('submission_id') != current.get('submission_id')
+                        or request.metadata.get('submission_digest') != current.get('digest')
+                        or request.metadata.get('supervisor_policy_digest')
+                           != str(current.get('supervisor_policy_digest') or 'owner-udf-only')
+                        or receipt is None or receipt.status != 'approved'
+                        or receipt.decided_by == request.requested_by
+                        or receipt.decided_by not in request.authorized_approver_ids
+                        or receipt.channel != 'microsoft_teams'
+                        or not receipt.authentication_evidence_hash):
+                    raise PermissionError('canonical signed Teams purchase approval receipt not verified')
 
         po_plan = (
             _po_execution_plan(submission)
@@ -2986,6 +3098,8 @@ class ProcurementApprovalInteractionFlow:
     approval_service: ApprovalRequestService
     submissions: SQLiteProcurementSubmissionStore
     processor: ProcurementTeamsFlow
+    signed_verifier: Any | None = None
+    identities: Any | None = None
 
     def handle(
         self,
@@ -2998,22 +3112,77 @@ class ProcurementApprovalInteractionFlow:
         conversation_id: str,
         channel_response_id: str,
         decided_at: datetime,
+        signed_envelope: Mapping[str, Any] | None = None,
     ) -> Mapping[str, object]:
-        if selections:
-            raise PermissionError("owner procurement approval does not accept mutable selections")
+        # Same signed transport verification, issued-card challenge, live
+        # identity binding, and canonical approval service as production
+        # releases. Teams form fields are not authority or executable scope.
+        if self.signed_verifier is None or self.identities is None or not isinstance(signed_envelope, Mapping):
+            raise PermissionError('signed Teams purchase approval evidence required')
+        token = json.dumps(dict(signed_envelope), separators=(',',':'),ensure_ascii=False)
+        _, parsed_envelope = self.signed_verifier.parse(token)
+        submit = parsed_envelope.approval_submit
+        if (submit is None or submit.approval_id != approval_id
+                or submit.decision != decision
+                or parsed_envelope.microsoft_tenant_id != microsoft_tenant_id
+                or parsed_envelope.microsoft_object_id != microsoft_object_id
+                or parsed_envelope.conversation_id != conversation_id
+                or submit.channel_response_id != channel_response_id
+                or parsed_envelope.issued_at != decided_at
+                or parsed_envelope.documents
+                or dict(submit.selections) != dict(selections or {})):
+            raise PermissionError('Teams purchase vote does not match signed gateway evidence')
+        request = self.approval_service.repository.get(approval_id)
+        if (request is None or request.capability != PROCUREMENT_APPROVAL_CAPABILITY
+                or request.requested_mode != 'purchase'
+                or request.organization_id != 'aot' or request.client_id is not None):
+            raise LookupError('procurement approval request not found')
+        challenge = request.metadata.get('card_instance_challenge')
+        fingerprint = request.metadata.get('card_instance_challenge_sha256')
+        expected = {'card_challenge':challenge}
+        if (not isinstance(challenge,str) or len(challenge)!=48
+                or any(x not in '0123456789abcdef' for x in challenge)
+                or not isinstance(fingerprint,str)
+                or not hmac.compare_digest(sha256(challenge.encode('ascii')).hexdigest(),fingerprint)
+                or dict(submit.selections)!=expected):
+            raise PermissionError('Teams purchase vote lacks original issued card challenge')
+        verified = self.signed_verifier.verify(token)
         binding = self.bindings.find(
             microsoft_tenant_id=microsoft_tenant_id,
             microsoft_object_id=microsoft_object_id,
         )
-        if binding is None or binding.status != "active":
-            raise PermissionError("approver Microsoft identity is not bound")
-        request = self.approval_service.repository.get(approval_id)
-        if request is None or request.capability != PROCUREMENT_APPROVAL_CAPABILITY:
-            raise LookupError("procurement approval request not found")
+        if (binding is None or binding.status != 'active'
+                or verified.tenant_id != microsoft_tenant_id
+                or verified.object_id != microsoft_object_id):
+            raise PermissionError('approver Microsoft identity is not bound')
+        identity = self.identities.get(binding.jason_identity_id)
+        if (identity is None or identity.status != 'active'
+                or identity.organization_id != request.organization_id
+                or identity.identity_id != binding.jason_identity_id):
+            raise PermissionError('approver lacks active AOT identity')
+        submission_id = request.metadata['submission_id']
+        submission = self.submissions.get(submission_id)
+        if submission is None:
+            raise ProcurementFlowError('procurement approval submission no longer exists')
+        if request.metadata.get('submission_digest') != submission.get('digest'):
+            raise PermissionError('procurement approval scope changed')
+        if str(submission.get('approval_id')) != approval_id:
+            raise PermissionError('purchase approval has been superseded or escalated')
+        digest = str(request.metadata.get('supervisor_policy_digest') or '')
+        if digest != str(submission.get('supervisor_policy_digest') or 'owner-udf-only'):
+            raise PermissionError('spending policy approval evidence mismatch')
+        if digest != 'owner-udf-only':
+            if self.processor.supervisor_policy is None:
+                raise PermissionError('configured supervisor spending policy missing')
+            self.processor.supervisor_policy.revalidate(digest=digest)
+        if binding.jason_identity_id == request.requested_by:
+            raise PermissionError('requester self-approval prohibited')
         try:
             parsed = ApprovalDecision(decision)
         except ValueError as exc:
-            raise PermissionError("invalid procurement approval decision") from exc
+            raise PermissionError('invalid procurement approval decision') from exc
+        if parsed not in {ApprovalDecision.APPROVE, ApprovalDecision.DENY}:
+            raise PermissionError('procurement approval accepts only Approve or Deny')
         accepted = self.approval_service.accept_response(
             ApprovalResponse(
                 approval_id=approval_id,
@@ -3023,6 +3192,7 @@ class ProcurementApprovalInteractionFlow:
                 decided_at=decided_at,
                 channel="microsoft_teams",
                 channel_response_id=channel_response_id,
+                authentication_evidence_hash=verified.authentication_evidence_hash,
             ),
             now=decided_at,
         )

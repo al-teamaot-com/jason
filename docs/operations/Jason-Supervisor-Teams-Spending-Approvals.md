@@ -1,0 +1,26 @@
+# Jason Supervisor Spending — shared Teams approval process
+
+## Section Goal
+
+Reuse the **same** Teams approval presentation, signed gateway callback verifier, immutable approval-request repository, and Approve/Deny semantics as Jason's existing production release Universal Approver; do not build a new approval engine, card transport or authority bypass. Purchasing authority and production release/CCC authority remain separate and cannot approve each other's capabilities.
+
+## Source of spending authority
+
+The canonical AOT technician's exactly matched **Autotask Contact UDF `Spending limit`** (companyID=0, authenticated @teamaot.com requester) is the maximum amount the requester can commit **without a further approval**. A missing, ambiguous or malformed UDF fails to Human Review. Total commitment includes **all products, freight, taxes and fees**. A reviewed role/technician purchase-type rule may only lower that ceiling. Effective threshold is `min(verified_contact_UDF, reviewed_policy_rule)`. Purchase requests at or below this threshold can follow the existing governed worker; above it must receive exact signed Teams approval before *any* purchase-order or line-item provider write. All existing Autotask provider capabilities remain governed separately.
+
+Policy must be explicitly activated using `JASON_PROCUREMENT_SUPERVISOR_POLICY_PATH` pointing to a reviewed private JSON document. The source-only example at `docs/examples/procurement-supervisor-spending-v1.example.json` contains **fake identity values and grants no authority**. Before enabling, replace each example with currently active AOT Jason canonical person identity IDs and review the role memberships, supervisor(s), owner fallback, purchase types, dollar limits and TTL. The default with no policy path remains strict verified Contact UDF and **owner-only approval** for over-limit orders. Failure to load an explicitly configured policy is fail-closed, never an implicit default grant.
+
+Role-to-person membership is a canonical reviewed configuration, **never a claimed role from Teams form input**. The purchase approval audience is derived from the immutable request's exact authorized approver IDs; the shared Teams sender pre-verifies every active Microsoft binding before fan-out. Self-approval is always denied. The signature verifier accepts only registered machines, a current signed Teams envelope, matching tenant/actor/conversation/decision/message/time and the original 48-character issued-card challenge; only Approve or Deny buttons are shown in the same compact production-style layout. After a valid authenticated click, the canonical ApprovalRequestService atomically consumes the pending request and records the signer/evidence hash for audit. The PO executor independently requires the matching, approved, durable **Teams decision receipt**, scoped to the immutable submission digest and current policy digest; a bare approval ID cannot authorize spending.
+
+Supervisor card details show requester, vendor, product, part, quantity, customer, ticket, retail, total commitment, Autotask UDF, effective threshold, freight, allocation/billing, and source. Changes to any source amount, item, vendor, identity, customer/ticket or policy invalidate the approval. The one-way Teams action always uses the existing gateway parser and canonical card renderer; no new click endpoint is introduced.
+
+## Reminders and escalation
+
+The existing runtime maintenance composite periodically inspects pending purchase approvals. The first supervisor card is reminded once halfway through its TTL. If the supervisor card expires or delivery is unverified, it is **not** automatically approved: a new, separately signed, immutable owner approval is created with the same purchase digest and a link to the previous request. The original request is superseded. Owner fallback cannot re-escalate to itself, and absent/changed policy or unavailable owner binding stays blocked for explicit Human Review. Denial is terminal and blocks purchasing. Delivery failure is reported as **blocked**, not as a sent approval or an authorized purchase. The original request and every decision remain in the canonical audit repository.
+
+## Boundaries and acceptance
+
+- Tested: thresholds below/at/above Contact UDF; technician and reviewed role membership; ambiguous/missing policy; request-edit rejection; self-approval, unauthorized/cross-tenant/signed-card replay; denial; callback expiration; genuine signed approval hash; owner fallback and one-time reminder.
+- Existing retry and duplicate-PO/charge protections remain in `procurement_teams_flow.py`, and receipt must match exact submission digest. No live Autotask purchases may be used as acceptance tests without a separately authorized bounded test ticket/vendor.
+- **Still required for full #2043 closure:** a reviewed production supervisor roster/policy, functional end-to-end Teams Universal Approver acceptance, actual observed signed Teams Approve/Deny callback, provider audit/PO readback on controlled test data, and exact-SHA governed deployment. Source tests and CI alone do not constitute live production acceptance.
+- #2044 must call these same financial approval and receipt checks before touching PO or stock; do not invent a separate approval engine.
