@@ -305,6 +305,32 @@ class DocumentationPublisherE2ETest(unittest.TestCase):
         self.assertEqual(self.published_state()["validated_source"]["revision"], self.rev_b)
         self.assertEqual(len(self.state()["prs"]), 1)
 
+    def test_legacy_revision_worktree_is_migrated_without_losing_pr(self):
+        self.assert_published(self.invoke(self.rev_a))
+        legacy = "automation/documentation-reconcile-deadbeefcafe"
+        legacy_dir = self.root / "trees" / "documentation-reconcile-deadbeefcafe"
+        self.git("-C", str(self.repo), "push", "origin", "refs/remotes/origin/" + BRANCH + ":refs/heads/" + legacy)
+        self.git(
+            "-C", str(self.repo), "worktree", "add", "-b", legacy,
+            str(legacy_dir), "origin/" + BRANCH
+        )
+        data = self.state()
+        data["prs"][0]["state"] = "closed"
+        data["prs"].append({
+            "number": 701, "state": "open", "headRefName": legacy,
+            "title": "Reconcile automated documentation state for deadbeefcafe",
+        })
+        self.gh_state.write_text(json.dumps(data))
+        result = self.invoke(self.rev_b, run_id="124")
+        self.assert_published(result)
+        self.assertFalse(legacy_dir.exists())
+        self.assertEqual(len([p for p in self.state()["prs"] if p["state"] == "open"]), 1)
+        state = json.loads(self.git(
+            "--git-dir", str(self.remote), "show",
+            "refs/heads/" + legacy + ":" + JSON_PATH,
+        ).stdout)
+        self.assertEqual(state["validated_source"]["revision"], self.rev_b)
+
     def test_two_hosts_initial_publication_can_create_at_most_one_pr(self):
         other = self.root / "another-host-repo"
         self.git("clone", str(self.remote), str(other))
