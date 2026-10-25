@@ -274,6 +274,52 @@ def ensure_recovery_worktree(repo: Path, issue_number: int, revision: str) -> Pa
     return path
 
 
+def ensure_stale_source_clone(repo: Path, issue_number: int, revision: str) -> Path:
+    """Create clean isolated recovery checkout without writing managed source Git.
+
+    The production worker may write only inside the approved owner-development
+    worktree root. In particular, it may NOT write repo/.git/worktrees or
+    change, reset, fast-forward, or delete the old source checkout.
+    """
+    if not isinstance(issue_number, int) or issue_number <= 0 or not re.fullmatch(r'[0-9a-f]{40}', revision):
+        raise support.WorkerError('invalid stale-source clone identity')
+    path = WORKTREE_ROOT / f'issue-{issue_number}-stale-{revision[:12]}'
+    branch = f'develop/owner-approved-issue-{issue_number}-stale-{revision[:12]}'
+    WORKTREE_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
+    origin = support.run(['git', 'remote', 'get-url', 'origin'], cwd=repo)
+    if (repo.resolve() == Path('/home/al/.local/lib/jason/engineering-source-repo')
+            and origin != 'https://github.com/al-teamaot-com/jason.git'):
+        raise support.WorkerError('managed source GitHub origin identity mismatch')
+    # The installed protected engineering source is pinned by Release Manager.
+    # Never accept an arbitrary model-provided remote, git -c overrides, or
+    # a network URL as a worktree/clone path.
+    if not origin or not (origin.startswith('https://github.com/') or Path(origin).is_absolute()):
+        raise support.WorkerError('untrusted engineering Git remote')
+    if not path.exists():
+        # Fetch the already verified origin/main ref using Git's file transport
+        # from the trusted managed engineering source; this writes only the
+        # new private checkout, not source/.git/worktrees.
+        support.run(['git', 'init', '-q', '-b', 'main', str(path)], cwd=WORKTREE_ROOT)
+        support.run(['git', 'remote', 'add', 'origin', origin], cwd=path)
+        source = 'file://' + str(repo.resolve())
+        support.run(['git', 'fetch', '--no-tags', '--depth=1', source,
+                     'refs/remotes/origin/main'], cwd=path)
+        sha = support.run(['git', 'rev-parse', 'FETCH_HEAD'], cwd=path)
+        if sha != revision:
+            raise support.WorkerError('managed source changed during recovery clone')
+        support.run(['git', 'checkout', '-q', '-b', branch, 'FETCH_HEAD'], cwd=path)
+        support.run(['git', 'update-ref', 'refs/remotes/origin/main', revision], cwd=path)
+    if (path.is_symlink() or not path.is_dir()
+            or support.run(['git', 'rev-parse', '--show-toplevel'], cwd=path) != str(path)
+            or support.run(['git', 'rev-parse', 'HEAD'], cwd=path) != revision
+            or support.run(['git', 'branch', '--show-current'], cwd=path) != branch
+            or support.run(['git', 'remote', 'get-url', 'origin'], cwd=path) != origin
+            or support.run(['git', 'status', '--porcelain', '--untracked-files=all'], cwd=path)
+            or support.run(['git', 'ls-files', '--others', '--ignored', '--exclude-standard'], cwd=path)):
+        raise support.WorkerError('stale-source clone failed immutable clean identity verification')
+    return path
+
+
 def phase_for_existing_pr(phase: str) -> str:
     """An existing PR must not erase a pending/in-progress CI repair.
 
@@ -1209,6 +1255,97 @@ def readmit_source_context_after_verified_worker_upgrade(
     return resumed
 
 
+def readmit_stale_clean_development_source(
+    state: dict[str, Any], admitted: list[dict[str, Any]], spool: Path, repo: Path,
+    *, max_active: int,
+) -> list[str]:
+    """Re-admit exactly verified stale-source workers from fresh, clean main.
+
+    A successful prior edit-plan response is evidence, NOT reusable edits.
+    The full approved source discovery and model plan must be regenerated.
+    No old branch movement, working tree deletion, state hand-editing,
+    provider action, or expanded approval is permitted.
+    """
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active = sum(1 for r in records.values() if isinstance(r, Mapping)
+                 and r.get('phase') in ACTIVE_PHASES)
+    slots = max(0, max(1, int(max_active)) - active_support_count(spool) - active)
+    if not slots:
+        return []
+    current = support.run(['git', 'rev-parse', 'origin/main'], cwd=repo)
+    if not re.fullmatch(r'[0-9a-f]{40}', current):
+        return []
+    resumed: list[str] = []
+    for item in admitted:
+        if not slots:
+            break
+        item_id = str(item.get('id') or '')
+        issue = item.get('issue_number')
+        rec = records.get(item_id)
+        if (not isinstance(issue, int) or item_id != f'DEV-{issue}'
+                or not isinstance(rec, dict)
+                or rec.get('phase') != 'blocked'
+                or rec.get('reason') != 'EvidenceToolError: stale worktree requires governed clean-source recovery'
+                or rec.get('pr_number')
+                or rec.get('stale_source_recovery_revision')
+                or rec.get('blocker_class') in {'external_authority', 'blocked_by_dependency', 'internal_retry_exhausted'}
+                or issue_has_closed_dependency_gate(item)):
+            continue
+        old_path = WORKTREE_ROOT / f'issue-{issue}'
+        old_branch = f'develop/owner-approved-issue-{issue}'
+        rid = str(rec.get('reasoning_request_id') or '')
+        if (rec.get('worktree') != str(old_path)
+                or rec.get('branch') != old_branch
+                or not re.fullmatch(r'[a-f0-9]{64}', rid)
+                or old_path.is_symlink() or not old_path.is_dir()):
+            continue
+        try:
+            old_sha = support.run(['git', 'rev-parse', 'HEAD'], cwd=old_path)
+            if (not re.fullmatch(r'[0-9a-f]{40}', old_sha)
+                    or old_sha == current
+                    or support.run(['git', 'branch', '--show-current'], cwd=old_path) != old_branch
+                    or support.run(['git', 'rev-parse', '--show-toplevel'], cwd=old_path) != str(old_path)
+                    or Path(support.run(['git', 'rev-parse', '--git-common-dir'], cwd=old_path)).resolve() != (repo / '.git').resolve()
+                    or support.run(['git', 'status', '--porcelain', '--untracked-files=all'], cwd=old_path)
+                    or support.run(['git', 'ls-files', '--others', '--ignored', '--exclude-standard'], cwd=old_path)
+                    or subprocess.run(['git', '-C', str(repo), 'merge-base', '--is-ancestor',old_sha,current],
+                                      check=False, capture_output=True, timeout=20).returncode):
+                continue
+            req_path = spool / 'reasoning' / 'requests' / f'{rid}.json'
+            if not req_path.is_file() or req_path.stat().st_size > 200000:
+                continue
+            old_req = json.loads(req_path.read_text(encoding='utf-8'))
+            old_rsp = support.reasoning_response(spool, rid)
+            if (old_req.get('request_id') != rid or support.request_id(old_req) != rid
+                    or old_req.get('kind') != 'edit_plan' or old_req.get('support_item') != item_id
+                    or not isinstance(old_req.get('context'), Mapping)
+                    or old_req['context'].get('work_class') != 'owner_approved_development'
+                    or not isinstance(old_rsp, Mapping) or old_rsp.get('status') != 'succeeded'
+                    or old_rsp.get('request_id') != rid or old_rsp.get('kind') != 'edit_plan'
+                    or old_rsp.get('support_item') != item_id):
+                continue
+            fresh = ensure_stale_source_clone(repo, issue, current)
+            rec.update({
+                'phase': 'diagnosing',
+                'reason': 'Stale clean source independently verified; fresh source discovery required.',
+                'reasoning_request_id': '',
+                'stale_source_recovery_revision': current,
+                'stale_source_recovery_prior_revision': old_sha,
+                'stale_source_recovery_prior_request_id': rid,
+                'stale_source_recovery_at': now(),
+                'context_expansion_attempts': 0,
+                'source_paths': [], 'source_history': [],
+                'worktree': str(fresh),
+                'branch': support.run(['git', 'branch', '--show-current'], cwd=fresh),
+                'updated_at': now(),
+            })
+            resumed.append(item_id)
+            slots -= 1
+        except (OSError, ValueError, TypeError, subprocess.TimeoutExpired, support.WorkerError):
+            continue  # Fail closed; preserve the original blocked record.
+    return resumed
+
+
 def readmit_explicit_verified_dependencies(
     state: dict[str, Any], eligible: list[dict[str, Any]], spool: Path,
     *, max_active: int,
@@ -1604,6 +1741,9 @@ def main() -> int:
     readmit_development_after_verified_credit_replenishment(
         state, admitted, spool, max_active=max(1, int(args.max_active)),
     )
+    readmit_stale_clean_development_source(
+        state, admitted, spool, repo, max_active=max(1, int(args.max_active)),
+    )
     state['discovery'] = {
         'observed_at': now(),
         'approved_issue_numbers': [item['issue_number'] for item in eligible],
@@ -1796,7 +1936,10 @@ def main() -> int:
                 continue
 
             recovery_revision = str(record.get('recovery_worktree_revision') or '')
-            worktree = (ensure_recovery_worktree(repo, item['issue_number'], recovery_revision)
+            stale_revision = str(record.get('stale_source_recovery_revision') or '')
+            worktree = (ensure_stale_source_clone(repo, item['issue_number'], stale_revision)
+                        if stale_revision else
+                        ensure_recovery_worktree(repo, item['issue_number'], recovery_revision)
                         if recovery_revision else ensure_worktree(
                             repo, item['issue_number'],
                             str(record.get('branch') or '') or None,
