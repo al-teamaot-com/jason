@@ -4,6 +4,7 @@ Run with: python3 -m unittest tests/test_documentation_single_flight.py
 These checks do not substitute for integration tests with concurrent publishers.
 """
 from pathlib import Path
+import os
 import subprocess
 import tempfile
 import unittest
@@ -93,6 +94,32 @@ class DocumentationSingleFlightTests(unittest.TestCase):
             newer = git("rev-parse", "HEAD").stdout.strip()
             self.assertEqual(git("merge-base", "--is-ancestor", older, newer).returncode, 0)
             self.assertNotEqual(git("merge-base", "--is-ancestor", newer, older).returncode, 0)
+
+    def test_actual_publisher_rejects_ambiguous_prs_before_git_mutations(self):
+        # Mock only the GitHub PR listing. Execute the real publisher in a
+        # disposable directory; it must stop before git fetch or branch writes.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            gh = bin_dir / "gh"
+            gh.write_text(
+                '#!/bin/sh\\n'
+                'printf \'%s\\n\' \'[{"number":100,"headRefName":"automation/documentation-reconcile-a"},'
+                '{"number":101,"headRefName":"automation/documentation-reconcile-b"}]\'\\n'
+            )
+            gh.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = str(bin_dir) + os.pathsep + env["PATH"]
+            env["JASON_DOCUMENTATION_REPO_ROOT"] = str(root)
+            env["JASON_DOCUMENTATION_WORKTREE_ROOT"] = str(root / "trees")
+            result = subprocess.run(
+                ["bash", str(SCRIPT), "source", "abcdef123456", "12", "https://example.invalid/run"],
+                capture_output=True, text=True, env=env, timeout=10,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("BLOCKED_MULTIPLE_CANDIDATES", result.stderr)
+            self.assertFalse((root / ".git").exists())
 
     def test_push_uses_lease(self):
         self.assertIn('git push --force-with-lease', self.script)
