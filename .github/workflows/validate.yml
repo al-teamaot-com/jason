@@ -173,6 +173,8 @@ jobs:
         run: python3 -B -m unittest discover -s tests -p test_documentation_single_flight.py
       - name: Test documentation publisher in disposable Git remotes
         run: python3 -B -m unittest discover -s tests -p test_documentation_publisher_e2e.py
+      - name: Test documentation evidence replay idempotency
+        run: python3 -B -m unittest discover -s tests -p test_documentation_reconciler_replay.py
       - name: Validate documentation control plane
         run: python3 tools/validate_documentation_control.py
       - name: Build documentation directly from canonical docs tree
