@@ -87,7 +87,7 @@ def test_archived_clean_old_worktree_has_durable_manifest(monkeypatch,tmp_path):
         shutil.rmtree(item)
         return subprocess.CompletedProcess(args,0,'','')
     monkeypatch.setattr(storage,'git',remove)
-    report=storage.repair()
+    report=storage.repair(engineering_archive=True)
     assert report['status']=='archived_and_verified'
     assert report['archived_count']==1
     assert not item.exists()
@@ -150,3 +150,21 @@ def test_cache_prune_skips_active_build_without_mutation(monkeypatch):
 def test_cache_prune_rejects_unreviewed_parameters():
     with pytest.raises(ValueError,match='unreviewed'):
         storage.unused_build_cache_prune(hours=1)
+
+
+def test_production_cache_repair_never_touches_developer_worktrees(monkeypatch,tmp_path):
+    srcroot=tmp_path/'worktrees';srcroot.mkdir()
+    arch=tmp_path/'archive';arch.mkdir()
+    spool=tmp_path/'state';spool.mkdir()
+    p=dict(storage.policy())
+    p['archive_mount']=str(arch)
+    p['archive_worktree_root']=str(arch/'retired')
+    monkeypatch.setattr(storage,'policy',lambda _:p)
+    monkeypatch.setattr(storage,'ROOT',spool)
+    monkeypatch.setattr(storage,'capacity_gate',lambda p:('repair_allowed',{'root_percent':94,'archive_percent':5}))
+    monkeypatch.setattr(storage,'unused_build_cache_prune',lambda **kwargs:1024)
+    monkeypatch.setattr(storage,'candidates',lambda *a,**kw:pytest.fail('production must never access developer checkout'))
+    r=storage.repair()
+    assert r['cache_reclaimed_bytes']==1024
+    assert r['archived_count']==0
+    assert r['status']=='cache_reclaimed_and_verified'
