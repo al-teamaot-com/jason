@@ -11,9 +11,20 @@
   "source_worktree_root": "/home/al/jason-worktrees",
   "archive_worktree_root": "/srv/jason/archive/historical/retired-git-worktrees/auto",
   "archive_mount": "/srv/jason/archive",
-  "protected_paths": ["/var/lib/jason", "/opt/jason", "/var/lib/docker", "/opt/jason/infrastructure/openbao/audit"],
-  "allow_actions": ["archive_reconstructible_clean_detached_worktree"],
+  "protected_paths": [
+    "/var/lib/jason",
+    "/opt/jason",
+    "/var/lib/docker",
+    "/opt/jason/infrastructure/openbao/audit"
+  ],
+  "allow_actions": [
+    "archive_reconstructible_clean_detached_worktree",
+    "scoped_unused_buildx_cache_cleanup"
+  ],
   "require_ancestor_of_protected_main": true,
   "no_service_signals": true,
-  "no_live_data_mutations": true
+  "no_live_data_mutations": true,
+  "builder": "default",
+  "minimum_unused_cache_age_hours": 24,
+  "maximum_cache_cleanup_seconds": 90
 }

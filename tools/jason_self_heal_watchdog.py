@@ -903,7 +903,8 @@ def main() -> int:
         try:
             from jason_storage_autorepair import repair as bounded_storage_repair
             storage_repair = bounded_storage_repair()
-            if storage_repair.get('archived_count', 0):
+            if (storage_repair.get('archived_count', 0)
+                    or storage_repair.get('cache_reclaimed_bytes', 0)):
                 failures, evidence = bounded_detect(root)
             evidence['host_storage_autorepair'] = storage_repair
         except (OSError,ValueError,RuntimeError,subprocess.TimeoutExpired) as exc:
@@ -956,7 +957,8 @@ def main() -> int:
         # process is making measurable progress and the other disk is healthy.
         autorepair_progress = (str(incident.get('family')) == 'host_storage_capacity'
                                and isinstance(storage_repair, dict)
-                               and int(storage_repair.get('archived_count') or 0) > 0)
+                               and (int(storage_repair.get('archived_count') or 0) > 0
+                                    or int(storage_repair.get('cache_reclaimed_bytes') or 0) > 0))
         if (not autorepair_progress and attempts >= max(1, int(args.max_attempts))
                 and bool(repair.get("requires_owner_action"))):
             escalation = write_incident_escalation(
