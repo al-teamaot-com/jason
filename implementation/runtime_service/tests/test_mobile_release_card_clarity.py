@@ -41,21 +41,58 @@ def test_mobile_release_card_has_two_accessible_buttons_and_key_details():
     result = TeamsGatewayPlaybookApprovalSender._adaptive_card(card())
     assert result["type"] == "AdaptiveCard"
     assert result["version"] == "1.4"
-    assert result["body"][0]["text"] == "ACTION REQUIRED: PRODUCTION + CCC"
-    assert [x["title"] for x in result["actions"]] == ["Approve", "Deny"]
-    assert [x["data"]["decision"] for x in result["actions"]] == ["approve", "deny"]
-    assert all(x["data"]["approval_id"] == "relapproval-test" for x in result["actions"])
-    facts = result["body"][-1]["facts"]
-    assert len(facts) <= 9
-    vals = [x["value"] for x in facts]
-    assert SHA in vals
-    assert ROLLBACK in vals
+    assert result["body"][0]["text"] == "JASON \u00b7 AOT"
+    assert result["body"][1]["text"] == "Approval required"
+    assert result["body"][1]["color"] == "Warning"
+    assert result["body"][2]["text"] == "Documentation-only change"
+    assert "Deployment still requires independent checks" in result["body"][3]["text"]
+
+    # The actual Teams form has exactly two server-validated submit actions.
+    actions = result["actions"]
+    assert [x["title"] for x in actions] == ["Approve", "Deny"]
+    assert [x["data"]["decision"] for x in actions] == ["approve", "deny"]
+    assert [x["style"] for x in actions] == ["positive", "destructive"]
+    assert all(x["data"]["approval_id"] == "relapproval-test" for x in actions)
+    assert all(set(x["data"]) == {"approval_id", "decision"} for x in actions)
+
+    # Full signed source/rollback SHA values stay visible, even on phones.
+    visible_text = [x.get("text", "") for x in result["body"] if "text" in x]
+    assert SHA in visible_text
+    assert ROLLBACK in visible_text
+    assert result["body"][4]["type"] == "FactSet"
+    assert [x["title"] for x in result["body"][4]["facts"]] == [
+        "Risk", "Checks", "Expires",
+    ]
+
+    # Long evidence is hidden by default and available on the SAME card,
+    # keeping Approve and Deny accessible without scrolling over metadata.
+    toggle = result["body"][-2]["actions"][0]
+    detail = result["body"][-1]
+    assert toggle["type"] == "Action.ToggleVisibility"
+    assert toggle["targetElements"] == ["jason_release_technical_details"]
+    assert detail["type"] == "Container"
+    assert detail["id"] == "jason_release_technical_details"
+    assert detail["isVisible"] is False
+    detail_facts = detail["items"][1]["facts"]
+    vals = [x["value"] for x in detail_facts]
     assert "docs/control/state.json" in vals
     assert "runtime, mcp, scheduled controls" in vals
     assert "b"*64 in vals
-    assert "normal" in vals
-    assert not any(f["title"] in {"Approval ID", "Capability", "Mode"} for f in facts)
-    assert "Request Changes" not in str(result)
+    assert "normal" not in vals
+    assert "Request Changes" not in json.dumps(result)
+
+
+def test_mobile_release_technical_evidence_is_collapsed_without_discarding_refs():
+    from dataclasses import replace
+    rendered = TeamsGatewayPlaybookApprovalSender._adaptive_card(
+        replace(card(), evidence_artifact_ids=("audit-release-1", "ccc-evidence-2"))
+    )
+    details = rendered["body"][-1]
+    assert details["isVisible"] is False
+    assert "audit-release-1" in details["items"][-1]["text"]
+    assert "ccc-evidence-2" in details["items"][-1]["text"]
+    assert len(rendered["actions"]) == 2
+    assert all(a["type"] == "Action.Submit" for a in rendered["actions"])
 
 
 def test_teams_gateway_accepts_both_mobile_card_actions():
@@ -148,8 +185,9 @@ def test_old_release_notice_prominently_identifies_itself_as_status_only():
     assert event == "production_owner_action_required"
     assert "STATUS ONLY" in text
     assert "no approval buttons" in text.lower()
-    assert "NOT an approval card" in rendered["body"][0]["text"]
-    assert "no approval buttons" in rendered["body"][1]["text"].lower()
+    assert rendered["body"][0]["text"] == "JASON \u00b7 AOT"
+    assert "NOT an approval card" in rendered["body"][1]["text"]
+    assert "no approval buttons" in rendered["body"][2]["text"].lower()
     assert not rendered.get("actions")
 
 
