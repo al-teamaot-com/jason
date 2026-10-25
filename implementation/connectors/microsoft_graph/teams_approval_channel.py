@@ -43,10 +43,15 @@ def render_approval_card(request: ApprovalRequest) -> TeamsApprovalCard:
         request.capability == "release.production.approve"
         and request.approval_id.startswith("relapproval-"))
     is_universal_plan = request.approval_id.startswith("planapproval-")
-    if is_universal_plan and challenge is None:
-        raise PermissionError("universal plan card requires an issued card-instance proof")
+    is_procurement_purchase = (
+        request.capability == 'procurement.submission.execute'
+        and request.requested_mode == 'purchase'
+        and request.approval_id.startswith('procapproval-')
+    )
+    if (is_universal_plan or is_procurement_purchase) and challenge is None:
+        raise PermissionError("reviewed plan or purchase card requires an issued card-instance proof")
     if challenge is not None:
-        if (not (is_reviewed_release or is_universal_plan)
+        if (not (is_reviewed_release or is_universal_plan or is_procurement_purchase)
                 or type(challenge) is not str
                 or re.fullmatch(r"[0-9a-f]{48}", challenge) is None
                 or hashlib.sha256(challenge.encode("ascii")).hexdigest()

@@ -324,6 +324,8 @@ from .procurement_billing_audit_maintenance import (
     TeamsGatewayBillingAuditSender,
     ensure_billing_audit_read_authority,
 )
+from .procurement_supervisor_policy import SupervisorSpendingPolicy
+from .procurement_approval_maintenance import ProcurementApprovalMaintenance
 from .procurement_inventory_billing import (
     HardwareBillingDispositionFlow,
     SQLiteBillingLeakageStore,
@@ -331,6 +333,7 @@ from .procurement_inventory_billing import (
 from .procurement_teams_flow import (
     ApprovalInteractionDispatcher,
     OwnerOnlyProcurementAuthority,
+    ConfiguredProcurementApprovalAuthority,
     ProcurementApprovalInteractionFlow,
     ProcurementTeamsFlow,
     ProcurementWorkerExecutor,
@@ -574,6 +577,9 @@ class RuntimeSettings:
     procurement_approvals_db: Path = Path(
         "/var/lib/jason/openclaw/procurement/approvals.sqlite3"
     )
+    # Explicit opt-in: missing/unreviewed supervisor policy never silently grants
+    # staff purchasing authority. Existing Autotask UDF + owner approval remains.
+    procurement_supervisor_policy_path: Path | None = None
     procurement_billing_audit_db: Path = Path(
         "/var/lib/jason/openclaw/procurement/billing-audit.sqlite3"
     )
@@ -1044,6 +1050,11 @@ class RuntimeSettings:
                     "JASON_PROCUREMENT_BILLING_AUDIT_DB",
                     "/var/lib/jason/openclaw/procurement/billing-audit.sqlite3",
                 )
+            ),
+            procurement_supervisor_policy_path=(
+                Path(os.environ['JASON_PROCUREMENT_SUPERVISOR_POLICY_PATH'])
+                if os.getenv('JASON_PROCUREMENT_SUPERVISOR_POLICY_PATH','').strip()
+                else None
             ),
             universal_approval_mode=pilot_mode,
             universal_approval_worker_enabled=os.getenv(
@@ -2382,6 +2393,7 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
     procurement_approval_flow = None
     billing_disposition_flow = None
     procurement_billing_audit_maintenance = None
+    procurement_approval_maintenance = None
     procurement_enabled = (
         os.getenv(AUTOTASK_PROCUREMENT_PROFILE_ENV, "").strip().casefold()
         == AUTOTASK_PROCUREMENT_PROFILE
@@ -2391,6 +2403,20 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
     if procurement_enabled:
         ensure_procurement_worker_authority(identity_authority, enabled=True)
         procurement_owner_ids = approval_owner_identities()
+        supervisor_policy = (
+            SupervisorSpendingPolicy.load(settings.procurement_supervisor_policy_path)
+            if settings.procurement_supervisor_policy_path is not None
+            else None
+        )
+        supervisor_approver_ids = (
+            supervisor_policy.allowed_approver_ids if supervisor_policy is not None
+            else frozenset()
+        )
+        # Exactly the same canonical ApprovalRequestService, signed Teams
+        # callback and release-style card sender. Authorization remains scoped
+        # to this purchase request's authenticated approver identity list.
+        procurement_approval_recipient_ids = tuple(sorted(
+            set(procurement_owner_ids) | set(supervisor_approver_ids)))
         procurement_submission_store = SQLiteProcurementSubmissionStore(
             settings.procurement_submissions_db
         )
@@ -2399,15 +2425,17 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         )
         procurement_approval_service = ApprovalRequestService(
             repository=procurement_approval_repository,
-            authority=OwnerOnlyProcurementAuthority(
-                frozenset(procurement_owner_ids)
+            authority=(
+                ConfiguredProcurementApprovalAuthority(frozenset(procurement_approval_recipient_ids))
+                if supervisor_policy is not None else
+                OwnerOnlyProcurementAuthority(frozenset(procurement_owner_ids))
             ),
         )
         procurement_approval_sender = TeamsGatewayPlaybookApprovalSender(
             gateway_url=settings.teams_gateway_internal_url,
             token_file=settings.teams_proactive_token_file,
             bindings=bindings,
-            owner_identity_ids=procurement_owner_ids,
+            owner_identity_ids=procurement_approval_recipient_ids,
         )
         procurement_worker = ProcurementWorkerExecutor(
             authority=identity_authority,
@@ -2425,14 +2453,29 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
             approval_service=procurement_approval_service,
             approval_sender=procurement_approval_sender,
             owner_ids=tuple(procurement_owner_ids),
+            supervisor_policy=supervisor_policy,
             structured_client=hosted_conversation_client or ollama_client,
             inventory_location_id=settings.procurement_inventory_location_id,
         )
+        from .universal_teams_approval import SignedTeamsApprovalEvidenceVerifier
         procurement_approval_flow = ProcurementApprovalInteractionFlow(
-            bindings=bindings,
+            bindings=durable_bindings,
             approval_service=procurement_approval_service,
             submissions=procurement_submission_store,
             processor=procurement_teams_flow,
+            signed_verifier=SignedTeamsApprovalEvidenceVerifier(
+                authenticator=teams_authenticator,
+                allowed_machine_identities=settings.allowed_machine_identities,
+                allowed_approval_prefixes=('procapproval-',),
+                allowed_selection_keys=frozenset({'card_challenge'}),
+            ),
+            identities=SQLiteIdentityRepository(authority_store),
+        )
+        procurement_approval_maintenance = ProcurementApprovalMaintenance(
+            approval_service=procurement_approval_service,
+            submissions=procurement_submission_store,
+            processor=procurement_teams_flow,
+            sender=procurement_approval_sender,
         )
         billing_audit_store = SQLiteBillingLeakageStore(
             settings.procurement_billing_audit_db
@@ -2748,6 +2791,7 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         operational_autonomy_maintenance,
         drmm_recent_alert_reconciliation_maintenance,
         procurement_billing_audit_maintenance,
+        procurement_approval_maintenance,
         windows_time_source_shadow_maintenance,
         shadow_autonomy_maintenance,
     )
