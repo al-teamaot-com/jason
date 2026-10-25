@@ -71,16 +71,22 @@ if [ "$REMOTE_EXISTS" -eq 1 ]; then
 fi
 # Protect both already-open candidates and main/closed candidates against
 # stale historical triggers. Every mode is compared only with its own record.
-PRIOR_REVISION="$(git show "$STATE_REF:docs/control/AUTOMATED-CHANGE-STATE.json" | jq -r --arg mode "$MODE" 'if $mode == "source" then .validated_source.revision // "" else .production.revision // "" end')"
-if [ -n "$PRIOR_REVISION" ] && [ "$PRIOR_REVISION" != "$SOURCE_REVISION" ]; then
-  if ! git cat-file -e "$PRIOR_REVISION^{commit}" 2>/dev/null; then
-    git fetch origin "$PRIOR_REVISION" >/dev/null 2>&1 || { echo "DOCUMENTATION_PUBLICATION=BLOCKED_UNVERIFIABLE_PRIOR" >&2; exit 1; }
-  fi
-  if ! git merge-base --is-ancestor "$PRIOR_REVISION" "$SOURCE_REVISION"; then
-    echo "DOCUMENTATION_PUBLICATION=BLOCKED_STALE_OR_DIVERGENT_REVISION" >&2
-    exit 1
-  fi
+STATE_REFS=("origin/main")
+if [ "$REMOTE_EXISTS" -eq 1 ]; then
+  STATE_REFS+=("origin/$BRANCH")
 fi
+for CHECK_REF in "${STATE_REFS[@]}"; do
+  PRIOR_REVISION="$(git show "$CHECK_REF:docs/control/AUTOMATED-CHANGE-STATE.json" | jq -r --arg mode "$MODE" 'if $mode == "source" then .validated_source.revision // "" else .production.revision // "" end')"
+  if [ -n "$PRIOR_REVISION" ] && [ "$PRIOR_REVISION" != "$SOURCE_REVISION" ]; then
+    if ! git cat-file -e "$PRIOR_REVISION^{commit}" 2>/dev/null; then
+      git fetch origin "$PRIOR_REVISION" >/dev/null 2>&1 || { echo "DOCUMENTATION_PUBLICATION=BLOCKED_UNVERIFIABLE_PRIOR" >&2; exit 1; }
+    fi
+    if ! git merge-base --is-ancestor "$PRIOR_REVISION" "$SOURCE_REVISION"; then
+      echo "DOCUMENTATION_PUBLICATION=BLOCKED_STALE_OR_DIVERGENT_REVISION" >&2
+      exit 1
+    fi
+  fi
+done
 
 if [ -d "$WORKTREE/.git" ] || [ -f "$WORKTREE/.git" ]; then
   git worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
