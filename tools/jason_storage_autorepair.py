@@ -226,7 +226,7 @@ def unused_build_cache_prune(*, hours: int = 24, timeout: int = 90) -> int:
     return max(0,usage(Path('/'))[1]-available_before)
 
 
-def repair(*, policy_path: Path=POLICY, dry_run: bool=False) -> dict[str,Any]:
+def repair(*, policy_path: Path=POLICY, dry_run: bool=False, engineering_archive: bool=False) -> dict[str,Any]:
     p=policy(policy_path)
     status,ev=capacity_gate(p)
     report={'schema_version':'1.0','status':status,'capacity':ev,'archived_count':0,'archived_bytes':0,'cache_reclaimed_bytes':0,'checked_at':datetime.now(timezone.utc).isoformat()}
@@ -256,6 +256,15 @@ def repair(*, policy_path: Path=POLICY, dry_run: bool=False) -> dict[str,Any]:
         if current!='repair_allowed':
             report['capacity_after']=capacity_gate(p)[1]
             report['status']='completed_no_more_root_pressure' if current=='root_below_80' else current
+            return report
+        # The production self-heal unit's developer-checkout exclusion is a
+        # constitutional invariant. It may clear unused Docker build cache but
+        # MUST NOT traverse, copy, or mutate developer Git worktree paths.
+        # Cold-worktree archival is available only to a separate, explicitly
+        # governed engineering maintenance invocation outside this sandbox.
+        if not engineering_archive:
+            report['capacity_after']=capacity_gate(p)[1]
+            report['status']='cache_reclaimed_and_verified' if report['cache_reclaimed_bytes'] else 'no_safe_cache_reclaimable'
             return report
         for path,sha in candidates(Path(p['source_worktree_root']),minimum_age_days=p['minimum_age_days']):
             if report['archived_count']>=p['max_worktrees_per_cycle']:break
