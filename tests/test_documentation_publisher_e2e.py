@@ -210,6 +210,42 @@ class DocumentationPublisherE2ETest(unittest.TestCase):
         self.assertIn("BLOCKED_NON_GENERATED_CHANGE", rejected.stderr)
         self.assertEqual(self.branch_sha(), sha)
 
+    def test_historical_main_state_blocks_stale_event_without_an_open_pr(self):
+        # CI may replay an old event after the previous documentation PR was merged.
+        path = self.repo / JSON_PATH
+        path.write_text(json.dumps({
+            "schema_version": "1.0",
+            "validated_source": {"revision": self.rev_b, "status": "ci_passed"},
+        }) + "\n")
+        self.git("-C", str(self.repo), "add", JSON_PATH)
+        self.git("-C", str(self.repo), "commit", "-m", "main already records latest source")
+        self.git("-C", str(self.repo), "push", "origin", "main")
+        stale = self.invoke(self.rev_a)
+        self.assertNotEqual(stale.returncode, 0)
+        self.assertIn("BLOCKED_STALE_OR_DIVERGENT_REVISION", stale.stderr)
+        self.assertEqual(self.state()["prs"], [])
+
+    def test_closed_pr_remote_branch_rejects_stale_history(self):
+        self.assert_published(self.invoke(self.rev_a))
+        self.assert_published(self.invoke(self.rev_b, run_id="124"))
+        before = self.branch_sha()
+        data = self.state()
+        data["prs"][0]["state"] = "closed"
+        self.gh_state.write_text(json.dumps(data))
+        rejected = self.invoke(self.rev_a)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("BLOCKED_STALE_OR_DIVERGENT_REVISION", rejected.stderr)
+        self.assertEqual(self.branch_sha(), before)
+
+    def test_failed_ci_does_not_spawn_second_pr_on_new_revision(self):
+        self.assert_published(self.invoke(self.rev_a))
+        data = self.state()
+        data["prs"][0]["checks"] = "failure"
+        self.gh_state.write_text(json.dumps(data))
+        self.assert_published(self.invoke(self.rev_b, run_id="124"))
+        self.assertEqual(len(self.state()["prs"]), 1)
+        self.assertEqual(self.published_state()["validated_source"]["revision"], self.rev_b)
+
     def test_two_hosts_initial_publication_can_create_at_most_one_pr(self):
         other = self.root / "another-host-repo"
         self.git("clone", str(self.remote), str(other))
