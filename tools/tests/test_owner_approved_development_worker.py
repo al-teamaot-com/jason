@@ -1996,3 +1996,148 @@ def test_preexisting_failed_diagnostic_backfill_requires_matching_issue_identity
     assert record['recovery_diagnostic_result_status'] == 'failed'
     assert 'recovery_handoff_id' not in record
     assert not list(tmp_path.rglob('*.json'))
+
+
+def _credit_failure_case(tmp_path, monkeypatch, *, kind='search_plan', issue_number=759):
+    """Build immutable content-addressed owner-approved original reasoning."""
+    import json
+    item = {
+        'id': f'DEV-{issue_number}', 'issue_number': issue_number,
+        'title': 'Functional P0 prototype', 'body': 'Owner scope with acceptance',
+        'approval_source': f'https://github.com/al-teamaot-com/jason/issues/{issue_number}',
+        'evidence': 'sourced', 'acceptance': 'tested and approved',
+    }
+    context = {
+        'work_class': 'owner_approved_development',
+        'approved_scope': module.approved_scope(item),
+        'approval_source': item['approval_source'],
+    }
+    payload = {
+        'kind': kind,
+        'support_item': item['id'],
+        'title': item['title'],
+        'evidence': item['evidence'],
+        'acceptance': item['acceptance'],
+        'context': context,
+    }
+    rid = module.support.request_id(payload)
+    payload['request_id'] = rid
+    p = tmp_path/'reasoning'/'requests'
+    p.mkdir(parents=True)
+    (p/(rid+'.json')).write_text(json.dumps(payload))
+    reason_prefix = 'development reasoning' if kind == 'search_plan' else 'development edit reasoning'
+    state = {'items': {
+        item['id']: {
+            'phase': 'blocked',
+            'reason': reason_prefix + ' failed: Hosted reasoning blocked: credit_balance_exhausted; Owner action: restore_provider_credits',
+            'reasoning_request_id': rid,
+        }
+    }}
+    failure = {
+        'request_id': rid, 'status': 'failed',
+        'primary_provider_error_code': 'credit_balance_exhausted',
+        'required_owner_action': 'restore_provider_credits',
+        'primary_http_status': 429, 'retryable': False,
+        'completed_at': '2026-10-25T13:12:04+00:00',
+    }
+    monkeypatch.setattr(module, 'active_support_count', lambda spool: 0)
+    monkeypatch.setattr(module.support, 'reasoning_response', lambda spool, req: failure)
+    return state,item,context,rid,failure
+
+
+def test_owner_dev_credit_failure_never_retries_without_metered_proof(tmp_path,monkeypatch):
+    import copy
+    state,item,_,_,_= _credit_failure_case(tmp_path,monkeypatch)
+    original=copy.deepcopy(state)
+    calls=[]
+    monkeypatch.setattr(module.support,'verified_credit_reload_receipt',lambda *a,**kw:None)
+    monkeypatch.setattr(module,'queue_reasoning',lambda *a,**kw:calls.append((a,kw)))
+    assert module.readmit_development_after_verified_credit_replenishment(
+        state,[item],tmp_path,max_active=3,
+    ) == []
+    assert calls==[]
+    assert state==original
+
+
+def test_owner_dev_credit_recovery_queues_once_after_external_receipt(tmp_path,monkeypatch):
+    state,item,context,rid,failure=_credit_failure_case(tmp_path,monkeypatch)
+    evidence=[]
+    def receipt(path, *, failed_at):
+        evidence.append((str(path),str(failed_at)))
+        return {'entry_id':'metered-openai-verify-1','model':'gpt-read-reasoner'}
+    monkeypatch.setattr(module.support,'verified_credit_reload_receipt',receipt)
+    queued=[]
+    def enqueue(spool, *, kind, item, context):
+        queued.append({'kind':kind,'item':item,'context':context})
+        return 'b'*64
+    monkeypatch.setattr(module,'queue_reasoning',enqueue)
+    assert module.readmit_development_after_verified_credit_replenishment(
+        state,[item],tmp_path,max_active=3
+    )==['DEV-759']
+    record=state['items']['DEV-759']
+    assert record['phase']=='diagnosing'
+    assert record['reasoning_request_id']=='b'*64
+    assert record['provider_credit_requeue_id']=='b'*64
+    assert record['provider_credit_original_failure_id']==rid
+    assert record['provider_credit_receipt_id']=='metered-openai-verify-1'
+    assert evidence and evidence[0][0].endswith('model-usage.sqlite3')
+    assert queued[0]['kind']=='search_plan'
+    assert queued[0]['context']['approved_scope']==context['approved_scope']
+    assert queued[0]['context']['approval_source']==item['approval_source']
+    assert queued[0]['context']['verified_credit_recovery']=={
+        'failed_request_id':rid,
+        'provider_credit_receipt_id':'metered-openai-verify-1',
+        'provider_model':'gpt-read-reasoner',
+        'retry_limit':1,
+        'purpose':'same_approved_scope_after_metered_credit_recovery',
+    }
+    # The original provider failure remains available for audit, never changed.
+    assert failure['status']=='failed'
+    assert module.readmit_development_after_verified_credit_replenishment(
+        state,[item],tmp_path,max_active=3
+    )==[]
+    assert len(queued)==1
+
+
+def test_owner_dev_credit_recovery_keeps_wrong_scope_and_saturated_slots_blocked(tmp_path,monkeypatch):
+    import copy
+    state,item,_,_,_=_credit_failure_case(tmp_path,monkeypatch)
+    queued=[]
+    proofs=[]
+    monkeypatch.setattr(module.support,'verified_credit_reload_receipt',
+                        lambda *a,**kw: proofs.append('called') or {'entry_id':'meter-1'})
+    monkeypatch.setattr(module,'queue_reasoning',lambda *a,**kw:queued.append('called') or 'c'*64)
+    other={**item,'body':item['body']+' amended by a different author'}
+    before=copy.deepcopy(state)
+    assert module.readmit_development_after_verified_credit_replenishment(
+        state,[other],tmp_path,max_active=3
+    )==[]
+    assert not proofs and not queued and state==before
+    busy={**state,'items':{**state['items'],
+        'DEV-1111':{'phase':'diagnosing'},
+        'DEV-1112':{'phase':'implementing'},
+        'DEV-1113':{'phase':'diagnosing'},
+    }}
+    assert module.readmit_development_after_verified_credit_replenishment(
+        busy,[item],tmp_path,max_active=3
+    )==[]
+    assert not queued and not proofs
+
+
+def test_owner_dev_credit_recovery_rejects_wrong_provider_error_or_already_retried(tmp_path,monkeypatch):
+    state,item,_,_,failure=_credit_failure_case(tmp_path,monkeypatch,kind='edit_plan')
+    receipts=[]
+    monkeypatch.setattr(module.support,'verified_credit_reload_receipt',
+                        lambda *a,**kw: receipts.append('proof') or {'entry_id':'meter-1'})
+    monkeypatch.setattr(module,'queue_reasoning',lambda *a,**kw:'e'*64)
+    failure['primary_http_status']=403
+    assert module.readmit_development_after_verified_credit_replenishment(
+        state,[item],tmp_path,max_active=3
+    )==[]
+    assert not receipts
+    failure['primary_http_status']=429
+    state['items'][item['id']]['provider_credit_requeue_id']='d'*64
+    assert module.readmit_development_after_verified_credit_replenishment(
+        state,[item],tmp_path,max_active=3
+    )==[]
+    assert not receipts

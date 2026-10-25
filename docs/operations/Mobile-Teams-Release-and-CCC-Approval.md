@@ -473,3 +473,34 @@ tenant authorization, or independent production verification.
 Do not report active work as completed functionality. New diagnosing or
 implementing states show only productive admission; the three Big Three
 workflows remain outstanding until real end-to-end acceptance passes.
+
+## Owner-approved Big Three: hosted engineering credit-exhaustion recovery
+
+The October 25 production engineering-admission release successfully claimed
+Teams #1545, staff PO/invoicing #759 and QuickBooks bank reconciliation #1470.
+All three native reasoning requests then received a provider HTTP 429
+credit_balance_exhausted failure with required owner action to replenish the
+hosted OpenAI API credit balance. The local Ollama models cannot be claimed to
+be a verified replacement for the configured hosted engineering reasoner.
+Ordinary ChatGPT subscription funding should not be presumed to replenish
+separate API credits.
+
+The existing native support worker already requires a provider-reported,
+metered, operator-authorized OpenAI diagnostic before any retry on exhaustion,
+but the owner-approved development worker had no equivalent retry lane. The
+new one-time development recovery uses that exact existing diagnostic receipt
+function, verified 0600 usage ledger, exact original owner-authored approved
+scope, immutable request SHA, provider HTTP 429 and nonretryable failure
+response. Only after a NEW provider-reported positive-token diagnostic receipt
+is present may the worker queue ONE fresh same-kind request for the original
+approved issue. It retains both request IDs and usage-receipt ID and never
+changes the old failed response or grants provider writes, finance authority,
+billing authorization or production promotion. Missing credits or invalid
+proof keeps each item blocked, never falsely marked healthy.
+
+Owner action is to restore credit in the existing hosted API provider billing
+account and run its separately authorized credit-verify diagnostic. No paid
+provider requests should be blindly retried while the provider reports
+exhaustion. The developer lane will then independently readmit as capacity
+allows. These development recovery checks are not end-to-end certification of
+Teams, all-staff invoicing, or QuickBooks reconciliation.
