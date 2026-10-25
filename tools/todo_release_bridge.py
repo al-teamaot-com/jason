@@ -842,6 +842,7 @@ def main() -> int:
     state.setdefault("items", {})
     original = json.dumps(state, sort_keys=True)
     unmerged_authority: dict[str, str] = {}
+    identity_holds: dict[str, dict[str, Any]] = {}
 
     run(["git", "fetch", "--no-tags", "origin", "main"], cwd=repo)
     prs = merged_prs_by_issue(repo)
@@ -857,11 +858,27 @@ def main() -> int:
                 "updated_at": now(),
             },
         )
-        if (not isinstance(record, dict)
-                or record.get("issue_number") != issue["issue_number"]):
+        if not isinstance(record, dict) or type(record.get("issue_number")) is not int:
             raise TodoReleaseBridgeError(
-                "TODO item identity conflict for " + todo_id + " (support issue #1099)"
+                "invalid persisted TODO identity for " + todo_id + " (support issue #1099)"
             )
+        if record["issue_number"] != issue["issue_number"]:
+            # This TODO may have been admitted twice or re-scoped after a
+            # different earlier issue was closed. Never auto-rebind or copy
+            # release/approval evidence from the old issue to the new one.
+            # Quarantine *only this item* while continuing unrelated P0 work.
+            identity_holds[todo_id] = {
+                "state": "requires_governed_identity_reconciliation",
+                "persisted_issue_number": record["issue_number"],
+                "observed_issue_number": issue["issue_number"],
+                "next_action": "verify_canonical_issue_closure_and_new_approved_scope",
+                "release_eligible": False,
+            }
+            print(
+                "TODO_RELEASE_BRIDGE_IDENTITY_HELD id="
+                + todo_id + " support_issue=1099", flush=True,
+            )
+            continue
         # Only declared exact release IDs can change the governing dependency
         # set. A changed declaration invalidates the old eligibility result.
         declared = issue["governing_dependencies"]
@@ -987,13 +1004,23 @@ def main() -> int:
                 "reason": "",
             })
 
-    reconcile_verified_closed_issues(repo, args.release_state.resolve(), state["items"])
-    for item in state["items"].values():
+    # Never retrospectively close/complete a mismatched issue from a
+    # previous release receipt. Pass references only for the safe subset.
+    reconcilable = {
+        key: item for key, item in state["items"].items()
+        if key not in identity_holds
+    }
+    reconcile_verified_closed_issues(repo, args.release_state.resolve(), reconcilable)
+    for key, item in state["items"].items():
+        if key in identity_holds:
+            continue
         if isinstance(item, dict):
             item.update(next_work_gate(str(item.get("phase") or ""), str(item.get("reason") or "")))
     # Read authoritative protected release records, without changing a worker
     # admission decision, modifying dependencies, or granting new authority.
-    for item in state["items"].values():
+    for key, item in state["items"].items():
+        if key in identity_holds:
+            continue
         if isinstance(item, dict):
             item.update(dependency_state_for_item(item, args.release_state.resolve()))
     for item in state["items"].values():
@@ -1004,6 +1031,13 @@ def main() -> int:
             item["retry_eligible"] = False
             item["source_decision_stale"] = True
             item["next_action"] = "request_governed_development_re_evaluation"
+    # Bounded durable exception log. No approval or identity rebind occurs.
+    # The release bridge can complete for independent items, while the
+    # operator/supervisor sees exact work that still requires reconciliation.
+    if identity_holds:
+        state["identity_holds"] = identity_holds
+    else:
+        state.pop("identity_holds", None)
     state["summary"] = commitment_summary(state["items"])
     try:
         require_consistent_commitment_summary(
