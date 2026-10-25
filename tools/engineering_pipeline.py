@@ -32,7 +32,11 @@ STAGES = (
     Stage("todo_intake", "todo_engineering_intake.py", ("--max-support-repairs", "2"), ("support_repair",)),
     # Already-approved development has its own support-capacity and approval checks;
     # it may continue if intake fails, but must stop if support priority is unknown.
-    Stage("development", "owner_approved_development_worker.py", ("--max-active", "2"), ("support_repair",)),
+    # Shared cap of three across active critical support and owner-approved
+    # development. This permits Teams, PO and QBO to make bounded parallel
+    # progress when support has no active repair; the development worker
+    # subtracts actual active support before claiming any slot.
+    Stage("development", "owner_approved_development_worker.py", ("--max-active", "3"), ("support_repair",)),
     # Read/reconciliation of durable work state must not be suppressed by earlier
     # GitHub or reasoning failures. This stage retains its own governed gates.
     Stage("release_bridge", "todo_release_bridge.py"),

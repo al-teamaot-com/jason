@@ -77,17 +77,17 @@ def test_ambiguous_owner_selection_fails_closed(monkeypatch,tmp_path):
         worker.reconcile_owner_selected_pull_requests(tmp_path,{'items':{}},[item(body='- Development pull request: #1518\n- Development pull request: #1514')])
 
 
-def test_canonical_owner_focus_only_admits_universal_teams_approvals():
+def test_current_owner_focus_admits_three_bounded_priority_workstreams():
     import json
     repo = Path(__file__).resolve().parents[2]
     policy = json.loads((repo / 'config' / 'owner-approved-development-focus.json').read_text())
     assert policy['schema_version'] == '1.0' and policy['enabled'] is True
-    expected = {1440, 1545, 1553, 1468, 1566, 1493}
+    expected = {1545, 759, 1470, 1440, 1553, 1468, 1566, 1493}
     assert set(policy['issue_numbers']) == expected
     assert len(policy['issue_numbers']) == len(expected)
-    assert {1196, 1458, 759, 1467, 1470, 1500}.isdisjoint(policy['issue_numbers'])
-    assert 'Universal Teams Approvals' in policy['directive']
-    assert policy['authority_source'].startswith('https://github.com/al-teamaot-com/jason/issues/1440#issuecomment-')
+    assert {1196, 1458, 1467, 1500}.isdisjoint(policy['issue_numbers'])
+    assert 'Universal Teams Approver' in policy['directive']
+    assert policy['authority_source'] == 'https://github.com/al-teamaot-com/jason/issues/1467'
 
     # Existing broad PM/TODO release work is parked, not newly admitted.
     # Previously blocked work is *not* equivalent to live in-flight editing.
@@ -105,7 +105,7 @@ def test_canonical_owner_focus_only_admits_universal_teams_approvals():
         item(1467, body='QuickBooks'),
     ]
     admitted = worker.apply_owner_development_focus(state, items, policy)
-    assert [entry['issue_number'] for entry in admitted] == [1545, 1553]
+    assert [entry['issue_number'] for entry in admitted] == [759, 1545, 1553]
 
 
 def test_focus_does_not_interrupt_unrelated_active_edit_mid_transaction():
@@ -120,3 +120,28 @@ def test_focus_does_not_interrupt_unrelated_active_edit_mid_transaction():
         state, [item(1196), item(1458), item(1440)], policy,
     )
     assert [entry['issue_number'] for entry in accepted] == [1196, 1440]
+
+
+def test_big_three_owner_scope_admission_fills_three_only_when_support_idle():
+    """A closed Teams implementation cannot occupy a slot or block new P0s."""
+    import json
+    repo = Path(__file__).resolve().parents[2]
+    policy = json.loads((repo / 'config/owner-approved-development-focus.json').read_text())
+    state = {'items': {'DEV-1440': {'phase': 'complete'}}}
+    items = [
+        item(759, body='Staff-wide PO/invoice functional acceptance'),
+        item(1440, body='Previously merged Teams release approval'),
+        item(1470, body='QuickBooks bank/credit-card evidence'),
+        item(1545, body='Universal Teams Approver acceptance'),
+        item(1467, body='Broad QuickBooks epic outside exact bounded admission'),
+        item(1500, body='Unrelated endpoint provisioning'),
+    ]
+    focused = worker.apply_owner_development_focus(state, items, policy)
+    assert [v['issue_number'] for v in focused] == [759, 1440, 1470, 1545]
+    assert worker.select_items(state, focused, capacity=3) == [
+        'DEV-759', 'DEV-1470', 'DEV-1545'
+    ]
+    assert worker.select_items(state, focused, capacity=2) == [
+        'DEV-759', 'DEV-1470'
+    ]
+    assert '1467' not in [str(v['issue_number']) for v in focused]
