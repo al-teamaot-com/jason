@@ -48,7 +48,7 @@ def setup(*, actor='person-supervisor', requester='person-tech', org='aot', dead
                   'submission_digest':body['digest'],'supervisor_policy_digest':'owner-udf-only',
                   'card_instance_challenge':challenge,
                   'card_instance_challenge_sha256':sha256(challenge.encode()).hexdigest()},
-        presentation=ApprovalPresentation(title='Purchase Approval',summary='Exact purchase',facts=(('Total Commitment','$325.00'),)))
+        presentation=ApprovalPresentation(title='Purchase Approval',summary='Exact purchase',facts=(('Total Commitment','$325.00'),('Vendor','Test vendor'))))
     svc.create(req,now=NOW)
     calls=[]
     class Processor:
