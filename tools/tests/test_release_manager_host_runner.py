@@ -595,7 +595,8 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 runner,
                 "_deploy_production_locked",
                 side_effect=runner.ReleaseManagerError("forced failure"),
-            ):
+            ), patch.object(runner, 'require_host_reconciler_ready'), \
+               patch.object(runner, 'reconcile_stopped_rollback_retention', return_value=16):
                 with self.assertRaisesRegex(runner.ReleaseManagerError, "forced failure"):
                     runner.deploy_production(ROOT, root, release)
 
@@ -1945,6 +1946,55 @@ class HostReconciliationTimeoutContractTests(unittest.TestCase):
             with patch.object(runner, 'require_host_reconciler_ready'), patch.object(runner.time, 'monotonic', side_effect=[0.0, 2.0]):
                 with self.assertRaisesRegex(runner.ReleaseManagerError, 'host reconciliation result timed out'):
                     runner.request_host_reconcile(root, SHA_A, timeout_seconds=1.0)
+
+
+def test_explicit_promotion_reserves_retention_before_breaker_and_deploy():
+    from unittest.mock import patch
+    calls = []
+    handle = object()
+    with patch.object(runner, 'acquire_production_transaction_lock', return_value=handle), \
+         patch.object(runner, 'require_host_reconciler_ready'), \
+         patch.object(runner, 'release_production_transaction_lock', side_effect=lambda h: calls.append('unlock')), \
+         patch.object(runner, 'reconcile_stopped_rollback_retention', side_effect=lambda: calls.append('retention')), \
+         patch.object(runner, 'revalidate_circuit_breaker', side_effect=lambda root: calls.append('breaker')), \
+         patch.object(runner, '_deploy_production_locked', side_effect=lambda *args: calls.append('deploy') or {'state':'closed'}):
+        assert runner.deploy_production(ROOT, Path('/tmp/nonexistent'), {'state':'production_eligible'}) == {'state':'closed'}
+    assert calls == ['retention', 'breaker', 'deploy', 'unlock']
+
+
+def test_explicit_promotion_missing_root_reconciler_denies_cleanup():
+    from unittest.mock import patch
+    import pytest
+    unlocked = []
+    with patch.object(runner, 'acquire_production_transaction_lock', return_value=object()), \
+         patch.object(runner, 'release_production_transaction_lock', side_effect=lambda h: unlocked.append(True)), \
+         patch.object(runner, 'require_host_reconciler_ready', side_effect=runner.ReleaseManagerError('root reconciler not ready')), \
+         patch.object(runner, 'reconcile_stopped_rollback_retention') as cleanup, \
+         patch.object(runner, 'revalidate_circuit_breaker') as breaker, \
+         patch.object(runner, '_deploy_production_locked') as deploy:
+        with pytest.raises(runner.ReleaseManagerError, match='root reconciler not ready'):
+            runner.deploy_production(ROOT, Path('/tmp/nonexistent'), {'state':'production_eligible'})
+        cleanup.assert_not_called()
+        breaker.assert_not_called()
+        deploy.assert_not_called()
+    assert unlocked == [True]
+
+
+def test_explicit_promotion_retention_failure_blocks_mutation():
+    from unittest.mock import patch
+    import pytest
+    calls = []
+    with patch.object(runner, 'acquire_production_transaction_lock', return_value=object()), \
+         patch.object(runner, 'require_host_reconciler_ready'), \
+         patch.object(runner, 'release_production_transaction_lock', side_effect=lambda h: calls.append('unlock')), \
+         patch.object(runner, 'reconcile_stopped_rollback_retention', side_effect=runner.ReleaseManagerError('historical cleanup failed')), \
+         patch.object(runner, 'revalidate_circuit_breaker') as breaker, \
+         patch.object(runner, '_deploy_production_locked') as deploy:
+        with pytest.raises(runner.ReleaseManagerError, match='historical cleanup failed'):
+            runner.deploy_production(ROOT, Path('/tmp/nonexistent'), {'state':'production_eligible'})
+        breaker.assert_not_called()
+        deploy.assert_not_called()
+    assert calls == ['unlock']
 
 
 def test_rollback_retention_only_removes_old_exited_named_containers():

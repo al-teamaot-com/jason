@@ -2953,6 +2953,14 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
 def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
     lock = acquire_production_transaction_lock(repo, state_root, record)
     try:
+        # Verify that the independent root reconciler is installed and active
+        # before even bounded stopped-container retention maintenance.
+        require_host_reconciler_ready(state_root)
+        # Explicit/manual promotion needs the same bounded rollback retention
+        # headroom already reserved by prepare_release and the automatic timer.
+        # Remove only historical stopped rollback containers under the exclusive
+        # production lock, BEFORE root breaker revalidation and any live change.
+        reconcile_stopped_rollback_retention()
         revalidate_circuit_breaker(state_root)
         return _deploy_production_locked(repo, state_root, record)
     finally:

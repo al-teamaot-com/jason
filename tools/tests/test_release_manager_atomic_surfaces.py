@@ -24,6 +24,17 @@ runner = importlib.util.module_from_spec(runner_spec)
 assert runner_spec.loader is not None
 runner_spec.loader.exec_module(runner)
 
+@pytest.fixture(autouse=True)
+def existing_retention_preflight_is_independently_tested():
+    """Atomic surface tests isolate deployment/rollback from container hygiene.
+
+    Actual manual-promotion retention ordering, Docker safety and error handling
+    are covered in test_release_manager_host_runner.py.
+    """
+    with patch.object(runner, "reconcile_stopped_rollback_retention", return_value=16):
+        yield
+
+
 SHA_A = "a" * 40
 SHA_B = "b" * 40
 BASELINE_RUNTIME_IMAGE = "sha256:" + "2" * 64
