@@ -14,7 +14,7 @@ REPO_ROOT="${JASON_DOCUMENTATION_REPO_ROOT:-/home/al/projects/jason}"
 SHORT_REVISION="${SOURCE_REVISION:0:12}"
 BRANCH="automation/documentation-reconcile-current"
 WORKTREE_ROOT="${JASON_DOCUMENTATION_WORKTREE_ROOT:-/home/al/jason-worktrees}"
-WORKTREE="$WORKTREE_ROOT/documentation-reconcile-${SHORT_REVISION}"
+WORKTREE="$WORKTREE_ROOT/documentation-reconcile-current"
 
 mkdir -p "$WORKTREE_ROOT"
 # One host publisher at a time: source and production events share this lock.
