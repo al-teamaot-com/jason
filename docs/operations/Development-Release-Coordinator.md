@@ -340,3 +340,39 @@ A new 429 occurring after recovery, any malformed response, stale/dirty clone,
 missing approval, or exhausted slot stays blocked. Provider bills and worker
 responses are not rewritten. Source patch acceptance and release/CCC gates
 remain independent; only exact-SHA Owner approval allows production activation.
+
+## Finite evidence-budget completion (October 25, 2026)
+
+The read-only source evidence loop is bounded to four turns by the authoritative
+`config/engineering-supervisor-policy.json`. The previously deployed worker
+allowed the model to request more evidence on its fourth follow-up; the host
+correctly blocked a fifth turn, but owner-approved Teams Universal Approver
+and purchasing development were left with terminal `source evidence turn
+budget exhausted` records and no actionable source proposal.
+
+On the fourth allowed tool response, the source broker now labels the next
+`edit_plan` input `final_evidence_turn=true` and
+`evidence_turns_remaining=0`. Hosted reasoning receives an explicit
+**patch-or-precise-blocker** instruction. Further tool requests remain denied;
+models never obtain shell, GitHub, provider, or policy-write authority.
+
+For the two previously exhausted cases, the upgraded owner development worker
+may make **one** additional final proposal, but only after independent proof
+of an exact current released revision: production symlink SHA, protected
+last-known-good SHA, closed Release Manager record with passing post-CCC and
+preproduction, closed circuit breaker, fresh clean drift, and a source change
+to the affected tools/reasoning worker. The record must still refer to an
+Owner-approved open issue without dependency hold or a PR, exact pinned
+fourth-turn model request, its immutable hash, a successful response consisting
+of read-only evidence requests, and a clean original immutable clone. The
+worker creates a **new** clean source clone from the released SHA, re-reads only
+Git-tracked J-CHANGE-002-eligible excerpts, creates one new content-addressed
+`edit_plan` request, and saves a nonrepeatable completion receipt. It does not
+reset the four-turn evidence budget, consume historical model edits, modify
+past responses, or promote anything to production. Unauthorized paths, missing
+provider or identity proof, owner/dependency hold, missing capacity, incomplete
+release verification, or another request for tools leave the job blocked.
+
+A successful model response is still **not** acceptance. Exact-text code
+changes, changed tests, protected CI and separate reviewed release/CCC gates
+remain required; actual Teams Approve/Deny awaits independent human clicks.
