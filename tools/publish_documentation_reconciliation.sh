@@ -17,8 +17,35 @@ WORKTREE_ROOT="${JASON_DOCUMENTATION_WORKTREE_ROOT:-/home/al/jason-worktrees}"
 WORKTREE="$WORKTREE_ROOT/documentation-reconcile-${SHORT_REVISION}"
 
 mkdir -p "$WORKTREE_ROOT"
+# One host publisher at a time: source and production events share this lock.
+exec 9>"$WORKTREE_ROOT/documentation-reconciliation.lock"
+flock -x 9
 cd "$REPO_ROOT"
-git fetch origin main "$BRANCH" >/dev/null 2>&1 || git fetch origin main >/dev/null 2>&1
+
+# Reuse an existing generated PR instead of creating a PR per revision.
+# An ambiguous set of PRs is a hard failure, never an invitation to pick one.
+PR_ROWS="$(gh pr list --repo al-teamaot-com/jason --state open --limit 500 --json number,title,headRefName --jq '[.[] | select((.title | startswith("Reconcile automated documentation state for ")) and (.headRefName | startswith("automation/documentation-reconcile-")))]')"
+PR_COUNT="$(printf '%s' "$PR_ROWS" | jq 'length')"
+if [ "$PR_COUNT" -gt 1 ]; then
+  echo "DOCUMENTATION_PUBLICATION=BLOCKED_MULTIPLE_CANDIDATES" >&2
+  exit 1
+fi
+if [ "$PR_COUNT" -eq 1 ]; then
+  BRANCH="$(printf '%s' "$PR_ROWS" | jq -r '.[0].headRefName')"
+  PR_NUMBER="$(printf '%s' "$PR_ROWS" | jq -r '.[0].number')"
+  # Protect against overwriting unrelated source or hand-authored material.
+  CHANGED_PATHS="$(gh pr diff "$PR_NUMBER" --repo al-teamaot-com/jason --name-only)"
+  while IFS= read -r changed; do
+    case "$changed" in
+      docs/control/AUTOMATED-CHANGE-STATE.json|docs/control/AUTOMATED-CHANGE-STATE.md) ;;
+      *) echo "DOCUMENTATION_PUBLICATION=BLOCKED_NON_GENERATED_CHANGE" >&2; exit 1 ;;
+    esac
+  done <<< "$CHANGED_PATHS"
+fi
+git fetch origin main >/dev/null 2>&1
+if [ "$PR_COUNT" -eq 1 ]; then
+  git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" >/dev/null 2>&1
+fi
 
 if [ -d "$WORKTREE/.git" ] || [ -f "$WORKTREE/.git" ]; then
   git worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
@@ -26,7 +53,7 @@ fi
 rm -rf "$WORKTREE"
 
 git branch -D "$BRANCH" >/dev/null 2>&1 || true
-git worktree add -b "$BRANCH" "$WORKTREE" origin/main
+git worktree add -B "$BRANCH" "$WORKTREE" origin/main
 
 cd "$WORKTREE"
 git config user.name "Project Jason Documentation Automation"
@@ -65,7 +92,7 @@ git add docs/control/AUTOMATED-CHANGE-STATE.json docs/control/AUTOMATED-CHANGE-S
 git commit -m "Reconcile automated documentation state for ${SHORT_REVISION}"
 git push --force-with-lease -u origin "$BRANCH"
 
-PR_NUMBER="$(gh pr list --repo al-teamaot-com/jason --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
+PR_NUMBER="${PR_NUMBER:-}"
 if [ -z "$PR_NUMBER" ]; then
   BODY_FILE="$(mktemp)"
   cat > "$BODY_FILE" <<EOF
