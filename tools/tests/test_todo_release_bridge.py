@@ -573,3 +573,74 @@ class MixedPhaseReconciliationTests(unittest.TestCase):
                 )
                 self.assertEqual(notify.call_count, 1)
             self.assertTrue(json.loads(record.read_text())['notified'])
+
+
+class IdentityConflictItemQuarantineTests(unittest.TestCase):
+    """An unrelated legacy TODO handoff must not stop approved P0 engineering."""
+
+    @staticmethod
+    def issue(name, number):
+        return {
+            'todo_id': name, 'issue_number': number,
+            'source_fingerprint': f'approved-source-{number}',
+            'governing_dependencies': [],
+            'governing_operational_dependencies': [],
+            'title': name,
+        }
+
+    def test_closed_legacy_issue_and_different_live_scope_do_not_rebind(self):
+        with tempfile.TemporaryDirectory() as td:
+            spool = Path(td) / 'spool'
+            spool.mkdir()
+            repo = Path(td) / 'repo'
+            repo.mkdir()
+            releases = Path(td) / 'releases'
+            releases.mkdir()
+            state_path = spool / 'todo-release-state.json'
+            initial = {'schema_version': '1.0',
+                       'items': {
+                           'TODO-OPS-013': {
+                               'issue_number': 1459, 'phase': 'development_blocked',
+                               'reason': 'exact historical blocked work',
+                               'source_fingerprint': 'earlier-authoritative-scope',
+                           },
+                           'TODO-OPS-002': {
+                               'issue_number': 952, 'phase': 'development_blocked',
+                               'reason': 'authoritative external dependency',
+                           }},
+                       'summary': {}}
+            state_path.write_text(json.dumps(initial))
+            argv = ['todo_release_bridge', '--repo', str(repo),
+                    '--spool', str(spool), '--release-state', str(releases)]
+            gate = {'dependency_recheck':'not_applicable',
+                    'operational_eligible':True,
+                    'operational_recheck':'not_applicable',
+                    'retry_eligible':False,
+                    'verified_operational_evidence':{}}
+            with (patch.object(sys, 'argv', argv),
+                  patch.object(module,'run',return_value=''),
+                  patch.object(module,'todo_issues',return_value=[
+                      self.issue('TODO-OPS-013',1500),
+                      self.issue('TODO-OPS-002',952)]),
+                  patch.object(module,'merged_prs_by_issue',return_value={}),
+                  patch.object(module,'development_records_by_issue',
+                               return_value={952:{'phase':'blocked','reason':'provider API prerequisite'}}),
+                  patch.object(module,'reconcile_verified_closed_issues'),
+                  patch.object(module,'dependency_state_for_item',return_value=gate)):
+                self.assertEqual(module.main(),0)
+                result=json.loads(state_path.read_text())
+                held=result['items']['TODO-OPS-013']
+                self.assertEqual(held['issue_number'],1459)
+                self.assertEqual(held['phase'],'development_blocked')
+                self.assertEqual(held['reason'],'exact historical blocked work')
+                self.assertNotIn('release_id',held)
+                hold=result['identity_holds']['TODO-OPS-013']
+                self.assertEqual(hold['persisted_issue_number'],1459)
+                self.assertEqual(hold['observed_issue_number'],1500)
+                self.assertIs(hold['release_eligible'],False)
+                self.assertEqual(result['items']['TODO-OPS-002']['issue_number'],952)
+                self.assertEqual(result['items']['TODO-OPS-002']['phase'],'development_blocked')
+                self.assertEqual(result['summary'],module.commitment_summary(result['items']))
+                before=state_path.read_bytes()
+                self.assertEqual(module.main(),0)
+                self.assertEqual(state_path.read_bytes(),before)
