@@ -147,6 +147,34 @@ retries. Those items retain their release-verified repair and readmission
 requirements. The canonical governed Release Manager remains the only
 production promotion path.
 
+### Operator diagnostic for confirmed hosted-credit replenishment
+
+After confirming credits in the existing hosted API account, an authorized operator
+may run the installed, one-shot diagnostic **inside the existing Jason runtime
+container**, where the canonical model configuration and OpenBao AppRole files
+are already mounted:
+
+```bash
+docker exec jason-runtime python -m jason_runtime.verify_hosted_credit
+```
+
+This command uses Jason's configured conversation model, approved OpenBao
+`openai.semantic_intent` secret, existing structured-model client, and append-only
+model-usage ledger. It never prints credentials or response bodies. Success is
+reported only after the same request has a positive-token, provider-reported
+completed receipt carrying `workflow_id=provider-credit-verify` and
+`routing_profile=operator-authorized-diagnostic`. A blocked result must not be
+converted into a hand-entered success or an unbounded retry. The diagnostic
+makes a small billable request and must be operator-authorized.
+
+The subsequent scheduled support and owner-approved development workers
+independently re-admit at most one eligible bounded request per blocked item,
+subject to the original approval, immutable failed receipt, 12-hour receipt
+freshness, capacity, and each worker's existing exclusions. Observe real
+reasoning, tests, PR progression and protected release acceptance before
+claiming autonomous development is recovered. A successful diagnostic alone
+is not that acceptance.
+
 The canonical operational logic is `docs/playbooks/Jason-Support-List-Autonomous-Repair.md`.
 
 ## Production boundary
