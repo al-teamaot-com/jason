@@ -43,23 +43,42 @@ if [ "$PR_COUNT" -eq 1 ]; then
   done <<< "$CHANGED_PATHS"
 fi
 git fetch origin main >/dev/null 2>&1
-# Fetch the expected remote head before force-with-lease, even when the prior
-# generated PR was already merged/closed. A stable branch prevents two hosts
-# from creating distinct revision-named branches during the first publication.
+# Stable branch + a compare-and-swap push prevent two hosts from leaving
+# revision-specific PR branches if they race to publish the first candidate.
+REMOTE_EXISTS=0
 if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
   git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" >/dev/null 2>&1
+  REMOTE_EXISTS=1
 fi
-if [ "$PR_COUNT" -eq 1 ]; then
-  # A delayed invocation must not replace a newer revision already offered.
-  PRIOR_REVISION="$(git show "origin/$BRANCH:docs/control/AUTOMATED-CHANGE-STATE.json" | jq -r --arg mode "$MODE" 'if $mode == "source" then .validated_source.revision // "" else .production.revision // "" end')"
-  if [ -n "$PRIOR_REVISION" ] && [ "$PRIOR_REVISION" != "$SOURCE_REVISION" ]; then
-    if ! git cat-file -e "$PRIOR_REVISION^{commit}" 2>/dev/null; then
-      git fetch origin "$PRIOR_REVISION" >/dev/null 2>&1 || { echo "DOCUMENTATION_PUBLICATION=BLOCKED_UNVERIFIABLE_PRIOR" >&2; exit 1; }
-    fi
-    if ! git merge-base --is-ancestor "$PRIOR_REVISION" "$SOURCE_REVISION"; then
-      echo "DOCUMENTATION_PUBLICATION=BLOCKED_STALE_OR_DIVERGENT_REVISION" >&2
-      exit 1
-    fi
+if [ "$PR_COUNT" -eq 1 ] && [ "$REMOTE_EXISTS" -ne 1 ]; then
+  echo "DOCUMENTATION_PUBLICATION=BLOCKED_MISSING_PR_BRANCH" >&2
+  exit 1
+fi
+STATE_REF="origin/main"
+if [ "$REMOTE_EXISTS" -eq 1 ]; then
+  STATE_REF="origin/$BRANCH"
+  if [ "$PR_COUNT" -eq 0 ]; then
+    # A leftover branch from a closed PR, or a cross-host race, must never
+    # overwrite manually authored files even without an open PR.
+    REMOTE_PATHS="$(git diff --name-only origin/main "$STATE_REF")"
+    while IFS= read -r changed; do
+      case "$changed" in
+        ""|docs/control/AUTOMATED-CHANGE-STATE.json|docs/control/AUTOMATED-CHANGE-STATE.md) ;;
+        *) echo "DOCUMENTATION_PUBLICATION=BLOCKED_NON_GENERATED_BRANCH" >&2; exit 1 ;;
+      esac
+    done <<< "$REMOTE_PATHS"
+  fi
+fi
+# Protect both already-open candidates and main/closed candidates against
+# stale historical triggers. Every mode is compared only with its own record.
+PRIOR_REVISION="$(git show "$STATE_REF:docs/control/AUTOMATED-CHANGE-STATE.json" | jq -r --arg mode "$MODE" 'if $mode == "source" then .validated_source.revision // "" else .production.revision // "" end')"
+if [ -n "$PRIOR_REVISION" ] && [ "$PRIOR_REVISION" != "$SOURCE_REVISION" ]; then
+  if ! git cat-file -e "$PRIOR_REVISION^{commit}" 2>/dev/null; then
+    git fetch origin "$PRIOR_REVISION" >/dev/null 2>&1 || { echo "DOCUMENTATION_PUBLICATION=BLOCKED_UNVERIFIABLE_PRIOR" >&2; exit 1; }
+  fi
+  if ! git merge-base --is-ancestor "$PRIOR_REVISION" "$SOURCE_REVISION"; then
+    echo "DOCUMENTATION_PUBLICATION=BLOCKED_STALE_OR_DIVERGENT_REVISION" >&2
+    exit 1
   fi
 fi
 
