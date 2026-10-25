@@ -93,6 +93,18 @@ if [ -d "$WORKTREE/.git" ] || [ -f "$WORKTREE/.git" ]; then
 fi
 rm -rf "$WORKTREE"
 
+# Migrate the revision-specific worktree from pre-single-flight publishers.
+# Only a validated 12-character SHA suffix can be used as a legacy path.
+if [[ "$BRANCH" =~ ^automation/documentation-reconcile-([0-9a-f]{12})$ ]]; then
+  LEGACY_WORKTREE="$WORKTREE_ROOT/documentation-reconcile-${BASH_REMATCH[1]}"
+  if [ -e "$LEGACY_WORKTREE/.git" ]; then
+    if [ -n "$(git -C "$LEGACY_WORKTREE" status --porcelain --untracked-files=all)" ]; then
+      echo "DOCUMENTATION_PUBLICATION=BLOCKED_DIRTY_LEGACY_WORKTREE" >&2
+      exit 1
+    fi
+    git worktree remove "$LEGACY_WORKTREE" >/dev/null
+  fi
+fi
 git branch -D "$BRANCH" >/dev/null 2>&1 || true
 git worktree add -B "$BRANCH" "$WORKTREE" origin/main
 
