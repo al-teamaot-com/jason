@@ -5,6 +5,7 @@ These checks do not substitute for integration tests with concurrent publishers.
 """
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 
 
@@ -51,6 +52,47 @@ class DocumentationSingleFlightTests(unittest.TestCase):
 
     def test_pending_cross_mode_evidence_is_preserved(self):
         self.assertIn('git show "origin/$BRANCH:docs/control/AUTOMATED-CHANGE-STATE.json" > docs/control/AUTOMATED-CHANGE-STATE.json', self.script)
+
+    def test_flock_excludes_concurrent_publisher(self):
+        # Exercise the actual OS lock primitive used by the publisher.
+        with tempfile.TemporaryDirectory() as directory:
+            lock = str(Path(directory) / "publisher.lock")
+            first = subprocess.Popen(
+                ["bash", "-c", 'exec 9>"$1"; flock -x 9; echo acquired; sleep 1', "_", lock],
+                stdout=subprocess.PIPE, text=True,
+            )
+            try:
+                self.assertEqual(first.stdout.readline().strip(), "acquired")
+                contender = subprocess.run(
+                    ["bash", "-c", 'exec 9>"$1"; flock -n 9', "_", lock],
+                    capture_output=True, timeout=3,
+                )
+                self.assertNotEqual(contender.returncode, 0)
+            finally:
+                first.wait(timeout=5)
+            after = subprocess.run(
+                ["bash", "-c", 'exec 9>"$1"; flock -n 9', "_", lock],
+                capture_output=True, timeout=3,
+            )
+            self.assertEqual(after.returncode, 0)
+
+    def test_git_ancestry_rejects_stale_revision(self):
+        with tempfile.TemporaryDirectory() as directory:
+            def git(*args):
+                return subprocess.run(["git", "-C", directory, *args], capture_output=True, text=True)
+            self.assertEqual(git("init", "-q").returncode, 0)
+            self.assertEqual(git("config", "user.name", "Test").returncode, 0)
+            self.assertEqual(git("config", "user.email", "test@example.invalid").returncode, 0)
+            file = Path(directory) / "snapshot"
+            file.write_text("first")
+            self.assertEqual(git("add", "snapshot").returncode, 0)
+            self.assertEqual(git("commit", "-qm", "first").returncode, 0)
+            older = git("rev-parse", "HEAD").stdout.strip()
+            file.write_text("second")
+            self.assertEqual(git("commit", "-qam", "second").returncode, 0)
+            newer = git("rev-parse", "HEAD").stdout.strip()
+            self.assertEqual(git("merge-base", "--is-ancestor", older, newer).returncode, 0)
+            self.assertNotEqual(git("merge-base", "--is-ancestor", newer, older).returncode, 0)
 
     def test_push_uses_lease(self):
         self.assertIn('git push --force-with-lease', self.script)
