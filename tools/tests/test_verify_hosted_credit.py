@@ -86,3 +86,20 @@ def test_metered_receipt_rejects_other_request_and_unmetered(tmp_path):
     db.commit()
     assert mod.metered_receipt(path, 'correct') is True
     db.close()
+
+
+def test_diagnostic_rejects_success_without_metered_receipt(monkeypatch, capsys):
+    mod = load_module()
+    monkeypatch.setenv('JASON_OPENAI_CONVERSATION_MODEL', 'gpt-5.4-mini')
+    class Resolver:
+        def __init__(self, **kwargs): pass
+        def resolve(self, *args): return {'api_key':'test-only'}
+    class Client:
+        def __init__(self, **kwargs): pass
+        def complete(self, **kwargs): return {'ok':True}
+    monkeypatch.setattr(mod, 'OpenBaoSecretResolver', Resolver)
+    monkeypatch.setattr(mod, 'OpenAIStructuredJsonClient', Client)
+    monkeypatch.setattr(mod, 'SQLiteUsageLedger', lambda path: SimpleNamespace(path=path))
+    monkeypatch.setattr(mod, 'metered_receipt', lambda path, rid: False)
+    assert mod.run() == 3
+    assert 'no matching provider-reported metered completion' in capsys.readouterr().out
