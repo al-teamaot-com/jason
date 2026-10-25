@@ -2256,3 +2256,21 @@ def test_stale_source_rejects_original_git_identity_mismatch(tmp_path,monkeypatc
     monkeypatch.setattr(module.support,'run',fake_run)
     assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==[]
     assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_stale_source_preserves_ignored_files_in_original(tmp_path,monkeypatch):
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    (old / '.gitignore').write_text('private-cache/\n')
+    (old / 'private-cache').mkdir()
+    (old / 'private-cache' / 'notes').write_text('important untracked bytes\n')
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==[]
+    assert (old / 'private-cache' / 'notes').read_text()=='important untracked bytes\n'
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_stale_clone_refuses_wrong_current_main_without_reset(tmp_path,monkeypatch):
+    import pytest
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    with pytest.raises(module.support.WorkerError,match='source changed'):
+        module.ensure_stale_source_clone(repo,42,old_sha)
+    assert git('rev-parse','HEAD',cwd=old)==old_sha
