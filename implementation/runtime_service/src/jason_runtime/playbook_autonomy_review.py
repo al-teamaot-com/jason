@@ -137,18 +137,38 @@ class OwnerOnlyPlaybookAutonomyAuthority:
 
 def _focused_teams_approval_card(*, heading: str, title: str, explanation: str,
                                  facts: list[dict[str, str]]) -> tuple[list[dict], tuple[tuple[str, str], ...]]:
-    """One compact production-style Teams Approve/Deny presentation.
+    """Mobile-first Teams Approve/Deny body, shared canonical gateway contract.
 
-    Neither UI text nor card controls grant authority. The immutable
-    ApprovalRequest, signed gateway response and shared approval repository do.
+    Mirrors the release UX's small brand header, clear human decision,
+    at-a-glance impact and expandable evidence. Does not grant authority.
     """
+    high_priority = {'Submitted by','Total Commitment','Effective threshold',
+                     'Autotask Contact UDF limit','Customer','Ticket','Expires'}
+    quick = [fact for fact in facts if fact['title'] in high_priority]
+    details = [fact for fact in facts if fact['title'] not in high_priority]
     body = [
-        {"type": "TextBlock", "text": heading, "weight": "Bolder", "wrap": True},
-        {"type": "TextBlock", "text": title, "weight": "Bolder", "wrap": True},
-        {"type": "TextBlock", "text": explanation, "wrap": True},
-        {"type": "FactSet", "facts": facts},
+        {'type':'TextBlock','text':'JASON · AOT','size':'Small',
+         'isSubtle':True,'spacing':'None'},
+        {'type':'TextBlock','text':'Approval required','size':'Large',
+         'color':'Warning','weight':'Bolder','wrap':True,'spacing':'Small'},
+        {'type':'TextBlock','text':title,'weight':'Bolder','wrap':True,'spacing':'Small'},
+        {'type':'TextBlock','text':explanation,'size':'Small',
+         'isSubtle':True,'wrap':True,'spacing':'Small'},
+        {'type':'FactSet','facts':quick},
     ]
-    return body, (("Approve", "approve"), ("Deny", "deny"))
+    if details:
+        body.extend([
+            {'type':'ActionSet','actions':[
+                {'type':'Action.ToggleVisibility','title':'Review items and evidence',
+                 'targetElements':['jason_purchase_technical_details']} ]},
+            {'type':'Container','id':'jason_purchase_technical_details',
+             'isVisible':False,'items':[
+                {'type':'TextBlock','text':'PURCHASE DETAILS AND EVIDENCE',
+                 'size':'Small','weight':'Bolder','isSubtle':True},
+                {'type':'FactSet','facts':details},
+             ]},
+        ])
+    return body, (('Approve','approve'),('Deny','deny'))
 
 
 class TeamsGatewayPlaybookApprovalSender:
@@ -243,14 +263,20 @@ class TeamsGatewayPlaybookApprovalSender:
             facts = [{"title": label, "value": str(review[key])}
                      for key, label in keys if key in review]
             facts.append({"title": "Expires", "value": card.expires_at})
-            body, actions = _focused_teams_approval_card(
-                heading="ACTION REQUIRED: PRODUCTION + CCC",
-                title=card.title,
-                explanation=("Review this exact release. The Approve and Deny buttons "
-                             "are below the details. Approve authorizes only this SHA; "
-                             "independent deployment, CCC and rollback gates still apply."),
-                facts=facts,
+            actions = (
+                ("Approve", "approve"), ("Deny", "deny"),
             )
+            body = [
+                {"type": "TextBlock", "text": "ACTION REQUIRED: PRODUCTION + CCC",
+                 "weight": "Bolder", "wrap": True},
+                {"type": "TextBlock", "text": card.title, "weight": "Bolder", "wrap": True},
+                {"type": "TextBlock",
+                 "text": ("Review this exact release. The Approve and Deny buttons "
+                          "are below the details. Approve authorizes only this SHA; "
+                          "independent deployment, CCC and rollback gates still apply."),
+                 "wrap": True},
+                {"type": "FactSet", "facts": facts},
+            ]
         elif (card.capability == "procurement.submission.execute"
                 and card.approval_id.startswith("procapproval-")
                 and card.requested_mode == "purchase"):

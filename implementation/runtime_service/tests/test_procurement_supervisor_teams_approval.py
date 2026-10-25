@@ -160,7 +160,9 @@ def test_only_approve_deny_actions_possible():
 def test_procurement_card_uses_production_focused_ui_and_exact_gateway_actions():
     flow,repo,store,calls,kwargs=setup()
     card=TeamsGatewayPlaybookApprovalSender._adaptive_card(render_approval_card(repo.get('procapproval-test')))
-    assert card['body'][0]['text']=='ACTION REQUIRED: PURCHASE APPROVAL'
+    assert card['body'][0]['text']=='JASON · AOT'
+    assert card['body'][1]['text']=='Approval required'
+    assert any(x.get('type')=='Container' and x.get('id')=='jason_purchase_technical_details' for x in card['body'])
     assert [a['title'] for a in card['actions']]==['Approve','Deny']
     assert [a['data']['decision'] for a in card['actions']]==['approve','deny']
     assert all(a['data']['approval_id']=='procapproval-test' for a in card['actions'])
