@@ -36,6 +36,10 @@ class DocumentationSingleFlightTests(unittest.TestCase):
         self.assertIn('PR_NUMBER="${PR_NUMBER:-}"', self.script)
         self.assertIn('if [ -z "$PR_NUMBER" ]; then', self.script)
 
+    def test_existing_pr_branch_fetched_before_rebuild(self):
+        self.assertIn('refs/heads/$BRANCH:refs/remotes/origin/$BRANCH', self.script)
+        self.assertIn('git worktree add -B "$BRANCH" "$WORKTREE" origin/main', self.script)
+
     def test_push_uses_lease(self):
         self.assertIn('git push --force-with-lease', self.script)
 
