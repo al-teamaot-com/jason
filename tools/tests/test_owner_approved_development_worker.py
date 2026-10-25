@@ -2141,3 +2141,136 @@ def test_owner_dev_credit_recovery_rejects_wrong_provider_error_or_already_retri
         state,[item],tmp_path,max_active=3
     )==[]
     assert not receipts
+
+
+def _stale_owner_recovery_fixture(tmp_path, monkeypatch):
+    import json
+    import subprocess
+    repo = tmp_path / 'managed-repo'
+    repo.mkdir()
+    def git(*args, cwd=repo):
+        p=subprocess.run(['git', *args], cwd=cwd, check=True, capture_output=True, text=True)
+        return p.stdout.strip()
+    git('init', '-b', 'main')
+    git('config', 'user.email', 'test@example.invalid')
+    git('config', 'user.name', 'Test Maintainer')
+    (repo / 'code.txt').write_text('old tracked code\n')
+    git('add', 'code.txt');git('commit', '-m', 'old baseline')
+    git('remote', 'add', 'origin', str(repo));git('fetch', 'origin', 'main')
+    old_sha = git('rev-parse','HEAD')
+    root=tmp_path / 'worktrees'
+    root.mkdir()
+    old = root / 'issue-42'
+    git('worktree','add','-b','develop/owner-approved-issue-42',str(old),'main')
+    (repo / 'code.txt').write_text('new tracked code\n')
+    git('add','code.txt');git('commit','-m','new approved source')
+    git('fetch','origin','main')
+    current_sha=git('rev-parse','origin/main')
+    spool=tmp_path/'spool';spool.mkdir()
+    item={'id':'DEV-42','issue_number':42,'title':'Approved Teams worker work',
+          'body':'- **Autonomous development:** owner-approved',
+          'evidence':'review exact source','acceptance':'test then PR',
+          'approval_source':'https://github.com/al-teamaot-com/jason/issues/42',
+          'approved_by':'owner','updated_at':'2026-10-25'}
+    rid=module.support.queue_reasoning(spool,kind='edit_plan',item=item,
+                                        context={'work_class':'owner_approved_development','approved_scope':item['body']})
+    response={'request_id':rid,'kind':'edit_plan','support_item':'DEV-42',
+              'status':'succeeded','result':{'edits':[],'test_paths':[]}}
+    resp_path=spool/'reasoning'/'responses'/f'{rid}.json'
+    resp_path.parent.mkdir(parents=True)
+    resp_path.write_text(json.dumps(response))
+    state={'items':{'DEV-42':{'phase':'blocked','reason':'EvidenceToolError: stale worktree requires governed clean-source recovery',
+                    'issue_number':42,'branch':'develop/owner-approved-issue-42',
+                    'worktree':str(old),'reasoning_request_id':rid}}}
+    monkeypatch.setattr(module,'WORKTREE_ROOT',root)
+    monkeypatch.setattr(module,'active_support_count',lambda spool:0)
+    monkeypatch.setattr(module,'issue_has_closed_dependency_gate',lambda item:False)
+    return repo,spool,item,state,old,old_sha,current_sha,git
+
+
+def test_stale_clean_worker_is_readmitted_from_fresh_isolated_clone_without_old_branch_mutation(tmp_path,monkeypatch):
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    resumed=module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)
+    assert resumed==['DEV-42']
+    record=state['items']['DEV-42']
+    assert record['phase']=='diagnosing'
+    assert record['reasoning_request_id']==''
+    assert record['stale_source_recovery_revision']==current
+    assert record['stale_source_recovery_prior_revision']==old_sha
+    assert git('rev-parse','HEAD',cwd=old)==old_sha
+    assert git('branch','--show-current',cwd=old)=='develop/owner-approved-issue-42'
+    clone=module.ensure_stale_source_clone(repo,42,current)
+    assert str(clone)==record['worktree']
+    assert (clone/'code.txt').read_text()=='new tracked code\n'
+    assert git('rev-parse','--git-common-dir',cwd=clone)=='.git'
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==[]
+
+
+def test_stale_source_refuses_dirty_original_and_keeps_blocker(tmp_path,monkeypatch):
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    (old/'code.txt').write_text('valuable uncommitted change\n')
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+    assert (old/'code.txt').read_text()=='valuable uncommitted change\n'
+
+
+def test_stale_source_requires_successful_matching_reasoning_response(tmp_path,monkeypatch):
+    import json
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    rid=state['items']['DEV-42']['reasoning_request_id']
+    p=spool/'reasoning'/'responses'/f'{rid}.json'
+    payload=json.loads(p.read_text());payload['status']='failed';p.write_text(json.dumps(payload))
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_stale_source_never_reopens_closed_approval_dependency(tmp_path,monkeypatch):
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    monkeypatch.setattr(module,'issue_has_closed_dependency_gate',lambda item:True)
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_stale_source_blocks_all_work_when_capacity_is_full(tmp_path,monkeypatch):
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    state['items']['DEV-99']={'phase':'implementing'}
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=1)==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_stale_source_blocks_unapproved_branch(tmp_path,monkeypatch):
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    state['items']['DEV-42']['branch']='develop/owner-approved-issue-other'
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_stale_source_rejects_original_git_identity_mismatch(tmp_path,monkeypatch):
+    import subprocess
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    actual_run=module.support.run
+    def fake_run(args,**kwargs):
+        if args==['git','rev-parse','--git-common-dir'] and kwargs.get('cwd')==old:
+            return str(tmp_path/'untrusted.git')
+        return actual_run(args,**kwargs)
+    monkeypatch.setattr(module.support,'run',fake_run)
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_stale_source_preserves_ignored_files_in_original(tmp_path,monkeypatch):
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    (old / '.gitignore').write_text('private-cache/\n')
+    (old / 'private-cache').mkdir()
+    (old / 'private-cache' / 'notes').write_text('important untracked bytes\n')
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==[]
+    assert (old / 'private-cache' / 'notes').read_text()=='important untracked bytes\n'
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_stale_clone_refuses_wrong_current_main_without_reset(tmp_path,monkeypatch):
+    import pytest
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    with pytest.raises(module.support.WorkerError,match='source changed'):
+        module.ensure_stale_source_clone(repo,42,old_sha)
+    assert git('rev-parse','HEAD',cwd=old)==old_sha

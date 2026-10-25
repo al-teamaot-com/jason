@@ -286,3 +286,26 @@ real awaiting-merge PR, missing PR, new TODO and historically completed
 items. Production acceptance additionally requires MCP readback alignment,
 no unrelated record regression and a separate exact-verified closeout
 release; source-merge alone is not TODO completion.
+
+## Bounded stale clean source recovery (owner-approved development)
+
+When an exact approved development edit-plan response is successfully recorded
+but execution reports `EvidenceToolError: stale worktree requires governed
+clean-source recovery`, the worker can automatically readmit that blocked item
+**once** after verifying the original request hash and successful reply, owner
+approval/current focus, current `origin/main`, exact old managed Git identity,
+clean tracked/untracked/**ignored** files and ancestry of the old source SHA.
+It never reset/fast-forwards/deletes the old worktree or reuses old model edits.
+
+Instead it initializes an independent, shallow Git checkout in the existing
+owner-approved worktree sandbox, fetching the *already verified* `origin/main`
+commit from the managed source via local Git file transport. It confirms the
+fresh SHA, expected branch, remote, and clean status, then queues a completely
+new approved `search_plan`. This intentionally avoids writing the protected
+engineering source `.git/worktrees` metadata from the rootless systemd unit.
+Re-admission respects shared active development/support capacity and excludes
+external/dependency/approval blockers; failure leaves the old record blocked.
+The new checkout and provenance fields are persisted for idempotent retries.
+Existing independent CI, guarded PR integration, CCC and exact-SHA production
+release authority remain unchanged. Source-only fixes are not proof of live
+Teams approval or disk repair acceptance.
