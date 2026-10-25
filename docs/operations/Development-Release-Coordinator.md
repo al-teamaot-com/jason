@@ -188,6 +188,16 @@ The coordinator does not deploy.
 
 Production promotion remains serialized and requires an exact merged main SHA.
 
+The explicit `promote` path and the scheduled promotion path reserve the same
+rollback-container headroom under the exclusive transaction lock **before**
+root circuit-breaker revalidation or a production mutation. The existing bounded
+retention routine removes only the oldest *exited, historically named* rollback
+containers, keeping the newest 16, without touching running containers, Docker
+images, immutable release records, or the pinned last-known-good release. A
+cleanup error must stop promotion before the breaker or deployment. This
+prevents a legitimate manual promotion from crossing the drift policy limit of
+20 stopped rollback containers after preparing the release.
+
 Normal releases remain human-approved. J-CHANGE-002 defines a narrow Autonomous Repair Release class where a new human production approval is not required when the change only restores previously approved behavior and passes every deterministic eligibility gate. Autonomous repair execution remains blocked until Jason's named governed deployment capability is enabled for that release class; classification alone is not deployment authority.
 
 ## Automation
