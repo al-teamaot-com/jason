@@ -12,23 +12,108 @@ WORKFLOW_RUN_ID="${3:-}"
 WORKFLOW_URL="${4:-}"
 REPO_ROOT="${JASON_DOCUMENTATION_REPO_ROOT:-/home/al/projects/jason}"
 SHORT_REVISION="${SOURCE_REVISION:0:12}"
-BRANCH="automation/documentation-reconcile-${SHORT_REVISION}"
+BRANCH="automation/documentation-reconcile-current"
 WORKTREE_ROOT="${JASON_DOCUMENTATION_WORKTREE_ROOT:-/home/al/jason-worktrees}"
-WORKTREE="$WORKTREE_ROOT/documentation-reconcile-${SHORT_REVISION}"
+WORKTREE="$WORKTREE_ROOT/documentation-reconcile-current"
 
 mkdir -p "$WORKTREE_ROOT"
+# One host publisher at a time: source and production events share this lock.
+exec 9>"$WORKTREE_ROOT/documentation-reconciliation.lock"
+flock -x 9
 cd "$REPO_ROOT"
-git fetch origin main "$BRANCH" >/dev/null 2>&1 || git fetch origin main >/dev/null 2>&1
+
+# Reuse an existing generated PR instead of creating a PR per revision.
+# An ambiguous set of PRs is a hard failure, never an invitation to pick one.
+PR_ROWS="$(gh pr list --repo al-teamaot-com/jason --state open --limit 500 --json number,title,headRefName --jq '[.[] | select((.title | startswith("Reconcile automated documentation state for ")) and (.headRefName | startswith("automation/documentation-reconcile-")))]')"
+PR_COUNT="$(printf '%s' "$PR_ROWS" | jq 'length')"
+if [ "$PR_COUNT" -gt 1 ]; then
+  echo "DOCUMENTATION_PUBLICATION=BLOCKED_MULTIPLE_CANDIDATES" >&2
+  exit 1
+fi
+if [ "$PR_COUNT" -eq 1 ]; then
+  BRANCH="$(printf '%s' "$PR_ROWS" | jq -r '.[0].headRefName')"
+  PR_NUMBER="$(printf '%s' "$PR_ROWS" | jq -r '.[0].number')"
+  # Protect against overwriting unrelated source or hand-authored material.
+  CHANGED_PATHS="$(gh pr diff "$PR_NUMBER" --repo al-teamaot-com/jason --name-only)"
+  while IFS= read -r changed; do
+    case "$changed" in
+      docs/control/AUTOMATED-CHANGE-STATE.json|docs/control/AUTOMATED-CHANGE-STATE.md) ;;
+      *) echo "DOCUMENTATION_PUBLICATION=BLOCKED_NON_GENERATED_CHANGE" >&2; exit 1 ;;
+    esac
+  done <<< "$CHANGED_PATHS"
+fi
+git fetch origin main >/dev/null 2>&1
+# Stable branch + a compare-and-swap push prevent two hosts from leaving
+# revision-specific PR branches if they race to publish the first candidate.
+REMOTE_EXISTS=0
+if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+  git fetch origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" >/dev/null 2>&1
+  REMOTE_EXISTS=1
+fi
+if [ "$PR_COUNT" -eq 1 ] && [ "$REMOTE_EXISTS" -ne 1 ]; then
+  echo "DOCUMENTATION_PUBLICATION=BLOCKED_MISSING_PR_BRANCH" >&2
+  exit 1
+fi
+STATE_REF="origin/main"
+if [ "$REMOTE_EXISTS" -eq 1 ]; then
+  STATE_REF="origin/$BRANCH"
+  if [ "$PR_COUNT" -eq 0 ]; then
+    # A leftover branch from a closed PR, or a cross-host race, must never
+    # overwrite manually authored files even without an open PR.
+    REMOTE_PATHS="$(git diff --name-only origin/main "$STATE_REF")"
+    while IFS= read -r changed; do
+      case "$changed" in
+        ""|docs/control/AUTOMATED-CHANGE-STATE.json|docs/control/AUTOMATED-CHANGE-STATE.md) ;;
+        *) echo "DOCUMENTATION_PUBLICATION=BLOCKED_NON_GENERATED_BRANCH" >&2; exit 1 ;;
+      esac
+    done <<< "$REMOTE_PATHS"
+  fi
+fi
+# Protect both already-open candidates and main/closed candidates against
+# stale historical triggers. Every mode is compared only with its own record.
+STATE_REFS=("origin/main")
+if [ "$REMOTE_EXISTS" -eq 1 ]; then
+  STATE_REFS+=("origin/$BRANCH")
+fi
+for CHECK_REF in "${STATE_REFS[@]}"; do
+  PRIOR_REVISION="$(git show "$CHECK_REF:docs/control/AUTOMATED-CHANGE-STATE.json" | jq -r --arg mode "$MODE" 'if $mode == "source" then .validated_source.revision // "" else .production.revision // "" end')"
+  if [ -n "$PRIOR_REVISION" ] && [ "$PRIOR_REVISION" != "$SOURCE_REVISION" ]; then
+    if ! git cat-file -e "$PRIOR_REVISION^{commit}" 2>/dev/null; then
+      git fetch origin "$PRIOR_REVISION" >/dev/null 2>&1 || { echo "DOCUMENTATION_PUBLICATION=BLOCKED_UNVERIFIABLE_PRIOR" >&2; exit 1; }
+    fi
+    if ! git merge-base --is-ancestor "$PRIOR_REVISION" "$SOURCE_REVISION"; then
+      echo "DOCUMENTATION_PUBLICATION=BLOCKED_STALE_OR_DIVERGENT_REVISION" >&2
+      exit 1
+    fi
+  fi
+done
 
 if [ -d "$WORKTREE/.git" ] || [ -f "$WORKTREE/.git" ]; then
   git worktree remove --force "$WORKTREE" >/dev/null 2>&1 || true
 fi
 rm -rf "$WORKTREE"
 
+# Migrate the revision-specific worktree from pre-single-flight publishers.
+# Only a validated 12-character SHA suffix can be used as a legacy path.
+if [[ "$BRANCH" =~ ^automation/documentation-reconcile-([0-9a-f]{12})$ ]]; then
+  LEGACY_WORKTREE="$WORKTREE_ROOT/documentation-reconcile-${BASH_REMATCH[1]}"
+  if [ -e "$LEGACY_WORKTREE/.git" ]; then
+    if [ -n "$(git -C "$LEGACY_WORKTREE" status --porcelain --untracked-files=all)" ]; then
+      echo "DOCUMENTATION_PUBLICATION=BLOCKED_DIRTY_LEGACY_WORKTREE" >&2
+      exit 1
+    fi
+    git worktree remove "$LEGACY_WORKTREE" >/dev/null
+  fi
+fi
 git branch -D "$BRANCH" >/dev/null 2>&1 || true
-git worktree add -b "$BRANCH" "$WORKTREE" origin/main
+git worktree add -B "$BRANCH" "$WORKTREE" origin/main
 
 cd "$WORKTREE"
+# Preserve the other mode's pending evidence when reusing the single PR.
+# The generated Markdown is re-rendered from this canonical JSON below.
+if [ "$PR_COUNT" -eq 1 ]; then
+  git show "origin/$BRANCH:docs/control/AUTOMATED-CHANGE-STATE.json" > docs/control/AUTOMATED-CHANGE-STATE.json
+fi
 git config user.name "Project Jason Documentation Automation"
 git config user.email "jason@teamaot.com"
 ARGS=("$MODE" --source-revision "$SOURCE_REVISION")
@@ -56,6 +141,14 @@ fi
 gh issue edit 526 --repo al-teamaot-com/jason --body-file "$CONTROL_BOARD_FILE" >/dev/null
 echo "CONTROL_BOARD_PUBLICATION=PASS"
 
+# A replay of an already-open candidate must not rewrite its branch or
+# retrigger CI if neither generated file changed.
+if [ "$PR_COUNT" -eq 1 ] &&
+   cmp -s docs/control/AUTOMATED-CHANGE-STATE.json <(git show "origin/$BRANCH:docs/control/AUTOMATED-CHANGE-STATE.json") &&
+   cmp -s docs/control/AUTOMATED-CHANGE-STATE.md <(git show "origin/$BRANCH:docs/control/AUTOMATED-CHANGE-STATE.md"); then
+  echo "DOCUMENTATION_PUBLICATION=NO_CHANGE"
+  exit 0
+fi
 if git diff --quiet -- docs/control/AUTOMATED-CHANGE-STATE.json docs/control/AUTOMATED-CHANGE-STATE.md; then
   echo "DOCUMENTATION_PUBLICATION=NO_CHANGE"
   exit 0
@@ -65,7 +158,7 @@ git add docs/control/AUTOMATED-CHANGE-STATE.json docs/control/AUTOMATED-CHANGE-S
 git commit -m "Reconcile automated documentation state for ${SHORT_REVISION}"
 git push --force-with-lease -u origin "$BRANCH"
 
-PR_NUMBER="$(gh pr list --repo al-teamaot-com/jason --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
+PR_NUMBER="${PR_NUMBER:-}"
 if [ -z "$PR_NUMBER" ]; then
   BODY_FILE="$(mktemp)"
   cat > "$BODY_FILE" <<EOF

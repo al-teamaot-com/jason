@@ -1,0 +1,129 @@
+"""Static regression contract for generated-documentation PR publication.
+
+Run with: python3 -m unittest tests/test_documentation_single_flight.py
+These checks do not substitute for integration tests with concurrent publishers.
+"""
+from pathlib import Path
+import os
+import subprocess
+import tempfile
+import unittest
+
+
+SCRIPT = Path(__file__).resolve().parents[1] / "tools" / "publish_documentation_reconciliation.sh"
+
+
+class DocumentationSingleFlightTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.script = SCRIPT.read_text(encoding="utf-8")
+
+    def test_bash_syntax(self):
+        subprocess.run(["bash", "-n", str(SCRIPT)], check=True)
+
+    def test_publication_is_serialized(self):
+        self.assertIn('flock -x 9', self.script)
+        self.assertIn('documentation-reconciliation.lock', self.script)
+
+    def test_fails_closed_on_ambiguous_pr_set(self):
+        self.assertIn('if [ "$PR_COUNT" -gt 1 ]; then', self.script)
+        self.assertIn('BLOCKED_MULTIPLE_CANDIDATES', self.script)
+
+    def test_only_generated_paths_can_be_rewritten(self):
+        self.assertIn('gh pr diff "$PR_NUMBER"', self.script)
+        self.assertIn('BLOCKED_NON_GENERATED_CHANGE', self.script)
+
+    def test_updates_current_pr_instead_of_always_creating(self):
+        self.assertIn('PR_NUMBER="$(printf', self.script)
+        self.assertIn('PR_NUMBER="${PR_NUMBER:-}"', self.script)
+        self.assertIn('if [ -z "$PR_NUMBER" ]; then', self.script)
+
+    def test_existing_pr_branch_fetched_before_rebuild(self):
+        self.assertIn('refs/heads/$BRANCH:refs/remotes/origin/$BRANCH', self.script)
+        self.assertIn('git worktree add -B "$BRANCH" "$WORKTREE" origin/main', self.script)
+
+    def test_stale_or_divergent_release_is_blocked(self):
+        self.assertIn('git merge-base --is-ancestor "$PRIOR_REVISION" "$SOURCE_REVISION"', self.script)
+        self.assertIn('BLOCKED_STALE_OR_DIVERGENT_REVISION', self.script)
+        self.assertIn('BLOCKED_UNVERIFIABLE_PRIOR', self.script)
+
+    def test_source_and_production_are_checked_independently(self):
+        self.assertIn('.validated_source.revision', self.script)
+        self.assertIn('.production.revision', self.script)
+
+    def test_pending_cross_mode_evidence_is_preserved(self):
+        self.assertIn('git show "origin/$BRANCH:docs/control/AUTOMATED-CHANGE-STATE.json" > docs/control/AUTOMATED-CHANGE-STATE.json', self.script)
+
+    def test_flock_excludes_concurrent_publisher(self):
+        # Exercise the actual OS lock primitive used by the publisher.
+        with tempfile.TemporaryDirectory() as directory:
+            lock = str(Path(directory) / "publisher.lock")
+            first = subprocess.Popen(
+                ["bash", "-c", 'exec 9>"$1"; flock -x 9; echo acquired; sleep 1', "_", lock],
+                stdout=subprocess.PIPE, text=True,
+            )
+            try:
+                self.assertEqual(first.stdout.readline().strip(), "acquired")
+                contender = subprocess.run(
+                    ["bash", "-c", 'exec 9>"$1"; flock -n 9', "_", lock],
+                    capture_output=True, timeout=3,
+                )
+                self.assertNotEqual(contender.returncode, 0)
+            finally:
+                first.wait(timeout=5)
+            after = subprocess.run(
+                ["bash", "-c", 'exec 9>"$1"; flock -n 9', "_", lock],
+                capture_output=True, timeout=3,
+            )
+            self.assertEqual(after.returncode, 0)
+
+    def test_git_ancestry_rejects_stale_revision(self):
+        with tempfile.TemporaryDirectory() as directory:
+            def git(*args):
+                return subprocess.run(["git", "-C", directory, *args], capture_output=True, text=True)
+            self.assertEqual(git("init", "-q").returncode, 0)
+            self.assertEqual(git("config", "user.name", "Test").returncode, 0)
+            self.assertEqual(git("config", "user.email", "test@example.invalid").returncode, 0)
+            file = Path(directory) / "snapshot"
+            file.write_text("first")
+            self.assertEqual(git("add", "snapshot").returncode, 0)
+            self.assertEqual(git("commit", "-qm", "first").returncode, 0)
+            older = git("rev-parse", "HEAD").stdout.strip()
+            file.write_text("second")
+            self.assertEqual(git("commit", "-qam", "second").returncode, 0)
+            newer = git("rev-parse", "HEAD").stdout.strip()
+            self.assertEqual(git("merge-base", "--is-ancestor", older, newer).returncode, 0)
+            self.assertNotEqual(git("merge-base", "--is-ancestor", newer, older).returncode, 0)
+
+    def test_actual_publisher_rejects_ambiguous_prs_before_git_mutations(self):
+        # Mock only the GitHub PR listing. Execute the real publisher in a
+        # disposable directory; it must stop before git fetch or branch writes.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            gh = bin_dir / "gh"
+            gh.write_text(
+                "#!/bin/sh\n"
+                "printf '%s\\n' '[{\"number\":100,\"headRefName\":\"automation/documentation-reconcile-a\"},"
+                "{\"number\":101,\"headRefName\":\"automation/documentation-reconcile-b\"}]'\n"
+            )
+            gh.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = str(bin_dir) + os.pathsep + env["PATH"]
+            env["JASON_DOCUMENTATION_REPO_ROOT"] = str(root)
+            env["JASON_DOCUMENTATION_WORKTREE_ROOT"] = str(root / "trees")
+            result = subprocess.run(
+                ["bash", str(SCRIPT), "source", "abcdef123456", "12", "https://example.invalid/run"],
+                capture_output=True, text=True, env=env, timeout=10,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("BLOCKED_MULTIPLE_CANDIDATES", result.stderr)
+            self.assertFalse((root / ".git").exists())
+
+    def test_push_uses_lease(self):
+        self.assertIn('git push --force-with-lease', self.script)
+
+
+if __name__ == "__main__":
+    unittest.main()
