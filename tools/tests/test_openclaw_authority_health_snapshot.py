@@ -63,7 +63,7 @@ def test_timeout_records_explicit_failure_and_replaces_stale_pass(monkeypatch, t
 
 def test_systemd_timeout_exceeds_checker_deadline():
     source = (
-        SCRIPT.parents[2]
+        SCRIPT.parents[1]
         / "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-full-integrity.service"
     ).read_text(encoding="utf-8")
     module = _load_module()
