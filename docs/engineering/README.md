@@ -38,6 +38,8 @@ Jason Integration SDK engineering principles, provider-development procedures, t
 
 Provider-specific reference specifications, limitations, and validation status.
 
+- [Governed Datto Linux Worker Shell Execution](providers/Datto-Linux-Worker-Command-Execution.md) — exact-host enrollment, reviewed shell input, per-run approval and rollout contract for the Claw2-PC pilot.
+
 ### `capabilities/`
 
 Engineering-level capability-registry and capability integration references.

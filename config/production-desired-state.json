@@ -28,6 +28,7 @@
     "jason-delegation-maintenance.timer",
     "jason-documentation-reconciliation.timer",
     "jason-openclaw-authority-health.timer",
+    "jason-openclaw-authority-full-integrity.timer",
     "jason-operations-configuration-exporter.service",
     "jason-playbook-exporter.service",
     "jason-production-drift-watchdog.timer",
@@ -56,6 +57,7 @@
     "jason-openbao-backup.service",
     "jason-openbao-backup.timer",
     "jason-openclaw-authority-health.service",
+    "jason-openclaw-authority-full-integrity.service",
     "jason-production-drift-watchdog.service",
     "jason-provider-health-canary.service",
     "jason-release-control-readback.service",
@@ -68,14 +70,18 @@
     "jason-support-repair-worker.timer",
     "jason-self-heal-watchdog.timer",
     "jason-dnsfilter-boundary-reconcile.timer",
-    "jason-kfs-collector.timer"
+    "jason-kfs-collector.timer",
+    "jason-release-approval-only.timer"
   ],
   "allowed_user_units": [
     "jason-release-manager.service",
     "jason-support-repair-worker.service",
     "jason-self-heal-watchdog.service",
     "jason-dnsfilter-boundary-reconcile.service",
-    "jason-kfs-collector.service"
+    "jason-kfs-collector.service",
+    "jason-release-approval-only.service",
+    "jason-openclaw-recovery-source-bridge.service",
+    "jason-openclaw-recovery-source-bridge.timer"
   ],
   "rollback_container_prefixes": [
     "jason-runtime-rollback-",

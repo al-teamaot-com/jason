@@ -575,7 +575,7 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Risk level:** Moderate
 - **Idea:** Give Jason a governed, evidence-backed workflow for answering client cyber-insurance, PII/security, compliance, and vendor-security questionnaires using authoritative client-specific data instead of assumptions or generic AOT standards.
 - **Why it matters:** AOT is regularly asked to complete technical portions of insurance/security forms. Jason should be able to collect current evidence across managed endpoints, Microsoft 365/Entra, email security, backup systems, DNS/security services, network/security appliances, security-awareness training, Autotask, and IT Glue; distinguish confirmed facts from client-owned business/legal questions; identify exceptions; and produce a traceable answer package.
-- **Why not now:** The current catalog can verify some endpoint facts but lacks several read surfaces required for complete evidence-backed answers. Active blockers are tracked in SUPPORT-CAP-006 through SUPPORT-CAP-011.
+- **Why not now:** The current catalog can verify some endpoint facts but lacks several read surfaces required for complete evidence-backed answers. Current connector prerequisites are tracked by TODO-CONN-005 through TODO-CONN-009 (formerly SUPPORT-CAP-007 through SUPPORT-CAP-011). SUPPORT-CAP-006 was resolved on 2026-09-18. Connector readiness varies: TODO-CONN-008 DNSFilter governed reads are production-active, TODO-CONN-006 backup reads have a production foundation, and the remaining required client-specific read surfaces must be verified independently before acceptance.
 - **Prerequisites:**
   - standing-safe diagnostic execution for non-destructive endpoint checks;
   - governed Microsoft 365 / Entra security-posture reads;
@@ -590,7 +590,7 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Expected behavior:** Jason should parse a questionnaire, map each technical question to available governed evidence, perform only approved read-only verification, report exceptions rather than hiding them, identify questions that belong to the client/legal/insurance representative, and generate a draft answer key with evidence references and unresolved items. Jason must not sign, certify, or make business/legal representations on behalf of the insured.
 - **Learning behavior:** Any questionnaire item that cannot be verified because of a missing capability, provider read, or governance restriction should create or reference a Support List blocker rather than being guessed. Repeated questionnaire gaps should inform connector and documentation priorities.
 - **Decision owner:** Jason Governance Authority / Technology Steward
-- **Review trigger:** Begin implementation after SUPPORT-CAP-006 through SUPPORT-CAP-011 have defined owners and the first required read surfaces are available.
+- **Review trigger:** Begin bounded implementation only after the relevant TODO-CONN-005 through TODO-CONN-009 owners and required client-specific read surfaces are verified; do not treat the resolved SUPPORT-CAP-006 or a single AOT-scoped DNSFilter read as blanket acceptance. Retain separate, independently signed issue-scoped operational acceptance for any controller readmission.
 
 
 ### TODO-OPS-004 — Governed DRMM monitor suppression for known accepted conditions
@@ -719,7 +719,7 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-CONN-005 — Microsoft 365 / Entra security-posture reads
 
 - **Priority:** P1
-- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-04
+- **Status:** Implemented — production verified 2026-10-16T08:25:21+00:00; release release-e953b80949459dff; SHA e953b80949459dff3a61c3b92f81296c81c857b3
 - **Implementation state at approval:** In progress — governed Entra posture read code deployed; production acceptance blocked by current Microsoft app consent/profile
 - **Autonomous engineering readiness:** Approved
 - **Authority basis:** Owner approval on 2026-10-04 authorizes autonomous engineering only within this exact TODO scope; existing Jason governance, client/provider boundaries, protected-core release approval, financial authority, and disruptive-action controls remain unchanged.
@@ -733,7 +733,7 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Prerequisites:** least-privilege Microsoft Graph/Exchange read scopes, tenant isolation, evidence normalization, and sanitized acceptance fixtures.
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** When Microsoft 365 security-posture automation becomes an approved implementation priority.
-
+- **Implementation evidence:** Jason Release Manager release-e953b80949459dff reached closed; production SHA e953b80949459dff3a61c3b92f81296c81c857b3.
 ### TODO-CONN-006 — Client backup-posture reads / Datto Endpoint Backup API
 
 - **Priority:** P1
@@ -949,7 +949,7 @@ When complete, document the implementation, tests, capability changes, and remai
 ### TODO-GOV-001 — Technology Steward review automation
 
 - **Priority:** P2
-- **Status:** Approved for Autonomous Engineering — owner-approved 2026-10-08
+- **Status:** Implemented — production verified 2026-10-10T20:46:36+00:00; release release-566c39a7fcbcc4e3; SHA 566c39a7fcbcc4e3211857b6c276d3bf292e98a0
 - **Autonomous engineering readiness:** Approved — bounded first implementation only
 - **Risk level:** Low
 - **Idea:** Periodically review dependent platforms for new capabilities, API changes, deprecations, and opportunities to retire custom Jason functionality.
@@ -960,7 +960,7 @@ When complete, document the implementation, tests, capability changes, and remai
 - **Prerequisites:** dependency registry, defined review sources, review workflow, retirement criteria. The first bounded implementation may establish the minimal local registry/reporting primitives needed for read-only review but may not add new external credentials or write authority.
 - **Decision owner:** AOT Owner / Technology Steward
 - **Review trigger:** After the first production connectors are operational.
-
+- **Implementation evidence:** Jason Release Manager release-566c39a7fcbcc4e3 reached closed; production SHA 566c39a7fcbcc4e3211857b6c276d3bf292e98a0.
 ### TODO-GOV-002 — Capability retirement and deprecation process
 
 - **Priority:** P2
@@ -1100,6 +1100,29 @@ When complete, document the implementation, tests, capability changes, and remai
   6. No new write/disruptive authority is introduced by this change.
 - **Decision owner:** Jason Governance Authority / Technology Steward
 - **Review trigger:** Implement in the next GPT Insights quality pass and validate against existing Autotask tickets containing `GPT Insights` notes before production promotion.
+
+### TODO-OPS-013 — Approved device provisioning and service offload
+
+- **Priority:** P1
+- **Status:** Approved for Autonomous Engineering — AOT Owner authorized 2026-10-16; production provisioning not accepted
+- **Autonomous engineering readiness:** Approved — bounded implementation of reusable role-based provisioning, not broad command or production release authority
+- **Risk level:** High — remote machine management, distributed execution, secrets, reboots and host replacement
+- **Issue:** [#1459](https://github.com/al-teamaot-com/jason/issues/1459)
+- **Section Goal:** Jason can take a device explicitly approved by the Owner and attach a versioned, explicitly approved service/function/helper role, then provision, verify, monitor, maintain, self-repair, drain, recover, and replace that worker without repeated Owner intervention for routine non-disruptive changes inside the approved role.
+- **Approved pilot device:** Claw2-PC, Datto UID `13eda165-08e0-ec79-026a-985b37e2eb9e`, AOT site. Production host `aoteq-OptiPlex-3040` / Claw is expressly excluded. An unknown or newly proposed device requires exact owner enrollment first.
+- **Approved initial service role:** isolated development/ToDo engineering worker; no independent ticket, approval, policy, production-deployment or secret-broker authority.
+- **Authority basis:** AOT Owner's designation and exact-host permission on 2026-10-15; renewed broad **role-scoped** approved-device provisioning/maintenance/offload policy and autonomous engineering instruction on 2026-10-16. These authorizations cover implementation and allow routine governed, non-disruptive actions only after exact device + role/version enrollment and live security acceptance. They do not pre-authorize new tenants, new roles/services, extra privileges, generic ad-hoc shell without per-run approval, disruptive reboots, erasure or reimaging.
+- **Approved scope:** Define central enrolled-device/role registry and immutable role contract; verify host identity, production dependencies, OS/hardware/disk/partition/services; controlled enrollment and least-privilege credential management; deterministic, auditable role-specific provisioning/repair; persistent health/drift monitoring, maintenance, safe drain/rejoin, lease/fencing/checkpoint/rollback and replacement; integrate worker tasks with existing GitHub/Release Manager rather than adding a second management plane; return useful owner status and failures via Teams.
+- **Explicit exclusions:** production Claw; non-enrolled provider/tenant endpoints; unattended unbounded shell/eval; changes to unrelated hosts/services; production release credentials on workers; bypass of `direct_provider_access=false`, Central Orchestrator, exact grants, endpoint/ticket/provider boundaries, protected-branch checks or Release Manager; user-visible disruption or irreversible destructive work without separate exact approval.
+- **Required capabilities:** Governed DRMM device search/read/audit, component lookup and bounded component execution, exact job output, central policy/enrollment/identity, approved managed config/release, versioned desired-state evaluator, safe role operations, durable worker queue/leases/checkpointing, health/heartbeat/recheck, identity retirement and Teams reporting. Missing functionality is implementation scope, not a reason to silently stop.
+- **Dependencies / current blocker:** Linux shell input guard shipped in PR #1462 but Claw2-PC is not enrolled for production command execution; MCP/runtime worker UID is unset and live configured component scope omits Linux shell. Implement separately configured role/Server-scoped worker capability without breaking the existing Desktop diagnostic pilot. Do not force a container restart or manually inject environment variables; use exact-SHA Release Manager.
+- **Implementation workstreams:** (1) safe governed worker execution scope and managed enrollment/config (2) versioned approved role/desired-state provisioning (3) durable lease, checkpoint, work admission and service-offload orchestration (4) maintenance, self-heal, drain/reboot/recovery and replace (5) full live acceptance.
+- **Acceptance test:** On Claw2-PC verify exact identity, OS/hardware/disk/services and no production roles; reject wrong device, different tenant, unauthorized role, generic standing shell and missing approval before provider dispatch; prove idempotent role install and drift repair, task PR output, bounded retries, safe release/rollback, draining and resume, identity revocation and simulated replacement with no duplicate execution. Independently verify all mutations and active production source. Production Claw remains untouched.
+- **Definition of done:** Claw2-PC is `verified_ready` and completes a real approved isolated engineering ToDo; Jason proves repeatable rebuild/replacement, accurate state and self-reporting, persisted task lease/outputs, and no loss of release/credential/tenant isolation. Merge/CI alone is not done.
+- **Open questions:** None requiring another Owner decision for the bounded engineering design. New role, tenant, privileged permission or genuinely disruptive/destructive operation must produce a separate approval request instead of blocking already authorized safe engineering.
+- **Decision owner:** AOT Owner / Jason Architecture Authority
+- **Review trigger:** Continue immediately through the existing governed engineering queue; automatically resume non-disruptive dependency fixes under the approved scope. Stop only at a genuine new authority, security, provider or disruption gate.
+- **Canonical playbook:** `docs/playbooks/Jason-Approved-Device-Provisioning-and-Service-Offload.md`
 
 ### TODO-CONN-018 — Internet-accessible Jason Control Panel through the AOT AWS endpoint
 

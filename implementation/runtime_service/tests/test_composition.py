@@ -94,6 +94,7 @@ def _trusted_registry(root: Path) -> Path:
 def _settings(tmp_path: Path, *, ollama_model: str = "local-test") -> RuntimeSettings:
     return RuntimeSettings(
         authority_db=tmp_path / "authority.sqlite3",
+        playbook_owner_approval_policy=tmp_path / "playbook-owner-pilot.json",
         bindings_db=tmp_path / "bindings.sqlite3",
         continuation_db=tmp_path / "continuation.sqlite3",
         replay_db=tmp_path / "replay.sqlite3",
@@ -128,6 +129,171 @@ def test_production_composition_builds_and_serves_internal_health(tmp_path):
     assert (tmp_path / "replay.sqlite3").stat().st_mode & 0o777 == 0o600
     assert (tmp_path / "security.sqlite3").stat().st_mode & 0o777 == 0o600
     assert (tmp_path / "events.sqlite3").stat().st_mode & 0o777 == 0o600
+
+
+
+def test_playbook_approve_callback_remains_live_when_maintenance_is_split(tmp_path, monkeypatch):
+    """The HTTP process must consume genuine owner clicks, not spawn card producers."""
+    from datetime import datetime, timedelta, timezone
+
+    from autonomous_remediation.playbook_autonomy_approval import SQLitePlaybookAutonomyApprovalStore
+    from autonomous_remediation.playbook_autonomy_review import PlaybookAutonomyReviewService
+    from connectors.src.jason_connectors.approval_requests import (
+        ApprovalRequestService,
+        SQLiteApprovalRequestRepository,
+    )
+    from jason_runtime.maintenance_process import http_runtime_settings
+    from jason_runtime.playbook_autonomy_review import (
+        OwnerOnlyPlaybookAutonomyAuthority,
+        PlaybookAutonomyApprovalInteractionFlow,
+        PlaybookAutonomyReviewMaintenance,
+    )
+    from orchestrator.teams_identity_binding import MicrosoftIdentityBinding
+    from orchestrator.teams_identity_binding_sqlite import SQLiteMicrosoftIdentityBindingStore
+
+    monkeypatch.setattr(
+        "jason_runtime.composition.approval_owner_identities",
+        lambda: frozenset(),  # Reproduce production's empty shared owner list.
+    )
+    pilot = tmp_path / "playbook-owner-pilot.json"
+    pilot.write_text(json.dumps({
+        "schema_version": "1.0",
+        "organization_id": "aot",
+        "capability": "playbook.autonomy.promote",
+        "policy_mode": "owner_only_test",
+        "owner_identity_ids": ["person-owner"],
+        "allowed_requested_modes": ["promote:demo@1.0.0"],
+    }), encoding="utf-8")
+    pilot.chmod(0o600)
+    registry = tmp_path / "demo-registry.json"
+    registry.write_text(json.dumps({
+        "schema_version": 2,
+        "playbooks": [{
+            "id": "demo", "name": "Demonstration", "version": "1.0.0",
+            "lifecycle": "production", "enabled": True,
+            "source": "tests/no-provider.md", "review_status": "test_only",
+            "autonomy": {
+                "activation": "autonomous",
+                "required_gates": ["identity"],
+                "allowed_capabilities": ["service.ticket.note.create"],
+                "policy_id": "playbook-autonomy:demo",
+            },
+        }],
+    }), encoding="utf-8")
+    settings = replace(
+        _settings(tmp_path),
+        autonomy_review_enabled=True,
+        autonomy_playbook_registry=registry,
+        autonomy_review_db=tmp_path / "review.sqlite3",
+        autonomy_promotion_db=tmp_path / "promotions.sqlite3",
+        autonomy_review_audit_path=tmp_path / "review-audit.jsonl",
+    )
+    SQLiteMicrosoftIdentityBindingStore(settings.bindings_db).put(
+        MicrosoftIdentityBinding(
+            microsoft_tenant_id="tenant-a",
+            microsoft_object_id="object-owner",
+            jason_identity_id="person-owner",
+        )
+    )
+    serving = http_runtime_settings(settings)
+    assert serving.autonomy_review_enabled is False
+    assert serving.playbook_approval_ingress_enabled is True
+
+    application = build_runtime_application(serving)
+    dispatcher = application.ingress.ingress.approval_flow
+    assert isinstance(dispatcher.fallback, PlaybookAutonomyApprovalInteractionFlow)
+    assert dispatcher.fallback.approval_service.authority.owner_identity_ids == frozenset({"person-owner"})
+    assert dispatcher.fallback.approval_service.authority.allowed_requested_modes == frozenset({"promote:demo@1.0.0"})
+    assert not dispatcher.fallback.approval_service.authority.can_approve(
+        approver_identity_id="person-owner",
+        organization_id="aot", client_id=None,
+        capability="playbook.autonomy.promote",
+        requested_mode="promote:unrelated@1.0.0",
+    )
+    assert not any(
+        isinstance(item, PlaybookAutonomyReviewMaintenance)
+        for item in application.maintenance.services
+    ), "HTTP must never duplicate the scheduled approval request generator"
+
+    requests = SQLiteApprovalRequestRepository(settings.autonomy_review_db)
+    promotions = SQLitePlaybookAutonomyApprovalStore(settings.autonomy_promotion_db)
+    # Seed an independently preapproved scope; the pilot is explicitly
+    # forbidden to create new operational promotion authority.
+    from autonomous_remediation.playbook_autonomy_scope import registered_autonomy_scope
+    exact = registered_autonomy_scope(registry_path=registry, playbook_id="demo")
+    existing = promotions.new(
+        playbook_id=exact.playbook_id,
+        playbook_version=exact.playbook_version,
+        policy_id=exact.policy_id,
+        allowed_capabilities=exact.allowed_capabilities,
+        approved_by="person-owner",
+    )
+    promotions.put(existing)
+    review = PlaybookAutonomyReviewService(
+        registry_path=registry,
+        promotion_store=promotions,
+        owner_identity_ids=frozenset({"person-owner"}),
+        audit_path=settings.autonomy_review_audit_path,
+    )
+    service = ApprovalRequestService(
+        repository=requests,
+        authority=OwnerOnlyPlaybookAutonomyAuthority({"person-owner"}),
+    )
+    now = datetime.now(timezone.utc)
+    request = review.build_request(
+        playbook_id="demo", requested_by="svc-test-runner",
+        now=now, ttl=timedelta(minutes=5),
+    )
+    service.create(request, now=now)
+
+    # The exact HTTP composition, using its independent SQLite connection,
+    # rejects an unbound Microsoft actor while leaving the request pending.
+    import pytest
+    with pytest.raises(PermissionError, match="not bound"):
+        dispatcher.handle(
+            approval_id=request.approval_id,
+            decision="approve",
+            microsoft_tenant_id="tenant-a",
+            microsoft_object_id="object-unbound",
+            conversation_id="test-conversation",
+            channel_response_id="unbound-message",
+            decided_at=now + timedelta(seconds=20),
+        )
+    assert requests.get(request.approval_id).status.value == "pending"
+
+    accepted = dispatcher.handle(
+        approval_id=request.approval_id,
+        decision="approve",
+        microsoft_tenant_id="tenant-a",
+        microsoft_object_id="object-owner",
+        conversation_id="test-conversation",
+        channel_response_id="owner-message",
+        decided_at=now + timedelta(seconds=30),
+    )
+    assert accepted["status"] == "completed"
+    receipt = requests.accepted_decision(request.approval_id)
+    assert receipt is not None
+    assert receipt.status == "approved"
+    assert receipt.decided_by == "person-owner"
+    assert receipt.channel_response_id == "owner-message"
+    # The only resulting promotion is in the isolated test database. No
+    # provider action, production authority or real Teams message was touched.
+    assert len(promotions.list_all()) == 1
+    assert promotions.list_all()[0].approval_id == existing.approval_id
+
+    # A second button delivery cannot reuse the already-consumed approval.
+    with pytest.raises(ValueError, match="no longer pending"):
+        dispatcher.handle(
+            approval_id=request.approval_id,
+            decision="approve",
+            microsoft_tenant_id="tenant-a",
+            microsoft_object_id="object-owner",
+            conversation_id="test-conversation",
+            channel_response_id="replayed-owner-message",
+            decided_at=now + timedelta(seconds=40),
+        )
+    assert len(promotions.list_all()) == 1
+    assert requests.accepted_decision(request.approval_id).channel_response_id == "owner-message"
 
 
 def test_procurement_web_profile_seeds_exact_aot_observe_authority(tmp_path, monkeypatch):
@@ -528,3 +694,138 @@ def test_dnsfilter_policy_delete_acceptance_profile_registers_only_delete(
     assert active_mutations == {
         DNSFILTER_MCP_MUTATION_POLICY_DELETE_ACCEPTANCE_CAPABILITY
     }
+
+
+def test_canonical_teams_workflow_approval_dependency_is_registered_on_real_ingress(tmp_path):
+    """One existing Teams ingress, not another HTTP callback or approval bot."""
+    from types import SimpleNamespace
+    from jason_runtime.procurement_teams_flow import ApprovalInteractionDispatcher
+
+    observed=[]
+    def safe_handler(**arguments):
+        observed.append(arguments)
+        return {"status":"completed","executed":False}
+
+    handler=SimpleNamespace(handle=safe_handler)
+    app=build_runtime_application(
+        _settings(tmp_path),
+        teams_workflow_approval_handlers={"expenseapproval-":handler},
+    )
+    dispatcher=app.ingress.ingress.approval_flow
+    assert isinstance(dispatcher,ApprovalInteractionDispatcher)
+    assert dispatcher.workflow_routes=={"expenseapproval-":handler}
+    result=dispatcher.handle(approval_id="expenseapproval-exact-controlled")
+    assert result=={"status":"completed","executed":False}
+    assert len(observed)==1
+    assert observed[0]["approval_id"]=="expenseapproval-exact-controlled"
+    # Protected existing routes are never redirected into this hook.
+    import pytest
+    with pytest.raises(PermissionError,match="universal plan"):
+        dispatcher.handle(approval_id="planapproval-fake")
+    assert len(observed)==1
+
+
+def test_canonical_teams_workflow_extensions_cannot_override_legacy_approval_routes(tmp_path):
+    from types import SimpleNamespace
+    import pytest
+    handler=SimpleNamespace(handle=lambda **kwargs:{"status":"ignored"})
+    with pytest.raises(ValueError,match="overlapping"):
+        build_runtime_application(
+            _settings(tmp_path),
+            teams_workflow_approval_handlers={"procapproval-":handler},
+        )
+
+
+def test_owner_uat_is_not_registered_when_disabled(tmp_path):
+    """Default-off UAT adds no callback or issuer to real runtime composition."""
+    from jason_runtime.universal_interaction.owner_uat import APPROVAL_PREFIX
+    app = build_runtime_application(_settings(tmp_path))
+    dispatcher = app.ingress.ingress.approval_flow
+    assert APPROVAL_PREFIX not in dispatcher.workflow_routes
+    assert not any(
+        svc.__class__.__name__ == "OwnerUatMaintenance"
+        for svc in app.maintenance.services
+    )
+
+
+def test_owner_uat_registered_only_with_separately_enabled_nonexecuting_mode(tmp_path):
+    """One existing signed callback dispatcher and one existing worker cycle."""
+    from jason_runtime.universal_interaction.owner_uat import (
+        APPROVAL_PREFIX, OwnerUatDecisionFlow, OwnerUatMaintenance,
+    )
+    cfg = replace(
+        _settings(tmp_path),
+        owner_uat_mode="nonexecuting_test_only",
+        owner_uat_worker_enabled=True,
+        owner_uat_session_id="OneShot-October17",
+        release_mobile_approval_db=tmp_path / "existing-owner-approvals.db",
+    )
+    app = build_runtime_application(cfg)
+    dispatcher = app.ingress.ingress.approval_flow
+    assert isinstance(dispatcher.workflow_routes[APPROVAL_PREFIX], OwnerUatDecisionFlow)
+    maintenance = [m for m in app.maintenance.services
+                   if isinstance(m, OwnerUatMaintenance)]
+    assert len(maintenance) == 1
+    assert maintenance[0].session_id == "OneShot-October17"
+    assert maintenance[0].issuer.universal_interactions.channels["teams"].channel_id == "teams"
+    # Do NOT call tick: that would attempt a real gateway send.
+
+
+def test_owner_uat_invalid_environment_modes_fail_closed(tmp_path):
+    import pytest
+    settings = _settings(tmp_path)
+    for bad in (
+        {"owner_uat_mode": "production"},
+        {"owner_uat_worker_enabled": True},
+        {"owner_uat_mode": "nonexecuting_test_only", "owner_uat_session_id": ""},
+        {"owner_uat_mode": "nonexecuting_test_only",
+         "owner_uat_session_id": "../../../escape"},
+    ):
+        with pytest.raises(ValueError, match="UAT"):
+            replace(settings, **bad).validate()
+
+
+def test_owner_reviewed_teams_release_mode_requires_exact_v2_policy(tmp_path):
+    import pytest
+    from implementation.runtime_service.tests.test_mobile_release_approval import (
+        policy_file, reviewed_policy_file,
+    )
+
+    v1 = policy_file(tmp_path)
+    mobile_db = tmp_path / "owner-approvals.sqlite3"
+    release_root = tmp_path / "release-state"
+    cfg = replace(
+        _settings(tmp_path),
+        release_mobile_approval_mode="owner_reviewed",
+        release_mobile_approval_policy=v1,
+        release_mobile_approval_db=mobile_db,
+        release_mobile_state_root=release_root,
+    )
+    cfg.validate()
+    with pytest.raises(PermissionError, match="mode and reviewed policy version"):
+        build_runtime_application(cfg)
+
+    v2 = reviewed_policy_file(tmp_path)
+    cfg = replace(cfg, release_mobile_approval_policy=v2)
+    app = build_runtime_application(cfg)
+    # A new Teams policy neither enables broad UTA nor issues a card by itself.
+    assert app is not None
+    assert cfg.universal_approval_mode == "off"
+    assert release_root.joinpath("mobile-release-offers").is_dir() is False
+
+
+def test_legacy_owner_pilot_refuses_silent_v2_risk_policy_upgrade(tmp_path):
+    import pytest
+    from implementation.runtime_service.tests.test_mobile_release_approval import (
+        reviewed_policy_file,
+    )
+    cfg = replace(
+        _settings(tmp_path),
+        release_mobile_approval_mode="owner_only_pilot",
+        release_mobile_approval_policy=reviewed_policy_file(tmp_path),
+        release_mobile_approval_db=tmp_path / "owner-pilot.sqlite3",
+        release_mobile_state_root=tmp_path / "release-state",
+    )
+    cfg.validate()
+    with pytest.raises(PermissionError, match="mode and reviewed policy version"):
+        build_runtime_application(cfg)

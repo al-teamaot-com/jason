@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from issue_resolution_engine import acceptance_text, correlate_failures, update_recurrence_memory
+from jason_host_storage_health import storage_capacity_failures
 
 DEFAULT_ROOT = Path("/var/lib/jason/openclaw/self-heal")
 HEALTH_URL = "http://127.0.0.1:9467/metrics"
@@ -42,6 +43,9 @@ ROOT_HOST_RECONCILER = Path("/usr/local/lib/jason/release_host_reconcile_worker.
 SCHEDULED_ARTIFACTS = (
     ("support_repair_worker", "tools/support_repair_host_worker.py", Path.home() / ".local/lib/jason/support_repair_host_worker.py"),
     ("owner_approved_development_worker", "tools/owner_approved_development_worker.py", Path.home() / ".local/lib/jason/owner_approved_development_worker.py"),
+    ("engineering_supervisor", "tools/engineering_supervisor.py", Path.home() / ".local/lib/jason/engineering_supervisor.py"),
+    ("release_breaker_recovery_manager", "tools/release_breaker_recovery_manager.py", Path.home() / ".local/lib/jason/release_breaker_recovery_manager.py"),
+    ("engineering_evidence_tools", "tools/engineering_evidence_tools.py", Path.home() / ".local/lib/jason/engineering_evidence_tools.py"),
     ("todo_engineering_intake", "tools/todo_engineering_intake.py", Path.home() / ".local/lib/jason/todo_engineering_intake.py"),
     ("todo_release_bridge", "tools/todo_release_bridge.py", Path.home() / ".local/lib/jason/todo_release_bridge.py"),
     ("self_heal_watchdog", "tools/jason_self_heal_watchdog.py", Path.home() / ".local/lib/jason/jason_self_heal_watchdog.py"),
@@ -267,7 +271,13 @@ def production_convergence_failures(
     automatic_window = production.get("automatic_window") if isinstance(production.get("automatic_window"), Mapping) else {}
     evidence["release_manager_policy_schedule"] = dict(schedule)
     evidence["development_release_automatic_window"] = dict(automatic_window)
-    if str(schedule.get("mode") or "").casefold() != "continuous_24x7":
+    # The production policy explicitly records the AOT owner's 24x7
+    # authorization. Both the canonical mode and this exact owner-approved
+    # mode denote continuous operation, not a legacy daily window.
+    if str(schedule.get("mode") or "").casefold() not in {
+        "continuous_24x7",
+        "continuous_24x7_owner_approved",
+    }:
         failures.append("production_convergence_intent_contradiction:release_policy_not_24x7")
     if "daily_window_local" in schedule:
         failures.append("production_convergence_intent_contradiction:legacy_daily_window_present")
@@ -460,8 +470,12 @@ def autonomy_behavior_anomalies(
             failures.append(f"autonomy_invariant_violation:eligible_gt_evaluated:{cycle}")
         if numeric["selected"] > numeric["eligible"]:
             failures.append(f"autonomy_invariant_violation:selected_gt_eligible:{cycle}")
-        if numeric["selected"] > numeric["active_slots"]:
-            failures.append(f"autonomy_invariant_violation:selected_gt_active_slots:{cycle}")
+        # active_slots is the currently occupied slot count at scan
+        # completion, not admission capacity at decision time. Successfully
+        # started work can finish or move to WAITING in this scan. Comparing
+        # selected starts to post-scan occupancy creates false P0 incidents.
+        # The true admission bound remains enforced at each _admit() and
+        # preserved in the worker's own max_active_work_items checks.
 
     # Generic behavioral baseline: compare recent selection efficiency with Jason's
     # own older healthy-looking cycles instead of hard-coding a particular failure.
@@ -656,6 +670,13 @@ def detect(root: Path = DEFAULT_ROOT) -> tuple[list[str], dict[str, Any]]:
     evidence["production_convergence"] = convergence_evidence
     failures.extend(convergence_failures)
 
+    # Existing five-minute watchdog: independent root and archive capacity,
+    # with allocatable-space and inode headroom. Informational detection only;
+    # never triggers deletion, cache prune, container shutdown or provider write.
+    storage_failures, storage_evidence = storage_capacity_failures()
+    evidence["host_storage_capacity"] = storage_evidence
+    failures.extend(storage_failures)
+
     failed_units = failed_jason_user_units()
     evidence["failed_jason_user_units"] = failed_units
     for unit in failed_units:
@@ -773,7 +794,10 @@ def queue_resolution_incident(root: Path, incident: Mapping[str, Any], evidence:
     }
     path = root / "incidents" / f"{fp}.json"
     atomic_json(path, payload)
-    run(["systemctl", "--user", "start", "--no-block", "jason-support-repair-worker.service"], timeout=10)
+    # Disk capacity is an owner-reviewed host-maintenance decision, not a
+    # grant to the engineering worker to remove caches or rollback artifacts.
+    if str(incident.get("family")) != "host_storage_capacity":
+        run(["systemctl", "--user", "start", "--no-block", "jason-support-repair-worker.service"], timeout=10)
     return path
 
 
@@ -790,7 +814,14 @@ def write_incident_escalation(root: Path, *, incident: Mapping[str, Any], attemp
         "degraded_function": str(incident.get("title") or ", ".join(symptoms))[:240],
         "evidence_summary": "; ".join(symptoms)[:600],
         "attempt_summary": ("; ".join(actions) or "bounded automatic recovery produced no safe action")[:600],
-        "owner_action": "A genuine authority or disruptive-action boundary remains; review only that specific blocked action.",
+        "owner_action": (
+            "Review root/archive capacity, then explicitly approve bounded storage "
+            "cleanup or relocation. Preserve running containers, active worktrees, "
+            "Docker volumes, immutable rollback images, backups and approval data; "
+            "require independent free-space readback."
+            if str(incident.get("family")) == "host_storage_capacity"
+            else "A genuine authority or disruptive-action boundary remains; review only that specific blocked action."
+        ),
         "repair_level": int(repair.get("level") or 4),
         "repair_class": str(repair.get("name") or "external_or_authority_blocker"),
         "attempts": attempts,
@@ -828,6 +859,28 @@ def write_escalation(
     return path
 
 
+def bounded_detect(root: Path) -> tuple[list[str], dict[str, Any]]:
+    """Represent a timed-out read-only probe as unknown, never as healthy/down.
+
+    The ordinary bounded verification pass may retry once, but no restart or
+    container start is authorized from timing uncertainty alone. Persist
+    uncertainty if it remains unresolved rather than failing the systemd unit
+    with an uncaught subprocess exception.
+    """
+    try:
+        return detect(root)
+    except subprocess.TimeoutExpired as exc:
+        command = list(exc.cmd) if isinstance(exc.cmd, (list, tuple)) else [str(exc.cmd)]
+        if len(command) < 2 or command[0] != 'docker' or command[1] not in ('inspect', 'exec'):
+            raise
+        return ['docker_probe_timeout'], {
+            'probe_status': 'inconclusive',
+            'probe_command': command[:3],
+            'timeout_seconds': exc.timeout,
+            'observed_at': now(),
+        }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
@@ -838,7 +891,25 @@ def main() -> int:
     memory_path = root / "issue-memory.json"
     state = read_json(state_path)
 
-    failures, evidence = detect(root)
+    failures, evidence = bounded_detect(root)
+    # The detector remains read-only. A distinct, Owner-authorized and strictly
+    # allowlisted repair routine may archive only clean detached merged Git
+    # worktrees when the second physical filesystem has safe headroom.
+    # This executes only in the installed production watchdog, never tests or
+    # arbitrary local roots, and never manipulates live audit/SQLite services.
+    storage_repair = None
+    if root == DEFAULT_ROOT and any(
+            f.startswith('host_storage_capacity_') for f in failures):
+        try:
+            from jason_storage_autorepair import repair as bounded_storage_repair
+            storage_repair = bounded_storage_repair()
+            if (storage_repair.get('archived_count', 0)
+                    or storage_repair.get('cache_reclaimed_bytes', 0)):
+                failures, evidence = bounded_detect(root)
+            evidence['host_storage_autorepair'] = storage_repair
+        except (OSError,ValueError,RuntimeError,subprocess.TimeoutExpired) as exc:
+            evidence['host_storage_autorepair'] = {
+                'status':'blocked','error_type':type(exc).__name__}
     if not failures:
         update_recurrence_memory(memory_path, [])
         atomic_json(state_path, {
@@ -857,7 +928,7 @@ def main() -> int:
     if attempts < max(1, int(args.max_attempts)):
         actions = bounded_recovery(failures)
         attempts += 1
-        failures_after, evidence_after = detect(root)
+        failures_after, evidence_after = bounded_detect(root)
         if not failures_after:
             update_recurrence_memory(memory_path, [])
             atomic_json(state_path, {
@@ -882,7 +953,14 @@ def main() -> int:
         incident_path = queue_resolution_incident(root, incident, evidence)
         incident_paths.append(str(incident_path))
         repair = incident.get("repair") if isinstance(incident.get("repair"), Mapping) else {}
-        if attempts >= max(1, int(args.max_attempts)) and bool(repair.get("requires_owner_action")):
+        # No repeating owner approval prompts while this known-safe archival
+        # process is making measurable progress and the other disk is healthy.
+        autorepair_progress = (str(incident.get('family')) == 'host_storage_capacity'
+                               and isinstance(storage_repair, dict)
+                               and (int(storage_repair.get('archived_count') or 0) > 0
+                                    or int(storage_repair.get('cache_reclaimed_bytes') or 0) > 0))
+        if (not autorepair_progress and attempts >= max(1, int(args.max_attempts))
+                and bool(repair.get("requires_owner_action"))):
             escalation = write_incident_escalation(
                 root, incident=incident, attempts=attempts, actions=actions
             )

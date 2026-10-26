@@ -17,6 +17,7 @@ from connectors.microsoft_graph.directory_connector import MicrosoftGraphDirecto
 from connectors.microsoft_graph.mailbox_connector import MicrosoftGraphMailboxConnector
 from connectors.microsoft_graph.security_posture import MicrosoftGraphSecurityPostureReader
 from connectors.microsoft_graph.security_posture_connector import MicrosoftGraphSecurityPostureConnector
+from kernel.client_boundaries import SQLiteClientBoundaryRepository
 from kernel.capabilities import CapabilityRegistryService
 from kernel.execution_providers import ExecutionProviderRegistryService
 from orchestrator.autotask_information_authorizer import (
@@ -83,6 +84,7 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_PRODUCT_SEARCH,
     SERVICE_PRODUCT_READ,
     SERVICE_PRODUCT_VENDOR_SEARCH,
+    SERVICE_INVENTORY_ITEM_SEARCH,
     SERVICE_SERVICE_SEARCH,
     SERVICE_SERVICE_READ,
     SERVICE_SERVICE_BUNDLE_SEARCH,
@@ -166,6 +168,7 @@ _PROVIDER_CAPABILITY_MAP = {
     (AUTOTASK_PROVIDER, SERVICE_PRODUCT_SEARCH): "autotask.entity.query",
     (AUTOTASK_PROVIDER, SERVICE_PRODUCT_READ): "autotask.entity.get",
     (AUTOTASK_PROVIDER, SERVICE_PRODUCT_VENDOR_SEARCH): "autotask.entity.query",
+    (AUTOTASK_PROVIDER, SERVICE_INVENTORY_ITEM_SEARCH): "autotask.entity.query",
     (AUTOTASK_PROVIDER, SERVICE_SERVICE_SEARCH): "autotask.entity.query",
     (AUTOTASK_PROVIDER, SERVICE_SERVICE_READ): "autotask.entity.get",
     (AUTOTASK_PROVIDER, SERVICE_SERVICE_BUNDLE_SEARCH): "autotask.entity.query",
@@ -451,6 +454,7 @@ def build_provider_read_invoker(
         microsoft_directory = runtime_microsoft_directory_from_env(transport=transport)
         directory_connector = MicrosoftGraphDirectoryConnector(
             directory=microsoft_directory.directory, bindings=raw_microsoft_bindings, audit=audit,
+            canary_boundaries=SQLiteClientBoundaryRepository(microsoft_directory.store),
         )
         posture_connector = MicrosoftGraphSecurityPostureConnector(
             reader=MicrosoftGraphSecurityPostureReader(tokens=microsoft_directory.directory.tokens, transport=transport),

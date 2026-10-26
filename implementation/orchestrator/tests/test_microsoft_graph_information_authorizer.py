@@ -14,6 +14,7 @@ from orchestrator.microsoft_graph_information_authorizer import (
     MicrosoftGraphInformationAuthorizer,
 )
 from orchestrator.provider_read_capability_catalog import (
+    COMMUNICATION_MAIL_MESSAGE_SEARCH,
     IDENTITY_USER_READ,
     IDENTITY_USER_SEARCH,
     MICROSOFT_GRAPH_PROVIDER,
@@ -101,6 +102,27 @@ def test_bound_authorized_human_can_receive_governed_entra_user_search():
     assert release.allowed is True
     assert "trusted_microsoft_identity_binding" in release.authorization_basis
     assert "validated_microsoft_tenant_boundary" in release.authorization_basis
+    assert "central_orchestrator_governed_read" in release.authorization_basis
+
+
+def test_bound_authorized_human_can_receive_governed_microsoft_mail_search():
+    invocation = MicrosoftGraphInformationAuthorizer(
+        delegate=Delegate(
+            {
+                "provider": MICROSOFT_GRAPH_PROVIDER,
+                "data": {"items": [{"id": "mail-1", "subject": "Security notice"}]},
+            }
+        ),
+        bindings=Bindings(),
+    ).invoke(
+        request=request(COMMUNICATION_MAIL_MESSAGE_SEARCH),
+        resolution=resolution(COMMUNICATION_MAIL_MESSAGE_SEARCH),
+    )
+
+    release = invocation.information_authorization.require_allowed(InformationAction.RELEASE)
+    assert release.allowed is True
+    assert "microsoft_graph_mail_read" in release.authorization_basis
+    assert "trusted_microsoft_identity_binding" in release.authorization_basis
     assert "central_orchestrator_governed_read" in release.authorization_basis
 
 

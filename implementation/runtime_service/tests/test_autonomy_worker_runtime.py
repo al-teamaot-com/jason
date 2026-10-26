@@ -6295,3 +6295,101 @@ def test_gpt_insights_v021_runs_even_when_promoted_remediation_playbook_matches(
         for _, capability, args in actions.calls
     )
     store.close()
+
+
+def test_backupiq_progress_percent_rejects_unverified_status_and_bad_values():
+    from jason_runtime.autonomy_worker_runtime import OperationalAutonomyMaintenance
+    parse = OperationalAutonomyMaintenance._backupiq_progress_percent
+    assert parse({"status": "inprogress"}) is None
+    assert parse({"progressPercent": "unknown"}) is None
+    assert parse({"progressPercent": True}) is None
+    assert parse({"progressPercent": -1}) is None
+    assert parse({"progressPercent": 101}) is None
+    assert parse({"progressPercent": "24.5"}) == 24.5
+    assert parse({"percentComplete": 0}) == 0.0
+    assert parse({"percentComplete": 100}) == 100.0
+    assert parse({"progressPercentage": "NaN"}) is None
+
+
+def test_ticket_lifecycle_cards_suppress_status_flapping_and_repeat_completion():
+    class FingerprintStore:
+        def __init__(self):
+            self.values = {}
+
+        def last_note_fingerprint(self, ticket_id, playbook_id, title):
+            return self.values.get((ticket_id, playbook_id, title))
+
+        def remember_note_fingerprint(self, ticket_id, playbook_id, title, fingerprint):
+            self.values[(ticket_id, playbook_id, title)] = fingerprint
+
+    sends = []
+    worker = object.__new__(OperationalAutonomyMaintenance)
+    worker.store = FingerprintStore()
+    worker.completion_notifier = SimpleNamespace(send=lambda event, **kw: sends.append(event))
+    work = SimpleNamespace(ticket_id=142415, playbook_id="backupiq_endpoint_backup", ticket_number="T20261011.0011", hostname="RBH-50940", title="BackupIQ")
+    for status in ("In Progress", "On Hold", "In Progress", "Waiting Device Access"):
+        worker._notify_ticket_event(work, "status_change", status)
+    assert sends == []
+    worker._notify_ticket_event(work, "pickup", "In Progress")
+    worker._notify_ticket_event(work, "pickup", "In Progress")
+    worker._notify_ticket_event(work, "status_change", "Complete")
+    worker._notify_ticket_event(work, "status_change", "On Hold")
+    worker._notify_ticket_event(work, "status_change", "Complete")
+    assert sends == ["work_started", "work_completed"]
+
+
+def test_deborah_gittens_backupiq_progress_never_spams_teams():
+    class FingerprintStore:
+        def __init__(self):
+            self.values = {}
+
+        def last_note_fingerprint(self, ticket_id, playbook_id, title):
+            return self.values.get((ticket_id, playbook_id, title))
+
+        def remember_note_fingerprint(self, ticket_id, playbook_id, title, fingerprint):
+            self.values[(ticket_id, playbook_id, title)] = fingerprint
+
+    store = FingerprintStore()
+    sends = []
+    worker = object.__new__(OperationalAutonomyMaintenance)
+    worker.store = store
+    worker.completion_notifier = SimpleNamespace(send=lambda event, **kwargs: sends.append((event, kwargs)))
+    work = SimpleNamespace(
+        ticket_id=141004, playbook_id="backupiq_endpoint_backup",
+        ticket_number="T20261011.0004", hostname="DGV-50859",
+        title="BackupIQ: Backup for asset is not available",
+    )
+    for status in ("In Progress", "On Hold", "In Progress", "Waiting Device Access", "In Progress"):
+        worker._notify_ticket_event(work, "status_change", status)
+    assert sends == []
+    worker._notify_ticket_event(work, "pickup", "In Progress")
+    worker._notify_ticket_event(work, "pickup", "In Progress")
+    for status in ("On Hold", "In Progress", "In Progress"):
+        worker._notify_ticket_event(work, "status_change", status)
+    assert [event for event, _ in sends] == ["work_started"]
+    worker._notify_ticket_event(work, "status_change", "Complete")
+    worker._notify_ticket_event(work, "status_change", "Complete")
+    assert [event for event, _ in sends] == ["work_started", "work_completed"]
+    assert "DGV-50859" in sends[-1][1]["summary"]
+    assert "Completed by Jason" in sends[-1][1]["summary"]
+
+
+def test_legacy_pickup_fingerprint_does_not_resend_on_upgrade():
+    import hashlib
+
+    class FingerprintStore:
+        def last_note_fingerprint(self, ticket_id, playbook_id, title):
+            if title == "Teams - Ticket Activity - pickup":
+                return hashlib.sha256(b"teams-ticket-v1|pickup|T20261011.0004|In Progress").hexdigest()
+            return None
+
+    sends = []
+    worker = object.__new__(OperationalAutonomyMaintenance)
+    worker.store = FingerprintStore()
+    worker.completion_notifier = SimpleNamespace(send=lambda event, **kwargs: sends.append(event))
+    work = SimpleNamespace(
+        ticket_id=141004, playbook_id="backupiq_endpoint_backup",
+        ticket_number="T20261011.0004", hostname="DGV-50859", title="BackupIQ",
+    )
+    worker._notify_ticket_event(work, "pickup", "In Progress")
+    assert sends == []

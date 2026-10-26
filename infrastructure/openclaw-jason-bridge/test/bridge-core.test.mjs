@@ -351,3 +351,49 @@ test("approval interactions preserve bounded card selections", () => {
     requested_window: "02:30",
   });
 });
+
+
+test("queued universal approval never renders as failed or completed execution", () => {
+  const reply=replyForRuntimeResult({httpStatus:200,payload:{status:"approved",executed:false,
+    reply:{text:"Approval recorded. Jason has queued the reviewed plan for execution."}}});
+  assert.equal(reply,"Approval recorded. Jason has queued the reviewed plan for execution.");
+  assert.doesNotMatch(reply,/could not safely|completed the request/i);
+});
+
+
+test('authenticated SDK callback reply-to is signed evidence, not caller authority', () => {
+  const value = buildConversationEnvelope({
+    text: 'Jason approval response',
+    microsoftTenantId: tenantId, microsoftObjectId: objectId,
+    conversationId: 'conversation-1', messageId: 'message-1',
+    keyId: 'gateway-key',
+    interaction: {
+      kind: 'approval.submit', approval_id: 'planapproval-1',
+      decision: 'approve', selections: { card_challenge: 'a'.repeat(48) },
+      channel_response_id: 'message-1',
+      callback_reply_to_id: 'f:original-teams-card-123',
+    },
+  });
+  assert.equal(value.interaction.callback_reply_to_id,'f:original-teams-card-123');
+  const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+  const signed = signConversationEnvelope(value,privateKey);
+  assert.ok(verify(null, canonicalSignedPayload(signed), publicKey,
+    Buffer.from(signed.signature,'base64')));
+  signed.interaction.callback_reply_to_id='f:changed';
+  assert.equal(verify(null, canonicalSignedPayload(signed), publicKey,
+    Buffer.from(signed.signature,'base64')),false);
+});
+
+
+test('malformed SDK callback reply-to cannot be signed as approval evidence', () => {
+  for (const value of ['', 'bad\nheader', 'x'.repeat(257), {}, 123]) {
+    assert.throws(() => buildConversationEnvelope({
+      text:'Jason approval response', microsoftTenantId:tenantId,
+      microsoftObjectId:objectId, conversationId:'conversation-1',
+      messageId:'message-1', keyId:'gateway-key',
+      interaction:{kind:'approval.submit',approval_id:'planapproval-1',
+        decision:'approve',channel_response_id:'message-1',
+        callback_reply_to_id:value},
+    }), /reply-to ID is invalid/);
+  }
+});

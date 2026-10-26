@@ -279,17 +279,34 @@ def test_generic_invariant_selected_cannot_exceed_eligible(tmp_path):
     assert evidence["cycles"][0]["cycle_id"] == "c1"
 
 
-def test_generic_invariant_selected_cannot_exceed_active_slots(tmp_path):
+def test_completed_or_waiting_admission_does_not_trigger_false_slot_invariant(tmp_path):
     db = tmp_path / "behavior.sqlite3"
     now_iso = datetime.now(timezone.utc).isoformat()
+    # One eligible candidate was admitted and immediately transitioned to
+    # completion/waiting, leaving zero occupied slots at scan completion.
     _create_behavior_db(
         db,
-        [("c2", now_iso, 4, 4, 0, 0, 0, 1, 2, 0, 0)],
+        [("c2", now_iso, 4, 1, 0, 0, 0, 0, 1, 0, 0)],
     )
 
     failures, evidence = module.autonomy_behavior_anomalies(db)
 
-    assert any("selected_gt_active_slots" in item for item in failures)
+    assert failures == []
+    assert evidence["cycles"][0]["selected"] == 1
+    assert evidence["cycles"][0]["active_slots"] == 0
+
+
+def test_true_over_selection_still_fails_closed(tmp_path):
+    db = tmp_path / "behavior.sqlite3"
+    now_iso = datetime.now(timezone.utc).isoformat()
+    _create_behavior_db(
+        db,
+        [("c2", now_iso, 4, 1, 0, 0, 0, 0, 2, 0, 0)],
+    )
+
+    failures, evidence = module.autonomy_behavior_anomalies(db)
+
+    assert any("selected_gt_eligible" in item for item in failures)
     assert evidence["cycles"][0]["cycle_id"] == "c2"
 
 
@@ -406,6 +423,44 @@ def test_production_convergence_accepts_exact_live_release(tmp_path, monkeypatch
     assert failures == []
     assert evidence["desired_revision"] == revision
     assert evidence["release_manager_timer_active"] is True
+
+
+def test_production_convergence_accepts_owner_approved_24x7_policy(tmp_path, monkeypatch):
+    revision = "a" * 40
+    releases = tmp_path / "releases"
+    release = _write_release_manager_fixture(releases, revision)
+    policy_path = release / "config/release-manager-policy.json"
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
+    policy["schedule"]["mode"] = "continuous_24x7_owner_approved"
+    policy_path.write_text(json.dumps(policy), encoding="utf-8")
+
+    installed = tmp_path / "installed"
+    installed.mkdir()
+    source_link = installed / "release-manager-source"
+    source_link.symlink_to(release, target_is_directory=True)
+    runner = installed / "release_manager_host_runner.py"
+    timer = installed / "jason-release-manager.timer"
+    runner.write_bytes((release / "tools/release_manager_host_runner.py").read_bytes())
+    timer.write_bytes(
+        (release / "infrastructure/openclaw-operations/systemd/user/jason-release-manager.timer").read_bytes()
+    )
+
+    monkeypatch.setattr(module, "_container_source_revision", lambda name: revision)
+    monkeypatch.setattr(
+        module,
+        "run",
+        lambda args, **kwargs: SimpleNamespace(returncode=0, stdout="active\n", stderr=""),
+    )
+
+    failures, evidence = module.production_convergence_failures(
+        release_manager_source_link=source_link,
+        installed_runner=runner,
+        installed_timer=timer,
+        releases_root=releases,
+    )
+
+    assert failures == []
+    assert evidence["release_manager_policy_schedule"]["mode"] == "continuous_24x7_owner_approved"
 
 
 def test_production_convergence_detects_stale_installed_release(tmp_path, monkeypatch):
@@ -695,3 +750,77 @@ def test_production_convergence_detects_scheduled_worker_drift(tmp_path, monkeyp
     assert "production_convergence_scheduled_artifact_drift:self_heal_watchdog" in failures
     assert evidence["engineering_source_revision"] == revision
     assert evidence["current_release"] == str(release.resolve())
+
+
+
+def test_docker_probe_timeout_is_inconclusive_and_never_triggers_restart(monkeypatch, tmp_path):
+    import subprocess
+    def timeout_probe(root):
+        raise subprocess.TimeoutExpired(['docker', 'exec', 'jason-mcp-pilot'], 20)
+    monkeypatch.setattr(module, 'detect', timeout_probe)
+    failures, evidence = module.bounded_detect(tmp_path)
+    assert failures == ['docker_probe_timeout']
+    assert evidence['probe_status'] == 'inconclusive'
+    assert evidence['probe_command'] == ['docker', 'exec', 'jason-mcp-pilot']
+    assert evidence['timeout_seconds'] == 20
+    monkeypatch.setattr(module, 'run', lambda *a, **kw: (
+        (_ for _ in ()).throw(AssertionError('unexpected disruptive action'))))
+    assert module.bounded_recovery(failures) == []
+
+
+def test_watchdog_transient_probe_timeout_recovers_on_second_read(monkeypatch, tmp_path):
+    import subprocess
+    import sys
+    sequence = iter([
+        subprocess.TimeoutExpired(['docker', 'inspect', 'jason-runtime'], 10),
+        ([], {'verified': True}),
+    ])
+    def probe(root):
+        observation = next(sequence)
+        if isinstance(observation, Exception):
+            raise observation
+        return observation
+    monkeypatch.setattr(module, 'detect', probe)
+    monkeypatch.setattr(module, 'run', lambda *a, **kw: (
+        (_ for _ in ()).throw(AssertionError('unexpected provider or container action'))))
+    monkeypatch.setattr(sys, 'argv', ['watchdog', '--root', str(tmp_path)])
+    assert module.main() == 0
+    data = json.loads((tmp_path / 'state.json').read_text())
+    assert data['state'] == 'recovered'
+    assert data['verification'] == 'original detector rerun passed with no remaining failures'
+    assert data['recovery_actions'] == []
+
+
+
+def test_non_docker_or_mutating_timeout_is_not_misclassified(monkeypatch, tmp_path):
+    import pytest
+    import subprocess
+    for command in (['git', 'fetch'], ['docker', 'restart', 'jason-runtime']):
+        def timeout_probe(root):
+            raise subprocess.TimeoutExpired(command, 20)
+        monkeypatch.setattr(module, 'detect', timeout_probe)
+        with pytest.raises(subprocess.TimeoutExpired):
+            module.bounded_detect(tmp_path)
+
+
+def test_repeated_docker_probe_timeout_persists_inconclusive_failure(monkeypatch, tmp_path):
+    import subprocess
+    import sys
+    def timeout_probe(root):
+        raise subprocess.TimeoutExpired(['docker', 'exec', 'jason-mcp-pilot'], 20)
+    monkeypatch.setattr(module, 'detect', timeout_probe)
+    support_notifications = []
+    def permitted_run(args, **kwargs):
+        assert args == ['systemctl', '--user', 'start', '--no-block',
+                        'jason-support-repair-worker.service']
+        support_notifications.append(args)
+        return SimpleNamespace(returncode=0, stdout='', stderr='')
+    monkeypatch.setattr(module, 'run', permitted_run)
+    monkeypatch.setattr(sys, 'argv', ['watchdog', '--root', str(tmp_path)])
+    assert module.main() == 0
+    assert support_notifications
+    data = json.loads((tmp_path / 'state.json').read_text())
+    assert data['state'] != 'healthy'
+    assert data['state'] != 'recovered'
+    assert data['failures'] == ['docker_probe_timeout']
+    assert data['last_recovery_actions'] == []

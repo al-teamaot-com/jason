@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Mapping, Sequence
 
 from .provider_capability_discovery import ProviderCapabilityDiscoveryAssessment
 
@@ -45,6 +45,44 @@ class ProviderDocumentationReviewPlan:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderDocumentationReviewFinding:
+    provider_id: str
+    documentation_source: str
+    evidence_reference: str
+    finding_type: str
+    summary: str
+    evidence: Mapping[str, object]
+
+    def as_context(self) -> Mapping[str, object]:
+        return {
+            "provider_id": self.provider_id,
+            "documentation_source": self.documentation_source,
+            "evidence_reference": self.evidence_reference,
+            "finding_type": self.finding_type,
+            "summary": self.summary,
+            "evidence": dict(self.evidence),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderDocumentationReviewReport:
+    review_only: bool
+    governance_owner: str
+    deterministic_source_inventory: tuple[Mapping[str, object], ...]
+    findings: tuple[ProviderDocumentationReviewFinding, ...]
+    interpretation_rule: str
+
+    def as_context(self) -> Mapping[str, object]:
+        return {
+            "review_only": self.review_only,
+            "governance_owner": self.governance_owner,
+            "deterministic_source_inventory": self.deterministic_source_inventory,
+            "findings": tuple(item.as_context() for item in self.findings),
+            "interpretation_rule": self.interpretation_rule,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class GovernedProviderDocumentationReviewPlanner:
     """Turn registered-provider discovery into bounded documentation review targets.
 
@@ -80,3 +118,56 @@ class GovernedProviderDocumentationReviewPlanner:
             )
         )
         return ProviderDocumentationReviewPlan(targets=tuple(targets))
+
+
+@dataclass(frozen=True, slots=True)
+class GovernedTechnologyStewardReviewRunner:
+    """Read-only Technology Steward review runner.
+
+    The runner consumes a bounded inventory of review targets and emits an advisory report.
+    It does not mutate providers, credentials, registries, or client systems.
+    """
+
+    governance_owner: str = "technology-steward"
+
+    def run(
+        self,
+        *,
+        review_plan: ProviderDocumentationReviewPlan,
+    ) -> ProviderDocumentationReviewReport:
+        inventory = tuple(
+            {
+                "provider_id": target.provider_id,
+                "documentation_source": target.documentation_source,
+                "evidence_reference": self._evidence_reference(target),
+            }
+            for target in review_plan.targets
+        )
+        findings = tuple(
+            ProviderDocumentationReviewFinding(
+                provider_id=target.provider_id,
+                documentation_source=target.documentation_source,
+                evidence_reference=self._evidence_reference(target),
+                finding_type="candidate_evidence",
+                summary=(
+                    "Documentation review identified a candidate source for advisory analysis only."
+                ),
+                evidence={
+                    "unsupported_facts": target.unsupported_facts,
+                    "resource_authority": target.resource_authority,
+                    "connector_id": target.connector_id,
+                },
+            )
+            for target in review_plan.targets
+        )
+        return ProviderDocumentationReviewReport(
+            review_only=True,
+            governance_owner=self.governance_owner,
+            deterministic_source_inventory=inventory,
+            findings=findings,
+            interpretation_rule=review_plan.interpretation_rule,
+        )
+
+    @staticmethod
+    def _evidence_reference(target: ProviderDocumentationReviewTarget) -> str:
+        return f"{target.provider_id}::{target.documentation_source}"

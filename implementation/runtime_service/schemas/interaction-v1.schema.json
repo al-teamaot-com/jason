@@ -1,0 +1,288 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema://jason/universal-interaction/1.0",
+  "title": "Jason Universal Interaction v1 (presentation; never authority)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "interaction_id",
+    "workflow",
+    "correlation_id",
+    "organization_id",
+    "requester_identity_id",
+    "kind",
+    "title",
+    "summary",
+    "visual_intent"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "1.0"
+    },
+    "interaction_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "workflow": {
+      "$ref": "#/$defs/identifier"
+    },
+    "correlation_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "organization_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "requester_identity_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "client_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "kind": {
+      "enum": [
+        "notice",
+        "progress",
+        "questionnaire",
+        "approval",
+        "acknowledgement"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 180
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 5000
+    },
+    "visual_intent": {
+      "enum": [
+        "information",
+        "action_required",
+        "caution",
+        "critical",
+        "success"
+      ]
+    },
+    "facts": {
+      "type": "array",
+      "maxItems": 30,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "label",
+          "value"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "value": {
+            "type": "string",
+            "maxLength": 1500
+          }
+        }
+      }
+    },
+    "fields": {
+      "type": "array",
+      "maxItems": 40,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "label",
+          "field_type",
+          "required",
+          "max_length"
+        ],
+        "properties": {
+          "key": {
+            "$ref": "#/$defs/identifier"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160
+          },
+          "field_type": {
+            "enum": [
+              "text",
+              "paragraph",
+              "number",
+              "currency",
+              "boolean",
+              "select",
+              "date"
+            ]
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "max_length": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4096
+          },
+          "options": {
+            "type": "array",
+            "maxItems": 40,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "value",
+                "label"
+              ],
+              "properties": {
+                "value": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 120
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 160
+                }
+              }
+            }
+          },
+          "currency": {
+            "type": "string",
+            "pattern": "^[A-Z]{3}$"
+          },
+          "minimum": {
+            "type": "string"
+          },
+          "maximum": {
+            "type": "string"
+          },
+          "show_when": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "depends_on",
+              "equals"
+            ],
+            "properties": {
+              "depends_on": {
+                "$ref": "#/$defs/identifier"
+              },
+              "equals": {
+                "type": [
+                  "string",
+                  "boolean"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "actions": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "label",
+          "intent"
+        ],
+        "properties": {
+          "key": {
+            "$ref": "#/$defs/identifier"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "intent": {
+            "enum": [
+              "submit",
+              "approve",
+              "deny",
+              "acknowledge",
+              "request_changes",
+              "escalate"
+            ]
+          }
+        }
+      }
+    },
+    "approval_id": {
+      "$ref": "#/$defs/identifier"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "approval"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "required": [
+          "approval_id",
+          "expires_at"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "approval_id"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "questionnaire"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "required": [
+          "fields",
+          "actions"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "fields"
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -65,6 +65,30 @@ The board shows recently active PRs and summarizes older open PRs rather than al
 
 Human roadmap authority remains controlling. The coordinator may recommend; it may not silently reorder or approve work.
 
+### Bounded GitHub evidence and protected operational readback
+
+The board enumerates **all open PRs** so older PR counts and open Support List
+repair correlations remain complete. It fetches protected-main comparisons and
+required CI checks for **every recently active displayed PR** (currently three
+days), and implementation-sensitive file lists for every PR in the independent
+overlap window (currently seven days). An older PR that is not checked is marked
+**Needs revalidation**, never silently reported as CI-ready or current. Six
+bounded concurrent readers preserve GitHub listing order in the published board;
+an authoritative read failure still aborts publication rather than fabricating
+green evidence. The refresh must not make per-PR verification scale unboundedly
+with historical inactive branches.
+
+When the unprivileged coordinator cannot read the root-owned mode-0600 release
+control or drift files directly, it consults the existing **root-published
+protected-readback snapshots** for advisory status. Missing, invalid, or
+unreadable evidence remains explicitly unknown; the board never uses these
+snapshots to grant an owner approval, close the breaker, or deploy anything.
+
+Production documentation closeout is an accepted release gate. Failure to
+publish is not a reason to bypass that gate: the release must fail closed,
+preserve its rollback evidence, and report a separately remediable publication
+or monitoring defect rather than declaring a successful deployment.
+
 ## Autonomous TODO engineering readiness
 
 The TODO roadmap is not itself an execution queue. A TODO becomes eligible for autonomous engineering only after an owner-approved readiness record declares the exact scope, dependencies, authority basis, safety class, required capabilities, acceptance test, production path, and `open_questions=none`. Material changes to that approved scope invalidate readiness and return the item to Design Review.
@@ -92,6 +116,68 @@ A support item stops automatically only for a genuine governance/capability bloc
 
 For every autonomously claimed Support List item, the support-repair lane must emit owner lifecycle events through the same canonical governed Teams owner-notification path used for TODO engineering: **repair started**, **blocked / owner action required** when applicable, and **production-verified complete**. The start message identifies the support ID, defect summary, and repair scope. The blocked message identifies the exact blocker and required owner action. The completion message identifies the merged/deployed revision and the production acceptance evidence that proves the defect is resolved. A support fix is not "complete" for notification purposes merely because code was committed, CI passed, or a PR merged. Notification delivery uses the same durable message/correlation identity, provider/readback verification, bounded retry, duplicate suppression, and `SUPPORT-CONN-037` reliability requirements as TODO lifecycle messages.
 
+### Verified hosted-model credit replenishment
+
+A hosted-model credit or billing error is **not** an ordinary transient transport
+failure. The runtime records a non-retryable failed reasoning receipt and the host
+worker must preserve that receipt and its retry budget; simply restarting the
+worker or overwriting the failed response is prohibited.
+
+For a failed **P0 Support List** item specifically marked
+`credit_balance_exhausted` with HTTP 429 and owner action
+`restore_provider_credits`, the existing rootless support worker may queue
+**one new, separately fingerprinted reasoning request** only if a newer
+provider-reported metered success is recorded from an explicitly scoped,
+operator-authorized `provider-credit-verify` diagnostic in the local usage ledger.
+The evidence must postdate the failure and be fresh (at most 12 hours).
+The operator diagnostic must be a real, minimal hosted-model request through
+Jason's configured client; an account-billing screenshot or a manually entered
+ledger row is not equivalent to a provider-reported successful usage receipt.
+The readmission retains the old failure, response, and retry count, records its
+metered-proof lineage, respects active-work capacity, checks the original
+request fingerprint and current issue eligibility, and refuses pending governed
+repair handoffs or previously retried credit failures. A tiny successful model
+diagnostic proves billing availability **only**; it does not prove the prior
+large engineering request is valid, nor does it authorize source changes,
+provider writes, PR merges, or production deployment.
+
+This limited recovery applies to eligible P0 **support** reasoning, not
+automatically to blocked TODO/development items with independently exhausted
+retries. Those items retain their release-verified repair and readmission
+requirements. The canonical governed Release Manager remains the only
+production promotion path.
+
+### Operator diagnostic for confirmed hosted-credit replenishment
+
+After confirming credits in the existing hosted API account, an authorized operator
+may run the installed, one-shot diagnostic **inside the existing Jason runtime
+container**, where the canonical model configuration and OpenBao AppRole files
+are already mounted:
+
+```bash
+docker exec jason-runtime python -m jason_runtime.verify_hosted_credit
+```
+
+This command uses Jason's configured conversation model, approved OpenBao
+`openai.semantic_intent` secret, existing structured-model client, and append-only
+model-usage ledger. It never prints credentials or response bodies. On failure it emits only a
+sanitized HTTP status and allowlisted provider error code so an operator can
+distinguish billing (429) from request-contract errors (400). An HTTP 429 is not permission to retry or infer restored credits. It uses the same
+low reasoning-effort setting as the running OpenAI client. Success is
+reported only after the same request has a positive-token, provider-reported
+completed receipt carrying `workflow_id=provider-credit-verify` and
+`routing_profile=operator-authorized-diagnostic`. A blocked result must not be
+converted into a hand-entered success or an unbounded retry. The diagnostic
+makes a small billable request and must be operator-authorized.
+
+The subsequent scheduled support and owner-approved development workers
+independently re-admit at most one eligible bounded request per blocked item,
+subject to the original approval, immutable failed receipt, 12-hour receipt
+freshness, capacity, and each worker's existing exclusions. Observe real
+reasoning, tests, PR progression and protected release acceptance before
+claiming autonomous development is recovered. A successful diagnostic alone
+is not that acceptance.
+
 The canonical operational logic is `docs/playbooks/Jason-Support-List-Autonomous-Repair.md`.
 
 ## Production boundary
@@ -101,6 +187,16 @@ Production remains governed by J-CHANGE-001 and the existing J-900/J-901 release
 The coordinator does not deploy.
 
 Production promotion remains serialized and requires an exact merged main SHA.
+
+The explicit `promote` path and the scheduled promotion path reserve the same
+rollback-container headroom under the exclusive transaction lock **before**
+root circuit-breaker revalidation or a production mutation. The existing bounded
+retention routine removes only the oldest *exited, historically named* rollback
+containers, keeping the newest 16, without touching running containers, Docker
+images, immutable release records, or the pinned last-known-good release. A
+cleanup error must stop promotion before the breaker or deployment. This
+prevents a legitimate manual promotion from crossing the drift policy limit of
+20 stopped rollback containers after preparing the release.
 
 Normal releases remain human-approved. J-CHANGE-002 defines a narrow Autonomous Repair Release class where a new human production approval is not required when the change only restores previously approved behavior and passes every deterministic eligibility gate. Autonomous repair execution remains blocked until Jason's named governed deployment capability is enabled for that release class; classification alone is not deployment authority.
 
@@ -154,3 +250,129 @@ After this first evidence-only version proves reliable, future controlled increm
 - explicit release-candidate designation.
 
 Those increments must preserve the authority boundary above.
+
+
+## TODO bridge: authoritative phase and summary integrity (SUPPORT-OPS-059 / #1099)
+
+The TODO release bridge is a derived ledger, not an authority to invent a
+development phase, treat PR readiness as completion, or override an owner
+acceptance decision. For an owner-approved TODO with no merged development
+PR, every bridge pass follows the durable development worker: blocked maps
+to development_blocked; waiting_operational_acceptance,
+waiting_external_dependency and waiting_sequenced_work remain unchanged.
+Only an actual OPEN GitHub PR with an exact Development issue marker and
+a matching numeric PR ID can justify waiting_development_merge.
+No PR identity, a closed PR, a mismatched issue marker or invalid PR number
+fails closed as development_blocked; no merge, release or acceptance is
+inferred. The original owner-approved TODO-OPS-001 operational acceptance
+state must survive a bridge reconciliation without a new development PR.
+
+Record timestamps change only when record data changes. The final summary
+is recomputed from the final item phases just before atomic persistence; a
+source phase or summary inconsistency blocks publication. After writing,
+the bridge reads back the persisted snapshot and validates the same
+authoritative phase and count contract. Repeated no-op scans must preserve
+the exact file bytes, including timestamps.
+
+On a verified integrity contradiction, the bridge refuses to publish an
+unsafe control-board state and creates a bounded private support defect
+receipt under support-repair/todo-release-defects/. It updates existing
+GitHub Support issue #1099 once per unique invariant failure. A failed
+GitHub comment remains pending for a bounded future retry, without changing
+the TODO state or granting a release/provider action.
+
+Mixed-state regression covers blocked, sequenced, operational acceptance,
+real awaiting-merge PR, missing PR, new TODO and historically completed
+items. Production acceptance additionally requires MCP readback alignment,
+no unrelated record regression and a separate exact-verified closeout
+release; source-merge alone is not TODO completion.
+
+## Bounded stale clean source recovery (owner-approved development)
+
+When an exact approved development edit-plan response is successfully recorded
+but execution reports `EvidenceToolError: stale worktree requires governed
+clean-source recovery`, the worker can automatically readmit that blocked item
+**once** after verifying the original request hash and successful reply, owner
+approval/current focus, current `origin/main`, exact old managed Git identity,
+clean tracked/untracked/**ignored** files and ancestry of the old source SHA.
+It never reset/fast-forwards/deletes the old worktree or reuses old model edits.
+
+Instead it initializes an independent, shallow Git checkout in the existing
+owner-approved worktree sandbox, fetching the *already verified* `origin/main`
+commit from the managed source via local Git file transport. It confirms the
+fresh SHA, expected branch, remote, and clean status, then queues a completely
+new approved `search_plan`. This intentionally avoids writing the protected
+engineering source `.git/worktrees` metadata from the rootless systemd unit.
+Re-admission respects shared active development/support capacity and excludes
+external/dependency/approval blockers; failure leaves the old record blocked.
+The new checkout and provenance fields are persisted for idempotent retries.
+Existing independent CI, guarded PR integration, CCC and exact-SHA production
+release authority remain unchanged. Source-only fixes are not proof of live
+Teams approval or disk repair acceptance.
+
+## Source-bound reasoning receipts and historical 429 replay
+
+The content-addressed reasoning queue deduplicates requests by their exact
+`kind`, `support_item`, `title`, `evidence`, `acceptance`, and `context` JSON.
+A restarted development worker must **not** treat clearing a persisted request
+ID as proof that a fresh provider call will run: reissuing an unchanged search
+plan can immediately consume a previously failed response, including an old
+`credit_balance_exhausted` error from before the independently verified credit
+replenishment. This is *not* evidence of a new current billing failure.
+
+The first diagnosing `search_plan` of any stale-clean-source recovery therefore
+adds an immutable `stale_clean_source_recovery` context binding the verified
+current main revision, previously verified source revision, exact previous
+successful edit-plan request ID, and a single-retry limit. It is a new hashed
+request even when an older model result used the same owner-approved scope.
+New source SHA creates a distinct ID; old model edits are never reused.
+
+For releases that already attempted the initial recovery before this fix,
+`readmit_verified_cached_stale_response_replay()` accepts **one** additional
+bounded retry only when the existing record proves: current owner approval
+and dependency scope; a previously verified clean recovery checkout; an exact
+hash-valid `search_plan` request; an attached failed response whose
+`primary_provider_error_code=credit_balance_exhausted` and HTTP status 429;
+its completion time strictly *before* the original recovery; and remaining
+shared support/development capacity. The worker makes a separate current-source
+clone, preserves all earlier evidence, and stores a one-use replay key.
+A new 429 occurring after recovery, any malformed response, stale/dirty clone,
+missing approval, or exhausted slot stays blocked. Provider bills and worker
+responses are not rewritten. Source patch acceptance and release/CCC gates
+remain independent; only exact-SHA Owner approval allows production activation.
+
+## Finite evidence-budget completion (October 25, 2026)
+
+The read-only source evidence loop is bounded to four turns by the authoritative
+`config/engineering-supervisor-policy.json`. The previously deployed worker
+allowed the model to request more evidence on its fourth follow-up; the host
+correctly blocked a fifth turn, but owner-approved Teams Universal Approver
+and purchasing development were left with terminal `source evidence turn
+budget exhausted` records and no actionable source proposal.
+
+On the fourth allowed tool response, the source broker now labels the next
+`edit_plan` input `final_evidence_turn=true` and
+`evidence_turns_remaining=0`. Hosted reasoning receives an explicit
+**patch-or-precise-blocker** instruction. Further tool requests remain denied;
+models never obtain shell, GitHub, provider, or policy-write authority.
+
+For the two previously exhausted cases, the upgraded owner development worker
+may make **one** additional final proposal, but only after independent proof
+of an exact current released revision: production symlink SHA, protected
+last-known-good SHA, closed Release Manager record with passing post-CCC and
+preproduction, closed circuit breaker, fresh clean drift, and a source change
+to the affected tools/reasoning worker. The record must still refer to an
+Owner-approved open issue without dependency hold or a PR, exact pinned
+fourth-turn model request, its immutable hash, a successful response consisting
+of read-only evidence requests, and a clean original immutable clone. The
+worker creates a **new** clean source clone from the released SHA, re-reads only
+Git-tracked J-CHANGE-002-eligible excerpts, creates one new content-addressed
+`edit_plan` request, and saves a nonrepeatable completion receipt. It does not
+reset the four-turn evidence budget, consume historical model edits, modify
+past responses, or promote anything to production. Unauthorized paths, missing
+provider or identity proof, owner/dependency hold, missing capacity, incomplete
+release verification, or another request for tools leave the job blocked.
+
+A successful model response is still **not** acceptance. Exact-text code
+changes, changed tests, protected CI and separate reviewed release/CCC gates
+remain required; actual Teams Approve/Deny awaits independent human clicks.

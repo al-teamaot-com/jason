@@ -154,6 +154,29 @@ class TodoEngineeringIntakeTests(unittest.TestCase):
         self.assertIsNotNone(candidate)
         self.assertEqual(candidate.item_id, "TODO-OPS-010")
 
+    def test_outstanding_work_is_visible_even_if_intake_has_no_candidate(self):
+        with tempfile.TemporaryDirectory() as td:
+            spool = Path(td)
+            (spool / "todo-release-state.json").write_text(json.dumps({
+                "items": {
+                    "TODO-OPS-001": {"phase": "waiting_operational_acceptance", "reason": "live proof required"},
+                    "TODO-OPS-002": {"phase": "development_blocked", "reason": "API prerequisite"},
+                    "TODO-COMM-001": {"phase": "complete"},
+                }
+            }), encoding="utf-8")
+            snapshot = module.outstanding_commitment_snapshot(spool)
+            self.assertEqual(snapshot["status"], "known")
+            self.assertEqual(snapshot["outstanding_count"], 2)
+            self.assertEqual(snapshot["items"][0]["next_gate"], "production_outcome_verification")
+            self.assertEqual(snapshot["items"][1]["next_gate"], "resolve_documented_development_blocker")
+            self.assertEqual([item["id"] for item in snapshot["items"]], ["TODO-OPS-001", "TODO-OPS-002"])
+
+    def test_missing_downstream_report_is_not_treated_as_empty_backlog(self):
+        with tempfile.TemporaryDirectory() as td:
+            snapshot = module.outstanding_commitment_snapshot(Path(td))
+            self.assertEqual(snapshot["status"], "unknown")
+            self.assertIsNone(snapshot["outstanding_count"])
+
     def test_existing_todo_issue_is_not_duplicated(self):
         todos = module.parse_todo_sections(TODO_TEXT)
         candidate, _ = module.select_candidate(
@@ -209,3 +232,29 @@ class TodoEngineeringIntakeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FullRepositoryTodoIntakeInventoryTests(unittest.TestCase):
+    def _item(self, number, body='- TODO item: TODO-OPS-002', title='BackupIQ'):
+        return {'number':number,'body':body,'title':title,'url':f'https://github.com/test/issues/{number}'}
+
+    def test_older_canonical_issue_is_included_beyond_default_window(self):
+        from unittest.mock import patch
+        issues=[self._item(2021),self._item(952)]+[self._item(n,'', 'unrelated') for n in range(2000,2300)]
+        with patch.object(module,'gh_json',return_value=issues) as gh:
+            result=module.open_todo_issue_map(Path('/tmp/repo'))
+        self.assertEqual(result['TODO-OPS-002']['number'],952)
+        self.assertIn('5000',gh.call_args.args[0])
+
+    def test_changed_duplicate_source_fails_closed(self):
+        from unittest.mock import patch
+        issues=[self._item(952),self._item(2021,'- TODO item: TODO-OPS-002\nOther instruction')]
+        with patch.object(module,'gh_json',return_value=issues):
+            with self.assertRaisesRegex(RuntimeError,'Conflicting GitHub TODO identities'):
+                module.open_todo_issue_map(Path('/tmp/repo'))
+
+    def test_saturated_inventory_never_authorizes_new_issue(self):
+        from unittest.mock import patch
+        with patch.object(module,'gh_json',return_value=[{} for _ in range(5000)]):
+            with self.assertRaisesRegex(RuntimeError,'safe limit'):
+                module.open_todo_issue_map(Path('/tmp/repo'))

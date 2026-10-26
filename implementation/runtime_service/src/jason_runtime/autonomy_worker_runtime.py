@@ -295,6 +295,8 @@ SECURITY_LOG_SELF_HEAL_UID = "cdd297b4-378f-4ffc-b272-56833e926c81"
 BACKUPIQ_INSTALLER_NAME = "Datto Endpoint Backup Agent v2 [WIN]"
 BACKUPIQ_INSTALLER_UID = "f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967"
 BACKUPIQ_REINSTALL_VERIFY_SECONDS = 3 * 60 * 60
+BACKUPIQ_INITIAL_BACKUP_MAX_SECONDS = 7 * 24 * 60 * 60
+BACKUPIQ_PROGRESS_STALL_SECONDS = 12 * 60 * 60
 LOW_DISK_SYSMON_CLEANUP_NAME = "Sysmon - Clear C:\\Sysmon Folder - AOT"
 LOW_DISK_SYSMON_CLEANUP_UID = "97ddcdd5-2b74-4a4b-9516-cc872af6a7b6"
 TERMINAL_PHASES = frozenset({"complete", "escalated", "blocked", "approval_pending"})
@@ -1012,19 +1014,33 @@ class OperationalAutonomyMaintenance:
 
         Notification failure must never undo an already-verified ticket change.
         A fingerprint prevents duplicate cards when a queued work item is resumed.
+        In-progress, on-hold, and other transient ticket-status updates stay quiet;
+        this notification rule does not affect governed ticket writes or approvals.
         """
         if self.completion_notifier is None:
             return
-        fingerprint = hashlib.sha256(
-            f"teams-ticket-v1|{event}|{work.ticket_number}|{status}".encode("utf-8")
-        ).hexdigest()
-        note_title = "Teams - Ticket Activity - " + event
-        if self.store.last_note_fingerprint(work.ticket_id, work.playbook_id, note_title) == fingerprint:
+        # Routine status churn is not an owner-action event. Only initial pickup
+        # and readback-verified completion produce lifecycle cards.
+        if event != "pickup" and status.casefold() != "complete":
             return
-        event_type = "work_started" if event == "pickup" else "work_completed" if status == "Complete" else "ticket_status_updated"
+        category = "pickup" if event == "pickup" else "completion"
+        fingerprint = hashlib.sha256(
+            f"teams-ticket-v2|{category}|{work.ticket_number}".encode("utf-8")
+        ).hexdigest()
+        note_title = "Teams - Ticket Activity - " + category
+        previous = self.store.last_note_fingerprint(work.ticket_id, work.playbook_id, note_title)
+        if previous == fingerprint:
+            return
+        # Prior deployments fingerprinted pickup with its status. Avoid a new
+        # pickup card immediately after upgrading the notification policy.
+        if category == "pickup" and previous == hashlib.sha256(
+            f"teams-ticket-v1|pickup|{work.ticket_number}|In Progress".encode("utf-8")
+        ).hexdigest():
+            return
+        event_type = "work_started" if category == "pickup" else "work_completed"
         summary = (
             f"Ticket: {work.ticket_number} | Device: {work.hostname or 'Not linked'} | "
-            f"Status: {status} | Action: {'Picked up by Jason' if event == 'pickup' else 'Status updated by Jason'}"
+            f"Status: {status} | Action: {'Picked up by Jason' if category == 'pickup' else 'Completed by Jason'}"
         )
         try:
             self.completion_notifier.send(
@@ -2335,10 +2351,12 @@ class OperationalAutonomyMaintenance:
             1 for state, reason, _, _ in classifications.values()
             if state == "not_actionable" and reason == "existing_technician_activity"
         )
-        eligible_count = sum(
-            1 for state, _, _, _ in classifications.values()
-            if state == "eligible_now"
-        )
+        # Eligibility is an admission candidate count, not a count of
+        # tickets STILL marked eligible after _advance(). A ticket can be
+        # selected and immediately complete, block, or enter a waiting
+        # state during this very scan. Snapshot metrics must preserve the
+        # population that was eligible at scan decision time.
+        eligible_count = len(eligible)
 
         trace = getattr(self.queue_source, "last_trace", None)
         scanned_at = datetime.now(timezone.utc).isoformat()
@@ -2362,6 +2380,8 @@ class OperationalAutonomyMaintenance:
             unsupported=unsupported,
             governance_blocked=governance_blocked,
             assigned_elsewhere=assigned_elsewhere,
+            # Observed occupancy at scan end; not admission capacity at start.
+            # Some started work has already advanced into terminal/waiting.
             active_slots=len(self.store.list_open()),
             selected=started,
             waiting_device=waiting_device,
@@ -5943,6 +5963,21 @@ class OperationalAutonomyMaintenance:
             )
         )
 
+    @staticmethod
+    def _backupiq_progress_percent(asset: Mapping[str, Any]) -> float | None:
+        """Only accept a documented numeric percentage; status alone is not progress."""
+        for key in ("progressPercent", "progressPercentage", "percentComplete"):
+            value = asset.get(key)
+            if isinstance(value, bool) or value is None:
+                continue
+            try:
+                percent = float(value)
+            except (ValueError, TypeError):
+                continue
+            if 0 <= percent <= 100:
+                return percent
+        return None
+
     def _verify_backupiq_reinstall(self, work: OperationalWork) -> None:
         started_at = self._backupiq_timestamp_from_reason(
             work, "backupiq_reinstall_started_at"
@@ -6068,7 +6103,45 @@ class OperationalAutonomyMaintenance:
             )
             return
 
-        if datetime.now(timezone.utc) >= deadline_at:
+        # An initial full backup may legitimately take days. Extend the short
+        # reinstall window ONLY with numeric progress evidence for this exact
+        # asset. Persist observations so restarts cannot refresh the deadline
+        # or mistake an unchanged in-progress label for ongoing progress.
+        now = datetime.now(timezone.utc)
+        progress = self._backupiq_progress_percent(asset)
+        in_progress = provider_status in {"inprogress", "in_progress", "running"}
+        baseline_match = re.search(
+            r"(?:^|;)\s*backupiq_progress_percent=([0-9.]+)",
+            str(work.last_reason or ""),
+        )
+        prior_progress = float(baseline_match.group(1)) if baseline_match else None
+        last_advance = self._backupiq_timestamp_from_reason(
+            work, "backupiq_progress_seen_at"
+        )
+        if endpoint_online and in_progress and progress is not None:
+            advanced = prior_progress is None or progress > prior_progress
+            if advanced:
+                last_advance = now
+            if last_advance is not None and progress >= (prior_progress or 0):
+                max_deadline = started_at.timestamp() + BACKUPIQ_INITIAL_BACKUP_MAX_SECONDS
+                stalled = (now - last_advance).total_seconds() >= BACKUPIQ_PROGRESS_STALL_SECONDS
+                if not stalled and now.timestamp() < max_deadline:
+                    self.store.put(self._replace(
+                        work,
+                        phase="waiting_recheck:backupiq_verify_reinstall",
+                        last_reason=(
+                            f"backupiq_reinstall_started_at={started_at.isoformat()}; "
+                            f"backupiq_verify_deadline_at={deadline_at.isoformat()}; "
+                            f"backupiq_progress_percent={progress}; "
+                            f"backupiq_progress_seen_at={last_advance.isoformat()}; "
+                            "Initial full backup underway; awaiting verified completion."
+                        ),
+                    ))
+                    return
+                # Progress stalled or seven-day ceiling reached. Fall through
+                # to technician review, never silently mute a genuine failure.
+                deadline_at = now
+        if now >= deadline_at:
             self._write_note(
                 work,
                 (
@@ -6820,6 +6893,7 @@ class OperationalAutonomyMaintenance:
                 last_reason=reason,
             )
         )
+        self._notify_ticket_event(work, "status_change", "Complete")
 
     def _notify_patch_completion(
         self,

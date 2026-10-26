@@ -15,8 +15,8 @@
 - the exact image tested in pre-production is the image promoted to production;
 - pre-production cannot write production state or activate provider mutations;
 - Support List impact is checked before Production Eligible;
-- unattended promotion runs every five minutes, 24x7;
-- protected-core releases require owner approval bound to the exact candidate SHA;
+- the five-minute timer remains active but unattended production promotion is suspended during the Owner-approved manual release period;
+- every production release requires explicit owner approval bound to the exact candidate SHA during manual mode;
 - production success requires live SHA, image identity, and health verification;
 - failed verification rolls back to the recorded known-good revision.
 
@@ -24,7 +24,7 @@
 
 The Release Manager applies when a protected-main software revision is nominated for production promotion.
 
-The automatic production window is continuous 24x7. The Release Manager reconciles eligible releases every five minutes. The schedule is only a promotion trigger; it never creates Production Eligible status.
+The release timer remains installed and active every five minutes to preserve monitored service topology. During the temporary Owner-approved manual mode (2026-10-10), the timer must never promote a release. Candidate preparation and pre-production remain automated; after explicit approval bound to a single candidate SHA, Production Manager's existing `promote` command performs the governed deployment, verification and rollback.
 
 ## 3. Scope and Boundaries
 
@@ -117,7 +117,7 @@ Release Manager remediation is limited to release mechanics.
 **Approval classification:** modifying/disruptive production operation.  
 **Verification:** runtime SHA/digest + MCP SHA/digest + immutable host SHA + Release Manager SHA/timer + health/alignment.
 
-Protected-core releases remain approval-bound. Ordinary releases may auto-promote only after all evidence gates classify them Production Eligible.
+During the temporary manual mode, every release (including normal and formerly autonomous repair classes) requires exact-SHA Owner approval. The existing production release path, health verification and fail-safe rollback are unchanged.
 
 ## 10. Retry Policy
 
@@ -131,12 +131,19 @@ No blind deployment retries.
 
 ## 11. Periodic Rechecks
 
-The production timer invokes `promote-eligible` every five minutes, 24x7. The host runner retains the centralized production-window policy gate, which is currently continuously open under owner-approved policy.
+The production timer invokes `promote-eligible` every five minutes, 24x7 but returns without consuming approvals, selecting candidates or promoting any release while `schedule.automatic_promotion_enabled` is false. The timer remains installed to avoid introducing desired-state drift.
 
-It:
-- scans durable release records;
-- selects at most one Production Eligible record;
-- performs no action when none is eligible.
+When the approved automatic-promotion policy is enabled, each scheduler tick now performs a **fresh, exact** lookup of protected remote `refs/heads/main` before considering records. It:
+
+- preserves all old exact-SHA approvals and release records, but **never selects a superseded SHA** merely because its owner approval is still recorded;
+- evaluates only a `production_eligible` record whose immutable candidate SHA equals the current protected main tip, then still requires its **own exact-SHA Owner approval** and all other production gates;
+- rechecks the protected main tip immediately before any rollback-container retention operation or production deployment; if protected main advances, it defers without mutation;
+- reports remote-source unavailability as an explicit `RELEASE_MANAGER_AUTO_DEFERRED=authoritative_main_unavailable` observation rather than making the systemd service fail or claiming approval;
+- selects at most one eligible candidate, preserving the release timer even when no matching authorized candidate exists.
+
+**Emergency stability hold:** When the installed controller is still unsafe, the bounded `auto-promotion-incident-hold` marker can prevent unattended service execution through its installed systemd `ConditionPathExists` gate while leaving the required timer active. A hold is **not** equivalent to a repaired controller and must not be removed until exact reviewed source, installed controller identity, owner approval, health and drift readbacks pass. Explicit release approvals are never fabricated or transferred.
+
+Release worktrees use distinct nonce-qualified exact-SHA paths and canonical Git worktree registration/removal rather than recursively deleting a previously existing SHA-named checkout. Git checkout failures include bounded diagnostic output and occur before the durable production state transition.
 
 ## 12. Aging / Stale Condition
 
@@ -261,8 +268,51 @@ Any uncovered defect becomes a Support List item and is handled before ordinary 
 
 ## 23. Autonomous Execution Eligibility and Owner Review
 
-Normal non-protected releases may automatically promote after reaching Production Eligible.
+Normal non-protected releases are **not** authorized to auto-promote during the temporary manual mode approved 2026-10-10. Every release requires explicit Owner approval for the exact SHA and an intentional invocation of the existing governed Production Manager `promote` command. Reinstating automatic promotion requires a separately approved policy change and verified deployment/rollback acceptance.
 
 Protected-core paths are defined in `config/release-manager-policy.json` and require explicit owner approval bound to the exact candidate SHA. The Release Manager itself is protected-core.
 
 The owner instruction on 2026-10-02 to prioritize, complete, and push the deployment-management system to production authorizes the initial protected-core Release Manager production candidate only after all required gates pass. It does not waive future protected-core approval requirements.
+
+
+## 24. Explicit Support-class release identity (SUPPORT-OPS-059 / #1099)
+
+Support-class release admission is separate from ordinary feature and TODO
+admission. It MUST have an exact currently open SUPPORT.md item, its exact
+open canonical GitHub Support issue and the actual merged PR producing the
+candidate SHA. Free-text issue references or a locally chosen Support ID
+cannot confer eligibility.
+
+Once the reviewed native Support binding is deployed, an eligible
+Support-class PR can be prepared with:
+
+    python3 /home/al/.local/lib/jason/release_manager_host_runner.py prepare --candidate-sha <exact-full-40-character-PR-merge-SHA> --change-class support --support-item SUPPORT-OPS-059 --support-pr-number <actual-merged-PR>
+
+The native runner reads current SUPPORT.md, requires an exact Support ID,
+reads the merged PR from GitHub, requires the PR merge commit to equal the
+candidate SHA and verifies a unique canonical Support issue binding in the
+PR body. It separately confirms the issue is OPEN and the title matches the
+Support item. The binding is recorded in the immutable release record and
+manifest. Later preparation/revalidation cannot switch change class or
+Support/PR identity for an existing candidate. Non-Support release classes
+must not supply Support metadata.
+
+Missing, closed, changed, unmerged, stale or mismatched evidence fails
+before building candidate images or touching any root-control transition.
+Existing Support-first priority gates, source review, protected CI, risk
+classification, preproduction/rollback checks, owner exact-SHA review,
+CCC and live acceptance remain in force. This is NOT a bypass of the
+strict autonomous-repair PR metadata classification.
+
+Historically the release runner had no --support-item or
+--support-pr-number option even though the Support release gate required
+the former. It also had an over-escaped Support title detector that could
+miss genuinely open Support issues. The release fix adds the explicit
+contract and regression coverage rather than disguising Support work as
+feature-class development.
+
+This fix itself changes Release Manager source and is
+production_control_core. The owner-only V1 Teams pilot (normal risk)
+cannot authorize installing it. Use independent reviewed high-impact
+owner release approval and CCC, and do not mark Support issue #1099
+closed without postrelease bridge/MCP acceptance evidence.

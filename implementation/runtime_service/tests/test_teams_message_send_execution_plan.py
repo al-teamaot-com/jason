@@ -104,3 +104,69 @@ def test_teams_exact_prepared_plan_sends_once(tmp_path, monkeypatch):
     assert result.output["message_id"] == "message-1"
     assert result.output["conversation_id"] == "conversation-1"
     assert result.output["bootstrap_created"] is True
+
+
+def test_teams_gateway_synthetic_card_receipt_is_not_presented_as_delivered(tmp_path, monkeypatch):
+    token_file = tmp_path / "token"
+    token_file.write_text("synthetic-proactive-token")
+    invoker = module.TeamsMessageSendInvoker(
+        gateway_url="http://gateway.internal:3979", token_file=str(token_file),
+    )
+
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc, tb):
+            return False
+        def read(self):
+            return (
+                b'{"status":"succeeded","message_id":"accepted:test-guid",'
+                b'"message_id_synthetic":true,'
+                b'"delivery_evidence_type":"provider_call_completed_without_message_id",'
+                b'"conversation_id":"conversation-1"}'
+            )
+
+    calls = []
+    def fake_urlopen(req, timeout):
+        calls.append((req, timeout))
+        return Response()
+
+    monkeypatch.setattr(module, "urlopen", fake_urlopen)
+    prepared = invoker.prepare_execution_plan(request=_request(), resolution=_resolution())
+    result = invoker.invoke_execution_plan(
+        request=_request(), resolution=_resolution(), prepared=prepared,
+    )
+    assert len(calls) == 1
+    assert result.output["message_id"] == "accepted:test-guid"
+    assert result.output["message_id_synthetic"] is True
+    assert result.output["delivery_evidence_type"] == "provider_call_completed_without_message_id"
+    assert result.output["delivery_state"] == "provider_accepted_delivery_unverified"
+
+
+def test_teams_gateway_rejects_contradictory_receipt_flags(tmp_path, monkeypatch):
+    token_file = tmp_path / "token"
+    token_file.write_text("synthetic-proactive-token")
+    invoker = module.TeamsMessageSendInvoker(
+        gateway_url="http://gateway.internal:3979", token_file=str(token_file),
+    )
+
+    class Response:
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc, tb):
+            return False
+        def read(self):
+            return b'{"status":"succeeded","message_id":"accepted:ref","message_id_synthetic":false}'
+
+    calls = []
+    def fake_urlopen(req, timeout):
+        calls.append(1)
+        return Response()
+
+    monkeypatch.setattr(module, "urlopen", fake_urlopen)
+    prepared = invoker.prepare_execution_plan(request=_request(), resolution=_resolution())
+    with pytest.raises(RuntimeError, match="inconsistent send evidence"):
+        invoker.invoke_execution_plan(
+            request=_request(), resolution=_resolution(), prepared=prepared,
+        )
+    assert calls == [1]  # a contradictory send result must not be retried

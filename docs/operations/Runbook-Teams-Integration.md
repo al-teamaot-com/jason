@@ -379,3 +379,117 @@ The routing workstream is production-proven. Remaining hardening includes:
 - Current resume point: `docs/control/CURRENT.md`
 
 If these sources conflict, the Constitution/governing ADRs and System Registry/current host evidence take precedence over this operational runbook.
+
+
+## Single-card delivery identity (October 24, 2026)
+
+The existing proactive sender must send a card as one attachment-only message.
+Do not combine top-level Activity.text with its Adaptive Card attachment: Teams
+can split that payload into two visible messages and return an empty HTTP 202,
+leaving no provider card ID. Microsoft documents that behavior in
+https://github.com/microsoft/botframework-sdk/issues/6155.
+
+The shared buildProactiveActivity helper now puts the notification text into
+Activity.summary and leaves the actual card, actions, challenge and payload
+unchanged. The card's own body contains the visible review details. Summary
+rendering varies by Teams client; it is not evidence of a displayed notification.
+Text-only messages remain unchanged. Both saved-conversation and first-contact
+proactive paths use this one helper.
+
+An actual provider message ID remains distinct from a synthetic accepted receipt.
+The patch does not fabricate delivery confirmation, grant approval, change
+identity verification, or clear an unresolved delivery block. Verify the deployed
+gateway source, then read the actual newly sent card and signed response before
+marking end-to-end acceptance. Existing uncertain requests must not be blindly
+resent.
+
+The shared deploy_live_container.py supports --health-runtime node for this
+existing Node gateway. Python stays the default for runtime/MCP. Both modes
+require HTTP 200 with a bounded timeout and use the same failure rollback.
+For an exact-source gateway image replacement, preserve the current container
+settings, signing-key/token mounts, network, public port and durable decision
+store. Use the shared preflight and rollback mechanism; do not rerun the
+historical initial OpenClaw port cutover to update an already direct gateway.
+
+
+### Non-root image source permissions (2026-10-24)
+
+The release builder can check out source with mode 0600. Docker COPY preserves
+that mode while assigning root ownership; the existing USER node cannot read
+the application. Normalize only packaged non-secret /app JavaScript modules
+and package.json to mode 0644 and /app to 0755 at image build time. Keep
+USER node and all mounted credential permissions unchanged. Before rollout,
+run an import/syntax smoke test as the image's default user with no network
+and a read-only root filesystem. Never compensate by running the bot as root.
+
+## Expiring internal-note functional pilot (October 24, 2026)
+
+The first executing general-plan pilot is restricted to the existing AOT
+`jason-autonomy-worker`, approved by `person-al`, and two exact internal-note
+payloads on the previously verified XYZ Test Company ticket 8870. It neither
+adds an identity/grant nor enables reboot, procurement, financial or client
+communication capabilities. `config/universal-approval-pilot-v1.json` pins the
+complete policy file hash. Its two request-payload hashes include ticket ID,
+internal-only publish value, note type, title and description. The campaign and
+policy expire on October 27 at 04:00 UTC. Live grants remain independently
+required; configuration cannot manufacture authority.
+
+An immutable deployed runtime carrying a valid source revision can select this
+explicit bundled pilot when the operator has not selected another universal
+approval mode. An explicit environment `off` always wins, including native
+isolated preproduction. Local development without a source revision stays off.
+A later rollback without this source manifest restores the previous off state.
+Expiry stops new issuance and existing-plan continuation, without stopping other
+runtime functions or granting broader approval authority.
+
+The existing UniversalPlanIssuer now accepts a trusted in-process registered
+workload requester with explicit, exact-intent policy. It is not an HTTP route.
+The human requester route retains its real Teams identity checks. Both routes
+use the same persisted requests, scoped policy, actual signed Teams decision,
+nonce/challenge, immutable plan, current JKD grant evaluation, Central
+Orchestrator and exactly-once execution ledger. A service remains a service in
+its execution context; a human approving it is not impersonated as the requester.
+
+**Final Teams result for workload requests:** The originating service account has
+no personal Teams binding. The existing universal-plan status maintenance must
+send its fixed, once-only completion/denial/blockage message to the *actual
+authenticated human decider*, not silently skip delivery because the requester
+is a workload. It resolves the tenant from the current versioned
+`service_requesters` policy and checks the original request's
+`workload_identity` evidence, organization, decider's active identity and
+current Teams binding. A missing/changed policy, cross-tenant binding or
+disabled decider blocks notification; it never redirects to a substitute user.
+Status delivery failure remains indeterminate without repeating the completed
+provider step or blindly re-sending an uncertain Teams message. Human-requester
+notifications retain their existing requester-and-decider behavior.
+
+After separately reviewed source deployment, run inside the existing runtime:
+`python -m jason_runtime.universal_approval_pilot deny`. A genuine human DENY
+must precede the `approve` case. The `approve` command then requests exactly one
+internal test note. Commands never execute the provider or fabricate a vote;
+normal signed Teams callbacks and the normal continuation worker own execution.
+Deterministic case IDs preserve pending, failed and ambiguous requests without
+blind resend. `status` reports the durable progress only. No periodic pilot
+issuer, additional bot, signing key, authority database or external endpoint is
+introduced.
+
+Acceptance is separate from CI: independently read the target ticket notes,
+confirm zero DENY-case notes and exactly one APPROVE-case note, verify the real
+Teams card ID and signed decision, and verify a duplicate response does not
+create another note. A queued callback is not execution success. Record the
+actual request/execution/receipt IDs and provider readback before declaring the
+pilot functional. Broader universal rollout remains separate.
+
+### Known deployment timing dependency
+
+The usage-attribution Prometheus job scrapes every two minutes. Host exporter
+restart can therefore leave a real Grafana dependency absent beyond the former
+three short retries. Host reconciliation now allows one bounded 150-second
+observation window, running the actual checker and requiring its success. It
+does not skip file/datasource/metric checks or clear a failed unit manually. The
+existing 360-second host budget remains unchanged; persistent failure rolls back.
+
+The source-pinned pilot default is runtime-only. The MCP application embeds the
+same composition but has its own registered MCP resource URL; its unset approval
+mode remains OFF. It does not instantiate the pilot just because it shares a
+source revision. Explicit operator-selected modes retain their existing semantics.

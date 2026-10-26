@@ -22,11 +22,13 @@ EXPORTER_UNITS = (
 MAINTENANCE_UNITS = (
     "jason-delegation-maintenance.service",
     "jason-openclaw-authority-health.service",
+    "jason-openclaw-authority-full-integrity.service",
     "jason-documentation-reconciliation.service",
 )
 MAINTENANCE_TIMERS = (
     "jason-delegation-maintenance.timer",
     "jason-openclaw-authority-health.timer",
+    "jason-openclaw-authority-full-integrity.timer",
     "jason-documentation-reconciliation.timer",
 )
 PROVIDER_CANARY_UNITS = (
@@ -64,6 +66,28 @@ def test_canonical_host_units_use_immutable_release_path() -> None:
         assert "/home/al/jason-worktrees/" not in text
 
 
+def test_status_exporter_start_is_not_blocked_by_long_authority_health() -> None:
+    unit = (
+        REPO_ROOT / "infrastructure" / "showcase" / "systemd"
+        / "jason-status-exporter.service"
+    ).read_text(encoding="utf-8")
+    after = [line for line in unit.splitlines() if line.startswith("After=")]
+    assert len(after) == 1
+    assert "docker.service" in after[0]
+    assert "jason-openclaw-authority-health.service" not in after[0]
+    assert "Requires=docker.service" in unit
+    assert "JASON_OPENCLAW_AUTHORITY_HEALTH_PATH" in unit
+
+    # Existing exporter logic fails closed when that asynchronous
+    # authority-health snapshot has not been produced yet.
+    exporter = (
+        REPO_ROOT / "infrastructure" / "showcase" / "status_exporter.py"
+    ).read_text(encoding="utf-8")
+    assert "jason_openclaw_authority_operational_health" in exporter
+    assert "jason_openclaw_authority_snapshot_age_seconds" in exporter
+    assert 'operational.get("status") == "pass"' in exporter
+
+
 def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     text = RECONCILE.read_text(encoding="utf-8")
 
@@ -74,7 +98,14 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'live MCP revision does not match requested host release' in text
     assert 'ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"' in text
     assert 'systemctl disable --now "$unit"' in text
-    assert 'pgrep -u al -f "$script_name"' in text
+    assert 'pgrep -u al -f "$script_name"' not in text
+    assert 'PORT_GUARD="$RELEASE_DIR/tools/release_exporter_port_guard.py"' in text
+    assert '--mode free --unit "$unit" --timeout-seconds 12' in text
+    assert '--mode owned --unit "$unit" --timeout-seconds 30' in text
+    assert 'HOST_RECONCILE_FAILURE step=' in text
+    assert 'kill "$pid"' not in text
+    assert text.index('--mode free --unit') < text.index('--mode owned --unit')
+    assert text.index('timeout --signal=TERM --kill-after=5s 25s systemctl stop') < text.index('--mode free --unit')
     assert 'developer checkout dependency remains in $unit' in text
     assert 'JASON_HOST_SERVICE_RECONCILIATION=PASS' in text
     assert 'DEFERRED_MAINTENANCE_SERVICES' in text
@@ -92,11 +123,21 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'JASON_USER_WORKER_RECONCILIATION=PASS' in text
     assert 'engineering-worker-source does not match managed production Git source' in text
     assert 'installed worker differs from production source' in text
+    assert 'engineering_supervisor.py' in text
+    assert 'release_breaker_recovery_manager.py' in text
+    assert 'engineering_evidence_tools.py' in text
     assert 'installed self-heal watchdog differs from production source' in text
     assert 'installed issue-resolution engine differs from production source' in text
     assert 'JASON_DOCUMENTATION_REPO_ROOT=/home/al/projects/jason' not in text
     assert 'jason-support-repair-worker.timer' in text
     assert 'jason-self-heal-watchdog.timer' in text
+    assert 'install_release_control_transition.py' in text
+    assert 'installed root release-transition worker differs from production source' in text
+    assert 'jason-release-control-transition.timer' in text
+    assert 'root release-transition timer is not active after production install' in text
+    assert 'JASON_ROOT_RELEASE_TRANSITION_RECONCILIATION=PASS' in text
+    # Preserve rollback helper before root-only policy migration can commit.
+    assert text.index('install_release_host_reconciler.py') < text.index('install_release_control_transition.py')
     assert 'install_release_host_reconciler.py' in text
     assert 'installed root host reconciler differs from production source' in text
     assert 'JASON_ROOT_HOST_RECONCILER_RECONCILIATION=PASS' in text
@@ -107,7 +148,51 @@ def test_reconciliation_contract_covers_all_known_host_drift() -> None:
     assert 'curl --connect-timeout 2 --max-time 15 -fsS' in text
     assert 'exporter verification failed on port $port after 3 bounded attempts' in text
     assert 'timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"' in text
+    assert 'if [ "$unit" = "jason-openclaw-authority-health.service" ]; then' in text
+    assert 'AUTHORITY_HANDOFF="$RELEASE_DIR/tools/release_authority_fast_health_handoff.py"' in text
+    assert '/usr/bin/python3 "$AUTHORITY_HANDOFF" --release-dir "$RELEASE_DIR"' in text
+    assert text.index('AUTHORITY_HANDOFF="$RELEASE_DIR/tools/') < text.index('timeout --signal=TERM --kill-after=5s 120s systemctl start "$unit"')
+    assert '45s systemctl start "$unit"' not in text
+    assert 'HOST_RECONCILE_FAILURE step=' in text
     assert 'timeout --signal=TERM --kill-after=5s 180s env JASON_REPO_ROOT=' in text
+
+
+def test_rollback_unit_delta_is_checked_before_immutable_host_revision_switch() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    planner = 'UNIT_DELTA_PLANNER="$RELEASE_DIR/tools/reconcile_managed_unit_delta.py"'
+    plan_system = '--scope system --installed-dir /etc/systemd/system'
+    plan_user = '--scope user --installed-dir /home/al/.config/systemd/user'
+    assert planner in text
+    assert plan_system in text
+    assert plan_user in text
+    assert 'PREVIOUS_HOST_RELEASE="$(readlink -f "$CURRENT_LINK"' in text
+    assert text.index("step_start release_owned_unit_delta") < text.index(
+        'ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"'
+    )
+    assert text.index(plan_system) < text.index('for unit in "${REMOVE_SYSTEM_UNITS[@]}"; do')
+    assert text.index(plan_user) < text.index('for unit in "${REMOVE_USER_UNITS[@]}"; do')
+    # Revalidate both candidate-only sets before any mutation.
+    assert text.index(plan_user) < text.index('for unit in "${REMOVE_SYSTEM_UNITS[@]}"; do')
+    assert 'rm -f -- "/etc/systemd/system/$unit"' in text
+    assert 'rm -f -- "/home/al/.config/systemd/user/$unit"' in text
+    assert 'systemctl disable --now "$unit"' in text
+    assert 'systemctl --user disable --now "$unit"' in text
+    assert 'cp -a "/etc/systemd/system/$unit" "$BACKUP_DIR/system-$unit.before"' in text
+    assert 'cp -a "/home/al/.config/systemd/user/$unit" "$BACKUP_DIR/user-$unit.before"' in text
+    assert "step_pass release_owned_unit_delta" in text
+    assert 'run_as_al systemctl --user daemon-reload' in text
+    assert text.index("step_pass release_owned_unit_delta") < text.index("step_start production_drift_guard")
+
+
+def test_rollback_unit_delta_planner_is_root_only_and_read_only() -> None:
+    planner = REPO_ROOT / "tools" / "reconcile_managed_unit_delta.py"
+    text = planner.read_text(encoding="utf-8")
+    assert 'if os.geteuid() != 0:' in text
+    assert "expected_installed" in text
+    assert "MAX_AUTO_REMOVALS = 8" in text
+    for forbidden in ("subprocess.run", "os.unlink", "shutil.rmtree", "systemctl"):
+        assert forbidden not in text
+    assert 'print(unit)' in text
 
 
 def test_reconciliation_fails_closed_without_root() -> None:
@@ -178,7 +263,7 @@ def test_production_reconciliation_emits_candidate_source_boundary_evidence() ->
 def test_control_panel_exporter_is_reconciled_on_dedicated_port() -> None:
     text = RECONCILE.read_text(encoding="utf-8")
     assert "jason-operations-configuration-exporter.service" in text
-    assert "operations_configuration_exporter.py" in text
+    assert "jason-operations-configuration-exporter.service" in text
     assert "9477" in text
     unit = (
         REPO_ROOT
@@ -236,3 +321,154 @@ def test_production_drift_watchdog_is_installed_after_cleanup() -> None:
     assert "JASON_PRODUCTION_DRIFT_GUARD=PASS" in text
     assert "JASON_ROLLBACK_CONTAINER_RETENTION=PASS" in text
     assert "systemctl --user reset-failed" in text
+
+
+def _recovered_exporter_probe(tmp_path: Path, mode: str) -> tuple[int, str, list[str]]:
+    """Execute the actual bounded shell helper with fake stateless host tools.
+
+    Only tool paths are swapped to local fixtures. No systemd, Docker or
+    production service is contacted.
+    """
+    import os
+
+    script = RECONCILE.read_text(encoding="utf-8")
+    start = script.index("ensure_owned_exporter() {")
+    end = script.index('\nfor unit in "${EXPORTER_UNITS[@]}"; do', start)
+    helper = script[start:end].replace(
+        '/usr/bin/python3 "$PORT_GUARD"', 'python3 "$PORT_GUARD"'
+    )
+    guard = tmp_path / "fake_guard.py"
+    guard.write_text(
+        """
+import os, sys
+from pathlib import Path
+log = Path(os.environ["PROBE_LOG"])
+calls = log.read_text().splitlines() if log.exists() else []
+check = sys.argv[sys.argv.index("--mode") + 1]
+calls.append("guard " + check)
+log.write_text("\\n".join(calls) + "\\n")
+if check == "free":
+    print("EXPORTER_PORT_GUARD=PASS check=free")
+    sys.exit(0)
+attempt = sum(line == "guard owned" for line in calls)
+mode = os.environ["PROBE_MODE"]
+if mode == "foreign":
+    print("EXPORTER_PORT_GUARD=FAIL detail=owned by a different/unknown process", file=sys.stderr)
+    sys.exit(1)
+if mode == "persistent" or attempt == 1 or (mode == "queued" and attempt <= 2):
+    print("EXPORTER_PORT_GUARD=FAIL detail=port 9464 has no listening owner (MainPID=0)", file=sys.stderr)
+    sys.exit(1)
+print("EXPORTER_PORT_GUARD=PASS check=owned")
+"""
+    )
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    timeout = bindir / "timeout"
+    timeout.write_text(
+        '#!/bin/sh\n'
+        'shift 3\n'
+        'exec "$@"\n'
+    )
+    timeout.chmod(0o755)
+    systemctl = bindir / "systemctl"
+    systemctl.write_text(
+        '#!/bin/sh\n'
+        'printf "systemctl %s\\n" "$*" >> "$PROBE_LOG"\n'
+    )
+    # Model a real systemd start job which remains pending during a slow boot.
+    systemctl_script = systemctl.read_text()
+    systemctl.write_text(systemctl_script +
+        'if [ "$1" = "show" ] && [ "$PROBE_MODE" = "queued" ]; then printf "123/start\\n"; fi\n'
+    )
+    systemctl.chmod(0o755)
+    sleep = bindir / "sleep"
+    sleep.write_text('#!/bin/sh\nexit 0\n')
+    sleep.chmod(0o755)
+    env = dict(os.environ)
+    env.update({
+        "PORT_GUARD": str(guard),
+        "PROBE_LOG": str(tmp_path / "calls"),
+        "PROBE_MODE": mode,
+        "PATH": str(bindir) + os.pathsep + env["PATH"],
+    })
+    result = subprocess.run(
+        ["bash", "-c", "set -eu\n" + helper + "\nensure_owned_exporter jason-status-exporter.service\n"],
+        env=env, capture_output=True, text=True, timeout=15,
+    )
+    events = (tmp_path / "calls").read_text().splitlines()
+    return result.returncode, result.stderr, events
+
+
+def test_exporter_ownership_guard_can_recover_only_verified_empty_socket(tmp_path: Path) -> None:
+    status, stderr, events = _recovered_exporter_probe(tmp_path, "transient")
+    assert status == 0, stderr
+    assert events == [
+        "guard owned", "guard free",
+        "systemctl show jason-status-exporter.service --property=Job --value",
+        "systemctl restart --no-block jason-status-exporter.service",
+        "guard owned",
+    ]
+
+
+def test_exporter_ownership_guard_waits_for_queued_job_without_restart(tmp_path: Path) -> None:
+    status, stderr, events = _recovered_exporter_probe(tmp_path, "queued")
+    assert status == 0, stderr
+    assert "EXPORTER_OWNERSHIP_RECONCILIATION=WAIT" in stderr
+    assert events == [
+        "guard owned", "guard free",
+        "systemctl show jason-status-exporter.service --property=Job --value",
+        "guard owned", "guard free",
+        "systemctl show jason-status-exporter.service --property=Job --value",
+        "guard owned",
+    ]
+
+
+def test_exporter_ownership_guard_rejects_foreign_owner_without_restart(tmp_path: Path) -> None:
+    status, stderr, events = _recovered_exporter_probe(tmp_path, "foreign")
+    assert status != 0
+    assert "EXPORTER_OWNERSHIP_RECONCILIATION=FAIL" in stderr
+    assert events == ["guard owned"]
+
+
+def test_exporter_ownership_guard_persistent_absence_stays_fatal(tmp_path: Path) -> None:
+    status, stderr, events = _recovered_exporter_probe(tmp_path, "persistent")
+    assert status != 0
+    assert "EXPORTER_OWNERSHIP_RECONCILIATION=FAIL" in stderr
+    assert events.count("guard owned") == 4
+    assert events.count("guard free") == 3
+    assert events.count("systemctl show jason-status-exporter.service --property=Job --value") == 3
+    assert events.count("systemctl restart --no-block jason-status-exporter.service") == 3
+
+def test_exporter_activation_queues_nonblocking_start_and_waits_for_real_port_owner() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    assert 'systemctl enable --now "$unit"' not in text
+    assert 'systemctl start --no-block "$unit"' in text
+    assert 'systemctl restart --no-block "$unit"' in text
+    assert 'timeout --signal=TERM --kill-after=5s 15s systemctl enable "$unit"' in text
+    assert 'timeout --signal=TERM --kill-after=5s 15s systemctl start --no-block "$unit"' in text
+    assert 'timeout --signal=TERM --kill-after=5s 15s systemctl restart --no-block "$unit"' in text
+    assert text.index('systemctl start --no-block "$unit"') < text.index('ensure_owned_exporter "$unit"')
+    assert text.index('ensure_owned_exporter "$unit"') < text.index('if [ "$(systemctl is-active "$unit")" != "active" ]')
+
+
+def test_authority_health_is_lightweight_and_full_proof_deferred_out_of_reconciliation():
+    text = RECONCILE.read_text(encoding="utf-8")
+    root_worker = (REPO_ROOT / "tools/release_host_reconcile_worker.py").read_text(encoding="utf-8")
+    manager = (REPO_ROOT / "tools/release_manager_host_runner.py").read_text(encoding="utf-8")
+    fast = (REPO_ROOT / "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-health.service").read_text(encoding="utf-8")
+    full = (REPO_ROOT / "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-full-integrity.service").read_text(encoding="utf-8")
+    timer = (REPO_ROOT / "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-full-integrity.timer").read_text(encoding="utf-8")
+    assert "HOST_RECONCILE_TIMEOUT_SECONDS = 360" in root_worker
+    assert "timeout_seconds: float = 420.0" in manager
+    assert "openclaw_authority_fast_health.py" in fast
+    assert "openclaw_authority_health_snapshot.py" not in fast
+    assert "openclaw_authority_health_snapshot.py" in full
+    assert "OnCalendar=" in timer and "Persistent=false" in timer
+    assert text.count('45s systemctl start "$unit"') == 0
+    assert 'release_authority_fast_health_handoff.py' in text
+    assert '--verify-only' in text
+    assert 'openclaw_authority_fast_health.py' in (REPO_ROOT / 'tools/release_authority_fast_health_handoff.py').read_text()
+    assert 'if [ "$unit" = "jason-openclaw-authority-health.service" ]; then' in text
+    assert "jason-openclaw-authority-full-integrity.service" in text
+    assert "jason-openclaw-authority-full-integrity.timer" in text
+    assert '120s systemctl start "$unit"' in text

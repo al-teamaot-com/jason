@@ -1,0 +1,84 @@
+# Universal Teams approval: live actor-authentication acceptance
+
+Status: **blocked pending a genuine platform-backed human identity proof and live approval receipt**. This document describes an integration requirement; passing unit tests alone does not activate universal plan approvals.
+
+## Existing live ingress
+
+`infrastructure/jason-teams-gateway/index.mjs` handles Teams `message` activities and card submissions. It reads `activity.from.aadObjectId`, tenant and message IDs, uses a duplicate-decision claim, and emits a machine-authenticated governed conversation envelope. The OpenClaw ingress verifies envelope authenticity, freshness, and replay and forwards `approval.submit` to the approval dispatcher. The production dispatcher currently has no universal handler, so `planapproval-*` fails closed.
+
+## Missing human proof
+
+The signed gateway envelope authenticates **the gateway**, and includes Teams activity identity *assertions*. It does not carry a delegated Microsoft **user token** suitable for `MicrosoftTokenVerifier.verify()`. Never populate `verified_token_source` using the bot application's client-credentials token, tenant ID, AAD object ID alone, a forwarded card field, or a token cached for a different action. The universal dispatcher requires an exact approval, tenant, actor, response receipt binding and independently verified Microsoft token.
+
+The implementation needs a trusted Teams platform activity-authentication design and a documented Microsoft user-authentication mechanism (for example, supported Teams SSO/OAuth user flow), with audience, issuer, tenant, token lifetime, and sender/receipt correlation validated. Ensure tokens are not logged, persisted in plain text, or echoed in card responses. If platform authentication is relied upon without a delegated user JWT, design an explicit separate verifier contract and independent security review rather than silently weakening the existing JWT contract.
+
+## Acceptance (controlled AOT internal test)
+
+1. Persist a server-owned test plan and original governed request. Confirm a single bounded scope and configured approver role. No customer mutation or production release action.
+2. Deliver a Teams approval card to an allowed test user and record the actual Teams provider message identifier; synthetic `accepted:` IDs are not delivery proof.
+3. Capture a **real** Approve action with authenticated human identity and unique response receipt. Verify tenant/actor and exact plan/receipt binding; audit Microsoft/Teams/JKD decision and issuance of exactly one scoped grant, with no automatic provider mutation.
+4. Capture a separate **real** Deny on a fresh proposal. Verify audit persisted, no grant, no execution continuation.
+5. Reject missing/untrusted proof, different tenant, different actor, mismatched receipt, expired plan, duplicate response, and replay. Verify on desktop and mobile where supported.
+6. Retain draft and no production activation until protected CI, independent security and governance reviews, and live provider receipt readback pass.
+
+
+## Phase-bound universal-plan card provenance hardening (P0 #1440)
+
+General `planapproval-*` approvals now require a new 192-bit random
+`card_instance_challenge`, stored with its SHA-256 checksum in the immutable
+server-issued `ApprovalRequest`. The existing Teams Adaptive Card inserts the
+challenge as an `Action.Submit` field; the authenticated gateway must sign
+that selected field, and runtime independently verifies the exact issued
+challenge and digest **before** an approval can create a plan grant or enqueue
+execution. Missing, stale, mismatched, swapped, cross-tenant, malformed or
+unreviewed card submissions must fail closed; decision replay is still
+governed by the existing atomic ledger.
+
+**Trust boundary:** A card challenge is *not* an OAuth human JWT, proof of
+Microsoft Teams message-origin ID, MFA, or proof that the Owner personally
+clicked. The unresolved historical provenance case #1553 remains separately
+open. This source-only implementation does not enable
+`JASON_UNIVERSAL_APPROVAL_MODE=enforced`, provide a production routing policy,
+authorize any reboot/PO/client message, or substitute for live negative UAT,
+Owner approval, CCC, and governed release controls.
+
+
+## Teams card send acceptance is not provider-confirmed delivery (P0 #1553)
+
+The existing Teams proactive transport can return either a provider message ID
+or a synthetic accepted:UUID receipt when the send returned no ID. Only the
+former can support a provider-delivery claim. The general plan approval
+delivery adapter now rejects synthetic, empty and duplicate message IDs and
+fails closed. The existing coordinator retains the pending request and
+records PROCESSING_FAILED, while the plan progress becomes blocked rather
+than reporting delivery. A later signed callback cannot silently remove a
+recorded delivery-origin block or mint an executable plan grant. Never automatically resend after a partial/unknown
+delivery outcome; reconcile native Teams message evidence first.
+
+A genuine provider message ID is not proof of device notification, Adaptive
+Card rendering, MFA, human presence, or a click. The historically disputed
+approval #1553 remains unproven. General approval mode stays off. Separately
+verify original message IDs, user interaction, identity and negative cases.
+
+
+## Signed SDK callback reply-to evidence — observation only (#1553)
+
+For an actual approval submit, the existing Microsoft Agents SDK gateway
+now checks the authenticated activity's own replyToId property (never the
+editable Adaptive Card Action.Submit value). If well formed and present,
+the gateway includes it as callback_reply_to_id in its Ed25519-signed
+approval interaction. The existing bridge bounds it and the Python
+transport parser retains it as read-only approval evidence. Missing
+replyToId is recorded as absent; it is not replaced with the callback
+message ID or an invented original-card ID. Attempts to assert this
+field through card input are rejected.
+
+**This is NOT human MFA, proof of physical click, guaranteed Graph
+origin-card ID, or permission to approve actions.** An SDK activity can
+omit replyToId, and no live callback-to-original-message linkage has
+yet been demonstrated. General UTA authorization remains OFF. Before
+a future trust decision, compare this observed SDK field against a
+genuine provider-returned, durable original outbound Teams card
+message ID, exact recipient/chat, immutable approval, authorized
+actor/tenant, and bounded TTL under controlled negative UAT.
+Do not infer linkage from an arbitrary signed string alone.

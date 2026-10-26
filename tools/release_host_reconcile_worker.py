@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import importlib.util
+import hashlib
 import grp
 import json
 import os
@@ -20,9 +22,24 @@ CANDIDATE_SCRIPTS = SPOOL / "candidate-scripts"
 CURRENT = Path("/opt/jason/current")
 REPO = Path("/home/al/.local/lib/jason/engineering-source-repo")
 SHA = re.compile(r"^[0-9a-f]{40}$")
+ROOT_RECOVERY_POLICY = Path("/etc/jason/release-readback-recovery/production-desired-state.json")
+SOURCE_DRIFT_POLICY = "config/production-desired-state.json"
+POLICY_UNIT_LISTS = (
+    "required_system_units", "allowed_system_units",
+    "required_user_units", "allowed_user_units",
+)
+
 REQUEST_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
-MAX_REQUESTS_PER_RUN = 8
+# Process one request per systemd activation; DirectoryNotEmpty retriggers for
+# remaining requests. Multiple 360s scripts must never overrun one unit start.
+MAX_REQUESTS_PER_RUN = 1
 HOST_RECONCILE_TIMEOUT_SECONDS = 360
+# Pinned historical rollback-only check; never skip the mandatory health start.
+LEGACY_LKG_SHA = "aca94fdc0bfa551162f6ea99d7ddded311786414"
+LEGACY_HOST_SCRIPT_SHA256 = "d8bf41dfe824b8eb01ae192386907a6657f09c245aa246306597a1162c7d1707"
+LEGACY_HEALTH_FROM = 'timeout --signal=TERM --kill-after=5s 240s systemctl start "$unit"'
+LEGACY_HEALTH_TO = 'timeout --signal=TERM --kill-after=5s 300s systemctl start "$unit"'
+HOST_RECONCILE_LEGACY_ROLLBACK_TIMEOUT_SECONDS = 410
 
 
 class HostReconcileError(RuntimeError):
@@ -112,6 +129,162 @@ def _verify_main(source_revision: str) -> None:
 
 
 
+def _protected_root_drift_policy() -> dict[str, object]:
+    """Read the root-only policy without following symlinks or weakening mode."""
+    fd = os.open(ROOT_RECOVERY_POLICY, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        meta = os.fstat(fd)
+        if not stat.S_ISREG(meta.st_mode) or meta.st_uid != 0 or meta.st_mode & 0o077:
+            raise HostReconcileError("root recovery policy is not root-only mode-0600")
+        if meta.st_size > 131072:
+            raise HostReconcileError("root recovery policy is unexpectedly large")
+        with os.fdopen(fd, "r", encoding="utf-8", closefd=False) as handle:
+            policy = json.load(handle)
+    finally:
+        os.close(fd)
+    if not isinstance(policy, dict) or policy.get("schema_version") != "1.0":
+        raise HostReconcileError("root recovery policy schema is invalid")
+    return policy
+
+
+def _declared_units(policy: dict[str, object], field: str) -> set[str]:
+    units = policy.get(field)
+    if (not isinstance(units, list)
+            or any(not isinstance(item, str)
+                   or not re.fullmatch(r"jason-[a-z0-9_.@-]{1,120}", item)
+                   for item in units)
+            or len(units) != len(set(units))):
+        raise HostReconcileError("invalid protected drift unit declarations: " + field)
+    return set(units)
+
+
+def _verify_root_policy_covers_candidate(source_revision: str) -> None:
+    """Refuse a host install that root's independent drift checker would reject.
+
+    This is intentionally READ-ONLY. Adding a source unit to an independently
+    root-approved policy is a material authority change: the host reconciler
+    must never silently enlarge its own protected allowlist.
+    """
+    try:
+        raw = subprocess.check_output(
+            _git("show", f"{source_revision}:{SOURCE_DRIFT_POLICY}"),
+            text=True, timeout=15,
+        )
+        candidate = json.loads(raw)
+    except (subprocess.SubprocessError, ValueError) as exc:
+        raise HostReconcileError("exact candidate drift policy could not be verified") from exc
+    if not isinstance(candidate, dict) or candidate.get("schema_version") != "1.0":
+        raise HostReconcileError("exact candidate drift policy schema is invalid")
+
+    root_policy = _protected_root_drift_policy()
+    missing: list[str] = []
+    for field in POLICY_UNIT_LISTS:
+        declared = _declared_units(candidate, field)
+        protected = _declared_units(root_policy, field)
+        # A required timer cannot be substituted by a merely allowed entry.
+        for unit in sorted(declared - protected):
+            missing.append(field + ":" + unit)
+
+    if missing:
+        raise HostReconcileError(
+            "protected root drift policy missing exact candidate unit declarations: "
+            + ", ".join(missing[:16])
+            + (" (additional entries omitted)" if len(missing) > 16 else "")
+            + "; requires separately authorized root-policy migration before host mutation"
+        )
+
+
+def _trusted_root_policy_helper():
+    """Load only the installed root-owned helper, never mutable source."""
+    helper = Path(__file__).with_name("protected_root_policy_migration.py")
+    meta = helper.lstat()
+    if (not stat.S_ISREG(meta.st_mode) or helper.is_symlink()
+            or meta.st_uid != 0 or meta.st_mode & 0o022):
+        raise HostReconcileError("root policy rollback helper is not securely installed")
+    spec = importlib.util.spec_from_file_location("jason_root_policy_migration", helper)
+    if spec is None or spec.loader is None:
+        raise HostReconcileError("root policy rollback helper cannot be loaded")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _verified_migration_ancestor(ancestor: str, descendant: str) -> bool:
+    """Verify exact immutable Git lineage; a persisted receipt alone is insufficient."""
+    if (not isinstance(ancestor, str) or not SHA.fullmatch(ancestor)
+            or not isinstance(descendant, str) or not SHA.fullmatch(descendant)):
+        raise HostReconcileError("root policy migration lineage requires exact revisions")
+    try:
+        result = subprocess.run(
+            _git("merge-base", "--is-ancestor", ancestor, descendant),
+            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise HostReconcileError("root policy migration lineage unavailable") from exc
+    if result.returncode not in (0, 1):
+        raise HostReconcileError("root policy migration lineage verification failed")
+    return result.returncode == 0
+
+
+def _restore_root_policy_for_target(source_revision: str) -> str:
+    """Restore audited rollback or retain exact independently committed policy."""
+    module = _trusted_root_policy_helper()
+    if not module.ACTIVE.is_file():
+        return "NO_MIGRATION_ACTIVE"
+    receipt = module._json(module._root_only(module.ACTIVE))
+    if receipt.get("candidate_sha") == source_revision:
+        return "CANDIDATE_POLICY_ACTIVE"
+    if receipt.get("rollback_sha") == source_revision:
+        return module.prepare_rollback(source_revision)
+    # Root-verified LKG can advance beyond the original migration SHA.
+    # Retain committed root policy only for independently verified descendants.
+    # With an open breaker, allow ONLY the protected complete LKG target, never
+    # a new candidate: rollback must remain possible without bypassing gates.
+    control = module._json(module._root_only(
+        module.ROOT / "production-control-state.json"))
+    lkg = ((control.get("last_known_good") or {}).get("manifest") or {})
+    breaker = control.get("circuit_breaker") or {}
+    lkg_revision = lkg.get("revision")
+    state = breaker.get("state")
+    authorized_target = (state == "closed" or
+                         (state == "open" and source_revision == lkg_revision))
+    if (receipt.get("phase") == "applied"
+            and lkg.get("complete") is True and authorized_target):
+        data = module._root_only(module.POLICY)
+        if module.digest(data) != receipt.get("applied_sha256"):
+            raise HostReconcileError("committed root policy differs from reviewed migration")
+        migration_sha = receipt.get("candidate_sha")
+        if (_verified_migration_ancestor(migration_sha, lkg_revision)
+                and _verified_migration_ancestor(migration_sha, source_revision)):
+            return "PREVIOUS_MIGRATION_LKG_VERIFIED"
+    raise HostReconcileError("active root policy migration does not belong to target SHA")
+
+
+def _preflight_candidate_root_policy(source_revision: str) -> str:
+    """Read-only reviewed-delta check, never automatic root allowlist writes."""
+    try:
+        _verify_root_policy_covers_candidate(source_revision)
+        return "ALREADY_COVERED"
+    except HostReconcileError as exc:
+        # Only an exact missing declaration is eligible for the separately
+        # authorized, fixed-scope migration path. Any malformed or untrusted
+        # policy must remain a hard denial.
+        if not str(exc).startswith(
+            "protected root drift policy missing exact candidate unit declarations:"
+        ):
+            raise
+    helper = _trusted_root_policy_helper()
+    state = helper._json(helper._root_only(
+        helper.ROOT / "production-control-state.json"
+    ))
+    rollback = (((state.get("last_known_good") or {}).get("manifest") or {})
+                .get("revision"))
+    if not isinstance(rollback, str) or not SHA.fullmatch(rollback):
+        raise HostReconcileError("root LKG absent for reviewed migration preflight")
+    return helper.preview_exact_migration(source_revision, rollback)
+
+
 def _candidate_reconcile_script(source_revision: str) -> Path:
     """Materialize the exact candidate reconciliation script from protected Git evidence."""
     CANDIDATE_SCRIPTS.mkdir(parents=True, exist_ok=True)
@@ -124,6 +297,13 @@ def _candidate_reconcile_script(source_revision: str) -> Path:
         raise HostReconcileError(
             "candidate host reconciliation script is not materializable from protected source"
         ) from exc
+    if source_revision == LEGACY_LKG_SHA:
+        if (hashlib.sha256(body.encode("utf-8")).hexdigest() != LEGACY_HOST_SCRIPT_SHA256
+                or body.count(LEGACY_HEALTH_FROM) != 1):
+            raise HostReconcileError("pinned immutable legacy health script identity mismatch")
+        # Only this exact checked source gets a timeout-only replacement.
+        # Mandatory full health execution and all pass/fail logic are unchanged.
+        body = body.replace(LEGACY_HEALTH_FROM, LEGACY_HEALTH_TO)
     developer_checkout = "/home/al/projects" + "/jason"
     if developer_checkout in body:
         raise HostReconcileError(
@@ -203,6 +383,14 @@ def _process(path: Path) -> None:
                 "live MCP revision does not match requested host release"
             )
 
+        # The audited root overlay must be restored before installing a
+        # previous immutable release that no longer declares its new units.
+        root_policy_result = _restore_root_policy_for_target(source_revision)
+
+        # Prevent the exact failure seen in #1974: host units were installed
+        # but root's independent recovery overlay did not declare them.
+        policy_preflight = _preflight_candidate_root_policy(source_revision)
+
         script = _candidate_reconcile_script(source_revision)
         if not script.is_file():
             raise HostReconcileError("candidate host reconciliation script is missing")
@@ -236,7 +424,9 @@ def _process(path: Path) -> None:
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                timeout=HOST_RECONCILE_TIMEOUT_SECONDS,
+                timeout=(HOST_RECONCILE_LEGACY_ROLLBACK_TIMEOUT_SECONDS
+                         if source_revision == LEGACY_LKG_SHA
+                         else HOST_RECONCILE_TIMEOUT_SECONDS),
                 env=script_env,
             )
         except subprocess.TimeoutExpired as exc:
@@ -245,7 +435,10 @@ def _process(path: Path) -> None:
                 output = output.decode("utf-8", errors="replace")
             detail = str(output).strip()
             raise HostReconcileError(
-                f"candidate host reconciliation script exceeded {HOST_RECONCILE_TIMEOUT_SECONDS}s"
+                "candidate host reconciliation script exceeded "
+                + str(HOST_RECONCILE_LEGACY_ROLLBACK_TIMEOUT_SECONDS
+                      if source_revision == LEGACY_LKG_SHA
+                      else HOST_RECONCILE_TIMEOUT_SECONDS) + "s"
                 + (": " + detail[-3000:] if detail else "")
             ) from exc
         except subprocess.CalledProcessError as exc:
@@ -267,6 +460,11 @@ def _process(path: Path) -> None:
         finally:
             os.umask(previous_umask)
 
+        if policy_preflight != "ALREADY_COVERED":
+            # The candidate install was required to apply its independent
+            # root-reviewed migration. Never accept success if it did not.
+            _verify_root_policy_covers_candidate(source_revision)
+
         release_meta = release_dir.stat()
         if release_meta.st_uid != 0 or (release_meta.st_mode & 0o055) != 0o055:
             raise HostReconcileError(
@@ -277,11 +475,21 @@ def _process(path: Path) -> None:
             raise HostReconcileError(
                 "immutable host release did not resolve to requested revision"
             )
+        if root_policy_result == "ROLLBACK_ALLOWED_STAGE":
+            # Candidate-only units have now been removed by the immutable
+            # baseline host script. Verify absence, then restore and archive
+            # the exact pre-migration root policy; never mark host PASS sooner.
+            module = _trusted_root_policy_helper()
+            root_policy_result = module.complete_rollback(source_revision)
+            if root_policy_result != "RESTORED":
+                raise HostReconcileError("root rollback policy restoration not certified")
         _write_result(
             request_id,
             source_revision,
             success=True,
-            detail=completed.stdout,
+            detail=("ROOT_POLICY_MIGRATION=" + root_policy_result
+                    + "\nROOT_POLICY_PREFLIGHT=" + policy_preflight
+                    + "\n" + completed.stdout),
         )
     except Exception as exc:
         _write_result(

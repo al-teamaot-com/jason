@@ -255,3 +255,25 @@ def test_completed_read_audits_intuit_tid_without_raw_headers(tmp_path):
         "realm_bound_by_oauth",
         "intuit_tid",
     }
+
+
+def test_production_connector_cannot_refresh_sandbox_token(tmp_path, monkeypatch):
+    store = QuickBooksOAuthStore(tmp_path / "oauth.sqlite3")
+    store.set_token(
+        {"access_token": "expired", "refresh_token": "sandbox-refresh", "expires_in": 1},
+        realm_id="1234567890123456", environment="sandbox",
+    )
+    secrets, transport, audit = FakeSecrets(), FakeTransport(), FakeAudit()
+    connector = QuickBooksConnector(
+        secrets=secrets, transport=transport, audit=audit,
+        oauth_store=store, expected_environment="production",
+    )
+    from connectors.quickbooks import oauth as oauth_module
+    calls = []
+    monkeypatch.setattr(oauth_module, "_token_request", lambda **kwargs: calls.append(kwargs))
+    with pytest.raises(ConnectorAuthorizationError, match="OAuth connection is unavailable"):
+        connector.execute(ConnectorRequest(_context(QUICKBOOKS_COMPANY_READ), {}))
+    assert calls == []
+    assert transport.calls == []
+    assert secrets.calls == ["quickbooks.production.oauth_client"]
+    assert store.get_token()["refresh_token"] == "sandbox-refresh"

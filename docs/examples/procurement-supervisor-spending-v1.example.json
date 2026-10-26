@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "policy_version": "EXAMPLE-REPLACE-WITH-REVIEWED-OWNER-VERSION",
+  "role_memberships": {
+    "example-role-technician": ["person-TECHNICIAN-EXAMPLE"]
+  },
+  "rules": [
+    {
+      "requester_id": null,
+      "role": "example-role-technician",
+      "purchase_type": "it",
+      "maximum_without_approval": "100.00",
+      "designated_supervisor_ids": ["person-SUPERVISOR-EXAMPLE"],
+      "escalation_owner_ids": ["person-OWNER-EXAMPLE"],
+      "ttl_minutes": 60
+    }
+  ]
+}

@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
-from urllib.request import Request, urlopen
 
 from kernel.capabilities import (
     CapabilityApproval,
@@ -18,7 +17,6 @@ from kernel.capabilities import (
     CapabilityStewardship,
     IdempotencyBehavior,
 )
-from kernel.execution_deadline import bounded_execution_timeout
 from kernel.execution_providers import (
     ExecutionProvider,
     ExecutionProviderRegistryService,
@@ -36,6 +34,7 @@ from orchestrator.contracts import OrchestrationRequest
 from orchestrator.execution_plan import ExecutionPlan, PreparedExecutionPlan
 from orchestrator.invokers import CapabilityInvokerRegistry
 from orchestrator.service import InvocationResult
+from .teams_message_send import post_existing_teams_gateway
 from autonomous_remediation.autonomous_principal import AutonomousPrincipal, AutonomousRequestFactory
 from autonomous_remediation.playbook_autonomy_approval import SQLitePlaybookAutonomyApprovalStore
 from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
@@ -448,13 +447,20 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str, dict[str, Any]]:
             )
             return event, text, card
         owner_action = _bounded(arguments.get("owner_action"), "owner_action", 300)
+        # This card is a status/fallback, NOT an authorization mechanism.
+        # An actionable Production + CCC card may be sent to the same chat
+        # shortly before this notice. Make the difference unmistakable
+        # rather than showing an "owner action required" card with no buttons.
         text = (
-            f"Jason needs owner action for {work_id}: {description} "
-            f"Owner action: {owner_action}."
+            f"STATUS ONLY (no approval buttons) for {work_id}: {description}. "
+            f"Owner action: {owner_action} "
+            "Use the separate Production + CCC approval card if present."
         )
         card = _adaptive_card(
-            title="Jason owner action required",
-            summary=description,
+            title="Production status only - NOT an approval card",
+            summary=(description +
+                     " This status card has no approval buttons. Use the separate "
+                     "Production + CCC approval card if present."),
             color="Attention",
             facts=(
                 ("Build", work_id),
@@ -604,27 +610,26 @@ class AutonomousCompletionTeamsInvoker:
         opaque = prepared.opaque
         if not isinstance(opaque, _PreparedNotification):
             raise PermissionError("invalid autonomous completion prepared state")
-        body = json.dumps(opaque.payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        http_request = Request(
-            opaque.gateway_url + "/internal/proactive/send",
-            data=body,
-            method="POST",
-            headers={
-                "Authorization": "Bearer " + opaque.token,
-                "Content-Type": "application/json",
-            },
+        # Share the governed gateway transport and its strict real-vs-synthetic
+        # receipt contract. Do not independently interpret an accepted:... token
+        # as the Microsoft Teams provider's message identifier.
+        result = post_existing_teams_gateway(
+            gateway_url=opaque.gateway_url,
+            token=opaque.token,
+            payload=opaque.payload,
         )
-        with urlopen(http_request, timeout=bounded_execution_timeout(20)) as response:
-            result = json.loads(response.read().decode("utf-8"))
-        if result.get("status") != "succeeded" or not result.get("message_id"):
-            raise RuntimeError("autonomous completion Teams send failed")
         return InvocationResult(
             output={
                 "provider": PROVIDER,
                 "channel": "microsoft_teams",
                 "recipient_identity": RECIPIENT_JASON_IDENTITY,
-                "message_id": str(result["message_id"]),
-                "message_id_synthetic": bool(result.get("message_id_synthetic", False)),
+                "message_id": result["message_id"],
+                "message_id_synthetic": result["message_id_synthetic"],
+                "delivery_evidence_type": result["delivery_evidence_type"],
+                "delivery_state": (
+                    "provider_accepted_delivery_unverified"
+                    if result["message_id_synthetic"] else "provider_accepted"
+                ),
             },
             attempts=1,
         )
@@ -716,6 +721,38 @@ def build_notifier(
     )
 
 
+def _notification_receipt(result: Mapping[str, Any]) -> tuple[str, bool]:
+    """Return a reference and uncertainty, never claim human delivery."""
+    if not isinstance(result, Mapping):
+        raise RuntimeError("Teams notification did not return a receipt")
+    message_id = str(result.get("message_id") or "").strip()
+    if not message_id:
+        raise RuntimeError("Teams notification missing receipt")
+    synthetic = result.get("message_id_synthetic", message_id.startswith("accepted:"))
+    if type(synthetic) is not bool or synthetic != message_id.startswith("accepted:"):
+        raise RuntimeError("Teams notification receipt evidence is inconsistent")
+    return message_id, synthetic
+
+
+def _persist_unverified_notification(
+    directory: Path, filename: str, *, event_type: str,
+    receipt_id: str, observed_at: datetime, **context: str,
+) -> None:
+    """Do not blindly resend an indeterminate Teams message or mark it notified."""
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = directory / filename
+    temp = path.with_suffix(path.suffix + ".tmp")
+    temp.write_text(json.dumps({
+        "event_type": event_type,
+        "receipt_id": receipt_id,
+        "observed_at": observed_at.isoformat(),
+        "status": "provider_accepted_delivery_unverified",
+        **context,
+    }, sort_keys=True) + "\n", encoding="utf-8")
+    os.chmod(temp, 0o600)
+    os.replace(temp, path)
+
+
 @dataclass(slots=True)
 class AutonomousWorkLifecycleNotificationMaintenance:
     notifier: GovernedAutonomousCompletionNotifier
@@ -740,6 +777,7 @@ class AutonomousWorkLifecycleNotificationMaintenance:
 
         events = self.spool_root / "lifecycle-events"
         notified = self.spool_root / "lifecycle-notifications"
+        unverified = self.spool_root / "lifecycle-notifications-unverified"
         if not events.exists():
             return False
         notified.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -747,7 +785,7 @@ class AutonomousWorkLifecycleNotificationMaintenance:
         handled = False
         for path in sorted(events.glob("*.json"), key=lambda item: item.stat().st_mtime):
             marker = notified / path.name
-            if marker.exists():
+            if marker.exists() or (unverified / path.name).exists():
                 continue
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
@@ -770,9 +808,13 @@ class AutonomousWorkLifecycleNotificationMaintenance:
             if owner_action:
                 arguments["owner_action"] = owner_action
             result = self.notifier.send(event_type, **arguments)
-            message_id = str(result.get("message_id") or "").strip()
-            if not message_id:
-                raise RuntimeError("lifecycle Teams notification missing message id")
+            message_id, synthetic = _notification_receipt(result)
+            if synthetic:
+                _persist_unverified_notification(
+                    unverified, path.name, event_type=event_type,
+                    receipt_id=message_id, observed_at=current, work_id=work_id,
+                )
+                continue
             temp = marker.with_suffix(marker.suffix + ".tmp")
             temp.write_text(
                 json.dumps(
@@ -780,6 +822,7 @@ class AutonomousWorkLifecycleNotificationMaintenance:
                         "event_type": event_type,
                         "work_id": work_id,
                         "message_id": message_id,
+                        "delivery_state": "provider_message_reference_recorded",
                         "notified_at": current.isoformat(),
                     },
                     sort_keys=True,
@@ -867,20 +910,14 @@ class ReleaseManagerOwnerNotificationMaintenance:
                 arguments["owner_action"] = owner_action
             try:
                 result = self.notifier.send(event_type, **arguments)
-                message_id = str(result.get("message_id") or "").strip()
-                if not message_id:
-                    raise RuntimeError("release Teams notification missing message id")
-                if result.get("message_id_synthetic") or message_id.startswith("accepted:"):
-                    # Provider acceptance is not delivery. A blind resend risks
-                    # duplicate cards; retain evidence for explicit reconciliation.
-                    unverified.mkdir(parents=True, exist_ok=True, mode=0o700)
-                    uncertain = unverified / path.name
-                    uncertain.write_text(json.dumps({
-                        "event_type": event_type, "release_id": release_id,
-                        "receipt_id": message_id, "observed_at": current.isoformat(),
-                        "status": "provider_accepted_delivery_unverified",
-                    }, sort_keys=True) + "\n", encoding="utf-8")
-                    os.chmod(uncertain, 0o600)
+                message_id, synthetic = _notification_receipt(result)
+                if synthetic:
+                    # A gateway acceptance token is not a Microsoft message ID.
+                    # Preserve the unknown state without a duplicate send.
+                    _persist_unverified_notification(
+                        unverified, path.name, event_type=event_type,
+                        receipt_id=message_id, observed_at=current, release_id=release_id,
+                    )
                     continue
             except Exception as exc:
                 # Never let one undelivered release event suppress subsequent alerts.
@@ -906,6 +943,7 @@ class ReleaseManagerOwnerNotificationMaintenance:
                         "event_type": event_type,
                         "release_id": release_id,
                         "message_id": message_id,
+                        "delivery_state": "provider_message_reference_recorded",
                         "notified_at": current.isoformat(),
                     },
                     sort_keys=True,
@@ -950,6 +988,7 @@ class AutonomousDeploymentCompletionNotificationMaintenance:
 
         results = self.spool_root / "results"
         notified = self.spool_root / "notifications"
+        unverified = self.spool_root / "notifications-unverified"
         if not results.exists():
             return False
         notified.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -957,7 +996,7 @@ class AutonomousDeploymentCompletionNotificationMaintenance:
         handled = False
         for path in sorted(results.glob("*.json"), key=lambda item: item.stat().st_mtime):
             marker = notified / path.name
-            if marker.exists():
+            if marker.exists() or (unverified / path.name).exists():
                 continue
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
@@ -975,11 +1014,18 @@ class AutonomousDeploymentCompletionNotificationMaintenance:
             if len(candidate) != 40 or not support_item:
                 continue
 
-            self.notifier.send(
+            result = self.notifier.send(
                 "deployment_completed",
                 candidate_sha=candidate,
                 support_item=support_item,
             )
+            message_id, synthetic = _notification_receipt(result)
+            if synthetic:
+                _persist_unverified_notification(
+                    unverified, path.name, event_type="deployment_completed",
+                    receipt_id=message_id, observed_at=current, support_item=support_item,
+                )
+                continue
             temp = marker.with_suffix(marker.suffix + ".tmp")
             temp.write_text(
                 json.dumps(
@@ -987,6 +1033,8 @@ class AutonomousDeploymentCompletionNotificationMaintenance:
                         "event_type": "deployment_completed",
                         "candidate_sha": candidate,
                         "support_item": support_item,
+                        "message_id": message_id,
+                        "delivery_state": "provider_message_reference_recorded",
                         "notified_at": current.isoformat(),
                     },
                     sort_keys=True,
@@ -1037,6 +1085,7 @@ class SelfHealEscalationNotificationMaintenance:
 
         escalations = self.spool_root / "escalations"
         notified = self.spool_root / "notifications"
+        unverified = self.spool_root / "notifications-unverified"
         if not escalations.exists():
             return False
         notified.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -1044,7 +1093,7 @@ class SelfHealEscalationNotificationMaintenance:
         handled = False
         for path in sorted(escalations.glob("*.json"), key=lambda item: item.stat().st_mtime):
             marker = notified / path.name
-            if marker.exists():
+            if marker.exists() or (unverified / path.name).exists():
                 continue
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
@@ -1055,19 +1104,28 @@ class SelfHealEscalationNotificationMaintenance:
             fingerprint = str(payload.get("fingerprint") or "").strip()
             if not fingerprint or path.stem != fingerprint:
                 continue
-            self.notifier.send(
+            result = self.notifier.send(
                 "self_heal_escalation",
                 degraded_function=str(payload.get("degraded_function") or ""),
                 evidence_summary=str(payload.get("evidence_summary") or ""),
                 attempt_summary=str(payload.get("attempt_summary") or ""),
                 owner_action=str(payload.get("owner_action") or ""),
             )
+            message_id, synthetic = _notification_receipt(result)
+            if synthetic:
+                _persist_unverified_notification(
+                    unverified, path.name, event_type="self_heal_escalation",
+                    receipt_id=message_id, observed_at=current, fingerprint=fingerprint,
+                )
+                continue
             temp = marker.with_suffix(marker.suffix + ".tmp")
             temp.write_text(
                 json.dumps(
                     {
                         "event_type": "self_heal_escalation",
                         "fingerprint": fingerprint,
+                        "message_id": message_id,
+                        "delivery_state": "provider_message_reference_recorded",
                         "notified_at": current.isoformat(),
                     },
                     sort_keys=True,

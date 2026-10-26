@@ -7,7 +7,7 @@
     "automatic_promotion_enabled": true,
     "timezone": "America/New_York",
     "serialized_promotion": true,
-    "mode": "continuous_24x7",
+    "mode": "continuous_24x7_owner_approved",
     "reconcile_interval_minutes": 5,
     "max_concurrent_releases": 1
   },
@@ -31,7 +31,8 @@
     "last_known_good_manifest_required": true,
     "controller_identity_pinning_required": true,
     "functional_smoke_test_required": true,
-    "fresh_pre_mutation_health_required": true
+    "fresh_pre_mutation_health_required": true,
+    "require_owner_approval_for_all": true
   },
   "protected_core_globs": [
     ".github/workflows/*",
@@ -40,12 +41,25 @@
     "tools/install_release_manager*.py",
     "infrastructure/openclaw-operations/systemd/user/jason-release-manager.*",
     "infrastructure/jason-runtime/production-deploy.sh",
+    "infrastructure/jason-runtime/Dockerfile",
+    ".dockerignore",
     "tools/deploy_live_container.py",
     "implementation/orchestrator/*",
     "implementation/kernel/*",
     "tools/release_host_reconcile_worker.py",
     "tools/install_release_host_reconciler.py",
-    "infrastructure/openclaw-operations/systemd/jason-release-host-reconcile.*"
+    "tools/reconcile_production_host_services.sh",
+    "tools/reconcile_managed_unit_delta.py",
+    "tools/release_exporter_port_guard.py",
+    "tools/release_mobile_approval_consumer.py",
+    "implementation/runtime_service/src/jason_runtime/mobile_release_approval.py",
+    "implementation/runtime_service/src/jason_runtime/universal_teams_approval.py",
+    "implementation/runtime_service/src/jason_runtime/playbook_autonomy_review.py",
+    "implementation/connectors/microsoft_graph/teams_approval_channel.py",
+    "infrastructure/openclaw-operations/systemd/jason-release-host-reconcile.*",
+    "tools/install_release_control_transition.py",
+    "tools/protected_root_policy_migration.py",
+    "config/production-desired-state.json"
   ],
   "priority": {
     "order": [
@@ -77,18 +91,62 @@
     "rolled_back"
   ],
   "transitions": {
-    "requested": ["development", "blocked"],
-    "development": ["dev_verified", "blocked", "failed"],
-    "dev_verified": ["release_candidate", "development", "blocked"],
-    "release_candidate": ["preproduction", "development", "blocked"],
-    "preproduction": ["preprod_verified", "development", "blocked", "failed"],
-    "preprod_verified": ["production_eligible", "development", "blocked"],
-    "production_eligible": ["production", "development", "blocked"],
-    "production": ["production_verified", "rolled_back", "failed"],
-    "production_verified": ["closed", "rolled_back"],
-    "blocked": ["development", "requested"],
-    "failed": ["development", "rolled_back"],
-    "rolled_back": ["development", "closed"],
+    "requested": [
+      "development",
+      "blocked"
+    ],
+    "development": [
+      "dev_verified",
+      "blocked",
+      "failed"
+    ],
+    "dev_verified": [
+      "release_candidate",
+      "development",
+      "blocked"
+    ],
+    "release_candidate": [
+      "preproduction",
+      "development",
+      "blocked"
+    ],
+    "preproduction": [
+      "preprod_verified",
+      "development",
+      "blocked",
+      "failed"
+    ],
+    "preprod_verified": [
+      "production_eligible",
+      "development",
+      "blocked"
+    ],
+    "production_eligible": [
+      "production",
+      "development",
+      "blocked"
+    ],
+    "production": [
+      "production_verified",
+      "rolled_back",
+      "failed"
+    ],
+    "production_verified": [
+      "closed",
+      "rolled_back"
+    ],
+    "blocked": [
+      "development",
+      "requested"
+    ],
+    "failed": [
+      "development",
+      "rolled_back"
+    ],
+    "rolled_back": [
+      "development",
+      "closed"
+    ],
     "closed": []
   },
   "required_development_evidence": [

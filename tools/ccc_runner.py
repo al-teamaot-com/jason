@@ -55,7 +55,7 @@ class CCCConfig:
         return cls(
             enabled=bool(value.get("enabled", True)),
             cadence_days=cadence,
-            repository_root=Path(value.get("repository_root", "/home/al/projects/jason")),
+            repository_root=Path(value.get("repository_root", "/home/al/.local/lib/jason/engineering-worker-source")),
             evidence_root=Path(value.get("evidence_root", "/home/al/Jason-Evidence/CCC")),
             recovery_root=Path(value.get("recovery_root", "/home/al/Jason-Recovery/CCC")),
             state_root=Path(value.get("state_root", "/var/lib/jason/ccc")),
@@ -150,11 +150,15 @@ class CCCRunner:
         self.checker_revision = checker_revision.strip()
         self.now = now or (lambda: datetime.now(timezone.utc))
 
-    def run(self, *, force: bool = False, trigger: str = "scheduled") -> CCCRunResult:
+    def run(self, *, force: bool = False, trigger: str = "scheduled", candidate_sha: str | None = None) -> CCCRunResult:
         if not self.config.enabled and not force:
             return CCCRunResult("DISABLED", trigger, None, None, None)
 
-        source_revision = self._authoritative_source_revision()
+        if candidate_sha is not None and (not force or trigger != "material_change"):
+            raise CCCRunnerError(
+                "immutable release candidate validation requires forced material-change check"
+            )
+        source_revision = self._authoritative_source_revision(candidate_sha)
         runtime_revision = self._runtime_revision()
         changed_from_lkc = self._changed_from_last_compliant(source_revision)
         material_changes = tuple(path for path in changed_from_lkc if _matches(path, self.config.material_path_prefixes))
@@ -225,6 +229,12 @@ class CCCRunner:
             worktree = self._temporary_worktree(source_revision)
             checks.extend(self._source_checks(worktree, run_dir))
             checks.extend(self._host_checks(runtime_revision))
+            if candidate_sha is None:
+                # Scheduled observers must not treat a watchdog that failed
+                # solely *because CCC previously failed* as independent
+                # production drift. Exact-candidate release checks retain
+                # the original failed-unit result, with no exception.
+                checks = self._reconcile_scheduled_watchdog_feedback(checks)
             checks.append(self._provider_canary_check())
         except Exception as exc:
             checks.append(CheckResult(
@@ -289,12 +299,29 @@ class CCCRunner:
             checkpoint_id,
         )
 
-    def _authoritative_source_revision(self) -> str:
+    def _authoritative_source_revision(self, candidate_sha: str | None = None) -> str:
+        """Select only an exact Git candidate reachable from protected main.
+
+        Scheduled CCC always checks current main. Release CCC may independently
+        verify an immutable owner-approved candidate without substituting newer
+        unrelated commits; invalid or unmerged candidates fail closed.
+        """
         repo = self.config.repository_root
         fetched = _run(("git", "fetch", "origin", "main"), cwd=repo, timeout=120)
         if fetched.returncode != 0:
             raise CCCRunnerError("Unable to refresh authoritative origin/main")
-        return _git(repo, "rev-parse", "origin/main")
+        head = _git(repo, "rev-parse", "origin/main")
+        if candidate_sha is None:
+            return head
+        import re
+        if not re.fullmatch(r"[0-9a-f]{40}", candidate_sha):
+            raise CCCRunnerError("release candidate must be one exact full SHA")
+        if _run(("git", "merge-base", "--is-ancestor", candidate_sha, head),
+                cwd=repo, timeout=30).returncode != 0:
+            raise CCCRunnerError("release candidate is not reachable from protected main")
+        if _git(repo, "rev-parse", f"{candidate_sha}^{{commit}}") != candidate_sha:
+            raise CCCRunnerError("release candidate does not identify exact commit")
+        return candidate_sha
 
     def _runtime_revision(self) -> str:
         result = _run((
@@ -400,6 +427,62 @@ class CCCRunner:
         results.append(CheckResult("mcp-constitutional-production-equivalent", "PASS" if mcp_ok else "FAIL", (mcp.stdout or "")[-1500:]))
         return results
 
+    def _reconcile_scheduled_watchdog_feedback(
+        self, checks: list[CheckResult],
+    ) -> list[CheckResult]:
+        """Isolate one proven CCC-to-watchdog feedback loop, never release CCC.
+
+        The original failed unit and the independent watchdog readback remain
+        in the CCC report. Unknown/stale/multi-unit failures remain FAIL.
+        """
+        target = next((c for c in checks if c.check_id == "systemd-failed-units"), None)
+        if target is None or target.status != "FAIL":
+            return checks
+        evidence = dict(target.evidence or {})
+        failed_units = evidence.get("failed_units")
+        if not isinstance(failed_units, list) or len(failed_units) != 1 or not isinstance(failed_units[0], str):
+            return checks
+        parts = failed_units[0].split()
+        if parts and parts[0] == "●":
+            parts = parts[1:]
+        if (len(parts) < 4 or parts[:4] != [
+            "jason-production-drift-watchdog.service", "loaded", "failed", "failed",
+        ]):
+            return checks
+        snapshot_path = Path(
+            "/var/lib/jason/openclaw/release-manager/protected-readback/production-drift.json"
+        )
+        try:
+            report = json.loads(snapshot_path.read_text(encoding="utf-8"))
+            problems = report.get("problems")
+            observed = _parse_time(str(report.get("observed_at") or ""))
+            age = (self.now().astimezone(timezone.utc) - observed).total_seconds()
+            if (report.get("status") != "drift_detected"
+                    or not isinstance(problems, list) or len(problems) != 1
+                    or problems[0] != {
+                        "kind": "failed_system_unit",
+                        "unit": "jason-ccc.service",
+                        "state": "failed",
+                    } or not (0 <= age <= 300)):
+                return checks
+        except (OSError, ValueError, TypeError, KeyError):
+            return checks
+        recorded = CheckResult(
+            "systemd-failed-units",
+            "PASS",
+            "Scheduled CCC: watchdog failure is proven downstream of the prior CCC failure; "
+            "this does not certify or override the exact-candidate release gate.",
+            {
+                "failed_units": [],
+                "historical_watchdog_feedback": {
+                    "original_failed_unit": failed_units[0],
+                    "drift_observed_at": report["observed_at"],
+                    "reason": "only_failed_unit_in_watchdog_readback_was_prior_ccc",
+                },
+            },
+        )
+        return [recorded if c is target else c for c in checks]
+
     def _host_checks(self, runtime_revision: str) -> list[CheckResult]:
         results: list[CheckResult] = []
         failed = _run(("systemctl", "--failed", "--no-legend"), timeout=30)
@@ -504,6 +587,12 @@ print(json.dumps(out,sort_keys=True))
                 "correlation_id": value.get("correlation_id"),
                 "expected_status": expected_status,
             }
+            # Preserve exception TYPE for troubleshooting, never provider
+            # error strings that might contain request data or credentials.
+            if value.get("status") == "exception":
+                exception_type = str(value.get("error_type") or "")
+                if exception_type.isidentifier() and len(exception_type) <= 80:
+                    record["exception_type"] = exception_type
             summary.append(record)
             if not matches:
                 failures.append({**record, "expected": dict(expected)})
@@ -512,7 +601,8 @@ print(json.dumps(out,sort_keys=True))
                 "governed-provider-boundary-canaries",
                 "PASS",
                 f"{len(values)} governed provider boundary canaries matched expected positive/negative outcomes.",
-                {"results": summary},
+                {"results": summary,
+                 "expected_canary_count": len(self.config.provider_canaries)},
             )
         encoded = json.dumps(failures, sort_keys=True)
         status = "NOT_PROVEN" if "NO_MATCHING_AUTHORITY_GRANT" in encoded else "FAIL"
@@ -520,7 +610,8 @@ print(json.dumps(out,sort_keys=True))
             "governed-provider-boundary-canaries",
             status,
             f"{len(failures)} canaries did not match their expected governed outcomes.",
-            {"failures": failures, "results": summary},
+            {"failures": failures, "results": summary,
+             "expected_canary_count": len(self.config.provider_canaries)},
         )
 
     def _runtime_manifest(self, runtime_revision: str) -> Mapping[str, Any]:

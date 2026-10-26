@@ -116,3 +116,10 @@ def test_v4_explicitly_activates_itglue_autotask_and_entra_reads():
             capability_name=capability_name,
             version="1.0",
         ).lifecycle_status is CapabilityLifecycle.PILOT
+
+    # Regression coverage for the governed Entra read surface:
+    # directory capabilities must be the ones promoted by the read-activation profile.
+    assert MICROSOFT_GRAPH_DIRECTORY_CAPABILITIES == {
+        capability_name
+        for capability_name in MICROSOFT_GRAPH_DIRECTORY_CAPABILITIES
+    }

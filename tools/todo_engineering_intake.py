@@ -114,24 +114,31 @@ def parse_todo_sections(text: str) -> list[TodoItem]:
 
 def open_todo_issue_map(repo: Path) -> dict[str, dict[str, Any]]:
     issues = gh_json(
-        [
-            "issue",
-            "list",
-            "--state",
-            "open",
-            "--limit",
-            "200",
-            "--json",
-            "number,title,body,url,updatedAt",
-        ],
+        ["issue", "list", "--state", "open", "--limit", "5000",
+         "--json", "number,title,body,url,updatedAt"],
         cwd=repo,
     ) or []
+    # A short GitHub window hid canonical October TODO issues and admitted
+    # multiple duplicates. Saturated inventories are UNKNOWN, not empty.
+    if len(issues) >= 5000:
+        raise RuntimeError("TODO inventory at safe limit; do not admit new issue")
     result: dict[str, dict[str, Any]] = {}
     for issue in issues:
         body = str(issue.get("body") or "")
         match = ISSUE_TODO.search(body)
-        if match:
-            result[match.group(1).upper()] = dict(issue)
+        if not match:
+            continue
+        item_id = match.group(1).upper()
+        prior = result.get(item_id)
+        if prior is not None:
+            # Identical duplicate issues do not create new work authority.
+            # Prefer the earliest canonical ID; mismatched scope is unsafe.
+            if (str(prior.get("body") or "") != body
+                    or str(prior.get("title") or "") != str(issue.get("title") or "")):
+                raise RuntimeError("Conflicting GitHub TODO identities: " + item_id)
+            if int(issue["number"]) >= int(prior["number"]):
+                continue
+        result[item_id] = dict(issue)
     return result
 
 
@@ -201,6 +208,40 @@ def capacity_consuming_todo_issue_count(
         for issue in issues.values()
         if int(issue.get("number", 0) or 0) not in blocked_issue_numbers
     )
+
+
+def outstanding_commitment_snapshot(spool: Path) -> dict[str, Any]:
+    """Report stalled downstream work without granting additional admission authority.
+
+    The release bridge remains authoritative for item phases. An absent or
+    malformed report is unknown, never evidence that all work is complete.
+    """
+    path = spool / "todo-release-state.json"
+    if not path.is_file():
+        return {"status": "unknown", "outstanding_count": None, "items": []}
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"status": "unknown", "outstanding_count": None, "items": []}
+    records = state.get("items") if isinstance(state, dict) else None
+    if not isinstance(records, dict):
+        return {"status": "unknown", "outstanding_count": None, "items": []}
+    next_gate_by_phase = {
+        "development_blocked": "resolve_documented_development_blocker",
+        "waiting_development_merge": "governed_merge_review",
+        "waiting_operational_acceptance": "production_outcome_verification",
+        "release_prepare_blocked": "release_gate_revalidation",
+        "release_blocked": "release_gate_revalidation",
+        "closure_blocked": "completion_evidence_review",
+    }
+    pending = [
+        {"id": item_id, "phase": str(record.get("phase") or "unknown"),
+         "reason": str(record.get("reason") or "")[:350],
+         "next_gate": next_gate_by_phase.get(str(record.get("phase") or ""), "manual_classification_required")}
+        for item_id, record in sorted(records.items())
+        if isinstance(record, dict) and record.get("phase") != "complete"
+    ]
+    return {"status": "known", "outstanding_count": len(pending), "items": pending}
 
 
 def active_development_count(spool: Path) -> int:
@@ -439,6 +480,15 @@ def main() -> int:
         "capacity_consuming_todo_issues": capacity_consuming_todo_issue_count(issues, spool),
     }
 
+    downstream = outstanding_commitment_snapshot(spool)
+    state["downstream_commitments"] = downstream
+    if candidate is None and downstream["outstanding_count"]:
+        state["status"] = "stalled_upstream_or_downstream"
+        state["reason"] = (
+            f"No new candidate; {downstream['outstanding_count']} approved commitments "
+            f"remain in existing engineering/release workflows. Intake alone cannot advance them."
+        )
+
     if candidate is None:
         atomic_json(state_path, state)
         return 0
@@ -454,6 +504,19 @@ def main() -> int:
         state["status"] = "dry_run"
         atomic_json(state_path, state)
         print(json.dumps(state, indent=2))
+        return 0
+
+    # Recheck all open TODOs immediately before a new GitHub mutation.
+    # A prior timer invocation can have admitted the same approved item.
+    already = open_todo_issue_map(repo).get(candidate.item_id)
+    if already is not None:
+        state["status"] = "existing_issue_detected"
+        state["issue"] = {
+            "number": int(already["number"]),
+            "url": str(already.get("url") or ""),
+            "todo_id": candidate.item_id,
+        }
+        atomic_json(state_path, state)
         return 0
 
     created = create_issue(repo, candidate)

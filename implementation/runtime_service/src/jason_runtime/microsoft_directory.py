@@ -42,6 +42,10 @@ def build_microsoft_directory_runtime(
         secret_id_path=secret_id_path,
     )
     credentials = OpenBaoMicrosoftCredentialSource(secrets=secrets)
+    # The existing validated AOT tenant boundary is directory-read. The
+    # broader identity-investigation-read profile is a *separate*, currently
+    # unconsented integration and cannot replace basic Teams identity lookup.
+    # This shared identity enrichment must use the approved narrow profile.
     application_tokens = MsalCertificateTokenProvider(
         boundaries=boundaries,
         credentials=credentials,
