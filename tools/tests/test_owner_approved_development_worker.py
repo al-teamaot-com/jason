@@ -760,7 +760,7 @@ def test_development_does_not_defer_permission_denial(monkeypatch, tmp_path):
         module.main()
 
 
-def test_verified_ccc_owner_review_readmits_once(tmp_path):
+def test_verified_ccc_owner_review_readmits_once(monkeypatch, tmp_path):
     import json
     from datetime import datetime, timezone
     sha = 'e' * 40
@@ -772,16 +772,110 @@ def test_verified_ccc_owner_review_readmits_once(tmp_path):
     review.write_text(json.dumps({'status': 'approved', 'source_revision': sha}))
     drift.write_text(json.dumps({'status': 'pass', 'problems': [], 'observed_at': datetime.now(timezone.utc).isoformat()}))
     (folder / 'ccc-report.json').write_text(json.dumps({'status': 'PASS', 'source_revision': sha, 'runtime_revision': sha, 'checks': [{'status': 'PASS'}]}))
+    observed_repositories = []
+    def capture_verified_repository(repo):
+        observed_repositories.append(repo)
+        assert repo == tmp_path
+        return {'production': {'revision': sha}}
+    monkeypatch.setattr(module.support, 'production_state_from_main', capture_verified_repository)
+    # Reproduce installation outside a Git checkout: __file__ must never
+    # control the production-state readback repository.
+    monkeypatch.setattr(module, '__file__', '/home/al/.local/lib/jason/owner_approved_development_worker.py')
     original = 'Exact owner-approved CCC material-change review for the current production SHA is required and not yet authorized.'
     state = {'items': {'DEV-1237': {'phase': 'blocked', 'reason': original}}}
-    kwargs = dict(review_path=review, report_root=reports, drift_path=drift)
+    kwargs = dict(source_repo=tmp_path, review_path=review, report_root=reports, drift_path=drift)
     assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, **kwargs) == 1
     assert state['items']['DEV-1237']['phase'] == 'diagnosing'
+    assert observed_repositories == [tmp_path]
     state['items']['DEV-1237'].update(phase='blocked', reason=original)
     assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, **kwargs) == 0
     state['items']['DEV-1237'].pop('verified_ccc_readmission_sha')
     drift.write_text(json.dumps({'status': 'drift_detected', 'problems': ['failed'], 'observed_at': datetime.now(timezone.utc).isoformat()}))
     assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, **kwargs) == 0
+
+
+def test_verified_ccc_owner_review_rejects_production_sha_mismatch(monkeypatch, tmp_path):
+    import json
+    from datetime import datetime, timezone
+    sha = 'e' * 40
+    review = tmp_path / 'review.json'
+    drift = tmp_path / 'drift.json'
+    reports = tmp_path / 'reports'
+    folder = reports / 'run1'
+    folder.mkdir(parents=True)
+    review.write_text(json.dumps({'status': 'approved', 'source_revision': sha}))
+    drift.write_text(json.dumps({'status': 'pass', 'problems': [], 'observed_at': datetime.now(timezone.utc).isoformat()}))
+    (folder / 'ccc-report.json').write_text(json.dumps({'status': 'PASS', 'source_revision': sha, 'runtime_revision': sha, 'checks': [{'status': 'PASS'}]}))
+    monkeypatch.setattr(module.support, 'production_state_from_main', lambda repo: {'production': {'revision': 'a' * 40}})
+    state = {'items': {'DEV-1237': {'phase': 'blocked', 'reason': 'Exact owner-approved CCC material-change review for the current production SHA is required and not yet authorized.'}}}
+    assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, source_repo=tmp_path, review_path=review, report_root=reports, drift_path=drift) == 0
+    assert state['items']['DEV-1237']['phase'] == 'blocked'
+
+
+def test_verified_ccc_owner_review_rejects_missing_production_identity(monkeypatch, tmp_path):
+    import json
+    from datetime import datetime, timezone
+    sha = 'e' * 40
+    review = tmp_path / 'review.json'
+    drift = tmp_path / 'drift.json'
+    reports = tmp_path / 'reports'
+    folder = reports / 'run1'
+    folder.mkdir(parents=True)
+    review.write_text(json.dumps({'status': 'approved', 'source_revision': sha}))
+    drift.write_text(json.dumps({'status': 'pass', 'problems': [], 'observed_at': datetime.now(timezone.utc).isoformat()}))
+    (folder / 'ccc-report.json').write_text(json.dumps({'status': 'PASS', 'source_revision': sha, 'runtime_revision': sha, 'checks': [{'status': 'PASS'}]}))
+    monkeypatch.setattr(module.support, 'production_state_from_main', lambda repo: {})
+    state = {'items': {'DEV-1237': {'phase': 'blocked', 'reason': 'Exact owner-approved CCC material-change review for the current production SHA is required and not yet authorized.'}}}
+    assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, source_repo=tmp_path, review_path=review, report_root=reports, drift_path=drift) == 0
+    assert state['items']['DEV-1237']['phase'] == 'blocked'
+
+
+
+def test_ccc_readmission_git_failure_is_fail_closed_without_worker_crash(monkeypatch, tmp_path):
+    import json
+    from datetime import datetime, timezone
+    sha = 'e' * 40
+    review = tmp_path / 'review.json'
+    drift = tmp_path / 'drift.json'
+    reports = tmp_path / 'reports'
+    folder = reports / 'run1'
+    folder.mkdir(parents=True)
+    review.write_text(json.dumps({'status': 'approved', 'source_revision': sha}))
+    drift.write_text(json.dumps({
+        'status': 'pass',
+        'problems': [],
+        'observed_at': datetime.now(timezone.utc).isoformat(),
+    }))
+    (folder / 'ccc-report.json').write_text(json.dumps({
+        'status': 'PASS', 'source_revision': sha, 'runtime_revision': sha,
+        'checks': [{'status': 'PASS'}],
+    }))
+
+    def unavailable_source(repo):
+        assert repo == tmp_path
+        raise module.support.WorkerError('synthetic source fetch unavailable')
+
+    monkeypatch.setattr(module.support, 'production_state_from_main', unavailable_source)
+    item = {'phase': 'blocked', 'reason': 'Exact owner-approved CCC material-change review required.'}
+    state = {'items': {'DEV-1237': item}}
+    assert module.readmit_verified_ccc_owner_review(
+        state, {'DEV-1237'}, source_repo=tmp_path,
+        review_path=review, drift_path=drift, report_root=reports,
+    ) == 0
+    assert item['phase'] == 'blocked'
+
+    # A timed-out Git source fetch is also a failed CCC read, not an exception
+    # that should mark the systemd engineering worker itself as failed.
+    import subprocess
+    def timed_out_source(repo):
+        assert repo == tmp_path
+        raise subprocess.TimeoutExpired(['git', 'fetch'], timeout=5)
+    monkeypatch.setattr(module.support, 'production_state_from_main', timed_out_source)
+    assert module.readmit_verified_ccc_owner_review(
+        state, {'DEV-1237'}, source_repo=tmp_path,
+        review_path=review, drift_path=drift, report_root=reports,
+    ) == 0
+    assert item['phase'] == 'blocked'
 
 
 def test_ccc_readmission_rejects_empty_certification_checks(tmp_path):
@@ -797,7 +891,7 @@ def test_ccc_readmission_rejects_empty_certification_checks(tmp_path):
     drift.write_text(json.dumps({'status': 'pass', 'problems': [], 'observed_at': datetime.now(timezone.utc).isoformat()}))
     (folder / 'ccc-report.json').write_text(json.dumps({'status': 'PASS', 'source_revision': sha, 'runtime_revision': sha, 'checks': []}))
     state = {'items': {'DEV-1237': {'phase': 'blocked', 'reason': 'Exact CCC material-change review required.'}}}
-    assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, review_path=review, drift_path=drift, report_root=reports) == 0
+    assert module.readmit_verified_ccc_owner_review(state, {'DEV-1237'}, source_repo=tmp_path, review_path=review, drift_path=drift, report_root=reports) == 0
     assert state['items']['DEV-1237']['phase'] == 'blocked'
 
 
@@ -1600,3 +1694,833 @@ def test_intervening_upgrade_rejects_untrusted_or_missing_git_history(tmp_path):
         'a'*40, 'c'*40, repo,
     )
     assert not module.verified_intervening_worker_upgrade([], 'a'*40, 'a'*40, repo)
+
+
+def test_development_readmit_only_exact_recovered_response(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(module, 'active_support_count', lambda spool: 0)
+    rid = 'c' * 64
+    responses = tmp_path / 'reasoning' / 'responses'
+    responses.mkdir(parents=True)
+    (responses / f'{rid}.json').write_text(json.dumps({
+        'status': 'succeeded', 'request_id': rid, 'kind': 'search_plan',
+        'support_item': 'DEV-111', 'result': {'search_terms': ['foo']},
+    }))
+    record = {'phase': 'blocked', 'reason': 'development reasoning failed: HTTP transport failed',
+              'reasoning_request_id': rid}
+    state = {'items': {'DEV-111': record}}
+    assert module.readmit_recovered_development_reasoning(state, [{'id': 'DEV-111'}], tmp_path,
+                                                             max_active=2) == ['DEV-111']
+    assert record['phase'] == 'diagnosing'
+    assert module.readmit_recovered_development_reasoning(state, [{'id': 'DEV-111'}], tmp_path,
+                                                             max_active=2) == []
+
+
+def test_development_recovered_response_does_not_bypass_retry_exhaustion(tmp_path, monkeypatch):
+    monkeypatch.setattr(module, 'active_support_count', lambda spool: 0)
+    rid = 'd' * 64
+    responses = tmp_path / 'reasoning' / 'responses'
+    responses.mkdir(parents=True)
+    (responses / f'{rid}.json').write_text(module.json.dumps({
+        'status': 'succeeded', 'request_id': rid, 'kind': 'search_plan',
+        'support_item': 'DEV-1500', 'result': {'search_terms': ['foo']},
+    }))
+    record = {
+        'phase': 'blocked',
+        'blocker_class': 'internal_retry_exhausted',
+        'reason': 'development reasoning failed: HTTP transport failed',
+        'reasoning_request_id': rid,
+    }
+    state = {'items': {'DEV-1500': record}}
+
+    assert module.readmit_recovered_development_reasoning(
+        state, [{'id': 'DEV-1500'}], tmp_path, max_active=3,
+    ) == []
+    assert record['phase'] == 'blocked'
+    assert record['blocker_class'] == 'internal_retry_exhausted'
+
+
+def test_exhausted_development_transport_gets_one_verified_recovery_request(tmp_path, monkeypatch):
+    monkeypatch.setattr(module, 'active_support_count', lambda spool: 0)
+    failed_id = 'a' * 64
+    record = {
+        'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+        'reason': 'development edit reasoning failed: HTTP transport failed with status 400',
+        'reasoning_request_id': failed_id, 'self_recovery_attempts': 2,
+    }
+    item = {'id': 'DEV-1196', 'issue_number': 1196, 'title': 'Existing approved repair'}
+    proof = ({'context': {'approved_scope': 'existing'}}, 'b' * 64)
+    monkeypatch.setattr(module.support, 'verified_later_reasoning_success',
+                        lambda *args, **kwargs: proof)
+    queued = []
+    monkeypatch.setattr(module, 'queue_reasoning',
+                        lambda spool, kind, item, context: queued.append((kind, context)) or 'c' * 64)
+
+    state = {'items': {'DEV-1196': record}}
+    assert module.readmit_development_after_verified_transport_recovery(
+        state, [item], tmp_path, max_active=3,
+    ) == ['DEV-1196']
+    assert record['phase'] == 'implementing'
+    assert record['self_recovery_attempts'] == 2
+    assert queued[0][0] == 'edit_plan'
+    assert queued[0][1]['verified_transport_recovery']['retry_limit'] == 1
+    assert module.readmit_development_after_verified_transport_recovery(
+        state, [item], tmp_path, max_active=3,
+    ) == []
+
+
+
+def test_verified_transport_recovery_rejects_missing_proof_and_full_capacity(tmp_path, monkeypatch):
+    """Never reopen an exhausted development item without proof and a worker slot."""
+    failed_id = 'a' * 64
+    item = {'id': 'DEV-1196', 'issue_number': 1196, 'title': 'Approved P0 work'}
+    record = {
+        'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+        'reason': 'development reasoning failed: HTTP transport failed',
+        'reasoning_request_id': failed_id, 'self_recovery_attempts': 2,
+    }
+    state = {'items': {'DEV-1196': record}}
+    seen = []
+    monkeypatch.setattr(
+        module, 'queue_reasoning',
+        lambda *args, **kwargs: seen.append((args, kwargs)) or 'c' * 64,
+    )
+    monkeypatch.setattr(module, 'active_support_count', lambda spool: 0)
+    monkeypatch.setattr(
+        module.support, 'verified_later_reasoning_success',
+        lambda *args, **kwargs: None,
+    )
+    assert module.readmit_development_after_verified_transport_recovery(
+        state, [item], tmp_path, max_active=2,
+    ) == []
+    assert record['phase'] == 'blocked'
+    assert record['self_recovery_attempts'] == 2
+    assert not seen
+
+    monkeypatch.setattr(
+        module.support, 'verified_later_reasoning_success',
+        lambda *args, **kwargs: ({'context': {}}, 'b' * 64),
+    )
+    monkeypatch.setattr(module, 'active_support_count', lambda spool: 2)
+    assert module.readmit_development_after_verified_transport_recovery(
+        state, [item], tmp_path, max_active=2,
+    ) == []
+    assert record['phase'] == 'blocked'
+    assert not seen
+
+
+
+def test_existing_pr_preserves_pending_and_inflight_ci_repairs():
+    assert module.phase_for_existing_pr('ci_repair_needed') == 'ci_repair_needed'
+    assert module.phase_for_existing_pr('ci_repairing') == 'ci_repairing'
+
+
+def test_existing_pr_reconciles_other_phases_through_validation():
+    for phase in ('identified', 'diagnosing', 'implementing', 'pr_validating'):
+        assert module.phase_for_existing_pr(phase) == 'pr_validating'
+
+
+def test_failed_diagnostic_routes_to_inert_support_handoff(monkeypatch, tmp_path):
+    record = {'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+              'issue_number': 1196, 'reason': 'development reasoning HTTP 400',
+              'recovery_diagnostic_request_id': 'request-123'}
+    state = {'items': {'DEV-1196': record}}
+    monkeypatch.setattr(module.support, 'reasoning_response', lambda spool, rid: {
+        'request_id': rid, 'status': 'failed', 'error_type': 'ConnectorTransportError'})
+    module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-1196'}, tmp_path)
+    module.reconcile_recovery_handoff_intake(state, {'DEV-1196'}, tmp_path)
+    created = []
+    monkeypatch.setattr(module.support, 'ensure_support_issue', lambda repo, item: created.append(item))
+    module.raise_exhausted_repair_support_issues(state, {'DEV-1196'}, tmp_path)
+    module.raise_exhausted_repair_support_issues(state, {'DEV-1196'}, tmp_path)
+    assert len(created) == 1
+    assert created[0]['id'] == 'SUPPORT-DEV-1196'
+    handoffs = list((tmp_path / 'development-recovery' / 'handoffs').glob('*.json'))
+    assert len(handoffs) == 1
+    payload = module.support.json.loads(handoffs[0].read_text())
+    assert payload['admission_authority'] is False
+    assert payload['diagnostic_request_id'] == 'request-123'
+    assert record['phase'] == 'blocked'
+    assert record['recovery_diagnostic_result_status'] == 'failed'
+
+def test_failed_diagnostic_without_verified_original_blocker_does_not_route(monkeypatch, tmp_path):
+    record = {'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+              'issue_number': 1196, 'reason': '', 'recovery_diagnostic_request_id': 'request-123'}
+    state = {'items': {'DEV-1196': record}}
+    monkeypatch.setattr(module.support, 'reasoning_response', lambda spool, rid: {
+        'request_id': rid, 'status': 'failed'})
+    module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-1196'}, tmp_path)
+    assert not list((tmp_path / 'development-recovery').rglob('*.json'))
+    assert record['phase'] == 'blocked'
+
+
+def test_failed_diagnostic_requires_matching_canonical_issue_identity(monkeypatch, tmp_path):
+    record = {'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+              'issue_number': 1459, 'reason': 'HTTP 400 transport failure',
+              'recovery_diagnostic_request_id': 'request-123'}
+    state = {'items': {'DEV-1196': record}}
+    monkeypatch.setattr(module.support, 'reasoning_response', lambda spool, rid: {
+        'request_id': rid, 'status': 'failed', 'error_type': 'ConnectorTransportError'})
+    module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-1196'}, tmp_path)
+    module.reconcile_recovery_handoff_intake(state, {'DEV-1196'}, tmp_path)
+    assert record['phase'] == 'blocked'
+    assert 'recovery_handoff_id' not in record
+    assert 'recovery_handoff_intake' not in record
+    assert not list((tmp_path / 'development-recovery').rglob('*.json'))
+
+
+def test_failed_diagnostic_handoff_is_idempotent_and_preserves_retry_budget(monkeypatch, tmp_path):
+    record = {'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+              'issue_number': 1196, 'reason': 'HTTP 400 transport failure',
+              'self_recovery_attempts': 2,
+              'recovery_diagnostic_request_id': 'request-123'}
+    state = {'items': {'DEV-1196': record}}
+    monkeypatch.setattr(module.support, 'reasoning_response', lambda spool, rid: {
+        'request_id': rid, 'status': 'failed', 'error_type': 'ConnectorTransportError'})
+    module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-1196'}, tmp_path)
+    handoff = record['recovery_handoff_id']
+    at = record['recovery_diagnostic_result_at']
+    module.reconcile_exhausted_recovery_diagnostics(state, {'DEV-1196'}, tmp_path)
+    assert record['recovery_handoff_id'] == handoff
+    assert record['recovery_diagnostic_result_at'] == at
+    assert record['self_recovery_attempts'] == 2
+    assert record['phase'] == 'blocked'
+    assert len(list((tmp_path / 'development-recovery' / 'handoffs').glob('*.json'))) == 1
+
+
+def test_preexisting_failed_diagnostic_backfills_support_once(monkeypatch, tmp_path):
+    # These are the durable DEV-1196/DEV-1500 states recorded before #1582
+    # was deployed. No development replay or new authorization is permitted.
+    created = []
+    monkeypatch.setattr(
+        module.support, 'reasoning_response',
+        lambda spool, rid: {'request_id': rid, 'status': 'failed',
+                            'error_type': 'ConnectorTransportError'},
+    )
+    monkeypatch.setattr(
+        module.support, 'ensure_support_issue',
+        lambda repo, item: created.append(item),
+    )
+    for issue in (1196, 1500):
+        record = {
+            'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+            'issue_number': issue, 'reason': 'development reasoning HTTP 400',
+            'self_recovery_attempts': 2,
+            'recovery_diagnostic_request_id': f'old-request-{issue}',
+            'recovery_diagnostic_result_status': 'failed',
+            'recovery_diagnostic_result_at': 'original-failure-time',
+        }
+        item_id = f'DEV-{issue}'
+        state = {'items': {item_id: record}}
+        root = tmp_path / str(issue)
+        for _ in range(2):
+            module.reconcile_exhausted_recovery_diagnostics(state, {item_id}, root)
+            module.reconcile_recovery_handoff_intake(state, {item_id}, root)
+            module.raise_exhausted_repair_support_issues(state, {item_id}, root)
+        handoffs = list((root / 'development-recovery' / 'handoffs').glob('*.json'))
+        assert len(handoffs) == 1
+        payload = module.support.json.loads(handoffs[0].read_text())
+        assert payload['admission_authority'] is False
+        assert payload['diagnostic_request_id'] == f'old-request-{issue}'
+        assert record['phase'] == 'blocked'
+        assert record['self_recovery_attempts'] == 2
+        assert record['recovery_diagnostic_result_at'] == 'original-failure-time'
+        assert record['recovery_diagnostic_result_status'] == 'failed'
+        assert record['recovery_support_issue_raised'] == f'SUPPORT-DEV-{issue}'
+    assert [x['id'] for x in created] == ['SUPPORT-DEV-1196', 'SUPPORT-DEV-1500']
+
+
+def test_preexisting_failed_diagnostic_backfill_rejects_untrusted_evidence(monkeypatch, tmp_path):
+    for index, response in enumerate((
+        None,
+        {'request_id': 'wrong-request', 'status': 'failed'},
+        {'request_id': 'old-request', 'status': 'succeeded'},
+        {'status': 'failed'},
+    )):
+        record = {
+            'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+            'issue_number': 1196, 'reason': 'HTTP transport failed',
+            'recovery_diagnostic_request_id': 'old-request',
+            'recovery_diagnostic_result_status': 'failed',
+            'recovery_diagnostic_result_at': 'original-failure-time',
+        }
+        monkeypatch.setattr(
+            module.support, 'reasoning_response',
+            lambda spool, rid, result=response: result,
+        )
+        root = tmp_path / str(index)
+        module.reconcile_exhausted_recovery_diagnostics(
+            {'items': {'DEV-1196': record}}, {'DEV-1196'}, root,
+        )
+        assert 'recovery_handoff_id' not in record
+        assert record['recovery_diagnostic_result_status'] == 'failed'
+        assert record['recovery_diagnostic_result_at'] == 'original-failure-time'
+        assert not list(root.rglob('*.json'))
+
+
+def test_preexisting_nonfailed_diagnostic_is_not_backfilled(monkeypatch, tmp_path):
+    record = {
+        'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+        'issue_number': 1196, 'reason': 'transport failed',
+        'recovery_diagnostic_request_id': 'old-request',
+        'recovery_diagnostic_result_status': 'succeeded',
+    }
+    monkeypatch.setattr(
+        module.support, 'reasoning_response',
+        lambda spool, rid: {'request_id': rid, 'status': 'succeeded'},
+    )
+    module.reconcile_exhausted_recovery_diagnostics(
+        {'items': {'DEV-1196': record}}, {'DEV-1196'}, tmp_path,
+    )
+    assert 'recovery_handoff_id' not in record
+    assert not list(tmp_path.rglob('*.json'))
+
+
+def test_preexisting_failed_diagnostic_backfill_requires_matching_issue_identity(monkeypatch, tmp_path):
+    # Even exact old error receipts must not repair a different issue.
+    record = {
+        'phase': 'blocked', 'blocker_class': 'internal_retry_exhausted',
+        'issue_number': 1500, 'reason': 'HTTP transport failed',
+        'recovery_diagnostic_request_id': 'old-request',
+        'recovery_diagnostic_result_status': 'failed',
+        'recovery_diagnostic_result_at': 'original-failure-time',
+    }
+    monkeypatch.setattr(
+        module.support, 'reasoning_response',
+        lambda spool, rid: {'request_id': rid, 'status': 'failed'},
+    )
+    module.reconcile_exhausted_recovery_diagnostics(
+        {'items': {'DEV-1196': record}}, {'DEV-1196'}, tmp_path,
+    )
+    assert record['phase'] == 'blocked'
+    assert record['recovery_diagnostic_result_status'] == 'failed'
+    assert 'recovery_handoff_id' not in record
+    assert not list(tmp_path.rglob('*.json'))
+
+
+def _credit_failure_case(tmp_path, monkeypatch, *, kind='search_plan', issue_number=759):
+    """Build immutable content-addressed owner-approved original reasoning."""
+    import json
+    item = {
+        'id': f'DEV-{issue_number}', 'issue_number': issue_number,
+        'title': 'Functional P0 prototype', 'body': 'Owner scope with acceptance',
+        'approval_source': f'https://github.com/al-teamaot-com/jason/issues/{issue_number}',
+        'evidence': 'sourced', 'acceptance': 'tested and approved',
+    }
+    context = {
+        'work_class': 'owner_approved_development',
+        'approved_scope': module.approved_scope(item),
+        'approval_source': item['approval_source'],
+    }
+    payload = {
+        'kind': kind,
+        'support_item': item['id'],
+        'title': item['title'],
+        'evidence': item['evidence'],
+        'acceptance': item['acceptance'],
+        'context': context,
+    }
+    rid = module.support.request_id(payload)
+    payload['request_id'] = rid
+    p = tmp_path/'reasoning'/'requests'
+    p.mkdir(parents=True)
+    (p/(rid+'.json')).write_text(json.dumps(payload))
+    reason_prefix = 'development reasoning' if kind == 'search_plan' else 'development edit reasoning'
+    state = {'items': {
+        item['id']: {
+            'phase': 'blocked',
+            'reason': reason_prefix + ' failed: Hosted reasoning blocked: credit_balance_exhausted; Owner action: restore_provider_credits',
+            'reasoning_request_id': rid,
+        }
+    }}
+    failure = {
+        'request_id': rid, 'status': 'failed',
+        'primary_provider_error_code': 'credit_balance_exhausted',
+        'required_owner_action': 'restore_provider_credits',
+        'primary_http_status': 429, 'retryable': False,
+        'completed_at': '2026-10-25T13:12:04+00:00',
+    }
+    monkeypatch.setattr(module, 'active_support_count', lambda spool: 0)
+    monkeypatch.setattr(module.support, 'reasoning_response', lambda spool, req: failure)
+    return state,item,context,rid,failure
+
+
+def test_owner_dev_credit_failure_never_retries_without_metered_proof(tmp_path,monkeypatch):
+    import copy
+    state,item,_,_,_= _credit_failure_case(tmp_path,monkeypatch)
+    original=copy.deepcopy(state)
+    calls=[]
+    monkeypatch.setattr(module.support,'verified_credit_reload_receipt',lambda *a,**kw:None)
+    monkeypatch.setattr(module,'queue_reasoning',lambda *a,**kw:calls.append((a,kw)))
+    assert module.readmit_development_after_verified_credit_replenishment(
+        state,[item],tmp_path,max_active=3,
+    ) == []
+    assert calls==[]
+    assert state==original
+
+
+def test_owner_dev_credit_recovery_queues_once_after_external_receipt(tmp_path,monkeypatch):
+    state,item,context,rid,failure=_credit_failure_case(tmp_path,monkeypatch)
+    evidence=[]
+    def receipt(path, *, failed_at):
+        evidence.append((str(path),str(failed_at)))
+        return {'entry_id':'metered-openai-verify-1','model':'gpt-read-reasoner'}
+    monkeypatch.setattr(module.support,'verified_credit_reload_receipt',receipt)
+    queued=[]
+    def enqueue(spool, *, kind, item, context):
+        queued.append({'kind':kind,'item':item,'context':context})
+        return 'b'*64
+    monkeypatch.setattr(module,'queue_reasoning',enqueue)
+    assert module.readmit_development_after_verified_credit_replenishment(
+        state,[item],tmp_path,max_active=3
+    )==['DEV-759']
+    record=state['items']['DEV-759']
+    assert record['phase']=='diagnosing'
+    assert record['reasoning_request_id']=='b'*64
+    assert record['provider_credit_requeue_id']=='b'*64
+    assert record['provider_credit_original_failure_id']==rid
+    assert record['provider_credit_receipt_id']=='metered-openai-verify-1'
+    assert evidence and evidence[0][0].endswith('model-usage.sqlite3')
+    assert queued[0]['kind']=='search_plan'
+    assert queued[0]['context']['approved_scope']==context['approved_scope']
+    assert queued[0]['context']['approval_source']==item['approval_source']
+    assert queued[0]['context']['verified_credit_recovery']=={
+        'failed_request_id':rid,
+        'provider_credit_receipt_id':'metered-openai-verify-1',
+        'provider_model':'gpt-read-reasoner',
+        'retry_limit':1,
+        'purpose':'same_approved_scope_after_metered_credit_recovery',
+    }
+    # The original provider failure remains available for audit, never changed.
+    assert failure['status']=='failed'
+    assert module.readmit_development_after_verified_credit_replenishment(
+        state,[item],tmp_path,max_active=3
+    )==[]
+    assert len(queued)==1
+
+
+def test_owner_dev_credit_recovery_keeps_wrong_scope_and_saturated_slots_blocked(tmp_path,monkeypatch):
+    import copy
+    state,item,_,_,_=_credit_failure_case(tmp_path,monkeypatch)
+    queued=[]
+    proofs=[]
+    monkeypatch.setattr(module.support,'verified_credit_reload_receipt',
+                        lambda *a,**kw: proofs.append('called') or {'entry_id':'meter-1'})
+    monkeypatch.setattr(module,'queue_reasoning',lambda *a,**kw:queued.append('called') or 'c'*64)
+    other={**item,'body':item['body']+' amended by a different author'}
+    before=copy.deepcopy(state)
+    assert module.readmit_development_after_verified_credit_replenishment(
+        state,[other],tmp_path,max_active=3
+    )==[]
+    assert not proofs and not queued and state==before
+    busy={**state,'items':{**state['items'],
+        'DEV-1111':{'phase':'diagnosing'},
+        'DEV-1112':{'phase':'implementing'},
+        'DEV-1113':{'phase':'diagnosing'},
+    }}
+    assert module.readmit_development_after_verified_credit_replenishment(
+        busy,[item],tmp_path,max_active=3
+    )==[]
+    assert not queued and not proofs
+
+
+def test_owner_dev_credit_recovery_rejects_wrong_provider_error_or_already_retried(tmp_path,monkeypatch):
+    state,item,_,_,failure=_credit_failure_case(tmp_path,monkeypatch,kind='edit_plan')
+    receipts=[]
+    monkeypatch.setattr(module.support,'verified_credit_reload_receipt',
+                        lambda *a,**kw: receipts.append('proof') or {'entry_id':'meter-1'})
+    monkeypatch.setattr(module,'queue_reasoning',lambda *a,**kw:'e'*64)
+    failure['primary_http_status']=403
+    assert module.readmit_development_after_verified_credit_replenishment(
+        state,[item],tmp_path,max_active=3
+    )==[]
+    assert not receipts
+    failure['primary_http_status']=429
+    state['items'][item['id']]['provider_credit_requeue_id']='d'*64
+    assert module.readmit_development_after_verified_credit_replenishment(
+        state,[item],tmp_path,max_active=3
+    )==[]
+    assert not receipts
+
+
+def _stale_owner_recovery_fixture(tmp_path, monkeypatch):
+    import json
+    import subprocess
+    repo = tmp_path / 'managed-repo'
+    repo.mkdir()
+    def git(*args, cwd=repo):
+        p=subprocess.run(['git', *args], cwd=cwd, check=True, capture_output=True, text=True)
+        return p.stdout.strip()
+    git('init', '-b', 'main')
+    git('config', 'user.email', 'test@example.invalid')
+    git('config', 'user.name', 'Test Maintainer')
+    (repo / 'code.txt').write_text('old tracked code\n')
+    git('add', 'code.txt');git('commit', '-m', 'old baseline')
+    git('remote', 'add', 'origin', str(repo));git('fetch', 'origin', 'main')
+    old_sha = git('rev-parse','HEAD')
+    root=tmp_path / 'worktrees'
+    root.mkdir()
+    old = root / 'issue-42'
+    git('worktree','add','-b','develop/owner-approved-issue-42',str(old),'main')
+    (repo / 'code.txt').write_text('new tracked code\n')
+    git('add','code.txt');git('commit','-m','new approved source')
+    git('fetch','origin','main')
+    current_sha=git('rev-parse','origin/main')
+    spool=tmp_path/'spool';spool.mkdir()
+    item={'id':'DEV-42','issue_number':42,'title':'Approved Teams worker work',
+          'body':'- **Autonomous development:** owner-approved',
+          'evidence':'review exact source','acceptance':'test then PR',
+          'approval_source':'https://github.com/al-teamaot-com/jason/issues/42',
+          'approved_by':'owner','updated_at':'2026-10-25'}
+    rid=module.support.queue_reasoning(spool,kind='edit_plan',item=item,
+                                        context={'work_class':'owner_approved_development','approved_scope':item['body']})
+    response={'request_id':rid,'kind':'edit_plan','support_item':'DEV-42',
+              'status':'succeeded','result':{'edits':[],'test_paths':[]}}
+    resp_path=spool/'reasoning'/'responses'/f'{rid}.json'
+    resp_path.parent.mkdir(parents=True)
+    resp_path.write_text(json.dumps(response))
+    state={'items':{'DEV-42':{'phase':'blocked','reason':'EvidenceToolError: stale worktree requires governed clean-source recovery',
+                    'issue_number':42,'branch':'develop/owner-approved-issue-42',
+                    'worktree':str(old),'reasoning_request_id':rid}}}
+    monkeypatch.setattr(module,'WORKTREE_ROOT',root)
+    monkeypatch.setattr(module,'active_support_count',lambda spool:0)
+    monkeypatch.setattr(module,'issue_has_closed_dependency_gate',lambda item:False)
+    return repo,spool,item,state,old,old_sha,current_sha,git
+
+
+def test_stale_clean_worker_is_readmitted_from_fresh_isolated_clone_without_old_branch_mutation(tmp_path,monkeypatch):
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    resumed=module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)
+    assert resumed==['DEV-42']
+    record=state['items']['DEV-42']
+    assert record['phase']=='diagnosing'
+    assert record['reasoning_request_id']==''
+    assert record['stale_source_recovery_revision']==current
+    assert record['stale_source_recovery_prior_revision']==old_sha
+    assert git('rev-parse','HEAD',cwd=old)==old_sha
+    assert git('branch','--show-current',cwd=old)=='develop/owner-approved-issue-42'
+    clone=module.ensure_stale_source_clone(repo,42,current)
+    assert str(clone)==record['worktree']
+    assert (clone/'code.txt').read_text()=='new tracked code\n'
+    assert git('rev-parse','--git-common-dir',cwd=clone)=='.git'
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==[]
+
+
+def test_stale_source_refuses_dirty_original_and_keeps_blocker(tmp_path,monkeypatch):
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    (old/'code.txt').write_text('valuable uncommitted change\n')
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+    assert (old/'code.txt').read_text()=='valuable uncommitted change\n'
+
+
+def test_stale_source_requires_successful_matching_reasoning_response(tmp_path,monkeypatch):
+    import json
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    rid=state['items']['DEV-42']['reasoning_request_id']
+    p=spool/'reasoning'/'responses'/f'{rid}.json'
+    payload=json.loads(p.read_text());payload['status']='failed';p.write_text(json.dumps(payload))
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_stale_source_never_reopens_closed_approval_dependency(tmp_path,monkeypatch):
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    monkeypatch.setattr(module,'issue_has_closed_dependency_gate',lambda item:True)
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_stale_source_blocks_all_work_when_capacity_is_full(tmp_path,monkeypatch):
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    state['items']['DEV-99']={'phase':'implementing'}
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=1)==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_stale_source_blocks_unapproved_branch(tmp_path,monkeypatch):
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    state['items']['DEV-42']['branch']='develop/owner-approved-issue-other'
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_stale_source_rejects_original_git_identity_mismatch(tmp_path,monkeypatch):
+    import subprocess
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    actual_run=module.support.run
+    def fake_run(args,**kwargs):
+        if args==['git','rev-parse','--git-common-dir'] and kwargs.get('cwd')==old:
+            return str(tmp_path/'untrusted.git')
+        return actual_run(args,**kwargs)
+    monkeypatch.setattr(module.support,'run',fake_run)
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_stale_source_preserves_ignored_files_in_original(tmp_path,monkeypatch):
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    (old / '.gitignore').write_text('private-cache/\n')
+    (old / 'private-cache').mkdir()
+    (old / 'private-cache' / 'notes').write_text('important untracked bytes\n')
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==[]
+    assert (old / 'private-cache' / 'notes').read_text()=='important untracked bytes\n'
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_stale_clone_refuses_wrong_current_main_without_reset(tmp_path,monkeypatch):
+    import pytest
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    with pytest.raises(module.support.WorkerError,match='source changed'):
+        module.ensure_stale_source_clone(repo,42,old_sha)
+    assert git('rev-parse','HEAD',cwd=old)==old_sha
+
+
+def test_stale_recovery_search_plan_hash_includes_immutable_source_revision(tmp_path):
+    import json
+    item={'id':'DEV-42','title':'Approved Teams request','evidence':'review','acceptance':'pass',
+          'approval_source':'owner-exact-issue','body':'- **Autonomous development:** owner-approved'}
+    old=module.owner_development_search_context(item,{})
+    record={'stale_source_recovery_revision':'b'*40,'stale_source_recovery_prior_revision':'a'*40,
+            'stale_source_recovery_prior_request_id':'c'*64}
+    fresh=module.owner_development_search_context(item,record)
+    assert old != fresh
+    assert fresh['stale_clean_source_recovery']['current_source_revision']=='b'*40
+    assert fresh['stale_clean_source_recovery']['previous_successful_edit_request_id']=='c'*64
+    old_id=module.support.queue_reasoning(tmp_path,kind='search_plan',item=item,context=old)
+    new_id=module.support.queue_reasoning(tmp_path,kind='search_plan',item=item,context=fresh)
+    assert old_id != new_id
+    second=dict(record,stale_source_recovery_revision='d'*40)
+    newer=module.support.queue_reasoning(tmp_path,kind='search_plan',item=item,
+                                         context=module.owner_development_search_context(item,second))
+    assert new_id != newer
+
+
+def test_malformed_recovery_provenance_must_not_queue_reasoning():
+    import pytest
+    item={'approval_source':'approved','body':'approved'}
+    with pytest.raises(module.support.WorkerError,match='provenance'):
+        module.owner_development_search_context(item,{'stale_source_recovery_revision':'bad'})
+
+
+def _cached_replay_receipt(tmp_path,monkeypatch,*,after_recovery=False):
+    import json
+    from datetime import datetime,timedelta,timezone
+    repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==['DEV-42']
+    record=state['items']['DEV-42']
+    req=module.support.queue_reasoning(spool,kind='search_plan',item=item,
+                                       context=module.owner_development_search_context(item,{}))
+    response_time=datetime.now(timezone.utc)+(timedelta(minutes=1) if after_recovery else -timedelta(hours=1))
+    rsp={'request_id':req,'status':'failed',
+         'error':'Hosted reasoning blocked: credit_balance_exhausted; Owner action: restore_provider_credits',
+         'primary_http_status':429,'primary_provider_error_code':'credit_balance_exhausted',
+         'completed_at':response_time.isoformat()}
+    path=spool/'reasoning'/'responses'/(req+'.json')
+    path.write_text(json.dumps(rsp))
+    record.update({'phase':'blocked','reason':'development reasoning failed: '+rsp['error'],
+                   'reasoning_request_id':req})
+    return repo,spool,item,state,old,old_sha,current,git,req,path
+
+
+def test_old_credit_receipt_replay_is_recovered_once_with_pinned_source(tmp_path,monkeypatch):
+    repo,spool,item,state,old,old_sha,current,git,rid,path=_cached_replay_receipt(tmp_path,monkeypatch)
+    assert module.readmit_verified_cached_stale_response_replay(state,[item],spool,repo,max_active=3)==['DEV-42']
+    rec=state['items']['DEV-42']
+    assert rec['phase']=='diagnosing'
+    assert rec['reasoning_request_id']==''
+    assert rec['stale_source_replay_recovered_request_id']==rid
+    ctx=module.owner_development_search_context(item,rec)
+    fresh=module.support.queue_reasoning(spool,kind='search_plan',item=item,context=ctx)
+    assert fresh != rid
+    assert not (spool/'reasoning'/'responses'/(fresh+'.json')).exists()
+    assert git('rev-parse','HEAD',cwd=old)==old_sha
+    assert module.readmit_verified_cached_stale_response_replay(state,[item],spool,repo,max_active=3)==[]
+
+
+def test_new_credit_failure_after_recovery_is_not_replayed(tmp_path,monkeypatch):
+    repo,spool,item,state,old,old_sha,current,git,rid,path=_cached_replay_receipt(tmp_path,monkeypatch,after_recovery=True)
+    assert module.readmit_verified_cached_stale_response_replay(state,[item],spool,repo,max_active=3)==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_unverified_old_reply_never_grants_one_shot_replay(tmp_path,monkeypatch):
+    import json
+    repo,spool,item,state,old,old_sha,current,git,rid,path=_cached_replay_receipt(tmp_path,monkeypatch)
+    rsp=json.loads(path.read_text());rsp['primary_provider_error_code']='rate_limit_exceeded'
+    path.write_text(json.dumps(rsp))
+    assert module.readmit_verified_cached_stale_response_replay(state,[item],spool,repo,max_active=3)==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_cached_replay_requires_owner_approved_dependency_gate(tmp_path,monkeypatch):
+    repo,spool,item,state,old,old_sha,current,git,rid,path=_cached_replay_receipt(tmp_path,monkeypatch)
+    monkeypatch.setattr(module,'issue_has_closed_dependency_gate',lambda item:True)
+    assert module.readmit_verified_cached_stale_response_replay(state,[item],spool,repo,max_active=3)==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+class _BudgetGate:
+    def __init__(self, deny=False):
+        self.deny=deny
+    def path_denial_reason(self,path,policy):
+        return 'denied' if self.deny else None
+
+
+def _exhausted_evidence_fixture(tmp_path,monkeypatch):
+    import json
+    repo,spool,item,state,old,old_sha,first_sha,git=_stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==['DEV-42']
+    rec=state['items']['DEV-42']
+    old_clone=module.ensure_stale_source_clone(repo,42,first_sha)
+    ctx={'work_class':'owner_approved_development','approved_scope':item['body'],
+         'pinned_source_revision':first_sha,'evidence_turn':4,
+         'source_excerpts':[{'path':'code.txt','content':'new tracked code'}]}
+    rid=module.support.queue_reasoning(spool,kind='edit_plan',item=item,context=ctx)
+    reply={'request_id':rid,'kind':'edit_plan','support_item':'DEV-42',
+           'status':'succeeded','result':{'edits':[],'test_paths':[],'blocked_reason':None,
+           'evidence_requests':[{'tool':'read_source','path':'code.txt','query':None}]}}
+    resp=spool/'reasoning'/'responses'/f'{rid}.json';resp.parent.mkdir(parents=True,exist_ok=True)
+    resp.write_text(json.dumps(reply))
+    rec.update({'phase':'blocked','reason':'EvidenceToolError: source evidence turn budget exhausted',
+                'reasoning_request_id':rid,'evidence_turn_count':4})
+    (repo/'tools').mkdir()
+    (repo/'tools'/'engineering_evidence_tools.py').write_text('# repaired bounded evidence\n')
+    git('add','.');git('commit','-m','fix existing evidence worker')
+    git('fetch','origin','main');newsha=git('rev-parse','origin/main')
+    root=spool.parent/'release-manager'
+    (root/'protected-readback').mkdir(parents=True)
+    (root/'records').mkdir()
+    import datetime
+    for rel,payload in (
+        ('protected-readback/production-control-state.json',{
+            'circuit_breaker':{'state':'closed'},
+            'last_known_good':{'manifest':{'revision':newsha}}}),
+        ('protected-readback/production-drift.json',{
+            'status':'pass','problems':[],
+            'observed_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}),
+        ('records/release-'+newsha[:16]+'.json',{
+            'state':'closed','release_candidate':{'candidate_sha':newsha},
+            'ccc_post_mutation_gate':{'status':'PASS'},
+            'preproduction':{'acceptance_passed':True},
+            'changed_files':['tools/engineering_evidence_tools.py']}),
+    ):
+        target=root/rel;target.write_text(json.dumps(payload));target.chmod(0o600)
+    releases=tmp_path/'releases';releases.mkdir()
+    (releases/newsha).mkdir()
+    (tmp_path/'current').symlink_to(releases/newsha, target_is_directory=True)
+    return repo,spool,item,state,old_clone,first_sha,newsha,git,rid,resp
+
+
+def test_exhausted_evidence_recover_once_from_clean_new_source(tmp_path,monkeypatch):
+    import json
+    repo,spool,item,state,old,prior_sha,current_sha,git,old_id,resp=_exhausted_evidence_fixture(tmp_path,monkeypatch)
+    result=module.readmit_verified_exhausted_evidence_synthesis(
+        state,[item],spool,repo,_BudgetGate(),{},max_active=3,current_link=tmp_path/'current')
+    assert result==['DEV-42']
+    rec=state['items']['DEV-42']
+    assert rec['phase']=='implementing'
+    assert rec['evidence_turn_count']==4
+    assert rec['evidence_synthesis_previous_request_id']==old_id
+    assert rec['reasoning_request_id']!=old_id
+    assert rec['evidence_synthesis_recovered_request_id']==rec['reasoning_request_id']
+    q=json.loads((spool/'reasoning'/'requests'/f"{rec['reasoning_request_id']}.json").read_text())
+    ctx=q['context']
+    assert ctx['final_evidence_turn'] is True
+    assert ctx['evidence_turns_remaining']==0
+    assert ctx['pinned_source_revision']==current_sha
+    assert ctx['historical_evidence_budget_exhausted'] is True
+    assert ctx['source_excerpts'][0]['path']=='code.txt'
+    assert 'new tracked code' in ctx['source_excerpts'][0]['content']
+    assert not (spool/'reasoning'/'responses'/f"{rec['reasoning_request_id']}.json").exists()
+    assert git('rev-parse','HEAD',cwd=old)==prior_sha
+    assert module.readmit_verified_exhausted_evidence_synthesis(
+        state,[item],spool,repo,_BudgetGate(),{},max_active=3,current_link=tmp_path/'current')==[]
+
+
+def test_exhausted_budget_recovery_never_reopens_unrelated_or_untrusted_failures(tmp_path,monkeypatch):
+    import json
+    repo,spool,item,state,old,prior_sha,current_sha,git,old_id,resp=_exhausted_evidence_fixture(tmp_path,monkeypatch)
+    rec=state['items']['DEV-42']
+    for reason in ('EvidenceToolError: source path not authorized','Provider billing issue'):
+        rec['reason']=reason
+        assert module.readmit_verified_exhausted_evidence_synthesis(
+            state,[item],spool,repo,_BudgetGate(),{},max_active=3,current_link=tmp_path/'current')==[]
+    rec['reason']='EvidenceToolError: source evidence turn budget exhausted'
+    rec['evidence_turn_count']=3
+    assert module.readmit_verified_exhausted_evidence_synthesis(
+        state,[item],spool,repo,_BudgetGate(),{},max_active=3,current_link=tmp_path/'current')==[]
+    rec['evidence_turn_count']=4
+    monkeypatch.setattr(module,'issue_has_closed_dependency_gate',lambda item:True)
+    assert module.readmit_verified_exhausted_evidence_synthesis(
+        state,[item],spool,repo,_BudgetGate(),{},max_active=3,current_link=tmp_path/'current')==[]
+    monkeypatch.setattr(module,'issue_has_closed_dependency_gate',lambda item:False)
+    rec['reasoning_request_id']='f'*64
+    assert module.readmit_verified_exhausted_evidence_synthesis(
+        state,[item],spool,repo,_BudgetGate(),{},max_active=3,current_link=tmp_path/'current')==[]
+
+
+def test_exhausted_budget_recovery_refuses_denied_or_dirty_source(tmp_path,monkeypatch):
+    repo,spool,item,state,old,prior_sha,current_sha,git,old_id,resp=_exhausted_evidence_fixture(tmp_path,monkeypatch)
+    assert module.readmit_verified_exhausted_evidence_synthesis(
+        state,[item],spool,repo,_BudgetGate(deny=True),{},max_active=3,current_link=tmp_path/'current')==[]
+    (old/'code.txt').write_text('dirty old checkout')
+    assert module.readmit_verified_exhausted_evidence_synthesis(
+        state,[item],spool,repo,_BudgetGate(),{},max_active=3,current_link=tmp_path/'current')==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_exhausted_budget_recovery_requires_capacity(tmp_path,monkeypatch):
+    repo,spool,item,state,old,prior_sha,current_sha,git,old_id,resp=_exhausted_evidence_fixture(tmp_path,monkeypatch)
+    state['items']['DEV-999']={'phase':'implementing'}
+    assert module.readmit_verified_exhausted_evidence_synthesis(
+        state,[item],spool,repo,_BudgetGate(),{},max_active=1,current_link=tmp_path/'current')==[]
+    assert state['items']['DEV-42']['phase']=='blocked'
+
+
+def test_evidence_recovery_denies_unreleased_main_and_root_drift(tmp_path,monkeypatch):
+    import json
+    repo,spool,item,state,old,prior_sha,sha,git,old_id,resp=_exhausted_evidence_fixture(tmp_path,monkeypatch)
+    root=spool.parent/'release-manager'
+    current=tmp_path/'current'
+    assert module.verified_live_evidence_recovery_release(spool,sha,current)
+    # GitHub main alone cannot authorize source recovery.
+    current.unlink()
+    current.symlink_to(tmp_path/'releases'/'not-deployed',target_is_directory=True)
+    assert not module.verified_live_evidence_recovery_release(spool,sha,current)
+    current.unlink();current.symlink_to(tmp_path/'releases'/sha,target_is_directory=True)
+    control=root/'protected-readback/production-control-state.json'
+    data=json.loads(control.read_text());data['circuit_breaker']['state']='open'
+    control.write_text(json.dumps(data))
+    assert not module.verified_live_evidence_recovery_release(spool,sha,current)
+    data['circuit_breaker']['state']='closed';control.write_text(json.dumps(data))
+    drift=root/'protected-readback/production-drift.json'
+    data=json.loads(drift.read_text());data['status']='failed';drift.write_text(json.dumps(data))
+    assert not module.verified_live_evidence_recovery_release(spool,sha,current)
+    data['status']='pass';data['problems']=[];drift.write_text(json.dumps(data))
+    release=root/'records'/f'release-{sha[:16]}.json'
+    data=json.loads(release.read_text());data['state']='production_eligible'
+    release.write_text(json.dumps(data))
+    assert not module.verified_live_evidence_recovery_release(spool,sha,current)
+    data['state']='closed';release.write_text(json.dumps(data))
+    assert module.verified_live_evidence_recovery_release(spool,sha,current)
+
+
+def test_evidence_recovery_requires_protected_recent_release_readbacks(tmp_path,monkeypatch):
+    import json
+    from datetime import datetime,timedelta,timezone
+    repo,spool,item,state,old,prior_sha,sha,git,old_id,resp=_exhausted_evidence_fixture(tmp_path,monkeypatch)
+    root=spool.parent/'release-manager'
+    current=tmp_path/'current'
+    assert module.verified_live_evidence_recovery_release(spool,sha,current)
+    drift=root/'protected-readback/production-drift.json'
+    d=json.loads(drift.read_text())
+    d['observed_at']=(datetime.now(timezone.utc)-timedelta(minutes=4)).isoformat()
+    drift.write_text(json.dumps(d))
+    assert not module.verified_live_evidence_recovery_release(spool,sha,current)
+    d['observed_at']=datetime.now(timezone.utc).isoformat()
+    drift.write_text(json.dumps(d))
+    drift.chmod(0o644)
+    assert not module.verified_live_evidence_recovery_release(spool,sha,current)
+    drift.chmod(0o600)
+    assert module.verified_live_evidence_recovery_release(spool,sha,current)

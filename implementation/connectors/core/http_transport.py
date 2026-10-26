@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json as json_module
+import errno
+import ssl
+import socket
 from socket import timeout as SocketTimeout
 from typing import Any, Mapping, MutableMapping
 from urllib.error import HTTPError, URLError
@@ -12,6 +15,23 @@ from .contracts import (
     ConnectorTransportError,
     bounded_transport_timeout,
 )
+
+
+
+def _safe_network_failure_code(exc: BaseException) -> str:
+    """Return fixed transport diagnostics without exposing exception text or secrets."""
+    cause = exc.reason if isinstance(exc, URLError) else exc
+    if isinstance(cause, (TimeoutError, SocketTimeout)):
+        return "NETWORK_TIMEOUT"
+    if isinstance(cause, socket.gaierror):
+        return "DNS_RESOLUTION"
+    if isinstance(cause, (ssl.SSLError, ssl.CertificateError)):
+        return "TLS_FAILURE"
+    if isinstance(cause, ConnectionRefusedError) or getattr(cause, "errno", None) == errno.ECONNREFUSED:
+        return "CONNECTION_REFUSED"
+    if isinstance(cause, OSError) and getattr(cause, "errno", None) in (errno.ENETUNREACH, errno.EHOSTUNREACH):
+        return "NETWORK_UNREACHABLE"
+    return "NETWORK_IO_FAILURE"
 
 
 _MAX_PROVIDER_ERROR_BODY_BYTES = 16384
@@ -205,15 +225,15 @@ class UrlLibJsonHttpTransport:
                 raise ConnectorExecutionDeadlineExceeded(
                     "governed provider execution deadline exceeded"
                 ) from exc
-            raise ConnectorTransportError("HTTP transport failed") from exc
+            raise ConnectorTransportError("HTTP transport failed", provider_error_code=_safe_network_failure_code(exc)) from exc
         except URLError as exc:
             if deadline_limited and isinstance(exc.reason, (TimeoutError, SocketTimeout)):
                 raise ConnectorExecutionDeadlineExceeded(
                     "governed provider execution deadline exceeded"
                 ) from exc
-            raise ConnectorTransportError("HTTP transport failed") from exc
+            raise ConnectorTransportError("HTTP transport failed", provider_error_code=_safe_network_failure_code(exc)) from exc
         except OSError as exc:
-            raise ConnectorTransportError("HTTP transport failed") from exc
+            raise ConnectorTransportError("HTTP transport failed", provider_error_code=_safe_network_failure_code(exc)) from exc
 
         if not raw:
             return {}
@@ -301,11 +321,11 @@ class UrlLibJsonHttpTransport:
                     raise ConnectorExecutionDeadlineExceeded(
                         "governed provider execution deadline exceeded"
                     ) from exc
-                raise ConnectorTransportError("HTTP transport failed") from exc
+                raise ConnectorTransportError("HTTP transport failed", provider_error_code=_safe_network_failure_code(exc)) from exc
             except URLError as exc:
-                raise ConnectorTransportError("HTTP transport failed") from exc
+                raise ConnectorTransportError("HTTP transport failed", provider_error_code=_safe_network_failure_code(exc)) from exc
             except OSError as exc:
-                raise ConnectorTransportError("HTTP transport failed") from exc
+                raise ConnectorTransportError("HTTP transport failed", provider_error_code=_safe_network_failure_code(exc)) from exc
 
             with response:
                 length = response.headers.get("Content-Length")

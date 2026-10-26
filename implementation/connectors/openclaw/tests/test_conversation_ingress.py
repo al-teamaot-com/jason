@@ -99,13 +99,15 @@ def envelope(**overrides):
     return value
 
 
-def ingress(*, authenticator=None, replay=None, audit=None, flow=None):
+def ingress(*, authenticator=None, replay=None, audit=None, flow=None,
+            procurement_flow=None):
     return GovernedOpenClawTeamsConversationIngress(
         authenticator=authenticator or Authenticator(),
         replay=replay or Replay(),
         audit=audit or Audit(),
         flow=flow or Flow(),
         allowed_machine_identities=frozenset({"machine:openclaw-jason"}),
+        procurement_flow=procurement_flow,
     )
 
 
@@ -828,3 +830,144 @@ def test_procurement_url_context_does_not_hijack_unrelated_link_message():
     )
     assert url is None
     assert ticket is None
+
+
+def test_teams_code_review_github_link_never_enters_procurement():
+    message = (
+        "@Jason review existing PR #1549 "
+        "(https://github.com/al-teamaot-com/jason/pull/1549), "
+        "exact SHA 9add202c. Confirm invoice/part/PO workflows, "
+        "review approvals, and production boundary without any mutation."
+    )
+    assert _procurement_url_context(message) == (None, None)
+
+
+def test_standalone_source_control_and_document_urls_do_not_purchase():
+    for url in (
+        "https://github.com/al-teamaot-com/jason/pull/1549",
+        "https://gist.github.com/employee/abc",
+        "https://gitlab.com/company/project/merge_requests/7",
+        "https://bitbucket.org/company/project/pull-requests/22",
+        "https://dev.azure.com/company/project/_git/example/pullrequest/22",
+        "https://learn.microsoft.com/en-us/microsoftteams/platform/",
+    ):
+        assert _procurement_url_context(url) == (None, None)
+        assert _procurement_url_context(
+            "Review this invoice/part design: " + url
+        ) == (None, None)
+
+
+def test_embedded_procurement_substrings_do_not_hijack_unrelated_link():
+    text = "Please check department status https://example.com/status"
+    assert _procurement_url_context(text) == (None, None)
+
+
+def test_explicit_procurement_context_still_routes_vendor_product_links():
+    url = "https://supplier.example/products/part-42"
+    for message, ticket in (
+        ("Procurement request: " + url, None),
+        ("Please quote this part " + url, None),
+        (url + " and create a quote for a customer", None),
+        ("Order " + url + " for ticket T20261017.0123", "T20261017.0123"),
+    ):
+        assert _procurement_url_context(message) == (url, ticket)
+    assert _procurement_url_context(url) == (url, None)
+
+
+def test_unrelated_vendor_link_in_general_message_stays_conversation():
+    assert _procurement_url_context(
+        "Please review this policy: https://example.com/status"
+    ) == (None, None)
+
+
+
+def test_actual_signed_ingress_routes_github_pr_to_conversation_not_procurement():
+    class Procurement:
+        def __init__(self):
+            self.urls = []
+
+        def handle_url(self, **kwargs):
+            self.urls.append(kwargs)
+            raise AssertionError("a GitHub PR is not a vendor product")
+
+    flow = Flow()
+    procurement = Procurement()
+    handler = ingress(flow=flow, procurement_flow=procurement)
+    result = handler.handle(envelope(
+        text=("Review PR #1549 https://github.com/al-teamaot-com/jason/pull/1549 "
+              "and check our invoice, part, quote and PO flows."),
+    ))
+    assert result["status"] == "completed"
+    assert procurement.urls == []
+    assert len(flow.requests) == 1
+    assert "PR #1549" in flow.requests[0].text
+
+
+def test_actual_signed_ingress_keeps_explicit_vendor_procurement_routing():
+    class Procurement:
+        def __init__(self):
+            self.urls = []
+
+        def handle_url(self, **kwargs):
+            self.urls.append(kwargs)
+            return {"status": "completed", "route": "procurement"}
+
+    flow = Flow()
+    procurement = Procurement()
+    handler = ingress(flow=flow, procurement_flow=procurement)
+    result = handler.handle(envelope(
+        text="Procurement request https://www.newegg.com/p/2VF-0046-00012",
+    ))
+    assert result["status"] == "completed"
+    assert result["route"] == "procurement"
+    assert len(procurement.urls) == 1
+    assert procurement.urls[0]["url"] == "https://www.newegg.com/p/2VF-0046-00012"
+    assert flow.requests == []
+
+
+def test_nonexecuting_owner_uat_receives_existing_signed_gateway_evidence():
+    """Only explicit owner-UAT callback receives signed evidence, not general flow."""
+    approval = ApprovalFlow()
+    normal = Flow()
+    original = envelope(
+        request_id="req-owner-uat-signed",
+        interaction={
+            "kind": "approval.submit",
+            "approval_id": "owneruatapproval-exact-1",
+            "decision": "deny",
+            "channel_response_id": "teams-message-1",
+            "selections": {},
+        },
+    )
+    flow = GovernedOpenClawTeamsConversationIngress(
+        authenticator=Authenticator(), replay=Replay(), audit=Audit(),
+        flow=normal, allowed_machine_identities=frozenset({"machine:openclaw-jason"}),
+        approval_flow=approval,
+    )
+    result = flow.handle(original)
+    assert result["status"] == "completed"
+    assert not normal.requests
+    assert len(approval.calls) == 1
+    assert approval.calls[0]["signed_envelope"] == original
+    assert approval.calls[0]["approval_id"] == "owneruatapproval-exact-1"
+    assert approval.calls[0]["decision"] == "deny"
+
+
+def test_ordinary_workflow_does_not_receive_signed_envelope_by_default():
+    approval = ApprovalFlow()
+    flow = GovernedOpenClawTeamsConversationIngress(
+        authenticator=Authenticator(), replay=Replay(), audit=Audit(),
+        flow=Flow(), allowed_machine_identities=frozenset({"machine:openclaw-jason"}),
+        approval_flow=approval,
+    )
+    result = flow.handle(envelope(
+        request_id="req-unprivileged-test",
+        interaction={
+            "kind": "approval.submit",
+            "approval_id": "supportapproval-test-1",
+            "decision": "deny",
+            "channel_response_id": "teams-message-1",
+        },
+    ))
+    assert result["status"] == "completed"
+    assert "signed_envelope" not in approval.calls[0]

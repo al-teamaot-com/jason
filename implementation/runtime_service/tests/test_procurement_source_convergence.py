@@ -143,6 +143,7 @@ def test_owner_approval_identifies_canonical_shipping_product(tmp_path):
         "freight_product_name": CANONICAL_SHIPPING_PRODUCT_NAME,
         "total_commitment": "207.59",
         "spending_limit": "100.00",
+        "effective_spending_threshold": "100.00",
         "source_url": "invoice:PSI393904",
     }
     approval = flow._create_owner_approval(submission)

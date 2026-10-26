@@ -29,6 +29,7 @@ APPROVED_AUTOTASK_ENTITIES = frozenset(
         "PurchaseOrderItems",
         "PurchaseOrderItemReceiving",
         "Products",
+        "InventoryItems",
         "ProductVendors",
         "Services",
         "ServiceBundles",

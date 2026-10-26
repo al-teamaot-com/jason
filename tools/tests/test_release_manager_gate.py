@@ -159,6 +159,36 @@ class ReleaseManagerGateTests(unittest.TestCase):
         self.assertTrue(accepted["allowed"])
         self.assertTrue(accepted["protected_core"])
 
+    def test_root_host_reconciliation_and_delta_planner_are_protected_core(self):
+        for path in (
+            "tools/reconcile_production_host_services.sh",
+            "tools/reconcile_managed_unit_delta.py",
+            "tools/release_exporter_port_guard.py",
+            "infrastructure/jason-runtime/Dockerfile",
+            ".dockerignore",
+        ):
+            record = {
+                "state": "production_eligible",
+                "rollback_sha": SHA_B,
+                "changed_files": [path],
+                "release_candidate": {
+                    "candidate_sha": SHA_A,
+                    "artifact_digest": "sha256:image",
+                    "immutable": True,
+                },
+            }
+            self.assertTrue(gate.is_protected_core(record, self.policy))
+            denied = self.evaluate(record, "production")
+            self.assertFalse(denied["allowed"])
+            self.assertTrue(denied["protected_core"])
+            self.assertIn(
+                "production release requires explicit owner approval",
+                denied["reasons"],
+            )
+            approved = deepcopy(record)
+            approved["owner_approval"] = {"approved": True, "candidate_sha": SHA_A}
+            self.assertTrue(self.evaluate(approved, "production")["allowed"])
+
     def test_normal_release_requires_exact_sha_owner_approval_in_manual_mode(self):
         base = {
             "state": "production_eligible",

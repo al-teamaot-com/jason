@@ -157,7 +157,8 @@ export function buildConversationEnvelope({
       assertOnlyKeys(
         interaction,
         new Set([
-          "kind", "approval_id", "decision", "selections", "channel_response_id",
+          "kind", "approval_id", "decision", "selections",
+          "channel_response_id", "callback_reply_to_id",
         ]),
         "approval",
       );
@@ -170,12 +171,21 @@ export function buildConversationEnvelope({
         throw new Error("approval interaction decision is invalid");
       }
       const selections = normalizeInteractionSelections(interaction.selections);
+      // This is metadata from the authenticated SDK activity, NOT from the
+      // submit data. It remains observational until provider-side correlation.
+      const replyTo = interaction.callback_reply_to_id;
+      if (replyTo !== undefined &&
+          (typeof replyTo !== "string" ||
+           !/^[A-Za-z0-9:._/-]{1,256}$/.test(replyTo))) {
+        throw new Error("approval callback reply-to ID is invalid");
+      }
       cleanInteraction = {
         kind,
         approval_id: approvalId,
         decision,
         ...(Object.keys(selections).length ? { selections } : {}),
         channel_response_id: channelResponseId,
+        ...(replyTo !== undefined ? { callback_reply_to_id: replyTo } : {}),
       };
     } else if (kind === "procurement.submit") {
       assertOnlyKeys(
@@ -374,6 +384,12 @@ export function replyForRuntimeResult(result) {
       return text.trim();
     }
     return "Jason needs one more detail before it can continue. No action was taken.";
+  }
+  if (payload.status === "approved") {
+    // A recorded approval is not completion. The server-side worker owns execution.
+    return typeof payload.reply?.text === "string" && payload.reply.text.trim()
+      ? payload.reply.text.trim()
+      : "Approval recorded. Jason has queued the reviewed plan; execution is not yet complete.";
   }
   if (payload.status === "approval_required") {
     return "Jason requires approval before this request can continue.";

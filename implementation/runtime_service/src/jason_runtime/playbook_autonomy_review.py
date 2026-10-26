@@ -13,8 +13,12 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
-from typing import Mapping, Protocol
-from urllib.request import Request, urlopen
+import os
+import re
+import stat
+from dataclasses import dataclass
+from typing import Iterable, Mapping, Protocol
+from .teams_communication_service import ExistingTeamsGatewayTransport
 
 from autonomous_remediation.playbook_autonomy_approval import (
     SQLitePlaybookAutonomyApprovalStore,
@@ -38,14 +42,76 @@ from connectors.src.jason_connectors.approval_requests import (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class PlaybookOwnerApprovalPolicy:
+    owner_identity_ids: frozenset[str]
+    allowed_requested_modes: frozenset[str] | None = None
+
+
+def load_playbook_owner_approval_policy(
+    *,
+    path: Path,
+    legacy_owner_identity_ids: Iterable[str],
+) -> PlaybookOwnerApprovalPolicy:
+    """Read a narrowly scoped local owner-approved role; otherwise keep legacy gates.
+
+    This file is not supplied by Teams, ticket text or a requester. It resides
+    only in the existing local Jason authority volume. Invalid files fail
+    closed instead of quietly granting broader or fallback authority.
+    """
+    policy_path = Path(path)
+    try:
+        metadata = policy_path.lstat()
+    except FileNotFoundError:
+        return PlaybookOwnerApprovalPolicy(
+            frozenset(str(x).strip() for x in legacy_owner_identity_ids if str(x).strip())
+        )
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_IMODE(metadata.st_mode) != 0o600
+        or metadata.st_uid not in (0, os.geteuid())
+    ):
+        raise PermissionError("playbook owner policy must be an owned 0600 regular file")
+    data = json.loads(policy_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or set(data) != {
+        "schema_version", "organization_id", "capability", "policy_mode",
+        "owner_identity_ids", "allowed_requested_modes",
+    }:
+        raise PermissionError("playbook owner policy schema not approved")
+    if (
+        data.get("schema_version") != "1.0"
+        or data.get("organization_id") != "aot"
+        or data.get("capability") != PLAYBOOK_AUTONOMY_PROMOTION_CAPABILITY
+        or data.get("policy_mode") != "owner_only_test"
+    ):
+        raise PermissionError("playbook owner policy is outside bounded AOT pilot")
+    identities = data.get("owner_identity_ids")
+    modes = data.get("allowed_requested_modes")
+    if (
+        not isinstance(identities, list) or len(identities) != 1
+        or not isinstance(modes, list) or len(modes) != 1
+        or any(not isinstance(x, str) for x in identities + modes)
+        or not re.fullmatch(r"person-[a-z0-9-]{1,80}", identities[0])
+        or not re.fullmatch(r"promote:[a-z0-9_]+@[0-9]+\.[0-9]+\.[0-9]+", modes[0])
+    ):
+        raise PermissionError("playbook owner policy requires one exact owner and mode")
+    return PlaybookOwnerApprovalPolicy(
+        owner_identity_ids=frozenset(identities),
+        allowed_requested_modes=frozenset(modes),
+    )
+
+
 class ActiveMicrosoftIdentityBindingReader(Protocol):
     def find_active_by_jason_identity(self, *, jason_identity_id: str): ...
     def find(self, *, microsoft_tenant_id: str, microsoft_object_id: str): ...
 
 
 class OwnerOnlyPlaybookAutonomyAuthority:
-    def __init__(self, owner_identity_ids) -> None:
+    def __init__(
+        self, owner_identity_ids, *, allowed_requested_modes: frozenset[str] | None = None
+    ) -> None:
         self.owner_identity_ids = frozenset(str(x).strip() for x in owner_identity_ids if str(x).strip())
+        self.allowed_requested_modes = allowed_requested_modes
 
     def can_approve(
         self,
@@ -61,8 +127,48 @@ class OwnerOnlyPlaybookAutonomyAuthority:
             and client_id is None
             and capability == PLAYBOOK_AUTONOMY_PROMOTION_CAPABILITY
             and requested_mode.startswith("promote:")
+            and (
+                self.allowed_requested_modes is None
+                or requested_mode in self.allowed_requested_modes
+            )
             and approver_identity_id in self.owner_identity_ids
         )
+
+
+def _focused_teams_approval_card(*, heading: str, title: str, explanation: str,
+                                 facts: list[dict[str, str]]) -> tuple[list[dict], tuple[tuple[str, str], ...]]:
+    """Mobile-first Teams Approve/Deny body, shared canonical gateway contract.
+
+    Mirrors the release UX's small brand header, clear human decision,
+    at-a-glance impact and expandable evidence. Does not grant authority.
+    """
+    high_priority = {'Submitted by','Total Commitment','Effective threshold',
+                     'Autotask Contact UDF limit','Customer','Ticket','Expires'}
+    quick = [fact for fact in facts if fact['title'] in high_priority]
+    details = [fact for fact in facts if fact['title'] not in high_priority]
+    body = [
+        {'type':'TextBlock','text':'JASON · AOT','size':'Small',
+         'isSubtle':True,'spacing':'None'},
+        {'type':'TextBlock','text':'Approval required','size':'Large',
+         'color':'Warning','weight':'Bolder','wrap':True,'spacing':'Small'},
+        {'type':'TextBlock','text':title,'weight':'Bolder','wrap':True,'spacing':'Small'},
+        {'type':'TextBlock','text':explanation,'size':'Small',
+         'isSubtle':True,'wrap':True,'spacing':'Small'},
+        {'type':'FactSet','facts':quick},
+    ]
+    if details:
+        body.extend([
+            {'type':'ActionSet','actions':[
+                {'type':'Action.ToggleVisibility','title':'Review items and evidence',
+                 'targetElements':['jason_purchase_technical_details']} ]},
+            {'type':'Container','id':'jason_purchase_technical_details',
+             'isVisible':False,'items':[
+                {'type':'TextBlock','text':'PURCHASE DETAILS AND EVIDENCE',
+                 'size':'Small','weight':'Bolder','isSubtle':True},
+                {'type':'FactSet','facts':details},
+             ]},
+        ])
+    return body, (('Approve','approve'),('Deny','deny'))
 
 
 class TeamsGatewayPlaybookApprovalSender:
@@ -79,54 +185,160 @@ class TeamsGatewayPlaybookApprovalSender:
         self.bindings = bindings
         self.owner_identity_ids = tuple(sorted(str(x).strip() for x in owner_identity_ids if str(x).strip()))
 
+    def _existing_transport(self) -> ExistingTeamsGatewayTransport:
+        # Single canonical adapter to the already-approved Teams gateway.
+        return ExistingTeamsGatewayTransport(
+            gateway_url=self.gateway_url, token_file=self.token_file)
+
     def send(self, request: ApprovalRequest) -> tuple[str, ...]:
         card = render_approval_card(request)
         adaptive = self._adaptive_card(card)
-        token = self.token_file.read_text(encoding="utf-8").strip()
-        if not token:
-            raise PermissionError("Teams proactive token unavailable")
-        message_ids: list[str] = []
-        for owner_id in self.owner_identity_ids:
-            binding = self.bindings.find_active_by_jason_identity(jason_identity_id=owner_id)
+        # Every approval type uses one canonical card renderer + gateway.
+        # Select recipients from the persisted immutable ApprovalRequest, not
+        # from user-supplied Teams data or a separate procurement sender.
+        # The configured sender allowlist must cover the exact request set.
+        requested = tuple(request.authorized_approver_ids)
+        allowlist = frozenset(self.owner_identity_ids)
+        if (not requested or len(set(requested)) != len(requested)
+                or any(identity not in allowlist for identity in requested)):
+            raise PermissionError("Teams recipient is outside configured approval audience")
+        bindings = []
+        # Fail before sending *any* card if one authorized recipient lacks a
+        # trusted Microsoft binding, preventing partial fan-out on bad policy.
+        for identity in requested:
+            binding = self.bindings.find_active_by_jason_identity(
+                jason_identity_id=identity)
             if binding is None or getattr(binding, "status", None) != "active":
-                raise PermissionError(f"owner Microsoft identity binding unavailable: {owner_id}")
-            payload = {
-                "aadObjectId": binding.microsoft_object_id,
-                "tenantId": binding.microsoft_tenant_id,
-                "text": card.summary,
-                "card": adaptive,
-            }
-            body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            http_request = Request(
-                self.gateway_url + "/internal/proactive/send",
-                data=body,
-                method="POST",
-                headers={
-                    "Authorization": "Bearer " + token,
-                    "Content-Type": "application/json",
-                },
-            )
-            with urlopen(http_request, timeout=20) as response:
-                result = json.loads(response.read().decode("utf-8"))
-            if result.get("status") != "succeeded" or not result.get("message_id"):
-                raise RuntimeError("Teams playbook approval delivery failed")
-            message_ids.append(str(result["message_id"]).strip())
-        return tuple(message_ids)
+                raise PermissionError(
+                    f"authorized Microsoft identity binding unavailable: {identity}")
+            bindings.append(binding)
+        transport = self._existing_transport()
+        return tuple(transport.send(binding=binding, text=card.summary,
+                                    card=adaptive).message_id
+                     for binding in bindings)
+
+    def send_status(self, *, text: str) -> tuple[str, ...]:
+        """Existing governed owner status messaging, no approval implied."""
+        if not isinstance(text, str) or not 1 <= len(text) <= 1200:
+            raise ValueError("bounded Teams status text required")
+        transport = self._existing_transport()
+        receipts: list[str] = []
+        for identity_id in self.owner_identity_ids:
+            binding = self.bindings.find_active_by_jason_identity(
+                jason_identity_id=identity_id)
+            if binding is None or getattr(binding, "status", None) != "active":
+                raise PermissionError("Teams status recipient binding unavailable")
+            receipts.append(transport.send(binding=binding, text=text).message_id)
+        return tuple(receipts)
 
     @staticmethod
     def _adaptive_card(card) -> dict:
-        facts = [
-            {"title": "Capability", "value": card.capability},
-            {"title": "Mode", "value": card.requested_mode},
-            {"title": "Expires", "value": card.expires_at},
-            {"title": "Approval ID", "value": card.approval_id},
-        ]
-        facts.extend({"title": str(k), "value": str(v)} for k, v in card.facts)
-        body = [
-            {"type": "TextBlock", "text": card.title, "weight": "Bolder", "wrap": True},
-            {"type": "TextBlock", "text": card.summary, "wrap": True},
-            {"type": "FactSet", "facts": facts},
-        ]
+        # Release approval cards arrive alongside ordinary release status
+        # notifications. On narrow phone screens the full 14-field metadata
+        # block pushes Approve/Deny out of view, making the owner mistake a
+        # status-only notification for the actionable card. Keep a separate
+        # concise, unambiguous release layout; authority always comes from
+        # the original immutable request, never the displayed field count.
+        is_mobile_release = (
+            card.capability == "release.production.approve"
+            and card.approval_id.startswith("relapproval-")
+        )
+        is_owner_uat = (
+            card.capability == "interaction.owner.acceptance.record"
+            and card.approval_id.startswith("owneruatapproval-")
+            and card.requested_mode == "test:nonexecuting"
+        )
+        if is_mobile_release:
+            review = dict(card.facts)
+            keys = (
+                ("Release", "Release"),
+                ("Highest risk", "Risk"),
+                ("Exact SHA", "Exact commit"),
+                ("Affected services", "Affected systems"),
+                ("Changed files", "Changed files"),
+                ("Rollback", "Rollback SHA"),
+                ("Preproduction and rollback", "Preproduction"),
+                ("Manifest fingerprint", "Manifest SHA-256"),
+            )
+            facts = [{"title": label, "value": str(review[key])}
+                     for key, label in keys if key in review]
+            facts.append({"title": "Expires", "value": card.expires_at})
+            actions = (
+                ("Approve", "approve"), ("Deny", "deny"),
+            )
+            body = [
+                {"type": "TextBlock", "text": "ACTION REQUIRED: PRODUCTION + CCC",
+                 "weight": "Bolder", "wrap": True},
+                {"type": "TextBlock", "text": card.title, "weight": "Bolder", "wrap": True},
+                {"type": "TextBlock",
+                 "text": ("Review this exact release. The Approve and Deny buttons "
+                          "are below the details. Approve authorizes only this SHA; "
+                          "independent deployment, CCC and rollback gates still apply."),
+                 "wrap": True},
+                {"type": "FactSet", "facts": facts},
+            ]
+        elif (card.capability == "procurement.submission.execute"
+                and card.approval_id.startswith("procapproval-")
+                and card.requested_mode == "purchase"):
+            # Exactly the same focused card pattern, authenticated gateway,
+            # persisted request and signed actions as a production release.
+            # Financial approvals never authorize release or CCC actions.
+            facts = [{"title": str(k), "value": str(v)} for k,v in card.facts]
+            facts.append({"title": "Expires", "value": card.expires_at})
+            body, actions = _focused_teams_approval_card(
+                heading="ACTION REQUIRED: PURCHASE APPROVAL",
+                title=card.title,
+                explanation=("Review the exact vendor, items, customer, ticket, and total. "
+                             "Approve authorizes only this purchase request; "
+                             "independent Autotask execution and audit checks still apply."),
+                facts=facts,
+            )
+        elif is_owner_uat:
+            # This is a TWO-STAGE scripted nonexecuting acceptance test.
+            # Never display both buttons when only one result can advance the
+            # campaign. The signed server-side callback independently checks
+            # the immutable phase, rather than trusting the card UI.
+            review = dict(card.facts)
+            if (review.get("Mode") != "TEST ONLY / NO EXECUTION"
+                    or review.get("Impact") != "None: records one test approval decision"
+                    or not review.get("Session")):
+                raise PermissionError("unrecognized nonexecuting owner UAT card scope")
+            if (card.title == "TEST ONLY: Jason owner approval in Teams (1/2: DENY)"
+                    and review.get("Next action") == "Click DENY (test only)"):
+                actions = (("Deny", "deny"),)
+            elif (card.title == "TEST ONLY: Jason owner approval in Teams (2/2: APPROVE)"
+                    and review.get("Next action") == "Click APPROVE (test only)"):
+                actions = (("Approve", "approve"),)
+            else:
+                raise PermissionError("nonexecuting owner UAT phase was not verifiable")
+            facts = [{"title": str(k), "value": str(v)} for k, v in card.facts]
+            facts.append({"title": "Expires", "value": card.expires_at})
+            body = [
+                {"type": "TextBlock",
+                 "text": "TEST ONLY: NO OPERATION WILL EXECUTE",
+                 "weight": "Bolder", "color": "Warning", "wrap": True},
+                {"type": "TextBlock", "text": card.title,
+                 "weight": "Bolder", "wrap": True},
+                {"type": "TextBlock", "text": card.summary, "wrap": True},
+                {"type": "FactSet", "facts": facts},
+            ]
+        else:
+            facts = [
+                {"title": "Capability", "value": card.capability},
+                {"title": "Mode", "value": card.requested_mode},
+                {"title": "Expires", "value": card.expires_at},
+                {"title": "Approval ID", "value": card.approval_id},
+            ]
+            facts.extend({"title": str(k), "value": str(v)} for k, v in card.facts)
+            actions = (
+                ("Approve", "approve"), ("Deny", "deny"),
+                ("Request Changes", "request_changes"),
+            )
+            body = [
+                {"type": "TextBlock", "text": card.title, "weight": "Bolder", "wrap": True},
+                {"type": "TextBlock", "text": card.summary, "wrap": True},
+                {"type": "FactSet", "facts": facts},
+            ]
         if card.evidence_artifact_ids:
             body.append(
                 {
@@ -144,31 +356,14 @@ class TeamsGatewayPlaybookApprovalSender:
             "actions": [
                 {
                     "type": "Action.Submit",
-                    "title": "Approve",
+                    "title": title,
                     "data": {
-                        "approval_id": card.approval_id,
-                        "organization_id": card.organization_id,
-                        "decision": "approve",
+                        "approval_id": card.approval_id, "decision": decision,
+                        **({"card_challenge": card.card_instance_challenge}
+                           if card.card_instance_challenge is not None else {}),
                     },
-                },
-                {
-                    "type": "Action.Submit",
-                    "title": "Deny",
-                    "data": {
-                        "approval_id": card.approval_id,
-                        "organization_id": card.organization_id,
-                        "decision": "deny",
-                    },
-                },
-                {
-                    "type": "Action.Submit",
-                    "title": "Request Changes",
-                    "data": {
-                        "approval_id": card.approval_id,
-                        "organization_id": card.organization_id,
-                        "decision": "request_changes",
-                    },
-                },
+                }
+                for title, decision in actions
             ],
         }
 
@@ -356,6 +551,28 @@ class PlaybookAutonomyApprovalInteractionFlow:
         except ValueError as exc:
             raise PermissionError("invalid playbook autonomy approval decision") from exc
 
+        pilot_modes = getattr(
+            self.approval_service.authority, "allowed_requested_modes", None
+        )
+        if pilot_modes is not None:
+            # A bounded owner-only test may reuse an independently authorized
+            # promotion, but must never create a new operational capability.
+            pilot_scope = registered_autonomy_scope(
+                registry_path=self.review_service.registry_path,
+                playbook_id=str(request.metadata.get("playbook_id") or ""),
+            )
+            if (
+                request.requested_mode != pilot_scope.requested_mode()
+                or request.metadata.get("entry_sha256") != pilot_scope.entry_sha256
+                or self.review_service.promotion_store.find_scope_approved(
+                    playbook_id=pilot_scope.playbook_id,
+                    playbook_version=pilot_scope.playbook_version,
+                    policy_id=pilot_scope.policy_id,
+                    required_capabilities=pilot_scope.allowed_capabilities,
+                ) is None
+            ):
+                raise PermissionError("owner-only pilot requires existing exact promotion")
+
         accepted = self.approval_service.accept_response(
             ApprovalResponse(
                 approval_id=approval_id,
@@ -369,7 +586,10 @@ class PlaybookAutonomyApprovalInteractionFlow:
             now=decided_at,
         )
         if accepted.status == "approved":
-            result = self.review_service.promote_accepted(request=request, accepted=accepted)
+            result = self.review_service.promote_accepted(
+                request=request, accepted=accepted,
+                allow_new_promotion=(pilot_modes is None),
+            )
             return {
                 "status": "completed",
                 "reply": {

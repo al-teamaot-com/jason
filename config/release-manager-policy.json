@@ -41,12 +41,25 @@
     "tools/install_release_manager*.py",
     "infrastructure/openclaw-operations/systemd/user/jason-release-manager.*",
     "infrastructure/jason-runtime/production-deploy.sh",
+    "infrastructure/jason-runtime/Dockerfile",
+    ".dockerignore",
     "tools/deploy_live_container.py",
     "implementation/orchestrator/*",
     "implementation/kernel/*",
     "tools/release_host_reconcile_worker.py",
     "tools/install_release_host_reconciler.py",
-    "infrastructure/openclaw-operations/systemd/jason-release-host-reconcile.*"
+    "tools/reconcile_production_host_services.sh",
+    "tools/reconcile_managed_unit_delta.py",
+    "tools/release_exporter_port_guard.py",
+    "tools/release_mobile_approval_consumer.py",
+    "implementation/runtime_service/src/jason_runtime/mobile_release_approval.py",
+    "implementation/runtime_service/src/jason_runtime/universal_teams_approval.py",
+    "implementation/runtime_service/src/jason_runtime/playbook_autonomy_review.py",
+    "implementation/connectors/microsoft_graph/teams_approval_channel.py",
+    "infrastructure/openclaw-operations/systemd/jason-release-host-reconcile.*",
+    "tools/install_release_control_transition.py",
+    "tools/protected_root_policy_migration.py",
+    "config/production-desired-state.json"
   ],
   "priority": {
     "order": [

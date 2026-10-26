@@ -953,3 +953,135 @@ def test_idle_logoff_playbook_scope_is_not_available_to_human_principal(monkeypa
         value.prepare_governed_execution(request)
 
     assert transport.calls == []
+
+
+LINUX_WORKER_UID = "bc7c4531-6869-4658-b1d6-7639a477045e"
+LINUX_WORKER_NAME = "Run Ad Hoc Command (Shell) [MAC] [LIN]"
+
+
+def linux_worker_connector():
+    transport = Transport()
+    value = DattoRmmComponentExecutionConnector(
+        secrets=Secrets(),
+        transport=transport,
+        audit=Audit(),
+        pilot=DattoComponentExecutionPilot(
+            allowlist_name="pilot-diagnostic",
+            components=(
+                DattoApprovedComponent(
+                    uid=LINUX_WORKER_UID,
+                    name=LINUX_WORKER_NAME,
+                    approval_mode="per_run",
+                ),
+            ),
+            device_uid="claw2",
+            device_class="workstation",
+        ),
+        sleeper=lambda _: None,
+        maximum_status_reads=1,
+        status_interval_seconds=0,
+    )
+    return value, transport
+
+
+def linux_worker_request(device_uid="claw2", **overrides):
+    arguments = {
+        "allowlist_name": "aot-approved-linux-worker",
+        "device_class": "Server",
+        "device_uid": device_uid,
+        "component_uid": LINUX_WORKER_UID,
+        "component_name": LINUX_WORKER_NAME,
+        "variables": {"usrInput": "uname -srm"},
+    }
+    arguments.update(overrides)
+    return execution_request(**arguments)
+
+
+def test_linux_shell_provider_blocks_missing_worker_enrollment(monkeypatch):
+    monkeypatch.delenv(
+        "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", raising=False
+    )
+    value, transport = linux_worker_connector()
+    with pytest.raises(PermissionError, match="DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED"):
+        value.prepare_governed_execution(linux_worker_request())
+    assert transport.calls == []
+
+
+def test_linux_shell_provider_blocks_non_enrolled_target(monkeypatch):
+    monkeypatch.setenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", "claw2")
+    value, transport = linux_worker_connector()
+    with pytest.raises(PermissionError, match="DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED"):
+        value.prepare_governed_execution(linux_worker_request("production-claw"))
+    assert transport.calls == []
+
+
+def test_linux_shell_provider_prepares_only_enrolled_target(monkeypatch):
+    monkeypatch.setenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", "claw2")
+    mock_access_token(monkeypatch)
+    value, transport = linux_worker_connector()
+    prepared = value.prepare_governed_execution(linux_worker_request())
+    assert prepared.resource_identifier == "claw2"
+    assert prepared.payload["jobComponent"]["variables"] == [
+        {"name": "usrInput", "value": "uname -srm"}
+    ]
+    assert [call["method"] for call in transport.calls] == ["GET"]
+
+
+def test_linux_worker_server_scope_is_independent_of_desktop_pilot(monkeypatch):
+    monkeypatch.setenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", "claw2")
+    mock_access_token(monkeypatch)
+    transport = Transport()
+    value = DattoRmmComponentExecutionConnector(
+        secrets=Secrets(),
+        transport=transport,
+        audit=Audit(),
+        pilot=DattoComponentExecutionPilot(
+            allowlist_name="pilot-diagnostic",
+            components=(DattoApprovedComponent(
+                uid="desktop-only-component",
+                name="Pilot Diagnostic",
+                approval_mode="per_run",
+            ),),
+            device_uid="desktop-only-device",
+            device_class="Desktop",
+        ),
+        sleeper=lambda _: None,
+        maximum_status_reads=1,
+        status_interval_seconds=0,
+    )
+    prepared = value.prepare_governed_execution(linux_worker_request())
+    assert prepared.parameters["allowlist_name"] == "aot-approved-linux-worker"
+    assert prepared.parameters["device_class"] == "Server"
+    assert prepared.resource_identifier == "claw2"
+    assert prepared.payload["jobComponent"]["componentUid"] == LINUX_WORKER_UID
+    assert [call["method"] for call in transport.calls] == ["GET"]
+
+
+def test_linux_worker_rejects_caller_desktop_class_before_provider(monkeypatch):
+    monkeypatch.setenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", "claw2")
+    value, transport = linux_worker_connector()
+    with pytest.raises(PermissionError, match="DATTO_COMPONENT_TARGET_CLASS_NOT_APPROVED"):
+        value.prepare_governed_execution(
+            linux_worker_request(device_class="Desktop")
+        )
+    assert transport.calls == []
+
+
+def test_linux_worker_rejects_autonomous_generic_shell(monkeypatch):
+    monkeypatch.setenv("JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", "claw2")
+    value, transport = linux_worker_connector()
+    request = linux_worker_request()
+    request = ConnectorRequest(
+        context=ConnectorContext(
+            correlation_id=request.context.correlation_id,
+            principal_id="jason-autonomy-worker",
+            organization_id=request.context.organization_id,
+            client_id=request.context.client_id,
+            capability=request.context.capability,
+            mode=request.context.mode,
+        ),
+        arguments=request.arguments,
+    )
+    with pytest.raises(PermissionError, match="DATTO_COMPONENT_AUTONOMY_REQUIRES_STANDING_SAFE"):
+        value.prepare_governed_execution(request)
+    assert transport.calls == []

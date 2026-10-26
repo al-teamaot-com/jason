@@ -136,6 +136,12 @@ class DattoRmmComponentExecutionPolicy:
     _AD_HOC_POWERSHELL_NAME = (
         "Run Ad Hoc Command (PowerShell 2-5) [WIN]"
     )
+    _AD_HOC_LINUX_SHELL_UID = (
+        "bc7c4531-6869-4658-b1d6-7639a477045e"
+    )
+    _AD_HOC_LINUX_SHELL_NAME = (
+        "Run Ad Hoc Command (Shell) [MAC] [LIN]"
+    )
 
     def __init__(self, *, allowlist: ComponentAllowlistResolver) -> None:
         self._allowlist = allowlist
@@ -215,6 +221,23 @@ class DattoRmmComponentExecutionPolicy:
             == cls._AD_HOC_POWERSHELL_UID
             and entry.display_name.casefold()
             == cls._AD_HOC_POWERSHELL_NAME.casefold()
+        ):
+            return (
+                ComponentVariablePolicy(
+                    name="usrInput",
+                    variable_type="string",
+                    required=True,
+                    maximum_length=20_000,
+                ),
+            )
+
+        # Linux/macOS shell is arbitrary eval, not a read-only diagnostic.
+        # Allow exactly one reviewed usrInput variable, bound to the live
+        # UID AND name; independent runtime policy forces per-run approval.
+        if (
+            entry.provider_component_uid == cls._AD_HOC_LINUX_SHELL_UID
+            and entry.display_name.casefold()
+            == cls._AD_HOC_LINUX_SHELL_NAME.casefold()
         ):
             return (
                 ComponentVariablePolicy(

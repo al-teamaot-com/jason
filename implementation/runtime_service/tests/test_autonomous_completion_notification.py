@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -77,6 +78,55 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
             invoker.prepare_execution_plan(
                 request=request,
                 resolution=resolution,
+            )
+
+    def test_autonomous_card_notifier_reuses_shared_gateway_once(self):
+        with tempfile.TemporaryDirectory() as td:
+            token_path = Path(td) / "token"
+            token_path.write_text("synthetic-token", encoding="utf-8")
+            binding = SimpleNamespace(
+                status="active", jason_identity_id="person-al",
+                microsoft_tenant_id="f7054323-d52b-4863-8c2f-1898f0b6077c",
+                microsoft_object_id="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+            )
+            invoker = AutonomousCompletionTeamsInvoker(
+                gateway_url="http://gateway.internal:3979",
+                token_file=token_path, bindings=BindingStore(binding),
+            )
+            request = SimpleNamespace(
+                capability_name="communication.teams.autonomy.completion.send",
+                principal_id="jason-autonomy-worker", permission_mode="execute",
+                organization_id="aot", client_id=None,
+                arguments={
+                    "event_type": "work_started",
+                    "work_id": "DEV-1440",
+                    "work_title": "Teams universal approver",
+                    "summary": "Safe nonexecuting test started",
+                },
+            )
+            resolution = SimpleNamespace(
+                selected_provider_id="microsoft_teams_gateway_autonomy_completion",
+            )
+            prepared = invoker.prepare_execution_plan(
+                request=request, resolution=resolution,
+            )
+            receipt = {
+                "message_id": "accepted:receipt-1",
+                "message_id_synthetic": True,
+                "delivery_evidence_type": "provider_call_completed_without_message_id",
+            }
+            with patch(
+                "jason_runtime.autonomous_completion_notification.post_existing_teams_gateway",
+                return_value=receipt,
+            ) as send:
+                result = invoker.invoke_execution_plan(
+                    request=request, resolution=resolution, prepared=prepared,
+                )
+            send.assert_called_once()
+            self.assertEqual(send.call_args.kwargs["payload"]["card"]["type"], "AdaptiveCard")
+            self.assertTrue(result.output["message_id_synthetic"])
+            self.assertEqual(
+                result.output["delivery_state"], "provider_accepted_delivery_unverified",
             )
 
     def test_verified_deployment_notifies_once(self):
@@ -383,6 +433,102 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
             )
             self.assertFalse(maintenance.tick())
             self.assertEqual(notifier.calls, [])
+
+
+    def test_self_heal_synthetic_gateway_receipt_is_unverified_not_notified(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            escalations = root / "escalations"
+            escalations.mkdir()
+            (escalations / "abc123.json").write_text(json.dumps({
+                "state": "owner_action_required", "fingerprint": "abc123",
+                "degraded_function": "jason-approver",
+                "evidence_summary": "benign UAT card not confirmed",
+                "attempt_summary": "one bounded test",
+                "owner_action": "review safe test request",
+            }), encoding="utf-8")
+
+            class SyntheticNotifier(Notifier):
+                def send(self, event_type, **kwargs):
+                    self.calls.append((event_type, kwargs))
+                    return {"message_id": "accepted:card-test", "message_id_synthetic": True}
+
+            notifier = SyntheticNotifier()
+            maintenance = SelfHealEscalationNotificationMaintenance(
+                notifier=notifier, spool_root=root, interval_seconds=30,
+                now=lambda: datetime(2026, 10, 22, 10, 0, tzinfo=timezone.utc),
+            )
+            self.assertFalse(maintenance.tick())
+            self.assertFalse((root / "notifications" / "abc123.json").exists())
+            marker = root / "notifications-unverified" / "abc123.json"
+            self.assertTrue(marker.exists())
+            self.assertEqual(json.loads(marker.read_text())["status"],
+                             "provider_accepted_delivery_unverified")
+            maintenance._next_due_at = None
+            self.assertFalse(maintenance.tick())
+            self.assertEqual(len(notifier.calls), 1)
+
+    def test_deployment_synthetic_receipt_does_not_claim_owner_notified(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            results = root / "results"
+            results.mkdir()
+            sha = "c" * 40
+            (results / "repair.json").write_text(json.dumps({
+                "state": "succeeded", "verification_passed": True,
+                "candidate_sha": sha, "live_revision": sha,
+                "support_item": "SUPPORT-OPS-023",
+            }), encoding="utf-8")
+
+            class SyntheticNotifier(Notifier):
+                def send(self, event_type, **kwargs):
+                    self.calls.append((event_type, kwargs))
+                    return {"message_id": "accepted:repair-test", "message_id_synthetic": True}
+
+            notifier = SyntheticNotifier()
+            maintenance = AutonomousDeploymentCompletionNotificationMaintenance(
+                notifier=notifier, spool_root=root, interval_seconds=30,
+                now=lambda: datetime(2026, 10, 22, 10, 0, tzinfo=timezone.utc),
+            )
+            self.assertFalse(maintenance.tick())
+            self.assertFalse((root / "notifications" / "repair.json").exists())
+            marker = root / "notifications-unverified" / "repair.json"
+            self.assertEqual(json.loads(marker.read_text())["status"],
+                             "provider_accepted_delivery_unverified")
+            maintenance._next_due_at = None
+            self.assertFalse(maintenance.tick())
+            self.assertEqual(len(notifier.calls), 1)
+
+    def test_lifecycle_synthetic_receipt_does_not_claim_owner_notified(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            events = root / "lifecycle-events"
+            events.mkdir()
+            (events / "work.json").write_text(json.dumps({
+                "event_type": "work_started",
+                "work_id": "DEV-1440", "work_title": "Teams universal approvals",
+                "summary": "Benign callback test started",
+            }), encoding="utf-8")
+
+            class SyntheticNotifier(Notifier):
+                def send(self, event_type, **kwargs):
+                    self.calls.append((event_type, kwargs))
+                    return {"message_id": "accepted:work-test", "message_id_synthetic": True}
+
+            notifier = SyntheticNotifier()
+            maintenance = AutonomousWorkLifecycleNotificationMaintenance(
+                notifier=notifier, spool_root=root, interval_seconds=30,
+                now=lambda: datetime(2026, 10, 22, 10, 0, tzinfo=timezone.utc),
+            )
+            self.assertFalse(maintenance.tick())
+            self.assertFalse((root / "lifecycle-notifications" / "work.json").exists())
+            marker = root / "lifecycle-notifications-unverified" / "work.json"
+            self.assertEqual(json.loads(marker.read_text())["status"],
+                             "provider_accepted_delivery_unverified")
+            maintenance._next_due_at = None
+            self.assertFalse(maintenance.tick())
+            self.assertEqual(len(notifier.calls), 1)
+
 
 
 if __name__ == "__main__":

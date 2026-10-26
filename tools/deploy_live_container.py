@@ -153,15 +153,29 @@ def _parse_readonly_bind(
     return source, destination
 
 
-def _health(name: str, url: str, attempts: int, interval: float) -> None:
-    script = (
-        "import urllib.request; "
-        f"r=urllib.request.urlopen({url!r}, timeout=3); "
-        "assert r.status == 200, r.status"
-    )
+def _health(name: str, url: str, attempts: int, interval: float,
+            runtime: str = "python") -> None:
+    if runtime == "python":
+        script = (
+            "import urllib.request; "
+            f"r=urllib.request.urlopen({url!r}, timeout=3); "
+            "assert r.status == 200, r.status"
+        )
+        probe = ["python", "-c", script]
+    elif runtime == "node":
+        # The existing Teams gateway is a Node image with no Python binary.
+        # Keep the same bounded HTTP-200 requirement, not a weaker liveness test.
+        script = (
+            f"fetch({json.dumps(url)}, {{signal: AbortSignal.timeout(3000)}})"
+            ".then(r => { if (r.status !== 200) process.exit(1); })"
+            ".catch(() => process.exit(1));"
+        )
+        probe = ["node", "-e", script]
+    else:
+        raise ValueError("unsupported health runtime")
     for attempt in range(1, attempts + 1):
         completed = subprocess.run(
-            ["docker", "exec", name, "python", "-c", script],
+            ["docker", "exec", name, *probe],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             text=True,
@@ -336,6 +350,7 @@ def main() -> int:
     parser.add_argument("--rollback", required=True)
     parser.add_argument("--source-revision", required=True)
     parser.add_argument("--health-url", required=True)
+    parser.add_argument("--health-runtime", choices=("python", "node"), default="python")
     parser.add_argument("--health-attempts", type=int, default=30)
     parser.add_argument("--health-interval", type=float, default=2.0)
     parser.add_argument("--preflight", action="store_true")
@@ -447,7 +462,7 @@ def main() -> int:
                 raise RuntimeError("replacement does not provide hardened /tmp tmpfs")
             print("HARDENING_VERIFICATION=PASS")
 
-        _health(args.live, args.health_url, args.health_attempts, args.health_interval)
+        _health(args.live, args.health_url, args.health_attempts, args.health_interval, args.health_runtime)
         if promote_tags:
             aliases_mutated = True
             _promote_image_aliases(

@@ -177,6 +177,78 @@ On **Approve**, Jason re-reads the current source registry and requires the exac
 
 A non-owner Microsoft/Jason identity fails authorization even if it can see or click the card. Teams remains transport/UI; configured Jason owner authority remains decisive.
 
+### Split-process callback readiness
+
+When `JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED=true`, Jason may run
+`PlaybookAutonomyReviewMaintenance` in its separate maintenance process.
+That worker creates and sends approval requests, but the HTTP-serving process
+must **still** register `PlaybookAutonomyApprovalInteractionFlow` inside
+`ApprovalInteractionDispatcher.fallback`. Otherwise, Teams can deliver a real
+owner click while Jason rejects it with HTTP 403,
+`approval_interaction_denied` / `approval flow is not configured`.
+
+The serving process must share the durable approval-request ledger while keeping
+the periodic review/sending worker disabled to prevent duplicate issuances.
+The internal `playbook_approval_ingress_enabled` composition setting preserves
+that split; it is not a new user permission or owner-approval bypass.
+
+Before accepting a live rollout, verify both processes: scheduled card
+issuance in maintenance only, authenticated owner click handling in HTTP,
+a terminal durable decision receipt and unchanged provider/device state for an
+inert pilot. A successful Teams delivery or button click alone is insufficient.
+The regression tests cover an unbound actor denial and an authorized owner
+decision using isolated SQLite state.
+
+### Owner-only pilot authority (local policy)
+
+An authenticated Teams click also requires an independently configured Jason
+approver role. On 2026-10-17, the second owner-only BackupIQ test returned
+`approval_interaction_denied` / `Jason authority denied approver authorization`
+even though the owner Teams binding and exact request owner ID were valid.
+The production `approval_owner_identities()` list was empty. Do not work
+around the missing role by trusting the recipient list on the card.
+
+The existing `JASON_DATTO_COMPONENT_APPROVAL_OWNER_IDENTITIES` setting is a
+**shared** owner gate for other Datto, MCP and procurement administration. Do
+not enable it merely to test a playbook card. For the specifically authorized
+AOT owner-only pilot, use a **separate** local policy file:
+
+`/var/lib/jason/authority/playbook-owner-approval-policy.json`
+
+The policy must be provisioned by the authenticated owner, never by a Teams
+message, generated ticket, request metadata, or an unreviewed external system.
+It must be a regular file owned by Jason's runtime user (or root, if readable
+by runtime) with **mode 0600**. Its exact schema for this limited pilot is:
+
+```json
+{
+  "schema_version": "1.0",
+  "organization_id": "aot",
+  "capability": "playbook.autonomy.promote",
+  "policy_mode": "owner_only_test",
+  "owner_identity_ids": ["person-al"],
+  "allowed_requested_modes": ["promote:backupiq_endpoint_backup@1.2.0"]
+}
+```
+
+The parser rejects additional approvers, modes, organizations, capabilities,
+extra keys, symlinks, group/world permissions and invalid file types. A
+bounded pilot decision is accepted **only when the exact playbook scope is
+already independently promoted**, and the promotion service is prohibited from
+creating new authority in this mode, even after a race/revocation. This
+policy **does not** authorize other users, Datto components, procurement,
+Universal Approver activation, or unrelated playbook scopes. If the file is
+absent, the original independent owner allowlist remains in force (no silent
+new owner). A malformed file must fail closed, not downgrade to broader legacy
+authority.
+
+After owner-reviewed provisioning and a guarded restart/release, read back
+the *effective* HTTP approval authority and allowed modes **before** sending
+a new actionable card. The previous 403 card must not be replayed. Verify the
+new terminal request, Microsoft-bound actor identity, exactly one decision
+receipt and unchanged durable promotion count. No provider or endpoint action
+is part of the owner-only callback pilot.
+
 ### Production settings
 
 - `JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED` — disabled by source default; explicitly enable in production after acceptance.
@@ -186,3 +258,12 @@ A non-owner Microsoft/Jason identity fails authorization even if it can see or c
 - owner identities are drawn from the existing configured owner-approval identity set.
 
 Do not delete or edit a decided review record to obtain another approval prompt. A denied or changes-requested playbook must change materially and produce a new fingerprint before returning to owner review. Expired/cancelled requests may be regenerated.
+
+## Mobile release/CCC owner pilot
+
+A separate, **disabled-by-default** owner-only release/CCC mobile approval
+adapter is described in [Mobile Teams Release and CCC Approval](Mobile-Teams-Release-and-CCC-Approval.md).
+It reuses the authenticated Teams ingress and durable Jason decision ledger,
+requires fresh independent host verification before converting one decision
+into exact-SHA owner review records, and retains every release/CCC deployment
+gate. Source presence is not proof of production activation.

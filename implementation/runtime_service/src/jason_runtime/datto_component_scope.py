@@ -68,15 +68,26 @@ DATTO_AD_HOC_POWERSHELL_NAME = (
     "Run Ad Hoc Command (PowerShell 2-5) [WIN]"
 )
 
+# Live Datto catalog-verified Linux/macOS arbitrary shell runner.
+# No command classification can elevate this to standing-safe.
+DATTO_AD_HOC_LINUX_SHELL_UID = (
+    "bc7c4531-6869-4658-b1d6-7639a477045e"
+)
+DATTO_AD_HOC_LINUX_SHELL_NAME = (
+    "Run Ad Hoc Command (Shell) [MAC] [LIN]"
+)
+
 _FORCED_PER_RUN_COMPONENT_UIDS = frozenset(
     {
         DATTO_AD_HOC_POWERSHELL_UID,
+        DATTO_AD_HOC_LINUX_SHELL_UID,
     }
 )
 
 _FORCED_PER_RUN_COMPONENT_NAMES = frozenset(
     {
         DATTO_AD_HOC_POWERSHELL_NAME.casefold(),
+        DATTO_AD_HOC_LINUX_SHELL_NAME.casefold(),
     }
 )
 

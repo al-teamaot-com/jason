@@ -198,3 +198,41 @@ def test_protected_readonly_bind_uses_docker_probe_when_host_path_is_not_visible
         f"type=bind,src={protected},dst=/run/protected/role_id,readonly"
         in command
     )
+
+
+def test_health_defaults_to_existing_python_http_probe(monkeypatch):
+    from types import SimpleNamespace
+    calls=[]
+    monkeypatch.setattr(deploy.subprocess,"run",lambda cmd,**kw:(calls.append(cmd) or SimpleNamespace(returncode=0)))
+    deploy._health("jason-runtime","http://127.0.0.1:8080/healthz",1,0)
+    assert calls[0][:5]==["docker","exec","jason-runtime","python","-c"]
+    assert "r.status == 200" in calls[0][-1]
+
+
+def test_node_gateway_health_requires_same_http_200_and_timeout(monkeypatch):
+    from types import SimpleNamespace
+    calls=[]
+    monkeypatch.setattr(deploy.subprocess,"run",lambda cmd,**kw:(calls.append(cmd) or SimpleNamespace(returncode=0)))
+    deploy._health("jason-teams-gateway","http://127.0.0.1:3979/healthz",1,0,"node")
+    assert calls[0][:5]==["docker","exec","jason-teams-gateway","node","-e"]
+    assert "r.status !== 200" in calls[0][-1]
+    assert "AbortSignal.timeout(3000)" in calls[0][-1]
+    assert "python" not in calls[0]
+
+
+def test_node_gateway_unhealthy_fails_after_bounded_attempts(monkeypatch):
+    from types import SimpleNamespace
+    calls=[]
+    monkeypatch.setattr(deploy.subprocess,"run",lambda cmd,**kw:(calls.append(cmd) or SimpleNamespace(returncode=1)))
+    monkeypatch.setattr(deploy.time,"sleep",lambda value:None)
+    with pytest.raises(RuntimeError,match="health verification"):
+        deploy._health("jason-teams-gateway","http://127.0.0.1:3979/healthz",2,0,"node")
+    assert len(calls)==2
+
+
+def test_unknown_health_runtime_refuses_without_execution(monkeypatch):
+    calls=[]
+    monkeypatch.setattr(deploy.subprocess,"run",lambda cmd,**kw:calls.append(cmd))
+    with pytest.raises(ValueError,match="unsupported"):
+        deploy._health("jason-teams-gateway","http://127.0.0.1:3979/healthz",1,0,"shell")
+    assert calls==[]

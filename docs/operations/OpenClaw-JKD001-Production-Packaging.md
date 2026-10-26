@@ -17,16 +17,24 @@ Elapsed delegation records with `status=active` are changed to `expired`. Record
 
 ### Operational health
 
-- `jason-openclaw-authority-health.service` — one-shot health snapshot.
-- `jason-openclaw-authority-health.timer` — refreshes the snapshot every five minutes.
+- `jason-openclaw-authority-health.service` — lightweight, read-only health check.
+- `jason-openclaw-authority-health.timer` — refreshes current availability every five minutes.
+- `jason-openclaw-authority-full-integrity.service` — the original full SQLite `PRAGMA integrity_check` and authority backup/restore proof.
+- `jason-openclaw-authority-full-integrity.timer` — schedules that heavyweight full check daily, separately from the frequent check and release reconciliation.
 
-The service runs `tools/openclaw_authority_health_snapshot.py`, which executes the governed operational health proof and atomically writes only secret-safe JSON to:
+The frequent service runs `tools/openclaw_authority_fast_health.py` and atomically writes only secret-safe JSON to:
 
 `/var/lib/jason/openclaw/operational-health.json`
 
-The snapshot is mode `0600`.
+It performs short, read-only SQLite schema lookups and current signing-key and delegation checks. **It cannot claim PASS unless the complete, independently generated full integrity and restore proof has passed within the last 30 hours.** It fails closed if that record is missing, stale, partial, unsafe, or demonstrates a failed backup/restore. Full scans are never performed in the five-minute service or synchronous host reconciliation.
 
-Operational health fails closed if required SQLite state is missing, has non-owner-only permissions, fails integrity checking, backup/restore proof fails, the trusted-key registry is missing or not `0600`, or there is no active OpenClaw signing key.
+The full service retains `tools/openclaw_authority_health_snapshot.py` and writes the full, mode-`0600` proof to:
+
+`/var/lib/jason/openclaw/operational-full-health.json`
+
+On the first upgrade, the frequent check may adopt the last actual `0600` full PASS snapshot into the separate full-proof path **only after independently checking all four DB integrity results, backup/restore details, signing keys, ownership, and age**. Its original modified timestamp is preserved; no missing proof is fabricated or treated as fresh. The new daily full service subsequently refreshes the evidence.
+
+Both snapshots are owner-only mode `0600`. Operational health fails closed if required SQLite state is missing, has non-owner-only permissions, cannot be read, lacks a recent successful full integrity and backup/restore proof, or has unhealthy signing keys. CCC retains its separate provider canaries and deployment-specific requirements.
 
 ## Command Center
 
