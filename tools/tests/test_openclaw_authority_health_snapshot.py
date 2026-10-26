@@ -34,7 +34,7 @@ def test_snapshot_uses_bounded_timeout_for_full_integrity_checks(monkeypatch, tm
     monkeypatch.setattr(module.sys, "argv", [str(SCRIPT), "--output", str(tmp_path / "health.json")])
 
     assert module.main() == 0
-    assert observed["timeout"] == 900
+    assert observed["timeout"] == 1800
     assert json.loads((tmp_path / "health.json").read_text())["status"] == "pass"
 
 
@@ -55,10 +55,22 @@ def test_timeout_records_explicit_failure_and_replaces_stale_pass(monkeypatch, t
     result = json.loads(output.read_text(encoding="utf-8"))
     assert result["status"] == "fail"
     assert result["failures"] == ["operational_health_timeout"]
-    assert result["snapshot_timeout_seconds"] == 900
+    assert result["snapshot_timeout_seconds"] == 1800
     assert result["snapshot_source_exit_code"] == 124
     assert "stale" not in result
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
+
+
+def test_systemd_timeout_exceeds_checker_deadline():
+    source = (
+        SCRIPT.parents[2]
+        / "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-full-integrity.service"
+    ).read_text(encoding="utf-8")
+    module = _load_module()
+    import re
+    match = re.search(r"(?m)^TimeoutStartSec=(\\d+)$", source)
+    assert match, "Full-integrity systemd job must have a bounded start timeout"
+    assert 1800 <= module.SOURCE_HEALTH_TIMEOUT_SECONDS < int(match.group(1)) <= 2400
 
 
 def test_nonzero_source_exit_cannot_publish_pass(monkeypatch, tmp_path):
