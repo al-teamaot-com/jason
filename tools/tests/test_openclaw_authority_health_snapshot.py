@@ -67,10 +67,13 @@ def test_systemd_timeout_exceeds_checker_deadline():
         / "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-full-integrity.service"
     ).read_text(encoding="utf-8")
     module = _load_module()
-    import re
-    match = re.search(r"(?m)^TimeoutStartSec=(\\d+)$", source)
-    assert match, "Full-integrity systemd job must have a bounded start timeout"
-    assert 1800 <= module.SOURCE_HEALTH_TIMEOUT_SECONDS < int(match.group(1)) <= 2400
+    timeouts = [
+        int(line.split("=", 1)[1])
+        for line in source.splitlines()
+        if line.startswith("TimeoutStartSec=")
+    ]
+    assert len(timeouts) == 1, "Full-integrity systemd job requires one bounded timeout"
+    assert 1800 <= module.SOURCE_HEALTH_TIMEOUT_SECONDS < timeouts[0] <= 2400
 
 
 def test_nonzero_source_exit_cannot_publish_pass(monkeypatch, tmp_path):
