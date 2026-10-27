@@ -72,3 +72,71 @@ def test_both_manual_and_automatic_promotion_are_gated_before_mutation(monkeypat
     with pytest.raises(runner.ReleaseManagerError, match="superseded candidate"):
         runner.deploy_production(tmp_path, tmp_path, record())
     assert calls == ["lock", "unlock"]
+
+
+@pytest.mark.parametrize("kind", ["file", "directory", "symlink"])
+def test_owner_release_freeze_fails_closed_for_any_existing_marker(tmp_path, kind):
+    marker = tmp_path / "production-deployment-freeze"
+    if kind == "file":
+        marker.write_text("owner ordered all production deployments halted")
+    elif kind == "directory":
+        marker.mkdir()
+    else:
+        marker.symlink_to(tmp_path / "nonexistent-target")
+    with pytest.raises(runner.ReleaseManagerError, match="manual and automatic promotions"):
+        runner.require_owner_production_deployment_unfrozen(tmp_path)
+
+
+def test_owner_release_freeze_denies_before_acquiring_production_lock(monkeypatch, tmp_path):
+    (tmp_path / "production-deployment-freeze").touch()
+    acquire = Mock(side_effect=AssertionError("production lock must not be acquired"))
+    source = Mock(side_effect=AssertionError("no network/source reads permitted"))
+    mutation = Mock(side_effect=AssertionError("no production state may change"))
+    monkeypatch.setattr(runner, "acquire_production_transaction_lock", acquire)
+    monkeypatch.setattr(runner, "require_current_protected_release_source", source)
+    monkeypatch.setattr(runner, "reconcile_stopped_rollback_retention", mutation)
+    with pytest.raises(runner.ReleaseManagerError, match="owner production deployment freeze"):
+        runner.deploy_production(tmp_path, tmp_path, record())
+    acquire.assert_not_called()
+    source.assert_not_called()
+    mutation.assert_not_called()
+
+
+def test_freeze_created_while_waiting_for_lock_still_denies(monkeypatch, tmp_path):
+    acquired = []
+    sentinel = object()
+
+    def acquire(repo, state_root, item):
+        acquired.append("lock")
+        (state_root / "production-deployment-freeze").touch()
+        return sentinel
+
+    monkeypatch.setattr(runner, "acquire_production_transaction_lock", acquire)
+    monkeypatch.setattr(runner, "release_production_transaction_lock",
+                        lambda lock: acquired.append("unlock"))
+    side = Mock(side_effect=AssertionError("must not attempt source or mutation"))
+    monkeypatch.setattr(runner, "require_current_protected_release_source", side)
+    monkeypatch.setattr(runner, "reconcile_stopped_rollback_retention", side)
+    with pytest.raises(runner.ReleaseManagerError, match="freeze is active"):
+        runner.deploy_production(tmp_path, tmp_path, record())
+    assert acquired == ["lock", "unlock"]
+    side.assert_not_called()
+
+
+def test_manual_mode_incident_hold_is_distinct_from_global_owner_freeze(tmp_path):
+    # The existing owner-approved manual mode must not accidentally become
+    # permanently blocked merely because unattended promotions are paused.
+    (tmp_path / "auto-promotion-incident-hold").write_text("automated only")
+    runner.require_owner_production_deployment_unfrozen(tmp_path)
+
+
+def test_owner_freeze_does_not_require_undoing_emergency_baseline_recovery(tmp_path):
+    (tmp_path / "production-deployment-freeze").touch()
+    source = (tmp_path.parent / "release_manager_host_runner.py")
+    # Source contract: all-deployments freeze belongs to deploy_production only.
+    # Baseline recovery has a separate reviewed authority and must remain viable.
+    from pathlib import Path
+    controller = (Path(__file__).resolve().parents[1] / "release_manager_host_runner.py").read_text()
+    recover = controller[controller.index("def recover_missing_last_known_good("):
+                         controller.index("\ndef ", controller.index("def recover_missing_last_known_good(") + 5)]
+    assert "require_owner_production_deployment_unfrozen" not in recover
