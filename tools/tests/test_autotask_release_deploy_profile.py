@@ -26,7 +26,7 @@ def lab(tmp_path):
     root = tmp_path / "immutable-source"
     (root / "config").mkdir(parents=True)
     (root / "config" / "autotask-entity-read-profile.json").write_text(
-        json.dumps({"schema_version": "1.0", "read_profile": V11})
+        json.dumps({"schema_version": "1.0", "read_profile": V11, "rollback_read_profile": V10})
     )
     bins = tmp_path / "fake-bin"
     bins.mkdir()
@@ -45,7 +45,7 @@ def check_preflight(lab, path, live_name, rollback_tag, *,
                     live=V10, source=V11):
     root, bins = lab
     declaration = root / "config" / "autotask-entity-read-profile.json"
-    declaration.write_text(json.dumps({"schema_version": "1.0", "read_profile": source}))
+    declaration.write_text(json.dumps({"schema_version": "1.0", "read_profile": source, "rollback_read_profile": V10}))
     source_script = (ROOT / path).read_text()
     marker = '\nif [ -z "$REVISION" ]; then'
     assert marker in source_script
@@ -99,12 +99,10 @@ def test_rollback_restore_uses_previous_v10_even_if_live_is_v11(
 @pytest.mark.parametrize("path,live_name,rollback_tag", SCRIPTS)
 @pytest.mark.parametrize("selected,rollback,live,source", [
     (V10, V10, V10, V11),
-    ("", V10, V10, V11),
-    (V11, "", V10, V11),
     (V11, V10, V11, V11),
     (V11, V10, V10, "unsupported"),
 ])
-def test_profile_mismatch_and_missing_rollback_refused_before_mutation(
+def test_profile_mismatch_or_wrong_live_baseline_refused_before_mutation(
         lab, path, live_name, rollback_tag, selected, rollback, live, source):
     response = check_preflight(
         lab, path, live_name, rollback_tag, selected=selected, rollback=rollback,
@@ -112,3 +110,21 @@ def test_profile_mismatch_and_missing_rollback_refused_before_mutation(
     )
     assert response.returncode != 0
     assert "SELECTED_PROFILE=" not in response.stdout
+
+
+@pytest.mark.parametrize("path,live_name,rollback_tag", SCRIPTS)
+def test_legacy_pm_preflight_without_undeployed_environment_overrides(
+        lab, path, live_name, rollback_tag):
+    response = check_preflight(lab, path, live_name, rollback_tag,
+                               selected="", rollback="", live=V10)
+    assert response.returncode == 0, response.stderr
+    assert "SELECTED_PROFILE=" + V11 in response.stdout
+
+
+@pytest.mark.parametrize("path,live_name,rollback_tag", SCRIPTS)
+def test_exact_v10_rollback_without_new_controller_env_overrides(
+        lab, path, live_name, rollback_tag):
+    response = check_preflight(lab, path, live_name, rollback_tag,
+                               image="rollback", selected="", rollback="", live=V11)
+    assert response.returncode == 0, response.stderr
+    assert "SELECTED_PROFILE=" + V10 in response.stdout
