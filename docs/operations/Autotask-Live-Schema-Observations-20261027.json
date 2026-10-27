@@ -14,6 +14,38 @@
     }
   ],
   "entities": {
+    "ActionTypes": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "AdditionalInvoiceFieldValues": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
+    },
+    "Appointments": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "ArticleAttachments": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "ArticleConfigurationItemCategoryAssociations": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
+    },
+    "ArticleNotes": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
+    },
+    "ArticlePlainTextContent": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
+    },
+    "ArticleTagAssociations": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
+    },
     "BillingItems": {
       "canQuery": true,
       "userAccessForQuery": "None"
@@ -319,7 +351,8 @@
       "userAccessForQuery": "All"
     }
   },
-  "entity_count": 76,
+  "entity_count": 84,
+  "entity_errors": {},
   "observed_date": "2026-10-27",
   "schema_unknown": "All other vendor index entities remain unverified in this snapshot; each observation is metadata, NOT a successful record query.",
   "schema_version": "1.0",
