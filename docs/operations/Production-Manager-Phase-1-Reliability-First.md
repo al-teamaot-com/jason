@@ -42,3 +42,25 @@ Make Jason's **existing foundational functions reliable** before expanding autom
 - No automatic-development claims until the above foundation is production-accepted.
 
 **Progress semantics:** SOURCE MERGED ≠ PREPRODUCTION PASS ≠ PRODUCTION PROMOTED ≠ FUNCTIONAL ACCEPTED. Report each separately, including the specific evidence gap when a gate blocks.
+
+### One-call authenticated read verification for v11 promotion
+
+The merged v11 native Production Manager acceptance gate requires post-deploy
+connected MCP read proofs from the **same authenticated AOT human** for a
+bounded count, complete 50-row cursor pagination, exact ticket ID and a
+governed Projects generic search. The source-integrated
+`verify_release_ticket_read_canary` MCP tool now performs these four
+operations in **one authorized read-only invocation** when `phase=after`
+and the active immutable profile is v11. The operator supplies an exact
+candidate SHA and a bounded, known-nonempty ticket creation window and
+uses `page_size=50`. The MCP tool neither grants source read rights nor
+emits release approval; receipt generation occurs only within successful
+ordinary `execute_read_capability` requests. A source- or
+requester-authorization failure, missing Projects read, incomplete
+pagination or wrong revision fails closed.
+
+The independent native Release Manager accepts only metadata-only,
+session-bound events witnessed through its own protected canary state;
+the MCP tool's summary by itself **cannot** turn a promotion green.
+Production remains frozen until the existing exact-SHA Owner exception
+and all native release/rollback preconditions pass.

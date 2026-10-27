@@ -32,6 +32,9 @@ class MCPReadFixture:
             data = {"items": [{"id": arguments["resource_id"],
                                "description": "PRIVATE-TICKET-BODY",
                                "email": "private@example.invalid"}]}
+        elif capability == "service.entity.search":
+            assert arguments == {"entity": "Projects", "page_size": 1}
+            data = {"items": [{"id": 98, "description": "PRIVATE-PROJECT-BODY"}]}
         else:
             raise AssertionError("unexpected provider-read capability")
         response["evidence"] = {"data": data}
@@ -142,3 +145,73 @@ def test_trusted_identity_but_denied_requester_read_fails_not_pass(monkeypatch):
     assert result["status"] == "failed"
     assert result["error_code"] == "governed_read_not_successful"
     assert result["customer_data_included"] is False
+
+
+
+def test_v11_postrelease_single_tool_verifies_ticket_and_generic_project_read(monkeypatch):
+    captured = MCPReadFixture()
+    monkeypatch.setenv("JASON_SOURCE_REVISION", CANDIDATE)
+    monkeypatch.setenv(
+        "JASON_PROVIDER_READ_ACTIVATION_PROFILE",
+        "itglue-autotask-entra-comprehensive-entity-read-catalog-v11",
+    )
+    monkeypatch.setattr(
+        server, "_authenticated_identity",
+        lambda: ("person-entra-" + "a" * 32, "aot", "delegated_microsoft_identity", None),
+    )
+    monkeypatch.setattr(server, "execute_read_capability", captured)
+    result = canary(page_size=50)
+    assert result["status"] == "succeeded"
+    assert result["summary"]["count_verified"] == 9
+    assert result["summary"]["pages_verified"] == 1
+    assert result["summary"]["generic_project_read_verified"] is True
+    assert [name for name, _ in captured.calls] == [
+        "service.ticket.count", "service.ticket.search",
+        "service.ticket.read", "service.entity.search",
+    ]
+    assert "PRIVATE-" not in json.dumps(result)
+
+
+def test_v11_postrelease_requires_real_release_page_size(monkeypatch):
+    captured = MCPReadFixture()
+    monkeypatch.setenv("JASON_SOURCE_REVISION", CANDIDATE)
+    monkeypatch.setenv(
+        "JASON_PROVIDER_READ_ACTIVATION_PROFILE",
+        "itglue-autotask-entra-comprehensive-entity-read-catalog-v11",
+    )
+    monkeypatch.setattr(
+        server, "_authenticated_identity",
+        lambda: ("person-entra-" + "a" * 32, "aot", "delegated_microsoft_identity", None),
+    )
+    monkeypatch.setattr(server, "execute_read_capability", captured)
+    result = canary(page_size=5)
+    assert result["status"] == "failed"
+    assert result["error_code"] == "v11_post_release_requires_page_size_50"
+    assert captured.calls == []
+
+
+def test_v11_postrelease_denied_projects_fails_even_if_tickets_work(monkeypatch):
+    captured = MCPReadFixture()
+    monkeypatch.setenv("JASON_SOURCE_REVISION", CANDIDATE)
+    monkeypatch.setenv(
+        "JASON_PROVIDER_READ_ACTIVATION_PROFILE",
+        "itglue-autotask-entra-comprehensive-entity-read-catalog-v11",
+    )
+    monkeypatch.setattr(
+        server, "_authenticated_identity",
+        lambda: ("person-entra-" + "b" * 32, "aot", "delegated_microsoft_identity", None),
+    )
+    def denied_projects(*, capability, arguments):
+        if capability == "service.entity.search":
+            return {
+                "status": "denied", "provider": "autotask",
+                "error_code": "INFORMATION_RELEASE_DENIED",
+                "reason_codes": ["SOURCE_REQUESTER_AUTHORIZATION_UNVERIFIED"],
+            }
+        return captured(capability=capability, arguments=arguments)
+    monkeypatch.setattr(server, "execute_read_capability", denied_projects)
+    result = canary(page_size=50)
+    assert result["status"] == "failed"
+    assert result["error_code"] == "governed_generic_project_read_not_successful"
+    assert result["customer_data_included"] is False
+    assert len(captured.calls) == 3
