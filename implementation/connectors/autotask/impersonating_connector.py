@@ -11,6 +11,7 @@ from connectors.core.connector_base import PreparedRequest
 from connectors.core.contracts import ConnectorRequest
 
 from .connector import AutotaskConnector
+from .verified_read_extensions import v12_entity_read_enabled
 
 
 class TrustedPrincipalBindingResolver(Protocol):
@@ -548,8 +549,11 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
             type(company_id) is not int or company_id < 1
         ):
             raise PermissionError("AUTOTASK_TIME_ENTRY_SCOPE_INVALID")
-        if str(request.context.client_id or "") != str(company_id):
+        context_client = str(request.context.client_id or "")
+        if context_client and context_client != str(company_id):
             raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_CLIENT_SCOPE_MISMATCH")
+        if not context_client and request.context.organization_id != "aot":
+            raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_SCOPE_INVALID")
         credentials = self._secrets.resolve(self.logical_secret, request.context)
         ticket_request = ConnectorRequest(
             context=replace(request.context, capability="autotask.ticket.get"),
@@ -630,14 +634,118 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
             raise PermissionError("AUTOTASK_EXACT_ENTITY_ID_MISMATCH")
         return result
 
-    def execute(self, request: ConnectorRequest):
-        if request.context.capability == "autotask.entity.query" and (
-            request.arguments.get("entity") == "TimeEntries"
+    _AOT_FULL_ADMIN_ROLE_ID = 37
+    _AOT_FULL_ADMIN_ROLE_LABEL = "System Administrator (system-AOT)"
+
+    def _verify_aot_full_administrator(self, request: ConnectorRequest) -> None:
+        """Verify the requesting Microsoft identity's *current* Autotask role.
+
+        An API-only service account query is not authority for the human.
+        This narrow administrator proof does not claim parity for restricted
+        security levels, protected UDFs, or customer-bound identities.
+        """
+        ctx = request.context
+        if ctx.organization_id != "aot" or ctx.mode != "observe":
+            raise PermissionError("AUTOTASK_REQUESTER_ADMIN_CONTEXT_INVALID")
+        email = self._trusted_email(request)
+        if not email:
+            raise PermissionError("AUTOTASK_REQUESTER_BINDING_REQUIRED")
+
+        creds = self._secrets.resolve(self.logical_secret, ctx)
+        prepared = super().prepare_request(request, creds)
+        api_root = self._api_root(prepared)
+        query = json.dumps(
+            {"MaxRecords": 2, "filter": [{"op": "eq", "field": "email", "value": email}]},
+            separators=(",", ":"), sort_keys=True,
+        )
+        provider = self._transport.request(
+            method="GET", url=f"{api_root}/V1.0/Resources/query",
+            headers=prepared.headers, params={"search": query},
+            timeout_seconds=prepared.timeout_seconds,
+        )
+        items = provider.get("items") if isinstance(provider, Mapping) else None
+        if not isinstance(items, list) or len(items) != 1:
+            raise PermissionError("AUTOTASK_REQUESTER_RESOURCE_NOT_UNIQUE")
+        resource = items[0]
+        if not isinstance(resource, Mapping) or (
+            str(resource.get("email") or "").strip().casefold() != email
+            or resource.get("isActive") is not True
+            or type(resource.get("userType")) is not int
+            or resource["userType"] != self._AOT_FULL_ADMIN_ROLE_ID
+            or type(resource.get("id")) is not int
+            or resource["id"] < 1
         ):
-            self._verify_time_entry_ticket_company(request)
-            return self._verify_time_entry_result_scope(
-                request, super().execute(request)
+            raise PermissionError("AUTOTASK_REQUESTER_FULL_ADMIN_ROLE_NOT_PROVEN")
+        metadata = self._transport.request(
+            method="GET",
+            url=f"{api_root}/V1.0/Resources/entityInformation/fields",
+            headers=prepared.headers,
+            timeout_seconds=prepared.timeout_seconds,
+        )
+        fields = metadata.get("fields") if isinstance(metadata, Mapping) else None
+        roles = (
+            [field for field in fields if isinstance(field, Mapping)
+             and field.get("name") == "userType"]
+            if isinstance(fields, list) else []
+        )
+        if len(roles) != 1 or not isinstance(roles[0].get("picklistValues"), list):
+            raise PermissionError("AUTOTASK_ADMIN_ROLE_METADATA_UNVERIFIED")
+        matches = [
+            role for role in roles[0]["picklistValues"]
+            if isinstance(role, Mapping)
+            and str(role.get("value")) == str(self._AOT_FULL_ADMIN_ROLE_ID)
+            and role.get("label") == self._AOT_FULL_ADMIN_ROLE_LABEL
+            and role.get("isActive") is not False
+        ]
+        if len(matches) != 1:
+            raise PermissionError("AUTOTASK_ADMIN_ROLE_METADATA_UNVERIFIED")
+        self._audit.record(
+            "autotask.requester_full_admin_read_verified",
+            ctx, {"provider": "autotask", "security_level_id": self._AOT_FULL_ADMIN_ROLE_ID},
+        )
+
+    def execute(self, request: ConnectorRequest):
+        is_labor = (
+            request.context.capability == "autotask.entity.query"
+            and request.arguments.get("entity") == "TimeEntries"
+        )
+        generic_entity = request.arguments.get("entity")
+        is_generic = (
+            request.context.capability == "autotask.entity.query"
+            and (
+                request.arguments.get("jason_full_administrator_read_required") is True
+                or generic_entity in {
+                    "Projects", "Tasks", "ServiceCalls", "ProjectNotes",
+                    "TicketAdditionalConfigurationItems",
+                }
+                or v12_entity_read_enabled(generic_entity)
             )
+        )
+        if is_labor or is_generic:
+            # Native impersonation remains independently gated by exact
+            # preproduction proof. The Jason-managed provider service-account
+            # path instead requires the live requester full-admin check.
+            needs_admin = is_generic or (
+                is_labor and autotask_requester_authorization_mode()
+                == AUTOTASK_AUTH_MODE_JASON_MANAGED
+            )
+            if needs_admin:
+                self._verify_aot_full_administrator(request)
+            if is_labor:
+                self._verify_time_entry_ticket_company(request)
+            protected = (
+                replace(
+                    request, arguments={
+                        **request.arguments,
+                        "jason_requester_admin_read_verified": True,
+                    },
+                )
+                if needs_admin else request
+            )
+            result = super().execute(protected)
+            if is_labor:
+                return self._verify_time_entry_result_scope(request, result)
+            return self._verify_generic_exact_entity_result(request, result)
         if request.context.capability not in self._ATTACHMENT_READ_OPERATIONS:
             return self._verify_generic_exact_entity_result(request, super().execute(request))
         self._verify_attachment_ticket_company(request)
@@ -696,9 +804,20 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
             # Provider-native impersonation on GET is NOT proof of read security.
             # The operator may enable only after observed positive/negative
             # authorization tests against the exact production entity.
-            if (mode != AUTOTASK_AUTH_MODE_IMPERSONATED
-                    or os.getenv("JASON_AUTOTASK_TIME_ENTRY_NATIVE_READ_PROVEN", "") != "verified"):
+            source_proven = (
+                mode == AUTOTASK_AUTH_MODE_IMPERSONATED
+                and os.getenv("JASON_AUTOTASK_TIME_ENTRY_NATIVE_READ_PROVEN", "") == "verified"
+            )
+            owner_admin_verified = (
+                mode == AUTOTASK_AUTH_MODE_JASON_MANAGED
+                and request.arguments.get("jason_requester_admin_read_verified") is True
+            )
+            if not (source_proven or owner_admin_verified):
                 raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_PERMISSION_NOT_PROVEN")
+        if (request.context.capability == "autotask.entity.query"
+                and request.arguments.get("jason_full_administrator_read_required") is True
+                and request.arguments.get("jason_requester_admin_read_verified") is not True):
+            raise PermissionError("AUTOTASK_GENERIC_REQUESTER_ADMIN_NOT_VERIFIED")
         if mode == AUTOTASK_AUTH_MODE_JASON_MANAGED:
             return prepared
 

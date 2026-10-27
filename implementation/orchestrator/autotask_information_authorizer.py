@@ -270,11 +270,19 @@ class AutotaskImpersonationInformationAuthorizer:
             else None
         )
 
-        if (provider_id == AUTOTASK_PROVIDER
-                and resolution.capability_name == SERVICE_TICKET_TIME_ENTRY_SEARCH
-                and (mode != AUTOTASK_AUTH_MODE_IMPERSONATED
-                     or os.getenv("JASON_AUTOTASK_TIME_ENTRY_NATIVE_READ_PROVEN", "") != "verified")):
-            raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_PERMISSION_NOT_PROVEN")
+        if (
+            provider_id == AUTOTASK_PROVIDER
+            and resolution.capability_name == SERVICE_TICKET_TIME_ENTRY_SEARCH
+        ):
+            if (mode == AUTOTASK_AUTH_MODE_IMPERSONATED
+                    and os.getenv("JASON_AUTOTASK_TIME_ENTRY_NATIVE_READ_PROVEN", "") != "verified"):
+                raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_PERMISSION_NOT_PROVEN")
+            if (mode == AUTOTASK_AUTH_MODE_JASON_MANAGED
+                    and (self.bindings is None
+                         or not _jason_managed_requester_authorization_proven(
+                             request=request, bindings=self.bindings,
+                         ))):
+                raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_PERMISSION_NOT_PROVEN")
 
         invocation = self.delegate.invoke(request=request, resolution=resolution)
 
@@ -282,8 +290,9 @@ class AutotaskImpersonationInformationAuthorizer:
             return invocation
 
         if mode == AUTOTASK_AUTH_MODE_JASON_MANAGED:
-            if resolution.capability_name == SERVICE_TICKET_TIME_ENTRY_SEARCH:
-                raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_PERMISSION_NOT_PROVEN")
+            # In jason_managed, only the connector's current full-admin proof
+            # can return labor data. Subsequent requester binding and authority
+            # checks below still control information release.
             if resolution.capability_name not in AUTOTASK_CAPABILITIES:
                 return invocation
             if resolution.capability_name in {SERVICE_ENTITY_SEARCH, SERVICE_ENTITY_READ}:

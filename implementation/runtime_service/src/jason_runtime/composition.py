@@ -1748,6 +1748,10 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         secrets=openbao,
         transport=http_transport,
         audit=ConnectorEventAudit(orchestration_events),
+        # Reuse the exact authenticated Microsoft binding resolver used by MCP,
+        # Teams, and other governed paths; don't construct a divergent
+        # environment-derived requester identity in the read connector.
+        bindings=source_authorization_bindings,
     )
     quickbooks_read_invoker = (
         build_quickbooks_read_invoker(

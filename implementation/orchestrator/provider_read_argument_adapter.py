@@ -700,6 +700,7 @@ def _autotask_generic_entity_query(
     max_records = 2 if capability_name == SERVICE_ENTITY_READ else _autotask_max_records(arguments)
     result = {
         "entity": entity,
+        "jason_full_administrator_read_required": True,
         "search": json.dumps(
             {"MaxRecords": max_records, "filter": clauses},
             separators=(",", ":"), sort_keys=True,
@@ -1204,6 +1205,16 @@ class GovernedProviderReadConnectorInvoker:
         client_id = str(request.client_id or "").strip()
         company_id = request.arguments.get("company_id")
         if not client_id:
+            if (
+                capability_name == SERVICE_TICKET_TIME_ENTRY_SEARCH
+                and request.organization_id == "aot"
+                and request.requester_kind == "human"
+                and request.permission_mode == "observe"
+            ):
+                # Connector independently verifies the authenticated AOT
+                # technician is a full system administrator and that the
+                # requested ticket belongs to the declared company.
+                return
             raise PermissionError("client context is required for company-scoped reads")
         if company_id is None or isinstance(company_id, bool):
             raise PermissionError("company_id is required for company-scoped reads")

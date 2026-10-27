@@ -1,6 +1,6 @@
 # Requester-authorized read parity for Autotask
 
-**Status:** Design and unactivated implementation in progress (2026-10-27).
+**Status:** Interim read-only administrator-verification implementation in progress (2026-10-27); restricted-technician parity remains blocked until a complete provider permission model is proven.
 **Owner directive:** Jason should discover all legitimate read-only data paths and answer any authenticated technician to the extent their **source-portal** permissions permit. Missing a prebuilt read capability is an engineering defect to investigate, not a reason to declare the data unavailable.
 
 ## Boundaries
@@ -31,9 +31,17 @@ This policy does **not** promise to return data for which no authorized read mec
 
 Autotask's documented REST API requires an API-only user account. The default API-only security level grants broad administrator-like API access; custom copies can narrow it. Autotask documents ImpersonationResourceId primarily for operations performed on behalf of another user, not as a blanket guarantee that every GET/query is filtered to the impersonated technician's view. AOT's earlier read-impersonation probes returned HTTP 500. The accepted ADR-011 implementation therefore uses a Jason-managed information-release boundary for existing registered reads.
 
-The first requested gap is canonical `service.ticket.time.entry.search`, which searches the documented `TimeEntries/query` endpoint with exact ticketID and a verified ticket-to-company preflight. The draft also checks returned row ticketID before release. **Production may not expose this labor capability until the technician-specific read authorization proof is completed.** Existing service-account-backed `jason_managed` must fail closed for labor reads. The additional runtime gate `JASON_AUTOTASK_TIME_ENTRY_NATIVE_READ_PROVEN=verified` defaults to DENY and must only be set after positive and negative live Autotask permission tests. A configured flag is evidence of operator attestation, not itself proof of the provider's authorization behavior.
+The first requested gap is canonical `service.ticket.time.entry.search`, which searches the documented `TimeEntries/query` endpoint with exact ticketID and a verified ticket-to-company preflight. The draft also checks returned row ticketID before release. **The interim verified System Administrator path may read labor; restricted technicians remain blocked until role-accurate source authorization is established.** The service-account's general fetch permission is not itself a reason to release labor. The additional runtime gate `JASON_AUTOTASK_TIME_ENTRY_NATIVE_READ_PROVEN=verified` defaults to DENY and must only be set after positive and negative live Autotask permission tests. A configured flag is evidence of operator attestation, not itself proof of the provider's authorization behavior.
 
 Canonical `service.entity.describe`, `service.entity.fields.describe` and `service.entity.udf.fields.describe` expose **schema metadata only** for syntactically valid entity names. They do not extend record-query permissions. Metadata returned is associated with the API integration account and cannot be used as the technician's own `userAccessForQuery` proof. Entity paths are validated to avoid URL or query injection.
+
+## Interim administrator read gate
+
+The runtime must pass its existing authenticated Microsoft binding resolver into the provider-read invoker. A separate environment-derived resolver can diverge and deny valid requests.
+
+For AOT staff read-only labor and generic entity queries, the connector verifies the requester against the current Autotask Resources record and the Resources security-level picklist. Only the active built-in System Administrator level (AOT ID 37, label System Administrator (system-AOT)) is eligible for broad reads. Missing bindings, lower roles, incorrect customer scope, and unverified security metadata fail closed. No new writes are enabled.
+
+This is **not** complete permission parity for restricted technicians or protected UDFs. Those require separate source-accurate permission evidence before release.
 
 ## Production acceptance
 

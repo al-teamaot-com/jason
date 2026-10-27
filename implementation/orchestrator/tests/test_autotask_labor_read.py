@@ -60,8 +60,10 @@ class _LaborBindings:
         return _LaborBinding() if jason_identity_id == "technician" else None
 
 class _LaborTransport:
-    def __init__(self, *, ticket_company=827, entries=None):
+    def __init__(self, *, ticket_company=827, entries=None, role_id=37, role_label='System Administrator (system-AOT)'):
         self.ticket_company=ticket_company
+        self.role_id=role_id
+        self.role_label=role_label
         self.entries=entries if entries is not None else [{"id": 100, "ticketID": 143168, "resourceID": 29, "hoursWorked": 0.5}]
         self.paths=[]
         self.query_headers=[]
@@ -72,10 +74,14 @@ class _LaborTransport:
         if url.endswith("/V1.0/Tickets/query"):
             return {"items": [{"id":143168,"companyID":self.ticket_company}]}
         if url.endswith("/V1.0/Resources/query"):
-            return {"items": [{"id": 29, "email": "technician@example.invalid", "isActive": True}]}
+            return {"items": [{"id": 29, "email": "technician@example.invalid", "isActive": True, "userType": self.role_id}]}
+        if url.endswith("/V1.0/Resources/entityInformation/fields"):
+            return {"fields": [{"name": "userType", "picklistValues": [{"value": "37", "label": self.role_label, "isActive": True}]}]}
         if url.endswith("/V1.0/TimeEntries/query"):
             self.query_headers.append(dict(headers))
             return {"items": self.entries}
+        if url.endswith("/V1.0/Projects/query"):
+            return {"items": [{"id": 601, "projectName": "Synthetic Project"}]}
         raise AssertionError("Unexpected provider route: " + url)
 
 def _time_request(*, company=827, principal="technician"):
@@ -186,3 +192,69 @@ def test_labor_rejects_client_context_mismatch_without_provider_io(monkeypatch):
     with pytest.raises(PermissionError,match="REQUESTER_CLIENT_SCOPE_MISMATCH"):
         connector.execute(request)
     assert transport.paths==[]
+
+def test_managed_full_admin_can_read_ticket_labor_with_internal_scope(monkeypatch):
+    monkeypatch.setenv("JASON_AUTOTASK_REQUESTER_AUTH_MODE", "jason_managed")
+    from dataclasses import replace
+    transport=_LaborTransport()
+    connector=AutotaskImpersonatingConnector(
+        secrets=_LaborSecrets(), transport=transport, audit=_LaborAudit(), bindings=_LaborBindings())
+    request=_time_request()
+    request=replace(request, context=replace(request.context, client_id=None))
+    result=connector.execute(request)
+    assert len(result.data["items"]) == 1
+    assert result.data["items"][0]["resourceID"] == 29
+    assert len(transport.query_headers) == 1
+    assert "ImpersonationResourceId" not in transport.query_headers[0]
+
+
+@pytest.mark.parametrize("role,label,expected", [
+    (25, "System Administrator (system-AOT)", "FULL_ADMIN_ROLE_NOT_PROVEN"),
+    (37, "Help Desk I", "ROLE_METADATA_UNVERIFIED"),
+])
+def test_managed_labor_refuses_non_admin_or_unverified_role(monkeypatch,role,label,expected):
+    monkeypatch.setenv("JASON_AUTOTASK_REQUESTER_AUTH_MODE", "jason_managed")
+    transport=_LaborTransport(role_id=role, role_label=label)
+    connector=AutotaskImpersonatingConnector(
+        secrets=_LaborSecrets(), transport=transport, audit=_LaborAudit(), bindings=_LaborBindings())
+    with pytest.raises(PermissionError,match=expected):
+        connector.execute(_time_request())
+    assert not transport.query_headers
+
+
+def test_generic_entity_search_requires_admin(monkeypatch):
+    monkeypatch.setenv("JASON_AUTOTASK_REQUESTER_AUTH_MODE", "jason_managed")
+    from orchestrator.provider_read_capability_catalog import SERVICE_ENTITY_SEARCH
+    args=adapt_autotask_arguments(SERVICE_ENTITY_SEARCH,{"entity":"Projects","page_size":2})
+    assert args["jason_full_administrator_read_required"] is True
+    from dataclasses import replace
+    request=replace(_time_request(), arguments=args)
+    non_admin=_LaborTransport(role_id=25)
+    connector=AutotaskImpersonatingConnector(
+        secrets=_LaborSecrets(), transport=non_admin, audit=_LaborAudit(), bindings=_LaborBindings())
+    with pytest.raises(PermissionError,match="FULL_ADMIN_ROLE_NOT_PROVEN"):
+        connector.execute(request)
+    assert not any(url.endswith("/Projects/query") for url in non_admin.paths)
+
+
+def test_generic_entity_search_full_admin_can_read(monkeypatch):
+    monkeypatch.setenv("JASON_AUTOTASK_REQUESTER_AUTH_MODE", "jason_managed")
+    from orchestrator.provider_read_capability_catalog import SERVICE_ENTITY_SEARCH
+    from dataclasses import replace
+    args=adapt_autotask_arguments(SERVICE_ENTITY_SEARCH,{"entity":"Projects","page_size":2})
+    request=replace(_time_request(), arguments=args)
+    transport=_LaborTransport()
+    connector=AutotaskImpersonatingConnector(
+        secrets=_LaborSecrets(), transport=transport, audit=_LaborAudit(), bindings=_LaborBindings())
+    result=connector.execute(request)
+    assert result.data["items"][0]["id"] == 601
+
+
+def test_managed_full_admin_labor_fails_without_bound_requester(monkeypatch):
+    monkeypatch.setenv("JASON_AUTOTASK_REQUESTER_AUTH_MODE", "jason_managed")
+    transport=_LaborTransport()
+    connector=AutotaskImpersonatingConnector(
+        secrets=_LaborSecrets(), transport=transport, audit=_LaborAudit(), bindings=_LaborBindings())
+    with pytest.raises(PermissionError, match="BINDING_REQUIRED"):
+        connector.execute(_time_request(principal="unbound"))
+    assert transport.paths == []
