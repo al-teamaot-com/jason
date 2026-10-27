@@ -65,6 +65,8 @@ SERVICE_CONFIGURATION_SEARCH = "service.configuration.search"
 SERVICE_CONFIGURATION_READ = "service.configuration.read"
 SERVICE_CONTRACT_SEARCH = "service.contract.search"
 SERVICE_CONTRACT_READ = "service.contract.read"
+SERVICE_ENTITY_SEARCH = "service.entity.search"
+SERVICE_ENTITY_READ = "service.entity.read"
 SERVICE_ENTITY_DESCRIBE = "service.entity.describe"
 SERVICE_ENTITY_FIELDS_DESCRIBE = "service.entity.fields.describe"
 SERVICE_ENTITY_UDF_FIELDS_DESCRIBE = "service.entity.udf.fields.describe"
@@ -144,6 +146,8 @@ AUTOTASK_CAPABILITIES = frozenset(
         SERVICE_CONFIGURATION_READ,
         SERVICE_CONTRACT_SEARCH,
         SERVICE_CONTRACT_READ,
+        SERVICE_ENTITY_SEARCH,
+        SERVICE_ENTITY_READ,
         SERVICE_ENTITY_DESCRIBE,
         SERVICE_ENTITY_FIELDS_DESCRIBE,
         SERVICE_ENTITY_UDF_FIELDS_DESCRIBE,
@@ -1027,6 +1031,32 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             operation="read",
             selector_keys="resource_id",
             fact_hints="opportunity,sales opportunity,client quote",
+            authoritative_change_sources=at,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_ENTITY_SEARCH,
+            display_name="Search Additional Autotask PSA Entities",
+            business_purpose=(
+                "Read bounded projects, tasks, service calls and related records "
+                "through the existing authenticated Autotask provider query path."
+            ),
+            resource_types="service_entity,project,project_task,service_call,project_note,ticket_configuration_relation",
+            operation="search",
+            selector_keys="entity,resource_id,filters,page_size,after_resource_id",
+            fact_hints="Autotask projects, project tasks, service calls, project notes, ticket associations, other Autotask PSA records",
+            authoritative_change_sources=at,
+            collection_fact="Autotask service-management records",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_ENTITY_READ,
+            display_name="Read Exact Additional Autotask PSA Entity",
+            business_purpose="Read an exact authorized Autotask project, task, service call or related entity record.",
+            resource_types="service_entity,project,project_task,service_call,project_note,ticket_configuration_relation",
+            operation="read",
+            selector_keys="entity,resource_id",
+            fact_hints="Autotask project detail, task detail, service call detail, project notes, related record",
             authoritative_change_sources=at,
         ),
         _read_capability(
