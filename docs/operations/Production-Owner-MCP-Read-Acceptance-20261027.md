@@ -59,3 +59,12 @@ and the existing CCC/drift/host rollback checks pass.
 This stage does **not** determine the exact root cause of the previous
 intermittent or release-specific requester denial. It prevents the
 same failure from being accepted as a healthy release again.
+
+## Parallel source integration
+
+PR #2074 adds an optional `verify_release_ticket_read_canary` MCP tool after
+`execute_read_capability`. This P0 gate instead records the source-bound
+receipt inside `execute_read_capability` itself, immediately before successful
+return. The two insertion points are separate and do not conflict; neither
+delegates requester disclosure authority to a service canary. The remaining
+integration requirement is a source-bound end-to-end proof after both merge.
