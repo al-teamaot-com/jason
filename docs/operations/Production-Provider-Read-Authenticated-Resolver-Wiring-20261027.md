@@ -50,3 +50,21 @@ This narrow P0 change is coordinated with #2082, which separately
 proposes labor/administrator read expansion. That additional functionality
 is not necessary to repair the foundational authenticated ticket-read
 handoff and is left under its own review/negative permission tests.
+
+## Why the two resolvers were not equivalent
+
+The composition root wraps its durable SQLite binding store in
+`AutoEnrollingMicrosoftIdentityBindingStore`, uses it in the bound
+Microsoft/Jason runtime identity pipeline, then creates one
+`DirectoryEnrichedMicrosoftIdentityBindingResolver(bindings=bindings,
+directory=microsoft_directory.directory)`. The old provider read factory
+silently rebuilt its own resolver from a **plain**
+`SQLiteMicrosoftIdentityBindingStore` and a newly built directory runtime.
+Those were not the same authenticated runtime identity path, even when
+both referenced the same SQLite file.
+
+Sharing the already-constructed resolver corrects that divergence without
+enabling a fallback when directory evidence is unavailable. The
+administrator/labor extension in PR #2082 independently proposes the
+same constructor injection; it remains a separate, broader permission
+change and is intentionally not included in this minimal P0 repair.

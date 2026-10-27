@@ -74,3 +74,15 @@ def test_no_new_provider_write_or_jason_managed_bypass_in_fix():
     assert "bindings=source_authorization_bindings" in call
     assert "execute_governed_capability" not in call
     assert "AUTOTASK_REQUESTER_AUTH_MODE" not in call
+
+
+
+def test_shared_runtime_resolver_is_built_from_the_autoenrolled_identity_store():
+    source = inspect.getsource(composition.build_runtime_application)
+    assert "bindings = AutoEnrollingMicrosoftIdentityBindingStore(" in source
+    assert "source_authorization_bindings = (" in source
+    assert "DirectoryEnrichedMicrosoftIdentityBindingResolver(" in source
+    assert "bindings=bindings" in source
+    # The same source authorization resolver instance must reach the provider
+    # reads, rather than another plain SQLite-backed environment resolver.
+    assert "bindings=source_authorization_bindings" in source
