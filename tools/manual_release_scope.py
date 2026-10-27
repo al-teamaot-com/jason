@@ -94,8 +94,26 @@ def open_pr_overlaps(repository, changed, reader=command):
     overlaps = []
     for row in rows:
         files = row.get("files")
-        if not isinstance(files, list) or len(files) >= 100:
+        if not isinstance(files, list):
             raise ScopeBlocked("unverifiable open PR changed files")
+        if len(files) >= 100:
+            # GitHub's GraphQL PR summary caps the file list. Retrieve every
+            # page instead of silently trusting its first 100 filenames.
+            number = row.get("number")
+            if not isinstance(number, int) or number < 1:
+                raise ScopeBlocked("invalid open PR identifier")
+            raw_pages = command([
+                "gh", "api", "--paginate", "--slurp",
+                "repos/" + repository + "/pulls/" + str(number) + "/files?per_page=100",
+            ])
+            try:
+                pages = json.loads(raw_pages)
+                full = [file for page in pages for file in page]
+                if not isinstance(pages, list) or not 100 <= len(full) < 3000:
+                    raise ScopeBlocked("open PR full file list incomplete")
+                files = [{"path": item["filename"]} for item in full]
+            except (TypeError, KeyError, ValueError) as exc:
+                raise ScopeBlocked("open PR full file list unverified") from exc
         common = sorted(changed.intersection(x["path"] for x in files))
         if common:
             overlaps.append({"number": row["number"], "branch": row["headRefName"],
