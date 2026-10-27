@@ -1,0 +1,52 @@
+name: Production Manager Disposable Systemd-Docker Rollback Lab
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jason-pm-isolated-lab
+  cancel-in-progress: false
+
+jobs:
+  isolated-acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Prove disposable host and independent boundaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test -d /run/systemd/system
+          test ! -e /opt/jason/current
+          test ! -e /var/lib/jason/openclaw
+          test ! -e /home/al/projects/jason
+          docker info >/dev/null
+          echo "LAB_ISOLATION_PREFLIGHT=PASS"
+
+      - name: Execute fail-closed canonical rollback helpers on isolated units
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo env GITHUB_ACTIONS=true JASON_PM_LAB=1 \
+            GITHUB_WORKSPACE="$GITHUB_WORKSPACE" \
+            EVIDENCE_OUTPUT="$GITHUB_WORKSPACE/pm-lab-receipt.json" \
+            bash tools/ci/production_manager_disposable_lab.sh
+
+      - name: Preserve lab acceptance receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-manager-disposable-lab
+          path: pm-lab-receipt.json
+          if-no-files-found: warn
+          retention-days: 30
