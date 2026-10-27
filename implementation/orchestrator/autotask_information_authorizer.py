@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from typing import Any, Protocol
 
 from connectors.autotask.impersonating_connector import (
@@ -266,6 +267,12 @@ class AutotaskImpersonationInformationAuthorizer:
             if provider_id == AUTOTASK_PROVIDER
             else None
         )
+
+        if (provider_id == AUTOTASK_PROVIDER
+                and resolution.capability_name == SERVICE_TICKET_TIME_ENTRY_SEARCH
+                and (mode != AUTOTASK_AUTH_MODE_IMPERSONATED
+                     or os.getenv("JASON_AUTOTASK_TIME_ENTRY_NATIVE_READ_PROVEN", "") != "verified")):
+            raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_PERMISSION_NOT_PROVEN")
 
         invocation = self.delegate.invoke(request=request, resolution=resolution)
 

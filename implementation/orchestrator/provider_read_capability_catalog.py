@@ -67,6 +67,7 @@ SERVICE_CONTRACT_SEARCH = "service.contract.search"
 SERVICE_CONTRACT_READ = "service.contract.read"
 SERVICE_ENTITY_DESCRIBE = "service.entity.describe"
 SERVICE_ENTITY_FIELDS_DESCRIBE = "service.entity.fields.describe"
+SERVICE_ENTITY_UDF_FIELDS_DESCRIBE = "service.entity.udf.fields.describe"
 SERVICE_NOTIFICATION_HISTORY_SEARCH = "service.notification.history.search"
 SERVICE_PRODUCT_SEARCH = "service.product.search"
 SERVICE_PRODUCT_READ = "service.product.read"
@@ -145,6 +146,7 @@ AUTOTASK_CAPABILITIES = frozenset(
         SERVICE_CONTRACT_READ,
         SERVICE_ENTITY_DESCRIBE,
         SERVICE_ENTITY_FIELDS_DESCRIBE,
+        SERVICE_ENTITY_UDF_FIELDS_DESCRIBE,
         SERVICE_NOTIFICATION_HISTORY_SEARCH,
         SERVICE_PRODUCT_SEARCH,
         SERVICE_PRODUCT_READ,
@@ -1053,6 +1055,17 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             operation="describe_fields",
             selector_keys="entity",
             fact_hints="fields,field names,picklist,picklist values,field metadata,schema",
+            authoritative_change_sources=at,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_ENTITY_UDF_FIELDS_DESCRIBE,
+            display_name="Describe Service Entity Custom Fields",
+            business_purpose="Read provider UDF field metadata, not custom-field values.",
+            resource_types="service_schema,service_field_schema",
+            operation="describe_udf_fields",
+            selector_keys="entity",
+            fact_hints="custom fields,udf,user defined fields,field schema,Autotask UDF",
             authoritative_change_sources=at,
         ),
         _read_capability(

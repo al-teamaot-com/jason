@@ -51,6 +51,7 @@ from .provider_read_capability_catalog import (
     SERVICE_RESOURCE_SEARCH,
     SERVICE_ENTITY_DESCRIBE,
     SERVICE_ENTITY_FIELDS_DESCRIBE,
+    SERVICE_ENTITY_UDF_FIELDS_DESCRIBE,
     SERVICE_NOTIFICATION_HISTORY_SEARCH,
     SERVICE_PRODUCT_SEARCH,
     SERVICE_PRODUCT_READ,
@@ -642,7 +643,11 @@ def adapt_autotask_arguments(
             raise ValueError("a positive numeric ticket_id is required")
         if any(k in arguments for k in ("search", "filters", "resource_id")):
             raise ValueError("unbounded or raw labor filters are prohibited")
-        return {"entity": "TimeEntries", "search": _autotask_search(capability_name, arguments)}
+        company_id = arguments.get("company_id")
+        if isinstance(company_id, bool) or not isinstance(company_id, int) or company_id < 1:
+            raise ValueError("a positive numeric company_id is required")
+        return {"entity": "TimeEntries", "search": _autotask_search(capability_name, arguments),
+                "company_id": company_id, "ticket_id": ticket_id}
     if capability_name == SERVICE_TICKET_NOTES_SEARCH:
         return {
             "ticket_id": arguments.get("ticket_id") or _resource_id(arguments)
@@ -751,7 +756,7 @@ def adapt_autotask_arguments(
     }
     if capability_name in entity_searches:
         return {"entity": entity_searches[capability_name], "search": _autotask_search(capability_name, arguments)}
-    if capability_name in {SERVICE_ENTITY_DESCRIBE, SERVICE_ENTITY_FIELDS_DESCRIBE}:
+    if capability_name in {SERVICE_ENTITY_DESCRIBE, SERVICE_ENTITY_FIELDS_DESCRIBE, SERVICE_ENTITY_UDF_FIELDS_DESCRIBE}:
         entity = arguments.get("entity")
         if not isinstance(entity, str) or not entity.strip():
             raise ValueError("entity is required for schema description")

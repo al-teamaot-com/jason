@@ -20,6 +20,7 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_CONTACT_SEARCH,
     SERVICE_ENTITY_DESCRIBE,
     SERVICE_ENTITY_FIELDS_DESCRIBE,
+    SERVICE_ENTITY_UDF_FIELDS_DESCRIBE,
     SERVICE_NOTIFICATION_HISTORY_SEARCH,
     SERVICE_PRODUCT_SEARCH,
     SERVICE_PRODUCT_READ,
@@ -252,7 +253,6 @@ def build_autotask_manifest() -> IntegrationManifest:
                         collection_supported=False,
                     ),
                     _read("service.ticket.read", SERVICE_TICKET_READ),
-                    _search("service.ticket.time.entry.search", SERVICE_TICKET_TIME_ENTRY_SEARCH, ("company_id", "ticket_id", "page_size", "after_resource_id")),
                     IntegrationOperation(
                         operation_id="service.ticket.notes.search",
                         kind=OperationKind.SEARCH,
@@ -269,6 +269,22 @@ def build_autotask_manifest() -> IntegrationManifest:
                     ResourceObservation("notes", "Ticket note evidence."),
                 ),
                 relationships=("ticket -> company", "ticket -> contact", "ticket -> configuration"),
+            ),
+            ResourceDefinition(
+                resource_type="service_ticket_time_entry",
+                description="Read-only technician labor/time entries on a verified ticket in an authorized company.",
+                selectors=selectors,
+                operations=(
+                    _search(
+                        "service.ticket.time.entry.search",
+                        SERVICE_TICKET_TIME_ENTRY_SEARCH,
+                        ("company_id", "ticket_id", "page_size", "after_resource_id"),
+                    ),
+                ),
+                observations=(
+                    ResourceObservation("labor", "Technician, worked time, notes and billable context when source permissions are proven."),
+                ),
+                relationships=("time entry -> ticket", "time entry -> resource", "ticket -> company"),
             ),
             ResourceDefinition(
                 resource_type="service_ticket_attachment",
@@ -464,14 +480,14 @@ def build_autotask_manifest() -> IntegrationManifest:
             ),
             ResourceDefinition(
                 resource_type="service_schema",
-                description="Autotask approved entity schema metadata.",
+                description="Autotask read-only entity schema metadata.",
                 selectors=selectors,
                 operations=(
                     IntegrationOperation(
                         operation_id="service.entity.describe",
                         kind=OperationKind.READ,
                         capability_name=SERVICE_ENTITY_DESCRIBE,
-                        description="Describe one approved Autotask entity and requester permissions.",
+                        description="Describe a provider entity (API integration-account schema, not technician permissions).",
                         read_only=True,
                         selector_names=("entity",),
                     ),
@@ -479,7 +495,15 @@ def build_autotask_manifest() -> IntegrationManifest:
                         operation_id="service.entity.fields.describe",
                         kind=OperationKind.READ,
                         capability_name=SERVICE_ENTITY_FIELDS_DESCRIBE,
-                        description="Describe fields and tenant-specific picklist values for one approved Autotask entity.",
+                        description="Describe fields and tenant-specific picklist values for one valid Autotask entity.",
+                        read_only=True,
+                        selector_names=("entity",),
+                    ),
+                    IntegrationOperation(
+                        operation_id="service.entity.udf.fields.describe",
+                        kind=OperationKind.READ,
+                        capability_name=SERVICE_ENTITY_UDF_FIELDS_DESCRIBE,
+                        description="Describe UDF field metadata (no custom-field values).",
                         read_only=True,
                         selector_names=("entity",),
                     ),
@@ -492,7 +516,7 @@ def build_autotask_manifest() -> IntegrationManifest:
         metadata={
             "mode": "read_only",
             "credential_surface": "internal_openbao_only",
-            "schema_discovery": "approved_entities_only",
+            "schema_discovery": "validated_schema_entity_names_only",
             "pagination": "durable_id_continuation",
         },
     )

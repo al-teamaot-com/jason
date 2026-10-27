@@ -83,6 +83,7 @@ def test_registry_matches_connector_capabilities_and_dormant_mutations() -> None
     assert set(AUTOTASK_OPERATIONS) == {
         "autotask.entity.describe",
         "autotask.entity.fields.describe",
+        "autotask.entity.udf.fields.describe",
         "autotask.entity.get",
         "autotask.entity.query",
         "autotask.ticket.get",
@@ -381,3 +382,34 @@ def test_ticket_charge_create_and_update_use_ticket_child_route() -> None:
     assert path == "/V1.0/Tickets/123/Charges"
     assert params is None
     assert body == {"id": 456, "unitQuantity": 1}
+
+
+@pytest.mark.parametrize("capability,expected_suffix",[
+    ("autotask.entity.describe", "/entityInformation"),
+    ("autotask.entity.fields.describe", "/entityInformation/fields"),
+    ("autotask.entity.udf.fields.describe", "/entityInformation/userDefinedFields"),
+])
+def test_autotask_metadata_discovery_accepts_unlisted_valid_entity(capability, expected_suffix):
+    method,path,params=resolve_operation(
+        capability, {"entity":"TimeEntryAttachments"}
+    )
+    assert method=="GET"
+    assert path=="/V1.0/TimeEntryAttachments"+expected_suffix
+    assert params is None
+
+
+@pytest.mark.parametrize("entity",[
+    "../Tickets", "TimeEntries/query", "TimeEntries?x=1",
+    "TimeEntries%2fquery", "lowercase", "X" * 200, "",
+])
+def test_autotask_metadata_entity_path_is_injection_safe(entity):
+    with pytest.raises(ValueError, match="not approved"):
+        resolve_operation("autotask.entity.describe", {"entity":entity})
+
+
+def test_metadata_discovery_does_not_broaden_record_query_allowlist():
+    with pytest.raises(ValueError, match="not approved"):
+        resolve_operation("autotask.entity.query",{
+            "entity":"TimeEntryAttachments",
+            "search": '{"MaxRecords":1,"filter":[{"op":"exist","field":"id"}]}',
+        })
