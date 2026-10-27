@@ -51,6 +51,15 @@ jobs:
             EVIDENCE_ROOT_OUTPUT="$GITHUB_WORKSPACE/pm-root-boundary-receipt.json" \
             /usr/bin/python3 tools/ci/production_manager_root_boundary_lab.py
 
+      - name: Reproduce approval-only timer versus release transaction race
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo env GITHUB_ACTIONS=true JASON_PM_LAB=1 \
+            GITHUB_WORKSPACE="$GITHUB_WORKSPACE" \
+            EVIDENCE_APPROVAL_OUTPUT="$GITHUB_WORKSPACE/pm-approval-timer-receipt.json" \
+            /usr/bin/python3 tools/ci/production_manager_approval_timer_lab.py
+
       - name: Preserve lab acceptance receipt
         if: always()
         uses: actions/upload-artifact@v4
@@ -59,5 +68,6 @@ jobs:
           path: |
             pm-lab-receipt.json
             pm-root-boundary-receipt.json
+            pm-approval-timer-receipt.json
           if-no-files-found: warn
           retention-days: 30
