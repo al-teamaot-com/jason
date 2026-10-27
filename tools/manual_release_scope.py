@@ -152,6 +152,7 @@ def main():
                         a.acknowledge_dirty_worktree, worktree_repo=a.worktree_repo)
     except (ScopeBlocked, OSError, ValueError) as e:
         print(json.dumps({"status": "BLOCKED_EVIDENCE", "error_type": type(e).__name__,
+                          "reason": str(e)[:160] if isinstance(e, ScopeBlocked) else "unclassified",
                           "deployment_authorized": False}))
         return 2
     print(json.dumps(result, indent=2))
