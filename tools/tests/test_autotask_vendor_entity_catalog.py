@@ -45,3 +45,17 @@ def test_observations_are_not_confused_with_public_index_or_permission_grants():
     assert evidence["entities"]["BillingItems"]["userAccessForQuery"] == "None"
     assert evidence["entities"]["Phases"]["userAccessForQuery"] == "All"
     assert evidence["entities"]["TaskNotes"]["userAccessForQuery"] == "All"
+
+
+def test_generated_csv_matches_source_snapshots_and_never_claims_full_access():
+    import csv
+    csv_path = ROOT / "docs/operations/Autotask-Read-Coverage-Matrix-20261027.csv"
+    with csv_path.open(encoding="utf-8", newline="") as source:
+        rows = list(csv.DictReader(source))
+    assert len(rows) == json.loads(INDEX.read_text())["entity_count"]
+    by_name = {row["entity"]: row for row in rows}
+    assert by_name["Invoices"]["assessment"] == "provider_user_query_denied"
+    assert by_name["Tickets"]["assessment"] == "named_route_active_requires_live_read_proof"
+    assert by_name["Phases"]["assessment"] == "governed_query_route_gap"
+    assert by_name["Phases"]["live_record_read_verified"] == "False"
+    assert by_name["Phases"]["generic_capabilities_active"] == "False"
