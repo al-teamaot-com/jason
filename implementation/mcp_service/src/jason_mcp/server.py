@@ -6728,6 +6728,73 @@ def execute_read_capability(
 
 
 @mcp.tool()
+def verify_release_ticket_read_canary(
+    release_candidate_sha: str,
+    phase: str,
+    created_after: str,
+    created_before: str,
+    page_size: int = 5,
+) -> dict[str, Any]:
+    """Verify complete live Autotask reads under this MCP requester's own identity.
+
+    This is a read-only functional probe, NOT a provider-access exception or
+    an authorization to deploy. Every individual count, search and exact read
+    goes through the existing execute_read_capability -> _governed_read path,
+    which independently enforces the connected Microsoft identity, trusted
+    Jason binding, JKD-001 grants and requester information-release rules.
+    No ticket content or raw provider responses are ever returned.
+    """
+    from orchestrator.foundational_ticket_read_acceptance import (
+        TicketReadCanaryError,
+        run_ticket_read_canary,
+    )
+
+    try:
+        # Fail before any provider call for an unbound/non-human requester.
+        _authenticated_identity()
+    except (PermissionError, ValueError, RuntimeError):
+        return {
+            "status": "denied",
+            "error_code": "MCP_AUTHENTICATED_REQUESTER_REQUIRED",
+            "customer_data_included": False,
+        }
+
+    # This revision is injected by the immutable native Docker release path.
+    # Never trust a caller-supplied running revision for after-release proof.
+    running_revision = str(os.environ.get("JASON_SOURCE_REVISION") or "").strip()
+    try:
+        summary = run_ticket_read_canary(
+            lambda capability, arguments: execute_read_capability(
+                capability=capability,
+                arguments=dict(arguments),
+            ),
+            release_candidate_sha=release_candidate_sha,
+            running_revision=running_revision,
+            phase=phase,
+            created_after=created_after,
+            created_before=created_before,
+            page_size=page_size,
+            now=datetime.now(timezone.utc),
+        )
+    except TicketReadCanaryError as exc:
+        return {
+            "status": "failed",
+            "error_code": str(exc),
+            "provider": "autotask",
+            "customer_data_included": False,
+        }
+
+    return {
+        "status": "succeeded",
+        "acceptance_status": "PASS",
+        "summary": summary,
+        "customer_data_included": False,
+        "production_release_approval": False,
+        "needs_independent_receipt_binding": True,
+    }
+
+
+@mcp.tool()
 def view_documentation_attachment(
     document_id: int,
     attachment_id: int,
