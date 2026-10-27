@@ -443,7 +443,7 @@ def run_acceptance() -> None:
                 "observed_at": datetime.now(timezone.utc).isoformat(),
             }
             output = Path(os.environ["EVIDENCE_ROOT_OUTPUT"])
-            write_json(output, receipt, 0o600)
+            write_json(output, receipt, 0o644)
             print("ROOT_WORKER_INTEGRATION=PASS_WITH_LIMITATIONS", flush=True)
         finally:
             run("systemctl", "stop", HOST_PATH, HOST_UNIT, CAND_UNIT, BASE_UNIT, check=False)
