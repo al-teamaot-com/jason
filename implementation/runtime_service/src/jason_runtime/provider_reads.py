@@ -502,11 +502,6 @@ def build_provider_read_invoker(
     autotask_authorized = AutotaskImpersonationInformationAuthorizer(
         delegate=source_authorized,
         bindings=effective_bindings,
-        # The canonical active binding is the identity/JKD-001 authority
-        # anchor for AOT INTERNAL v11 Jason-managed read-only release.
-        # Provider impersonation and IT Glue still use the live Graph-
-        # enriched binding, with their existing ACL and fail-closed gates.
-        internal_bindings=raw_microsoft_bindings,
     )
     governed_provider_reads: CapabilityInvoker = MicrosoftGraphInformationAuthorizer(
         delegate=autotask_authorized,

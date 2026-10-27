@@ -1748,6 +1748,11 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         secrets=openbao,
         transport=http_transport,
         audit=ConnectorEventAudit(orchestration_events),
+        # Source reads must share the SAME authenticated, authority-bound
+        # Microsoft/Jason resolver as the other governed runtime paths.
+        # A new environment-derived resolver can lose requester identity
+        # and turn all Autotask reads into service-only denials.
+        bindings=source_authorization_bindings,
     )
     quickbooks_read_invoker = (
         build_quickbooks_read_invoker(

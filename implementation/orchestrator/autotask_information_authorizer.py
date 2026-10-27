@@ -138,48 +138,6 @@ def _active_trusted_binding(
     )
 
 
-_AOT_INTERNAL_READ_PROFILE = "itglue-autotask-entra-comprehensive-entity-read-catalog-v11"
-
-
-def _aot_internal_source_binding_proven(
-    *,
-    request: OrchestrationRequest,
-    bindings: TrustedPrincipalBindingResolver | None,
-) -> bool:
-    """Internal AOT v11 read authority is active Entra/Jason binding + JKD-001.
-
-    The provider-neutral Jason-managed path does NOT use the bound user's email
-    for native Autotask provider impersonation. Therefore a live Microsoft
-    Graph email lookup should not turn an independently authenticated, active
-    AOT internal JKD-001 read into service-only output.
-
-    This narrow path never authorizes a customer-bound caller, an unbound user,
-    an inactive binding, a service principal, the impersonated provider mode,
-    or any read under legacy/v10 activation. External/user-specific native
-    provider impersonation still requires the directory-enriched binding.
-    """
-    if (
-        os.getenv("JASON_PROVIDER_READ_ACTIVATION_PROFILE", "").strip()
-        != _AOT_INTERNAL_READ_PROFILE
-        or request.organization_id != "aot"
-        or request.client_id is not None
-        or not request.authority_allowed
-        or not request.authority_context_id
-        or request.permission_mode != "observe"
-        or request.requester_kind != "human"
-        or request.orchestration_mode is not OrchestrationMode.EXECUTE
-        or bindings is None
-    ):
-        return False
-    binding = _active_trusted_binding(request=request, bindings=bindings)
-    return bool(
-        binding is not None
-        and getattr(binding, "status", None) == "active"
-        and getattr(binding, "client_id", None) is None
-        and getattr(binding, "jason_identity_id", None) == request.principal_id
-    )
-
-
 def _jason_managed_requester_authorization_proven(
     *,
     request: OrchestrationRequest,
@@ -298,7 +256,6 @@ class AutotaskImpersonationInformationAuthorizer:
 
     delegate: CapabilityInvoker
     bindings: TrustedPrincipalBindingResolver | None = None
-    internal_bindings: TrustedPrincipalBindingResolver | None = None
 
     def invoke(
         self,
@@ -329,29 +286,19 @@ class AutotaskImpersonationInformationAuthorizer:
                 raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_PERMISSION_NOT_PROVEN")
             if resolution.capability_name not in AUTOTASK_CAPABILITIES:
                 return invocation
-            internal_aot_proven = _aot_internal_source_binding_proven(
-                request=request, bindings=self.internal_bindings
-            )
             if resolution.capability_name in {SERVICE_ENTITY_SEARCH, SERVICE_ENTITY_READ}:
                 # Internal provider reads may correlate across AOT's customers,
                 # but a customer-bound identity must NEVER receive the generic
                 # cross-customer query result. Existing customer-scoped routes
                 # continue to own client-specific disclosures.
-                if not internal_aot_proven:
-                    # Preserve the original directory-enriched allow path for
-                    # already-authorized AOT internal identities in existing
-                    # tests/older callers. A customer-bound identity must
-                    # NEVER receive generic cross-customer output.
-                    binding = _active_trusted_binding(
-                        request=request, bindings=self.bindings
-                    )
-                    if (
-                        binding is None
-                        or getattr(binding, "client_id", None) is not None
-                        or request.client_id is not None
-                        or request.organization_id != "aot"
-                    ):
-                        return invocation
+                binding = _active_trusted_binding(request=request, bindings=self.bindings)
+                if (
+                    binding is None
+                    or getattr(binding, "client_id", None) is not None
+                    or request.client_id is not None
+                    or request.organization_id != "aot"
+                ):
+                    return invocation
             if (
                 is_provider_health_canary_request(
                     request=request,
@@ -367,14 +314,6 @@ class AutotaskImpersonationInformationAuthorizer:
                     "jkd001_authority_context",
                     "central_orchestrator_governed_read",
                     "synthetic_empty_result_only",
-                )
-            elif internal_aot_proven:
-                basis = (
-                    "jason_managed",
-                    "aot_internal_active_entra_binding",
-                    "jkd001_authority_context",
-                    "central_orchestrator_governed_read",
-                    "not_provider_native_impersonation",
                 )
             elif _jason_managed_requester_authorization_proven(
                 request=request,
