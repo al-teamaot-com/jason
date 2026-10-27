@@ -18,6 +18,8 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_CONTRACT_SEARCH,
     SERVICE_CONTACT_READ,
     SERVICE_CONTACT_SEARCH,
+    SERVICE_ENTITY_SEARCH,
+    SERVICE_ENTITY_READ,
     SERVICE_ENTITY_DESCRIBE,
     SERVICE_ENTITY_FIELDS_DESCRIBE,
     SERVICE_ENTITY_UDF_FIELDS_DESCRIBE,
@@ -477,6 +479,28 @@ def build_autotask_manifest() -> IntegrationManifest:
                 ),
                 observations=(ResourceObservation("sales", "Opportunity identity, company, owner, and status."),),
                 relationships=("opportunity -> company", "opportunity -> quotes"),
+            ),
+            ResourceDefinition(
+                resource_type="service_entity",
+                description="Read-only Autotask projects, tasks, service calls and related canonical PSA records.",
+                selectors=selectors,
+                operations=(
+                    _search(
+                        "service.entity.search",
+                        SERVICE_ENTITY_SEARCH,
+                        ("entity", "resource_id", "filters", "page_size", "after_resource_id"),
+                    ),
+                    IntegrationOperation(
+                        operation_id="service.entity.read",
+                        kind=OperationKind.READ,
+                        capability_name=SERVICE_ENTITY_READ,
+                        description="Read one exact additional Autotask entity from the bounded provider query path.",
+                        read_only=True,
+                        selector_names=("entity", "resource_id"),
+                    ),
+                ),
+                observations=(ResourceObservation("entity", "Authenticated PSA provider records with requester-bound release policy."),),
+                relationships=("project -> tasks", "service call -> ticket", "project -> notes"),
             ),
             ResourceDefinition(
                 resource_type="service_schema",
