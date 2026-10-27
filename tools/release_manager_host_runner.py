@@ -2681,6 +2681,10 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         )
     save_record(state_root, record)
 
+    # Recheck after CCC/manifest work, immediately before the first production
+    # transition. A GitHub merge during long preflight must not make a
+    # formerly-current candidate silently supersede newer protected work.
+    require_current_protected_release_source(repo, record)
     gate_transition(repo, state_root, record, "production")
     save_record(state_root, record)
 
@@ -2953,6 +2957,9 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
 def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
     lock = acquire_production_transaction_lock(repo, state_root, record)
     try:
+        # Check fresh authoritative source before retention, breaker work, or
+        # production deployment. Applies to explicit/manual and automatic paths.
+        require_current_protected_release_source(repo, record)
         # Verify that the independent root reconciler is installed and active
         # before even bounded stopped-container retention maintenance.
         require_host_reconciler_ready(state_root)
@@ -3131,6 +3138,38 @@ def authoritative_auto_promotion_head(repo: Path) -> str:
             or not SHA.fullmatch(lines[0][0])):
         raise ReleaseManagerError("protected main returned an invalid exact revision")
     return lines[0][0]
+
+
+def require_current_protected_release_source(repo: Path, record: dict[str, Any]) -> None:
+    """Reject a superseded/manual candidate before a production transaction.
+
+    Automatic selection already compares to main; manual promotion must obey the
+    same immutable source rule. Neither a past exact-SHA approval nor a successful
+    preproduction run authorizes replacing more recent protected-main work.
+    """
+    candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
+    baseline = str(record.get("rollback_sha") or "")
+    if not SHA.fullmatch(candidate) or not SHA.fullmatch(baseline):
+        raise ReleaseManagerError("production candidate or baseline SHA is invalid")
+    current_main = authoritative_auto_promotion_head(repo)
+    if candidate != current_main:
+        raise ReleaseManagerError(
+            "production release candidate is behind protected main; "
+            "reprepare and revalidate the exact current main revision"
+        )
+    # A valid candidate on main must also include the installed production
+    # history; otherwise promoting it would drop production changes.
+    ancestry = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", baseline, candidate],
+        cwd=repo,
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    if ancestry.returncode != 0:
+        raise ReleaseManagerError(
+            "production release candidate does not descend from the active baseline"
+        )
 
 
 def live_release_mobile_approval_mode(runtime: dict[str, Any]) -> str:
