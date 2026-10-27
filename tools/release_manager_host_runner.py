@@ -178,6 +178,53 @@ def declared_quickbooks_read_profile(candidate_worktree: Path) -> str | None:
     return str(payload["read_profile"])
 
 
+AUTOTASK_PROVIDER_READ_PROFILES = frozenset({
+    "itglue-autotask-entra-procurement-billing-reconciliation-catalog-v10",
+    "itglue-autotask-entra-comprehensive-entity-read-catalog-v11",
+})
+
+
+def declared_autotask_read_profile(candidate_worktree: Path) -> str | None:
+    """Exact immutable-source Autotask read profile; absent on older releases."""
+    path = candidate_worktree / "config" / "autotask-entity-read-profile.json"
+    if path.is_symlink():
+        raise ReleaseManagerError("Autotask profile declaration cannot be a symlink")
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ReleaseManagerError("Autotask read profile declaration unreadable") from exc
+    if (not isinstance(payload, dict)
+            or set(payload) != {"schema_version", "read_profile"}
+            or payload.get("schema_version") != "1.0"
+            or payload.get("read_profile") not in AUTOTASK_PROVIDER_READ_PROFILES):
+        raise ReleaseManagerError("candidate Autotask read profile declaration invalid")
+    return str(payload["read_profile"])
+
+
+def live_autotask_read_profile() -> str:
+    """Prove both live services have the same supported activation profile."""
+    profiles = set()
+    for name in ("jason-runtime", "jason-mcp-pilot"):
+        env = json.loads(output([
+            "docker", "inspect", name, "--format", "{{json .Config.Env}}",
+        ]))
+        if not isinstance(env, list):
+            raise ReleaseManagerError("live Autotask profile environment unavailable")
+        matching = [
+            item.split("=", 1)[1] for item in env
+            if isinstance(item, str)
+            and item.startswith("JASON_PROVIDER_READ_ACTIVATION_PROFILE=")
+        ]
+        if len(matching) != 1 or matching[0] not in AUTOTASK_PROVIDER_READ_PROFILES:
+            raise ReleaseManagerError("live Autotask read activation profile missing or invalid")
+        profiles.add(matching[0])
+    if len(profiles) != 1:
+        raise ReleaseManagerError("live Runtime/MCP Autotask read profiles disagree")
+    return profiles.pop()
+
+
 def live_quickbooks_read_profile() -> str:
     """Require matching, supported read profiles from live Runtime and MCP."""
     profiles = set()
@@ -2635,6 +2682,13 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     candidate_worker_uid = worker_enrollment.approved_diagnostic_uid(deploy_worktree)
     previous_worker_uid = worker_enrollment.live_diagnostic_uid(output)
     prior_quickbooks_profile = live_quickbooks_read_profile()
+    prior_autotask_profile = live_autotask_read_profile()
+    candidate_autotask_profile = declared_autotask_read_profile(deploy_worktree)
+    if (candidate_autotask_profile is not None
+            and os.environ.get("JASON_PROVIDER_READ_ACTIVATION_PROFILE") not in (None, candidate_autotask_profile)):
+        raise ReleaseManagerError(
+            "invoking Autotask profile override conflicts with immutable candidate"
+        )
     if (candidate_quickbooks_profile is not None
             and os.environ.get("JASON_QUICKBOOKS_READ_PROFILE") not in (None, candidate_quickbooks_profile)):
         raise ReleaseManagerError(
@@ -2698,6 +2752,9 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     env[worker_enrollment.ENV_NAME] = candidate_worker_uid
     if candidate_quickbooks_profile is not None:
         env["JASON_QUICKBOOKS_READ_PROFILE"] = candidate_quickbooks_profile
+    env["JASON_PROVIDER_READ_ACTIVATION_PROFILE"] = (
+        candidate_autotask_profile or prior_autotask_profile
+    )
 
     runtime_attempted = False
     mcp_attempted = False
@@ -2727,6 +2784,8 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             raise ReleaseManagerError(
                 "MCP did not report the exact candidate revision after deployment"
             )
+        if live_autotask_read_profile() != (candidate_autotask_profile or prior_autotask_profile):
+            raise ReleaseManagerError("post-deploy Autotask read activation profile mismatch")
 
         host_attempted = True
         host_result = request_host_reconcile(state_root, candidate_sha)
@@ -2840,6 +2899,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         rollback_env = quickbooks_rollback_environment(
             os.environ, rollback_sha=rollback_sha, prior_profile=prior_quickbooks_profile
         )
+        rollback_env["JASON_PROVIDER_READ_ACTIVATION_PROFILE"] = prior_autotask_profile
         rollback_env[worker_enrollment.ENV_NAME] = previous_worker_uid
 
         rollback_errors: list[str] = []
