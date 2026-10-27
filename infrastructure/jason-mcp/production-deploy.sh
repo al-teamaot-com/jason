@@ -14,6 +14,23 @@ else
   )"
 fi
 
+# Match the source-committed read profile on a new release and recover the
+# exact previous profile on the native baseline rollback. The release manager
+# independently binds the override to a signed, immutable candidate.
+if [ "${JASON_PROVIDER_READ_ACTIVATION_PROFILE+x}" = "x" ]; then
+  AUTOTASK_READ_PROFILE="$JASON_PROVIDER_READ_ACTIVATION_PROFILE"
+else
+  AUTOTASK_READ_PROFILE="$(
+    docker inspect jason-mcp-pilot --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null |
+      sed -n 's/^JASON_PROVIDER_READ_ACTIVATION_PROFILE=//p' |
+      tail -n 1
+  )"
+fi
+case "$AUTOTASK_READ_PROFILE" in
+  itglue-autotask-entra-procurement-billing-reconciliation-catalog-v10|itglue-autotask-entra-comprehensive-entity-read-catalog-v11) ;;
+  *) echo "DENIED: unsupported Autotask provider-read activation profile" >&2; exit 2 ;;
+esac
+
 if [ -z "$REVISION" ]; then
   REVISION="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
 fi
@@ -69,6 +86,7 @@ python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-mcp-pilot   -
   --set-env JASON_QUICKBOOKS_OPENBAO_ROLE_ID_PATH="$QBO_ACTIVE_ROLE_CONTAINER" \
   --set-env JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH="$QBO_ACTIVE_SECRET_CONTAINER" \
   --set-env JASON_QUICKBOOKS_OAUTH_DB="$QBO_ACTIVE_DB" \
+  --set-env "JASON_PROVIDER_READ_ACTIVATION_PROFILE=$AUTOTASK_READ_PROFILE" \
   --set-env "JASON_QUICKBOOKS_READ_PROFILE=$QUICKBOOKS_READ_PROFILE" \
   --set-env "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID=${JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID:-}" \
   --add-readonly-bind "$QBO_DEV_ROLE_HOST:/run/jason-secrets/openbao/quickbooks-development/role_id" \
