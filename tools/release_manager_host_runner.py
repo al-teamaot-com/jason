@@ -2681,6 +2681,10 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         )
     save_record(state_root, record)
 
+    # Recheck after CCC/manifest work, immediately before the first production
+    # transition. A GitHub merge during long preflight must not make a
+    # formerly-current candidate silently supersede newer protected work.
+    require_current_protected_release_source(repo, record)
     gate_transition(repo, state_root, record, "production")
     save_record(state_root, record)
 
