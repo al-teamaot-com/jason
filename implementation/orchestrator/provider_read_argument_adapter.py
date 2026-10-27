@@ -51,6 +51,7 @@ from .provider_read_capability_catalog import (
     SERVICE_RESOURCE_SEARCH,
     SERVICE_ENTITY_DESCRIBE,
     SERVICE_ENTITY_FIELDS_DESCRIBE,
+    SERVICE_ENTITY_UDF_FIELDS_DESCRIBE,
     SERVICE_NOTIFICATION_HISTORY_SEARCH,
     SERVICE_PRODUCT_SEARCH,
     SERVICE_PRODUCT_READ,
@@ -75,6 +76,7 @@ from .provider_read_capability_catalog import (
     SERVICE_OPPORTUNITY_READ,
     SERVICE_TICKET_COUNT,
     SERVICE_TICKET_NOTES_SEARCH,
+    SERVICE_TICKET_TIME_ENTRY_SEARCH,
     SERVICE_TICKET_ATTACHMENT_SEARCH,
     SERVICE_TICKET_ATTACHMENT_READ,
     SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
@@ -221,6 +223,9 @@ _AUTOTASK_SEARCH_FIELDS: Mapping[str, Mapping[str, str]] = {
         "resource_id": "id",
         "purchase_order_id": "orderID",
         "product_id": "productID",
+    },
+    SERVICE_TICKET_TIME_ENTRY_SEARCH: {
+        "ticket_id": "ticketID",
     },
     SERVICE_TICKET_CHARGE_SEARCH: {
         "resource_id": "id",
@@ -631,6 +636,18 @@ def adapt_autotask_arguments(
         return {"ticket_id": _ticket_read_selector(arguments)}
     if capability_name == SERVICE_CONFIGURATION_READ:
         return {"configuration_item_id": _resource_id(arguments)}
+    if capability_name == SERVICE_TICKET_TIME_ENTRY_SEARCH:
+        # No broad time-entry query: one verified ticket and client only.
+        ticket_id = arguments.get("ticket_id")
+        if isinstance(ticket_id, bool) or not isinstance(ticket_id, int) or ticket_id < 1:
+            raise ValueError("a positive numeric ticket_id is required")
+        if any(k in arguments for k in ("search", "filters", "resource_id")):
+            raise ValueError("unbounded or raw labor filters are prohibited")
+        company_id = arguments.get("company_id")
+        if isinstance(company_id, bool) or not isinstance(company_id, int) or company_id < 1:
+            raise ValueError("a positive numeric company_id is required")
+        return {"entity": "TimeEntries", "search": _autotask_search(capability_name, arguments),
+                "company_id": company_id, "ticket_id": ticket_id}
     if capability_name == SERVICE_TICKET_NOTES_SEARCH:
         return {
             "ticket_id": arguments.get("ticket_id") or _resource_id(arguments)
@@ -739,7 +756,7 @@ def adapt_autotask_arguments(
     }
     if capability_name in entity_searches:
         return {"entity": entity_searches[capability_name], "search": _autotask_search(capability_name, arguments)}
-    if capability_name in {SERVICE_ENTITY_DESCRIBE, SERVICE_ENTITY_FIELDS_DESCRIBE}:
+    if capability_name in {SERVICE_ENTITY_DESCRIBE, SERVICE_ENTITY_FIELDS_DESCRIBE, SERVICE_ENTITY_UDF_FIELDS_DESCRIBE}:
         entity = arguments.get("entity")
         if not isinstance(entity, str) or not entity.strip():
             raise ValueError("entity is required for schema description")
@@ -1090,6 +1107,7 @@ class GovernedProviderReadConnectorInvoker:
     def _enforce_client_selector_binding(request: OrchestrationRequest, capability_name: str) -> None:
         scoped = {
             SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ,
+            SERVICE_TICKET_TIME_ENTRY_SEARCH,
             SERVICE_TICKET_ATTACHMENT_SEARCH, SERVICE_TICKET_ATTACHMENT_READ,
             SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
         }

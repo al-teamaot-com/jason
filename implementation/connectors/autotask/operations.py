@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any, Mapping
 
 
@@ -39,6 +40,7 @@ APPROVED_AUTOTASK_ENTITIES = frozenset(
         "Opportunities",
         "NotificationHistory",
         "TicketNotes",
+        "TimeEntries",
         "TicketCharges",
         "TicketAttachments",
     }
@@ -54,6 +56,11 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
     "autotask.entity.fields.describe": OperationDefinition(
         method="GET",
         path_template="/V1.0/{entity}/entityInformation/fields",
+        path_arguments=("entity",),
+    ),
+    "autotask.entity.udf.fields.describe": OperationDefinition(
+        method="GET",
+        path_template="/V1.0/{entity}/entityInformation/userDefinedFields",
         path_arguments=("entity",),
     ),
     "autotask.entity.get": OperationDefinition(
@@ -318,10 +325,22 @@ def _path_values(
         if argument_name == "entity":
             entity = value_source[argument_name]
 
-            if (
-                not isinstance(entity, str)
-                or entity not in APPROVED_AUTOTASK_ENTITIES
-            ):
+            # The schema-only GET endpoints may inspect any syntactically valid
+            # vendor entity name; this exposes metadata, never entity records.
+            # Data GET/query remains limited to approved provider resource maps.
+            schema_only = (
+                definition.method == "GET"
+                and definition.path_template in {
+                    "/V1.0/{entity}/entityInformation",
+                    "/V1.0/{entity}/entityInformation/fields",
+                    "/V1.0/{entity}/entityInformation/userDefinedFields",
+                }
+            )
+            safe_name = (
+                isinstance(entity, str)
+                and re.fullmatch(r"[A-Z][A-Za-z0-9]{1,79}", entity) is not None
+            )
+            if not safe_name or (not schema_only and entity not in APPROVED_AUTOTASK_ENTITIES):
                 raise ValueError(
                     f"Autotask entity is not approved: {entity!r}"
                 )

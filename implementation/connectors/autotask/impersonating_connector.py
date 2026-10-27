@@ -531,6 +531,68 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
         if observed_ticket != ticket_id or observed_company != expected_company:
             raise PermissionError("AUTOTASK_ATTACHMENT_TICKET_COMPANY_MISMATCH")
 
+    def _verify_time_entry_ticket_company(self, request: ConnectorRequest) -> None:
+        """Prove exact ticket/company before a privileged labor query.
+
+        A matching caller-supplied company_id is not evidence that ticket_id
+        belongs to that company. The provider ticket record must corroborate it.
+        The result is never released or cached as a labor entry.
+        """
+        if request.context.capability != "autotask.entity.query" or (
+            request.arguments.get("entity") != "TimeEntries"
+        ):
+            return
+        ticket_id = request.arguments.get("ticket_id")
+        company_id = request.arguments.get("company_id")
+        if type(ticket_id) is not int or ticket_id < 1 or (
+            type(company_id) is not int or company_id < 1
+        ):
+            raise PermissionError("AUTOTASK_TIME_ENTRY_SCOPE_INVALID")
+        if str(request.context.client_id or "") != str(company_id):
+            raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_CLIENT_SCOPE_MISMATCH")
+        credentials = self._secrets.resolve(self.logical_secret, request.context)
+        ticket_request = ConnectorRequest(
+            context=replace(request.context, capability="autotask.ticket.get"),
+            arguments={"ticket_id": ticket_id},
+        )
+        prepared = self._prepare_ticket_read_as_query(
+            request=ticket_request, credentials=credentials
+        )
+        observed = self._transport.request(
+            method=prepared.method, url=prepared.url, headers=prepared.headers,
+            params=prepared.params, json=prepared.json,
+            timeout_seconds=prepared.timeout_seconds,
+        )
+        rows = observed.get("items") if isinstance(observed, Mapping) else None
+        if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], Mapping):
+            raise PermissionError("AUTOTASK_TIME_ENTRY_TICKET_NOT_UNIQUE")
+        record = rows[0]
+        try:
+            verified_id = int(record.get("id"))
+            verified_company = int(record.get("companyID"))
+        except (ValueError, TypeError) as exc:
+            raise PermissionError("AUTOTASK_TIME_ENTRY_SCOPE_INVALID") from exc
+        if verified_id != ticket_id or verified_company != company_id:
+            raise PermissionError("AUTOTASK_TIME_ENTRY_COMPANY_MISMATCH")
+
+    @staticmethod
+    def _verify_time_entry_result_scope(request: ConnectorRequest, result):
+        if request.context.capability != "autotask.entity.query" or (
+            request.arguments.get("entity") != "TimeEntries"
+        ):
+            return result
+        data = result.data
+        items = data.get("items") if isinstance(data, Mapping) else None
+        if not isinstance(items, list):
+            raise PermissionError("AUTOTASK_TIME_ENTRY_RESPONSE_INVALID")
+        ticket_id = request.arguments["ticket_id"]
+        for item in items:
+            if not isinstance(item, Mapping) or (
+                type(item.get("ticketID")) is not int or item["ticketID"] != ticket_id
+            ):
+                raise PermissionError("AUTOTASK_TIME_ENTRY_RESPONSE_SCOPE_MISMATCH")
+        return result
+
     @staticmethod
     def _sanitize_attachment_metadata(payload: Any) -> Any:
         if isinstance(payload, Mapping):
@@ -544,6 +606,13 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
         return payload
 
     def execute(self, request: ConnectorRequest):
+        if request.context.capability == "autotask.entity.query" and (
+            request.arguments.get("entity") == "TimeEntries"
+        ):
+            self._verify_time_entry_ticket_company(request)
+            return self._verify_time_entry_result_scope(
+                request, super().execute(request)
+            )
         if request.context.capability not in self._ATTACHMENT_READ_OPERATIONS:
             return super().execute(request)
         self._verify_attachment_ticket_company(request)
@@ -597,10 +666,20 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
         }:
             prepared = self._resolve_ticket_search_status(prepared=prepared)
 
+        if (request.context.capability == "autotask.entity.query"
+                and request.arguments.get("entity") == "TimeEntries"):
+            # Provider-native impersonation on GET is NOT proof of read security.
+            # The operator may enable only after observed positive/negative
+            # authorization tests against the exact production entity.
+            if (mode != AUTOTASK_AUTH_MODE_IMPERSONATED
+                    or os.getenv("JASON_AUTOTASK_TIME_ENTRY_NATIVE_READ_PROVEN", "") != "verified"):
+                raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_PERMISSION_NOT_PROVEN")
         if mode == AUTOTASK_AUTH_MODE_JASON_MANAGED:
             return prepared
 
-        if request.context.capability not in _IMPERSONATED_READ_OPERATIONS:
+        is_native_labor_read = (request.context.capability == "autotask.entity.query"
+            and request.arguments.get("entity") == "TimeEntries")
+        if request.context.capability not in _IMPERSONATED_READ_OPERATIONS and not is_native_labor_read:
             return prepared
 
         email = self._trusted_email(request)

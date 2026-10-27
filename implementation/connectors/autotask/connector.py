@@ -31,6 +31,7 @@ class AutotaskConnector(ConnectorBase):
         {
             "autotask.entity.describe",
             "autotask.entity.fields.describe",
+            "autotask.entity.udf.fields.describe",
             "autotask.entity.get",
             "autotask.entity.query",
             "autotask.ticket.get",

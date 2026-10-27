@@ -57,6 +57,7 @@ SERVICE_TICKET_SEARCH = "service.ticket.search"
 SERVICE_TICKET_COUNT = "service.ticket.count"
 SERVICE_TICKET_READ = "service.ticket.read"
 SERVICE_TICKET_NOTES_SEARCH = "service.ticket.notes.search"
+SERVICE_TICKET_TIME_ENTRY_SEARCH = "service.ticket.time.entry.search"
 SERVICE_TICKET_ATTACHMENT_SEARCH = "service.ticket.attachment.search"
 SERVICE_TICKET_ATTACHMENT_READ = "service.ticket.attachment.read"
 SERVICE_TICKET_ATTACHMENT_CONTENT_READ = "service.ticket.attachment.content.read"
@@ -66,6 +67,7 @@ SERVICE_CONTRACT_SEARCH = "service.contract.search"
 SERVICE_CONTRACT_READ = "service.contract.read"
 SERVICE_ENTITY_DESCRIBE = "service.entity.describe"
 SERVICE_ENTITY_FIELDS_DESCRIBE = "service.entity.fields.describe"
+SERVICE_ENTITY_UDF_FIELDS_DESCRIBE = "service.entity.udf.fields.describe"
 SERVICE_NOTIFICATION_HISTORY_SEARCH = "service.notification.history.search"
 SERVICE_PRODUCT_SEARCH = "service.product.search"
 SERVICE_PRODUCT_READ = "service.product.read"
@@ -134,6 +136,7 @@ AUTOTASK_CAPABILITIES = frozenset(
         SERVICE_TICKET_COUNT,
         SERVICE_TICKET_READ,
         SERVICE_TICKET_NOTES_SEARCH,
+        SERVICE_TICKET_TIME_ENTRY_SEARCH,
         SERVICE_TICKET_ATTACHMENT_SEARCH,
         SERVICE_TICKET_ATTACHMENT_READ,
         SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
@@ -143,6 +146,7 @@ AUTOTASK_CAPABILITIES = frozenset(
         SERVICE_CONTRACT_READ,
         SERVICE_ENTITY_DESCRIBE,
         SERVICE_ENTITY_FIELDS_DESCRIBE,
+        SERVICE_ENTITY_UDF_FIELDS_DESCRIBE,
         SERVICE_NOTIFICATION_HISTORY_SEARCH,
         SERVICE_PRODUCT_SEARCH,
         SERVICE_PRODUCT_READ,
@@ -691,6 +695,18 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
         ),
         _read_capability(
             now=now,
+            capability_name=SERVICE_TICKET_TIME_ENTRY_SEARCH,
+            display_name="Search Service Ticket Labor Entries",
+            business_purpose="Read actual technician labor entries for one exact authorized Autotask ticket.",
+            resource_types="service_ticket_time_entry,ticket_time_entry,technician_labor",
+            operation="search",
+            selector_keys="company_id,ticket_id,page_size,after_resource_id",
+            fact_hints="time entries,technician time,labor,work hours,worked on ticket,work performed",
+            authoritative_change_sources=at,
+            collection_fact="ticket labor time entries",
+        ),
+        _read_capability(
+            now=now,
             capability_name=SERVICE_NOTIFICATION_HISTORY_SEARCH,
             display_name="Search Service Notification History",
             business_purpose="Search bounded Autotask notification history for one authorized company or ticket.",
@@ -1039,6 +1055,17 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             operation="describe_fields",
             selector_keys="entity",
             fact_hints="fields,field names,picklist,picklist values,field metadata,schema",
+            authoritative_change_sources=at,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_ENTITY_UDF_FIELDS_DESCRIBE,
+            display_name="Describe Service Entity Custom Fields",
+            business_purpose="Read provider UDF field metadata, not custom-field values.",
+            resource_types="service_schema,service_field_schema",
+            operation="describe_udf_fields",
+            selector_keys="entity",
+            fact_hints="custom fields,udf,user defined fields,field schema,Autotask UDF",
             authoritative_change_sources=at,
         ),
         _read_capability(
