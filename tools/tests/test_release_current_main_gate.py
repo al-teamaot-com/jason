@@ -61,6 +61,8 @@ def test_both_manual_and_automatic_promotion_are_gated_before_mutation(monkeypat
                         lambda repo, root, item: (calls.append("lock"), sentinel_lock)[1])
     monkeypatch.setattr(runner, "release_production_transaction_lock",
                         lambda handle: calls.append("unlock"))
+    monkeypatch.setattr(runner, "require_current_manual_scope_review",
+                        lambda repo, root, item: None)
     monkeypatch.setattr(runner, "require_current_protected_release_source",
                         lambda repo, item: (_ for _ in ()).throw(
                             runner.ReleaseManagerError("superseded candidate")
