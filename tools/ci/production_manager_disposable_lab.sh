@@ -20,6 +20,8 @@ CANDUNIT=jason-pm-lab-candidate.service
 TIMER=jason-pm-lab-candidate.timer
 UNITDIR=/etc/systemd/system
 IMAGE=jason-pm-lab-candidate:scenario
+LAB_NETWORK=jason-pm-lab-internal
+if docker network inspect "$LAB_NETWORK" >/dev/null 2>&1; then echo "ABORT existing lab network" >&2; exit 2; fi
 for unit in "$BASEUNIT" "$CANDUNIT" "$TIMER"; do test ! -e "$UNITDIR/$unit"; done
 for name in jason-pm-lab-runtime jason-pm-lab-mcp jason-pm-lab-runtime-rollback jason-pm-lab-mcp-rollback; do
   if docker inspect "$name" >/dev/null 2>&1; then echo "ABORT existing lab container" >&2; exit 2; fi
@@ -33,9 +35,12 @@ cleanup() {
     docker rm -f "$name" >/dev/null 2>&1 || true
   done
   docker image rm "$IMAGE" >/dev/null 2>&1 || true
+  docker network rm "$LAB_NETWORK" >/dev/null 2>&1 || true
   rm -rf "$DIR"
 }
 trap cleanup EXIT
+docker network create --driver bridge --internal "$LAB_NETWORK" >/dev/null
+test "$(docker network inspect "$LAB_NETWORK" --format '{{.Internal}}')" = true
 
 mkdir -p "$DIR/releases/$BASE/config" "$DIR/releases/$CAND/config" "$DIR/releases/$CAND/infrastructure/openclaw-operations/systemd"
 cat > "$DIR/releases/$BASE/config/production-desired-state.json" <<'EOF'
@@ -124,7 +129,7 @@ FROM python:3.12-alpine
 RUN echo lab-candidate > /tmp/lab-marker
 EOF
 for name in jason-pm-lab-runtime jason-pm-lab-mcp; do
-  docker run --detach --name "$name" --network none \
+  docker run --detach --name "$name" --network "$LAB_NETWORK" \
     --label "com.teamaot.jason.source_revision=$BASE" \
     --env "JASON_SOURCE_REVISION=$BASE" python:3.12-alpine python -m http.server 8080 >/dev/null
   sleep 2
@@ -152,6 +157,7 @@ from datetime import datetime,timezone
 p=pathlib.Path(sys.argv[1]);p.parent.mkdir(parents=True,exist_ok=True)
 o={"schema_version":"1.0","environment":"ephemeral GitHub-hosted Ubuntu systemd/Docker",
    "production_credentials_used":False,"production_resources_touched":False,
+   "isolated_docker_internal_network":True,
    "baseline_revision":sys.argv[2],"candidate_revision":sys.argv[3],
    "baseline_unit_hash":sys.argv[4],"shadow_breaker":"OPEN_after_injected_failure",
    "shadow_known_good":sys.argv[2],
