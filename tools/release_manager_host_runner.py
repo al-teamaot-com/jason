@@ -31,8 +31,8 @@ from typing import Any, Mapping
 from uuid import uuid4
 
 import release_manager_gate as gate
-import production_read_canary_gate as owner_read_canary
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import production_read_canary_gate as owner_read_canary
 import worker_execution_enrollment as worker_enrollment
 
 DEFAULT_REPO = Path("/home/al/.local/lib/jason/engineering-worker-source")
