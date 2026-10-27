@@ -2686,6 +2686,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     # transition. A GitHub merge during long preflight must not make a
     # formerly-current candidate silently supersede newer protected work.
     require_current_protected_release_source(repo, record)
+    require_current_manual_scope_review(repo, state_root, record)
     require_owner_production_deployment_unfrozen(state_root)
     gate_transition(repo, state_root, record, "production")
     save_record(state_root, record)
@@ -2956,6 +2957,94 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         remove_worktree(repo, deploy_worktree)
 
 
+def manual_release_scope_review(
+    repo: Path, state_root: Path, record: dict[str, Any], *,
+    include_prs: tuple[int, ...] = (),
+    include_commits: tuple[str, ...] = (),
+    acknowledged_prs: tuple[int, ...] = (),
+    acknowledged_worktrees: tuple[str, ...] = (),
+    record_review: bool = False,
+) -> dict[str, Any]:
+    """Review a full exact-main release; no deployment or developer checkout edits.
+
+    A scope acknowledgement is technical change-integration evidence, NOT
+    owner deployment authorization. It is bound to the candidate and baseline
+    and must be recomputed under the production lock before any mutation.
+    """
+    import importlib.util
+    source = repo / "tools/manual_release_scope.py"
+    if source.is_symlink() or not source.is_file():
+        raise ReleaseManagerError("canonical manual scope reviewer is unavailable")
+    spec = importlib.util.spec_from_file_location("jason_manual_release_scope", source)
+    if spec is None or spec.loader is None:
+        raise ReleaseManagerError("canonical manual scope reviewer cannot be loaded")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    candidate = exact_sha(str(
+        (record.get("release_candidate") or {}).get("candidate_sha") or ""
+    ), "candidate_sha")
+    baseline = exact_sha(str(record.get("rollback_sha") or ""), "rollback_sha")
+    try:
+        result = module.review(
+            repo, "al-teamaot-com/jason", baseline, candidate,
+            allowed_prs=include_prs,
+            allowed_commits=include_commits,
+            acknowledged_prs=acknowledged_prs,
+            acknowledged_worktrees=acknowledged_worktrees,
+        )
+    except module.ScopeBlocked as exc:
+        raise ReleaseManagerError("manual scope review failed closed: " + str(exc)) from exc
+    if record_review:
+        if record.get("state") != "production_eligible":
+            raise ReleaseManagerError("scope review requires production_eligible release")
+        if result.get("status") != "SCOPE_REVIEWED_NOT_DEPLOYMENT_APPROVED":
+            raise ReleaseManagerError(
+                "scope review blocked unacknowledged merged changes or parallel work"
+            )
+        record["manual_scope_review"] = {
+            "schema_version": "1.0",
+            "candidate_sha": candidate,
+            "baseline_sha": baseline,
+            "scope_sha256": result["scope_sha256"],
+            "included_prs": sorted(set(include_prs)),
+            "included_commits": sorted(set(include_commits)),
+            "acknowledged_prs": sorted(set(acknowledged_prs)),
+            "acknowledged_worktrees": sorted(set(acknowledged_worktrees)),
+            "recorded_at": now(),
+        }
+        save_record(state_root, record)
+    return result
+
+
+def require_current_manual_scope_review(
+    repo: Path, state_root: Path, record: dict[str, Any]
+) -> None:
+    """Reject promotions without a fresh complete review of *all* merged work."""
+    receipt = record.get("manual_scope_review")
+    if not isinstance(receipt, dict) or receipt.get("schema_version") != "1.0":
+        raise ReleaseManagerError(
+            "manual release blocked: full change/parallel-work review is missing"
+        )
+    candidate = exact_sha(str(
+        (record.get("release_candidate") or {}).get("candidate_sha") or ""
+    ), "candidate_sha")
+    baseline = exact_sha(str(record.get("rollback_sha") or ""), "rollback_sha")
+    if receipt.get("candidate_sha") != candidate or receipt.get("baseline_sha") != baseline:
+        raise ReleaseManagerError("manual scope review is for a different release")
+    result = manual_release_scope_review(
+        repo, state_root, record,
+        include_prs=tuple(receipt.get("included_prs") or ()),
+        include_commits=tuple(receipt.get("included_commits") or ()),
+        acknowledged_prs=tuple(receipt.get("acknowledged_prs") or ()),
+        acknowledged_worktrees=tuple(receipt.get("acknowledged_worktrees") or ()),
+    )
+    if (result.get("status") != "SCOPE_REVIEWED_NOT_DEPLOYMENT_APPROVED"
+            or receipt.get("scope_sha256") != result.get("scope_sha256")):
+        raise ReleaseManagerError(
+            "manual release scope changed: repeat review of merged and unfinished work"
+        )
+
+
 def require_owner_production_deployment_unfrozen(state_root: Path) -> None:
     """Refuse any production promotion while an exact owner freeze is recorded.
 
@@ -2987,6 +3076,7 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
     lock = acquire_production_transaction_lock(repo, state_root, record)
     try:
         require_owner_production_deployment_unfrozen(state_root)
+        require_current_manual_scope_review(repo, state_root, record)
         # Check fresh authoritative source before retention, breaker work, or
         # production deployment. Applies to explicit/manual and automatic paths.
         require_current_protected_release_source(repo, record)
@@ -3816,6 +3906,14 @@ def main() -> int:
     preprod = sub.add_parser("preprod")
     preprod.add_argument("--release-id", required=True)
 
+    impact = sub.add_parser("review-impact")
+    impact.add_argument("--release-id", required=True)
+    impact.add_argument("--include-pr", type=int, action="append", default=[])
+    impact.add_argument("--include-commit", action="append", default=[])
+    impact.add_argument("--acknowledge-overlapping-pr", type=int, action="append", default=[])
+    impact.add_argument("--acknowledge-dirty-worktree", action="append", default=[])
+    impact.add_argument("--record", action="store_true")
+
     approve = sub.add_parser("approve")
     approve.add_argument("--release-id", required=True)
     approve.add_argument("--candidate-sha", required=True)
@@ -3874,6 +3972,18 @@ def main() -> int:
         record = run_preproduction(repo, state_root, load_record(state_root, args.release_id))
         print(json.dumps(record, indent=2))
         return 0
+    if args.command == "review-impact":
+        record = load_record(state_root, args.release_id)
+        result = manual_release_scope_review(
+            repo, state_root, record,
+            include_prs=tuple(args.include_pr),
+            include_commits=tuple(args.include_commit),
+            acknowledged_prs=tuple(args.acknowledge_overlapping_pr),
+            acknowledged_worktrees=tuple(args.acknowledge_dirty_worktree),
+            record_review=args.record,
+        )
+        print(json.dumps(result, indent=2))
+        return 0 if result["status"] == "SCOPE_REVIEWED_NOT_DEPLOYMENT_APPROVED" else 2
     if args.command == "approve":
         record = approve_release(
             repo,
