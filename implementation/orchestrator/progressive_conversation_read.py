@@ -45,6 +45,10 @@ from .information_fulfillment import (
     FulfillmentStep,
     RegistryBackedFulfillmentCatalog,
 )
+from .investigation_completion import (
+    NeedCompletionRecord,
+    require_investigation_completion,
+)
 from .information_need_intent import (
     InformationNeedIntentBuilder,
     PlannedInformationNeed,
@@ -174,6 +178,7 @@ class ProgressiveConversationReadEngine:
         observations: list[
             VerifiedConversationResourceObservation
         ] = []
+        completion_records: list[NeedCompletionRecord] = []
 
         available: dict[
             str,
@@ -266,6 +271,12 @@ class ProgressiveConversationReadEngine:
                     supports.extend(
                         assessment.supports
                     )
+                    completion_records.append(NeedCompletionRecord(
+                        information_need=planned.need.need,
+                        target_reference=planned.need.target.reference,
+                        disposition="supported",
+                        attempted_reads=tuple(dict.fromkeys(attempted_capabilities)),
+                    ))
                     continue
 
                 (
@@ -307,8 +318,25 @@ class ProgressiveConversationReadEngine:
                     supports.extend(
                         recovered.supports
                     )
+                    completion_records.append(NeedCompletionRecord(
+                        information_need=planned.need.need,
+                        target_reference=planned.need.target.reference,
+                        disposition="supported",
+                        attempted_reads=tuple(dict.fromkeys(attempted_capabilities)),
+                    ))
 
                 else:
+                    completion_records.append(NeedCompletionRecord(
+                        information_need=planned.need.need,
+                        target_reference=planned.need.target.reference,
+                        disposition="limited",
+                        attempted_reads=tuple(dict.fromkeys(attempted_capabilities)),
+                        terminal_reason=(
+                            "read_budget_exhausted"
+                            if len(attempted_capabilities) > self.max_specialized_reads_per_need
+                            else "no_further_authorized_read"
+                        ),
+                    ))
                     limitations.append(
                         ConversationLimitation(
                             information_need=(
@@ -323,6 +351,13 @@ class ProgressiveConversationReadEngine:
                             ),
                         )
                     )
+
+        require_investigation_completion(
+            needs=tuple(item.need for group in groups for item in group),
+            records=tuple(completion_records),
+            supports=tuple(supports),
+            limitations=tuple(limitations),
+        )
 
         answer = self.answerer.answer(
             ConversationAnswerInput(
