@@ -255,6 +255,23 @@ def live_quickbooks_read_profile() -> str:
     return profiles.pop()
 
 
+def autotask_rollback_environment(
+    env: dict[str, str], *, prior_autotask_profile: str
+) -> dict[str, str]:
+    """Use the exact immutable candidate's reviewed rollback profile.
+
+    The v11 candidate script rejects a v10 *candidate activation* override,
+    even during rollback. Its rollback-current image selects v10 internally,
+    and this function supplies only an independently verified expectation.
+    """
+    if prior_autotask_profile not in AUTOTASK_PROVIDER_READ_PROFILES:
+        raise ReleaseManagerError("rollback Autotask profile is unsupported")
+    result = env.copy()
+    result.pop("JASON_PROVIDER_READ_ACTIVATION_PROFILE", None)
+    result["JASON_PROVIDER_READ_ROLLBACK_PROFILE"] = prior_autotask_profile
+    return result
+
+
 def quickbooks_rollback_environment(
     env: dict[str, str], *, rollback_sha: str, prior_profile: str
 ) -> dict[str, str]:
@@ -2916,7 +2933,15 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             os.environ, rollback_sha=rollback_sha, prior_profile=prior_quickbooks_profile
         )
         if prior_autotask_profile is not None:
-            rollback_env["JASON_PROVIDER_READ_ACTIVATION_PROFILE"] = prior_autotask_profile
+            # The immutable candidate script is the sole authority for choosing
+            # its declared rollback profile. Supplying the old profile as the
+            # *candidate activation* override makes both native rollback
+            # scripts reject the transition before touching their containers.
+            # Preserve the exact audited rollback SHA and verify the expected
+            # profile separately without overriding the source profile.
+            rollback_env = autotask_rollback_environment(
+                rollback_env, prior_autotask_profile=prior_autotask_profile
+            )
         rollback_env[worker_enrollment.ENV_NAME] = previous_worker_uid
 
         rollback_errors: list[str] = []
@@ -2970,6 +2995,10 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
                     recovery_steps["runtime"] = "restoration_attempted"
                     pin_exact_rollback_image("runtime", baseline_manifest)
                     run([str(runtime_script)], cwd=deploy_worktree, env=rollback_env)
+                    # Docker may have started the correct immutable LKG image
+                    # while its health probe still reports "starting". The
+                    # promotion closeout also waits; rollback must too.
+                    wait_live_runtime()
                     if not rollback_surface_is_verified("runtime", rollback_sha, baseline_manifest):
                         raise ReleaseManagerError("runtime rollback image/alias/health is not verified")
                     recovery_steps["runtime"] = "restored_and_verified"
