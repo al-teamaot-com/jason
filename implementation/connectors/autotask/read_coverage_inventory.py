@@ -91,7 +91,7 @@ def assess_coverage(
         raw_access = info.get("userAccessForQuery") if metadata_observed else None
         access = (
             raw_access if isinstance(raw_access, str) and raw_access in
-            {"All", "Mine", "None"} else None
+            {"All", "Mine", "Restricted", "None"} else None
         )
         fields = (provider_fields or {}).get(entity)
         known_fields = isinstance(fields, list)
@@ -119,7 +119,7 @@ def assess_coverage(
             state = "provider_user_query_denied"
         elif access is None:
             state = "provider_user_query_access_unverified"
-        elif access == "Mine":
+        elif access in {"Mine", "Restricted"}:
             state = "provider_user_query_scope_limited"
         elif specialized:
             state = "specialized_authorization_review_required"
