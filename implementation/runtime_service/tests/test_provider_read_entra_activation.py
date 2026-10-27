@@ -54,7 +54,8 @@ def test_v3_does_not_silently_activate_new_microsoft_provider():
     )
 
     assert set(state.provider_ids) == {IT_GLUE_PROVIDER, AUTOTASK_PROVIDER}
-    legacy_autotask = AUTOTASK_CAPABILITIES - PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES
+    legacy_autotask = (AUTOTASK_CAPABILITIES - PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES
+                       - {"service.entity.search", "service.entity.read"})
     assert set(state.capability_names) == IT_GLUE_CAPABILITIES | legacy_autotask
     for capability_name in PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES:
         assert capabilities.get(
@@ -82,7 +83,8 @@ def test_v4_explicitly_activates_itglue_autotask_and_entra_reads():
         profile=PROVIDER_READ_ENTRA_GOVERNED_CATALOG_PROFILE,
     )
 
-    legacy_autotask = AUTOTASK_CAPABILITIES - PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES
+    legacy_autotask = (AUTOTASK_CAPABILITIES - PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES
+                       - {"service.entity.search", "service.entity.read"})
     expected = IT_GLUE_CAPABILITIES | legacy_autotask | MICROSOFT_GRAPH_DIRECTORY_CAPABILITIES
     assert PROVIDER_READ_ENTRA_GOVERNED_CATALOG_CAPABILITIES == expected
     assert set(state.capability_names) == expected
