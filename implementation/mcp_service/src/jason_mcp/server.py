@@ -6751,6 +6751,136 @@ def execute_read_capability(
 
 
 @mcp.tool()
+def verify_release_ticket_read_canary(
+    release_candidate_sha: str,
+    phase: str,
+    created_after: str,
+    created_before: str,
+    page_size: int = 50,
+) -> dict[str, Any]:
+    """Verify complete live Autotask reads under this MCP requester's own identity.
+
+    This is a read-only functional probe, NOT a provider-access exception or
+    an authorization to deploy. Every individual count, search and exact read
+    goes through the existing execute_read_capability -> _governed_read path,
+    which independently enforces the connected Microsoft identity, trusted
+    Jason binding, JKD-001 grants and requester information-release rules.
+    No ticket content or raw provider responses are ever returned.
+    """
+    from orchestrator.foundational_ticket_read_acceptance import (
+        TicketReadCanaryError,
+        run_ticket_read_canary,
+    )
+
+    try:
+        # Fail before any provider call for an unbound/non-human requester.
+        _authenticated_identity()
+    except (PermissionError, ValueError, RuntimeError):
+        return {
+            "status": "denied",
+            "error_code": "MCP_AUTHENTICATED_REQUESTER_REQUIRED",
+            "customer_data_included": False,
+        }
+
+    # This revision is injected by the immutable native Docker release path.
+    # Never trust a caller-supplied running revision for after-release proof.
+    running_revision = str(os.environ.get("JASON_SOURCE_REVISION") or "").strip()
+    profile = str(os.environ.get("JASON_PROVIDER_READ_ACTIVATION_PROFILE") or "").strip()
+    v11_post_release = (
+        phase == "after"
+        and profile == "itglue-autotask-entra-comprehensive-entity-read-catalog-v11"
+    )
+    if v11_post_release and page_size != 50:
+        # The independent PM gate requires proof of the actual first 50-page
+        # plus the exact cursor continuation, rather than a synthetic or
+        # separately-shaped paging smoke.
+        return {
+            "status": "failed", "error_code": "v11_post_release_requires_page_size_50",
+            "provider": "autotask", "customer_data_included": False,
+        }
+    try:
+        summary = run_ticket_read_canary(
+            lambda capability, arguments: execute_read_capability(
+                capability=capability,
+                arguments=dict(arguments),
+            ),
+            release_candidate_sha=release_candidate_sha,
+            running_revision=running_revision,
+            phase=phase,
+            created_after=created_after,
+            created_before=created_before,
+            page_size=page_size,
+            now=datetime.now(timezone.utc),
+        )
+    except TicketReadCanaryError as exc:
+        return {
+            "status": "failed",
+            "error_code": str(exc),
+            "provider": "autotask",
+            "customer_data_included": False,
+        }
+
+    if v11_post_release:
+        # The new generic read path is also mandatory. It must succeed for
+        # the same already-authenticated requester; no service-level fallback
+        # is permitted. This query emits its independent metadata-only receipt
+        # through the normal execute_read_capability read path.
+        try:
+            project_result = execute_read_capability(
+                capability="service.entity.search",
+                arguments={"entity": "Projects", "page_size": 1},
+            )
+        except Exception:
+            return {
+                "status": "failed",
+                "error_code": "governed_generic_project_read_exception",
+                "provider": "autotask", "customer_data_included": False,
+            }
+        if (
+            not isinstance(project_result, dict)
+            or project_result.get("status") != "succeeded"
+            or project_result.get("provider") != "autotask"
+            or project_result.get("error_code") is not None
+        ):
+            return {
+                "status": "failed",
+                "error_code": "governed_generic_project_read_not_successful",
+                "provider": "autotask", "customer_data_included": False,
+            }
+        project_evidence = project_result.get("evidence")
+        project_data = (
+            project_evidence.get("data")
+            if isinstance(project_evidence, dict) else None
+        )
+        items = project_data.get("items") if isinstance(project_data, dict) else None
+        if (
+            not isinstance(items, list)
+            or len(items) > 1
+            or any(
+                not isinstance(item, dict)
+                or type(item.get("id")) is not int
+                or item["id"] <= 0
+                for item in items
+            )
+        ):
+            return {
+                "status": "failed",
+                "error_code": "governed_generic_project_read_malformed",
+                "provider": "autotask", "customer_data_included": False,
+            }
+        summary = {**summary, "generic_project_read_verified": True}
+
+    return {
+        "status": "succeeded",
+        "acceptance_status": "PASS",
+        "summary": summary,
+        "customer_data_included": False,
+        "production_release_approval": False,
+        "needs_independent_receipt_binding": True,
+    }
+
+
+@mcp.tool()
 def view_documentation_attachment(
     document_id: int,
     attachment_id: int,
