@@ -49,6 +49,8 @@ from .provider_read_capability_catalog import (
     SERVICE_CONTACT_SEARCH,
     SERVICE_RESOURCE_READ,
     SERVICE_RESOURCE_SEARCH,
+    SERVICE_ENTITY_SEARCH,
+    SERVICE_ENTITY_READ,
     SERVICE_ENTITY_DESCRIBE,
     SERVICE_ENTITY_FIELDS_DESCRIBE,
     SERVICE_ENTITY_UDF_FIELDS_DESCRIBE,
@@ -624,10 +626,92 @@ def _autotask_count(
     return json.dumps(payload, separators=(",", ":"), sort_keys=True)
 
 
+# These generic read families are confirmed provider-queryable and do not have
+# specialized attachment, labor or company-boundary release contracts. Those
+# sensitive families remain on their existing individually governed paths.
+_AUTOTASK_GENERIC_READ_ENTITIES = frozenset({
+    "Projects",
+    "Tasks",
+    "ServiceCalls",
+    "ProjectNotes",
+    "TicketAdditionalConfigurationItems",
+})
+_AUTOTASK_GENERIC_FIELD_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
+
+
+def _autotask_generic_entity_query(
+    capability_name: str, arguments: Mapping[str, Any],
+) -> dict[str, Any]:
+    entity = arguments.get("entity")
+    if not isinstance(entity, str) or entity not in _AUTOTASK_GENERIC_READ_ENTITIES:
+        raise ValueError("generic read entity is not yet API-accepted for governed query")
+    unsupported = set(arguments) - {
+        "entity", "resource_id", "filters", "page_size", "after_resource_id",
+        "requested_facts", "result_intent", "completeness_requirement",
+    }
+    if unsupported:
+        raise ValueError("unsupported generic Autotask selector")
+    if "search" in arguments:
+        raise ValueError("provider-specific raw Autotask search is prohibited")
+    if capability_name == SERVICE_ENTITY_READ:
+        if arguments.get("filters") not in (None, {}):
+            raise ValueError("exact entity read does not accept additional filters")
+        if arguments.get("after_resource_id") is not None:
+            raise ValueError("exact entity read cannot continue a collection query")
+    filters = arguments.get("filters") or {}
+    if not isinstance(filters, Mapping) or len(filters) > 12:
+        raise ValueError("generic Autotask filters must be at most 12 equality fields")
+    clauses = []
+    for field, value in filters.items():
+        if not isinstance(field, str) or not _AUTOTASK_GENERIC_FIELD_NAME.fullmatch(field):
+            raise ValueError("Autotask filter has invalid canonical field name")
+        if type(value) not in (str, int, float, bool):
+            raise ValueError("Autotask filter value must be a bounded scalar")
+        if isinstance(value, str) and (not value.strip() or len(value) > 512):
+            raise ValueError("Autotask filter text is blank or too large")
+        clauses.append({"op": "eq", "field": field, "value": value})
+    raw_id = arguments.get("resource_id")
+    exact_id = None
+    if raw_id is not None:
+        if isinstance(raw_id, bool):
+            raise ValueError("entity resource_id must be a positive integer")
+        try:
+            exact_id = int(raw_id)
+        except (ValueError, TypeError) as exc:
+            raise ValueError("entity resource_id must be a positive integer") from exc
+        if exact_id < 1:
+            raise ValueError("entity resource_id must be a positive integer")
+        if any(clause["field"] == "id" for clause in clauses):
+            raise ValueError("duplicate exact id selector")
+        clauses.append({"op": "eq", "field": "id", "value": exact_id})
+    elif capability_name == SERVICE_ENTITY_READ:
+        raise ValueError("exact entity read requires resource_id")
+    after_id = _autotask_after_resource_id(arguments)
+    if after_id is not None:
+        if exact_id is not None or any(c["field"] == "id" for c in clauses):
+            raise ValueError("cannot continue an exact-id entity query")
+        clauses.append({"op": "gt", "field": "id", "value": after_id})
+    if not clauses:
+        clauses.append({"op": "exist", "field": "id"})
+    max_records = 2 if capability_name == SERVICE_ENTITY_READ else _autotask_max_records(arguments)
+    result = {
+        "entity": entity,
+        "search": json.dumps(
+            {"MaxRecords": max_records, "filter": clauses},
+            separators=(",", ":"), sort_keys=True,
+        ),
+    }
+    if capability_name == SERVICE_ENTITY_READ:
+        result["jason_exact_entity_read_id"] = exact_id
+    return result
+
+
 def adapt_autotask_arguments(
     capability_name: str,
     arguments: Mapping[str, Any],
 ) -> dict[str, Any]:
+    if capability_name in {SERVICE_ENTITY_SEARCH, SERVICE_ENTITY_READ}:
+        return _autotask_generic_entity_query(capability_name, arguments)
     if capability_name == SERVICE_COMPANY_READ:
         return {"company_id": _resource_id(arguments)}
     if capability_name == SERVICE_CONTACT_READ:
