@@ -102,6 +102,7 @@ def atomic_release_sandbox(monkeypatch):
     only the external effects, not the rollback execution path itself.
     """
     monkeypatch.setattr(runner, "verify_candidate_on_main", lambda *a: None)
+    monkeypatch.setattr(runner, "require_current_protected_release_source", lambda *a: None)
     monkeypatch.setattr(runner, "run_release_ccc_gate",
                         lambda *a, **k: {"status": "PASS",
                                         "mode": "candidate_transition" if k.get("before_mutation") else "live_certified"})
