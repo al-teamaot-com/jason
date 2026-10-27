@@ -20,6 +20,7 @@ from production_read_canary_gate import (
 from jason_mcp.production_read_acceptance import record_authenticated_owner_read
 
 SHA = "a" * 40
+CONNECTED_AOT_PRINCIPAL = "person-entra-" + "a" * 32
 ARGS = {
     "created_after": "2026-10-26T00:00:00-04:00",
     "created_before": "2026-10-27T00:00:00-04:00",
@@ -27,7 +28,7 @@ ARGS = {
 
 
 def _send(root: Path, session: dict, capability: str, arguments: dict, data: dict,
-          *, principal="person-al", org="aot", client=None, profile=PROFILE_V11):
+          *, principal=CONNECTED_AOT_PRINCIPAL, org="aot", client=None, profile=PROFILE_V11):
     return record_authenticated_owner_read(
         capability=capability, arguments=arguments,
         result={"status": "succeeded", "evidence": {"data": data}},
@@ -69,7 +70,7 @@ def test_full_live_owner_read_attestation_passes_with_exact_pagination(tmp_path)
     verdict = verify_authenticated_read_canary(tmp_path, session)
     assert verdict == {
         "status": "PASS", "source_revision": SHA,
-        "identity": "authenticated-owner-jason-managed", "ticket_count": 72,
+        "identity": "authenticated-aot-human-jason-managed", "ticket_count": 72,
         "ticket_pages": 2, "ticket_page_sum": 72,
         "exact_id_readback": True, "generic_project_read": True,
         "customer_data_in_receipt": False,
@@ -93,9 +94,9 @@ def test_missing_one_real_read_never_finishes_owner_acceptance(tmp_path, exclude
 
 @pytest.mark.parametrize("actor,org,client,profile", [
     ("svc-jason", "aot", None, PROFILE_V11),
-    ("person-al", "wrong-org", None, PROFILE_V11),
-    ("person-al", "aot", "customer-14", PROFILE_V11),
-    ("person-al", "aot", None, "itglue-autotask-entra-procurement-billing-reconciliation-catalog-v10"),
+    (CONNECTED_AOT_PRINCIPAL, "wrong-org", None, PROFILE_V11),
+    (CONNECTED_AOT_PRINCIPAL, "aot", "customer-14", PROFILE_V11),
+    (CONNECTED_AOT_PRINCIPAL, "aot", None, "itglue-autotask-entra-procurement-billing-reconciliation-catalog-v10"),
 ])
 def test_service_customer_wrong_tenant_or_inactive_profile_cannot_attest(
     tmp_path, actor, org, client, profile,
@@ -113,7 +114,7 @@ def test_denied_mcp_read_cannot_write_a_success_receipt(tmp_path):
         capability="service.ticket.count", arguments=ARGS,
         result={"status": "denied", "reason_codes": ["SOURCE_REQUESTER_AUTHORIZATION_UNVERIFIED"],
                 "evidence": {"data": {"queryCount": 72}}},
-        principal_id="person-al", organization_id="aot", client_id=None,
+        principal_id=CONNECTED_AOT_PRINCIPAL, organization_id="aot", client_id=None,
         live_profile=PROFILE_V11, root=tmp_path / "functional-canary",
         now=session["issued_at"] + 1,
     )
@@ -172,7 +173,7 @@ def test_recording_requires_existing_private_intent(tmp_path):
     assert not record_authenticated_owner_read(
         capability="service.ticket.count", arguments=ARGS,
         result={"status": "succeeded", "evidence": {"data": {"queryCount": 72}}},
-        principal_id="person-al", organization_id="aot", client_id=None,
+        principal_id=CONNECTED_AOT_PRINCIPAL, organization_id="aot", client_id=None,
         live_profile=PROFILE_V11, root=tmp_path / "functional-canary",
     )
 
@@ -199,3 +200,24 @@ def test_exact_read_real_mcp_one_item_shape_is_accepted(tmp_path):
     assert _send(tmp_path, session, "service.ticket.read",
                  {"resource_id": 143192},
                  {"items": [{"id": 143192}], "pageDetails": {"count": 1}})
+
+
+def test_live_jit_enrolled_owner_identity_is_accepted_not_only_legacy_alias(tmp_path):
+    session = _start(tmp_path)
+    assert _send(tmp_path, session, "service.ticket.count", ARGS,
+                 {"queryCount": 72}, principal=CONNECTED_AOT_PRINCIPAL)
+    assert not _send(tmp_path, session, "service.ticket.count", ARGS,
+                     {"queryCount": 72}, principal="person-not-bound-to-aot")
+
+
+def test_do_not_stitch_one_aot_operators_count_to_anothers_tickets(tmp_path):
+    session = _start(tmp_path)
+    _full(tmp_path, session)
+    event_dir = tmp_path / "functional-canary" / "events"
+    other = "person-entra-" + "b" * 32
+    for path in event_dir.glob("*.json"):
+        payload = json.loads(path.read_text())
+        if payload["proof"]["kind"] == "ticket_count":
+            payload["principal_id"] = other
+            path.write_text(json.dumps(payload))
+    assert verify_authenticated_read_canary(tmp_path, session) is None

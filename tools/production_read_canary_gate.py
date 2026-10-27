@@ -16,6 +16,7 @@ from uuid import uuid4
 
 _SHA = re.compile(r"[a-f0-9]{40}\Z")
 _NONCE = re.compile(r"[a-f0-9]{32}\Z")
+_AOT_HUMAN = re.compile(r"(?:person-al|person-entra-[a-f0-9]{12,64})\Z")
 PROFILE_V11 = "itglue-autotask-entra-comprehensive-entity-read-catalog-v11"
 _DIR = "functional-canary"
 
@@ -102,11 +103,17 @@ def _proofs(state_root: Path, session: dict) -> list[dict]:
         if any(evidence.get(k) != session.get(k) for k in
                ("candidate_sha", "profile", "nonce")):
             continue
-        if evidence.get("schema_version") != "1.0" or evidence.get("principal_id") != "person-al":
+        identity = evidence.get("principal_id")
+        if (evidence.get("schema_version") != "1.0"
+                or not isinstance(identity, str)
+                or not _AOT_HUMAN.fullmatch(identity)):
             continue
         proof = evidence.get("proof")
         if isinstance(proof, dict):
-            results.append(proof)
+            # Never mix one person's count with another person's pages.
+            # Keep identity inside trusted local verification, not customer
+            # output or the final release success response.
+            results.append({**proof, "_authenticated_principal": identity})
     return results
 
 
@@ -122,7 +129,9 @@ def verify_authenticated_read_canary(state_root: Path, session: dict) -> dict | 
         scope = count.get("scope")
         if type(total) is not int or not 1 <= total <= 100 or not isinstance(scope, dict):
             continue
-        pages = [p for p in proofs if p.get("kind") == "ticket_page" and p.get("scope") == scope]
+        identity = count.get("_authenticated_principal")
+        pages = [p for p in proofs if p.get("kind") == "ticket_page"
+                 and p.get("scope") == scope and p.get("_authenticated_principal") == identity]
         for first in (p for p in pages if p.get("after") is None):
             ids = first.get("ids")
             if not isinstance(ids, list) or not ids or len(ids) != min(total, 50):
@@ -139,17 +148,19 @@ def verify_authenticated_read_canary(state_root: Path, session: dict) -> dict | 
                         or any(type(i) is not int or i <= ids[-1] for i in second_ids)
                         or second_ids != sorted(set(second_ids))):
                     continue
-                reads = [p for p in proofs if p.get("kind") == "ticket_exact_read"]
+                reads = [p for p in proofs if p.get("kind") == "ticket_exact_read"
+                         and p.get("_authenticated_principal") == identity]
                 if not any(p.get("id") in ids for p in reads):
                     continue
-                if not any(p.get("kind") == "project_search" and
-                           type(p.get("items")) is int and p["items"] in (0, 1)
+                if not any(p.get("kind") == "project_search"
+                           and p.get("_authenticated_principal") == identity
+                           and type(p.get("items")) is int and p["items"] in (0, 1)
                            for p in proofs):
                     continue
                 return {
                     "status": "PASS",
                     "source_revision": session["candidate_sha"],
-                    "identity": "authenticated-owner-jason-managed",
+                    "identity": "authenticated-aot-human-jason-managed",
                     "ticket_count": total,
                     "ticket_pages": 2 if second_ids else 1,
                     "ticket_page_sum": len(ids) + len(second_ids),

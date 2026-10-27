@@ -23,6 +23,7 @@ _CAPABILITIES = frozenset({
 })
 _SHA = re.compile(r"[a-f0-9]{40}\Z")
 _NONCE = re.compile(r"[a-f0-9]{32}\Z")
+_AOT_HUMAN = re.compile(r"(?:person-al|person-entra-[a-f0-9]{12,64})\Z")
 _TIMESTAMP = re.compile(r"[0-9TZ:+.\-]{16,40}\Z")
 
 
@@ -143,7 +144,12 @@ def record_authenticated_owner_read(
     The caller must derive the principal from the validated Entra OAuth
     context, never from tool arguments or provider output.
     """
-    if (principal_id != "person-al" or organization_id != "aot"
+    # The connected MCP authenticates active AOT Entra users as
+    # person-entra-<object-id>; the historical person-al release approver
+    # is NOT necessarily a live OAuth/Jason binding. Trust only the validated
+    # OAuth-derived principal, not a caller-supplied owner alias.
+    if (not isinstance(principal_id, str) or not _AOT_HUMAN.fullmatch(principal_id)
+            or organization_id != "aot"
             or client_id is not None or live_profile != PROFILE_V11):
         return False
     if not isinstance(arguments, Mapping) or not isinstance(result, Mapping):

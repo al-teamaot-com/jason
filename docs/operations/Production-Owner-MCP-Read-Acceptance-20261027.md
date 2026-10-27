@@ -15,8 +15,10 @@ read profile changes.
 After native preflight and before a production mutation, Release Manager
 creates a fresh, SHA-bound, expiring owner canary intent (mode 0600) in a
 shared AOT-only state directory. Only a successful, normally authorized
-MCP read from the authenticated `person-al` Entra/Jason identity in
-the `aot` organization, with **no customer client binding**, is eligible
+MCP read from an authenticated and governed AOT human Entra/Jason
+identity (`person-entra-<object-id>` or an active legacy `person-al`
+binding) in the `aot` organization, with **no customer client binding**,
+is eligible
 to produce a metadata-only witness.
 
 The MCP witness contains no customer names, ticket descriptions, email,
@@ -68,3 +70,16 @@ receipt inside `execute_read_capability` itself, immediately before successful
 return. The two insertion points are separate and do not conflict; neither
 delegates requester disclosure authority to a service canary. The remaining
 integration requirement is a source-bound end-to-end proof after both merge.
+
+The complete count, pages, exact read and Projects probe must all be from
+**the same authenticated AOT human**; a session cannot combine unrelated
+staff identities. Owner approval of the release is still a separate,
+mandatory exact-SHA authority gate. The witness never grants new reads.
+
+2026-10-27 binding evidence: The active connected Microsoft/Jason identity
+store exposes JIT-enrolled AOT principals using the `person-entra-` family.
+Hard-coding the historical release approver `person-al` would make the
+acceptance witness impossible to satisfy even if every authorized provider
+read succeeded. The writer now accepts only that already-authenticated AOT
+human family and the previous trusted alias, with tenant and customer
+binding restrictions unchanged.
