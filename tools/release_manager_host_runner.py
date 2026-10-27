@@ -2986,7 +2986,7 @@ def manual_release_scope_review(
     baseline = exact_sha(str(record.get("rollback_sha") or ""), "rollback_sha")
     try:
         result = module.review(
-            repo, "al-teamaot-com/jason", baseline, candidate,
+            repo, module.repository_from_origin(repo), baseline, candidate,
             allowed_prs=include_prs,
             allowed_commits=include_commits,
             acknowledged_prs=acknowledged_prs,
@@ -3974,14 +3974,24 @@ def main() -> int:
         return 0
     if args.command == "review-impact":
         record = load_record(state_root, args.release_id)
-        result = manual_release_scope_review(
-            repo, state_root, record,
-            include_prs=tuple(args.include_pr),
-            include_commits=tuple(args.include_commit),
-            acknowledged_prs=tuple(args.acknowledge_overlapping_pr),
-            acknowledged_worktrees=tuple(args.acknowledge_dirty_worktree),
-            record_review=args.record,
-        )
+        # A durable acknowledgment updates a production-eligible record.
+        # Serialize it with promotion, then re-read under the same exclusive
+        # transaction lock; a stale record must never overwrite a newer state.
+        lock = acquire_production_transaction_lock(repo, state_root, record) if args.record else None
+        try:
+            if args.record:
+                record = load_record(state_root, args.release_id)
+            result = manual_release_scope_review(
+                repo, state_root, record,
+                include_prs=tuple(args.include_pr),
+                include_commits=tuple(args.include_commit),
+                acknowledged_prs=tuple(args.acknowledge_overlapping_pr),
+                acknowledged_worktrees=tuple(args.acknowledge_dirty_worktree),
+                record_review=args.record,
+            )
+        finally:
+            if lock is not None:
+                release_production_transaction_lock(lock)
         print(json.dumps(result, indent=2))
         return 0 if result["status"] == "SCOPE_REVIEWED_NOT_DEPLOYMENT_APPROVED" else 2
     if args.command == "approve":
