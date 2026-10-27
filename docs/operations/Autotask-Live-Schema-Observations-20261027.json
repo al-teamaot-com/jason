@@ -1,0 +1,165 @@
+{
+  "entities": {
+    "BillingItems": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
+    },
+    "Companies": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "CompanyNotes": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "ConfigurationItemNotes": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "ConfigurationItems": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "Contacts": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "ContractNotes": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
+    },
+    "Contracts": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "InventoryItems": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "InvoiceTemplates": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "Invoices": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
+    },
+    "NotificationHistory": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "Opportunities": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "Phases": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "ProductVendors": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "Products": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "ProjectAttachments": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "ProjectNotes": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "Projects": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "PurchaseOrderItemReceiving": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "PurchaseOrderItems": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "PurchaseOrders": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "QuoteItems": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "QuoteLocations": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "Quotes": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "Resources": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "ServiceBundles": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "ServiceCalls": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "Services": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "TaskAttachments": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "TaskNotes": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "Tasks": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "TicketAdditionalConfigurationItems": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "TicketAttachments": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "TicketCharges": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "TicketNotes": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "Tickets": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "TimeEntries": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    }
+  },
+  "entity_count": 38,
+  "observed_date": "2026-10-27",
+  "schema_unknown": "All other vendor index entity names have not been verified via this snapshot. These observations do not establish a successful record query.",
+  "schema_version": "1.0",
+  "source": "per-entity Jason governed service.entity.describe (AOT Autotask API integration; schema-only, no ticket/customer record values)",
+  "unsupported_name_probe": {
+    "entity": "PurchaseOrderAttachments",
+    "result": "PROVIDER_HTTP_STATUS_404 (not proof about other attachment entity names)"
+  }
+}
