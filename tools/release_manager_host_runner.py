@@ -184,8 +184,8 @@ AUTOTASK_PROVIDER_READ_PROFILES = frozenset({
 })
 
 
-def declared_autotask_read_profile(candidate_worktree: Path) -> str | None:
-    """Exact immutable-source Autotask read profile; absent on older releases."""
+def declared_autotask_read_profiles(candidate_worktree: Path) -> tuple[str, str] | None:
+    """Bind BOTH new source profile and rollback baseline to immutable Git."""
     path = candidate_worktree / "config" / "autotask-entity-read-profile.json"
     if path.is_symlink():
         raise ReleaseManagerError("Autotask profile declaration cannot be a symlink")
@@ -196,11 +196,18 @@ def declared_autotask_read_profile(candidate_worktree: Path) -> str | None:
     except (OSError, ValueError) as exc:
         raise ReleaseManagerError("Autotask read profile declaration unreadable") from exc
     if (not isinstance(payload, dict)
-            or set(payload) != {"schema_version", "read_profile"}
+            or set(payload) != {"schema_version", "read_profile", "rollback_read_profile"}
             or payload.get("schema_version") != "1.0"
-            or payload.get("read_profile") not in AUTOTASK_PROVIDER_READ_PROFILES):
+            or payload.get("read_profile") not in AUTOTASK_PROVIDER_READ_PROFILES
+            or payload.get("rollback_read_profile") not in AUTOTASK_PROVIDER_READ_PROFILES):
         raise ReleaseManagerError("candidate Autotask read profile declaration invalid")
-    return str(payload["read_profile"])
+    return str(payload["read_profile"]), str(payload["rollback_read_profile"])
+
+
+def declared_autotask_read_profile(candidate_worktree: Path) -> str | None:
+    pair = declared_autotask_read_profiles(candidate_worktree)
+    return pair[0] if pair is not None else None
+
 
 
 def live_autotask_read_profile() -> str:
@@ -2686,6 +2693,12 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     prior_autotask_profile = (
         live_autotask_read_profile() if candidate_autotask_profile is not None else None
     )
+    if candidate_autotask_profile is not None:
+        declared_pair = declared_autotask_read_profiles(deploy_worktree)
+        if declared_pair is None or prior_autotask_profile != declared_pair[1]:
+            raise ReleaseManagerError(
+                "live Autotask baseline differs from exact candidate rollback declaration"
+            )
     if (candidate_autotask_profile is not None
             and os.environ.get("JASON_PROVIDER_READ_ACTIVATION_PROFILE") not in (None, candidate_autotask_profile)):
         raise ReleaseManagerError(

@@ -15,14 +15,15 @@ V11 = "itglue-autotask-entra-comprehensive-entity-read-catalog-v11"
 def test_candidate_profile_loaded_from_immutable_source(tmp_path):
     path = tmp_path / "config" / "autotask-entity-read-profile.json"
     path.parent.mkdir()
-    path.write_text(json.dumps({"schema_version": "1.0", "read_profile": V11}))
+    path.write_text(json.dumps({"schema_version": "1.0", "read_profile": V11, "rollback_read_profile": V10}))
     assert runner.declared_autotask_read_profile(tmp_path) == V11
 
 
 @pytest.mark.parametrize("payload", [
-    {"schema_version": "1.0", "read_profile": "invalid"},
-    {"schema_version": "2.0", "read_profile": V11},
-    {"schema_version": "1.0", "read_profile": V11, "extra": "ignored"},
+    {"schema_version": "1.0", "read_profile": "invalid", "rollback_read_profile": V10},
+    {"schema_version": "1.0", "read_profile": V11, "rollback_read_profile": "invalid"},
+    {"schema_version": "2.0", "read_profile": V11, "rollback_read_profile": V10},
+    {"schema_version": "1.0", "read_profile": V11, "rollback_read_profile": V10, "extra": "ignored"},
     {"read_profile": V11}, [],
 ])
 def test_unapproved_or_bad_profile_declaration_fails_closed(tmp_path, payload):
@@ -39,7 +40,7 @@ def test_missing_legacy_declaration_does_not_force_new_profile(tmp_path):
 
 def test_symlink_profile_source_is_refused(tmp_path):
     data = tmp_path / "outside.json"
-    data.write_text(json.dumps({"schema_version": "1.0", "read_profile": V11}))
+    data.write_text(json.dumps({"schema_version": "1.0", "read_profile": V11, "rollback_read_profile": V10}))
     (tmp_path / "config").mkdir()
     (tmp_path / "config" / "autotask-entity-read-profile.json").symlink_to(data)
     with pytest.raises(runner.ReleaseManagerError, match="symlink"):
@@ -86,3 +87,10 @@ def test_native_release_code_preserves_profile_during_rollback():
     assert 'rollback_env["JASON_PROVIDER_READ_ACTIVATION_PROFILE"] = prior_autotask_profile' in source
     assert "post-deploy Autotask read activation profile mismatch" in source
     assert "invoking Autotask profile override conflicts with immutable candidate" in source
+
+
+def test_immutable_pair_matches_actual_v10_restore(tmp_path):
+    p=tmp_path / "config" / "autotask-entity-read-profile.json"
+    p.parent.mkdir()
+    p.write_text(json.dumps({"schema_version":"1.0","read_profile":V11,"rollback_read_profile":V10}))
+    assert runner.declared_autotask_read_profiles(tmp_path) == (V11,V10)

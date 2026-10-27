@@ -15,42 +15,54 @@ else
   )"
 fi
 
-# Bind the provider-read profile to the actual immutable source, and recover
-# the prior live profile on the native rollback. Both values must be supplied
-# by the governed PM transaction. An earlier installed PM runner can invoke
-# this same contract with independently reviewed, exact source/profile values.
-SOURCE_READ_PROFILE="$(
+# Source-declared v11 and last-known-good v10 are both exact-SHA reviewed.
+# PM v10's non-mutating preflight does not inject profile variables; enforce
+# immutable source and verify the current container's known-good profile
+# independently instead of weakening the actual release activation contract.
+PROFILE_PAIR="$(
   python3 - "$REPO_ROOT/config/autotask-entity-read-profile.json" <<'PY'
 import json, sys
 from pathlib import Path
 p = Path(sys.argv[1])
 if p.is_symlink() or not p.is_file():
-    raise SystemExit("DENIED: missing immutable Autotask read profile declaration")
+    raise SystemExit("DENIED: immutable Autotask read/rollback profile absent")
 o = json.loads(p.read_text(encoding="utf-8"))
 allowed = {"itglue-autotask-entra-procurement-billing-reconciliation-catalog-v10",
            "itglue-autotask-entra-comprehensive-entity-read-catalog-v11"}
-if not isinstance(o, dict) or set(o) != {"schema_version", "read_profile"} or o.get("schema_version") != "1.0" or o.get("read_profile") not in allowed:
-    raise SystemExit("DENIED: invalid immutable Autotask read profile declaration")
-print(o["read_profile"])
+if (not isinstance(o, dict)
+        or set(o) != {"schema_version", "read_profile", "rollback_read_profile"}
+        or o.get("schema_version") != "1.0"
+        or o.get("read_profile") not in allowed
+        or o.get("rollback_read_profile") not in allowed):
+    raise SystemExit("DENIED: unapproved Autotask candidate/rollback profile pair")
+print(o["read_profile"] + "|" + o["rollback_read_profile"])
 PY
 )" || exit 2
-if [ "${JASON_PROVIDER_READ_ACTIVATION_PROFILE:-}" != "$SOURCE_READ_PROFILE" ]; then
-  echo "DENIED: candidate provider-read profile is not bound to immutable source" >&2
+IFS='|' read -r SOURCE_READ_PROFILE DECLARED_ROLLBACK_PROFILE <<< "$PROFILE_PAIR"
+# Optional PM overrides never supersede the exact source contract.
+if [ -n "${JASON_PROVIDER_READ_ACTIVATION_PROFILE:-}" ] &&
+   [ "$JASON_PROVIDER_READ_ACTIVATION_PROFILE" != "$SOURCE_READ_PROFILE" ]; then
+  echo "DENIED: invoking candidate provider-read profile differs from reviewed source" >&2
   exit 2
 fi
-case "${JASON_PROVIDER_READ_ROLLBACK_PROFILE:-}" in
-  itglue-autotask-entra-procurement-billing-reconciliation-catalog-v10|itglue-autotask-entra-comprehensive-entity-read-catalog-v11) ;;
-  *) echo "DENIED: verified rollback provider-read profile is missing or unsupported" >&2; exit 2 ;;
-esac
+if [ -n "${JASON_PROVIDER_READ_ROLLBACK_PROFILE:-}" ] &&
+   [ "$JASON_PROVIDER_READ_ROLLBACK_PROFILE" != "$DECLARED_ROLLBACK_PROFILE" ]; then
+  echo "DENIED: invoking rollback provider-read profile differs from reviewed source" >&2
+  exit 2
+fi
 case "$IMAGE" in
   jason-runtime:rollback-current)
-    AUTOTASK_READ_PROFILE="$JASON_PROVIDER_READ_ROLLBACK_PROFILE"
+    # Original v10 code/image may have no source declaration of its own.
+    # On exact native rollback use the current candidate's reviewed LKG pair.
+    AUTOTASK_READ_PROFILE="$DECLARED_ROLLBACK_PROFILE"
     ;;
   *)
-    PREVIOUS_READ_PROFILE="$(docker inspect jason-runtime --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null |
+    # During runtime->MCP transition only verify this service's previous
+    # profile; the other service may legitimately be on the new revision.
+    LIVE_READ_PROFILE="$(docker inspect jason-runtime --format '{{range .Config.Env}}{{println .}}{{end}}' |
       sed -n 's/^JASON_PROVIDER_READ_ACTIVATION_PROFILE=//p')"
-    if [ "$PREVIOUS_READ_PROFILE" != "$JASON_PROVIDER_READ_ROLLBACK_PROFILE" ]; then
-      echo "DENIED: live provider-read baseline differs from reviewed rollback profile" >&2
+    if [ "$LIVE_READ_PROFILE" != "$DECLARED_ROLLBACK_PROFILE" ]; then
+      echo "DENIED: current service profile mismatches source-declared LKG" >&2
       exit 2
     fi
     AUTOTASK_READ_PROFILE="$SOURCE_READ_PROFILE"

@@ -31,6 +31,9 @@ The new capabilities are **PILOT** until the independent **v11** provider-read a
 
 Before activating v11, prove the managed runtime configuration and independent production health monitoring agree on the selected version. A mismatched exporter or incomplete service configuration is a release blocker, not a reason to disable the drift watchdog.
 
+**Installed-controller bootstrap / rollback:** The immutable release source must declare both the selected candidate's **v11** profile and the verified previous production **v10** profile. During read-only preflight, the installed v10 Production Manager may not yet supply v11 environment variables. In that case the source-bound preflight is permitted only when the currently running service matches the declared v10 baseline; conflicting supplied profile overrides fail closed. Runtime and MCP are verified independently during the forward transition, and native rollback must restore the declared v10 profile for both, not guess from a partly promoted v11 process. Neither a source merge nor a successful isolated preflight authorizes clearing the Owner's production freeze; release admission remains exact-SHA and separately approved.
+
+
 Minimum acceptance:
 1. Provider-backed metadata proof for each additional queryable entity.
 2. Isolated and authenticated positive AOT read, cross-client relationship traversal, exact record IDs, pagination and complete result semantics.
