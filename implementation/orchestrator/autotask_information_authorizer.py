@@ -30,6 +30,8 @@ from .provider_read_capability_catalog import (
     SERVICE_COMPANY_SEARCH,
     SERVICE_CONFIGURATION_READ,
     SERVICE_CONFIGURATION_SEARCH,
+    SERVICE_ENTITY_SEARCH,
+    SERVICE_ENTITY_READ,
     SERVICE_ENTITY_FIELDS_DESCRIBE,
     SERVICE_RESOURCE_READ,
     SERVICE_RESOURCE_SEARCH,
@@ -284,6 +286,19 @@ class AutotaskImpersonationInformationAuthorizer:
                 raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_PERMISSION_NOT_PROVEN")
             if resolution.capability_name not in AUTOTASK_CAPABILITIES:
                 return invocation
+            if resolution.capability_name in {SERVICE_ENTITY_SEARCH, SERVICE_ENTITY_READ}:
+                # Internal provider reads may correlate across AOT's customers,
+                # but a customer-bound identity must NEVER receive the generic
+                # cross-customer query result. Existing customer-scoped routes
+                # continue to own client-specific disclosures.
+                binding = _active_trusted_binding(request=request, bindings=self.bindings)
+                if (
+                    binding is None
+                    or getattr(binding, "client_id", None) is not None
+                    or request.client_id is not None
+                    or request.organization_id != "aot"
+                ):
+                    return invocation
             if (
                 is_provider_health_canary_request(
                     request=request,
