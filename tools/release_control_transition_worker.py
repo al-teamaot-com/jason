@@ -198,6 +198,15 @@ def apply_transition(req: dict, state: dict) -> dict:
         if record.get('state') not in {'production','closed'} or record.get('owner_approval',{}).get('approved') is not True or record['owner_approval'].get('candidate_sha')!=revision:
             raise ValueError('record lacks exact production approval')
         manifest=verify_health(revision)
+        # Preserve the independently root-verified previous LKG in the same
+        # root-owned atomic control record. An open breaker must be able to
+        # restore this EXACT prior revision, not an arbitrary ancestor.
+        previous=state.get('last_known_good')
+        old_manifest=(previous or {}).get('manifest') or {}
+        if (isinstance(previous,dict) and old_manifest.get('complete') is True
+                and isinstance(old_manifest.get('revision'),str)
+                and old_manifest['revision']!=revision):
+            state['previous_last_known_good']=previous
         state['last_known_good']={'release_id':release_id,'manifest':manifest,'recorded_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
     state['circuit_breaker']={'state':'closed','reason':'root_verified_'+action,'revalidated_revision':revision,
                               'updated_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}

@@ -239,16 +239,30 @@ def _restore_root_policy_for_target(source_revision: str) -> str:
         return module.prepare_rollback(source_revision)
     # Root-verified LKG can advance beyond the original migration SHA.
     # Retain committed root policy only for independently verified descendants.
-    # With an open breaker, allow ONLY the protected complete LKG target, never
-    # a new candidate: rollback must remain possible without bypassing gates.
+    # An open breaker may restore either the current protected complete LKG
+    # or the EXACT prior LKG retained by the root transition worker. It must
+    # never authorize an arbitrary ancestor or read an unprivileged release
+    # record as proof. The separately reviewed root policy, digest and Git
+    # ancestry checks below remain mandatory.
     control = module._json(module._root_only(
         module.ROOT / "production-control-state.json"))
     lkg = ((control.get("last_known_good") or {}).get("manifest") or {})
+    previous = ((control.get("previous_last_known_good") or {}).get("manifest") or {})
     breaker = control.get("circuit_breaker") or {}
     lkg_revision = lkg.get("revision")
+    previous_is_exact_verified_baseline = (
+        previous.get("complete") is True
+        and previous.get("revision") == source_revision
+        and source_revision != lkg_revision
+    )
     state = breaker.get("state")
-    authorized_target = (state == "closed" or
-                         (state == "open" and source_revision == lkg_revision))
+    authorized_target = (
+        state == "closed"
+        or (state == "open" and (
+            source_revision == lkg_revision
+            or previous_is_exact_verified_baseline
+        ))
+    )
     if (receipt.get("phase") == "applied"
             and lkg.get("complete") is True and authorized_target):
         data = module._root_only(module.POLICY)

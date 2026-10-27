@@ -84,7 +84,9 @@ def test_native_release_code_preserves_profile_during_rollback():
     source = (Path(__file__).resolve().parents[1] /
               "release_manager_host_runner.py").read_text()
     assert 'env["JASON_PROVIDER_READ_ACTIVATION_PROFILE"] = candidate_autotask_profile' in source
-    assert 'rollback_env["JASON_PROVIDER_READ_ACTIVATION_PROFILE"] = prior_autotask_profile' in source
+    assert 'rollback_env = autotask_rollback_environment(' in source
+    assert 'result.pop("JASON_PROVIDER_READ_ACTIVATION_PROFILE", None)' in source
+    assert 'result["JASON_PROVIDER_READ_ROLLBACK_PROFILE"] = prior_autotask_profile' in source
     assert "post-deploy Autotask read activation profile mismatch" in source
     assert "invoking Autotask profile override conflicts with immutable candidate" in source
 
@@ -94,3 +96,18 @@ def test_immutable_pair_matches_actual_v10_restore(tmp_path):
     p.parent.mkdir()
     p.write_text(json.dumps({"schema_version":"1.0","read_profile":V11,"rollback_read_profile":V10}))
     assert runner.declared_autotask_read_profiles(tmp_path) == (V11,V10)
+
+
+def test_native_rollback_profiles_must_not_pass_v10_as_candidate_override():
+    """2026-10-27 real failure: passing v10 in candidate override refused both rollback scripts."""
+    native_rollback_contract = runner.autotask_rollback_environment
+    env = {
+        "JASON_PROVIDER_READ_ACTIVATION_PROFILE": V11,
+        "JASON_SOURCE_REVISION_OVERRIDE": "b" * 40,
+        "JASON_RUNTIME_PRODUCTION_IMAGE": "jason-runtime:rollback-current",
+        "JASON_MCP_PRODUCTION_IMAGE": "jason-mcp:rollback-current",
+    }
+    selected = native_rollback_contract(env, prior_autotask_profile=V10)
+    assert "JASON_PROVIDER_READ_ACTIVATION_PROFILE" not in selected
+    assert selected["JASON_PROVIDER_READ_ROLLBACK_PROFILE"] == V10
+    assert selected["JASON_SOURCE_REVISION_OVERRIDE"] == "b" * 40
