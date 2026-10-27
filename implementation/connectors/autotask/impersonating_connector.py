@@ -605,6 +605,31 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
             return [AutotaskImpersonatingConnector._sanitize_attachment_metadata(value) for value in payload]
         return payload
 
+    @staticmethod
+    def _verify_generic_exact_entity_result(request: ConnectorRequest, result):
+        """Prevent a provider query fallback from returning a different record."""
+        expected = request.arguments.get("jason_exact_entity_read_id")
+        if expected is None:
+            return result
+        if request.context.capability != "autotask.entity.query":
+            raise PermissionError("AUTOTASK_EXACT_ENTITY_CAPABILITY_INVALID")
+        if type(expected) is not int or expected < 1:
+            raise PermissionError("AUTOTASK_EXACT_ENTITY_ID_INVALID")
+        payload = result.data
+        items = payload.get("items") if isinstance(payload, Mapping) else None
+        if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], Mapping):
+            raise PermissionError("AUTOTASK_EXACT_ENTITY_NOT_UNIQUE")
+        found = items[0].get("id")
+        if isinstance(found, bool) or not isinstance(found, (int, str)):
+            raise PermissionError("AUTOTASK_EXACT_ENTITY_ID_MISMATCH")
+        try:
+            same = int(found) == expected
+        except (TypeError, ValueError):
+            same = False
+        if not same:
+            raise PermissionError("AUTOTASK_EXACT_ENTITY_ID_MISMATCH")
+        return result
+
     def execute(self, request: ConnectorRequest):
         if request.context.capability == "autotask.entity.query" and (
             request.arguments.get("entity") == "TimeEntries"
@@ -614,7 +639,7 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
                 request, super().execute(request)
             )
         if request.context.capability not in self._ATTACHMENT_READ_OPERATIONS:
-            return super().execute(request)
+            return self._verify_generic_exact_entity_result(request, super().execute(request))
         self._verify_attachment_ticket_company(request)
         result = super().execute(request)
         if request.context.capability != "autotask.ticket.attachment.content.get":
