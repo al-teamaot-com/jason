@@ -34,6 +34,7 @@ from .provider_read_capability_catalog import (
     SERVICE_RESOURCE_SEARCH,
     SERVICE_TICKET_COUNT,
     SERVICE_TICKET_NOTES_SEARCH,
+    SERVICE_TICKET_TIME_ENTRY_SEARCH,
     SERVICE_TICKET_READ,
     SERVICE_TICKET_SEARCH,
 )
@@ -88,6 +89,7 @@ _IMPERSONATED_CANONICAL_READS = frozenset(
         SERVICE_TICKET_READ,
         SERVICE_TICKET_SEARCH,
         SERVICE_TICKET_COUNT,
+        SERVICE_TICKET_TIME_ENTRY_SEARCH,
     }
 )
 
@@ -271,6 +273,8 @@ class AutotaskImpersonationInformationAuthorizer:
             return invocation
 
         if mode == AUTOTASK_AUTH_MODE_JASON_MANAGED:
+            if resolution.capability_name == SERVICE_TICKET_TIME_ENTRY_SEARCH:
+                raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_PERMISSION_NOT_PROVEN")
             if resolution.capability_name not in AUTOTASK_CAPABILITIES:
                 return invocation
             if (

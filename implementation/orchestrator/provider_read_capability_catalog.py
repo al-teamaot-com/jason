@@ -57,6 +57,7 @@ SERVICE_TICKET_SEARCH = "service.ticket.search"
 SERVICE_TICKET_COUNT = "service.ticket.count"
 SERVICE_TICKET_READ = "service.ticket.read"
 SERVICE_TICKET_NOTES_SEARCH = "service.ticket.notes.search"
+SERVICE_TICKET_TIME_ENTRY_SEARCH = "service.ticket.time.entry.search"
 SERVICE_TICKET_ATTACHMENT_SEARCH = "service.ticket.attachment.search"
 SERVICE_TICKET_ATTACHMENT_READ = "service.ticket.attachment.read"
 SERVICE_TICKET_ATTACHMENT_CONTENT_READ = "service.ticket.attachment.content.read"
@@ -134,6 +135,7 @@ AUTOTASK_CAPABILITIES = frozenset(
         SERVICE_TICKET_COUNT,
         SERVICE_TICKET_READ,
         SERVICE_TICKET_NOTES_SEARCH,
+        SERVICE_TICKET_TIME_ENTRY_SEARCH,
         SERVICE_TICKET_ATTACHMENT_SEARCH,
         SERVICE_TICKET_ATTACHMENT_READ,
         SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
@@ -688,6 +690,18 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             fact_hints="ticket note,ticket notes,note,notes,update,work note,description",
             authoritative_change_sources=at,
             collection_fact="ticket notes",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_TICKET_TIME_ENTRY_SEARCH,
+            display_name="Search Service Ticket Labor Entries",
+            business_purpose="Read actual technician labor entries for one exact authorized Autotask ticket.",
+            resource_types="service_ticket_time_entry,ticket_time_entry,technician_labor",
+            operation="search",
+            selector_keys="company_id,ticket_id,page_size,after_resource_id",
+            fact_hints="time entries,technician time,labor,work hours,worked on ticket,work performed",
+            authoritative_change_sources=at,
+            collection_fact="ticket labor time entries",
         ),
         _read_capability(
             now=now,

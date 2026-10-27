@@ -39,6 +39,7 @@ APPROVED_AUTOTASK_ENTITIES = frozenset(
         "Opportunities",
         "NotificationHistory",
         "TicketNotes",
+        "TimeEntries",
         "TicketCharges",
         "TicketAttachments",
     }

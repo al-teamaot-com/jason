@@ -597,10 +597,16 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
         }:
             prepared = self._resolve_ticket_search_status(prepared=prepared)
 
+        if (request.context.capability == "autotask.entity.query"
+                and request.arguments.get("entity") == "TimeEntries"
+                and mode != AUTOTASK_AUTH_MODE_IMPERSONATED):
+            raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_PERMISSION_NOT_PROVEN")
         if mode == AUTOTASK_AUTH_MODE_JASON_MANAGED:
             return prepared
 
-        if request.context.capability not in _IMPERSONATED_READ_OPERATIONS:
+        is_native_labor_read = (request.context.capability == "autotask.entity.query"
+            and request.arguments.get("entity") == "TimeEntries")
+        if request.context.capability not in _IMPERSONATED_READ_OPERATIONS and not is_native_labor_read:
             return prepared
 
         email = self._trusted_email(request)

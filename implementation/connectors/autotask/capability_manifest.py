@@ -44,6 +44,7 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_OPPORTUNITY_READ,
     SERVICE_TICKET_COUNT,
     SERVICE_TICKET_NOTES_SEARCH,
+    SERVICE_TICKET_TIME_ENTRY_SEARCH,
     SERVICE_TICKET_ATTACHMENT_SEARCH,
     SERVICE_TICKET_ATTACHMENT_READ,
     SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
@@ -251,6 +252,7 @@ def build_autotask_manifest() -> IntegrationManifest:
                         collection_supported=False,
                     ),
                     _read("service.ticket.read", SERVICE_TICKET_READ),
+                    _search("service.ticket.time.entry.search", SERVICE_TICKET_TIME_ENTRY_SEARCH, ("company_id", "ticket_id", "page_size", "after_resource_id")),
                     IntegrationOperation(
                         operation_id="service.ticket.notes.search",
                         kind=OperationKind.SEARCH,
