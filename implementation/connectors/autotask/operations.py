@@ -4,6 +4,8 @@ from dataclasses import dataclass
 import re
 from typing import Any, Mapping
 
+from .verified_read_extensions import v12_entity_read_enabled
+
 
 @dataclass(frozen=True)
 class OperationDefinition:
@@ -345,7 +347,22 @@ def _path_values(
                 isinstance(entity, str)
                 and re.fullmatch(r"[A-Z][A-Za-z0-9]{1,79}", entity) is not None
             )
-            if not safe_name or (not schema_only and entity not in APPROVED_AUTOTASK_ENTITIES):
+            # Additional verified read entities are a distinct v12-only
+            # provider GET/query allowance. This MUST NOT expand the existing
+            # entity whitelist used by any mutation operation.
+            v12_data_read = (
+                definition.method == "GET"
+                and definition.path_template in {
+                    "/V1.0/{entity}/query",
+                    "/V1.0/{entity}/{entity_id}",
+                }
+                and v12_entity_read_enabled(entity)
+            )
+            if not safe_name or (
+                not schema_only
+                and entity not in APPROVED_AUTOTASK_ENTITIES
+                and not v12_data_read
+            ):
                 raise ValueError(
                     f"Autotask entity is not approved: {entity!r}"
                 )

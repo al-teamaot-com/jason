@@ -7,18 +7,19 @@
 | Public documentation candidate entity names | 230 |
 | Distinct union of public and source-known names | 230 |
 | Existing Jason connector source-known names | 31 |
-| Live governed schema checks succeeded | 38 |
-| API integration userAccessForQuery=All | 35 |
-| API integration userAccessForQuery=None | 3 |
+| Live governed schema checks succeeded | 76 |
+| API integration userAccessForQuery=All | 59 |
+| API integration userAccessForQuery=None | 15 |
+| API integration userAccessForQuery=Restricted/Mine | 2 |
 | Live entity-record queries validated through new generic route | 0 |
 | Named entity families with at least one live read route | 22 |
-| Vendor candidate metadata verified | 16.5% |
+| Vendor candidate metadata verified | 33.0% |
 
 ## Important distinctions
 
 The published index contains candidates, not an authenticated API account's permissions. The presence of `canQuery=true` alone is insufficient; user-specific `userAccessForQuery=None` remains a provider denial. The metadata evidence is not a successful record query, field-completeness test, child traversal, pagination test, or proof that a user may receive a result. An API read and requester disclosure remain separate decisions.
 
-Known provider-account metadata restrictions: BillingItems, ContractNotes, Invoices.
+Known provider-account metadata restrictions: BillingItems, ContractBillingRules, ContractBlocks, ContractCharges, ContractExclusionSets, ContractMilestones, ContractNotes, ContractRates, ContractServiceBundles, ContractServices, InventoryTransfers, Invoices, KnowledgeBaseArticles, ProductTiers, TicketAdditionalContacts.
 
 ## Next engineering gates
 

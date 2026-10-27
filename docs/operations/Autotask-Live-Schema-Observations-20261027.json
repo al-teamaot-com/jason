@@ -1,4 +1,18 @@
 {
+  "bounded_read_probes": [
+    {
+      "capability": "service.invoice.search",
+      "page_size": 1,
+      "record_content_saved": false,
+      "result": "PROVIDER_HTTP_STATUS_500"
+    },
+    {
+      "capability": "service.billing.item.search",
+      "page_size": 1,
+      "record_content_saved": false,
+      "result": "PROVIDER_HTTP_STATUS_500"
+    }
+  ],
   "entities": {
     "BillingItems": {
       "canQuery": true,
@@ -8,7 +22,35 @@
       "canQuery": true,
       "userAccessForQuery": "All"
     },
+    "CompanyAlerts": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "CompanyAttachments": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "CompanyCategories": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "CompanyLocations": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
     "CompanyNotes": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "CompanySiteConfigurations": {
+      "canQuery": true,
+      "userAccessForQuery": "Restricted"
+    },
+    "CompanyTeams": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "CompanyToDos": {
       "canQuery": true,
       "userAccessForQuery": "All"
     },
@@ -24,7 +66,39 @@
       "canQuery": true,
       "userAccessForQuery": "All"
     },
+    "ContractBillingRules": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
+    },
+    "ContractBlocks": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
+    },
+    "ContractCharges": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
+    },
+    "ContractExclusionSets": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
+    },
+    "ContractMilestones": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
+    },
     "ContractNotes": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
+    },
+    "ContractRates": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
+    },
+    "ContractServiceBundles": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
+    },
+    "ContractServices": {
       "canQuery": true,
       "userAccessForQuery": "None"
     },
@@ -32,15 +106,39 @@
       "canQuery": true,
       "userAccessForQuery": "All"
     },
+    "InventoryItemSerialNumbers": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
     "InventoryItems": {
       "canQuery": true,
       "userAccessForQuery": "All"
+    },
+    "InventoryLocations": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "InventoryProducts": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "InventoryStockedItems": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "InventoryTransfers": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
     },
     "InvoiceTemplates": {
       "canQuery": true,
       "userAccessForQuery": "All"
     },
     "Invoices": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
+    },
+    "KnowledgeBaseArticles": {
       "canQuery": true,
       "userAccessForQuery": "None"
     },
@@ -55,6 +153,14 @@
     "Phases": {
       "canQuery": true,
       "userAccessForQuery": "All"
+    },
+    "ProductNotes": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "ProductTiers": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
     },
     "ProductVendors": {
       "canQuery": true,
@@ -108,6 +214,22 @@
       "canQuery": true,
       "userAccessForQuery": "All"
     },
+    "ServiceCallTaskResources": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "ServiceCallTasks": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "ServiceCallTicketResources": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "ServiceCallTickets": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
     "ServiceCalls": {
       "canQuery": true,
       "userAccessForQuery": "All"
@@ -120,7 +242,19 @@
       "canQuery": true,
       "userAccessForQuery": "All"
     },
+    "TaskNoteAttachments": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
     "TaskNotes": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "TaskPredecessors": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "TaskSecondaryResources": {
       "canQuery": true,
       "userAccessForQuery": "All"
     },
@@ -132,7 +266,19 @@
       "canQuery": true,
       "userAccessForQuery": "All"
     },
+    "TicketAdditionalContacts": {
+      "canQuery": true,
+      "userAccessForQuery": "None"
+    },
     "TicketAttachments": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "TicketCategories": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "TicketChangeRequestApprovals": {
       "canQuery": true,
       "userAccessForQuery": "All"
     },
@@ -140,9 +286,29 @@
       "canQuery": true,
       "userAccessForQuery": "All"
     },
+    "TicketChecklistItems": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "TicketHistory": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "TicketNoteAttachments": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
     "TicketNotes": {
       "canQuery": true,
       "userAccessForQuery": "All"
+    },
+    "TicketSecondaryResources": {
+      "canQuery": true,
+      "userAccessForQuery": "All"
+    },
+    "TicketTagAssociations": {
+      "canQuery": true,
+      "userAccessForQuery": "Restricted"
     },
     "Tickets": {
       "canQuery": true,
@@ -153,9 +319,9 @@
       "userAccessForQuery": "All"
     }
   },
-  "entity_count": 38,
+  "entity_count": 76,
   "observed_date": "2026-10-27",
-  "schema_unknown": "All other vendor index entity names have not been verified via this snapshot. These observations do not establish a successful record query.",
+  "schema_unknown": "All other vendor index entities remain unverified in this snapshot; each observation is metadata, NOT a successful record query.",
   "schema_version": "1.0",
   "source": "per-entity Jason governed service.entity.describe (AOT Autotask API integration; schema-only, no ticket/customer record values)",
   "unsupported_name_probe": {

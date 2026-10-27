@@ -44,6 +44,7 @@ def generate() -> dict:
     observed = [r for r in rows if r["provider_metadata_observed"]]
     allowed = [r for r in observed if r["provider_user_query_access"] == "All"]
     denied = [r for r in observed if r["provider_user_query_access"] == "None"]
+    limited = [r for r in observed if r["provider_user_query_access"] in {"Restricted", "Mine"}]
     coverage = len(observed) / len(rows)
     named_active = sum(bool(r["named_route_capabilities_active"]) for r in rows)
     text = (
@@ -56,6 +57,7 @@ def generate() -> dict:
         f"| Live governed schema checks succeeded | {len(observed)} |\n"
         f"| API integration userAccessForQuery=All | {len(allowed)} |\n"
         f"| API integration userAccessForQuery=None | {len(denied)} |\n"
+        f"| API integration userAccessForQuery=Restricted/Mine | {len(limited)} |\n"
         f"| Live entity-record queries validated through new generic route | 0 |\n"
         f"| Named entity families with at least one live read route | {named_active} |\n"
         f"| Vendor candidate metadata verified | {coverage:.1%} |\n\n"
@@ -89,6 +91,7 @@ def generate() -> dict:
         "metadata_verified": len(observed),
         "api_user_all": len(allowed),
         "api_user_none": len(denied),
+        "api_user_restricted": len(limited),
         "source_registered": report["source_registered_entity_count"],
         "named_entity_families_active": named_active,
     }
