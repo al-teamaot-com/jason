@@ -1,0 +1,41 @@
+name: P0 Owner Autotask Production Read Acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'tools/production_read_canary_gate.py'
+      - 'tools/release_manager_host_runner.py'
+      - 'implementation/mcp_service/src/jason_mcp/production_read_acceptance.py'
+      - 'implementation/mcp_service/src/jason_mcp/server.py'
+      - 'tools/tests/test_production_read_canary_gate.py'
+      - '.github/workflows/production-owner-autotask-read-acceptance.yml'
+  push:
+    paths:
+      - 'tools/production_read_canary_gate.py'
+      - 'tools/release_manager_host_runner.py'
+      - 'implementation/mcp_service/src/jason_mcp/production_read_acceptance.py'
+      - 'implementation/mcp_service/src/jason_mcp/server.py'
+      - 'tools/tests/test_production_read_canary_gate.py'
+      - '.github/workflows/production-owner-autotask-read-acceptance.yml'
+
+jobs:
+  native-real-owner-read-canary:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: tools:implementation/mcp_service/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test harness
+        run: python -m pip install pytest
+      - name: Verify pure read-attestation and native acceptance code
+        run: |
+          python -m py_compile \
+            tools/production_read_canary_gate.py \
+            tools/release_manager_host_runner.py \
+            implementation/mcp_service/src/jason_mcp/production_read_acceptance.py \
+            implementation/mcp_service/src/jason_mcp/server.py
+      - name: Prove real owner read gating and negative authorization
+        run: python -m pytest -q tools/tests/test_production_read_canary_gate.py
