@@ -2756,6 +2756,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         env["JASON_QUICKBOOKS_READ_PROFILE"] = candidate_quickbooks_profile
     if candidate_autotask_profile is not None:
         env["JASON_PROVIDER_READ_ACTIVATION_PROFILE"] = candidate_autotask_profile
+        env["JASON_PROVIDER_READ_ROLLBACK_PROFILE"] = prior_autotask_profile
 
     runtime_attempted = False
     mcp_attempted = False
