@@ -96,6 +96,7 @@ from connectors.datto_edr.threat_correlation import (
 )
 from pydantic import AnyHttpUrl
 from jason_mcp.release_approval_request import queue_release_approval_request
+from jason_mcp.production_read_acceptance import record_authenticated_owner_read
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse
 
@@ -6723,6 +6724,28 @@ def execute_read_capability(
                 result["evidence"] = _safe(
                     evidence
                 )
+
+    # The native Production Manager cannot accept a read-surface release
+    # based on HTTP 200 alone. Only a real Entra-authenticated owner request
+    # that passed ordinary requester release authorization may furnish
+    # non-sensitive external functional acceptance evidence. Never mint
+    # evidence from service-only canaries or from failed/denied calls.
+    if capability_name in {
+        "service.ticket.count", "service.ticket.search",
+        "service.ticket.read", "service.entity.search",
+    }:
+        try:
+            owner_principal, owner_org, _, owner_client = _authenticated_identity()
+            record_authenticated_owner_read(
+                capability=capability_name, arguments=read_arguments,
+                result=result, principal_id=owner_principal,
+                organization_id=owner_org, client_id=owner_client,
+                live_profile=os.getenv("JASON_PROVIDER_READ_ACTIVATION_PROFILE", ""),
+            )
+        except (PermissionError, OSError, ValueError):
+            # A missing optional canary must never disrupt the authorized
+            # requester read. It fails the separate deployment gate instead.
+            pass
 
     return result
 

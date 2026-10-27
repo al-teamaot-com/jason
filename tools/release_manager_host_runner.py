@@ -32,6 +32,7 @@ from uuid import uuid4
 
 import release_manager_gate as gate
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import production_read_canary_gate as owner_read_canary
 import worker_execution_enrollment as worker_enrollment
 
 DEFAULT_REPO = Path("/home/al/.local/lib/jason/engineering-worker-source")
@@ -2740,6 +2741,15 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
 
     controller_pin = controller_identity(deploy_worktree)
     baseline_manifest = capture_production_manifest(rollback_sha)
+    owner_read_canary_session = None
+    if (candidate_autotask_profile is not None
+            and candidate_autotask_profile != prior_autotask_profile):
+        # Start the post-deploy *real connected owner* acceptance witness before
+        # any production mutation. Empty/stale/synthetic evidence cannot pass.
+        owner_read_canary_session = owner_read_canary.begin_authenticated_read_canary(
+            state_root, candidate_sha=candidate_sha,
+            profile=candidate_autotask_profile,
+        )
     record["controller_pin"] = controller_pin
     record["last_known_good_manifest"] = baseline_manifest
     record["pre_mutation_health"] = {
@@ -2844,6 +2854,15 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
 
         controller_verified = verify_controller_identity(controller_pin, deploy_worktree, installed_candidate=True)
         smoke = run_functional_smoke_tests(candidate_sha)
+        verified_owner_read_canary = None
+        if owner_read_canary_session is not None:
+            # This waits for genuine OAuth-bound, governed MCP tool reads:
+            # ticket count, exact pagination, exact ticket read and the newly
+            # added generic Projects query. No synthetic provider-health
+            # canary, status endpoint or fixture may satisfy this gate.
+            verified_owner_read_canary = owner_read_canary.require_authenticated_read_canary(
+                state_root, owner_read_canary_session,
+            )
         # Certification is mandatory BEFORE verified/closed or new LKG. A
         # non-PASS or stale/wrong-SHA report raises inside the rollback block.
         ccc_postflight = run_release_ccc_gate(
@@ -2864,6 +2883,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "ccc_post_mutation": ccc_postflight,
             "functional_smoke_tests_passed": bool(smoke.get("passed")),
             "functional_smoke_tests": smoke,
+            "authenticated_owner_read_canary": verified_owner_read_canary,
             "controller_identity_verified": True,
             "controller_handoff": controller_verified["controller_handoff"],
             "executing_controller_revision": controller_verified["executing_controller_revision"],
@@ -2907,6 +2927,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "preproduction": record.get("preproduction"),
             "pre_mutation_health": record.get("pre_mutation_health"),
             "functional_smoke_tests": smoke,
+            "authenticated_owner_read_canary": verified_owner_read_canary,
             "production_manifest": production_manifest,
             "desired_state_drift_evidence": drift_evidence,
             "rollback_target": baseline_manifest,
