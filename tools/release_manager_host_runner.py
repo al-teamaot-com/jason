@@ -2685,6 +2685,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     # transition. A GitHub merge during long preflight must not make a
     # formerly-current candidate silently supersede newer protected work.
     require_current_protected_release_source(repo, record)
+    require_owner_production_deployment_unfrozen(state_root)
     gate_transition(repo, state_root, record, "production")
     save_record(state_root, record)
 
@@ -2954,9 +2955,37 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         remove_worktree(repo, deploy_worktree)
 
 
+def require_owner_production_deployment_unfrozen(state_root: Path) -> None:
+    """Refuse any production promotion while an exact owner freeze is recorded.
+
+    The existing auto-promotion incident hold controls unattended scheduling
+    and intentional manual mode. This separate marker freezes BOTH entry
+    points without preventing read-only diagnostics, isolated preproduction,
+    or emergency rollback to the independently verified baseline.
+
+    A symlink, directory, or unreadable marker fails closed; no caller can
+    bypass this check by passing an absent/unreadable marker value.
+    """
+    marker = state_root / "production-deployment-freeze"
+    try:
+        marker.lstat()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise ReleaseManagerError(
+            "owner production deployment freeze status cannot be verified"
+        ) from exc
+    raise ReleaseManagerError(
+        "owner production deployment freeze is active: "
+        "manual and automatic promotions are prohibited"
+    )
+
+
 def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
+    require_owner_production_deployment_unfrozen(state_root)
     lock = acquire_production_transaction_lock(repo, state_root, record)
     try:
+        require_owner_production_deployment_unfrozen(state_root)
         # Check fresh authoritative source before retention, breaker work, or
         # production deployment. Applies to explicit/manual and automatic paths.
         require_current_protected_release_source(repo, record)
