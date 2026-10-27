@@ -31,6 +31,23 @@ def command(args, cwd=None):
     return result.stdout
 
 
+def repository_from_origin(repo):
+    """Resolve the actual Git remote identity, never a caller-selected PR scope."""
+    from urllib.parse import urlparse
+    url = command(["git", "remote", "get-url", "origin"], repo).strip()
+    if "://" in url:
+        path = urlparse(url).path.strip("/")
+    elif ":" in url and "@" in url.split(":", 1)[0]:
+        path = url.split(":", 1)[1]
+    else:
+        raise ScopeBlocked("GitHub repository origin is not verifiable")
+    if path.endswith(".git"):
+        path = path[:-4]
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", path):
+        raise ScopeBlocked("GitHub repository origin does not identify owner/name")
+    return path
+
+
 def source_scope(repo, baseline, candidate):
     if not SHA.fullmatch(baseline) or not SHA.fullmatch(candidate):
         raise ScopeBlocked("exact SHA required")
