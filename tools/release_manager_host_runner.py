@@ -24,6 +24,7 @@ import tempfile
 import sys
 import time
 import urllib.request
+from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Mapping
@@ -3256,20 +3257,74 @@ def signed_owner_offer_purpose(
     return "ccc_material_review_only"
 
 
-def approval_only_while_promotion_held(repo: Path, state_root: Path) -> bool:
-    """Issue nonexecuting owner Teams offers and consume signed decisions, NEVER deploy.
+@contextmanager
+def approval_only_production_transaction_gate(state_root: Path):
+    """Serialize nonexecuting approval processing with the REAL release mutex.
 
-    Runs via a distinct systemd timer only while the legacy automatic-promotion
-    incident hold remains installed. The production timer retains its explicit
-    systemd hold condition; this function has no deploy/host/root-control call.
-    No isolated preproduction state may read live owner decisions or issue cards.
+    An in-flight release may temporarily have a new runtime/MCP but the old
+    protected LKG. This is not evidence of a permanently inconsistent baseline.
+    Deferring the entire approval-only cycle while that exclusive transaction
+    lock is held avoids a spurious failed user unit and downstream root drift.
+
+    Use the same inode as native promotion, never its written metadata or a
+    timestamp as evidence of activity. All other lock errors fail closed.
+    """
+    path = state_root / "production-transaction.lock"
+    flags = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC
+    try:
+        fd = os.open(path, flags, 0o660)
+    except OSError as exc:
+        raise ReleaseManagerError(
+            "approval-only release transaction lock cannot be opened safely"
+        ) from exc
+    try:
+        metadata = os.fstat(fd)
+        if (not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_uid != os.getuid()
+                or metadata.st_mode & 0o002):
+            raise ReleaseManagerError(
+                "approval-only release transaction lock ownership or mode is unsafe"
+            )
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            # Still no approval, no Teams card and no production state read.
+            yield False
+            return
+        except OSError as exc:
+            raise ReleaseManagerError(
+                "approval-only release transaction lock state is unavailable"
+            ) from exc
+        try:
+            yield True
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def approval_only_while_promotion_held(repo: Path, state_root: Path) -> bool:
+    """Issue nonexecuting owner Teams offers, NEVER during a release transaction.
+
+    The same exclusive lock governs the *whole* approved-only read and any
+    signed decision, so a simultaneous production promotion cannot begin after
+    we first check the version but before issuing or consuming a Teams offer.
+    A collision is a benign IDLE deferral, never permission to bypass drift.
     """
     if Path(state_root).resolve() != DEFAULT_STATE.resolve():
         raise ReleaseManagerError("approval-only worker requires canonical live state")
     if not (state_root / "auto-promotion-incident-hold").is_file():
         print("RELEASE_APPROVAL_ONLY=HOLD_NOT_ACTIVE", flush=True)
         return False
+    with approval_only_production_transaction_gate(state_root) as stable:
+        if not stable:
+            print("RELEASE_APPROVAL_ONLY=PRODUCTION_TRANSITION_IN_PROGRESS", flush=True)
+            return False
+        return _approval_only_on_stable_production(repo, state_root)
 
+
+def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
+    """Private locked implementation; never call outside the serialized gate."""
     # Trust only fresh root-published evidence and a healthy, aligned live
     # production baseline; never revalidate or close an opened breaker here.
     control = _read_protected_snapshot(state_root, "production-control-state.json")
