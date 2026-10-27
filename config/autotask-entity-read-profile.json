@@ -1,4 +1,5 @@
 {
   "schema_version": "1.0",
-  "read_profile": "itglue-autotask-entra-comprehensive-entity-read-catalog-v11"
+  "read_profile": "itglue-autotask-entra-comprehensive-entity-read-catalog-v11",
+  "rollback_read_profile": "itglue-autotask-entra-procurement-billing-reconciliation-catalog-v10"
 }
