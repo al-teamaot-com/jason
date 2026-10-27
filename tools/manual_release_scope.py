@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -21,7 +22,8 @@ class ScopeBlocked(ValueError):
 
 def command(args, cwd=None):
     try:
-        result = subprocess.run(args, cwd=cwd, text=True, capture_output=True, timeout=45)
+        result = subprocess.run(args, cwd=cwd, text=True, capture_output=True, timeout=45,
+                                env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ScopeBlocked("required read-only evidence unavailable") from exc
     if result.returncode or len(result.stdout) > 6000000:
@@ -61,7 +63,8 @@ def dirty_worktrees(repo, changed):
     for path in paths:
         if not path.is_dir():
             raise ScopeBlocked("registered development worktree unavailable")
-        status = command(["git", "status", "--porcelain=v1", "--untracked-files=normal"], path)
+        status = command(["git", "status", "--porcelain=v1", "--untracked-files=normal",
+                          "--", *sorted(changed)], path)
         dirty = set()
         for line in status.splitlines():
             if len(line) < 4 or line[2] != " ":
