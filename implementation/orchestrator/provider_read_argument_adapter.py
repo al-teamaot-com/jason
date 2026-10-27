@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from connectors.autotask.verified_read_extensions import v12_entity_read_enabled
+
 import json
 import re
 from dataclasses import dataclass, replace
@@ -643,7 +645,9 @@ def _autotask_generic_entity_query(
     capability_name: str, arguments: Mapping[str, Any],
 ) -> dict[str, Any]:
     entity = arguments.get("entity")
-    if not isinstance(entity, str) or entity not in _AUTOTASK_GENERIC_READ_ENTITIES:
+    if not isinstance(entity, str) or not (
+        entity in _AUTOTASK_GENERIC_READ_ENTITIES or v12_entity_read_enabled(entity)
+    ):
         raise ValueError("generic read entity is not yet API-accepted for governed query")
     unsupported = set(arguments) - {
         "entity", "resource_id", "filters", "page_size", "after_resource_id",
