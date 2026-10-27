@@ -595,7 +595,8 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 runner,
                 "_deploy_production_locked",
                 side_effect=runner.ReleaseManagerError("forced failure"),
-            ), patch.object(runner, 'require_host_reconciler_ready'), \
+            ), patch.object(runner, 'require_current_protected_release_source'), \
+               patch.object(runner, 'require_host_reconciler_ready'), \
                patch.object(runner, 'reconcile_stopped_rollback_retention', return_value=16):
                 with self.assertRaisesRegex(runner.ReleaseManagerError, "forced failure"):
                     runner.deploy_production(ROOT, root, release)
@@ -872,6 +873,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 return "sha256:runtime" if value == "jason-runtime:test" else "sha256:mcp"
             with (
                 patch.object(runner, "image_id", side_effect=image),
+                patch.object(runner, "require_current_protected_release_source"),
                 patch.object(runner, "require_host_reconciler_ready"),
                 patch.object(runner, "live_production_alignment", return_value={}),
                 patch.object(runner, "worktree", side_effect=runner.ReleaseManagerError("repo unavailable")),
@@ -1953,6 +1955,7 @@ def test_explicit_promotion_reserves_retention_before_breaker_and_deploy():
     calls = []
     handle = object()
     with patch.object(runner, 'acquire_production_transaction_lock', return_value=handle), \
+         patch.object(runner, 'require_current_protected_release_source'), \
          patch.object(runner, 'require_host_reconciler_ready'), \
          patch.object(runner, 'release_production_transaction_lock', side_effect=lambda h: calls.append('unlock')), \
          patch.object(runner, 'reconcile_stopped_rollback_retention', side_effect=lambda: calls.append('retention')), \
@@ -1968,6 +1971,7 @@ def test_explicit_promotion_missing_root_reconciler_denies_cleanup():
     unlocked = []
     with patch.object(runner, 'acquire_production_transaction_lock', return_value=object()), \
          patch.object(runner, 'release_production_transaction_lock', side_effect=lambda h: unlocked.append(True)), \
+         patch.object(runner, 'require_current_protected_release_source'), \
          patch.object(runner, 'require_host_reconciler_ready', side_effect=runner.ReleaseManagerError('root reconciler not ready')), \
          patch.object(runner, 'reconcile_stopped_rollback_retention') as cleanup, \
          patch.object(runner, 'revalidate_circuit_breaker') as breaker, \
@@ -1985,6 +1989,7 @@ def test_explicit_promotion_retention_failure_blocks_mutation():
     import pytest
     calls = []
     with patch.object(runner, 'acquire_production_transaction_lock', return_value=object()), \
+         patch.object(runner, 'require_current_protected_release_source'), \
          patch.object(runner, 'require_host_reconciler_ready'), \
          patch.object(runner, 'release_production_transaction_lock', side_effect=lambda h: calls.append('unlock')), \
          patch.object(runner, 'reconcile_stopped_rollback_retention', side_effect=runner.ReleaseManagerError('historical cleanup failed')), \
