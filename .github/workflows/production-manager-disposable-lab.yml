@@ -42,11 +42,22 @@ jobs:
             EVIDENCE_OUTPUT="$GITHUB_WORKSPACE/pm-lab-receipt.json" \
             bash tools/ci/production_manager_disposable_lab.sh
 
+      - name: Exercise root host reconciliation and protected breaker through real systemd
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo env GITHUB_ACTIONS=true JASON_PM_LAB=1 \
+            GITHUB_WORKSPACE="$GITHUB_WORKSPACE" \
+            EVIDENCE_ROOT_OUTPUT="$GITHUB_WORKSPACE/pm-root-boundary-receipt.json" \
+            /usr/bin/python3 tools/ci/production_manager_root_boundary_lab.py
+
       - name: Preserve lab acceptance receipt
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: production-manager-disposable-lab
-          path: pm-lab-receipt.json
+          path: |
+            pm-lab-receipt.json
+            pm-root-boundary-receipt.json
           if-no-files-found: warn
           retention-days: 30
