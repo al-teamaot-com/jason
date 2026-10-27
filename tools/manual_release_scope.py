@@ -102,10 +102,10 @@ def open_pr_overlaps(repository, changed, reader=command):
 
 def review(repo, repository, baseline, candidate, allowed_prs=(),
            allowed_commits=(), acknowledged_prs=(), acknowledged_worktrees=(),
-           pr_reader=command):
+           pr_reader=command, worktree_repo=None):
     repo = Path(repo).resolve(strict=True)
     commits, paths = source_scope(repo, baseline, candidate)
-    dirty, worktree_count = dirty_worktrees(repo, set(paths))
+    dirty, worktree_count = dirty_worktrees(Path(worktree_repo or repo), set(paths))
     prs, pr_count = open_pr_overlaps(repository, set(paths), reader=pr_reader)
     allowed_prs, allowed_commits = set(allowed_prs), set(allowed_commits)
     acknowledged_prs, acknowledged_worktrees = set(acknowledged_prs), set(acknowledged_worktrees)
@@ -135,6 +135,7 @@ def main():
     p = argparse.ArgumentParser(description="Review full manual release scope without mutation")
     p.add_argument("--repo", type=Path, required=True)
     p.add_argument("--repository", required=True)
+    p.add_argument("--worktree-repo", type=Path)
     p.add_argument("--baseline-sha", required=True)
     p.add_argument("--candidate-sha", required=True)
     p.add_argument("--include-pr", type=int, action="append", default=[])
@@ -145,7 +146,7 @@ def main():
     try:
         result = review(a.repo, a.repository, a.baseline_sha, a.candidate_sha,
                         a.include_pr, a.include_commit, a.acknowledge_overlapping_pr,
-                        a.acknowledge_dirty_worktree)
+                        a.acknowledge_dirty_worktree, worktree_repo=a.worktree_repo)
     except (ScopeBlocked, OSError, ValueError) as e:
         print(json.dumps({"status": "BLOCKED_EVIDENCE", "error_type": type(e).__name__,
                           "deployment_authorized": False}))
