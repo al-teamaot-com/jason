@@ -140,7 +140,374 @@
       "C. Build child definition"
     ],
     "remediation_substep_titles": [],
-    "live_execution_mapped": false
+    "live_execution_mapped": false,
+    "structured_source_fields": {
+      "identification_checklist": {
+        "source_section_key": "4",
+        "present": true,
+        "verbatim_bullets": [
+          "1. Read the exact source ticket.",
+          "2. Confirm the source company.",
+          "3. Parse every affected node from the VulScan description.",
+          "4. Require at least two unique node names.",
+          "5. For each node, search active same-company Autotask configurations by exact RMM hostname/name.",
+          "6. Require exactly one CI with a non-empty Datto/DRMM resource ID.",
+          "7. Read the Datto endpoint by that exact resource ID.",
+          "8. Require endpoint UID readback equality and exact hostname equality.",
+          "9. Resolve every target before creating any child.",
+          "10. If any target is ambiguous or unresolved, fail closed without completing the source."
+        ]
+      },
+      "expected_state_checklist": {
+        "source_section_key": "5",
+        "present": true,
+        "verbatim_bullets": [
+          "- one child ticket per source affected node;",
+          "- each child belongs to the source company;",
+          "- each child is in queue Jason, status New;",
+          "- each child has exactly one configuration item;",
+          "- each child description contains the source ticket number and deterministic split marker;",
+          "- the durable split ledger records source ticket + target UID -> child ticket ID;",
+          "- source ticket contains a note listing the verified child ticket IDs;",
+          "- source ticket is Complete only after all children have verified readback."
+        ]
+      },
+      "decision_gate_checklist": {
+        "source_section_key": "8",
+        "present": true,
+        "verbatim_bullets": [
+          "- source is a qualifying multi-device VulScan alert;",
+          "- at least two unique targets;",
+          "- all targets resolve exactly;",
+          "- exact `vulscan_multi_device_split@1.0.0` durable promotion is active;",
+          "- that promotion includes `service.ticket.create`, `service.ticket.note.create`, and `service.ticket.update`;",
+          "- shared split runtime is available.",
+          "- requested target count equals verified child count;",
+          "- every child has durable provider readback;",
+          "- source lineage note has been attempted successfully;",
+          "- no unresolved target remains."
+        ]
+      },
+      "retry_checklist": {
+        "source_section_key": "10",
+        "present": true,
+        "verbatim_bullets": [
+          "- verified children are persisted and reused;",
+          "- a retry creates only missing children;",
+          "- source/target mapping cannot be rebound to a different child ID;",
+          "- provider create/readback failure stops the split attempt;",
+          "- source remains open until all children are verified;",
+          "- duplicate target names in one source fail closed."
+        ]
+      },
+      "recheck_checklist": {
+        "source_section_key": "11",
+        "present": true,
+        "verbatim_bullets": [
+          "- shared Jason Ticket Split Runtime Contract;",
+          "- governed `service.ticket.create`;",
+          "- Autotask configuration search/read;",
+          "- Datto endpoint read;",
+          "- Autotask ticket update/note create;",
+          "- durable playbook promotion store;",
+          "- durable split ledger."
+        ]
+      },
+      "stale_checklist": {
+        "source_section_key": "12",
+        "present": true,
+        "verbatim_bullets": [
+          "- count of child tickets;",
+          "- each target hostname;",
+          "- each verified child ticket ID;",
+          "- statement that each child has one verified CI;",
+          "- statement that no endpoint remediation occurred during splitting.",
+          "- source ticket number;",
+          "- target hostname;",
+          "- Datto UID;",
+          "- deterministic split marker;",
+          "- original relevant VulScan finding."
+        ]
+      },
+      "dependency_checklist": {
+        "source_section_key": "13",
+        "present": true,
+        "verbatim_bullets": [
+          "- any target cannot resolve exactly;",
+          "- exact split promotion is absent;",
+          "- ticket-create capability is unavailable;",
+          "- provider readback fails;",
+          "- persisted split mapping conflicts."
+        ]
+      },
+      "documentation_checklist": {
+        "source_section_key": "14",
+        "present": true,
+        "verbatim_bullets": [
+          "- provider returns a durable ticket ID;",
+          "- post-create readback verifies company and title;",
+          "- durable split ledger records the child only after verification.",
+          "- completion update requires provider readback of status."
+        ]
+      },
+      "failure_checklist": {
+        "source_section_key": "15",
+        "present": true,
+        "verbatim_bullets": [
+          "- every parsed target has a verified child;",
+          "- all child mappings are durable;",
+          "- lineage note is written;",
+          "- source Complete status is read back successfully."
+        ]
+      },
+      "escalation_checklist": {
+        "source_section_key": "16",
+        "present": true,
+        "verbatim_bullets": [
+          "- `service.ticket.create`",
+          "- `service.ticket.note.create`",
+          "- `service.ticket.update`",
+          "- `service.configuration.search`",
+          "- `endpoint.device.read`"
+        ]
+      },
+      "verification_checklist": {
+        "source_section_key": "17",
+        "present": true,
+        "verbatim_bullets": [
+          "- source ticket T20260929.0033, company 208, KB5129195, four affected nodes.",
+          "1. four node names are parsed;",
+          "2. each resolves to exactly one active same-company CI and exact Datto endpoint;",
+          "3. source is claimed into Jason/In Progress;",
+          "4. four child tickets are created in Jason/New;",
+          "5. each child has exactly one correct CI;",
+          "6. each child contains source lineage;",
+          "7. all four creates have provider readback;",
+          "8. repeat invocation creates zero duplicate children;",
+          "9. source note lists all verified children;",
+          "10. source completes only after all four children exist.",
+          "- T20260930.0041 may be used later to validate another five-node source, but it should not be replayed simultaneously if doing so would create duplicate remediation work for the same KB/device set."
+        ]
+      },
+      "completion_checklist": {
+        "source_section_key": "18",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "required_capabilities_source": {
+        "source_section_key": "20",
+        "present": true,
+        "verbatim_bullets": [
+          "- split attempts;",
+          "- created vs reused child counts;",
+          "- target-resolution failures;",
+          "- provider readback failures;",
+          "- source completion verification;",
+          "- duplicate suppression events."
+        ]
+      },
+      "acceptance_test_checklist": {
+        "source_section_key": "21",
+        "present": true,
+        "verbatim_bullets": [
+          "- generic ticket split primitive tests pass;",
+          "- VulScan integration tests pass;",
+          "- full runtime-service suite passes;",
+          "- strict documentation build passes;",
+          "- exact split playbook promotion is durable;",
+          "- one controlled real source proves child creation and retry idempotency;",
+          "- source/child lineage is visible in Autotask."
+        ]
+      },
+      "closure_checklist": {
+        "source_section_key": "22",
+        "present": true,
+        "verbatim_bullets": [
+          "- source code and docs merge;",
+          "- production deployment is verified;",
+          "- exact `vulscan_multi_device_split@1.0.0` promotion is active;",
+          "- controlled live acceptance succeeds;",
+          "- issue #814 records the production proof and any remaining macOS AV work separately."
+        ]
+      },
+      "owner_review_checklist": {
+        "source_section_key": "23",
+        "present": false,
+        "verbatim_bullets": []
+      }
+    },
+    "diagnostic_substeps": [
+      {
+        "id": "7_sub_1",
+        "heading": "A. Parse source alert",
+        "content_markdown": "\nExtract node names only from the bounded VulScan `Affected Nodes:` section.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_2",
+        "heading": "B. Resolve target identity",
+        "content_markdown": "\nFor each node:\n- exact same-company active CI lookup;\n- exact CI `referenceNumber` as Datto UID;\n- exact endpoint read by UID;\n- exact endpoint UID and hostname readback.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_3",
+        "heading": "C. Build child definition",
+        "content_markdown": "\nEach child copies bounded source context:\n- company;\n- priority;\n- issue type;\n- subissue type;\n- ticket type;\n- relevant finding text.\n\nChild-specific values:\n- title includes the target hostname;\n- configuration item is the target CI only;\n- queue = Jason;\n- status = New;\n- description includes target hostname, Datto UID, source ticket number, and split marker.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      }
+    ],
+    "remediation_branches": [
+      {
+        "id": "9_overview",
+        "heading": "Full workflow",
+        "content_markdown": "\n\nThis playbook does not remediate endpoints. Its only modifying actions are PSA ticket lifecycle operations:\n- claim source;\n- create child tickets;\n- add source lineage note;\n- complete source after verified split.\n\nChild tickets are then processed independently by the existing VulScan playbook.\n\n",
+        "source_section_key": "9"
+      }
+    ],
+    "source_section_inventory": [
+      {
+        "section_key": "1",
+        "present": true,
+        "title": "Section Goal",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "2",
+        "present": true,
+        "title": "Trigger",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "3",
+        "present": true,
+        "title": "Scope and Boundaries",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "4",
+        "present": true,
+        "title": "Initial Identification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "5",
+        "present": true,
+        "title": "Expected State",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "6",
+        "present": true,
+        "title": "State Model",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "7",
+        "present": true,
+        "title": "Diagnostic Workflow",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "8",
+        "present": true,
+        "title": "Decision Gates",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "9",
+        "present": true,
+        "title": "Remediation",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "10",
+        "present": true,
+        "title": "Retry and Recheck Rules",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "11",
+        "present": true,
+        "title": "Dependencies",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "12",
+        "present": true,
+        "title": "Documentation",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "13",
+        "present": true,
+        "title": "Failure and Escalation Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "14",
+        "present": true,
+        "title": "Verification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "15",
+        "present": true,
+        "title": "Completion",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "16",
+        "present": true,
+        "title": "Required Capabilities",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "17",
+        "present": true,
+        "title": "Acceptance Test",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "18",
+        "present": true,
+        "title": "Required Capabilities and Authority Review",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "19",
+        "present": true,
+        "title": "Final Resolution Note",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "20",
+        "present": true,
+        "title": "Observability",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "21",
+        "present": true,
+        "title": "Acceptance Criteria",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "22",
+        "present": true,
+        "title": "Section Goal Closure",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "23",
+        "present": false,
+        "title": null,
+        "review_status": "missing_in_source_needs_author_review"
+      }
+    ],
+    "section_semantics": "Source-derived metadata only. Diagnostic commands and remediation branches are inert Markdown, not executable provider calls."
   },
   "legacy_registry": {
     "source_path": "docs/playbooks/Jason-VulScan-Multi-Device-Split.md",
@@ -324,6 +691,8 @@
       "Controlled shadow comparison and independent acceptance",
       "Owner-bound activation and branch-specific autonomous promotion"
     ],
-    "external_fact_fields_non_authoritative": true
+    "external_fact_fields_non_authoritative": true,
+    "source_reconstruction_integrity": "verified_from_original_source_on_conversion",
+    "section_semantic_extraction": "source_text_derived_no_provider_execution"
   }
 }
