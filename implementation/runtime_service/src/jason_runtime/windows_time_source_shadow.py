@@ -212,10 +212,17 @@ class WindowsTimeSourceShadowMaintenance:
         audit=None,
         json_shadow=None,
         json_shadow_state=None,
+        json_shadow_allowed_site_uids: frozenset[str] = frozenset(),
         json_shadow_max_alerts_per_tick: int = 25,
     ) -> None:
         if (json_shadow is None) != (json_shadow_state is None):
             raise ValueError("Windows Time JSON shadow needs both adapter and state")
+        if json_shadow is not None and (
+            not json_shadow_allowed_site_uids
+            or "*" in json_shadow_allowed_site_uids
+            or any(not str(uid).strip() for uid in json_shadow_allowed_site_uids)
+        ):
+            raise ValueError("JSON shadow requires exact site UID allowlist")
         if json_shadow_max_alerts_per_tick < 1 or json_shadow_max_alerts_per_tick > 100:
             raise ValueError("JSON shadow per-tick bound must be 1..100")
         if cadence < timedelta(minutes=1):
@@ -227,6 +234,7 @@ class WindowsTimeSourceShadowMaintenance:
         self.audit = audit
         self.json_shadow = json_shadow
         self.json_shadow_state = json_shadow_state
+        self.json_shadow_allowed_site_uids = frozenset(json_shadow_allowed_site_uids)
         self.json_shadow_max_alerts_per_tick = json_shadow_max_alerts_per_tick
 
     def tick(self) -> bool:
@@ -267,6 +275,9 @@ class WindowsTimeSourceShadowMaintenance:
                 str(item.get("alertUid") or "").strip()
                 for item in alerts if is_time_source_alert(item)
                 and str(item.get("alertUid") or "").strip()
+                and isinstance(item.get("alertSourceInfo"), Mapping)
+                and str(item["alertSourceInfo"].get("siteUid") or "").strip()
+                    in self.json_shadow_allowed_site_uids
             })
             if matching_uids:
                 window = min(self.json_shadow_max_alerts_per_tick, len(matching_uids))
@@ -277,6 +288,16 @@ class WindowsTimeSourceShadowMaintenance:
                     for i in range(window)
                 }
             summary["json_shadow_selected"] = len(json_selected)
+            summary["json_shadow_outside_site_allowlist"] = len({
+                str(item.get("alertUid") or "").strip()
+                for item in alerts if is_time_source_alert(item)
+                and str(item.get("alertUid") or "").strip()
+                and (
+                    not isinstance(item.get("alertSourceInfo"), Mapping)
+                    or str(item["alertSourceInfo"].get("siteUid") or "").strip()
+                        not in self.json_shadow_allowed_site_uids
+                )
+            })
             summary["json_shadow_deferred"] = max(
                 0, len(matching_uids) - len(json_selected)
             )
