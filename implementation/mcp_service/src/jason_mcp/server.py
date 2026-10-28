@@ -6384,6 +6384,31 @@ def _filter_discoverable_capabilities(
     if matches:
         if resource_filter:
             result["resource_capability_available"] = True
+            # A named read may require narrower selectors than a generic
+            # schema-proven read. Advertise the alternative for deliberate
+            # selection, never automatic execution or authorization bypass.
+            generic = [
+                item for item in available
+                if item["capability"] in {
+                    "service.entity.search", "service.entity.read"
+                }
+                and resource_filter in {
+                    v.casefold() for v in item["resource_types"]
+                }
+                and item["capability"] not in {
+                    candidate["capability"] for candidate in matches
+                }
+            ]
+            if generic:
+                result["alternatives"] = generic
+                result["alternative_count"] = len(generic)
+                result["selection_guidance"] = (
+                    "Schema-proven generic Autotask reads are candidate "
+                    "alternatives when a named route lacks appropriate "
+                    "selectors. Select explicitly and independently check "
+                    "provider and requester authorization; never retry "
+                    "a denied read as a generic query."
+                )
         return result
 
     if not resource_filter:

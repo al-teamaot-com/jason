@@ -1041,7 +1041,7 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
                 "Read bounded projects, tasks, service calls and related records "
                 "through the existing authenticated Autotask provider query path."
             ),
-            resource_types="service_entity,project,project_task,service_call,project_note,ticket_configuration_relation",
+            resource_types="service_entity,project,project_task,service_call,project_note,ticket_configuration_relation,contract,inventory_item,purchase_order,invoice",
             operation="search",
             selector_keys="entity,resource_id,filters,page_size,after_resource_id",
             fact_hints="Autotask projects, project tasks, service calls, project notes, ticket associations, other Autotask PSA records",
@@ -1053,7 +1053,7 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             capability_name=SERVICE_ENTITY_READ,
             display_name="Read Exact Additional Autotask PSA Entity",
             business_purpose="Read an exact authorized Autotask project, task, service call or related entity record.",
-            resource_types="service_entity,project,project_task,service_call,project_note,ticket_configuration_relation",
+            resource_types="service_entity,project,project_task,service_call,project_note,ticket_configuration_relation,contract,inventory_item,purchase_order,invoice",
             operation="read",
             selector_keys="entity,resource_id",
             fact_hints="Autotask project detail, task detail, service call detail, project notes, related record",

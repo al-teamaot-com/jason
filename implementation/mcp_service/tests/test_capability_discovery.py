@@ -120,3 +120,27 @@ def test_unknown_resource_remains_fail_closed(monkeypatch):
     assert result["resource_capability_available"] is False
     assert result["alternative_count"] == 0
     assert result["alternatives"] == []
+
+
+def test_named_inventory_route_advertises_governed_generic_candidate(monkeypatch):
+    capabilities = [
+        _capability("service.inventory.item.search", "search", ["inventory_item"]),
+        _capability("service.entity.search", "search", ["service_entity", "inventory_item"]),
+    ]
+    monkeypatch.setattr(server, "_discoverable_capabilities", lambda: capabilities)
+    result = server._filter_discoverable_capabilities(resource_type="inventory_item", operation="search", facts="")
+    assert result["capability_count"] == 2
+    assert all(c["capability"] in {"service.inventory.item.search", "service.entity.search"} for c in result["capabilities"])
+
+
+def test_named_inventory_read_advertises_generic_search_without_execution(monkeypatch):
+    capabilities = [
+        _capability("service.inventory.item.read", "read", ["inventory_item"]),
+        _capability("service.entity.search", "search", ["service_entity", "inventory_item"]),
+    ]
+    monkeypatch.setattr(server, "_discoverable_capabilities", lambda: capabilities)
+    result = server._filter_discoverable_capabilities(resource_type="inventory_item", operation="read")
+    assert result["capability_count"] == 1
+    assert result["alternative_count"] == 1
+    assert result["alternatives"][0]["capability"] == "service.entity.search"
+    assert "never retry" in result["selection_guidance"]
