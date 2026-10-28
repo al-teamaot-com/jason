@@ -2714,9 +2714,9 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     )
     if candidate_autotask_profile is not None:
         declared_pair = declared_autotask_read_profiles(deploy_worktree)
-        if declared_pair is None or prior_autotask_profile != declared_pair[1]:
+        if (declared_pair is None or prior_autotask_profile not in declared_pair):
             raise ReleaseManagerError(
-                "live Autotask baseline differs from exact candidate rollback declaration"
+                "live Autotask profile is neither candidate source nor declared rollback profile"
             )
     if (candidate_autotask_profile is not None
             and os.environ.get("JASON_PROVIDER_READ_ACTIVATION_PROFILE") not in (None, candidate_autotask_profile)):
