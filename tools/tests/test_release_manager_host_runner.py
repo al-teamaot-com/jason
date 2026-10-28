@@ -3339,6 +3339,7 @@ def _exercise_serialized_preprod(monkeypatch, tmp_path, *, fail_health=False):
         return subprocess.CompletedProcess(argv, 0)
 
     monkeypatch.setattr(runner, "gate_transition", transition)
+    monkeypatch.setattr(runner, "require_candidate_controller_for_preproduction", lambda *a: None)
     monkeypatch.setattr(runner, "image_id", lambda _: "sha256:fixture")
     monkeypatch.setattr(runner, "acquire_production_transaction_lock", acquire)
     monkeypatch.setattr(runner, "release_production_transaction_lock", release)
@@ -3971,3 +3972,35 @@ def test_transactional_sqlite_snapshot_rejects_disk_budget_before_copy(tmp_path)
         with pytest.raises(runner.ReleaseManagerError, match='isolated capacity'):
             runner.transactional_preprod_sqlite_backup(source,target)
     assert not target.exists()
+
+
+def test_preproduction_refuses_old_controller_for_new_candidate(tmp_path):
+    import hashlib
+    import pytest
+    candidate=b"#!/usr/bin/env python3\n# candidate controller revision\n"
+    with (patch.object(runner.subprocess, "check_output", return_value=candidate) as source,
+          patch.object(runner, "file_digest", return_value="sha256:" + "0" * 64)):
+        with pytest.raises(runner.ReleaseManagerError, match="exact candidate Production Manager"):
+            runner.require_candidate_controller_for_preproduction(tmp_path, SHA_A)
+    assert source.call_args.args[0][-1] == SHA_A + ":tools/release_manager_host_runner.py"
+
+
+def test_preproduction_accepts_only_exact_immutable_candidate_controller(tmp_path):
+    import hashlib
+    candidate=b"#!/usr/bin/env python3\n# candidate controller revision\n"
+    expected="sha256:"+hashlib.sha256(candidate).hexdigest()
+    with (patch.object(runner.subprocess, "check_output", return_value=candidate),
+          patch.object(runner, "file_digest", return_value=expected)):
+        runner.require_candidate_controller_for_preproduction(tmp_path, SHA_A)
+
+
+def test_preproduction_controller_gate_runs_before_state_transition(tmp_path):
+    import pytest
+    release={"state":"release_candidate", "release_candidate":{"candidate_sha":SHA_A}}
+    with (patch.object(runner, "require_candidate_controller_for_preproduction",
+                       side_effect=runner.ReleaseManagerError("old controller refused")),
+          patch.object(runner,"gate_transition") as transition):
+        with pytest.raises(runner.ReleaseManagerError, match="old controller refused"):
+            runner.run_preproduction(tmp_path,tmp_path,release)
+    transition.assert_not_called()
+    assert release["state"]=="release_candidate"
