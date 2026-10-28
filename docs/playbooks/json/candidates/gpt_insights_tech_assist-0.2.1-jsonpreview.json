@@ -1,0 +1,340 @@
+{
+  "schema_version": 1,
+  "playbook": {
+    "id": "gpt_insights_tech_assist",
+    "name": "GPT Insights - Help Desk Tech Assist (JSON migration draft)",
+    "version": "0.2.1-jsonpreview",
+    "lifecycle": "pilot",
+    "target_type": "ticket",
+    "source_owner": "AOT",
+    "source_registry_version": "0.2.1",
+    "documented_version": "0.2.1",
+    "original_lifecycle": "production"
+  },
+  "trigger": {
+    "source_registry_match": {
+      "queue_in": [
+        "Help Desk I"
+      ],
+      "status_in": [
+        "New"
+      ],
+      "excluded_ticket_source_labels": [
+        "Recurring"
+      ]
+    },
+    "details_section_key": "2",
+    "execution_enabled": false
+  },
+  "scope": {
+    "direct_provider_access": false,
+    "preview_only": true,
+    "execution_authority": "none",
+    "scope_section_key": "3"
+  },
+  "expected_state": {
+    "details_section_key": "5",
+    "not_reverified_in_json_runtime": true
+  },
+  "state_model": {
+    "entry_step": "identity_gate",
+    "source_section_key": "6",
+    "context_binding_status": "not_implemented_for_migration_draft"
+  },
+  "steps": [
+    {
+      "id": "identity_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_target_identity_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "evidence_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "evidence_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "authoritative_evidence_complete",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "authorization_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "authorization_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "approved_json_runtime_parity",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "migration_hold"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "migration_hold",
+      "type": "human_review"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "verification": {
+    "authoritative_source": "Legacy source playbook section 17 and provider readbacks; not executed in this JSON draft",
+    "success_condition": "Legacy source Section 17 and Section 18 must pass independently; classification-only draft cannot verify or close"
+  },
+  "completion": {
+    "terminal_disposition": "Human Review (draft only; existing production source unchanged)"
+  },
+  "autonomy": {
+    "activation": "disabled",
+    "allowed_capabilities": []
+  },
+  "procedure": {
+    "section_refs": {
+      "section_goal": "1",
+      "trigger": "2",
+      "scope": "3",
+      "identification": "4",
+      "expected_state": "5",
+      "state_model": "6",
+      "diagnostics": "7",
+      "decision_gates": "8",
+      "remediation": "9",
+      "retry_policy": "10",
+      "periodic_rechecks": "11",
+      "stale_condition": "12",
+      "dependencies": "13",
+      "documentation": "14",
+      "failures": "15",
+      "escalation": "16",
+      "verification": "17",
+      "completion": "18",
+      "final_resolution": "19",
+      "required_capabilities": "20",
+      "acceptance_test": "21",
+      "closure": "22",
+      "autonomy_review": "23"
+    },
+    "section_keys_missing_from_source": [],
+    "diagnostic_substep_titles": [
+      "Step 1: Ticket classification",
+      "Step 2: Device evidence",
+      "Step 3: Correlation",
+      "Decision"
+    ],
+    "remediation_substep_titles": [],
+    "live_execution_mapped": false
+  },
+  "legacy_registry": {
+    "source_path": "docs/playbooks/Jason-GPT-Insights-Tech-Assist.md",
+    "source_version": "0.2.1",
+    "review_status": "owner_approved_2026-10-06_all_help_desk_i_new_managed_note_scope",
+    "source_enabled": true,
+    "source_autonomy_activation": "autonomous",
+    "source_allowed_capabilities": [
+      "service.ticket.note.create",
+      "service.ticket.note.update"
+    ],
+    "source_required_gates": [
+      "help_desk_i_queue",
+      "new_status",
+      "recurring_ticket_source_excluded",
+      "evidence_first",
+      "no_avoidable_human_question",
+      "internal_note_only",
+      "jason_owned_note_update",
+      "autonomy_approved"
+    ],
+    "source_trigger": {
+      "queue_in": [
+        "Help Desk I"
+      ],
+      "status_in": [
+        "New"
+      ],
+      "excluded_ticket_source_labels": [
+        "Recurring"
+      ]
+    }
+  },
+  "source_document": {
+    "path": "docs/playbooks/Jason-GPT-Insights-Tech-Assist.md",
+    "source_blob_sha": "12b770b6dc74546215c5196c1d72fb533e0dd243",
+    "prelude_markdown": "# Jason Playbook: GPT Insights - Help Desk Tech Assist\n\n**Version:** 0.2.1\n**Status:** Production scope; exact durable owner promotion required\n**Mode:** Advisory, internal-note only\n\n",
+    "sections": [
+      {
+        "key": "1",
+        "title": "Section Goal",
+        "heading_markdown": "## 1. Section Goal",
+        "body_markdown": "\n\n**Goal:** Give an AOT technician useful, evidence-grounded help on every eligible Help Desk I New ticket, independently of whether a separate remediation playbook also applies, without claiming the ticket, changing ticket state, performing remediation, or asking a human for facts Jason can obtain itself.\n\n**Success means:**\n- every eligible non-recurring Help Desk I ticket in status `New` receives one internal `GPT Insights` note;\n- material evidence changes refresh that same Jason-owned note rather than creating update-note clutter;\n- recurring tickets never reach this playbook;\n- no client notification, ticket update, or disruptive action is performed.\n\n"
+      },
+      {
+        "key": "2",
+        "title": "Trigger",
+        "heading_markdown": "## 2. Trigger",
+        "body_markdown": "\n\n- Queue: **Help Desk I**\n- Status: **New**\n- Autotask ticket source is not **Recurring**\n\n"
+      },
+      {
+        "key": "3",
+        "title": "Scope and Boundaries",
+        "heading_markdown": "## 3. Scope and Boundaries",
+        "body_markdown": "\n\n### In Scope\n- read-only ticket, configuration, endpoint, and bounded same-client evidence;\n- one internal `GPT Insights` note;\n- governed update of that same Jason-owned internal note when material evidence changes.\n\n### Out of Scope\n- Help Desk II;\n- any status other than New;\n- Autotask source **Recurring**;\n- ticket queue/status/assignment mutation;\n- client-facing communication;\n- component execution or remediation;\n- disruptive actions.\n\nPreserve Central Orchestrator authority, `direct_provider_access=false`, exact requester grants, provider/client isolation, and auditability.\n\n"
+      },
+      {
+        "key": "4",
+        "title": "Initial Identification",
+        "heading_markdown": "## 4. Initial Identification",
+        "body_markdown": "\n\n1. Identify the exact Autotask ticket.\n2. Confirm queue = Help Desk I and status = New.\n3. Confirm the queue source already excluded source label Recurring.\n4. Resolve the associated configuration item only when an exact same-company active association is available.\n5. If identity is uncertain, record the limitation in the insight rather than guessing.\n6. Do not claim or move the ticket.\n\n"
+      },
+      {
+        "key": "5",
+        "title": "Expected State",
+        "heading_markdown": "## 5. Expected State",
+        "body_markdown": "\n\nThe ticket has exactly one current `GPT Insights` internal note containing the best available evidence and recommendations. If evidence has not materially changed, no note mutation occurs.\n\n"
+      },
+      {
+        "key": "6",
+        "title": "State Model",
+        "heading_markdown": "## 6. State Model",
+        "body_markdown": "\n\n`eligible -> evidence_collected -> insight_created | insight_current | insight_updated | blocked`\n\nPersist the material-evidence fingerprint in the operational augmentation store. A restart or local-state loss must not create a duplicate base note when Autotask already contains `GPT Insights`.\n\n"
+      },
+      {
+        "key": "7",
+        "title": "Diagnostic Workflow",
+        "heading_markdown": "## 7. Diagnostic Workflow",
+        "body_markdown": "\n\n### Step 1: Ticket classification\nClassify as network, printing, performance, login, application, or unknown from ticket evidence without inventing a cause.\n\n### Step 2: Device evidence\nWhen an exact associated device exists, collect authoritative online state, last-seen evidence, OS, and category-specific read-only facts.\n\n### Step 3: Correlation\nUse bounded same-company ticket evidence where it materially reduces technician effort.\n\n### Decision\n- material evidence available -> render/update insight;\n- evidence unchanged -> no write;\n- evidence unavailable -> state the limitation and avoid unsupported claims.\n\n"
+      },
+      {
+        "key": "8",
+        "title": "Decision Gates",
+        "heading_markdown": "## 8. Decision Gates",
+        "body_markdown": "\n\nBefore note creation/update:\n- exact Help Desk I queue;\n- exact New status;\n- recurring source exclusion already applied;\n- exact durable v0.2.1 owner promotion exists;\n- update target, if present, is uniquely identified as the Jason-owned `GPT Insights` internal note.\n\n"
+      },
+      {
+        "key": "9",
+        "title": "Remediation",
+        "heading_markdown": "## 9. Remediation",
+        "body_markdown": "\n\nNot applicable. This playbook is advisory only.\n\nAllowed mutations:\n- `service.ticket.note.create`\n- `service.ticket.note.update`\n\nThe update capability may touch only an existing Jason-owned internal note after exact creator, visibility, title, and note-ID verification.\n\n"
+      },
+      {
+        "key": "10",
+        "title": "Retry Policy",
+        "heading_markdown": "## 10. Retry Policy",
+        "body_markdown": "\n\nNo provider mutation retries. One governed attempt per execution plan. Failed note writes fail closed and are retried only by a later normal worker cycle after state is re-read.\n\n"
+      },
+      {
+        "key": "11",
+        "title": "Periodic Rechecks",
+        "heading_markdown": "## 11. Periodic Rechecks",
+        "body_markdown": "\n\nThe normal worker cadence may reassess eligible New tickets. A recheck with the same material fingerprint performs no note mutation.\n\n"
+      },
+      {
+        "key": "12",
+        "title": "Aging / Stale Condition",
+        "heading_markdown": "## 12. Aging / Stale Condition",
+        "body_markdown": "\n\nWhen the ticket leaves New status, GPT Insights stops. The playbook does not continue refreshing tickets already being actively handled.\n\n"
+      },
+      {
+        "key": "13",
+        "title": "Dependency Handling",
+        "heading_markdown": "## 13. Dependency Handling",
+        "body_markdown": "\n\nMissing device association or unavailable read-only evidence is recorded as a limitation; Jason does not fabricate identity or configuration.\n\n"
+      },
+      {
+        "key": "14",
+        "title": "Documentation Requirements",
+        "heading_markdown": "## 14. Documentation Requirements",
+        "body_markdown": "\n\nMaintain one internal note titled **GPT Insights**. The living note contains current evidence, assessment, limitations, and recommended next steps.\n\nEvery successful note revision is also recorded in Jason's mutation audit with:\n- ticket ID;\n- note ID;\n- prior and revised body;\n- prior and revised SHA-256;\n- provider readback result.\n\n"
+      },
+      {
+        "key": "15",
+        "title": "Failure Handling",
+        "heading_markdown": "## 15. Failure Handling",
+        "body_markdown": "\n\nFail closed if:\n- note identity is ambiguous;\n- target note is not internal;\n- creator identity is not Jason's exact execution identity;\n- provider update permission is unavailable;\n- post-mutation readback does not match.\n\n"
+      },
+      {
+        "key": "16",
+        "title": "Escalation Criteria",
+        "heading_markdown": "## 16. Escalation Criteria",
+        "body_markdown": "\n\nGPT Insights itself does not escalate operational tickets. Failures are surfaced to Jason support/audit while leaving the ticket untouched.\n\n"
+      },
+      {
+        "key": "17",
+        "title": "Verification",
+        "heading_markdown": "## 17. Verification",
+        "body_markdown": "\n\nSuccess requires authoritative Autotask readback showing:\n- the intended note ID;\n- title `GPT Insights`;\n- noteType=3;\n- publish=2;\n- exact intended description;\n- exact Jason creator attribution.\n\n"
+      },
+      {
+        "key": "18",
+        "title": "Completion Criteria",
+        "heading_markdown": "## 18. Completion Criteria",
+        "body_markdown": "\n\nFor each eligible scan, the playbook is complete when the current material fingerprint is represented by the one verified internal note or no write is needed because the note is already current.\n\n"
+      },
+      {
+        "key": "19",
+        "title": "Final Resolution Note",
+        "heading_markdown": "## 19. Final Resolution Note",
+        "body_markdown": "\n\nNot applicable. GPT Insights is an advisory augmentation, not the incident-resolution playbook.\n\n"
+      },
+      {
+        "key": "20",
+        "title": "Required Capabilities",
+        "heading_markdown": "## 20. Required Capabilities",
+        "body_markdown": "\n\n- `service.ticket.notes.search`\n- `service.ticket.search`\n- `service.configuration.read`\n- `endpoint.device.read`\n- approved read-only diagnostic capabilities where category-specific evidence warrants them\n- `service.ticket.note.create`\n- `service.ticket.note.update`\n\n"
+      },
+      {
+        "key": "21",
+        "title": "Acceptance Test",
+        "heading_markdown": "## 21. Acceptance Test",
+        "body_markdown": "\n\nProve:\n1. eligible Help Desk I New non-recurring ticket receives one base note;\n2. same evidence creates no duplicate or update;\n3. material evidence change updates that same note ID;\n4. technician/client/workflow notes cannot be updated;\n5. Help Desk II does not receive GPT Insights;\n6. non-New status does not receive GPT Insights;\n7. source Recurring is excluded upstream;\n8. update audit preserves before/after bodies and hashes;\n9. post-write readback verifies internal visibility and Jason ownership;\n10. no ticket-field/client/disruptive mutation occurs.\n\n"
+      },
+      {
+        "key": "22",
+        "title": "Section Goal Closure",
+        "heading_markdown": "## 22. Section Goal Closure",
+        "body_markdown": "\n\nClose only after source tests, protected CI, exact durable owner promotion, production deployment, and controlled live Help Desk I verification are complete.\n\n"
+      },
+      {
+        "key": "23",
+        "title": "Autonomous Execution Eligibility and Owner Review",
+        "heading_markdown": "## 23. Autonomous Execution Eligibility and Owner Review",
+        "body_markdown": "\n\nProduction nomination: `autonomy.activation=autonomous`.\n\nExact promoted scope:\n- playbook: `gpt_insights_tech_assist@0.2.1`\n- policy: `playbook-autonomy:gpt_insights_tech_assist`\n- capabilities: `service.ticket.note.create`, `service.ticket.note.update`\n\nAny material version, capability, trigger, ownership rule, or notification-boundary change requires new owner review.\n"
+      }
+    ]
+  },
+  "migration": {
+    "status": "SOURCE_PRESERVED_STRUCTURED_DRAFT_NOT_RUNTIME_PARITY",
+    "source_version_discrepancy": false,
+    "production_replacement_allowed": false,
+    "staged": false,
+    "activated": false,
+    "required_before_activation": [
+      "Canonical Python JSON semantic validation",
+      "Exact-capability binding and source-scoped argument context verified",
+      "Safe diagnostic and remediation branches mapped to governed capabilities",
+      "Durable retry/wait/terminal lifecycle parity with shared runtime",
+      "Error, negative-evidence and client-boundary regression tests",
+      "Controlled shadow comparison and independent acceptance",
+      "Owner-bound activation and branch-specific autonomous promotion"
+    ],
+    "external_fact_fields_non_authoritative": true
+  }
+}
