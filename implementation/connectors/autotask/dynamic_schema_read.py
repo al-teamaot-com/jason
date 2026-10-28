@@ -60,7 +60,14 @@ def proven_queryable_fields(
     info = entity_metadata.get("info", entity_metadata)
     if not isinstance(info, Mapping):
         raise PermissionError("AUTOTASK_DYNAMIC_SCHEMA_UNVERIFIED")
-    if (info.get("name") != entity
+    # Datto REST metadata returns singular entity names (for example
+    # ActionType from GET /ActionTypes/entityInformation). The trustworthy
+    # route identifier is the strict entity path already sent to the API, not
+    # this human/catalog display name. Require a bounded valid metadata name,
+    # never falsely demand equal singular/plural spelling.
+    metadata_name = info.get("name")
+    if (not isinstance(metadata_name, str)
+            or not _ENTITY_NAME.fullmatch(metadata_name)
             or info.get("canQuery") is not True
             or info.get("userAccessForQuery") != "All"):
         raise PermissionError("AUTOTASK_DYNAMIC_PROVIDER_QUERY_NOT_AUTHORIZED")

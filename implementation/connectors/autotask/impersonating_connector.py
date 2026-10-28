@@ -662,8 +662,16 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
         # An API account may legitimately have no query access even if its
         # entity is publicly documented; stop before GET /query in that case.
         actual = info.get("info", info)
-        if (not isinstance(actual, Mapping)
-                or actual.get("name") != entity
+        # The live schema `name` is singular (ActionType, Appointment)
+        # although this entity's canonical REST URL uses plural spelling.
+        # The GET URL is source-bound above, and schema capability/access
+        # proof is authoritative for that exact endpoint.
+        metadata_name = actual.get("name") if isinstance(actual, Mapping) else None
+        if (not isinstance(metadata_name, str)
+                or not metadata_name
+                or len(metadata_name) > 80
+                or not metadata_name[0].isalpha()
+                or not metadata_name.isalnum()
                 or actual.get("canQuery") is not True
                 or actual.get("userAccessForQuery") != "All"):
             raise PermissionError("AUTOTASK_DYNAMIC_PROVIDER_QUERY_NOT_AUTHORIZED")

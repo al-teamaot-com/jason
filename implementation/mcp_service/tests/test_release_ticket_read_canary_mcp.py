@@ -33,8 +33,12 @@ class MCPReadFixture:
                                "description": "PRIVATE-TICKET-BODY",
                                "email": "private@example.invalid"}]}
         elif capability == "service.entity.search":
-            assert arguments == {"entity": "Projects", "page_size": 1}
-            data = {"items": [{"id": 98, "description": "PRIVATE-PROJECT-BODY"}]}
+            if arguments.get("entity") == "Projects":
+                assert arguments == {"entity": "Projects", "page_size": 1}
+                data = {"items": [{"id": 98, "description": "PRIVATE-PROJECT-BODY"}]}
+            else:
+                assert arguments == {"entity": "ActionTypes", "page_size": 1, "select": ["id", "name"]}
+                data = {"items": [{"id": 8, "name": "ACTION-PRIVATE"}]}
         else:
             raise AssertionError("unexpected provider-read capability")
         response["evidence"] = {"data": data}
@@ -215,3 +219,69 @@ def test_v11_postrelease_denied_projects_fails_even_if_tickets_work(monkeypatch)
     assert result["error_code"] == "governed_generic_project_read_not_successful"
     assert result["customer_data_included"] is False
     assert len(captured.calls) == 3
+
+def test_v13_postrelease_requires_complete_ticket_project_and_dynamic_schema_query(
+    monkeypatch,
+):
+    captured=MCPReadFixture()
+    monkeypatch.setenv("JASON_SOURCE_REVISION",CANDIDATE)
+    monkeypatch.setenv(
+        "JASON_PROVIDER_READ_ACTIVATION_PROFILE",
+        "itglue-autotask-entra-dynamic-schema-read-catalog-v13",
+    )
+    monkeypatch.setattr(
+        server, "_authenticated_identity",
+        lambda: ("person-entra-"+"a"*32,"aot","delegated_microsoft_identity",None),
+    )
+    monkeypatch.setattr(server,"execute_read_capability",captured)
+    result=canary(page_size=50)
+    assert result["status"]=="succeeded"
+    assert result["summary"]["generic_project_read_verified"] is True
+    assert result["summary"]["dynamic_schema_read_verified"] is True
+    assert result["customer_data_included"] is False
+    assert [name for name,_ in captured.calls]==[
+        "service.ticket.count","service.ticket.search","service.ticket.read",
+        "service.entity.search","service.entity.search",
+    ]
+    assert "ACTION-PRIVATE" not in json.dumps(result)
+
+
+def test_v13_denied_real_generic_query_fails_even_if_v11_reads_work(monkeypatch):
+    captured=MCPReadFixture()
+    monkeypatch.setenv("JASON_SOURCE_REVISION",CANDIDATE)
+    monkeypatch.setenv(
+        "JASON_PROVIDER_READ_ACTIVATION_PROFILE",
+        "itglue-autotask-entra-dynamic-schema-read-catalog-v13",
+    )
+    monkeypatch.setattr(
+        server,"_authenticated_identity",
+        lambda: ("person-entra-"+"a"*32,"aot","delegated_microsoft_identity",None),
+    )
+    def deny_dynamic(*,capability,arguments):
+        if capability=="service.entity.search" and arguments.get("entity")=="ActionTypes":
+            return {"status":"denied","provider":"autotask",
+                    "error_code":"INFORMATION_RELEASE_DENIED"}
+        return captured(capability=capability,arguments=arguments)
+    monkeypatch.setattr(server,"execute_read_capability",deny_dynamic)
+    result=canary(page_size=50)
+    assert result["status"]=="failed"
+    assert result["error_code"]=="governed_dynamic_schema_read_not_successful"
+    assert result["customer_data_included"] is False
+
+
+def test_v13_rejects_wrong_page_size_before_any_provider_call(monkeypatch):
+    captured=MCPReadFixture()
+    monkeypatch.setenv("JASON_SOURCE_REVISION",CANDIDATE)
+    monkeypatch.setenv(
+        "JASON_PROVIDER_READ_ACTIVATION_PROFILE",
+        "itglue-autotask-entra-dynamic-schema-read-catalog-v13",
+    )
+    monkeypatch.setattr(
+        server,"_authenticated_identity",
+        lambda: ("person-entra-"+"a"*32,"aot","delegated_microsoft_identity",None),
+    )
+    monkeypatch.setattr(server,"execute_read_capability",captured)
+    result=canary(page_size=5)
+    assert result["status"]=="failed"
+    assert result["error_code"]=="v13_post_release_requires_page_size_50"
+    assert captured.calls==[]

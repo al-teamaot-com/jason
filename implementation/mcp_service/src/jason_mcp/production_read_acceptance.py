@@ -17,6 +17,8 @@ from uuid import uuid4
 
 ROOT = Path("/var/lib/jason/openclaw/release-manager/functional-canary")
 PROFILE_V11 = "itglue-autotask-entra-comprehensive-entity-read-catalog-v11"
+PROFILE_V13 = "itglue-autotask-entra-dynamic-schema-read-catalog-v13"
+_ACTIVE_READ_PROFILES = frozenset({PROFILE_V11, PROFILE_V13})
 _CAPABILITIES = frozenset({
     "service.ticket.count", "service.ticket.search",
     "service.ticket.read", "service.entity.search",
@@ -81,6 +83,15 @@ def _safe_event(
     if not isinstance(data, Mapping):
         return None
     if capability == "service.entity.search":
+        if arguments.get("entity") == "ActionTypes":
+            if (set(arguments) != {"entity", "page_size", "select"}
+                    or arguments.get("page_size") != 1
+                    or arguments.get("select") != ["id", "name"]):
+                return None
+            items = _ids(data.get("items"), maximum=1)
+            if items is None:
+                return None
+            return {"kind": "dynamic_schema_search", "items": len(items)}
         if set(arguments) != {"entity", "page_size"} or arguments.get("entity") != "Projects" or arguments.get("page_size") != 1:
             return None
         items = _ids(data.get("items"), maximum=1)
@@ -150,7 +161,7 @@ def record_authenticated_owner_read(
     # OAuth-derived principal, not a caller-supplied owner alias.
     if (not isinstance(principal_id, str) or not _AOT_HUMAN.fullmatch(principal_id)
             or organization_id != "aot"
-            or client_id is not None or live_profile != PROFILE_V11):
+            or client_id is not None or live_profile not in _ACTIVE_READ_PROFILES):
         return False
     if not isinstance(arguments, Mapping) or not isinstance(result, Mapping):
         return False

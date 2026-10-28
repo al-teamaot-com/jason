@@ -6790,12 +6790,21 @@ def verify_release_ticket_read_canary(
         phase == "after"
         and profile == "itglue-autotask-entra-comprehensive-entity-read-catalog-v11"
     )
-    if v11_post_release and page_size != 50:
+    v13_post_release = (
+        phase == "after"
+        and profile == "itglue-autotask-entra-dynamic-schema-read-catalog-v13"
+    )
+    expanded_post_release = v11_post_release or v13_post_release
+    if expanded_post_release and page_size != 50:
         # The independent PM gate requires proof of the actual first 50-page
         # plus the exact cursor continuation, rather than a synthetic or
         # separately-shaped paging smoke.
         return {
-            "status": "failed", "error_code": "v11_post_release_requires_page_size_50",
+            "status": "failed",
+            "error_code": (
+                "v13_post_release_requires_page_size_50"
+                if v13_post_release else "v11_post_release_requires_page_size_50"
+            ),
             "provider": "autotask", "customer_data_included": False,
         }
     try:
@@ -6820,7 +6829,7 @@ def verify_release_ticket_read_canary(
             "customer_data_included": False,
         }
 
-    if v11_post_release:
+    if expanded_post_release:
         # The new generic read path is also mandatory. It must succeed for
         # the same already-authenticated requester; no service-level fallback
         # is permitted. This query emits its independent metadata-only receipt
@@ -6869,6 +6878,57 @@ def verify_release_ticket_read_canary(
                 "provider": "autotask", "customer_data_included": False,
             }
         summary = {**summary, "generic_project_read_verified": True}
+
+    if v13_post_release:
+        # The v13 activation cannot be declared successful based solely on
+        # v11 tickets/Projects. Use the SAME authenticated human and one
+        # arbitrary ordinary entity outside the former fixed whitelist.
+        # Any source, field permission or connector denial fails the release.
+        try:
+            dynamic_result = execute_read_capability(
+                capability="service.entity.search",
+                arguments={
+                    "entity": "ActionTypes", "page_size": 1,
+                    "select": ["id", "name"],
+                },
+            )
+        except Exception:
+            return {
+                "status": "failed",
+                "error_code": "governed_dynamic_schema_read_exception",
+                "provider": "autotask", "customer_data_included": False,
+            }
+        if (
+            not isinstance(dynamic_result, dict)
+            or dynamic_result.get("status") != "succeeded"
+            or dynamic_result.get("provider") != "autotask"
+            or dynamic_result.get("error_code") is not None
+        ):
+            return {
+                "status": "failed",
+                "error_code": "governed_dynamic_schema_read_not_successful",
+                "provider": "autotask", "customer_data_included": False,
+            }
+        evidence = dynamic_result.get("evidence")
+        data = evidence.get("data") if isinstance(evidence, dict) else None
+        items = data.get("items") if isinstance(data, dict) else None
+        if (
+            not isinstance(items, list)
+            or len(items) > 1
+            or any(
+                not isinstance(item, dict)
+                or type(item.get("id")) is not int
+                or item["id"] <= 0
+                or set(item) - {"id", "name"}
+                for item in items
+            )
+        ):
+            return {
+                "status": "failed",
+                "error_code": "governed_dynamic_schema_read_malformed",
+                "provider": "autotask", "customer_data_included": False,
+            }
+        summary = {**summary, "dynamic_schema_read_verified": True}
 
     return {
         "status": "succeeded",

@@ -128,5 +128,7 @@ def test_v13_dormant_profile_is_declared_for_future_exact_sha_native_review(tmp_
     )
     root=Path(__file__).resolve().parents[2]
     deployed=json.loads((root/"config/autotask-entity-read-profile.json").read_text())
-    assert deployed["read_profile"]==V11
-    assert deployed["read_profile"]!=DYNAMIC_READ_PROFILE
+    # Only the new owner-reviewed v13 activation source selects v13;
+    # previous v10/v11 source and production remain independently pinned.
+    assert deployed["read_profile"]==DYNAMIC_READ_PROFILE
+    assert deployed["rollback_read_profile"]==V10
