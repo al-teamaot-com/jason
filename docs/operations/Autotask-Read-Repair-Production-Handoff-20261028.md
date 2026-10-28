@@ -26,3 +26,6 @@ No schema migrations or record writes are part of these read changes. Revert the
 
 ## Current decision
 **NOT PRODUCTION ELIGIBLE** until gates 1–6 are evidenced; this is a complete engineering handoff, not an approval. Production containers, configuration and databases must remain unchanged until explicitly authorized through PM.
+
+## Final candidate integration checkpoint
+Preproduction merge candidate 70086a7a4dcd518980fc95d0e8303e01f3d00106 included protected main 9ccd994659710c3251fddaa35789e790e8f826b7. The immutable candidate MCP image built and passed a network-isolated source smoke test. The current release includes unrelated mainline work in AOT routine Autotask RW, IT Glue notes RW, Entra standard-user creation, and KFS diagnostics; no such mutation capabilities are authorized by this read-only release. Concurrent PR #2125 targets governed execute and is tracked in PR #2110's Integration coordination declaration. Do not promote until exact-head CI, independent PM preproduction, and owner exact SHA approval all pass.
