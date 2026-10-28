@@ -142,7 +142,442 @@
       "Branch B: Restore domain hierarchy",
       "Explicitly not autonomous"
     ],
-    "live_execution_mapped": false
+    "live_execution_mapped": false,
+    "structured_source_fields": {
+      "identification_checklist": {
+        "source_section_key": "4",
+        "present": true,
+        "verbatim_bullets": [
+          "1. Identify exact alert UID.",
+          "2. Identify exact DRMM device UID, hostname, and site/client from alert source evidence.",
+          "3. Read the managed endpoint by exact UID and confirm hostname/site identity.",
+          "4. If an Autotask ticket is linked, use the global CI/device-association and work-start lifecycle.",
+          "5. If no ticket exists, retain a provider-object playbook instance keyed by alert UID and device UID.",
+          "6. Search resolved alert history for prior matching Windows Time source failures on the same endpoint.",
+          "7. If identity is ambiguous, set `state = identification_blocked` and stop."
+        ]
+      },
+      "expected_state_checklist": {
+        "source_section_key": "5",
+        "present": true,
+        "verbatim_bullets": [
+          "- endpoint is online;",
+          "- Windows Time service is available and functional;",
+          "- synchronization mode is appropriate for domain hierarchy;",
+          "- current time source is in the site/client approved source set;",
+          "- synchronization status is healthy;",
+          "- a rediscovery/resync does not return an unresolved provider/system error;",
+          "- the exact triggering DRMM monitor condition clears."
+        ]
+      },
+      "decision_gate_checklist": {
+        "source_section_key": "8",
+        "present": true,
+        "verbatim_bullets": [
+          "1. exact alert and endpoint identity;",
+          "2. endpoint online in DRMM;",
+          "3. diagnostic evidence fresh;",
+          "4. endpoint proven to be a supported ordinary Windows domain member for domain-hierarchy repair;",
+          "5. endpoint is not a domain controller;",
+          "6. no evidence of domain trust, DNS/DC discovery, GPO, or broader site/domain failure requiring separate handling;",
+          "7. exact remediation component identity and arguments are source controlled;",
+          "8. exact authority exists for the target/action;",
+          "9. no equivalent action is already in flight;",
+          "10. retry limit is not exhausted."
+        ]
+      },
+      "retry_checklist": {
+        "source_section_key": "10",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "recheck_checklist": {
+        "source_section_key": "11",
+        "present": true,
+        "verbatim_bullets": [
+          "- endpoint becomes online;",
+          "- remediation job reaches terminal state;",
+          "- normal DRMM monitor cycle updates;",
+          "- current source/health diagnostic changes."
+        ]
+      },
+      "stale_checklist": {
+        "source_section_key": "12",
+        "present": true,
+        "verbatim_bullets": [
+          "- recurrent DC reachability;",
+          "- DNS/DC-locator problems;",
+          "- roaming/offsite/VPN behavior;",
+          "- GPO/configuration drift;",
+          "- VM guest-time-provider interaction;",
+          "- Windows Time service instability;",
+          "- secure-channel/trust problems;",
+          "- broader domain time hierarchy health."
+        ]
+      },
+      "dependency_checklist": {
+        "source_section_key": "13",
+        "present": true,
+        "verbatim_bullets": [
+          "- dedicated read-only Windows Time diagnostic component;",
+          "- accepted bounded remediation component;",
+          "- governed job status/output reads;",
+          "- exact alert resolution capability;",
+          "- durable provider-object playbook state;",
+          "- optional Autotask ticket creation for recurrence/failure escalation."
+        ]
+      },
+      "documentation_checklist": {
+        "source_section_key": "14",
+        "present": true,
+        "verbatim_bullets": [
+          "1. **STATUS**",
+          "2. **NEXT STEP / ACTION REQUIRED**",
+          "3. **WHEN / ESCALATION**",
+          "4. **KEY EVIDENCE**",
+          "5. **WHAT JASON DID**",
+          "6. **CHANGES MADE**",
+          "7. **JASON STATE**",
+          "- `Jason - Windows Time - Diagnostic`",
+          "- `Jason - Windows Time - Recurring Failure`",
+          "- `Jason - Windows Time - Remediation`",
+          "- `Jason - Windows Time - Verification`",
+          "- `Jason - Windows Time - Resolution`",
+          "- `Jason - Windows Time - Human Review Required`"
+        ]
+      },
+      "failure_checklist": {
+        "source_section_key": "15",
+        "present": true,
+        "verbatim_bullets": [
+          "- missing/ambiguous device identity;",
+          "- endpoint read failure;",
+          "- diagnostic component failure or unreadable output;",
+          "- unknown machine role;",
+          "- domain-controller target;",
+          "- conflicting policy evidence;",
+          "- job output unavailable;",
+          "- alert-resolution readback failure;",
+          "- unsupported provider result."
+        ]
+      },
+      "escalation_checklist": {
+        "source_section_key": "16",
+        "present": true,
+        "verbatim_bullets": [
+          "- domain controller is affected;",
+          "- trust/DC discovery remains broken;",
+          "- DNS/GPO/site/domain issue is suspected;",
+          "- two bounded repair attempts fail;",
+          "- recurrence threshold is reached;",
+          "- disruptive action is required;",
+          "- approved source policy is missing or contradictory;",
+          "- current state cannot be independently verified."
+        ]
+      },
+      "verification_checklist": {
+        "source_section_key": "17",
+        "present": true,
+        "verbatim_bullets": [
+          "1. rerun the dedicated Windows Time diagnostic;",
+          "2. prove current source is in the approved source set;",
+          "3. prove synchronization health;",
+          "4. verify the exact DRMM time-source monitor condition is no longer open;",
+          "5. resolve the exact triggering alert only when provider state has not already auto-resolved it;",
+          "6. independently read back alert resolution/history."
+        ]
+      },
+      "completion_checklist": {
+        "source_section_key": "18",
+        "present": true,
+        "verbatim_bullets": [
+          "- exact alert/device identity is proven;",
+          "- required diagnostics are complete;",
+          "- classification is established;",
+          "- any authorized remediation succeeded;",
+          "- authoritative healthy-state evidence exists;",
+          "- exact alert is no longer open;",
+          "- documentation is complete when a ticket/case exists;",
+          "- terminal provider/PSA state is independently read back."
+        ]
+      },
+      "required_capabilities_source": {
+        "source_section_key": "20",
+        "present": true,
+        "verbatim_bullets": [
+          "- `management.alert.search`",
+          "- `endpoint.device.read`",
+          "- `endpoint.alert.history.search`",
+          "- `automation.component.search`",
+          "- `automation.job.read`",
+          "- `automation.job.output.read`",
+          "- `service.ticket.search/read` when a ticket exists.",
+          "- `automation.component.execute`",
+          "- `endpoint.alert.resolve`",
+          "- `service.ticket.create`",
+          "- `service.ticket.note.create`",
+          "- `service.ticket.update`."
+        ]
+      },
+      "acceptance_test_checklist": {
+        "source_section_key": "21",
+        "present": true,
+        "verbatim_bullets": [
+          "1. current alert is detected by exact diagnostic signature;",
+          "2. exact endpoint identity resolves;",
+          "3. source `Free-running System Clock` is extracted;",
+          "4. approved source `ADSRV.Rigginsco.local` is extracted;",
+          "5. prior same-device `Free-running System Clock` and `Local CMOS Clock` episodes count toward recurrence;",
+          "6. recurrence threshold classifies CR412LT as recurring;",
+          "7. wrong/unrelated `comp_script_ctx` alerts are rejected;",
+          "8. offline endpoint waits without mutation;",
+          "9. missing/failed evidence is inconclusive rather than healthy;",
+          "10. shadow mode performs zero mutations;",
+          "11. future remediation job is single/idempotent and bounded;",
+          "12. future verification requires monitor clear and diagnostic healthy state;",
+          "13. exact alert resolution is read back;",
+          "14. ambiguous/cross-client identity fails closed;",
+          "15. restart/resume preserves state."
+        ]
+      },
+      "closure_checklist": {
+        "source_section_key": "22",
+        "present": true,
+        "verbatim_bullets": [
+          "- shadow trigger/identity/recurrence acceptance passes on CR412LT;",
+          "- dedicated diagnostic component is reviewed and accepted;",
+          "- bounded remediation component is reviewed and accepted;",
+          "- remediation and verification acceptance cases pass;",
+          "- source-controlled registry is promoted from pilot/shadow to production/autonomous;",
+          "- exact owner promotion exists;",
+          "- Grafana/Project Jason control center shows the playbook and its state."
+        ]
+      },
+      "owner_review_checklist": {
+        "source_section_key": "23",
+        "present": true,
+        "verbatim_bullets": [
+          "- detect/identify/classify;",
+          "- read-only diagnostic;",
+          "- ordinary domain-member rediscover/resync;",
+          "- restore domain hierarchy only when diagnostic gates prove it is required;",
+          "- bounded W32Time restart only as part of the reviewed component;",
+          "- authoritative verification;",
+          "- resolve exact alert;",
+          "- create/update a recurrence or failure ticket when policy requires."
+        ]
+      }
+    },
+    "diagnostic_substeps": [
+      {
+        "id": "7_sub_1",
+        "heading": "Step 1: Alert evidence",
+        "content_markdown": "\n\n**Purpose:** Establish the exact observed mismatch.\n\n**Evidence source:** DRMM open alert.\n\nRecord current source, approved source list, alert timestamp, autoresolve setting, response-action references, and exact alert UID.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {
+          "purpose": "** Establish the exact observed mismatch.",
+          "evidence_source": "** DRMM open alert."
+        }
+      },
+      {
+        "id": "7_sub_2",
+        "heading": "Step 2: Endpoint identity and availability",
+        "content_markdown": "\n\n**Purpose:** Prove the alert belongs to the exact current endpoint and determine whether diagnostics can run.\n\n**Evidence source:** `endpoint.device.read`.\n\nIf offline, enter `waiting_device_access`. Do not dispatch repair.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {
+          "purpose": "** Prove the alert belongs to the exact current endpoint and determine whether diagnostics can run.",
+          "evidence_source": "** `endpoint.device.read`."
+        }
+      },
+      {
+        "id": "7_sub_3",
+        "heading": "Step 3: Recurrence",
+        "content_markdown": "\n\n**Purpose:** Distinguish transient drift from repeated failure.\n\n**Evidence source:** `endpoint.alert.history.search`.\n\nCount same-device time-source mismatch alerts inside the previous 30 days. Three or more occurrences, including the current incident, classify as `RECURRING_FAILURE`.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {
+          "purpose": "** Distinguish transient drift from repeated failure.",
+          "evidence_source": "** `endpoint.alert.history.search`."
+        }
+      },
+      {
+        "id": "7_sub_4",
+        "heading": "Step 4: Dedicated Windows Time diagnostic",
+        "content_markdown": "\n\n**Required component:** `Windows Time Diagnostic [WIN] AOT Ver 10012026-1` or later accepted equivalent.\n\nThe diagnostic must return structured evidence for:\n- domain joined;\n- domain name;\n- machine role / domain-controller status;\n- W32Time service status/start type;\n- current source;\n- synchronization mode/type;\n- configured peers;\n- last successful synchronization;\n- last synchronization error;\n- stratum/offset where available;\n- DC discovery result;\n- authenticating DC;\n- relevant recent Windows Time events;\n- health classification.\n\nDiagnostic component is read-only and is the intended standing-safe evidence source.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_5",
+        "heading": "Step 5: Classification",
+        "content_markdown": "\n\nBounded classifications:\n- `HEALTHY_TRANSIENT`\n- `W32TIME_STOPPED`\n- `WRONG_SYNC_MODE`\n- `RESYNC_REQUIRED`\n- `LOCAL_CLOCK_FALLBACK`\n- `NO_DOMAIN_SOURCE`\n- `DOMAIN_TRUST_OR_DC_FAILURE`\n- `DOMAIN_CONTROLLER`\n- `NON_DOMAIN_DEVICE`\n- `POLICY_CONFLICT`\n- `RECURRING_FAILURE`\n- `INCONCLUSIVE`\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      }
+    ],
+    "remediation_branches": [
+      {
+        "id": "9_sub_1",
+        "heading": "Branch A: Rediscover and resync",
+        "content_markdown": "\n\nUse for `RESYNC_REQUIRED` or eligible `LOCAL_CLOCK_FALLBACK`.\n\nExpected behavior:\n- rediscover time source;\n- request resynchronization;\n- return before/after source and command result;\n- no reboot.\n\nClassification: modifying, non-disruptive.\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      },
+      {
+        "id": "9_sub_2",
+        "heading": "Branch B: Restore domain hierarchy",
+        "content_markdown": "\n\nUse only for `WRONG_SYNC_MODE` on a proven ordinary domain member.\n\nExpected behavior:\n- restore domain-hierarchy synchronization configuration;\n- update Windows Time configuration;\n- restart W32Time only when required by the accepted remediation component;\n- rediscover/resync;\n- return before/after configuration and source.\n\nClassification: modifying. Service restart is permitted only if the accepted playbook-scoped component has been specifically reviewed for this branch.\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      },
+      {
+        "id": "9_sub_3",
+        "heading": "Explicitly not autonomous",
+        "content_markdown": "\n- domain-controller time configuration;\n- secure-channel reset;\n- DNS changes;\n- domain rejoin;\n- GPO changes;\n- reboot.\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      }
+    ],
+    "source_section_inventory": [
+      {
+        "section_key": "1",
+        "present": true,
+        "title": "Section Goal",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "2",
+        "present": true,
+        "title": "Trigger",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "3",
+        "present": true,
+        "title": "Scope and Boundaries",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "4",
+        "present": true,
+        "title": "Initial Identification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "5",
+        "present": true,
+        "title": "Expected State",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "6",
+        "present": true,
+        "title": "State Model",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "7",
+        "present": true,
+        "title": "Diagnostic Workflow",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "8",
+        "present": true,
+        "title": "Decision Gates",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "9",
+        "present": true,
+        "title": "Remediation",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "10",
+        "present": true,
+        "title": "Retry Policy",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "11",
+        "present": true,
+        "title": "Periodic Rechecks",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "12",
+        "present": true,
+        "title": "Aging / Stale Condition",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "13",
+        "present": true,
+        "title": "Dependency Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "14",
+        "present": true,
+        "title": "Documentation Requirements",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "15",
+        "present": true,
+        "title": "Failure Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "16",
+        "present": true,
+        "title": "Escalation Criteria",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "17",
+        "present": true,
+        "title": "Verification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "18",
+        "present": true,
+        "title": "Completion Criteria",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "19",
+        "present": true,
+        "title": "Final Resolution Note",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "20",
+        "present": true,
+        "title": "Required Capabilities",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "21",
+        "present": true,
+        "title": "Acceptance Test",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "22",
+        "present": true,
+        "title": "Section Goal Closure",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "23",
+        "present": true,
+        "title": "Autonomous Execution Eligibility and Owner Review",
+        "review_status": "source_preserved"
+      }
+    ],
+    "section_semantics": "Source-derived metadata only. Diagnostic commands and remediation branches are inert Markdown, not executable provider calls."
   },
   "legacy_registry": {
     "source_path": "docs/playbooks/Jason-Windows-Time-Source-Self-Heal.md",
@@ -330,6 +765,8 @@
       "Controlled shadow comparison and independent acceptance",
       "Owner-bound activation and branch-specific autonomous promotion"
     ],
-    "external_fact_fields_non_authoritative": true
+    "external_fact_fields_non_authoritative": true,
+    "source_reconstruction_integrity": "verified_from_original_source_on_conversion",
+    "section_semantic_extraction": "source_text_derived_no_provider_execution"
   }
 }
