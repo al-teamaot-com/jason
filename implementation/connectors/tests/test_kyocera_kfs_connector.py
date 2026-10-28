@@ -242,3 +242,49 @@ def test_non_observe_mode_is_rejected_before_provider_call():
             )
         )
     assert FakeSessionClient.calls == []
+
+
+def test_kfs_http_error_classification_retains_status_without_secret_material():
+    from urllib.error import HTTPError
+    from connectors.core.contracts import ConnectorTransportError
+    from connectors.kyocera_kfs.client import KyoceraKfsSessionClient
+
+    class FailedOpener:
+        def open(self, request, timeout):
+            raise HTTPError(
+                url="https://api.kyods.com/KFS/Login", code=403,
+                msg="potentially-secret-provider-error", hdrs=None, fp=None,
+            )
+
+    client=KyoceraKfsSessionClient(credentials(),opener=FailedOpener())
+    with pytest.raises(ConnectorTransportError) as error:
+        client._post("/KFS/Login", {"password":"test-do-not-print"})
+    assert error.value.error_code=="PROVIDER_HTTP_STATUS_403"
+    assert error.value.status_code==403
+    assert error.value.service=="kyocera_kfs"
+    assert "test-do-not-print" not in str(error.value)
+    assert "potentially-secret-provider-error" not in str(error.value)
+
+
+def test_kfs_application_status_failure_is_not_falsely_classified_as_http_error():
+    from connectors.kyocera_kfs.client import (
+        KyoceraKfsApplicationStatusError, KyoceraKfsSessionClient,
+    )
+    for value,expected in (
+        (401,"KFS_APPLICATION_STATUS_401"),
+        (503,"KFS_APPLICATION_STATUS_503"),
+        ("private message","KFS_APPLICATION_STATUS_UNKNOWN"),
+    ):
+        with pytest.raises(KyoceraKfsApplicationStatusError) as error:
+            KyoceraKfsSessionClient._require_success(
+                {"status":{"code":value,"secret":"private"}}, "KFS login",
+            )
+        assert error.value.error_code==expected
+        assert "private message" not in str(error.value)
+        assert "private" not in str(error.value)
+        assert error.value.status_code is None
+
+
+def test_kfs_success_status_preserves_read_behavior():
+    from connectors.kyocera_kfs.client import KyoceraKfsSessionClient
+    KyoceraKfsSessionClient._require_success({"status":{"code":200}},"KFS login")
