@@ -11,7 +11,7 @@ All **16** entries in `implementation/autonomous_remediation/playbook_registry.j
 - Every candidate conforms to the *review-only* JSON v1 envelope and passes static JavaScript checks for JSON parsing, step-graph reachability/acyclicity, minimum fields, source reconstruction, absent executable remediation, and `autonomy.activation=disabled`.
 - All candidates are `lifecycle=pilot`, have **no JSON runtime activation**, no allowed capability actions, and stop in human review in their preview step graph.
 - **No production JSON runtime registry was modified.** No live Jason playbook was staged, activated, promoted, replaced or deployed. The original production behavior remains governed by its existing source registry and runtime.
-- The *canonical Python semantic validator* and live runtime worker parity **have not yet been executed/proven**. Do not claim these source conversion drafts are production-ready executable playbooks.
+- The **canonical Python semantic validator has now passed for all 16** in isolated GitHub CI tests (2026-10-28, source commit `f7bf956b0f0a35a86d72e26923f73832dfd50e58`); the Windows Time JSON interpreter also passed 15 **synthetic** cases. Live runtime worker integration, trusted evidence binding, provider-read acceptance, rechecks and full operational parity **remain unproven**. Do not claim these source conversion drafts are production-ready executable playbooks.
 
 ## Converted playbook inventory
 
@@ -36,6 +36,15 @@ All **16** entries in `implementation/autonomous_remediation/playbook_registry.j
 
 The existing v1 JSON schema and validator: [playbook-v1.schema.json](./playbook-v1.schema.json) and `implementation/autonomous_remediation/playbook_document.py`. The common operational playbook design contract remains [Jason-Playbook-Runtime-Automation-Contract.md](../Jason-Playbook-Runtime-Automation-Contract.md). The [JSON Playbook Runtime](../Jason-JSON-Playbook-Runtime.md) explicitly requires incremental migration and per-playbook acceptance, not unverified mass activation.
 
+## Isolated validation evidence — 2026-10-28
+
+- Test module: `implementation/runtime_service/tests/test_json_playbook_migration_candidates.py`.
+- GitHub Actions: [Validate Jason, run 40749435902](https://github.com/al-teamaot-com/jason/actions/runs/40749435902), commit `f7bf956b0f0a35a86d72e26923f73832dfd50e58`: **passed**. The `runtime-service` job ran the complete `implementation/runtime_service/tests` suite, which includes canonical `validate_playbook_document` for all 16 drafts and 15 Windows Time synthetic classification cases. The documentation, repository-hygiene, system-registry, cap and other jobs passed. SEC-007, Teams Gateway, and Conversation Experience workflows also passed.
+- Tests verify source-document byte-for-byte reconstruction and git blob fingerprint, draft-only identity, no declared capabilities, no provider-operation steps, `autonomy.activation=disabled`, and no implied production approval. The validator rejects injected inline PowerShell.
+- Windows Time simulation covers missing identity, offline endpoints, incomplete evidence, missing policy, domain-controller or trust risk, policy conflict, recurrence, non-domain endpoint, stopped W32Time, wrong synchronization mode, resync requirement, disallowed time source, apparently healthy source, and unknown synchronization health.
+- Every synthetic classification reaches a **human-review** terminal with **no capability invocation**. Those facts are untrusted fixtures, not live provider observations. This is successful **structural and deterministic unit acceptance only**, not a functional production shadow comparison.
+- BackupIQ version mismatch is tracked in [issue #2113](https://github.com/al-teamaot-com/jason/issues/2113); source registry remains at **1.2.0** pending scope reconciliation. No approval was inferred for the header's **1.3.0**.
+
 ## Source issues requiring review
 
 1. **BackupIQ version drift:** `docs/playbooks/Jason-BackupIQ-Datto-Endpoint-Backup.md` declares **1.3.0**, while the source registry declares **1.2.0**. The JSON draft has a registry-based `1.2.0-jsonpreview` identity but preserves and labels the document version; do **not** assert equivalence until reconciled.
@@ -47,10 +56,10 @@ The existing v1 JSON schema and validator: [playbook-v1.schema.json](./playbook-
 
 ## Next controlled acceptance steps
 
-1. Run the repository's **canonical** `validate_playbook_document` with each JSON candidate and compare exact registered capability names. Retain the current disabled preview status.
-2. Reconcile source-version and missing-section issues *in documentation first*, without inventing automation authority.
+1. **Completed for draft-only validation:** Canonical `validate_playbook_document` passed for all 16 with `known_capabilities=set()` because none declares an executable step. The registered capability binding check is **still pending** for any future executable conversion.
+2. **Open source reconciliation:** Track the BackupIQ 1.2/1.3 mismatch in issue #2113 and missing-section issues *in documentation first*, without inventing automation authority.
 3. Define exact provider-target and evidence-fact bindings via **existing** Central Orchestrator, shared ticket-work-start lifecycle and verified Autotask/DRMM identities. Do not interpolate arbitrary commands or URLs.
-4. Prove a bounded real JSON-driven workflow for **one** low-risk playbook in shadow against controlled synthetic and live-read scenarios. Include negative evidence, cross-client rejection, waiting/retry persistence, duplicate suppression, terminal readback, and proof that no new write occurs.
+4. **Synthetic classification now proven.** Next prove a bounded real JSON-driven workflow for **one** low-risk playbook in shadow against authorized live-read evidence. Include negative evidence, cross-client rejection, waiting/retry persistence, duplicate suppression, terminal readback, and proof that no new write occurs.
 5. Only after true runtime parity and verified acceptance, consider exact-version activation using Jason's existing Release Manager and separate owner-granted autonomy promotion. Preserve existing production playbook as rollback baseline until parity is proven.
 6. Use the source snapshot and per-file blob references to detect future Markdown/registry drift rather than silently replacing reviewed JSON.
 
