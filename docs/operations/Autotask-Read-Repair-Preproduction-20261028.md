@@ -20,3 +20,10 @@ These changes are NOT production approved. Use the Production Manager for any pr
 - Unit tests do not constitute live preproduction provider acceptance.
 - Broad cross-customer contract enumeration remains unavailable without an explicit scope model.
 - Time-entry provider-backed read remains blocked pending permission evidence.
+
+## Live metadata evidence — 2026-10-28
+Using governed service.entity.describe against live Autotask:
+- TimeEntries: canQuery=true, userAccessForQuery=All, create/update/delete=Restricted.
+- Contracts: canQuery=true, userAccessForQuery=All, create/update/delete=None.
+
+These describe responses demonstrate entity query visibility for the current API metadata context, **not** that requester-specific native impersonation has been verified. The explicit labor read gate remains DENY. Preproduction must prove the native requester header and provider enforcement (including a denied unauthorized requester) before activating the labor read. No production environment flags should be changed as a substitute for proof.
