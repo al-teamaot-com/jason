@@ -1,0 +1,334 @@
+{
+  "schema_version": 1,
+  "playbook": {
+    "id": "datto_edr_av",
+    "name": "Jason - Datto EDR/AV Diagnose & Repair (JSON migration draft)",
+    "version": "1.3.0-jsonpreview",
+    "lifecycle": "pilot",
+    "target_type": "endpoint",
+    "source_owner": "AOT",
+    "source_registry_version": "1.3.0",
+    "documented_version": "1.3.0",
+    "original_lifecycle": "production"
+  },
+  "trigger": {
+    "source_registry_match": {
+      "title_contains": [
+        "Security Threat detected",
+        "Antivirus status"
+      ]
+    },
+    "details_section_key": "2",
+    "execution_enabled": false
+  },
+  "scope": {
+    "direct_provider_access": false,
+    "preview_only": true,
+    "execution_authority": "none",
+    "scope_section_key": "3"
+  },
+  "expected_state": {
+    "details_section_key": "5",
+    "not_reverified_in_json_runtime": true
+  },
+  "state_model": {
+    "entry_step": "identity_gate",
+    "source_section_key": "6",
+    "context_binding_status": "not_implemented_for_migration_draft"
+  },
+  "steps": [
+    {
+      "id": "identity_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_target_identity_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "evidence_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "evidence_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "authoritative_evidence_complete",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "authorization_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "authorization_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "approved_json_runtime_parity",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "migration_hold"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "migration_hold",
+      "type": "human_review"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "verification": {
+    "authoritative_source": "Legacy source playbook section 17 and provider readbacks; not executed in this JSON draft",
+    "success_condition": "Legacy source Section 17 and Section 18 must pass independently; classification-only draft cannot verify or close"
+  },
+  "completion": {
+    "terminal_disposition": "Human Review (draft only; existing production source unchanged)"
+  },
+  "autonomy": {
+    "activation": "disabled",
+    "allowed_capabilities": []
+  },
+  "procedure": {
+    "section_refs": {
+      "section_goal": "1",
+      "trigger": "2",
+      "scope": "3",
+      "identification": "4",
+      "expected_state": "5",
+      "state_model": "6",
+      "diagnostics": "7",
+      "decision_gates": "8",
+      "remediation": "9",
+      "retry_policy": "10",
+      "periodic_rechecks": "11",
+      "stale_condition": "12",
+      "dependencies": "13",
+      "documentation": "14",
+      "failures": "15",
+      "escalation": "16",
+      "verification": "17",
+      "completion": "18",
+      "final_resolution": "19",
+      "required_capabilities": "20",
+      "acceptance_test": "21",
+      "closure": "22",
+      "autonomy_review": "23"
+    },
+    "section_keys_missing_from_source": [],
+    "diagnostic_substep_titles": [
+      "Step 1: Ticket/device/context",
+      "Step 2: Authoritative product-health component",
+      "Step 3: Datto EDR/AV API evidence",
+      "Step 4: Classify the condition",
+      "Step 5: Narrow service diagnostics",
+      "Step 6: Security detection detail"
+    ],
+    "remediation_substep_titles": [
+      "Threat branch"
+    ],
+    "live_execution_mapped": false
+  },
+  "legacy_registry": {
+    "source_path": "implementation/autonomous_remediation/datto_edr_av_playbook.py",
+    "source_version": "1.3.0",
+    "review_status": "health_only_autonomous_threat_branch_approval_gated",
+    "source_enabled": true,
+    "source_autonomy_activation": "autonomous",
+    "source_allowed_capabilities": [
+      "automation.component.execute",
+      "service.ticket.note.create",
+      "service.ticket.update"
+    ],
+    "source_required_gates": [
+      "trigger",
+      "identity",
+      "expected_condition",
+      "exclusions_clear",
+      "evidence_fresh",
+      "governance_precheck",
+      "autonomy_approved"
+    ],
+    "source_trigger": {
+      "title_contains": [
+        "Security Threat detected",
+        "Antivirus status"
+      ]
+    }
+  },
+  "source_document": {
+    "path": "docs/playbooks/Jason-Datto-EDR-AV-Diagnose-Repair.md",
+    "source_blob_sha": "f6b42825d9b9caf9feb8cd619c522cdf1bc824e9",
+    "prelude_markdown": "# Jason Playbook: Datto EDR/AV Diagnose & Repair\n\nVersion: 1.3.0\nPlaybook ID: `datto_edr_av`\nStatus: v1.3 production-enabled under normal Jason governance. Governed endpoint-security reads and Datto AV scan execution are production-proven. The controlled AOT-50282 / T20260918.0005 threat acceptance proved completed Full and Quick scan evidence, post-scan detection review, recurrence handling, duplicate-scan suppression, ticket documentation, and terminal escalation when provider evidence remains `compromised=true` or a recurring source remains unresolved. Security escalation is terminal/sticky and cannot be downgraded by later healthy product state.\n\n",
+    "sections": [
+      {
+        "key": "1",
+        "title": "Section Goal",
+        "heading_markdown": "## 1. Section Goal",
+        "body_markdown": "\n\n**Goal:** Allow Jason to identify, diagnose, repair, verify, document, and appropriately escalate Datto EDR/AV endpoint-security issues without conflating product health, configuration problems, security detections, malicious artifacts, or endpoint compromise.\n\n**Success means:**\n- the correct ticket/client/device is resolved and associated;\n- product health and security-event state are evaluated independently;\n- Datto documentation and Datto API evidence are authoritative for Datto product semantics;\n- bounded, governed remediation is performed only when justified;\n- threat-triggered runs cannot close solely because the EDR/AV stack is healthy;\n- every meaningful action/result is documented;\n- playbook outcomes are measured in Grafana for continuous improvement.\n\n"
+      },
+      {
+        "key": "2",
+        "title": "Trigger",
+        "heading_markdown": "## 2. Trigger",
+        "body_markdown": "\n\nThis playbook may start from Autotask/DRMM EDR or AV alerts, Datto EDR/AV detections/webhooks, or a technician request for a named endpoint.\n\nAt intake classify the run as exactly one of:\n- `health_only`\n- `threat_only`\n- `health_and_threat`\n\nAn alert is evidence requiring evaluation. It is not, by itself, proof of compromise.\n\n"
+      },
+      {
+        "key": "3",
+        "title": "Scope and Boundaries",
+        "heading_markdown": "## 3. Scope and Boundaries",
+        "body_markdown": "\n\n### In Scope\n- Autotask ticket/device correlation;\n- Datto RMM endpoint identification and governed reads;\n- Datto EDR/AV API reads;\n- Datto EDR/AV alert/detection evidence;\n- EDR/AV policy and status evidence;\n- approved DRMM diagnostic/remediation components;\n- approved Datto AV quick/full scans when warranted;\n- approved second-opinion scanning when warranted;\n- internal ticket documentation;\n- Grafana playbook telemetry.\n\n### Out of Scope\n- declaring compromise from agent health, Windows Security status, or one uninvestigated alert;\n- arbitrary PowerShell or shell execution;\n- autonomous AV exclusions/allowlisting;\n- autonomous disruptive containment;\n- direct provider access outside Jason governance;\n- unrelated endpoints/tickets;\n- unbounded retry loops.\n\nPreserve `direct_provider_access=false`, Central Orchestrator authority, exact requester grants, client isolation, evidence/audit logging, and disruption controls.\n\n"
+      },
+      {
+        "key": "4",
+        "title": "Initial Identification",
+        "heading_markdown": "## 4. Initial Identification",
+        "body_markdown": "\n\nBefore troubleshooting:\n1. Resolve the exact Autotask ticket.\n2. Execute Jason's mandatory ticket-work-start lifecycle: queue **Jason**, status **In Progress**, Work Type **Remote Support**.\n3. Resolve the client/organization.\n4. Extract the device selector from ticket/alert evidence.\n5. Resolve the exact DRMM device UID; never choose the first ambiguous match.\n6. Preserve an existing ticket configuration item or associate one only through the deterministic DRMM UID ↔ active Autotask configuration relationship defined in `docs/operations/Jason-Autotask-Ticket-Work-Lifecycle.md`.\n7. Preserve existing Ticket Type / Issue Type / Sub-Issue Type unless the playbook has exact supported classification labels; resolve labels from live Autotask metadata before mutation.\n8. Resolve the corresponding Datto EDR/AV endpoint using durable provider mapping.\n9. Record trigger timestamp, alert IDs, correlation IDs, and relevant provider IDs.\n\nIf identity remains ambiguous: `state=identification_blocked`; document and escalate.\n\n"
+      },
+      {
+        "key": "5",
+        "title": "Expected State",
+        "heading_markdown": "## 5. Expected State",
+        "body_markdown": "\n\n### SecurityStackHealthy\nExpected evidence includes:\n- endpoint reachable/checking in;\n- HUNTAgent installed/running as expected;\n- EDR agent current/registered;\n- Datto AV present when required by client policy;\n- AV engine/signature state current;\n- expected AV/EDR policy assigned;\n- real-time protection state consistent with assigned policy;\n- no unresolved registration/tamper/license condition;\n- authoritative AOT health component reports `Status=Healthy`.\n\n### ThreatResolved\nFor threat-triggered runs:\n- originating Datto detection has an authoritative final disposition;\n- no unresolved malicious finding remains;\n- the verification scan record is completed and read;\n- a post-scan governed detection search shows no unresolved/new matching threat evidence;\n- configured recurrence check has passed;\n- security stack remains healthy.\n\n`SecurityStackHealthy=true` does not imply `ThreatResolved=true`.\n\n"
+      },
+      {
+        "key": "6",
+        "title": "State Model",
+        "heading_markdown": "## 6. State Model",
+        "body_markdown": "\n\nPersisted playbook states include:\n- `new`, `diagnosing`, `repairing`, `verifying`\n- `awaiting_approval`, `awaiting_scheduled_reboot`\n- `awaiting_security_verification`\n- `threat_investigation`, `threat_contained`\n- `false_positive_review`\n- `healthy`, `escalation_required` (terminal/sticky)\n\nSecurity disposition is separately persisted:\n- `not_applicable`\n- `no_detection`\n- `detection_under_investigation`\n- `malicious_artifact_contained`\n- `false_positive_review`\n- `resolved`\n- `security_incident_escalation`\n\nCompromise signal is separately persisted:\n- `not_established`\n- `provider_indicated`\n- `corroborated_execution`\n\nContained detection state distinguishes `detection_contained` from\n`malicious_artifact_contained`. Datto quarantine evidence can establish\ncontainment without establishing that the endpoint is compromised or that the\nprovider explicitly classified the artifact as malicious.\n\nDatto provider metadata `compromised=true` is recorded as `provider_indicated`; Jason does not silently rename it independent proof.\n\n"
+      },
+      {
+        "key": "7",
+        "title": "Diagnostic Workflow",
+        "heading_markdown": "## 7. Diagnostic Workflow",
+        "body_markdown": "\n\n### Step 1: Ticket/device/context\nResolve exact ticket, client, device UID, current user if relevant, related alerts, and known exceptions.\n\n### Step 2: Authoritative product-health component\nRun `Check Datto EDR/AV Status AOT Ver 12122025-1`.\n\nDo not interpret a single Windows service state as the whole product state.\n\n### Step 3: Datto EDR/AV API evidence\nUsing governed API reads, collect when available:\n- EDR/AV endpoint IDs/mapping;\n- agent/status/version;\n- AV engine version and VDF version;\n- assigned policies;\n- recent scan history;\n- alerts/detections;\n- quarantine/disposition;\n- isolation state.\n\nUse the tenant LoopBack API Explorer as authority for actual entities, operations, models, parameters, and responses.\n\n### Step 4: Classify the condition\nClassify separately as:\n- protection-health issue;\n- policy/configuration issue;\n- security detection under investigation;\n- malicious artifact contained;\n- false-positive review;\n- provider-indicated/corroborated security incident.\n\nA stale definition, stopped/missing agent, failed scan, or Windows Security warning is not compromise evidence.\n\n### Step 5: Narrow service diagnostics\nWhen appropriate use `Check Service Detail & Diagnostic [WIN] AOT Ver 12122025-1`.\n\nDatto documents `HUNTAgent` as the EDR agent service for service monitoring. Do not assume `EndpointProtectionService=Stopped` independently proves Datto AV failure.\n\n### Step 6: Security detection detail\nFor threat-triggered runs persist the narrowest authoritative evidence available:\n- alert/detection ID;\n- threat name/severity;\n- malicious/non-malicious/suspicious flags;\n- quarantine/block state;\n- provider `compromised` signal;\n- process/parent process;\n- command line in secure evidence storage;\n- SHA256;\n- original path;\n- user;\n- timestamps;\n- recurrence.\n\n"
+      },
+      {
+        "key": "8",
+        "title": "Decision Gates",
+        "heading_markdown": "## 8. Decision Gates",
+        "body_markdown": "\n\nBefore remediation confirm:\n- exact endpoint identity;\n- endpoint is reachable enough to verify;\n- action matches the current branch;\n- no conflicting job is already running;\n- required component/capability exists;\n- current policy/expected state is known;\n- no documented client exception explains the condition;\n- disruptive action has explicit approval for that instance.\n\nThreat branch preflight must confirm the required EDR API reads. Missing evidence means Jason cannot claim full threat resolution.\n\n"
+      },
+      {
+        "key": "9",
+        "title": "Remediation",
+        "heading_markdown": "## 9. Remediation",
+        "body_markdown": "\n\nNormal bounded health-repair order:\n1. authoritative health check;\n2. narrow service diagnostic when indicated;\n3. `Datto EDR Maintenance [WIN]`;\n4. authoritative verification;\n5. `Datto EDR Force Reinstall and Upgrade [WIN] AOT 09162024` when still required;\n6. authoritative verification;\n7. one governed Datto AV force update using `agent.exe datto-av --force-update`;\n8. authoritative verification;\n9. scheduled reboot only when required/authorized;\n10. post-reboot verification;\n11. policy-gated clean recovery only after normal paths are exhausted.\n\nThe force-update binding permits only the fixed approved operation; callers cannot supply arbitrary PowerShell.\n\n### Threat branch\n`read threat -> verify stack -> scan -> governed remediation/quarantine if appropriate -> rescan -> reread threat -> recurrence check -> verify stack -> resolve/escalate`\n\nIf Datto already blocked/quarantined an object, verify that disposition rather than repeating cleanup unnecessarily.\n\n"
+      },
+      {
+        "key": "10",
+        "title": "Retry Policy",
+        "heading_markdown": "## 10. Retry Policy",
+        "body_markdown": "\n\n- Each repair step: maximum one normal attempt unless explicitly defined otherwise.\n- One additional AV refresh may occur after the approved scheduled reboot.\n- Read/poll/output failures retry the same read and never authorize redispatch.\n- Failed AV scan may be retried when Datto-documented transient causes are plausible.\n- Repeated AV scan failures (three or more) escalate per Datto guidance.\n- No endless remediation loops.\n\n"
+      },
+      {
+        "key": "11",
+        "title": "Periodic Rechecks",
+        "heading_markdown": "## 11. Periodic Rechecks",
+        "body_markdown": "\n\nFor waits/reboots:\n- scheduled reboot default: 02:30 local;\n- post-reboot verification: 03:30 local;\n- threat recurrence window must be explicit by severity/policy;\n- prevent duplicate scheduled jobs.\n\nThreat runs re-read the originating detection after remediation and at the configured recurrence boundary. Once `escalation_required` is established, later healthy stack evidence, a clean scan, or a clear recurrence check may enrich the incident record but must not downgrade the terminal escalation state.\n\n"
+      },
+      {
+        "key": "12",
+        "title": "Aging / Stale Condition",
+        "heading_markdown": "## 12. Aging / Stale Condition",
+        "body_markdown": "\n\nDo not wait indefinitely for offline devices, stale EDR records, ambiguous mapping, scans that never complete, provider jobs with no terminal state, or threat dispositions that cannot be read. These become explicit escalation conditions.\n\n"
+      },
+      {
+        "key": "13",
+        "title": "Dependency Handling",
+        "heading_markdown": "## 13. Dependency Handling",
+        "body_markdown": "\n\nDependencies include:\n- Datto EDR/AV API token;\n- API entity/capability discovery;\n- expected client policy;\n- licensing;\n- documented exceptions;\n- required components;\n- Autotask write capability;\n- scan execute/read capability.\n\nTokens must be stored through Jason's secrets path and never logged. Datto API tokens currently expire one year after creation.\n\n"
+      },
+      {
+        "key": "14",
+        "title": "Documentation Requirements",
+        "heading_markdown": "## 14. Documentation Requirements",
+        "body_markdown": "\n\nDocument every meaningful step:\n- operation/component/scan;\n- target;\n- timestamp;\n- job/correlation ID;\n- result/output summary;\n- interpretation;\n- SecurityStackHealthy state;\n- security disposition;\n- next decision.\n\nNever copy secrets, tokens, unnecessary raw threat artifacts, or sensitive command-line data into ticket notes.\n\n"
+      },
+      {
+        "key": "15",
+        "title": "Failure Handling",
+        "heading_markdown": "## 15. Failure Handling",
+        "body_markdown": "\n\nExplicitly document provider/API failures, ambiguous mapping, component failure, missing output, scan failure, conflicting evidence, missing license/policy, denied authority, service/engine disconnect, and recurrence after remediation.\n\nMissing evidence never becomes a healthy/clean conclusion.\n\n"
+      },
+      {
+        "key": "16",
+        "title": "Escalation Criteria",
+        "heading_markdown": "## 16. Escalation Criteria",
+        "body_markdown": "\n\nEscalate when:\n- endpoint identity cannot be established;\n- tamper/registration blocks safe repair;\n- bounded repair is exhausted;\n- AV scans repeatedly fail;\n- provider indicates `compromised=true`;\n- malicious execution is explicitly corroborated;\n- ransomware, credential theft, persistence, lateral movement, or repeated execution is indicated;\n- disruptive isolation/containment is required;\n- detection remains ambiguous;\n- required API/scan evidence is unavailable;\n- material evidence conflicts.\n\nEndpoint/network isolation remains disruptive and requires explicit technician approval unless separately governed.\n\n"
+      },
+      {
+        "key": "17",
+        "title": "Verification",
+        "heading_markdown": "## 17. Verification",
+        "body_markdown": "\n\n### Health-only\nRequired:\n- authoritative health component = `Status=Healthy`;\n- policy/API state consistent;\n- if AV protection was repaired or unavailable, approved verification scan when supported;\n- scan record read, not merely job completion; Datto `ScanHistoryTracking` does not itself expose a zero-findings result, so clean verification additionally requires a post-scan detection search with no unresolved/new matching evidence.\n\n### Threat-triggered\nRequired:\n- SecurityStackHealthy = true;\n- originating threat authoritatively resolved/contained;\n- post-remediation scan completed/read and composite clean verification established by a clear post-scan detection search;\n- no matching recurrence during required check;\n- required documentation succeeded.\n\nA failed scan is not proof of malware. Datto documents transient causes including another scan/update, engine disconnect, agent restart/update, low disk, and permissions.\n\n"
+      },
+      {
+        "key": "18",
+        "title": "Completion Criteria",
+        "heading_markdown": "## 18. Completion Criteria",
+        "body_markdown": "\n\n### Health-only ticket\nComplete only after correct endpoint identification, health classification, required repair, `Status=Healthy`, applicable scan verification, and documentation.\n\n### Threat-triggered ticket\nComplete only when:\n1. correct endpoint/detection identified;\n2. `SecurityStackHealthy=true`;\n3. `ThreatResolved=true`;\n4. the verification scan record is completed/read and the post-scan detection check is clear;\n5. recurrence check passed;\n6. required ticket documentation succeeded.\n\n"
+      },
+      {
+        "key": "19",
+        "title": "Final Resolution Note",
+        "heading_markdown": "## 19. Final Resolution Note",
+        "body_markdown": "\n\nInclude original trigger, health/configuration root cause if established, threat/detection ID when applicable, diagnostics, remediation, attempt count, scan type/result, final Datto disposition, final EDR/AV health, recurrence verification, and final classification.\n\nAvoid wording such as \"machine was compromised\" unless the incident record contains explicit supporting evidence.\n\n"
+      },
+      {
+        "key": "20",
+        "title": "Required Capabilities",
+        "heading_markdown": "## 20. Required Capabilities",
+        "body_markdown": "\n\nExisting capabilities include Autotask reads/writes, DRMM endpoint/alert reads, component execution, job/output reads, persisted state, and scheduled rechecks.\n\nEndpoint-security API capabilities:\n- `endpoint.security.status.read`\n- `endpoint.security.detection.search`\n- `endpoint.security.detection.read`\n- `endpoint.security.policy.read`\n- `endpoint.security.scan.history.search`\n- `endpoint.security.quarantine.search`\n- `endpoint.security.scan.start`\n\nExact Datto API entities remain inside the connector and must be discovered from the tenant LoopBack Explorer rather than guessed.\n\n"
+      },
+      {
+        "key": "21",
+        "title": "Acceptance Test",
+        "heading_markdown": "## 21. Acceptance Test",
+        "body_markdown": "\n\nControlled target pattern:\n- AOT-50282\n- T20260918.0005\n\nProve exact association, trigger classification, health check, API evidence, health/threat separation, no compromise inference from misconfiguration, no threat closure from `Status=Healthy` alone, bounded remediation, scan execution/read, threat reread/recurrence, ticket documentation, terminal disposition, telemetry event, Grafana metrics, and duplicate-job prevention.\n\nControlled production acceptance completed on AOT-50282 / T20260918.0005. The originating high-severity Datto AV detection remained quarantined/remediated, Datto provider evidence continued to report `compromised=true`, and the exact SHA-256 showed repeated weekly detections. A Full scan completed on 2026-09-19, later Quick scans including 2026-09-24 completed, and the post-scan detection search showed no newer matching detection. The correct terminal outcome was `security_incident_escalation`, not ticket closure. No duplicate scan, restore, exclusion, isolation, reboot, or other disruptive action was performed as part of this acceptance.\n\n"
+      },
+      {
+        "key": "22",
+        "title": "Section Goal Closure",
+        "heading_markdown": "## 22. Section Goal Closure",
+        "body_markdown": "\n\nClose only after code/tests pass, EDR API connector/token is governed and available, controlled acceptance succeeds, telemetry reaches Prometheus/Grafana, limitations are documented, source is committed/pushed, and Grafana reflects the playbook/version/status.\n\n"
+      },
+      {
+        "key": "23",
+        "title": "Datto Documentation Authority",
+        "heading_markdown": "## 23. Datto Documentation Authority",
+        "body_markdown": "\n\nPrimary technical references:\n- Admin/API index: https://edr.datto.com/help/Content/09-navigating-admin-options/admin-option-intro.htm\n- LoopBack API Explorer: https://edr.datto.com/help/Content/09-navigating-admin-options/api-loopback-explorer.html\n- API tokens: https://edr.datto.com/help/Content/09-navigating-admin-options/api-generate-token.htm\n- Webhooks/alert metadata: https://edr.datto.com/help/Content/09-navigating-admin-options/api-create-webhooks.htm\n- Alerts: https://edr.datto.com/help/Content/05-investigating-responding-to-alerts/page-alerts.htm\n- Alert details: https://edr.datto.com/help/Content/05-investigating-responding-to-alerts/page-alert-detail.htm\n- Device details: https://edr.datto.com/help/Content/02-managing-organizations-locations-devices/page-device-details.htm\n- Datto AV: https://edr.datto.com/help/Content/01-getting-started/what-is-datto-av.htm\n- AV policy best practices: https://edr.datto.com/help/Content/04-configuring-assigning-policies/datto-av-policy/av-policies-best-practices.htm\n- Alert Only behavior: https://edr.datto.com/help/Content/04-configuring-assigning-policies/datto-av-policy/configuring-datto-av-alert-only-mode.htm\n- Service monitoring: https://edr.datto.com/help/Content/troubleshooting/service-monitoring.htm\n- Failed AV scan diagnosis: https://edr.datto.com/help/Content/troubleshooting/diagnose-failed-datto-av-scan.htm\n- Tasks: https://edr.datto.com/help/Content/09-navigating-admin-options/page-tasks.htm\n\nWhen AOT observations or scripts conflict with Datto product semantics, review current Datto documentation/API evidence before changing the playbook.\n"
+      }
+    ]
+  },
+  "migration": {
+    "status": "SOURCE_PRESERVED_STRUCTURED_DRAFT_NOT_RUNTIME_PARITY",
+    "source_version_discrepancy": false,
+    "production_replacement_allowed": false,
+    "staged": false,
+    "activated": false,
+    "required_before_activation": [
+      "Canonical Python JSON semantic validation",
+      "Exact-capability binding and source-scoped argument context verified",
+      "Safe diagnostic and remediation branches mapped to governed capabilities",
+      "Durable retry/wait/terminal lifecycle parity with shared runtime",
+      "Error, negative-evidence and client-boundary regression tests",
+      "Controlled shadow comparison and independent acceptance",
+      "Owner-bound activation and branch-specific autonomous promotion"
+    ],
+    "external_fact_fields_non_authoritative": true
+  }
+}
