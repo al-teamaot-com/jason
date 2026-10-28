@@ -216,3 +216,64 @@ def test_nonowner_cannot_select_resolution_memory_client(monkeypatch):
             "platform": "windows",
         },
     ) == (None, None)
+
+
+def test_aot_trusted_staff_contract_context_with_exact_observe_authority(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    base_context = server.ExecutionContext(
+        context_id="base-staff", correlation_id="staff-corr",
+        principal_id="person-tech", organization_id="aot", client_id=None,
+        capability=server.SERVICE_CONTRACT_SEARCH,
+        requested_mode=server.PermissionMode.OBSERVE,
+        maximum_mode=server.PermissionMode.OBSERVE,
+        outcome=server.AuthorityOutcome.ALLOWED,
+        approval_required=False, matched_grants=("exact-staff-observe",),
+        authentication_assurance="entra", issued_at=now,
+        expires_at=now + timedelta(minutes=5),
+    )
+    authority = Authority(server.AuthorityOutcome.ALLOWED)
+    authority.evaluate = lambda request: SimpleNamespace(
+        outcome=server.AuthorityOutcome.ALLOWED,
+        execution_context=base_context,
+    )
+    class Contexts:
+        def __init__(self):
+            self.saved = []
+        def put_context(self, context):
+            self.saved.append(context)
+    authority.contexts = Contexts()
+    authority.audit = None
+    trusted = SimpleNamespace(status="active", client_id=None)
+    bindings = SimpleNamespace(
+        find_active_by_jason_identity=lambda *, jason_identity_id:
+            trusted if jason_identity_id == "person-tech" else None
+    )
+    app = SimpleNamespace(identity_authority=authority, microsoft_identity_bindings=bindings)
+    monkeypatch.setattr(server, "_runtime", lambda: app)
+    monkeypatch.setattr(server, "approval_owner_identities", lambda: frozenset({"person-owner"}))
+    monkeypatch.setattr(server, "_governed_read_for_identity", lambda **kw: {"status":"succeeded"})
+    client, context = server._contract_client_context_for_identity(
+        principal="person-tech", organization="aot", assurance="entra",
+        bound_client_id=None, capability_name=server.SERVICE_CONTRACT_SEARCH,
+        arguments={"company_id": 827},
+    )
+    assert client == "827"
+    assert context.client_id == "827"
+    assert context.maximum_mode == server.PermissionMode.OBSERVE
+    assert context.matched_grants == ("exact-staff-observe",)
+
+
+def test_untrusted_aot_staff_cannot_derive_contract_client_scope(monkeypatch):
+    app = SimpleNamespace(microsoft_identity_bindings=SimpleNamespace(
+        find_active_by_jason_identity=lambda **kwargs: None
+    ))
+    monkeypatch.setattr(server, "_runtime", lambda: app)
+    monkeypatch.setattr(server, "_governed_read_for_identity",
+                        lambda **kw: (_ for _ in ()).throw(AssertionError("no provider read")))
+    assert server._contract_client_context_for_identity(
+        principal="person-unbound", organization="aot", assurance="entra",
+        bound_client_id=None, capability_name=server.SERVICE_CONTRACT_SEARCH,
+        arguments={"company_id": 827},
+    ) == (None, None)

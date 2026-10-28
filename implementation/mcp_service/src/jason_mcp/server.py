@@ -1057,9 +1057,24 @@ def _contract_client_context_for_identity(
     if bound_client_id is not None:
         return bound_client_id, None
 
-    # Organization-scoped client selection is owner-only. Reuse Jason's existing
-    # authenticated owner allowlist rather than inventing a second owner concept.
-    if principal not in approval_owner_identities():
+    # Contract reads can be selected by a trusted AOT staff identity with an
+    # existing exact observe grant; other sensitive client-scoped read families
+    # retain their Owner-only selection rule.
+    if capability_name in {SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ}:
+        app = _runtime()
+        bindings = getattr(app, "microsoft_identity_bindings", None)
+        trusted = (
+            bindings.find_active_by_jason_identity(jason_identity_id=principal)
+            if bindings is not None else None
+        )
+        if (
+            organization != "aot"
+            or trusted is None
+            or getattr(trusted, "status", None) != "active"
+            or getattr(trusted, "client_id", None) is not None
+        ):
+            return None, None
+    elif principal not in approval_owner_identities():
         return None, None
 
     # Prove the selected Autotask company exists through the ordinary governed
