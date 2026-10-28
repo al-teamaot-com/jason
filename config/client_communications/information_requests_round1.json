@@ -1,0 +1,1217 @@
+{
+  "schema_version": 1,
+  "catalog_id": "aot-client-information-requests-round1-v1",
+  "content_approval": "owner-approved-2026-10-28",
+  "production_activation": false,
+  "send_authority": "none-from-catalog",
+  "notes": "Source-only approved wording. Questions are not enrolled in the live approved-workflow registry, and this catalog conveys no notification or deployment authority.",
+  "footer": {
+    "template_id": "client-support-footer-v1",
+    "body": "If you have any questions or would like assistance with this request, our support team is happy to help. Simply reply to this message, email us at support@teamaot.com, or call us at 757-466-8862.\n\nPlease reference ticket {{ticket_number}} so we can assist you.",
+    "placeholders": [
+      "ticket_number"
+    ]
+  },
+  "questions": [
+    {
+      "question_id": "JQ-001",
+      "template_id": "aot-client-question-jq-001-v1",
+      "category": "general_troubleshooting",
+      "title": "Clarify the issue",
+      "body": "Could you provide a little more information about the issue you're experiencing?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-002",
+      "template_id": "aot-client-question-jq-002-v1",
+      "category": "general_troubleshooting",
+      "title": "Describe the problem",
+      "body": "Could you describe what happens when you encounter the issue?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-003",
+      "template_id": "aot-client-question-jq-003-v1",
+      "category": "general_troubleshooting",
+      "title": "Expected behavior",
+      "body": "What were you expecting to happen when the issue occurred?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-004",
+      "template_id": "aot-client-question-jq-004-v1",
+      "category": "general_troubleshooting",
+      "title": "When it started",
+      "body": "Approximately when did you first notice this problem?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-005",
+      "template_id": "aot-client-question-jq-005-v1",
+      "category": "general_troubleshooting",
+      "title": "Previous functionality",
+      "body": "Has this worked correctly in the past?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-006",
+      "template_id": "aot-client-question-jq-006-v1",
+      "category": "general_troubleshooting",
+      "title": "Frequency",
+      "body": "Does this happen every time, or only occasionally?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-007",
+      "template_id": "aot-client-question-jq-007-v1",
+      "category": "general_troubleshooting",
+      "title": "Reproduction steps",
+      "body": "Could you describe the steps you take before the issue occurs?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-008",
+      "template_id": "aot-client-question-jq-008-v1",
+      "category": "general_troubleshooting",
+      "title": "Recent changes",
+      "body": "Were there any changes to your computer, software, or work environment shortly before this issue started?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-009",
+      "template_id": "aot-client-question-jq-009-v1",
+      "category": "scope_and_impact",
+      "title": "Number of users",
+      "body": "Is this affecting only you, or are other people experiencing the same issue?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-010",
+      "template_id": "aot-client-question-jq-010-v1",
+      "category": "scope_and_impact",
+      "title": "Number of devices",
+      "body": "Does this issue occur on more than one computer or device?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-011",
+      "template_id": "aot-client-question-jq-011-v1",
+      "category": "scope_and_impact",
+      "title": "Work interruption",
+      "body": "Is this issue preventing you from working, or are you able to continue using an alternative method?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-012",
+      "template_id": "aot-client-question-jq-012-v1",
+      "category": "scope_and_impact",
+      "title": "Business impact",
+      "body": "Could you let us know how this issue is affecting your work?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-013",
+      "template_id": "aot-client-question-jq-013-v1",
+      "category": "scope_and_impact",
+      "title": "Multiple locations",
+      "body": "Is this happening at just one location or at multiple locations?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-014",
+      "template_id": "aot-client-question-jq-014-v1",
+      "category": "scope_and_impact",
+      "title": "Consistent behavior",
+      "body": "Does the issue happen consistently, or does it come and go?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-015",
+      "template_id": "aot-client-question-jq-015-v1",
+      "category": "scope_and_impact",
+      "title": "Particular user",
+      "body": "Does the issue happen when someone else tries the same task?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-016",
+      "template_id": "aot-client-question-jq-016-v1",
+      "category": "scope_and_impact",
+      "title": "Priority clarification",
+      "body": "Is there a particular deadline or business requirement we should be aware of while addressing this issue?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-017",
+      "template_id": "aot-client-question-jq-017-v1",
+      "category": "errors_and_supporting_information",
+      "title": "Exact error",
+      "body": "Are you receiving an error message? If so, could you provide the exact wording?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-018",
+      "template_id": "aot-client-question-jq-018-v1",
+      "category": "errors_and_supporting_information",
+      "title": "Screenshot",
+      "body": "Could you send us a screenshot showing the issue? Please avoid including passwords or other sensitive information.",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-019",
+      "template_id": "aot-client-question-jq-019-v1",
+      "category": "errors_and_supporting_information",
+      "title": "Error code",
+      "body": "Does the message include an error number or code?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-020",
+      "template_id": "aot-client-question-jq-020-v1",
+      "category": "errors_and_supporting_information",
+      "title": "Error timing",
+      "body": "At what point in the process does the error appear?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-021",
+      "template_id": "aot-client-question-jq-021-v1",
+      "category": "errors_and_supporting_information",
+      "title": "Last occurrence",
+      "body": "Approximately what time did the issue last occur?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-022",
+      "template_id": "aot-client-question-jq-022-v1",
+      "category": "errors_and_supporting_information",
+      "title": "Supporting details",
+      "body": "Is there any additional information displayed that might help us identify the problem?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-023",
+      "template_id": "aot-client-question-jq-023-v1",
+      "category": "errors_and_supporting_information",
+      "title": "Changes in error",
+      "body": "Has the error message changed since the issue first appeared?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-024",
+      "template_id": "aot-client-question-jq-024-v1",
+      "category": "errors_and_supporting_information",
+      "title": "Video evidence",
+      "body": "If the problem is difficult to describe, would you be able to provide a short screen recording showing what happens? Please avoid capturing confidential information.",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-025",
+      "template_id": "aot-client-question-jq-025-v1",
+      "category": "computers_devices_and_locations",
+      "title": "Device identification",
+      "body": "Which computer or device are you experiencing the issue on?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-026",
+      "template_id": "aot-client-question-jq-026-v1",
+      "category": "computers_devices_and_locations",
+      "title": "Device availability",
+      "body": "Is the affected computer currently powered on and connected to the internet?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-027",
+      "template_id": "aot-client-question-jq-027-v1",
+      "category": "computers_devices_and_locations",
+      "title": "Device location",
+      "body": "Where is the affected device located?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-028",
+      "template_id": "aot-client-question-jq-028-v1",
+      "category": "computers_devices_and_locations",
+      "title": "Remote or office",
+      "body": "Are you working from the office, from home, or from another location?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-029",
+      "template_id": "aot-client-question-jq-029-v1",
+      "category": "computers_devices_and_locations",
+      "title": "Device name",
+      "body": "Could you provide the computer name or the asset label on the affected device?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-030",
+      "template_id": "aot-client-question-jq-030-v1",
+      "category": "computers_devices_and_locations",
+      "title": "Other devices",
+      "body": "Are you able to perform the same task successfully from another device?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-031",
+      "template_id": "aot-client-question-jq-031-v1",
+      "category": "computers_devices_and_locations",
+      "title": "Device replacement",
+      "body": "Have you recently started using a different computer or had your current computer replaced?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-032",
+      "template_id": "aot-client-question-jq-032-v1",
+      "category": "computers_devices_and_locations",
+      "title": "Device accessibility",
+      "body": "Are you currently able to sign in and use the affected computer?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-033",
+      "template_id": "aot-client-question-jq-033-v1",
+      "category": "accounts_passwords_and_permissions",
+      "title": "Affected account",
+      "body": "Which email address or username is associated with the issue? Please do not send your password.",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-034",
+      "template_id": "aot-client-question-jq-034-v1",
+      "category": "accounts_passwords_and_permissions",
+      "title": "Sign-in error",
+      "body": "What message appears when you attempt to sign in?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-035",
+      "template_id": "aot-client-question-jq-035-v1",
+      "category": "accounts_passwords_and_permissions",
+      "title": "Account access elsewhere",
+      "body": "Are you able to sign in to the same account from another device?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-036",
+      "template_id": "aot-client-question-jq-036-v1",
+      "category": "accounts_passwords_and_permissions",
+      "title": "MFA notification",
+      "body": "Are you receiving the expected verification prompt when signing in?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-037",
+      "template_id": "aot-client-question-jq-037-v1",
+      "category": "accounts_passwords_and_permissions",
+      "title": "Unexpected MFA prompt",
+      "body": "Did you receive a verification request that you did not initiate? If so, please let us know whether you approved or denied it.",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-038",
+      "template_id": "aot-client-question-jq-038-v1",
+      "category": "accounts_passwords_and_permissions",
+      "title": "Access previously worked",
+      "body": "Were you previously able to access this resource?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-039",
+      "template_id": "aot-client-question-jq-039-v1",
+      "category": "accounts_passwords_and_permissions",
+      "title": "Other users' access",
+      "body": "Can other authorized users access the same resource successfully?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-040",
+      "template_id": "aot-client-question-jq-040-v1",
+      "category": "accounts_passwords_and_permissions",
+      "title": "Permission requirement",
+      "body": "Could you explain what you need to access and what work you need to perform? This will help us determine the appropriate permissions.",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-041",
+      "template_id": "aot-client-question-jq-041-v1",
+      "category": "email_and_messaging",
+      "title": "Sending or receiving",
+      "body": "Are you having difficulty sending messages, receiving messages, or both?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-042",
+      "template_id": "aot-client-question-jq-042-v1",
+      "category": "email_and_messaging",
+      "title": "Affected recipient",
+      "body": "Does the problem occur with every recipient or only particular addresses?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-043",
+      "template_id": "aot-client-question-jq-043-v1",
+      "category": "email_and_messaging",
+      "title": "Sender address",
+      "body": "Which email address was used to send the message?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-044",
+      "template_id": "aot-client-question-jq-044-v1",
+      "category": "email_and_messaging",
+      "title": "Message timing",
+      "body": "Approximately when was the affected message sent or expected to arrive?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-045",
+      "template_id": "aot-client-question-jq-045-v1",
+      "category": "email_and_messaging",
+      "title": "Delivery failure",
+      "body": "Did you receive a delivery failure or undeliverable message? If so, could you forward the failure notification to us?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-046",
+      "template_id": "aot-client-question-jq-046-v1",
+      "category": "email_and_messaging",
+      "title": "Attachment issue",
+      "body": "Does the problem occur only when sending or receiving attachments?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-047",
+      "template_id": "aot-client-question-jq-047-v1",
+      "category": "email_and_messaging",
+      "title": "Attachment size",
+      "body": "Approximately how large is the attachment you're trying to send?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-048",
+      "template_id": "aot-client-question-jq-048-v1",
+      "category": "email_and_messaging",
+      "title": "Email application",
+      "body": "Does the issue occur in your email application, webmail, or both?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-049",
+      "template_id": "aot-client-question-jq-049-v1",
+      "category": "shared_files_collaboration_and_cloud",
+      "title": "Shared resource",
+      "body": "Could you identify the file, folder, or shared resource you're trying to access?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-050",
+      "template_id": "aot-client-question-jq-050-v1",
+      "category": "shared_files_collaboration_and_cloud",
+      "title": "Access method",
+      "body": "Are you accessing the resource through a web browser, a desktop application, or a shared network location?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-051",
+      "template_id": "aot-client-question-jq-051-v1",
+      "category": "shared_files_collaboration_and_cloud",
+      "title": "File permissions",
+      "body": "Are you able to open the file but unable to make changes, or are you unable to open it at all?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-052",
+      "template_id": "aot-client-question-jq-052-v1",
+      "category": "shared_files_collaboration_and_cloud",
+      "title": "Shared link",
+      "body": "Does the issue occur when using a particular shared link?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-053",
+      "template_id": "aot-client-question-jq-053-v1",
+      "category": "shared_files_collaboration_and_cloud",
+      "title": "Collaboration scope",
+      "body": "Are other users having difficulty accessing or editing the same information?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-054",
+      "template_id": "aot-client-question-jq-054-v1",
+      "category": "shared_files_collaboration_and_cloud",
+      "title": "File location",
+      "body": "Do you know where the affected file or folder is normally stored?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-055",
+      "template_id": "aot-client-question-jq-055-v1",
+      "category": "shared_files_collaboration_and_cloud",
+      "title": "Sync issue",
+      "body": "Are changes failing to appear across devices, or are you receiving a synchronization error?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-056",
+      "template_id": "aot-client-question-jq-056-v1",
+      "category": "shared_files_collaboration_and_cloud",
+      "title": "Browser comparison",
+      "body": "Does the issue also occur when using a different web browser?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-057",
+      "template_id": "aot-client-question-jq-057-v1",
+      "category": "printing_copying_and_scanning",
+      "title": "Printer identification",
+      "body": "Which printer or copier is experiencing the issue?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-058",
+      "template_id": "aot-client-question-jq-058-v1",
+      "category": "printing_copying_and_scanning",
+      "title": "Printer location",
+      "body": "Where is the affected printer or copier located?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-059",
+      "template_id": "aot-client-question-jq-059-v1",
+      "category": "printing_copying_and_scanning",
+      "title": "Printing or scanning",
+      "body": "Is the issue related to printing, copying, scanning, or another function?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-060",
+      "template_id": "aot-client-question-jq-060-v1",
+      "category": "printing_copying_and_scanning",
+      "title": "Error message",
+      "body": "Is the printer or copier displaying an error message or code?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-061",
+      "template_id": "aot-client-question-jq-061-v1",
+      "category": "printing_copying_and_scanning",
+      "title": "Multiple users",
+      "body": "Are other users experiencing the same problem with this device?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-062",
+      "template_id": "aot-client-question-jq-062-v1",
+      "category": "printing_copying_and_scanning",
+      "title": "Print job scope",
+      "body": "Does the problem occur with every document or only particular files?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-063",
+      "template_id": "aot-client-question-jq-063-v1",
+      "category": "printing_copying_and_scanning",
+      "title": "Scan destination",
+      "body": "Where are you attempting to send the scanned document?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-064",
+      "template_id": "aot-client-question-jq-064-v1",
+      "category": "printing_copying_and_scanning",
+      "title": "Paper and supplies",
+      "body": "Is the device indicating that it needs paper, toner, or another supply?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-065",
+      "template_id": "aot-client-question-jq-065-v1",
+      "category": "internet_networking_remote_access_and_phones",
+      "title": "Connection type",
+      "body": "Are you connected through Wi-Fi or a wired network connection?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-066",
+      "template_id": "aot-client-question-jq-066-v1",
+      "category": "internet_networking_remote_access_and_phones",
+      "title": "Network scope",
+      "body": "Are other devices at your location experiencing the same connection issue?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-067",
+      "template_id": "aot-client-question-jq-067-v1",
+      "category": "internet_networking_remote_access_and_phones",
+      "title": "Website access",
+      "body": "Are you unable to access all websites, or only a particular website or service?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-068",
+      "template_id": "aot-client-question-jq-068-v1",
+      "category": "internet_networking_remote_access_and_phones",
+      "title": "Remote connection",
+      "body": "Does the problem occur only when working remotely?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-069",
+      "template_id": "aot-client-question-jq-069-v1",
+      "category": "internet_networking_remote_access_and_phones",
+      "title": "VPN status",
+      "body": "Are you receiving an error when attempting to establish your remote connection?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-070",
+      "template_id": "aot-client-question-jq-070-v1",
+      "category": "internet_networking_remote_access_and_phones",
+      "title": "Wireless network",
+      "body": "Which wireless network are you connected to?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-071",
+      "template_id": "aot-client-question-jq-071-v1",
+      "category": "internet_networking_remote_access_and_phones",
+      "title": "Telephone scope",
+      "body": "Is the telephone issue affecting one phone, several phones, or all phones at your location?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-072",
+      "template_id": "aot-client-question-jq-072-v1",
+      "category": "internet_networking_remote_access_and_phones",
+      "title": "Call behavior",
+      "body": "Is the issue occurring with incoming calls, outgoing calls, or both?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-073",
+      "template_id": "aot-client-question-jq-073-v1",
+      "category": "applications_and_business_software",
+      "title": "Application name",
+      "body": "Which application are you having trouble with?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-074",
+      "template_id": "aot-client-question-jq-074-v1",
+      "category": "applications_and_business_software",
+      "title": "Application function",
+      "body": "What were you attempting to do in the application when the problem occurred?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-075",
+      "template_id": "aot-client-question-jq-075-v1",
+      "category": "applications_and_business_software",
+      "title": "Application access",
+      "body": "Does the application open successfully, or does the issue occur before it opens?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-076",
+      "template_id": "aot-client-question-jq-076-v1",
+      "category": "applications_and_business_software",
+      "title": "Affected users",
+      "body": "Are other people able to use the same application successfully?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-077",
+      "template_id": "aot-client-question-jq-077-v1",
+      "category": "applications_and_business_software",
+      "title": "Recent update",
+      "body": "Did the issue begin after an application update or configuration change?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-078",
+      "template_id": "aot-client-question-jq-078-v1",
+      "category": "applications_and_business_software",
+      "title": "Specific file",
+      "body": "Does the problem occur with every file or only a particular file?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-079",
+      "template_id": "aot-client-question-jq-079-v1",
+      "category": "applications_and_business_software",
+      "title": "Application performance",
+      "body": "Is the application slow, unresponsive, closing unexpectedly, or displaying an error?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-080",
+      "template_id": "aot-client-question-jq-080-v1",
+      "category": "applications_and_business_software",
+      "title": "Software vendor",
+      "body": "Do you know whether the software vendor has already been contacted about this issue?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-081",
+      "template_id": "aot-client-question-jq-081-v1",
+      "category": "computer_performance_storage_and_hardware",
+      "title": "Performance description",
+      "body": "Is your computer generally running slowly, or is the slowdown limited to a particular application?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-082",
+      "template_id": "aot-client-question-jq-082-v1",
+      "category": "computer_performance_storage_and_hardware",
+      "title": "Timing of slowdown",
+      "body": "Does the performance issue occur throughout the day or only during particular activities?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-083",
+      "template_id": "aot-client-question-jq-083-v1",
+      "category": "computer_performance_storage_and_hardware",
+      "title": "Storage warnings",
+      "body": "Have you received any messages indicating that your computer is running low on storage space?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-084",
+      "template_id": "aot-client-question-jq-084-v1",
+      "category": "computer_performance_storage_and_hardware",
+      "title": "File storage",
+      "body": "Are there any large files or folders that you know must remain stored locally on this computer?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-085",
+      "template_id": "aot-client-question-jq-085-v1",
+      "category": "computer_performance_storage_and_hardware",
+      "title": "Device behavior",
+      "body": "Is the computer freezing, restarting unexpectedly, shutting down, or showing another symptom?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-086",
+      "template_id": "aot-client-question-jq-086-v1",
+      "category": "computer_performance_storage_and_hardware",
+      "title": "Hardware signs",
+      "body": "Have you noticed unusual noises, warning lights, or other physical signs of a problem?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-087",
+      "template_id": "aot-client-question-jq-087-v1",
+      "category": "computer_performance_storage_and_hardware",
+      "title": "Connected devices",
+      "body": "Does the problem occur only when a particular accessory or external device is connected?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-088",
+      "template_id": "aot-client-question-jq-088-v1",
+      "category": "computer_performance_storage_and_hardware",
+      "title": "Power issue",
+      "body": "Is the computer failing to power on, or does it power on but fail to start normally?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-089",
+      "template_id": "aot-client-question-jq-089-v1",
+      "category": "backup_and_data_recovery",
+      "title": "Missing information",
+      "body": "Could you identify the file or information you need recovered?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-090",
+      "template_id": "aot-client-question-jq-090-v1",
+      "category": "backup_and_data_recovery",
+      "title": "Last known availability",
+      "body": "When was the missing information last known to be available?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-091",
+      "template_id": "aot-client-question-jq-091-v1",
+      "category": "backup_and_data_recovery",
+      "title": "Original location",
+      "body": "Where was the information originally stored?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-092",
+      "template_id": "aot-client-question-jq-092-v1",
+      "category": "backup_and_data_recovery",
+      "title": "Deletion or modification",
+      "body": "Was the information deleted, overwritten, changed, or is it simply no longer visible?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-093",
+      "template_id": "aot-client-question-jq-093-v1",
+      "category": "backup_and_data_recovery",
+      "title": "Recovery scope",
+      "body": "Are you looking to recover one file, a folder, or a larger collection of information?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-094",
+      "template_id": "aot-client-question-jq-094-v1",
+      "category": "backup_and_data_recovery",
+      "title": "Recovery date",
+      "body": "Do you know approximately which date or version of the information you need restored?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-095",
+      "template_id": "aot-client-question-jq-095-v1",
+      "category": "backup_and_data_recovery",
+      "title": "Other users' access",
+      "body": "Is anyone else still able to access the missing information?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-096",
+      "template_id": "aot-client-question-jq-096-v1",
+      "category": "backup_and_data_recovery",
+      "title": "Recovery destination",
+      "body": "Would you prefer the recovered information to be placed in a separate location for review, if that option is available?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-097",
+      "template_id": "aot-client-question-jq-097-v1",
+      "category": "security_related_questions",
+      "title": "Suspicious email",
+      "body": "Did you interact with any links or attachments in the suspicious message?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-098",
+      "template_id": "aot-client-question-jq-098-v1",
+      "category": "security_related_questions",
+      "title": "Unrecognized activity",
+      "body": "Did you recognize the activity or sign-in attempt that was reported?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-099",
+      "template_id": "aot-client-question-jq-099-v1",
+      "category": "security_related_questions",
+      "title": "Suspicious download",
+      "body": "Do you recognize the file or application referenced in the security alert?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-100",
+      "template_id": "aot-client-question-jq-100-v1",
+      "category": "security_related_questions",
+      "title": "Expected software",
+      "body": "Is this software something you normally use for your work?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-101",
+      "template_id": "aot-client-question-jq-101-v1",
+      "category": "security_related_questions",
+      "title": "Unexpected prompts",
+      "body": "Have you recently received unexpected requests to enter your password or approve a sign-in?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-102",
+      "template_id": "aot-client-question-jq-102-v1",
+      "category": "security_related_questions",
+      "title": "Missing device",
+      "body": "Has the affected device been lost, stolen, or simply moved to another location?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-103",
+      "template_id": "aot-client-question-jq-103-v1",
+      "category": "security_related_questions",
+      "title": "Security timeline",
+      "body": "Approximately when did you first notice the suspicious activity?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-104",
+      "template_id": "aot-client-question-jq-104-v1",
+      "category": "security_related_questions",
+      "title": "Security observations",
+      "body": "Have you noticed any other unusual behavior that may be related to this concern?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-105",
+      "template_id": "aot-client-question-jq-105-v1",
+      "category": "scheduling_coordination_and_permission",
+      "title": "Availability",
+      "body": "What would be a convenient time for us to contact you about this issue?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-106",
+      "template_id": "aot-client-question-jq-106-v1",
+      "category": "scheduling_coordination_and_permission",
+      "title": "Remote assistance",
+      "body": "Would you be available to assist us with a remote troubleshooting session if needed?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-107",
+      "template_id": "aot-client-question-jq-107-v1",
+      "category": "scheduling_coordination_and_permission",
+      "title": "Access to device",
+      "body": "Is there someone available who can provide physical access to the affected device if necessary?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-108",
+      "template_id": "aot-client-question-jq-108-v1",
+      "category": "scheduling_coordination_and_permission",
+      "title": "Best contact",
+      "body": "Who would be the best person to contact for additional information about this issue?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-109",
+      "template_id": "aot-client-question-jq-109-v1",
+      "category": "scheduling_coordination_and_permission",
+      "title": "Maintenance scheduling",
+      "body": "Is there a preferred time when maintenance could be performed with minimal interruption to your work?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-110",
+      "template_id": "aot-client-question-jq-110-v1",
+      "category": "scheduling_coordination_and_permission",
+      "title": "Business hours",
+      "body": "Are there any business hours or scheduled activities we should avoid when planning additional work?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-111",
+      "template_id": "aot-client-question-jq-111-v1",
+      "category": "scheduling_coordination_and_permission",
+      "title": "Approval contact",
+      "body": "Who is authorized to approve changes that could affect this system or its users?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-112",
+      "template_id": "aot-client-question-jq-112-v1",
+      "category": "scheduling_coordination_and_permission",
+      "title": "Coordination",
+      "body": "Are there any other individuals or departments we should coordinate with before proceeding?",
+      "review_class": "context_controlled",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-113",
+      "template_id": "aot-client-question-jq-113-v1",
+      "category": "followup_verification_and_ticket_completion",
+      "title": "Issue still occurring",
+      "body": "Are you still experiencing the issue?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-114",
+      "template_id": "aot-client-question-jq-114-v1",
+      "category": "followup_verification_and_ticket_completion",
+      "title": "Retest",
+      "body": "When convenient, could you try the affected function again and let us know the result?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-115",
+      "template_id": "aot-client-question-jq-115-v1",
+      "category": "followup_verification_and_ticket_completion",
+      "title": "Results after changes",
+      "body": "Have you noticed any improvement since the last troubleshooting steps were completed?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-116",
+      "template_id": "aot-client-question-jq-116-v1",
+      "category": "followup_verification_and_ticket_completion",
+      "title": "Recurrence",
+      "body": "Has the problem returned since it last appeared to be resolved?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-117",
+      "template_id": "aot-client-question-jq-117-v1",
+      "category": "followup_verification_and_ticket_completion",
+      "title": "Remaining symptoms",
+      "body": "Are you still experiencing any symptoms related to the original problem?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-118",
+      "template_id": "aot-client-question-jq-118-v1",
+      "category": "followup_verification_and_ticket_completion",
+      "title": "Additional assistance",
+      "body": "Is there anything else related to this issue that you need assistance with?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-119",
+      "template_id": "aot-client-question-jq-119-v1",
+      "category": "followup_verification_and_ticket_completion",
+      "title": "Resolution confirmation",
+      "body": "Does everything appear to be working correctly now?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    },
+    {
+      "question_id": "JQ-120",
+      "template_id": "aot-client-question-jq-120-v1",
+      "category": "followup_verification_and_ticket_completion",
+      "title": "Ticket closure",
+      "body": "Based on your latest results, are you comfortable with us closing this support ticket?",
+      "review_class": "routine",
+      "content_approved": true,
+      "autonomous_send_enabled": false
+    }
+  ]
+}
