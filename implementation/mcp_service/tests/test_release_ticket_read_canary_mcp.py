@@ -38,7 +38,8 @@ class MCPReadFixture:
                 data = {"items": [{"id": 98, "description": "PRIVATE-PROJECT-BODY"}]}
             else:
                 assert arguments == {"entity": "ActionTypes", "page_size": 1, "select": ["id", "name"]}
-                data = {"items": [{"id": 8, "name": "ACTION-PRIVATE"}]}
+                # Real Autotask ActionTypes first row is ID 0 (2026-10-28).
+                data = {"items": [{"id": 0, "name": "ACTION-PRIVATE"}]}
         else:
             raise AssertionError("unexpected provider-read capability")
         response["evidence"] = {"data": data}
@@ -285,3 +286,32 @@ def test_v13_rejects_wrong_page_size_before_any_provider_call(monkeypatch):
     assert result["status"]=="failed"
     assert result["error_code"]=="v13_post_release_requires_page_size_50"
     assert captured.calls==[]
+
+
+def test_v13_postrelease_rejects_negative_actiontype_id_even_when_read_succeeded(
+    monkeypatch,
+):
+    """Allow genuine ID=0, never negative or made-up dynamic proof."""
+    captured = MCPReadFixture()
+    monkeypatch.setenv("JASON_SOURCE_REVISION", CANDIDATE)
+    monkeypatch.setenv(
+        "JASON_PROVIDER_READ_ACTIVATION_PROFILE",
+        "itglue-autotask-entra-dynamic-schema-read-catalog-v13",
+    )
+    monkeypatch.setattr(
+        server, "_authenticated_identity",
+        lambda: ("person-entra-" + "a" * 32, "aot",
+                 "delegated_microsoft_identity", None),
+    )
+
+    def invalid_dynamic(*, capability, arguments):
+        result = captured(capability=capability, arguments=arguments)
+        if capability == "service.entity.search" and arguments.get("entity") == "ActionTypes":
+            result["evidence"]["data"]["items"][0]["id"] = -1
+        return result
+
+    monkeypatch.setattr(server, "execute_read_capability", invalid_dynamic)
+    response = canary(page_size=50)
+    assert response["status"] == "failed"
+    assert response["error_code"] == "governed_dynamic_schema_read_malformed"
+    assert response["customer_data_included"] is False

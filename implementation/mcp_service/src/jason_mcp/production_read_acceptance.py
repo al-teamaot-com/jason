@@ -88,8 +88,22 @@ def _safe_event(
                     or arguments.get("page_size") != 1
                     or arguments.get("select") != ["id", "name"]):
                 return None
-            items = _ids(data.get("items"), maximum=1)
-            if items is None:
+            # Live Autotask ActionTypes includes a legitimate ID 0 row.
+            # Ticket/Projects IDs remain strictly positive. Require both
+            # selected fields, a nonnegative integer (not bool), no extra
+            # provider fields, and a nonempty name before minting the
+            # same-human metadata-only dynamic query receipt.
+            items = data.get("items")
+            if (not isinstance(items, list) or len(items) > 1
+                    or any(
+                        not isinstance(item, Mapping)
+                        or set(item) != {"id", "name"}
+                        or type(item.get("id")) is not int
+                        or item["id"] < 0
+                        or not isinstance(item.get("name"), str)
+                        or not item["name"].strip()
+                        for item in items
+                    )):
                 return None
             return {"kind": "dynamic_schema_search", "items": len(items)}
         if set(arguments) != {"entity", "page_size"} or arguments.get("entity") != "Projects" or arguments.get("page_size") != 1:
