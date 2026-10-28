@@ -100,7 +100,6 @@ def test_rollback_restore_uses_previous_v10_even_if_live_is_v11(
 @pytest.mark.parametrize("path,live_name,rollback_tag", SCRIPTS)
 @pytest.mark.parametrize("selected,rollback,live,source", [
     (V10, V10, V10, V11),
-    (V11, V10, V11, V11),
     (V11, V10, V10, "unsupported"),
 ])
 def test_profile_mismatch_or_wrong_live_baseline_refused_before_mutation(
@@ -178,5 +177,19 @@ def test_v13_mismatched_source_override_rollback_or_live_state_fail_closed(
         lab,path,live_name,rollback_tag,
         selected=selected,rollback=rollback,live=live,source=source,
     )
+    assert response.returncode != 0
+    assert "SELECTED_PROFILE=" not in response.stdout
+
+
+@pytest.mark.parametrize("path,live_name,rollback_tag", SCRIPTS)
+def test_v13_to_v13_roll_forward_keeps_v10_rollback_and_source_gate(
+        lab,path,live_name,rollback_tag):
+    response=check_preflight(lab,path,live_name,rollback_tag,selected=V13,source=V13,rollback=V10,live=V13)
+    assert response.returncode == 0, response.stderr
+    assert "SELECTED_PROFILE=" + V13 in response.stdout
+
+@pytest.mark.parametrize("path,live_name,rollback_tag", SCRIPTS)
+def test_unknown_live_profile_still_denied(lab,path,live_name,rollback_tag):
+    response=check_preflight(lab,path,live_name,rollback_tag,selected=V13,source=V13,rollback=V10,live="unknown-profile")
     assert response.returncode != 0
     assert "SELECTED_PROFILE=" not in response.stdout
