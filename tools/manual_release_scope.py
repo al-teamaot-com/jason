@@ -19,6 +19,13 @@ PR = re.compile(r"#([0-9]+)")
 # be inspected. 2,000 is a bounded fail-closed ceiling, not permission to
 # skip, prune or implicitly acknowledge other developers' changes.
 MAX_REGISTERED_WORKTREES = 2000
+# Only the canonical native Release Manager may own these transient, detached
+# checkouts. They are created AFTER owner scope review and BEFORE its final
+# revalidation, so counting one as unrelated developer work makes *every*
+# promotion reject itself. No ordinary development checkout qualifies.
+INTERNAL_RELEASE_WORKTREE_ROOT = Path(
+    "/var/lib/jason/openclaw/release-manager/worktrees"
+)
 
 
 class ScopeBlocked(ValueError):
@@ -76,7 +83,47 @@ def source_scope(repo, baseline, candidate):
     return commits, files
 
 
-def dirty_worktrees(repo, changed):
+def _verified_ephemeral_release_worktree(path, record, candidate_sha):
+    """Exclude ONLY this candidate's immutable native temporary checkout.
+
+    The path must be a canonical release-owned per-run worktree, detached at
+    exactly the reviewed candidate, clean across ALL files (not just files
+    overlapping this release), with a Git registry HEAD agreeing with disk.
+    A corrupt or dirty candidate-shaped path denies the review, never silently
+    becomes an ignored worktree. Ordinary developer worktrees are not ignored.
+    """
+    if not isinstance(candidate_sha, str) or not SHA.fullmatch(candidate_sha):
+        return False
+    root = INTERNAL_RELEASE_WORKTREE_ROOT
+    if (path.parent != root or not re.fullmatch(
+            re.escape(candidate_sha) + r"-[0-9a-f]{12}", path.name)):
+        return False
+    if root.is_symlink() or not root.is_dir():
+        raise ScopeBlocked("canonical release worktree root invalid")
+    if not record or record[0] != "worktree " + str(path):
+        raise ScopeBlocked("canonical release worktree registry invalid")
+    if "HEAD " + candidate_sha not in record[1:] or "detached" not in record[1:]:
+        raise ScopeBlocked("native release worktree is not detached at reviewed SHA")
+    if any(line.startswith(("branch ", "locked")) for line in record[1:]):
+        raise ScopeBlocked("native release worktree has unexpected branch or lock")
+    prune = [line for line in record[1:] if line.startswith("prunable ")]
+    if not path.is_dir():
+        if (prune != ["prunable gitdir file points to non-existent location"]
+                or path.is_symlink()):
+            raise ScopeBlocked("unverified stale native release worktree registration")
+        return True
+    if prune or path.is_symlink() or path.resolve() != path:
+        raise ScopeBlocked("native release worktree filesystem is untrusted")
+    if path.stat().st_uid != os.getuid():
+        raise ScopeBlocked("native release worktree owner mismatch")
+    if command(["git", "rev-parse", "HEAD"], path).strip() != candidate_sha:
+        raise ScopeBlocked("native release worktree Git revision mismatch")
+    if command(["git", "status", "--porcelain=v1", "--untracked-files=all"], path).strip():
+        raise ScopeBlocked("native release worktree has local modifications")
+    return True
+
+
+def dirty_worktrees(repo, changed, candidate_sha=None):
     # The authoritative Git registry may retain orphaned entries for worktree
     # paths which no longer exist. Do not mutate any development checkout or
     # registry just to complete an owner's release review. Only Git's exact
@@ -98,7 +145,15 @@ def dirty_worktrees(repo, changed):
     overlaps = []
     stale = []
     inspected = 0
+    verified_internal = 0
     for path, record in zip(paths, records):
+        if _verified_ephemeral_release_worktree(path, record, candidate_sha):
+            # This exact-SHA pristine internal worktree was created BY the
+            # transaction under review. Deduct it from the digest-bearing
+            # registry count so it cannot invalidate its own prior review.
+            # All unrelated worktrees are still counted and fully inspected.
+            verified_internal += 1
+            continue
         prune_markers = [line for line in record[1:] if line.startswith("prunable ")]
         if not path.is_dir():
             if (prune_markers !=
@@ -123,7 +178,7 @@ def dirty_worktrees(repo, changed):
         common = sorted(changed.intersection(dirty))
         if common:
             overlaps.append({"path": str(path), "changed_files": common})
-    return overlaps, inspected, stale, len(paths)
+    return overlaps, inspected, stale, len(paths) - verified_internal
 
 
 def open_pr_overlaps(repository, changed, reader=command):
@@ -173,7 +228,7 @@ def review(repo, repository, baseline, candidate, allowed_prs=(),
     repo = Path(repo).resolve(strict=True)
     commits, paths = source_scope(repo, baseline, candidate)
     dirty, worktree_count, stale, registrations = dirty_worktrees(
-        Path(worktree_repo or repo), set(paths))
+        Path(worktree_repo or repo), set(paths), candidate)
     prs, pr_count = open_pr_overlaps(repository, set(paths), reader=pr_reader)
     allowed_prs, allowed_commits = set(allowed_prs), set(allowed_commits)
     acknowledged_prs, acknowledged_worktrees = set(acknowledged_prs), set(acknowledged_worktrees)
