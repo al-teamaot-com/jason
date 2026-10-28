@@ -138,6 +138,62 @@ case "$OWNER_UAT_MODE:$OWNER_UAT_WORKER" in
   *) echo "DENIED: UAT manifest activation returned unsupported mode" >&2; exit 2 ;;
 esac
 
+# Routine RW runs inside the MCP service as well as jason-runtime. Keep
+# environment scope and AppRole mounts consistent across both services,
+# without enabling any profile by default or reusing read-only credentials.
+ROUTINE_RW_ARGS=()
+add_routine_profile() {
+  local name="$1" expected="$2" value
+  if [ "${!name+x}" = x ]; then
+    value="${!name}"
+    if [ -n "$value" ] && [ "$value" != "$expected" ]; then
+      echo "DENIED: unrecognized routine RW profile $name" >&2
+      exit 2
+    fi
+    ROUTINE_RW_ARGS+=(--set-env "$name=$value")
+  fi
+}
+add_routine_profile JASON_AOT_ROUTINE_RW_PROFILE autotask-ticket-v1
+add_routine_profile JASON_IT_GLUE_ROUTINE_RW_PROFILE configuration-notes-v1
+add_routine_profile JASON_ENTRA_STANDARD_USER_CREATE_PROFILE cloud-user-v1
+
+add_routine_mount_pair() {
+  local role_var="$1" secret_var="$2" role_dst="$3" secret_dst="$4"
+  local role_path="${!role_var:-}" secret_path="${!secret_var:-}"
+  if [ -z "$role_path" ] && [ -z "$secret_path" ]; then
+    return 0
+  fi
+  if [ -z "$role_path" ] || [ -z "$secret_path" ]; then
+    echo "DENIED: incomplete routine RW AppRole host pair" >&2
+    exit 2
+  fi
+  for source in "$role_path" "$secret_path"; do
+    if [ ! -f "$source" ] || [ ! -s "$source" ] || [ -L "$source" ]; then
+      echo "DENIED: invalid routine RW AppRole source" >&2
+      exit 2
+    fi
+  done
+  ROUTINE_RW_ARGS+=(
+    --add-readonly-bind "$role_path:$role_dst"
+    --add-readonly-bind "$secret_path:$secret_dst"
+  )
+}
+add_routine_mount_pair \
+  JASON_IT_GLUE_RW_OPENBAO_ROLE_ID_HOST_PATH \
+  JASON_IT_GLUE_RW_OPENBAO_SECRET_ID_HOST_PATH \
+  /run/jason-secrets/openbao/it-glue-write/role_id \
+  /run/jason-secrets/openbao/it-glue-write/secret_id
+add_routine_mount_pair \
+  JASON_ENTRA_USER_CREATE_OPENBAO_ROLE_ID_HOST_PATH \
+  JASON_ENTRA_USER_CREATE_OPENBAO_SECRET_ID_HOST_PATH \
+  /run/jason-secrets/openbao/microsoft-graph-user-create/role_id \
+  /run/jason-secrets/openbao/microsoft-graph-user-create/secret_id
+add_routine_mount_pair \
+  JASON_ENTRA_ONBOARDING_PASSWORD_OPENBAO_ROLE_ID_HOST_PATH \
+  JASON_ENTRA_ONBOARDING_PASSWORD_OPENBAO_SECRET_ID_HOST_PATH \
+  /run/jason-secrets/openbao/microsoft-graph-onboarding-password/role_id \
+  /run/jason-secrets/openbao/microsoft-graph-onboarding-password/secret_id
+
 exec python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-runtime   --image "$IMAGE"   --rollback "$ROLLBACK"   --source-revision "$REVISION"   --harden \
   --set-env "JASON_OWNER_UAT_MODE=$OWNER_UAT_MODE" \
   --set-env "JASON_OWNER_UAT_WORKER_ENABLED=$OWNER_UAT_WORKER" \
@@ -151,6 +207,7 @@ exec python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-runtime 
   --set-env "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID=${JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID:-}" \
   --add-readonly-bind "$QBO_ROLE_HOST:$QBO_MOUNT_BASE/role_id" \
   --add-readonly-bind "$QBO_SECRET_HOST:$QBO_MOUNT_BASE/secret_id" \
+  "${ROUTINE_RW_ARGS[@]}" \
   --promote-image-tag jason-runtime:production \
   --promote-image-tag jason-runtime:local \
   --rollback-image-tag jason-runtime:rollback-current \

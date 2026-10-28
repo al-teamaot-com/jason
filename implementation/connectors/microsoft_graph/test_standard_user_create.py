@@ -24,6 +24,7 @@ class FakeScope:
             client_id="client-17", tenant_id=self.tenant_id,
             managed_domains=frozenset({"contoso.example"}),
             source_authority=self.source,
+            approved_user_principal_name="jane.smith@contoso.example",
         )
 
 
