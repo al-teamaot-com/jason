@@ -600,7 +600,10 @@ def _autotask_search(
                 {"op": "jason_open", "field": provider_field, "value": "open"}
             )
             continue
-        clauses.append({"op": "eq", "field": provider_field, "value": value})
+        # Autotask company discovery accepts partial names, while exact company IDs
+        # remain equality-bound. Never broaden arbitrary filter fields.
+        operator = "contains" if capability_name == SERVICE_COMPANY_SEARCH and selector == "name" else "eq"
+        clauses.append({"op": operator, "field": provider_field, "value": value})
 
     if not clauses:
         clauses.append({"op": "exist", "field": "id"})
