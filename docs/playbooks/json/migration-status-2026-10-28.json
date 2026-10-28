@@ -20,7 +20,17 @@
     "source_declares_shadow": 2,
     "live_durable_promotions": "not_verified",
     "live_json_stage_inventory": "not_verified",
-    "production_health": "revalidation_required_in_control_board_2026-10-28"
+    "production_health": "revalidation_required_in_control_board_2026-10-28",
+    "source_preserving_json_candidates_created": 16,
+    "source_preserving_json_candidates_shape_validated": 16,
+    "json_candidates_with_live_execution_authority": 0,
+    "json_candidates_staged_or_activated": 0,
+    "source_document_section_gaps": 6,
+    "known_source_doc_registry_version_mismatch": [
+      "backupiq_endpoint_backup"
+    ],
+    "canonical_python_semantic_validation": "not_run",
+    "full_runtime_parity": "not_proven"
   },
   "migration": {
     "runtime_definition_schema_version": 1,
@@ -29,8 +39,22 @@
     "no_live_activation_or_registry_modification_authorized_by_this_snapshot": true,
     "first_candidate": "windows_time_source",
     "first_candidate_rationale": "Already pilot/shadow with an existing Markdown source and explicit risk gates; migrate only its deterministic classification first, without activating remediation",
-    "next_gate": "Validate a schema-conformant classification-only draft and establish runtime/context-binding plus worker-integration acceptance before staging or activation",
-    "full_parity_required_before_replacing_legacy": true
+    "next_gate": "Canonical Python JSON v1 semantic validation and a real capability/identity-binding integration plan; first working migrated playbook only after prior P0 production stabilization",
+    "full_parity_required_before_replacing_legacy": true,
+    "migration_phase": "all_source_preserving_json_v1_drafts_created_on_draft_branch",
+    "candidate_count": 16,
+    "candidate_paths_root": "docs/playbooks/json/candidates/",
+    "all_drafts_autonomy_activation": "disabled",
+    "all_drafts_terminal": "human_review_only",
+    "live_execution_enabled": false,
+    "pr_url": "https://github.com/al-teamaot-com/jason/pull/2111",
+    "unresolved": [
+      "Back-up IQ registry v1.2.0 versus source docs v1.3.0",
+      "Missing canonical sections in selected source Markdown",
+      "No accepted provider-capability/argument binding for JSON step execution",
+      "No proof that JSON runtime interpreter is integrated into autonomous ticket worker",
+      "No accepted wait/recheck runtime parity and no controlled shadow acceptance"
+    ]
   },
   "playbooks": [
     {
@@ -56,10 +80,19 @@
         "governance_precheck",
         "autonomy_approved"
       ],
-      "current_json_v1_document_migration": "not_verified",
+      "current_json_v1_document_migration": "source_preserving_structured_draft",
       "live_durable_owner_promotion": "not_verified",
       "live_functional_acceptance": "not_verified",
-      "migration_notes": "Source declaration is not independent production acceptance."
+      "migration_notes": "Source declaration is not independent production acceptance.",
+      "converted_json_v1_candidate": "docs/playbooks/json/candidates/backupiq_endpoint_backup-1.2.0-jsonpreview.json",
+      "converted_json_schema_version": 1,
+      "json_candidate_validation": "JSON parse / static shape / acyclic graph / guardrail checks passed (not canonical Python semantic validator)",
+      "source_text_reconstruction_verified_during_conversion": true,
+      "current_json_autonomy_activation": "disabled",
+      "source_section_gaps": [],
+      "document_version": "1.3.0",
+      "source_registry_version": "1.2.0",
+      "version_alignment": "SOURCE_DOC_VERSION_CONFLICT_REQUIRES_RECONCILIATION"
     },
     {
       "id": "datto_edr_av",
@@ -84,10 +117,18 @@
         "governance_precheck",
         "autonomy_approved"
       ],
-      "current_json_v1_document_migration": "not_verified",
+      "current_json_v1_document_migration": "source_preserving_structured_draft",
       "live_durable_owner_promotion": "not_verified",
       "live_functional_acceptance": "not_verified",
-      "migration_notes": "Source declaration is not independent production acceptance."
+      "migration_notes": "Source declaration is not independent production acceptance.",
+      "converted_json_v1_candidate": "docs/playbooks/json/candidates/datto_edr_av-1.3.0-jsonpreview.json",
+      "converted_json_schema_version": 1,
+      "json_candidate_validation": "JSON parse / static shape / acyclic graph / guardrail checks passed (not canonical Python semantic validator)",
+      "source_text_reconstruction_verified_during_conversion": true,
+      "current_json_autonomy_activation": "disabled",
+      "source_section_gaps": [],
+      "document_version": null,
+      "version_alignment": "no_detected_conflict_or_unstated_document_version"
     },
     {
       "id": "disk_bad_block_event_7",
@@ -109,10 +150,18 @@
         "evidence_fresh",
         "governance_precheck"
       ],
-      "current_json_v1_document_migration": "not_verified",
+      "current_json_v1_document_migration": "source_preserving_structured_draft",
       "live_durable_owner_promotion": "not_verified",
       "live_functional_acceptance": "not_verified",
-      "migration_notes": "Source declaration is not independent production acceptance."
+      "migration_notes": "Source declaration is not independent production acceptance.",
+      "converted_json_v1_candidate": "docs/playbooks/json/candidates/disk_bad_block_event_7-1.0.0-jsonpreview.json",
+      "converted_json_schema_version": 1,
+      "json_candidate_validation": "JSON parse / static shape / acyclic graph / guardrail checks passed (not canonical Python semantic validator)",
+      "source_text_reconstruction_verified_during_conversion": true,
+      "current_json_autonomy_activation": "disabled",
+      "source_section_gaps": [],
+      "document_version": null,
+      "version_alignment": "no_detected_conflict_or_unstated_document_version"
     },
     {
       "id": "dns_agent_diagnostic",
@@ -135,10 +184,20 @@
         "evidence_fresh",
         "governance_precheck"
       ],
-      "current_json_v1_document_migration": "not_verified",
+      "current_json_v1_document_migration": "source_preserving_structured_draft",
       "live_durable_owner_promotion": "not_verified",
       "live_functional_acceptance": "not_verified",
-      "migration_notes": "Source declaration is not independent production acceptance."
+      "migration_notes": "Source declaration is not independent production acceptance.",
+      "converted_json_v1_candidate": "docs/playbooks/json/candidates/dns_agent_diagnostic-1.0.0-jsonpreview.json",
+      "converted_json_schema_version": 1,
+      "json_candidate_validation": "JSON parse / static shape / acyclic graph / guardrail checks passed (not canonical Python semantic validator)",
+      "source_text_reconstruction_verified_during_conversion": true,
+      "current_json_autonomy_activation": "disabled",
+      "source_section_gaps": [
+        "23"
+      ],
+      "document_version": null,
+      "version_alignment": "no_detected_conflict_or_unstated_document_version"
     },
     {
       "id": "drmm_recent_alert_reconciliation",
@@ -162,10 +221,23 @@
         "governance_precheck",
         "autonomy_approved"
       ],
-      "current_json_v1_document_migration": "not_verified",
+      "current_json_v1_document_migration": "source_preserving_structured_draft",
       "live_durable_owner_promotion": "not_verified",
       "live_functional_acceptance": "not_verified",
-      "migration_notes": "Source declaration is not independent production acceptance."
+      "migration_notes": "Source declaration is not independent production acceptance.",
+      "converted_json_v1_candidate": "docs/playbooks/json/candidates/drmm_recent_alert_reconciliation-1.0.0-jsonpreview.json",
+      "converted_json_schema_version": 1,
+      "json_candidate_validation": "JSON parse / static shape / acyclic graph / guardrail checks passed (not canonical Python semantic validator)",
+      "source_text_reconstruction_verified_during_conversion": true,
+      "current_json_autonomy_activation": "disabled",
+      "source_section_gaps": [
+        "20",
+        "21",
+        "22",
+        "23"
+      ],
+      "document_version": null,
+      "version_alignment": "no_detected_conflict_or_unstated_document_version"
     },
     {
       "id": "gpt_insights_tech_assist",
@@ -190,10 +262,18 @@
         "jason_owned_note_update",
         "autonomy_approved"
       ],
-      "current_json_v1_document_migration": "not_verified",
+      "current_json_v1_document_migration": "source_preserving_structured_draft",
       "live_durable_owner_promotion": "not_verified",
       "live_functional_acceptance": "not_verified",
-      "migration_notes": "Source declaration is not independent production acceptance."
+      "migration_notes": "Source declaration is not independent production acceptance.",
+      "converted_json_v1_candidate": "docs/playbooks/json/candidates/gpt_insights_tech_assist-0.2.1-jsonpreview.json",
+      "converted_json_schema_version": 1,
+      "json_candidate_validation": "JSON parse / static shape / acyclic graph / guardrail checks passed (not canonical Python semantic validator)",
+      "source_text_reconstruction_verified_during_conversion": true,
+      "current_json_autonomy_activation": "disabled",
+      "source_section_gaps": [],
+      "document_version": null,
+      "version_alignment": "no_detected_conflict_or_unstated_document_version"
     },
     {
       "id": "idle_log_off",
@@ -221,10 +301,18 @@
         "governance_precheck",
         "autonomy_approved"
       ],
-      "current_json_v1_document_migration": "not_verified",
+      "current_json_v1_document_migration": "source_preserving_structured_draft",
       "live_durable_owner_promotion": "not_verified",
       "live_functional_acceptance": "not_verified",
-      "migration_notes": "Source declaration is not independent production acceptance."
+      "migration_notes": "Source declaration is not independent production acceptance.",
+      "converted_json_v1_candidate": "docs/playbooks/json/candidates/idle_log_off-1.1.0-jsonpreview.json",
+      "converted_json_schema_version": 1,
+      "json_candidate_validation": "JSON parse / static shape / acyclic graph / guardrail checks passed (not canonical Python semantic validator)",
+      "source_text_reconstruction_verified_during_conversion": true,
+      "current_json_autonomy_activation": "disabled",
+      "source_section_gaps": [],
+      "document_version": null,
+      "version_alignment": "no_detected_conflict_or_unstated_document_version"
     },
     {
       "id": "jason_activity_log",
@@ -248,10 +336,18 @@
         "duplicate_state_suppression",
         "autonomy_approved"
       ],
-      "current_json_v1_document_migration": "not_verified",
+      "current_json_v1_document_migration": "source_preserving_structured_draft",
       "live_durable_owner_promotion": "not_verified",
       "live_functional_acceptance": "not_verified",
-      "migration_notes": "Source explicitly calls out pending acceptance; do not represent as live-verified."
+      "migration_notes": "Source explicitly calls out pending acceptance; do not represent as live-verified.",
+      "converted_json_v1_candidate": "docs/playbooks/json/candidates/jason_activity_log-1.0.0-jsonpreview.json",
+      "converted_json_schema_version": 1,
+      "json_candidate_validation": "JSON parse / static shape / acyclic graph / guardrail checks passed (not canonical Python semantic validator)",
+      "source_text_reconstruction_verified_during_conversion": true,
+      "current_json_autonomy_activation": "disabled",
+      "source_section_gaps": [],
+      "document_version": null,
+      "version_alignment": "no_detected_conflict_or_unstated_document_version"
     },
     {
       "id": "low_disk_space",
@@ -281,10 +377,20 @@
         "governance_precheck",
         "autonomy_approved"
       ],
-      "current_json_v1_document_migration": "not_verified",
+      "current_json_v1_document_migration": "source_preserving_structured_draft",
       "live_durable_owner_promotion": "not_verified",
       "live_functional_acceptance": "not_verified",
-      "migration_notes": "Source declaration is not independent production acceptance."
+      "migration_notes": "Source declaration is not independent production acceptance.",
+      "converted_json_v1_candidate": "docs/playbooks/json/candidates/low_disk_space-1.1.0-jsonpreview.json",
+      "converted_json_schema_version": 1,
+      "json_candidate_validation": "JSON parse / static shape / acyclic graph / guardrail checks passed (not canonical Python semantic validator)",
+      "source_text_reconstruction_verified_during_conversion": true,
+      "current_json_autonomy_activation": "disabled",
+      "source_section_gaps": [
+        "23"
+      ],
+      "document_version": null,
+      "version_alignment": "no_detected_conflict_or_unstated_document_version"
     },
     {
       "id": "offline_ticket_context_augmentation",
@@ -306,10 +412,18 @@
         "governance_precheck",
         "autonomy_approved"
       ],
-      "current_json_v1_document_migration": "not_verified",
+      "current_json_v1_document_migration": "source_preserving_structured_draft",
       "live_durable_owner_promotion": "not_verified",
       "live_functional_acceptance": "not_verified",
-      "migration_notes": "Source declaration is not independent production acceptance."
+      "migration_notes": "Source declaration is not independent production acceptance.",
+      "converted_json_v1_candidate": "docs/playbooks/json/candidates/offline_ticket_context_augmentation-0.1.0-jsonpreview.json",
+      "converted_json_schema_version": 1,
+      "json_candidate_validation": "JSON parse / static shape / acyclic graph / guardrail checks passed (not canonical Python semantic validator)",
+      "source_text_reconstruction_verified_during_conversion": true,
+      "current_json_autonomy_activation": "disabled",
+      "source_section_gaps": [],
+      "document_version": null,
+      "version_alignment": "no_detected_conflict_or_unstated_document_version"
     },
     {
       "id": "post_error_investigation",
@@ -333,10 +447,20 @@
         "evidence_fresh",
         "governance_precheck"
       ],
-      "current_json_v1_document_migration": "not_verified",
+      "current_json_v1_document_migration": "source_preserving_structured_draft",
       "live_durable_owner_promotion": "not_verified",
       "live_functional_acceptance": "not_verified",
-      "migration_notes": "Source declaration is not independent production acceptance."
+      "migration_notes": "Source declaration is not independent production acceptance.",
+      "converted_json_v1_candidate": "docs/playbooks/json/candidates/post_error_investigation-1.0.0-jsonpreview.json",
+      "converted_json_schema_version": 1,
+      "json_candidate_validation": "JSON parse / static shape / acyclic graph / guardrail checks passed (not canonical Python semantic validator)",
+      "source_text_reconstruction_verified_during_conversion": true,
+      "current_json_autonomy_activation": "disabled",
+      "source_section_gaps": [
+        "23"
+      ],
+      "document_version": null,
+      "version_alignment": "no_detected_conflict_or_unstated_document_version"
     },
     {
       "id": "security_log_self_heal",
@@ -359,10 +483,20 @@
         "evidence_fresh",
         "governance_precheck"
       ],
-      "current_json_v1_document_migration": "not_verified",
+      "current_json_v1_document_migration": "source_preserving_structured_draft",
       "live_durable_owner_promotion": "not_verified",
       "live_functional_acceptance": "not_verified",
-      "migration_notes": "Source declaration is not independent production acceptance."
+      "migration_notes": "Source declaration is not independent production acceptance.",
+      "converted_json_v1_candidate": "docs/playbooks/json/candidates/security_log_self_heal-1.0.0-jsonpreview.json",
+      "converted_json_schema_version": 1,
+      "json_candidate_validation": "JSON parse / static shape / acyclic graph / guardrail checks passed (not canonical Python semantic validator)",
+      "source_text_reconstruction_verified_during_conversion": true,
+      "current_json_autonomy_activation": "disabled",
+      "source_section_gaps": [
+        "23"
+      ],
+      "document_version": null,
+      "version_alignment": "no_detected_conflict_or_unstated_document_version"
     },
     {
       "id": "unexpected_shutdown",
@@ -389,10 +523,18 @@
         "evidence_fresh",
         "governance_precheck"
       ],
-      "current_json_v1_document_migration": "not_verified",
+      "current_json_v1_document_migration": "source_preserving_structured_draft",
       "live_durable_owner_promotion": "not_verified",
       "live_functional_acceptance": "not_verified",
-      "migration_notes": "Source declaration is not independent production acceptance."
+      "migration_notes": "Source declaration is not independent production acceptance.",
+      "converted_json_v1_candidate": "docs/playbooks/json/candidates/unexpected_shutdown-1.1.0-jsonpreview.json",
+      "converted_json_schema_version": 1,
+      "json_candidate_validation": "JSON parse / static shape / acyclic graph / guardrail checks passed (not canonical Python semantic validator)",
+      "source_text_reconstruction_verified_during_conversion": true,
+      "current_json_autonomy_activation": "disabled",
+      "source_section_gaps": [],
+      "document_version": null,
+      "version_alignment": "no_detected_conflict_or_unstated_document_version"
     },
     {
       "id": "vulscan_missing_patch",
@@ -416,10 +558,18 @@
         "evidence_fresh",
         "governance_precheck"
       ],
-      "current_json_v1_document_migration": "not_verified",
+      "current_json_v1_document_migration": "source_preserving_structured_draft",
       "live_durable_owner_promotion": "not_verified",
       "live_functional_acceptance": "not_verified",
-      "migration_notes": "Source explicitly calls out pending acceptance; do not represent as live-verified."
+      "migration_notes": "Source explicitly calls out pending acceptance; do not represent as live-verified.",
+      "converted_json_v1_candidate": "docs/playbooks/json/candidates/vulscan_missing_patch-1.1.0-jsonpreview.json",
+      "converted_json_schema_version": 1,
+      "json_candidate_validation": "JSON parse / static shape / acyclic graph / guardrail checks passed (not canonical Python semantic validator)",
+      "source_text_reconstruction_verified_during_conversion": true,
+      "current_json_autonomy_activation": "disabled",
+      "source_section_gaps": [],
+      "document_version": null,
+      "version_alignment": "no_detected_conflict_or_unstated_document_version"
     },
     {
       "id": "vulscan_multi_device_split",
@@ -442,10 +592,20 @@
         "ticket_create_authority",
         "governance_precheck"
       ],
-      "current_json_v1_document_migration": "not_verified",
+      "current_json_v1_document_migration": "source_preserving_structured_draft",
       "live_durable_owner_promotion": "not_verified",
       "live_functional_acceptance": "not_verified",
-      "migration_notes": "Source explicitly calls out pending acceptance; do not represent as live-verified."
+      "migration_notes": "Source explicitly calls out pending acceptance; do not represent as live-verified.",
+      "converted_json_v1_candidate": "docs/playbooks/json/candidates/vulscan_multi_device_split-1.0.0-jsonpreview.json",
+      "converted_json_schema_version": 1,
+      "json_candidate_validation": "JSON parse / static shape / acyclic graph / guardrail checks passed (not canonical Python semantic validator)",
+      "source_text_reconstruction_verified_during_conversion": true,
+      "current_json_autonomy_activation": "disabled",
+      "source_section_gaps": [
+        "23"
+      ],
+      "document_version": null,
+      "version_alignment": "no_detected_conflict_or_unstated_document_version"
     },
     {
       "id": "windows_time_source",
@@ -468,10 +628,18 @@
         "governance_precheck",
         "autonomy_approved"
       ],
-      "current_json_v1_document_migration": "not_verified",
+      "current_json_v1_document_migration": "source_preserving_structured_draft",
       "live_durable_owner_promotion": "not_verified",
       "live_functional_acceptance": "not_verified",
-      "migration_notes": "Selected for non-executable JSON v1 classification preview; existing shadow pilot authority remains unchanged."
+      "migration_notes": "Selected for non-executable JSON v1 classification preview; existing shadow pilot authority remains unchanged.",
+      "converted_json_v1_candidate": "docs/playbooks/json/candidates/windows_time_source-0.1.0-jsonpreview.json",
+      "converted_json_schema_version": 1,
+      "json_candidate_validation": "JSON parse / static shape / acyclic graph / guardrail checks passed (not canonical Python semantic validator)",
+      "source_text_reconstruction_verified_during_conversion": true,
+      "current_json_autonomy_activation": "disabled",
+      "source_section_gaps": [],
+      "document_version": null,
+      "version_alignment": "no_detected_conflict_or_unstated_document_version"
     }
   ]
 }
