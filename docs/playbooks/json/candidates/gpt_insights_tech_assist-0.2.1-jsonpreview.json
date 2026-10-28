@@ -141,7 +141,323 @@
       "Decision"
     ],
     "remediation_substep_titles": [],
-    "live_execution_mapped": false
+    "live_execution_mapped": false,
+    "structured_source_fields": {
+      "identification_checklist": {
+        "source_section_key": "4",
+        "present": true,
+        "verbatim_bullets": [
+          "1. Identify the exact Autotask ticket.",
+          "2. Confirm queue = Help Desk I and status = New.",
+          "3. Confirm the queue source already excluded source label Recurring.",
+          "4. Resolve the associated configuration item only when an exact same-company active association is available.",
+          "5. If identity is uncertain, record the limitation in the insight rather than guessing.",
+          "6. Do not claim or move the ticket."
+        ]
+      },
+      "expected_state_checklist": {
+        "source_section_key": "5",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "decision_gate_checklist": {
+        "source_section_key": "8",
+        "present": true,
+        "verbatim_bullets": [
+          "- exact Help Desk I queue;",
+          "- exact New status;",
+          "- recurring source exclusion already applied;",
+          "- exact durable v0.2.1 owner promotion exists;",
+          "- update target, if present, is uniquely identified as the Jason-owned `GPT Insights` internal note."
+        ]
+      },
+      "retry_checklist": {
+        "source_section_key": "10",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "recheck_checklist": {
+        "source_section_key": "11",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "stale_checklist": {
+        "source_section_key": "12",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "dependency_checklist": {
+        "source_section_key": "13",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "documentation_checklist": {
+        "source_section_key": "14",
+        "present": true,
+        "verbatim_bullets": [
+          "- ticket ID;",
+          "- note ID;",
+          "- prior and revised body;",
+          "- prior and revised SHA-256;",
+          "- provider readback result."
+        ]
+      },
+      "failure_checklist": {
+        "source_section_key": "15",
+        "present": true,
+        "verbatim_bullets": [
+          "- note identity is ambiguous;",
+          "- target note is not internal;",
+          "- creator identity is not Jason's exact execution identity;",
+          "- provider update permission is unavailable;",
+          "- post-mutation readback does not match."
+        ]
+      },
+      "escalation_checklist": {
+        "source_section_key": "16",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "verification_checklist": {
+        "source_section_key": "17",
+        "present": true,
+        "verbatim_bullets": [
+          "- the intended note ID;",
+          "- title `GPT Insights`;",
+          "- noteType=3;",
+          "- publish=2;",
+          "- exact intended description;",
+          "- exact Jason creator attribution."
+        ]
+      },
+      "completion_checklist": {
+        "source_section_key": "18",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "required_capabilities_source": {
+        "source_section_key": "20",
+        "present": true,
+        "verbatim_bullets": [
+          "- `service.ticket.notes.search`",
+          "- `service.ticket.search`",
+          "- `service.configuration.read`",
+          "- `endpoint.device.read`",
+          "- approved read-only diagnostic capabilities where category-specific evidence warrants them",
+          "- `service.ticket.note.create`",
+          "- `service.ticket.note.update`"
+        ]
+      },
+      "acceptance_test_checklist": {
+        "source_section_key": "21",
+        "present": true,
+        "verbatim_bullets": [
+          "1. eligible Help Desk I New non-recurring ticket receives one base note;",
+          "2. same evidence creates no duplicate or update;",
+          "3. material evidence change updates that same note ID;",
+          "4. technician/client/workflow notes cannot be updated;",
+          "5. Help Desk II does not receive GPT Insights;",
+          "6. non-New status does not receive GPT Insights;",
+          "7. source Recurring is excluded upstream;",
+          "8. update audit preserves before/after bodies and hashes;",
+          "9. post-write readback verifies internal visibility and Jason ownership;",
+          "10. no ticket-field/client/disruptive mutation occurs."
+        ]
+      },
+      "closure_checklist": {
+        "source_section_key": "22",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "owner_review_checklist": {
+        "source_section_key": "23",
+        "present": true,
+        "verbatim_bullets": [
+          "- playbook: `gpt_insights_tech_assist@0.2.1`",
+          "- policy: `playbook-autonomy:gpt_insights_tech_assist`",
+          "- capabilities: `service.ticket.note.create`, `service.ticket.note.update`"
+        ]
+      }
+    },
+    "diagnostic_substeps": [
+      {
+        "id": "7_sub_1",
+        "heading": "Step 1: Ticket classification",
+        "content_markdown": "\nClassify as network, printing, performance, login, application, or unknown from ticket evidence without inventing a cause.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_2",
+        "heading": "Step 2: Device evidence",
+        "content_markdown": "\nWhen an exact associated device exists, collect authoritative online state, last-seen evidence, OS, and category-specific read-only facts.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_3",
+        "heading": "Step 3: Correlation",
+        "content_markdown": "\nUse bounded same-company ticket evidence where it materially reduces technician effort.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_4",
+        "heading": "Decision",
+        "content_markdown": "\n- material evidence available -> render/update insight;\n- evidence unchanged -> no write;\n- evidence unavailable -> state the limitation and avoid unsupported claims.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      }
+    ],
+    "remediation_branches": [
+      {
+        "id": "9_overview",
+        "heading": "Full workflow",
+        "content_markdown": "\n\nNot applicable. This playbook is advisory only.\n\nAllowed mutations:\n- `service.ticket.note.create`\n- `service.ticket.note.update`\n\nThe update capability may touch only an existing Jason-owned internal note after exact creator, visibility, title, and note-ID verification.\n\n",
+        "source_section_key": "9"
+      }
+    ],
+    "source_section_inventory": [
+      {
+        "section_key": "1",
+        "present": true,
+        "title": "Section Goal",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "2",
+        "present": true,
+        "title": "Trigger",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "3",
+        "present": true,
+        "title": "Scope and Boundaries",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "4",
+        "present": true,
+        "title": "Initial Identification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "5",
+        "present": true,
+        "title": "Expected State",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "6",
+        "present": true,
+        "title": "State Model",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "7",
+        "present": true,
+        "title": "Diagnostic Workflow",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "8",
+        "present": true,
+        "title": "Decision Gates",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "9",
+        "present": true,
+        "title": "Remediation",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "10",
+        "present": true,
+        "title": "Retry Policy",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "11",
+        "present": true,
+        "title": "Periodic Rechecks",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "12",
+        "present": true,
+        "title": "Aging / Stale Condition",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "13",
+        "present": true,
+        "title": "Dependency Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "14",
+        "present": true,
+        "title": "Documentation Requirements",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "15",
+        "present": true,
+        "title": "Failure Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "16",
+        "present": true,
+        "title": "Escalation Criteria",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "17",
+        "present": true,
+        "title": "Verification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "18",
+        "present": true,
+        "title": "Completion Criteria",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "19",
+        "present": true,
+        "title": "Final Resolution Note",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "20",
+        "present": true,
+        "title": "Required Capabilities",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "21",
+        "present": true,
+        "title": "Acceptance Test",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "22",
+        "present": true,
+        "title": "Section Goal Closure",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "23",
+        "present": true,
+        "title": "Autonomous Execution Eligibility and Owner Review",
+        "review_status": "source_preserved"
+      }
+    ],
+    "section_semantics": "Source-derived metadata only. Diagnostic commands and remediation branches are inert Markdown, not executable provider calls."
   },
   "legacy_registry": {
     "source_path": "docs/playbooks/Jason-GPT-Insights-Tech-Assist.md",
@@ -335,6 +651,8 @@
       "Controlled shadow comparison and independent acceptance",
       "Owner-bound activation and branch-specific autonomous promotion"
     ],
-    "external_fact_fields_non_authoritative": true
+    "external_fact_fields_non_authoritative": true,
+    "source_reconstruction_integrity": "verified_from_original_source_on_conversion",
+    "section_semantic_extraction": "source_text_derived_no_provider_execution"
   }
 }
