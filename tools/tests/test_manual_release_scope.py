@@ -131,3 +131,135 @@ def test_paged_pr_file_list_detects_overlap(repo, monkeypatch):
     items, count = m.open_pr_overlaps("test/repo", {"shared.py"}, reader=reader(prs))
     assert count == 1
     assert items[0]["changed_files"] == ["shared.py"]
+
+
+def test_all_1020_registered_worktrees_including_last_dirty_overlap_are_checked(
+    tmp_path, monkeypatch,
+):
+    """Real host has >1,000 worktrees; don't silently skip later developers."""
+    count = 1020
+    paths = [tmp_path / f"reviewed-{i:04d}" for i in range(count)]
+    for path in paths:
+        path.mkdir()
+    target = paths[-1]
+    inspected = []
+
+    def fake_command(args, cwd=None):
+        if args[:3] == ["git", "worktree", "list"]:
+            return "\n\n".join(f"worktree {p}" for p in paths)
+        assert args[:3] == ["git", "status", "--porcelain=v1"]
+        inspected.append(cwd)
+        assert args[-1] == "shared.py"
+        return " M shared.py\n" if cwd == target else ""
+
+    monkeypatch.setattr(m, "command", fake_command)
+    overlaps, n, stale, registered = m.dirty_worktrees(tmp_path, {"shared.py"})
+    assert n == count and registered == count and stale == []
+    assert len(inspected) == count
+    assert len(set(inspected)) == count
+    assert overlaps == [{
+        "path": str(target),
+        "changed_files": ["shared.py"],
+    }]
+
+
+def test_more_than_2000_registered_worktrees_still_fails_closed(monkeypatch, tmp_path):
+    paths = [tmp_path / f"registry-{i:05d}" for i in range(2001)]
+    def fake_command(args, cwd=None):
+        assert args[:3] == ["git", "worktree", "list"]
+        return "\n\n".join(f"worktree {p}" for p in paths)
+    monkeypatch.setattr(m, "command", fake_command)
+    with pytest.raises(m.ScopeBlocked, match="incomplete registered worktree set"):
+        m.dirty_worktrees(tmp_path, {"shared.py"})
+
+
+def test_missing_registered_worktree_still_refuses_scope_review(monkeypatch, tmp_path):
+    paths = [tmp_path / f"present-{i}" for i in range(3)]
+    for path in paths[:2]:
+        path.mkdir()
+    def fake_command(args, cwd=None):
+        if args[:3] == ["git", "worktree", "list"]:
+            return "\n\n".join(f"worktree {p}" for p in paths)
+        return ""
+    monkeypatch.setattr(m, "command", fake_command)
+    with pytest.raises(m.ScopeBlocked, match="worktree unavailable"):
+        m.dirty_worktrees(tmp_path, {"shared.py"})
+
+
+
+def test_verified_stale_git_registrations_skipped_without_modifying_worktrees(
+    tmp_path, monkeypatch,
+):
+    existing = [tmp_path / f"present-{i}" for i in range(1020)]
+    stale = [tmp_path / f"missing-{i}" for i in range(26)]
+    for path in existing:
+        path.mkdir()
+    inspected = []
+    parts = [f"worktree {p}\nHEAD {'a' * 40}" for p in existing]
+    parts += [
+        f"worktree {p}\nHEAD {'a' * 40}\nprunable gitdir file points to non-existent location"
+        for p in stale
+    ]
+    def fake_command(args, cwd=None):
+        if args[:3] == ["git", "worktree", "list"]:
+            return "\n\n".join(parts)
+        assert args[:3] == ["git", "status", "--porcelain=v1"]
+        inspected.append(cwd)
+        return " M shared.py\n" if cwd == existing[-1] else ""
+    monkeypatch.setattr(m, "command", fake_command)
+    overlaps, checked, ignored, registered = m.dirty_worktrees(tmp_path, {"shared.py"})
+    assert checked == 1020 and registered == 1046
+    assert len(inspected) == 1020 and set(inspected) == set(existing)
+    assert set(ignored) == {str(p) for p in stale}
+    assert overlaps == [{"path": str(existing[-1]), "changed_files": ["shared.py"]}]
+    assert all(x.is_dir() for x in existing)
+    assert all(not x.exists() for x in stale)
+
+
+def test_prunable_marker_cannot_hide_a_real_worktree(tmp_path, monkeypatch):
+    present = tmp_path / "still-present"
+    present.mkdir()
+    monkeypatch.setattr(
+        m, "command",
+        lambda args, cwd=None: (
+            f"worktree {present}\nHEAD {'a' * 40}\nprunable gitdir file points to non-existent location"
+        ),
+    )
+    with pytest.raises(m.ScopeBlocked, match="marked prunable while present"):
+        m.dirty_worktrees(tmp_path, {"shared.py"})
+
+
+def test_unverified_absent_git_registration_is_never_silently_skipped(tmp_path, monkeypatch):
+    missing = tmp_path / "missing-unverified"
+    monkeypatch.setattr(m, "command", lambda args, cwd=None: f"worktree {missing}")
+    with pytest.raises(m.ScopeBlocked, match="worktree unavailable"):
+        m.dirty_worktrees(tmp_path, {"shared.py"})
+
+
+def test_scope_digest_includes_verified_missing_git_registry_evidence(tmp_path, monkeypatch):
+    """Cannot reuse a release receipt after the Git worktree inventory changes."""
+    sha = "a" * 40
+    commits = [{"sha": sha, "subject": "Reviewed feature (#101)", "prs": [101]}]
+    monkeypatch.setattr(m, "source_scope", lambda *_: (commits, ["shared.py"]))
+    monkeypatch.setattr(m, "open_pr_overlaps", lambda *_args, **_kwargs: ([], 0))
+    monkeypatch.setattr(
+        m, "dirty_worktrees",
+        lambda *_: ([], 1020, ["/tmp/stale-Git-entry"], 1046),
+    )
+    initial = m.review(
+        tmp_path, "test/repo", "1" * 40, "2" * 40,
+        allowed_prs=[101], pr_reader=reader([]),
+    )
+    assert initial["status"] == "SCOPE_REVIEWED_NOT_DEPLOYMENT_APPROVED"
+    assert initial["registered_worktrees"] == 1046
+    assert initial["worktrees_inspected"] == 1020
+    assert initial["git_verified_stale_registrations"] == ["/tmp/stale-Git-entry"]
+    monkeypatch.setattr(
+        m, "dirty_worktrees",
+        lambda *_: ([], 1020, ["/tmp/a-different-stale-Git-entry"], 1046),
+    )
+    changed = m.review(
+        tmp_path, "test/repo", "1" * 40, "2" * 40,
+        allowed_prs=[101], pr_reader=reader([]),
+    )
+    assert changed["scope_sha256"] != initial["scope_sha256"]

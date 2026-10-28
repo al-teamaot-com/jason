@@ -14,6 +14,11 @@ import subprocess
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
 PR = re.compile(r"#([0-9]+)")
+# 2026-10-28: production registered 1,020 parallel worktrees, exceeding
+# the historical 600-worktree ceiling. Every registered checkout still must
+# be inspected. 2,000 is a bounded fail-closed ceiling, not permission to
+# skip, prune or implicitly acknowledge other developers' changes.
+MAX_REGISTERED_WORKTREES = 2000
 
 
 class ScopeBlocked(ValueError):
@@ -72,21 +77,45 @@ def source_scope(repo, baseline, candidate):
 
 
 def dirty_worktrees(repo, changed):
-    lines = command(["git", "worktree", "list", "--porcelain"], repo).splitlines()
-    paths = [Path(line[9:]) for line in lines if line.startswith("worktree ")]
-    if not 1 <= len(paths) <= 600:
+    # The authoritative Git registry may retain orphaned entries for worktree
+    # paths which no longer exist. Do not mutate any development checkout or
+    # registry just to complete an owner's release review. Only Git's exact
+    # "prunable gitdir file points to non-existent location" evidence allows
+    # a missing directory to be classified as stale; every real checkout
+    # must still be inspected, including ones after a stale entry.
+    raw = command(["git", "worktree", "list", "--porcelain"], repo)
+    records = [part.splitlines() for part in raw.strip().split("\n\n") if part.strip()]
+    if not 1 <= len(records) <= MAX_REGISTERED_WORKTREES:
         raise ScopeBlocked("incomplete registered worktree set")
+    paths = []
+    for record in records:
+        if not record or not record[0].startswith("worktree "):
+            raise ScopeBlocked("unparseable registered worktree")
+        p = Path(record[0][9:])
+        if not p.is_absolute() or p in paths:
+            raise ScopeBlocked("duplicated or relative worktree path")
+        paths.append(p)
     overlaps = []
-    for path in paths:
+    stale = []
+    inspected = 0
+    for path, record in zip(paths, records):
+        prune_markers = [line for line in record[1:] if line.startswith("prunable ")]
         if not path.is_dir():
-            raise ScopeBlocked("registered development worktree unavailable")
+            if (prune_markers !=
+                    ["prunable gitdir file points to non-existent location"]
+                    or any(line.startswith("locked") for line in record[1:])):
+                raise ScopeBlocked("registered development worktree unavailable")
+            stale.append(str(path))
+            continue
+        if prune_markers:
+            raise ScopeBlocked("Git worktree unexpectedly marked prunable while present")
+        inspected += 1
         status = command(["git", "status", "--porcelain=v1", "--untracked-files=normal",
                           "--", *sorted(changed)], path)
         dirty = set()
         for line in status.splitlines():
             if len(line) < 4 or line[2] != " ":
                 raise ScopeBlocked("unparseable worktree status")
-            # Git can quote exotic paths. Fail closed instead of guessing.
             filename = line[3:]
             if filename.startswith('"') or " -> " in filename:
                 raise ScopeBlocked("worktree path requires explicit review")
@@ -94,7 +123,7 @@ def dirty_worktrees(repo, changed):
         common = sorted(changed.intersection(dirty))
         if common:
             overlaps.append({"path": str(path), "changed_files": common})
-    return overlaps, len(paths)
+    return overlaps, inspected, stale, len(paths)
 
 
 def open_pr_overlaps(repository, changed, reader=command):
@@ -143,7 +172,8 @@ def review(repo, repository, baseline, candidate, allowed_prs=(),
            pr_reader=command, worktree_repo=None):
     repo = Path(repo).resolve(strict=True)
     commits, paths = source_scope(repo, baseline, candidate)
-    dirty, worktree_count = dirty_worktrees(Path(worktree_repo or repo), set(paths))
+    dirty, worktree_count, stale, registrations = dirty_worktrees(
+        Path(worktree_repo or repo), set(paths))
     prs, pr_count = open_pr_overlaps(repository, set(paths), reader=pr_reader)
     allowed_prs, allowed_commits = set(allowed_prs), set(allowed_commits)
     acknowledged_prs, acknowledged_worktrees = set(acknowledged_prs), set(acknowledged_worktrees)
@@ -155,8 +185,9 @@ def review(repo, repository, baseline, candidate, allowed_prs=(),
              and allowed_commits.issubset({c["sha"] for c in commits})
              and acknowledged_prs.issubset({p["number"] for p in prs})
              and acknowledged_worktrees.issubset({w["path"] for w in dirty}))
-    digest = hashlib.sha256(json.dumps([baseline, candidate, commits, paths, prs, dirty],
-                                        sort_keys=True).encode()).hexdigest()
+    digest = hashlib.sha256(json.dumps(
+        [baseline, candidate, commits, paths, prs, dirty, stale, registrations],
+        sort_keys=True).encode()).hexdigest()
     ready = valid and not missing and not unreviewed_prs and not unreviewed_worktrees
     return {"status": "SCOPE_REVIEWED_NOT_DEPLOYMENT_APPROVED" if ready else "BLOCKED_SCOPE",
             "candidate_sha": candidate, "baseline_sha": baseline,
@@ -164,7 +195,10 @@ def review(repo, repository, baseline, candidate, allowed_prs=(),
             "unreviewed_commit_shas": missing, "open_pr_overlaps": prs,
             "unreviewed_open_prs": unreviewed_prs, "dirty_worktree_overlaps": dirty,
             "unreviewed_worktrees": unreviewed_worktrees, "acknowledgments_valid": valid,
-            "worktrees_inspected": worktree_count, "open_prs_inspected": pr_count,
+            "worktrees_inspected": worktree_count,
+            "registered_worktrees": registrations,
+            "git_verified_stale_registrations": stale,
+            "open_prs_inspected": pr_count,
             "deployment_authorized": False,
             "scope_limitation": "Whole protected-main revision, not selected cherry-picked fixes"}
 
