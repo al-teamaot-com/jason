@@ -1,0 +1,339 @@
+{
+  "schema_version": 1,
+  "playbook": {
+    "id": "idle_log_off",
+    "name": "Jason - Windows Idle Log Off Compliance / Repair (JSON migration draft)",
+    "version": "1.1.0-jsonpreview",
+    "lifecycle": "pilot",
+    "target_type": "endpoint",
+    "source_owner": "AOT",
+    "source_registry_version": "1.1.0",
+    "documented_version": "1.1.0",
+    "original_lifecycle": "production"
+  },
+  "trigger": {
+    "source_registry_match": {
+      "title_contains": [
+        "Get Idle Log Off Status",
+        "Compliant: False"
+      ]
+    },
+    "details_section_key": "2",
+    "execution_enabled": false
+  },
+  "scope": {
+    "direct_provider_access": false,
+    "preview_only": true,
+    "execution_authority": "none",
+    "scope_section_key": "3"
+  },
+  "expected_state": {
+    "details_section_key": "5",
+    "not_reverified_in_json_runtime": true
+  },
+  "state_model": {
+    "entry_step": "identity_gate",
+    "source_section_key": "6",
+    "context_binding_status": "not_implemented_for_migration_draft"
+  },
+  "steps": [
+    {
+      "id": "identity_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_target_identity_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "evidence_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "evidence_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "authoritative_evidence_complete",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "authorization_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "authorization_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "approved_json_runtime_parity",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "migration_hold"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "migration_hold",
+      "type": "human_review"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "verification": {
+    "authoritative_source": "Legacy source playbook section 17 and provider readbacks; not executed in this JSON draft",
+    "success_condition": "Legacy source Section 17 and Section 18 must pass independently; classification-only draft cannot verify or close"
+  },
+  "completion": {
+    "terminal_disposition": "Human Review (draft only; existing production source unchanged)"
+  },
+  "autonomy": {
+    "activation": "disabled",
+    "allowed_capabilities": []
+  },
+  "procedure": {
+    "section_refs": {
+      "section_goal": "1",
+      "trigger": "2",
+      "scope": "3",
+      "identification": "4",
+      "expected_state": "5",
+      "state_model": "6",
+      "diagnostics": "7",
+      "decision_gates": "8",
+      "remediation": "9",
+      "retry_policy": "10",
+      "periodic_rechecks": "11",
+      "stale_condition": "12",
+      "dependencies": "13",
+      "documentation": "14",
+      "failures": "15",
+      "escalation": "16",
+      "verification": "17",
+      "completion": "18",
+      "final_resolution": "19",
+      "required_capabilities": "20",
+      "acceptance_test": "21",
+      "closure": "22",
+      "autonomy_review": "23"
+    },
+    "section_keys_missing_from_source": [],
+    "diagnostic_substep_titles": [
+      "Step 1: Validate applicability",
+      "Decision",
+      "Step 2: Validate the alert itself",
+      "Decision",
+      "Step 3: Verify current control state",
+      "Step 4: Check remediation component readiness"
+    ],
+    "remediation_substep_titles": [
+      "Remediation A: Missing or broken Idle Log Off control",
+      "Remediation B: Stale alert",
+      "Remediation C: Monitor/response plumbing failure"
+    ],
+    "live_execution_mapped": false
+  },
+  "legacy_registry": {
+    "source_path": "docs/playbooks/Jason-Windows-Idle-Log-Off-Compliance-Repair.md",
+    "source_version": "1.1.0",
+    "review_status": "playbook_scoped_autonomous_setter_monitor_verified",
+    "source_enabled": true,
+    "source_autonomy_activation": "autonomous",
+    "source_allowed_capabilities": [
+      "automation.component.execute",
+      "service.ticket.note.create",
+      "service.ticket.update"
+    ],
+    "source_required_gates": [
+      "trigger",
+      "identity",
+      "supported_windows_workstation",
+      "exact_current_idle_log_off_alert",
+      "no_monitor_plumbing_error",
+      "exact_setter_identity",
+      "built_in_defaults_only",
+      "evidence_fresh",
+      "governance_precheck",
+      "autonomy_approved"
+    ],
+    "source_trigger": {
+      "title_contains": [
+        "Get Idle Log Off Status",
+        "Compliant: False"
+      ]
+    }
+  },
+  "source_document": {
+    "path": "docs/playbooks/Jason-Windows-Idle-Log-Off-Compliance-Repair.md",
+    "source_blob_sha": "ef5b3e7b437a268a351370398f6417ff607d1c0b",
+    "prelude_markdown": "# Jason Playbook: Windows Idle Log Off Compliance / Repair\n\n## Playbook Manifest\n\n```yaml\nplaybook:\n  id: idle_log_off\n  name: Windows Idle Log Off Compliance / Repair\n  version: 1.1.0\n  owner: AOT\n  target_type: endpoint\n  trigger:\n    provider: Autotask / Datto RMM\n    match: Idle Log Off compliance alert or exact Jason-owned noncompliance ticket\n  ownership:\n    while_open: Jason\n    release_active_slot_when_waiting: true\n  retry:\n    max_remediation_attempts: 1\n  recheck:\n    enabled: true\n    cadence: normal Jason queue-review cadence\n    stale_after: normal support aging threshold\n  verification:\n    authoritative_source: Datto job/output plus normal DRMM current-alert state\n    success_condition: exact setter job succeeds with no stderr and the current Idle Log Off alert clears\n  completion:\n    terminal_disposition: Complete\n  autonomy:\n    allowed_branches:\n      - identify\n      - classify\n      - wait\n      - recheck\n      - resume_on_online\n      - remediate_exact_current_noncompliance\n      - verify_monitor_clear\n      - complete_verified_ticket\n    approval_bound_branches:\n      - client_specific_override\n      - stale_alert_resolution_without_normal_clear\n    disruptive_branches:\n      - forced_logoff\n      - reboot\n```\n\nThis playbook inherits common work-start, identity, waiting/recheck, active-slot, retry, documentation, verification, human-handoff, terminal-readback, and observability behavior from `Jason-Playbook-Runtime-Automation-Contract.md`.\n\n\nImplementation coordination for v1.1.0:\n- PR #610 adds VulScan-specific waiting states in the shared worker and must preserve the generic waiting/recheck behavior introduced here.\n- PR #604 changes VulScan client disposition and the shared registry and must preserve the Idle Log Off 1.1.0 registry scope.\n- Neither overlapping workstream changes Idle Log Off component authority.\n\n",
+    "sections": [
+      {
+        "key": "1",
+        "title": "Section Goal",
+        "heading_markdown": "## 1. Section Goal",
+        "body_markdown": "\n\n**Goal:**  \nJason must process Windows Idle Log Off compliance alerts from identification through verified resolution or escalation. When an endpoint is required by AOT/client policy to have Idle Log Off and the control is missing or broken, Jason should repair or install the control using the approved Datto RMM component, verify healthy compliance, document the result, and close the alert/ticket when appropriate.\n\n**Success means:**\n- Jason proves the exact endpoint is subject to the Idle Log Off requirement before changing it.\n- Jason distinguishes actual noncompliance from a monitor/component execution failure.\n- Missing or unhealthy Idle Log Off is repaired using the current approved AOT component rather than ad hoc scripting.\n- The final status check returns a valid compliant result and the related DRMM alert is cleared.\n- All actions, job IDs, outputs, interpretations, and blockers are documented.\n- No unsupported server, kiosk, shared-session, exception, or ambiguous endpoint is modified.\n\nDo not consider the Section Goal complete until the controlled acceptance test succeeds and the production automation scope is explicitly approved.\n\n---\n\n"
+      },
+      {
+        "key": "2",
+        "title": "Trigger",
+        "heading_markdown": "## 2. Trigger",
+        "body_markdown": "\n\nPrimary trigger:\n- Autotask ticket title contains: [Get Idle Log Off Status AOT Ver 08202024] - Compliant: False\n- DRMM monitor/component: Get Idle Log Off Status AOT Ver 08202024\n- Current monitor component UID: 2b5de042-a3ec-4721-ba66-e0ca193a3604\n- Historical ticket/alert text may include a DRMM policy name. Treat that as historical evidence only; do not assume the named policy still exists or is the current source of the monitor without a live provider read.\n\nAlso applicable when:\n- an existing Jason-owned ticket explicitly reports the Idle Log Off control is missing, broken, or noncompliant; or\n- authoritative verification after deployment shows the control is absent or unhealthy.\n\nJason must confirm the trigger and affected endpoint before beginning substantive work.\n\n---\n\n"
+      },
+      {
+        "key": "3",
+        "title": "Scope and Boundaries",
+        "heading_markdown": "## 3. Scope and Boundaries",
+        "body_markdown": "\n\n### In Scope\n- Managed Windows workstations and laptops that are required by AOT/client policy to have Idle Log Off.\n- Autotask/DRMM identification and current-state reads.\n- Validation of the DRMM alert and component diagnostics.\n- Verification that the endpoint is actually subject to the Idle Log Off standard.\n- Execution of the current approved AOT Idle Log Off setter after decision gates pass.\n- Re-running compliance verification.\n- Resolving the exact DRMM alert and completing the ticket when healthy.\n\n### Out of Scope\n- Windows Servers unless a documented client policy explicitly requires this control and a server-safe implementation is approved.\n- Kiosks, shared-session/RDS devices, lab systems, service consoles, or other documented exceptions.\n- Changing the required idle duration outside documented AOT/client policy.\n- Generic/ad hoc PowerShell when the approved component can perform the repair.\n- Immediate forced sign-out of an active user.\n- Reboot/shutdown.\n- Disabling the control.\n- Guessing missing component variables or borrowing values from another client.\n- Direct provider access outside Jason governance.\n\nPreserve:\n- direct_provider_access=false\n- Central Orchestrator authority\n- exact requester grants\n- provider/client isolation\n- audit trail\n- existing approval and disruption rules\n\n---\n\n"
+      },
+      {
+        "key": "4",
+        "title": "Initial Identification",
+        "heading_markdown": "## 4. Initial Identification",
+        "body_markdown": "\n\nBefore troubleshooting:\n\n1. Identify the exact Autotask ticket and DRMM alert.\n2. Identify the client/site.\n3. Identify the exact endpoint and operating system.\n4. Run the global device-association gate:\n   - preserve/validate an existing CI when present;\n   - if no CI is linked, resolve exactly one same-company active Autotask CI using authoritative DRMM-to-Autotask evidence and associate it before substantive remediation;\n   - if identity is ambiguous, set state = identification_blocked and stop.\n5. Confirm the endpoint is a supported Windows workstation/laptop unless an explicit documented exception allows another role.\n6. Confirm current online state.\n7. Record the alert UID, ticket number, component/monitor identity, and alert diagnostics.\n8. Before ticket-specific diagnostics/remediation, run the global ticket-work-start lifecycle:\n   - queue Jason;\n   - status In Progress;\n   - Work Type Remote Support;\n   - require readback.\n9. If the device is offline, do not claim active remediation work. Set state = waiting_endpoint and recheck later.\n\n---\n\n"
+      },
+      {
+        "key": "5",
+        "title": "Expected State",
+        "heading_markdown": "## 5. Expected State",
+        "body_markdown": "\n\nHealthy state for an applicable endpoint:\n\n- Endpoint is online and uniquely identified.\n- Client/site policy says Idle Log Off is required.\n- The AOT Idle Log Off control is installed/configured.\n- The status monitor returns a valid Compliant=True result.\n- Monitor execution itself has no PowerShell/runtime/path/variable error.\n- No open DRMM Idle Log Off noncompliance alert remains.\n- The configured idle duration matches the approved AOT/client standard.\n- No active exception exists for this endpoint.\n\nCurrent setter components discovered in the live Datto catalog:\n- Preferred current setter: Set Idle Log Off AOT Ver 02042026-1\n  - UID: acc6a240-881d-4655-9470-87f60c8e35e8\n  - variables: CheckForIdleEvery_X_Min, MyIdleTimeInMin, MyWarningTimeOut, MyFileDestination\n- Legacy setter: Set Idle Log Off AOT Ver 08202024\n  - UID: dec3eab8-52a1-4d5b-8c30-f7dab9ff63bf\n\nThe current component description states the standard control logs a workstation session off after four hours of idle time. Jason must still use the authoritative AOT/client configuration values rather than inventing values.\n\n---\n\n"
+      },
+      {
+        "key": "6",
+        "title": "State Model",
+        "heading_markdown": "## 6. State Model",
+        "body_markdown": "\n\nPersist one of the following states:\n\nidentified\n-> waiting_endpoint\n-> diagnosing\n-> not_applicable\n-> monitor_execution_failure\n-> control_missing\n-> control_unhealthy\n-> remediating\n-> verifying\n-> waiting_monitor_clear\n-> complete\n\nor:\n\nidentification_blocked\npolicy_ambiguous\ndependency_blocked\nremediation_failed\nescalated\n\nA waiting Idle Log Off ticket remains owned by Jason but releases its active-work slot. Offline cases use the shared `waiting_device_access:idle_log_off_investigate` state and resume from preserved work when the exact DRMM endpoint returns online.\n\n---\n\n"
+      },
+      {
+        "key": "7",
+        "title": "Diagnostic Workflow",
+        "heading_markdown": "## 7. Diagnostic Workflow",
+        "body_markdown": "\n\n### Step 1: Validate applicability\n\n**Purpose:** Determine whether the endpoint should have Idle Log Off.\n\n**Evidence source:** Autotask CI, DRMM device record, AOT/client policy/documentation.\n\n**Expected result:** Supported Windows workstation/laptop with no documented exception and a policy requiring Idle Log Off.\n\n### Decision\n\nIf required:\n-> continue to Step 2.\n\nIf clearly exempt/not applicable:\n-> state = not_applicable; document evidence; resolve the monitoring false positive where appropriate.\n\nIf policy cannot be determined:\n-> state = policy_ambiguous; document and escalate. Do not install.\n\n### Step 2: Validate the alert itself\n\n**Purpose:** Determine whether Compliant=False reflects endpoint state or a failed monitor/response script.\n\n**Evidence source:** endpoint.alert.search / exact DRMM alert read.\n\nInspect:\n- alert context\n- diagnostics\n- response actions\n- component/runtime errors\n- alert age and duplicates\n\nExamples of monitor/plumbing failures:\n- Invalid MyFileDestination\n- PowerShell/runtime mismatch\n- missing variable/configuration\n- script exception\n- no valid compliance output\n\n### Decision\n\nIf a valid monitor result proves noncompliance:\n-> continue to Step 3.\n\nIf diagnostics show monitor/response execution failure:\n-> state = monitor_execution_failure.\nDo not infer that the endpoint lacks Idle Log Off solely from Compliant=False.\nContinue with independent verification where available and repair the deployment path before final compliance judgment.\n\n### Step 3: Verify current control state\n\n**Purpose:** Determine whether the Idle Log Off control is present and healthy.\n\n**Evidence source:** exact status component and/or approved read-only verification.\n\nAuthoritative monitor:\n- Get Idle Log Off Status AOT Ver 08202024\n- UID: 2b5de042-a3ec-4721-ba66-e0ca193a3604\n- Datto type: monitor. It is evaluated by DRMM policy/monitoring and cannot be run as an on-demand script or quick job.\n\nExpected normal-cycle result:\n- monitor evaluates through DRMM;\n- output is syntactically valid;\n- Compliant=True.\n\nFor immediate post-remediation verification, use approved read-only endpoint evidence instead of trying to execute the monitor on demand. Verify the expected mechanism directly:\n- scheduled task AOT_IdleLogOff exists;\n- task state is Ready;\n- principal is SYSTEM / Highest;\n- executable is C:\\Temp\\MyIdleLogOff\\MyIdleLogOff.exe;\n- approved baseline arguments are 240 60 (four-hour idle threshold / 60-second warning).\n\nIf the normal monitor cycle later reports Compliant=True:\n-> state = verifying / healthy.\n\nIf the existing alert still carries only historical legacy-setter failure evidence while independent mechanism verification is healthy:\n-> classify the alert as stale evidence and resolve only that exact alert through governed alert resolution.\n\nIf the normal monitor cycle produces a fresh Compliant=False after verified repair:\n-> state = monitor_execution_failure or remediation_failed and investigate the monitor/policy path. Do not blindly rerun the setter.\n\n### Step 4: Check remediation component readiness\n\n**Purpose:** Ensure the current setter can run deterministically.\n\n**Evidence source:** live component catalog and approved component-control metadata.\n\nConfirm:\n- exact component name/UID;\n- current component version;\n- endpoint remains online;\n- the approved production baseline is the 02042026-1 setter invoked with its built-in defaults and no legacy variable overrides;\n- if any variable override is proposed, every value comes from an authoritative AOT/client source and is validated before dispatch;\n- never carry forward the legacy policy's invalid MyFileDestination payload;\n- no stale metadata/fingerprint mismatch.\n\nPreferred repair component:\n- Set Idle Log Off AOT Ver 02042026-1\n- UID: acc6a240-881d-4655-9470-87f60c8e35e8\n\nDo not default to the legacy 08202024 setter when the current approved setter is available.\n\n---\n\n"
+      },
+      {
+        "key": "8",
+        "title": "Decision Gates",
+        "heading_markdown": "## 8. Decision Gates",
+        "body_markdown": "\n\nAll gates must pass before repair/install:\n\n1. Exact endpoint/CI identity is verified.\n2. Endpoint is online.\n3. Endpoint is an in-scope Windows workstation/laptop or has an explicit documented policy exception allowing the control.\n4. Client/site policy requires Idle Log Off.\n5. No endpoint-specific exception exists.\n6. Current state is validly noncompliant or sufficiently proven missing/broken.\n7. Preferred setter component identity is exact.\n8. Use the production-validated built-in defaults unless an authoritative AOT/client requirement explicitly calls for overrides.\n9. Never pass the legacy MyFileDestination value/payload. If any override is required, validate it before dispatch.\n10. No conflicting maintenance or user-disruptive operation is in progress.\n11. Exact `idle_log_off@1.1.0` playbook autonomy promotion is active and includes `automation.component.execute`.\n12. The current endpoint has exactly one open Idle Log Off alert.\n13. The exact setter is source-bound to UID `acc6a240-881d-4655-9470-87f60c8e35e8`, with built-in defaults only.\n14. No client-specific variable override, generic PowerShell, reboot, forced logoff, or other component is requested.\n\nIf any gate fails, do not improvise.\n\n---\n\n"
+      },
+      {
+        "key": "9",
+        "title": "Remediation",
+        "heading_markdown": "## 9. Remediation",
+        "body_markdown": "\n\n### Remediation A: Missing or broken Idle Log Off control\n\n**Action/component:**  \nSet Idle Log Off AOT Ver 02042026-1  \nUID: acc6a240-881d-4655-9470-87f60c8e35e8\n\n**Preconditions:** all Section 8 gates pass.\n\n**Approval classification:** playbook-scoped autonomous modifying action with future user-session impact. Installation itself does not immediately force a logoff; the installed control enforces the approved idle-session policy later.\n\n**Authority intent:** Keep this component globally classified `per_run` in Datto Component Control. Do **not** promote it to globally standing-safe.\n\nAutonomous execution is permitted only through the exact owner-promoted `idle_log_off@1.1.0` playbook scope, whose allowed capabilities include `automation.component.execute`. The autonomous worker converts that durable playbook promotion into a short-lived, exact execution approval through the Central Orchestrator.\n\nThe autonomous remediation branch is hard-bound to:\n- one exact ticket/client/CI/device identity;\n- supported Windows workstation/laptop role;\n- exactly one current open Idle Log Off alert on that endpoint;\n- no monitor/plumbing failure evidence;\n- component name `Set Idle Log Off AOT Ver 02042026-1`;\n- component UID `acc6a240-881d-4655-9470-87f60c8e35e8`;\n- built-in defaults with `variables={}`;\n- one automatic setter attempt;\n- normal DRMM monitor-clear verification before ticket completion.\n\nThe playbook promotion does not authorize this component for any other playbook, target, arguments, or ad-hoc use.\n\n**Required variable handling:**\n- production acceptance validated the 02042026-1 setter with its built-in defaults and no overrides;\n- resulting task arguments were 240 60 (four-hour idle threshold / 60-second warning);\n- do not invent CheckForIdleEvery_X_Min, MyIdleTimeInMin, MyWarningTimeOut, or MyFileDestination;\n- do not pass the legacy policy's invalid MyFileDestination payload;\n- if future client-specific overrides are required, source and validate them authoritatively before execution;\n- never expose secrets.\n\n### Remediation B: Stale alert\n\nIf independent verification proves the approved Idle Log Off mechanism is healthy and the existing alert contains only historical legacy-setter failure evidence:\n- do not run the setter again;\n- resolve only the exact stale DRMM alert;\n- require alert-resolution readback;\n- verify ticket self-heal/completion.\n\n### Remediation C: Monitor/response plumbing failure\n\nIf the endpoint cannot be classified because the monitoring/response component failed:\n- document the component error;\n- use a safe independent verification if available;\n- fix/update the approved component/policy assignment through the normal engineering path;\n- do not equate script failure with endpoint noncompliance.\n\n---\n\n"
+      },
+      {
+        "key": "10",
+        "title": "Retry Policy",
+        "heading_markdown": "## 10. Retry Policy",
+        "body_markdown": "\n\n- Maximum automatic setter attempts per ticket: 1.\n- Never submit a duplicate while the prior job is active.\n- Poll the same job to terminal state.\n- Retrieve stdout and stderr.\n- A provider/job failure does not authorize automatic redispatch.\n- A second attempt requires new evidence and a separately reviewed path; the baseline autonomous branch escalates.\n\nNo endless loops.\n\n---\n\n"
+      },
+      {
+        "key": "11",
+        "title": "Periodic Rechecks",
+        "heading_markdown": "## 11. Periodic Rechecks",
+        "body_markdown": "\n\nWhen waiting:\n\n**Endpoint offline:** move to Waiting Device Access, retain Jason queue ownership, release the active-work slot, and recheck on the normal Jason queue-review cadence. When the exact endpoint becomes online, return to In Progress and resume `idle_log_off_investigate`.\n\n**Setter completed but monitor not yet cleared:** enter the shared `waiting_recheck:idle_log_off_verify_monitor` state, release the active-work slot, and recheck the exact current alert during a bounded 15-minute propagation window.\n\n**Configuration dependency:** any client-specific override or policy ambiguity exits the autonomous remediation branch. Jason does not invent values or broaden the playbook-scoped component authority.\n\nStop rechecks when:\n- valid Compliant=True is proven;\n- exact alert clears;\n- device becomes stale/retired;\n- retry limit reached;\n- policy ambiguity requires human decision.\n\n---\n\n"
+      },
+      {
+        "key": "12",
+        "title": "Aging / Stale Condition",
+        "heading_markdown": "## 12. Aging / Stale Condition",
+        "body_markdown": "\n\nIf the endpoint remains offline or unresolved beyond the normal support window, evaluate:\n- retired/replaced endpoint;\n- duplicate CI;\n- stale DRMM object;\n- device rename/reimage;\n- intentional exception;\n- broken monitor policy assignment.\n\nDo not repeat remediation indefinitely.\n\n---\n\n"
+      },
+      {
+        "key": "13",
+        "title": "Dependency Handling",
+        "heading_markdown": "## 13. Dependency Handling",
+        "body_markdown": "\n\nDependencies may include:\n- client/site policy confirming applicability;\n- approved setter variable values;\n- valid MyFileDestination;\n- live Datto component metadata;\n- component-control approval;\n- CI-association write path;\n- monitoring policy correction.\n\nIf missing:\n1. confirm the dependency is actually missing;\n2. search existing Support/TODO items;\n3. do not duplicate;\n4. create a Support item if an expected existing capability is broken;\n5. state = dependency_blocked.\n\nToday’s AVMAC-1096 evidence is an example:\n- ticket T20260924.0043;\n- endpoint AVMAC-1096 / CI 1583;\n- exact alert UID 9d34f135-8393-4e7f-b2a8-064a1e98eb07;\n- diagnostics report Invalid MyFileDestination;\n- this is not sufficient evidence by itself that the endpoint is truly noncompliant.\n\n---\n\n"
+      },
+      {
+        "key": "14",
+        "title": "Documentation Requirements",
+        "heading_markdown": "## 14. Documentation Requirements",
+        "body_markdown": "\n\nUse one consolidated internal note per logical work session where practical.\n\nSuggested titles:\n- Jason - Idle Log Off - Asset Validation\n- Jason - Idle Log Off - Diagnostic\n- Jason - Idle Log Off - Remediation\n- Jason - Idle Log Off - Verification\n- Jason - Idle Log Off - Escalation\n- Jason - Idle Log Off - Resolution\n\nDocument:\n- ticket and endpoint\n- applicability result\n- alert UID\n- status component result\n- exact setter/component version\n- variables by name and non-secret status only\n- job UID/correlation ID\n- stdout/stderr\n- retries\n- verification\n- final disposition\n\nNever document credentials or secret values.\n\n---\n\n"
+      },
+      {
+        "key": "15",
+        "title": "Failure Handling",
+        "heading_markdown": "## 15. Failure Handling",
+        "body_markdown": "\n\nExamples:\n- endpoint offline\n- CI missing/ambiguous\n- status component error\n- setter variable invalid\n- MyFileDestination invalid\n- job failure\n- component metadata changed\n- output unavailable\n- alert persists after verified compliant state\n- ticket completion blocked by governance\n\nEvery failure must be documented. Do not silently proceed.\n\n---\n\n"
+      },
+      {
+        "key": "16",
+        "title": "Escalation Criteria",
+        "heading_markdown": "## 16. Escalation Criteria",
+        "body_markdown": "\n\nEscalate when:\n- applicability cannot be proven;\n- endpoint role is out of scope;\n- a documented exception may apply;\n- setter fails twice;\n- required variable values are unavailable;\n- component/policy engineering is required;\n- status remains noncompliant after successful setter execution;\n- a disruptive action would be required;\n- CI association/governance prevents safe work;\n- provider evidence conflicts.\n\nEscalation must state symptoms, evidence, attempted actions, job IDs, current state, and recommended next step.\n\n---\n\n"
+      },
+      {
+        "key": "17",
+        "title": "Verification",
+        "heading_markdown": "## 17. Verification",
+        "body_markdown": "\n\nAfter autonomous repair/install:\n\n1. Wait for the exact setter job to reach a terminal provider state.\n2. Read both stdout and stderr for that exact job/component/device binding.\n3. Require terminal provider success and empty stderr. This proves action execution only; it does not prove incident resolution.\n4. Enter `waiting_recheck:idle_log_off_verify_monitor`, release the active-work slot, and observe the exact endpoint's normal DRMM current-alert state.\n5. If the Idle Log Off alert clears during the bounded 15-minute propagation window, treat that normal monitor-clear as the authoritative healthy-state evidence for the autonomous branch.\n6. If a current Idle Log Off alert remains after the propagation window, do not rerun the setter. Route to monitor/policy investigation.\n7. Complete the Autotask ticket only after the alert-clear evidence is present and terminal ticket-status readback succeeds.\n\nThe 2026-09-25 controlled acceptance separately proved the underlying scheduled-task mechanism and 240/60 baseline. Jason currently has no dedicated native scheduled-task-detail read capability, so the autonomous v1.1 branch does not claim to perform that direct mechanism inspection on every incident. A future dedicated read capability or standing-safe diagnostic may strengthen verification without changing this completion rule.\n\nSetter job success alone is never incident resolution.\n\n---\n\n"
+      },
+      {
+        "key": "18",
+        "title": "Completion Criteria",
+        "heading_markdown": "## 18. Completion Criteria",
+        "body_markdown": "\n\nComplete the individual incident only when:\n1. exact endpoint/CI is proven;\n2. applicability is proven;\n3. diagnostics distinguish real noncompliance from monitor/plumbing failure;\n4. required repair/install succeeded, or no repair was needed;\n5. authoritative healthy-state evidence exists from the normal DRMM current-alert state;\n6. the exact Idle Log Off alert is no longer open;\n7. ticket documentation is complete;\n8. any remaining policy/governance engineering item is explicitly tracked rather than hidden.\n\nThe playbook's autonomy Section Goal is separate from incident completion and remains open until v1.1.0 source tests, provider-boundary controls, Owner promotion, and controlled production acceptance are complete.\n\n---\n\n"
+      },
+      {
+        "key": "19",
+        "title": "Final Resolution Note",
+        "heading_markdown": "## 19. Final Resolution Note",
+        "body_markdown": "\n\nInclude:\n- original Compliant=False condition;\n- whether it was true noncompliance or monitor/plumbing failure;\n- endpoint applicability;\n- setter version/action if used;\n- job/correlation IDs;\n- verification result;\n- alert status;\n- final disposition.\n\n---\n\n"
+      },
+      {
+        "key": "20",
+        "title": "Required Capabilities",
+        "heading_markdown": "## 20. Required Capabilities",
+        "body_markdown": "\n\nMinimum required capabilities:\n- service.ticket.read/search/update\n- service.ticket.note.create\n- service.configuration.read/search\n- endpoint.device.read/search\n- endpoint.alert.search/resolve\n- automation.component.search\n- automation.component.execute\n- automation.job.read\n- automation.job.output.read\n- durable component-control approval/readback\n- persisted playbook state\n- scheduled/recheck support\n\nPotential implementation improvements:\n- a dedicated standing-safe Idle Log Off diagnostic component that independently verifies the installed mechanism and configuration without depending solely on the monitoring script;\n- a governed DRMM policy-response read/update capability so Jason can verify and replace legacy response-component assignments without direct provider access.\n\n---\n\n"
+      },
+      {
+        "key": "21",
+        "title": "Acceptance Test",
+        "heading_markdown": "## 21. Acceptance Test",
+        "body_markdown": "\n\n**Primary controlled test target:**  \nAVMAC-1096 / Autotask CI 1583 / ticket T20260924.0043.\n\nKnown baseline:\n- Windows 11 Pro workstation/laptop endpoint is online.\n- Alert UID 9d34f135-8393-4e7f-b2a8-064a1e98eb07.\n- Alert context reports Compliant=False.\n- Alert diagnostics currently report Invalid MyFileDestination.\n- Current setter catalog contains both the legacy 08202024 version and preferred 02042026-1 version.\n\nAcceptance must prove:\n1. trigger detection;\n2. exact CI/device association;\n3. applicability to the endpoint;\n4. monitor-error classification instead of blindly trusting Compliant=False;\n5. current preferred setter selection;\n6. production-validated built-in-default handling with no legacy MyFileDestination override;\n7. exactly one bounded setter execution if the endpoint is truly noncompliant;\n8. terminal job/output readback or safe stale-job classification;\n9. job stdout/stderr capture followed by normal current-alert monitor-clear verification;\n10. ticket completion only after monitor-clear evidence and terminal Autotask readback;\n11. Autotask documentation/completion behavior;\n12. retry/failure handling;\n13. no reboot, immediate forced logoff, or unrelated endpoint changes;\n14. persisted state and cleanup.\n\nA successful test should also verify the older setter is not accidentally selected when the current approved version is available and that the monitor is never dispatched as a quick job.\n\n### 2026-09-25 controlled production acceptance result\n\nAVMAC-1096 / ticket T20260924.0043 established:\n- exact endpoint/CI association remained AVMAC-1096 / CI 1583;\n- the legacy 08202024 response component failed with Invalid MyFileDestination;\n- the preferred Set Idle Log Off AOT Ver 02042026-1 setter was dispatched exactly once under owner approval using built-in defaults;\n- setter stdout reported successful staging and scheduled-task creation; stderr was empty;\n- independent read-only verification proved AOT_IdleLogOff was Ready, SYSTEM, Highest, executing C:\\Temp\\MyIdleLogOff\\MyIdleLogOff.exe with arguments 240 60 and exit code 0;\n- no immediate forced logoff or reboot occurred;\n- Get Idle Log Off Status AOT Ver 08202024 was confirmed to be a DRMM monitor that cannot be executed on demand; the attempted quick-job invocation returned HTTP 500 before job creation and is classified as an invalid execution path, not an endpoint failure;\n- exact stale alert 9d34f135-8393-4e7f-b2a8-064a1e98eb07 was resolved through governed alert resolution with one provider attempt and verified readback, correlation corr_mcp_action_8b29c0e4cc124ad0be8e0a5e98b0b6cf;\n- Autotask then completed T20260924.0043 automatically and the final internal resolution note was written;\n- Component Control standing-safe promotion of the setter was rejected by the disruptive/destructive review guard. This is the intended fail-closed result; the setter remains per-run approved;\n- the Autotask ticket description historically named DRMM policy AOT - Policy Idle Log Off Monitor/Resolve (Create Ticket), but on 2026-09-25 the operator verified no current DRMM policy exists under that name. The historical ticket text therefore must not be treated as proof of a current provider object or as a required manual change.\n- a fresh governed alert read confirmed no current Idle Log Off alert remained on AVMAC-1096 after resolution.\n\nThe AVMAC-1096 incident is resolved and has no remaining policy-change dependency. At the time of that 2026-09-25 acceptance, the broader playbook remained per-run governed because the setter has future user-session impact. The v1.1.0 design intentionally preserves the component's global per-run classification while proposing a narrower playbook-scoped autonomous authority.\n\n---\n\n"
+      },
+      {
+        "key": "22",
+        "title": "Section Goal Closure",
+        "heading_markdown": "## 22. Section Goal Closure",
+        "body_markdown": "\n\nThe Section Goal closes when:\n- this playbook is merged into Project Jason;\n- the preferred setter and built-in-default behavior are production-validated;\n- AVMAC-1096 historical acceptance proves the monitor-error, repair, independent-verification, stale-alert, and Autotask closeout mechanics;\n- v1.1.0 source acceptance proves exact playbook-scoped setter execution, provider-boundary binding, waiting/recheck behavior, and monitor-clear completion;\n- the globally per-run component-control state and the narrower playbook-scoped authority are both documented;\n- historical provider-object names are not treated as current without live verification;\n- Grafana/Project Jason operational status is updated where applicable;\n- known limitations and follow-up engineering items are recorded.\n\nDo not create or preserve a provider-policy remediation task solely from historical ticket text. Create a new Support/TODO item only when a current provider object and an actual unresolved defect are proven.\n\n\n---\n\n"
+      },
+      {
+        "key": "23",
+        "title": "Autonomous Execution Eligibility",
+        "heading_markdown": "## 23. Autonomous Execution Eligibility",
+        "body_markdown": "\n\n### Current production authority\n\nThe previously approved `idle_log_off@1.0.0` scope remains diagnostic-only in production until v1.1.0 completes controlled acceptance and receives exact Owner promotion.\n\n### v1.1.0 proposed playbook-scoped autonomous authority\n\n`idle_log_off@1.1.0` is designed for autonomous execution of the bounded normal-workstation remediation branch.\n\nRequired action capabilities:\n- `automation.component.execute`\n- `service.ticket.note.create`\n- `service.ticket.update`\n\nAutonomous branches:\n- exact ticket/client/CI/device identification;\n- supported Windows workstation/laptop classification;\n- current exact Idle Log Off alert confirmation;\n- monitor/plumbing-error rejection;\n- offline Waiting Device Access and online resume;\n- exact `Set Idle Log Off AOT Ver 02042026-1` execution with built-in defaults only;\n- Datto job/status/stdout/stderr readback;\n- bounded monitor-clear waiting/recheck;\n- ticket completion only after the current Idle Log Off alert is no longer open and Autotask status readback succeeds.\n\nThe Datto component itself remains globally `per_run` and is **not** standing-safe. The authority comes from the exact Owner-approved playbook/version/capability scope and is converted to an exact short-lived execution approval by the autonomous governance path.\n\nHard stops / exclusions:\n- server, domain controller, RDS/terminal server, kiosk, or unsupported/ambiguous role;\n- endpoint offline until it returns online;\n- zero or multiple current Idle Log Off alerts;\n- monitor/plumbing failure such as Invalid MyFileDestination;\n- client-specific variable override;\n- component UID/name mismatch;\n- non-empty stderr or non-success provider job state;\n- current Idle Log Off alert still open after the 15-minute propagation window;\n- generic PowerShell;\n- reboot;\n- immediate/forced logoff;\n- policy mutation;\n- unrelated component execution.\n\nAny hard stop routes to waiting, blocking, or Human Review as appropriate; it never broadens execution authority.\n\n### Promotion requirement\n\nThis document and its tests do not grant production authority by themselves. Promote `idle_log_off@1.1.0` only after the controlled acceptance matrix is green and Owner approval is durably recorded for the exact registry fingerprint and capability set. Any material source/version/capability change requires re-review.\n"
+      }
+    ]
+  },
+  "migration": {
+    "status": "SOURCE_PRESERVED_STRUCTURED_DRAFT_NOT_RUNTIME_PARITY",
+    "source_version_discrepancy": false,
+    "production_replacement_allowed": false,
+    "staged": false,
+    "activated": false,
+    "required_before_activation": [
+      "Canonical Python JSON semantic validation",
+      "Exact-capability binding and source-scoped argument context verified",
+      "Safe diagnostic and remediation branches mapped to governed capabilities",
+      "Durable retry/wait/terminal lifecycle parity with shared runtime",
+      "Error, negative-evidence and client-boundary regression tests",
+      "Controlled shadow comparison and independent acceptance",
+      "Owner-bound activation and branch-specific autonomous promotion"
+    ],
+    "external_fact_fields_non_authoritative": true
+  }
+}
