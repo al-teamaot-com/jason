@@ -30,7 +30,8 @@ Read authoritative ticket, contact, notes and notification history. Reserve ques
 
 - One strictly bounded automatic intake path is integrated: an exact client-created ticket in Jason's queue with no description, no linked operational work, and a current matching ticket contact may request JQ-001 after the authoritative ticket and notes reconfirm no description. A verified reply returns it to the ordinary queue assessment cycle.
 - Other diagnostic playbooks do not yet emit their missing-information gap codes. Pilot integration into real diagnostic branches and controlled live acceptance must be demonstrated before calling all real-world paths complete.
-- Complete unit, integration, adversarial and broader regression suites; required GitHub protected checks and code review.
+- Full local runtime suite passed when run with an isolated empty Datto component-approval registry. Seven unrelated Datto tests fail on the Jason host if they read its live durable approval registry; the failures reproduce on untouched protected main and pass with an empty isolated registry. Do not modify the live registry or Datto approval safety rules to satisfy tests.
+- Complete required GitHub protected checks and independent review; local test success alone does not certify production.
 - Reconcile against current protected main and overlapping work, then merge through the protected process.
 - Production Manager must report exact candidate SHA, separately verified LKG/rollback SHA, all unrelated commits and files, authenticated foundational read canaries, RMM/Teams results, preproduction and rollback-readiness evidence.
 - Do NOT deploy, activate, restart production containers, or remove the production freeze without a separate exact-SHA Owner decision.
