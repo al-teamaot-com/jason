@@ -73,6 +73,20 @@ def require_kfs_credentials(credentials: Mapping[str, str]) -> None:
             )
 
 
+class KyoceraKfsApplicationStatusError(ConnectorTransportError):
+    """A provider application-status failure, distinct from an HTTP failure.
+
+    Exposes only a bounded numeric status and never the KFS login response,
+    request contents, gateway credentials, or provider-controlled message.
+    """
+
+    def __init__(self, operation: str, code: Any):
+        super().__init__("Kyocera KFS operation returned an unsuccessful application status", service="kyocera_kfs")
+        safe_code = code if type(code) is int and 100 <= code <= 999 else "UNKNOWN"
+        self.error_code = f"KFS_APPLICATION_STATUS_{safe_code}"
+        self.operation = operation  # internal fixed operation label, not response text
+
+
 class KyoceraKfsSessionClient:
     """KFS v6 session client.
 
@@ -146,11 +160,19 @@ class KyoceraKfsSessionClient:
             with self._opener.open(request, timeout=self.timeout_seconds) as response:
                 raw = response.read()
         except HTTPError as exc:
+            # Keep HTTP status as bounded diagnostic metadata. The previous
+            # exception discarded it, collapsing 401/403/429/5xx into one
+            # opaque PROVIDER_TRANSPORT_FAILURE. Never include HTTP response
+            # body, headers, tokens, or the provider-supplied error message.
             raise ConnectorTransportError(
-                f"Kyocera KFS HTTP request failed with status {exc.code}"
+                "Kyocera KFS HTTP request failed",
+                status_code=int(exc.code),
+                service="kyocera_kfs",
             ) from exc
         except (URLError, TimeoutError, OSError) as exc:
-            raise ConnectorTransportError("Kyocera KFS HTTP request failed") from exc
+            raise ConnectorTransportError(
+                "Kyocera KFS network request failed", service="kyocera_kfs"
+            ) from exc
 
         try:
             decoded = json.loads(raw.decode("utf-8")) if raw else {}
@@ -165,6 +187,7 @@ class KyoceraKfsSessionClient:
         status = payload.get("status")
         code = status.get("code") if isinstance(status, Mapping) else None
         if code != 200:
-            raise ConnectorTransportError(
-                f"{operation} failed with KFS status {code!r}"
-            )
+            # An HTTP 200 may still carry a failed KFS *application* status;
+            # never mislabel it PROVIDER_HTTP_STATUS_401, and never leak the
+            # provider's optional human-readable error text.
+            raise KyoceraKfsApplicationStatusError(operation, code)
