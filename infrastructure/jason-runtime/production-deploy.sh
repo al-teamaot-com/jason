@@ -62,8 +62,12 @@ case "$IMAGE" in
     # profile; the other service may legitimately be on the new revision.
     LIVE_READ_PROFILE="$(docker inspect jason-runtime --format '{{range .Config.Env}}{{println .}}{{end}}' |
       sed -n 's/^JASON_PROVIDER_READ_ACTIVATION_PROFILE=//p')"
-    if [ "$LIVE_READ_PROFILE" != "$DECLARED_ROLLBACK_PROFILE" ]; then
-      echo "DENIED: current service profile mismatches source-declared LKG" >&2
+    # Permit an existing exact source-bound profile to be upgraded in place,
+    # while preserving the separately declared known-good rollback profile.
+    # Unknown or unrelated profiles remain denied before any deployment.
+    if [ "$LIVE_READ_PROFILE" != "$DECLARED_ROLLBACK_PROFILE" ] &&
+       [ "$LIVE_READ_PROFILE" != "$SOURCE_READ_PROFILE" ]; then
+      echo "DENIED: current service profile is neither approved source nor LKG" >&2
       exit 2
     fi
     AUTOTASK_READ_PROFILE="$SOURCE_READ_PROFILE"
