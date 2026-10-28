@@ -1,6 +1,6 @@
 # Jason JSON playbook conversion — source-preserving drafts
 **Audit date:** October 28, 2026  
-**Change type:** Draft PR documentation and inert JSON source data **only**  
+**Change type:** Draft PR documentation, inert JSON source data, and isolated acceptance tests **only**  
 **Review:** https://github.com/al-teamaot-com/jason/pull/2111
 
 ## Outcome
