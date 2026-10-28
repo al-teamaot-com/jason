@@ -14,6 +14,7 @@ on:
       - 'implementation/mcp_service/src/jason_mcp/server.py'
       - 'infrastructure/jason-runtime/compose.yaml'
       - 'infrastructure/jason-mcp/production-deploy.sh'
+      - 'infrastructure/jason-runtime/production-deploy.sh'
       - 'implementation/runtime_service/tests/test_routine_rw_*.py'
       - 'implementation/orchestrator/tests/test_routine_write_*.py'
       - 'implementation/orchestrator/tests/test_onboarding_request_attestation.py'
@@ -65,8 +66,10 @@ jobs:
             implementation/connectors/microsoft_graph/test_user_directory.py \
             implementation/mcp_service/tests/test_authority_grant_admin.py \
             implementation/mcp_service/tests/test_contract_client_context.py
-      - name: Verify MCP release shell and routine RW mount parity
-        run: bash -n infrastructure/jason-mcp/production-deploy.sh
+      - name: Verify both native release shells and routine RW mount parity
+        run: |
+          bash -n infrastructure/jason-mcp/production-deploy.sh
+          bash -n infrastructure/jason-runtime/production-deploy.sh
       - name: Validate production Compose is parsed and RW flags default off
         run: |
           python - <<'PY'

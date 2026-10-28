@@ -36,3 +36,24 @@ def test_unset_rw_profile_is_not_promoted_implicitly():
     assert "unrecognized routine RW profile" in shell
     assert "if [ -n" in shell
     assert "--set-env" in shell
+
+RUNTIME_SCRIPT = ROOT / "infrastructure/jason-runtime/production-deploy.sh"
+
+def test_native_runtime_release_shell_syntax():
+    result = subprocess.run(["bash", "-n", str(RUNTIME_SCRIPT)],
+                            capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+def test_native_runtime_release_matches_mcp_exact_rw_profiles_and_mounts():
+    runtime = RUNTIME_SCRIPT.read_text()
+    mcp = SCRIPT.read_text()
+    for token in ("JASON_AOT_ROUTINE_RW_PROFILE",
+                  "JASON_IT_GLUE_ROUTINE_RW_PROFILE",
+                  "JASON_ENTRA_STANDARD_USER_CREATE_PROFILE",
+                  "JASON_IT_GLUE_RW_OPENBAO_ROLE_ID_HOST_PATH",
+                  "JASON_ENTRA_USER_CREATE_OPENBAO_ROLE_ID_HOST_PATH",
+                  "JASON_ENTRA_ONBOARDING_PASSWORD_OPENBAO_ROLE_ID_HOST_PATH"):
+        assert token in runtime and token in mcp
+    assert "ROUTINE_RW_ARGS" in runtime
+    assert "unrecognized routine RW profile" in runtime
+    assert "invalid routine RW AppRole source" in runtime

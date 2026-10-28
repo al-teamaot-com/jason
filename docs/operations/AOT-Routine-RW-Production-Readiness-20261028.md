@@ -72,8 +72,9 @@ That source review is recorded in PR #2125's Integration coordination field.
 Do not merge or pre-approve #2110 as part of this release candidate.
 
 ## MCP/runtime release parity and offline acceptance
-Jason's MCP container composes a separate runtime registry. The native
-`infrastructure/jason-mcp/production-deploy.sh` now forwards explicitly configured routine-RW
+Jason's MCP container composes a separate runtime registry. Both native
+`infrastructure/jason-mcp/production-deploy.sh` and
+`infrastructure/jason-runtime/production-deploy.sh` now forward explicitly configured routine-RW
 profiles and six dedicated AppRole bind mounts. It preserves previous settings when
 no profile override was given and rejects incomplete, empty or symlinked credential
 mount pairs. These are source-only changes; no live container has been modified.
