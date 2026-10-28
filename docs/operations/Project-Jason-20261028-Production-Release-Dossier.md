@@ -1,27 +1,31 @@
 # October 28, 2026 — Governed full-scope release preparation dossier
 
-**Purpose:** Review and integration evidence only. No protected-main merge, Production Manager promotion, freeze exception, provider write or capability activation is authorized by this document.
+**Purpose:** Review and integration evidence only. Stage A source was merged through PR #2127, but no production deployment, additional protected-main merges, Production Manager promotion, freeze exception, provider write or capability activation is authorized by this document.
 
-**Generated UTC:** 2026-10-28T21:22:22+00:00
+**Generated UTC:** 2026-10-28T21:58:31+00:00
 **Last independently observed live runtime/MCP revision:** `b40c2f4a47e60e31e2241e4a4d55759242c2b580` (both containers matched in read-only Docker inspection).
-**Protected-main source baseline:** `2a51d03464ef0d1bdfd28de78a11663a006800e2`.
-**Mainline Production Manager release:** `release-2a51d03464ef0d1b`, source `2a51d03464ef0d1bdfd28de78a11663a006800e2`, state `production_eligible`, owner approval **false**. Isolated preprod, artifact digest verification, rollback readiness, failure-path tests, SQLite isolation and provider-mutation disabled checks were recorded as passing. This does **not** establish provider-backed acceptance of newly integrated branches.
+**Protected-main source baseline:** `1586dd9da10c23d7988d684a7c0b254c6353bef1` (PR #2127 Stage A merged).
+**Stage A native Production Manager release candidate:** `release-1586dd9da10c23d7`, exact source `1586dd9da10c23d7988d684a7c0b254c6353bef1`, owner approval **false**. Native preproduction is pending. The first attempt was safely stopped because copying 28 GB of OpenClaw state and 3.1 GB of authority state to the 24 GB-free root disk would have exhausted space; the partial scratch was deleted and only the private preproduction scratch location was redirected to the separate local archive volume (199 GB available at start). No production container was restarted. The prior mainline `release-2a51d03464ef0d1b` PM record was `production_eligible` with owner approval false, but is superseded by this source merge; it was not deployed.
 
 ## Staged release order and immutable upstream references
 
-1. **Reads A:** Integration merge `f4a6d9563046e29bc0bfdaba984c851a66997b51` on top of protected-main baseline; source PR #2110 exact `70faec63315acbd71866322a19be2a955471e434`. Read-only company contains search and governed technician contract context. Time-entry read remains deny-by-default until native provider-specific requester authorization evidence.
-2. **Routine RW B:** Integration merge `e558db52defcfeb64809b947a42d4995aa78502a` over A; source PR #2125 exact `151ba07dc9f5f377d7e69add70d226fd9ee48a12`. Includes Autotask controlled RW plus separate default-disabled IT Glue and Entra adapters; do not grant new roles, secrets, permissions or write activation by bundling.
-3. **Windows Time JSON C:** This review worktree merges the exact source PR #2126 `3fb983c7333b89eea5a57749b63df3d27c31d4a5` over B; origin PRs #2111, #2118, #2122. JSON shadow defaults off; no site allowlist is granted by source. The 16 JSON conversion drafts remain non-executable, and the 17th `client_information_request@1.0.0` is independently governed and explicitly excluded from those drafts.
+1. **Reads A:** Merged PR #2127 as protected-main commit `1586dd9da10c23d7988d684a7c0b254c6353bef1`; isolated integration merge `f4a6d9563046e29bc0bfdaba984c851a66997b51`, source PR #2110 `70faec63315acbd71866322a19be2a955471e434`. Read-only company contains search and governed technician contract context. Time-entry read remains deny-by-default until native provider-specific requester authorization evidence.
+2. **Routine RW B:** Current stacked PR #2128 review commit `0eca97fcc382e9090c8ea15878a18800e40fbac2` reconciles protected main after A; original integration merge `e558db52defcfeb64809b947a42d4995aa78502a`; source PR #2125 exact `151ba07dc9f5f377d7e69add70d226fd9ee48a12`. Includes Autotask controlled RW plus separate default-disabled IT Glue and Entra adapters; do not grant new roles, secrets, permissions or write activation by bundling.
+3. **Windows Time JSON C:** Review PR #2129 is rebased via a clean merge onto the updated Stage B review commit `0eca97fcc382e9090c8ea15878a18800e40fbac2`. This review worktree merges source PR #2126 `3fb983c7333b89eea5a57749b63df3d27c31d4a5` over B; origin PRs #2111, #2118, #2122. JSON shadow defaults off; no site allowlist is granted by source. The 16 JSON conversion drafts remain non-executable, and the 17th `client_information_request@1.0.0` is independently governed and explicitly excluded from those drafts.
 4. **Client questions:** Source PR #2123 is already included in baseline main. Its owner-approved text is not authorization to send. Client notifications stay disabled until controlled end-to-end acceptance, policy permission and separate explicit activation.
 5. The operator must issue a **distinct, SHA-bound approval** after the candidate is merged to protected main and PM exact-image review is complete. No PR, draft or source commit is a deploy permit.
 
 ## Mandatory review of unrelated protected-main changes
 
-Protected main is 21 git commits ahead of last known good. These commits are within the potential normal PM blast radius, even if the operator only intended an Autotask or JSON change:
+Protected main is **36 git commits** ahead of the last-known-good live revision. It now includes the source-only PR #2127 merge. All commits are in scope for any normal full-main Production Manager release, whether or not the owner intended only one feature:
 
+- `1586dd9da | Integrate governed Autotask read repairs from PR #2127`
+- `f4a6d9563 | Integrate Autotask governed reads with 2026-10-28 protected main`
 - `2a51d0346 | Merge pull request #2123 from al-teamaot-com/feature/client-question-library-round1-20261028`
 - `47a27b84f | Document isolated Datto test-registry acceptance and retain PM freeze`
 - `7b474885a | Implement governed Round 1 client information request lifecycle (disabled by default)`
+- `70faec633 | docs(release): record candidate integration and concurrent PR coordination`
+- `70086a7a4 | merge(preprod): reconcile Autotask read candidate with current main`
 - `6a6b84465 | Merge remote-tracking branch 'origin/main' into feature/client-question-round1-engineering-20261028`
 - `9ccd99465 | Merge pull request #2124 from al-teamaot-com/fix/kfs-session-safe-diagnostics-20261028`
 - `2d4e15307 | Merge branch 'main' into fix/kfs-session-safe-diagnostics-20261028`
@@ -35,19 +39,32 @@ Protected main is 21 git commits ahead of last known good. These commits are wit
 - `46e966670 | Test Round 1 client question content and fail-closed disabled state`
 - `57c814a39 | Stage 120 owner-approved client information questions and reusable support footer (no activation)`
 - `9f07a6132 | Merge remote-tracking branch 'origin/main' into fix/aot-routine-technician-rw-20261028`
+- `4abcf3ea9 | docs(release): production handoff and mandatory live read acceptance gates`
 - `7c9fc2af9 | Implement source-only governed standard Entra user creation`
+- `239f110e4 | test(preprod): reject missing or production Autotask credential sources`
 - `6e8eb670a | Add source-only governed IT Glue configuration notes mutation adapter`
+- `afb8428df | merge(preprod): reconcile Autotask read candidate with current main`
 - `1b8fc4a8d | Merge remote-tracking branch 'origin/main' into fix/aot-routine-technician-rw-20261028`
+- `ada153ce8 | docs(preprod): record isolated 74-test acceptance and live provider gates`
 - `a3d9d1dad | Test routine write rejects unapproved capability/provider class`
 - `ba01eb1bb | Add opt-in AOT routine Autotask technician write authority`
+- `f74a704ee | fix(preprod): deny cross-client selectors before contract reads`
+- `5fb2ff096 | docs(preprod): record live time-entry and contract permission metadata`
+- `8221b042f | test(docs): verify staff contract scoping and document preproduction gates`
+- `d0d4111aa | fix(preprod): preserve existing owner contract read selection`
+- `18113c9c3 | fix(preprod): allow trusted AOT staff scoped contract reads with exact observe authority`
+- `8fd221ad6 | test(preprod): cover company partial search and ticket time-entry request boundaries`
+- `ee61a4be0 | fix(preprod): use bounded contains search for Autotask company name`
 
-The 29 changed paths introduced on protected main since last-known-good are:
+The **37 changed paths** on protected main since LKG are:
 
 - `config/client_communications/information_requests_round1.json`
 - `docs/operations/AOT-Client-Information-Requests-Round1.md`
 - `docs/operations/AOT-Routine-Autotask-RW-Pilot.md`
 - `docs/operations/AOT-Routine-ITGlue-Configuration-Notes-RW-20261028.md`
 - `docs/operations/AOT-Standard-Entra-User-Create-20261028.md`
+- `docs/operations/Autotask-Read-Repair-Preproduction-20261028.md`
+- `docs/operations/Autotask-Read-Repair-Production-Handoff-20261028.md`
 - `docs/operations/KFS-Live-Session-Read-Error-Taxonomy-20261028.md`
 - `docs/playbooks/Jason-Client-Information-Requests-Round1.md`
 - `implementation/autonomous_remediation/playbook_registry.json`
@@ -58,10 +75,14 @@ The 29 changed paths introduced on protected main since last-known-good are:
 - `implementation/connectors/microsoft_graph/test_user_directory.py`
 - `implementation/connectors/tests/test_it_glue_configuration_note_update.py`
 - `implementation/connectors/tests/test_kyocera_kfs_connector.py`
+- `implementation/mcp_service/src/jason_mcp/server.py`
+- `implementation/mcp_service/tests/test_contract_client_context.py`
 - `implementation/orchestrator/autotask_information_authorizer.py`
+- `implementation/orchestrator/provider_read_argument_adapter.py`
 - `implementation/orchestrator/provider_read_authority.py`
 - `implementation/orchestrator/tests/test_aot_technician_routine_write_authority.py`
 - `implementation/orchestrator/tests/test_autotask_information_authorizer.py`
+- `implementation/orchestrator/tests/test_autotask_preproduction_read_repairs.py`
 - `implementation/runtime_service/src/jason_runtime/aot_routine_write_authority.py`
 - `implementation/runtime_service/src/jason_runtime/approved_client_messages.py`
 - `implementation/runtime_service/src/jason_runtime/autonomy_worker_composition.py`
@@ -72,6 +93,8 @@ The 29 changed paths introduced on protected main since last-known-good are:
 - `implementation/runtime_service/tests/test_aot_routine_write_authority.py`
 - `implementation/runtime_service/tests/test_client_information_requests_engine.py`
 - `implementation/runtime_service/tests/test_client_information_requests_round1.py`
+- `tools/autotask_preprod_credential_gate.py`
+- `tools/tests/test_autotask_preprod_credential_gate.py`
 
 ## Exact integration diff inventory
 
