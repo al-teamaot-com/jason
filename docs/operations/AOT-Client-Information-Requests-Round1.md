@@ -1,37 +1,40 @@
-# AOT Client Information Request Library — Round 1
+# AOT Client Information Requests — Round 1 Production Handoff
 
-## Section Goal
-Preserve the Owner-approved wording of 120 generic client information requests (JQ-001 through JQ-120) and the standard AOT support footer as immutable, versioned source data, without publishing or enabling an autonomous sender.
+Owner content approval: 2026-10-28. Status: NOT DEPLOYED. Production freeze: ACTIVE.
 
-## Status / production boundary
-- **Content:** Owner approved Round 1 in chat on 2026-10-28.
-- **Operational sending:** NOT activated; all 120 entries have `autonomous_send_enabled=false`.
-- **Production freeze:** ACTIVE. No merge into protected main, PM prepare/promote, profile changes, live ticket updates, or client notifications under this change.
-- The current `config/client_communications/approved.json` is intentionally unchanged.
-- This is a reviewable **content package**, **not** a working automatic question-selection or outbound-notification feature.
+## Implementation inventory
 
-## Package
-`config/client_communications/information_requests_round1.json` contains:
-- 120 stable IDs `JQ-001`–`JQ-120`;
-- title, exact wording, category, review class, content approval, and disabled sending;
-- separate `client-support-footer-v1` with AOT support email and phone;
-- bounded `{{ticket_number}}` token for eventual verified render-time substitution.
+- Approved source: config/client_communications/information_requests_round1.json — all 120 stable JQ identifiers and distinct source-controlled gap codes, classifications, exact wording, and footer.
+- Deterministic question selection, safe ticket-reference rendering, durable SQLite reservation, and reply reconciliation: implementation/runtime_service/src/jason_runtime/client_information_requests.py.
+- Exact approved server-side message reconstruction: approved_client_messages.py and autotask_client_notification.py. Original VulScan fixed-body path is preserved.
+- Optional autonomous-worker integration: autonomy_worker_runtime.py and autonomy_worker_composition.py. Verified same-company contact reply can resume exactly the suspended authorized phase.
+- Feature-specific read-only information-release policy: implementation/orchestrator/autotask_information_authorizer.py. Does not broaden the normal autonomy-worker read allowlist.
 
-## Required implementation before any activation
-1. Decide deterministic question-eligibility evidence and which categories need technician review. A content approval never overrides playbook-level authority.
-2. Extend the existing approved message registry/renderer **without altering current VulScan exact-body behavior**. Render only approved text and bounded, validated ticket-number substitution; append footer exactly once. Reject unknown placeholders, changed wording, cross-company contact, and arbitrary recipients.
-3. Read ticket notes/history and available diagnostics before asking. Deduplicate by ticket, question ID, material evidence and pending client response, not just body text.
-4. Require exact workflow/template binding, governed `service.ticket.client.notification.create`, authoritative ticket/contact match, contact email enabled, post-write ticket-note readback, and notification history verification where needed.
-5. Track waiting-for-client state and resume the approved playbook on a genuine client reply without repeatedly nagging or claiming a resolution.
-6. Add tests for exact full composition, escaping and token validation, authorization rejection, high-risk escalations, concurrent sends, idempotency, readback, and resumed work.
-7. Review overlapping open PRs, reconcile current protected main, and obtain required protected checks. Do not auto-merge.
-8. **PM controls release** under the active freeze; only a separately authorized exact-SHA freeze exception and governed release process may enable this work.
+## Security / activation
 
-## Safety
-Never expose internal system names, secrets, unverified claims, or private evidence in the client's question. Do not ask clients for passwords or MFA codes. A request for timing/approval is not itself approval for disruptive work. Security/backup/permissions questions require case-appropriate governed checks.
+Source approval grants NO communication or production authority. This feature is disabled unless all conditions hold:
+1. A separate exact-SHA governed release through Production Manager after an Owner-approved exception to the production freeze.
+2. Existing approved-workflow client notification profile.
+3. JASON_CLIENT_INFORMATION_REQUEST_PROFILE=approved-round1-v1.
+4. Durable Owner promotion for client_information_request v1.0.0, policy playbook-autonomy:client_information_request, including service.ticket.client.notification.create.
+5. A promoted diagnostic playbook supplies an exact catalog gap code, corroborated evidence fingerprint, and verified ticket identity.
+6. The outbound question is classified routine. Context-controlled and human-review questions require a separately designed exact technician-review authority and cannot presently be auto-sent.
 
-## Test
-`python -m pytest implementation/runtime_service/tests/test_client_information_requests_round1.py` from repository root with pytest available.
+No freeform questions, passwords, customer-selected recipients, or unverified ticket-number substitutions. The connector rechecks exact ticket/contact company, email notification preference and exact reconstructed title/body. Uncertain writes never auto-retry.
 
-## Rollback
-Delete the staged catalog, documentation and source-only test on this branch if rejected. Existing live message registry and production runtime remain unchanged.
+## Durable lifecycle
+
+Read authoritative ticket, contact, notes and notification history. Reserve question+ticket+evidence before any write. Send the canonical approved question and footer containing support@teamaot.com, 757-466-8862 and a validated ticket number. Require published-note readback and a matching recipient notification-history event before awaiting a reply. Only a newer same-contact authored note can resume a suspended workflow, with exact original phase and company rechecked. Ambiguous responses stay pending.
+
+## Remaining production-readiness work
+
+- One strictly bounded automatic intake path is integrated: an exact client-created ticket in Jason's queue with no description, no linked operational work, and a current matching ticket contact may request JQ-001 after the authoritative ticket and notes reconfirm no description. A verified reply returns it to the ordinary queue assessment cycle.
+- Other diagnostic playbooks do not yet emit their missing-information gap codes. Pilot integration into real diagnostic branches and controlled live acceptance must be demonstrated before calling all real-world paths complete.
+- Complete unit, integration, adversarial and broader regression suites; required GitHub protected checks and code review.
+- Reconcile against current protected main and overlapping work, then merge through the protected process.
+- Production Manager must report exact candidate SHA, separately verified LKG/rollback SHA, all unrelated commits and files, authenticated foundational read canaries, RMM/Teams results, preproduction and rollback-readiness evidence.
+- Do NOT deploy, activate, restart production containers, or remove the production freeze without a separate exact-SHA Owner decision.
+
+## Reversibility
+
+Feature profile is off by default. Use native PM rollback to a verified immutable release when subsequently authorized; preserve the SQLite evidence ledger and existing messaging behavior.

@@ -21,7 +21,8 @@
       "body": "Could you provide a little more information about the issue you're experiencing?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "general_troubleshooting_clarify_the_issue"
     },
     {
       "question_id": "JQ-002",
@@ -31,7 +32,8 @@
       "body": "Could you describe what happens when you encounter the issue?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "general_troubleshooting_describe_the_problem"
     },
     {
       "question_id": "JQ-003",
@@ -41,7 +43,8 @@
       "body": "What were you expecting to happen when the issue occurred?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "general_troubleshooting_expected_behavior"
     },
     {
       "question_id": "JQ-004",
@@ -51,7 +54,8 @@
       "body": "Approximately when did you first notice this problem?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "general_troubleshooting_when_it_started"
     },
     {
       "question_id": "JQ-005",
@@ -61,7 +65,8 @@
       "body": "Has this worked correctly in the past?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "general_troubleshooting_previous_functionality"
     },
     {
       "question_id": "JQ-006",
@@ -71,7 +76,8 @@
       "body": "Does this happen every time, or only occasionally?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "general_troubleshooting_frequency"
     },
     {
       "question_id": "JQ-007",
@@ -81,7 +87,8 @@
       "body": "Could you describe the steps you take before the issue occurs?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "general_troubleshooting_reproduction_steps"
     },
     {
       "question_id": "JQ-008",
@@ -91,7 +98,8 @@
       "body": "Were there any changes to your computer, software, or work environment shortly before this issue started?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "general_troubleshooting_recent_changes"
     },
     {
       "question_id": "JQ-009",
@@ -101,7 +109,8 @@
       "body": "Is this affecting only you, or are other people experiencing the same issue?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "scope_and_impact_number_of_users"
     },
     {
       "question_id": "JQ-010",
@@ -111,7 +120,8 @@
       "body": "Does this issue occur on more than one computer or device?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "scope_and_impact_number_of_devices"
     },
     {
       "question_id": "JQ-011",
@@ -121,7 +131,8 @@
       "body": "Is this issue preventing you from working, or are you able to continue using an alternative method?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "scope_and_impact_work_interruption"
     },
     {
       "question_id": "JQ-012",
@@ -131,7 +142,8 @@
       "body": "Could you let us know how this issue is affecting your work?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "scope_and_impact_business_impact"
     },
     {
       "question_id": "JQ-013",
@@ -141,7 +153,8 @@
       "body": "Is this happening at just one location or at multiple locations?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "scope_and_impact_multiple_locations"
     },
     {
       "question_id": "JQ-014",
@@ -151,7 +164,8 @@
       "body": "Does the issue happen consistently, or does it come and go?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "scope_and_impact_consistent_behavior"
     },
     {
       "question_id": "JQ-015",
@@ -161,7 +175,8 @@
       "body": "Does the issue happen when someone else tries the same task?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "scope_and_impact_particular_user"
     },
     {
       "question_id": "JQ-016",
@@ -171,7 +186,8 @@
       "body": "Is there a particular deadline or business requirement we should be aware of while addressing this issue?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "scope_and_impact_priority_clarification"
     },
     {
       "question_id": "JQ-017",
@@ -181,7 +197,8 @@
       "body": "Are you receiving an error message? If so, could you provide the exact wording?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "errors_and_supporting_information_exact_error"
     },
     {
       "question_id": "JQ-018",
@@ -191,7 +208,8 @@
       "body": "Could you send us a screenshot showing the issue? Please avoid including passwords or other sensitive information.",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "errors_and_supporting_information_screenshot"
     },
     {
       "question_id": "JQ-019",
@@ -201,7 +219,8 @@
       "body": "Does the message include an error number or code?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "errors_and_supporting_information_error_code"
     },
     {
       "question_id": "JQ-020",
@@ -211,7 +230,8 @@
       "body": "At what point in the process does the error appear?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "errors_and_supporting_information_error_timing"
     },
     {
       "question_id": "JQ-021",
@@ -221,7 +241,8 @@
       "body": "Approximately what time did the issue last occur?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "errors_and_supporting_information_last_occurrence"
     },
     {
       "question_id": "JQ-022",
@@ -231,7 +252,8 @@
       "body": "Is there any additional information displayed that might help us identify the problem?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "errors_and_supporting_information_supporting_details"
     },
     {
       "question_id": "JQ-023",
@@ -241,7 +263,8 @@
       "body": "Has the error message changed since the issue first appeared?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "errors_and_supporting_information_changes_in_error"
     },
     {
       "question_id": "JQ-024",
@@ -251,7 +274,8 @@
       "body": "If the problem is difficult to describe, would you be able to provide a short screen recording showing what happens? Please avoid capturing confidential information.",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "errors_and_supporting_information_video_evidence"
     },
     {
       "question_id": "JQ-025",
@@ -261,7 +285,8 @@
       "body": "Which computer or device are you experiencing the issue on?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "computers_devices_and_locations_device_identification"
     },
     {
       "question_id": "JQ-026",
@@ -271,7 +296,8 @@
       "body": "Is the affected computer currently powered on and connected to the internet?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "computers_devices_and_locations_device_availability"
     },
     {
       "question_id": "JQ-027",
@@ -281,7 +307,8 @@
       "body": "Where is the affected device located?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "computers_devices_and_locations_device_location"
     },
     {
       "question_id": "JQ-028",
@@ -291,7 +318,8 @@
       "body": "Are you working from the office, from home, or from another location?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "computers_devices_and_locations_remote_or_office"
     },
     {
       "question_id": "JQ-029",
@@ -301,7 +329,8 @@
       "body": "Could you provide the computer name or the asset label on the affected device?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "computers_devices_and_locations_device_name"
     },
     {
       "question_id": "JQ-030",
@@ -311,7 +340,8 @@
       "body": "Are you able to perform the same task successfully from another device?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "computers_devices_and_locations_other_devices"
     },
     {
       "question_id": "JQ-031",
@@ -321,7 +351,8 @@
       "body": "Have you recently started using a different computer or had your current computer replaced?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "computers_devices_and_locations_device_replacement"
     },
     {
       "question_id": "JQ-032",
@@ -331,7 +362,8 @@
       "body": "Are you currently able to sign in and use the affected computer?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "computers_devices_and_locations_device_accessibility"
     },
     {
       "question_id": "JQ-033",
@@ -341,7 +373,8 @@
       "body": "Which email address or username is associated with the issue? Please do not send your password.",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "accounts_passwords_and_permissions_affected_account"
     },
     {
       "question_id": "JQ-034",
@@ -351,7 +384,8 @@
       "body": "What message appears when you attempt to sign in?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "accounts_passwords_and_permissions_sign_in_error"
     },
     {
       "question_id": "JQ-035",
@@ -361,7 +395,8 @@
       "body": "Are you able to sign in to the same account from another device?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "accounts_passwords_and_permissions_account_access_elsewhere"
     },
     {
       "question_id": "JQ-036",
@@ -371,7 +406,8 @@
       "body": "Are you receiving the expected verification prompt when signing in?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "accounts_passwords_and_permissions_mfa_notification"
     },
     {
       "question_id": "JQ-037",
@@ -381,7 +417,8 @@
       "body": "Did you receive a verification request that you did not initiate? If so, please let us know whether you approved or denied it.",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "accounts_passwords_and_permissions_unexpected_mfa_prompt"
     },
     {
       "question_id": "JQ-038",
@@ -391,7 +428,8 @@
       "body": "Were you previously able to access this resource?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "accounts_passwords_and_permissions_access_previously_worked"
     },
     {
       "question_id": "JQ-039",
@@ -401,7 +439,8 @@
       "body": "Can other authorized users access the same resource successfully?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "accounts_passwords_and_permissions_other_users_access"
     },
     {
       "question_id": "JQ-040",
@@ -411,7 +450,8 @@
       "body": "Could you explain what you need to access and what work you need to perform? This will help us determine the appropriate permissions.",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "accounts_passwords_and_permissions_permission_requirement"
     },
     {
       "question_id": "JQ-041",
@@ -421,7 +461,8 @@
       "body": "Are you having difficulty sending messages, receiving messages, or both?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "email_and_messaging_sending_or_receiving"
     },
     {
       "question_id": "JQ-042",
@@ -431,7 +472,8 @@
       "body": "Does the problem occur with every recipient or only particular addresses?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "email_and_messaging_affected_recipient"
     },
     {
       "question_id": "JQ-043",
@@ -441,7 +483,8 @@
       "body": "Which email address was used to send the message?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "email_and_messaging_sender_address"
     },
     {
       "question_id": "JQ-044",
@@ -451,7 +494,8 @@
       "body": "Approximately when was the affected message sent or expected to arrive?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "email_and_messaging_message_timing"
     },
     {
       "question_id": "JQ-045",
@@ -461,7 +505,8 @@
       "body": "Did you receive a delivery failure or undeliverable message? If so, could you forward the failure notification to us?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "email_and_messaging_delivery_failure"
     },
     {
       "question_id": "JQ-046",
@@ -471,7 +516,8 @@
       "body": "Does the problem occur only when sending or receiving attachments?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "email_and_messaging_attachment_issue"
     },
     {
       "question_id": "JQ-047",
@@ -481,7 +527,8 @@
       "body": "Approximately how large is the attachment you're trying to send?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "email_and_messaging_attachment_size"
     },
     {
       "question_id": "JQ-048",
@@ -491,7 +538,8 @@
       "body": "Does the issue occur in your email application, webmail, or both?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "email_and_messaging_email_application"
     },
     {
       "question_id": "JQ-049",
@@ -501,7 +549,8 @@
       "body": "Could you identify the file, folder, or shared resource you're trying to access?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "shared_files_collaboration_and_cloud_shared_resource"
     },
     {
       "question_id": "JQ-050",
@@ -511,7 +560,8 @@
       "body": "Are you accessing the resource through a web browser, a desktop application, or a shared network location?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "shared_files_collaboration_and_cloud_access_method"
     },
     {
       "question_id": "JQ-051",
@@ -521,7 +571,8 @@
       "body": "Are you able to open the file but unable to make changes, or are you unable to open it at all?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "shared_files_collaboration_and_cloud_file_permissions"
     },
     {
       "question_id": "JQ-052",
@@ -531,7 +582,8 @@
       "body": "Does the issue occur when using a particular shared link?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "shared_files_collaboration_and_cloud_shared_link"
     },
     {
       "question_id": "JQ-053",
@@ -541,7 +593,8 @@
       "body": "Are other users having difficulty accessing or editing the same information?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "shared_files_collaboration_and_cloud_collaboration_scope"
     },
     {
       "question_id": "JQ-054",
@@ -551,7 +604,8 @@
       "body": "Do you know where the affected file or folder is normally stored?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "shared_files_collaboration_and_cloud_file_location"
     },
     {
       "question_id": "JQ-055",
@@ -561,7 +615,8 @@
       "body": "Are changes failing to appear across devices, or are you receiving a synchronization error?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "shared_files_collaboration_and_cloud_sync_issue"
     },
     {
       "question_id": "JQ-056",
@@ -571,7 +626,8 @@
       "body": "Does the issue also occur when using a different web browser?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "shared_files_collaboration_and_cloud_browser_comparison"
     },
     {
       "question_id": "JQ-057",
@@ -581,7 +637,8 @@
       "body": "Which printer or copier is experiencing the issue?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "printing_copying_and_scanning_printer_identification"
     },
     {
       "question_id": "JQ-058",
@@ -591,7 +648,8 @@
       "body": "Where is the affected printer or copier located?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "printing_copying_and_scanning_printer_location"
     },
     {
       "question_id": "JQ-059",
@@ -601,7 +659,8 @@
       "body": "Is the issue related to printing, copying, scanning, or another function?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "printing_copying_and_scanning_printing_or_scanning"
     },
     {
       "question_id": "JQ-060",
@@ -611,7 +670,8 @@
       "body": "Is the printer or copier displaying an error message or code?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "printing_copying_and_scanning_error_message"
     },
     {
       "question_id": "JQ-061",
@@ -621,7 +681,8 @@
       "body": "Are other users experiencing the same problem with this device?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "printing_copying_and_scanning_multiple_users"
     },
     {
       "question_id": "JQ-062",
@@ -631,7 +692,8 @@
       "body": "Does the problem occur with every document or only particular files?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "printing_copying_and_scanning_print_job_scope"
     },
     {
       "question_id": "JQ-063",
@@ -641,7 +703,8 @@
       "body": "Where are you attempting to send the scanned document?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "printing_copying_and_scanning_scan_destination"
     },
     {
       "question_id": "JQ-064",
@@ -651,7 +714,8 @@
       "body": "Is the device indicating that it needs paper, toner, or another supply?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "printing_copying_and_scanning_paper_and_supplies"
     },
     {
       "question_id": "JQ-065",
@@ -661,7 +725,8 @@
       "body": "Are you connected through Wi-Fi or a wired network connection?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "internet_networking_remote_access_and_phones_connection_type"
     },
     {
       "question_id": "JQ-066",
@@ -671,7 +736,8 @@
       "body": "Are other devices at your location experiencing the same connection issue?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "internet_networking_remote_access_and_phones_network_scope"
     },
     {
       "question_id": "JQ-067",
@@ -681,7 +747,8 @@
       "body": "Are you unable to access all websites, or only a particular website or service?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "internet_networking_remote_access_and_phones_website_access"
     },
     {
       "question_id": "JQ-068",
@@ -691,7 +758,8 @@
       "body": "Does the problem occur only when working remotely?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "internet_networking_remote_access_and_phones_remote_connection"
     },
     {
       "question_id": "JQ-069",
@@ -701,7 +769,8 @@
       "body": "Are you receiving an error when attempting to establish your remote connection?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "internet_networking_remote_access_and_phones_vpn_status"
     },
     {
       "question_id": "JQ-070",
@@ -711,7 +780,8 @@
       "body": "Which wireless network are you connected to?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "internet_networking_remote_access_and_phones_wireless_network"
     },
     {
       "question_id": "JQ-071",
@@ -721,7 +791,8 @@
       "body": "Is the telephone issue affecting one phone, several phones, or all phones at your location?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "internet_networking_remote_access_and_phones_telephone_scope"
     },
     {
       "question_id": "JQ-072",
@@ -731,7 +802,8 @@
       "body": "Is the issue occurring with incoming calls, outgoing calls, or both?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "internet_networking_remote_access_and_phones_call_behavior"
     },
     {
       "question_id": "JQ-073",
@@ -741,7 +813,8 @@
       "body": "Which application are you having trouble with?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "applications_and_business_software_application_name"
     },
     {
       "question_id": "JQ-074",
@@ -751,7 +824,8 @@
       "body": "What were you attempting to do in the application when the problem occurred?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "applications_and_business_software_application_function"
     },
     {
       "question_id": "JQ-075",
@@ -761,7 +835,8 @@
       "body": "Does the application open successfully, or does the issue occur before it opens?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "applications_and_business_software_application_access"
     },
     {
       "question_id": "JQ-076",
@@ -771,7 +846,8 @@
       "body": "Are other people able to use the same application successfully?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "applications_and_business_software_affected_users"
     },
     {
       "question_id": "JQ-077",
@@ -781,7 +857,8 @@
       "body": "Did the issue begin after an application update or configuration change?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "applications_and_business_software_recent_update"
     },
     {
       "question_id": "JQ-078",
@@ -791,7 +868,8 @@
       "body": "Does the problem occur with every file or only a particular file?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "applications_and_business_software_specific_file"
     },
     {
       "question_id": "JQ-079",
@@ -801,7 +879,8 @@
       "body": "Is the application slow, unresponsive, closing unexpectedly, or displaying an error?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "applications_and_business_software_application_performance"
     },
     {
       "question_id": "JQ-080",
@@ -811,7 +890,8 @@
       "body": "Do you know whether the software vendor has already been contacted about this issue?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "applications_and_business_software_software_vendor"
     },
     {
       "question_id": "JQ-081",
@@ -821,7 +901,8 @@
       "body": "Is your computer generally running slowly, or is the slowdown limited to a particular application?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "computer_performance_storage_and_hardware_performance_description"
     },
     {
       "question_id": "JQ-082",
@@ -831,7 +912,8 @@
       "body": "Does the performance issue occur throughout the day or only during particular activities?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "computer_performance_storage_and_hardware_timing_of_slowdown"
     },
     {
       "question_id": "JQ-083",
@@ -841,7 +923,8 @@
       "body": "Have you received any messages indicating that your computer is running low on storage space?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "computer_performance_storage_and_hardware_storage_warnings"
     },
     {
       "question_id": "JQ-084",
@@ -851,7 +934,8 @@
       "body": "Are there any large files or folders that you know must remain stored locally on this computer?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "computer_performance_storage_and_hardware_file_storage"
     },
     {
       "question_id": "JQ-085",
@@ -861,7 +945,8 @@
       "body": "Is the computer freezing, restarting unexpectedly, shutting down, or showing another symptom?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "computer_performance_storage_and_hardware_device_behavior"
     },
     {
       "question_id": "JQ-086",
@@ -871,7 +956,8 @@
       "body": "Have you noticed unusual noises, warning lights, or other physical signs of a problem?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "computer_performance_storage_and_hardware_hardware_signs"
     },
     {
       "question_id": "JQ-087",
@@ -881,7 +967,8 @@
       "body": "Does the problem occur only when a particular accessory or external device is connected?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "computer_performance_storage_and_hardware_connected_devices"
     },
     {
       "question_id": "JQ-088",
@@ -891,7 +978,8 @@
       "body": "Is the computer failing to power on, or does it power on but fail to start normally?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "computer_performance_storage_and_hardware_power_issue"
     },
     {
       "question_id": "JQ-089",
@@ -901,7 +989,8 @@
       "body": "Could you identify the file or information you need recovered?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "backup_and_data_recovery_missing_information"
     },
     {
       "question_id": "JQ-090",
@@ -911,7 +1000,8 @@
       "body": "When was the missing information last known to be available?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "backup_and_data_recovery_last_known_availability"
     },
     {
       "question_id": "JQ-091",
@@ -921,7 +1011,8 @@
       "body": "Where was the information originally stored?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "backup_and_data_recovery_original_location"
     },
     {
       "question_id": "JQ-092",
@@ -931,7 +1022,8 @@
       "body": "Was the information deleted, overwritten, changed, or is it simply no longer visible?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "backup_and_data_recovery_deletion_or_modification"
     },
     {
       "question_id": "JQ-093",
@@ -941,7 +1033,8 @@
       "body": "Are you looking to recover one file, a folder, or a larger collection of information?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "backup_and_data_recovery_recovery_scope"
     },
     {
       "question_id": "JQ-094",
@@ -951,7 +1044,8 @@
       "body": "Do you know approximately which date or version of the information you need restored?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "backup_and_data_recovery_recovery_date"
     },
     {
       "question_id": "JQ-095",
@@ -961,7 +1055,8 @@
       "body": "Is anyone else still able to access the missing information?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "backup_and_data_recovery_other_users_access"
     },
     {
       "question_id": "JQ-096",
@@ -971,7 +1066,8 @@
       "body": "Would you prefer the recovered information to be placed in a separate location for review, if that option is available?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "backup_and_data_recovery_recovery_destination"
     },
     {
       "question_id": "JQ-097",
@@ -981,7 +1077,8 @@
       "body": "Did you interact with any links or attachments in the suspicious message?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "security_related_questions_suspicious_email"
     },
     {
       "question_id": "JQ-098",
@@ -991,7 +1088,8 @@
       "body": "Did you recognize the activity or sign-in attempt that was reported?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "security_related_questions_unrecognized_activity"
     },
     {
       "question_id": "JQ-099",
@@ -1001,7 +1099,8 @@
       "body": "Do you recognize the file or application referenced in the security alert?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "security_related_questions_suspicious_download"
     },
     {
       "question_id": "JQ-100",
@@ -1011,7 +1110,8 @@
       "body": "Is this software something you normally use for your work?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "security_related_questions_expected_software"
     },
     {
       "question_id": "JQ-101",
@@ -1021,7 +1121,8 @@
       "body": "Have you recently received unexpected requests to enter your password or approve a sign-in?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "security_related_questions_unexpected_prompts"
     },
     {
       "question_id": "JQ-102",
@@ -1031,7 +1132,8 @@
       "body": "Has the affected device been lost, stolen, or simply moved to another location?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "security_related_questions_missing_device"
     },
     {
       "question_id": "JQ-103",
@@ -1041,7 +1143,8 @@
       "body": "Approximately when did you first notice the suspicious activity?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "security_related_questions_security_timeline"
     },
     {
       "question_id": "JQ-104",
@@ -1051,7 +1154,8 @@
       "body": "Have you noticed any other unusual behavior that may be related to this concern?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "security_related_questions_security_observations"
     },
     {
       "question_id": "JQ-105",
@@ -1061,7 +1165,8 @@
       "body": "What would be a convenient time for us to contact you about this issue?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "scheduling_coordination_and_permission_availability"
     },
     {
       "question_id": "JQ-106",
@@ -1071,7 +1176,8 @@
       "body": "Would you be available to assist us with a remote troubleshooting session if needed?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "scheduling_coordination_and_permission_remote_assistance"
     },
     {
       "question_id": "JQ-107",
@@ -1081,7 +1187,8 @@
       "body": "Is there someone available who can provide physical access to the affected device if necessary?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "scheduling_coordination_and_permission_access_to_device"
     },
     {
       "question_id": "JQ-108",
@@ -1091,7 +1198,8 @@
       "body": "Who would be the best person to contact for additional information about this issue?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "scheduling_coordination_and_permission_best_contact"
     },
     {
       "question_id": "JQ-109",
@@ -1101,7 +1209,8 @@
       "body": "Is there a preferred time when maintenance could be performed with minimal interruption to your work?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "scheduling_coordination_and_permission_maintenance_scheduling"
     },
     {
       "question_id": "JQ-110",
@@ -1111,7 +1220,8 @@
       "body": "Are there any business hours or scheduled activities we should avoid when planning additional work?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "scheduling_coordination_and_permission_business_hours"
     },
     {
       "question_id": "JQ-111",
@@ -1121,7 +1231,8 @@
       "body": "Who is authorized to approve changes that could affect this system or its users?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "scheduling_coordination_and_permission_approval_contact"
     },
     {
       "question_id": "JQ-112",
@@ -1131,7 +1242,8 @@
       "body": "Are there any other individuals or departments we should coordinate with before proceeding?",
       "review_class": "context_controlled",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "scheduling_coordination_and_permission_coordination"
     },
     {
       "question_id": "JQ-113",
@@ -1141,7 +1253,8 @@
       "body": "Are you still experiencing the issue?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "followup_verification_and_ticket_completion_issue_still_occurring"
     },
     {
       "question_id": "JQ-114",
@@ -1151,7 +1264,8 @@
       "body": "When convenient, could you try the affected function again and let us know the result?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "followup_verification_and_ticket_completion_retest"
     },
     {
       "question_id": "JQ-115",
@@ -1161,7 +1275,8 @@
       "body": "Have you noticed any improvement since the last troubleshooting steps were completed?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "followup_verification_and_ticket_completion_results_after_changes"
     },
     {
       "question_id": "JQ-116",
@@ -1171,7 +1286,8 @@
       "body": "Has the problem returned since it last appeared to be resolved?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "followup_verification_and_ticket_completion_recurrence"
     },
     {
       "question_id": "JQ-117",
@@ -1181,7 +1297,8 @@
       "body": "Are you still experiencing any symptoms related to the original problem?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "followup_verification_and_ticket_completion_remaining_symptoms"
     },
     {
       "question_id": "JQ-118",
@@ -1191,7 +1308,8 @@
       "body": "Is there anything else related to this issue that you need assistance with?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "followup_verification_and_ticket_completion_additional_assistance"
     },
     {
       "question_id": "JQ-119",
@@ -1201,7 +1319,8 @@
       "body": "Does everything appear to be working correctly now?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "followup_verification_and_ticket_completion_resolution_confirmation"
     },
     {
       "question_id": "JQ-120",
@@ -1211,7 +1330,8 @@
       "body": "Based on your latest results, are you comfortable with us closing this support ticket?",
       "review_class": "routine",
       "content_approved": true,
-      "autonomous_send_enabled": false
+      "autonomous_send_enabled": false,
+      "gap_code": "followup_verification_and_ticket_completion_ticket_closure"
     }
   ]
 }
