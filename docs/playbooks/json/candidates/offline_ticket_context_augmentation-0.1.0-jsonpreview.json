@@ -1,0 +1,334 @@
+{
+  "schema_version": 1,
+  "playbook": {
+    "id": "offline_ticket_context_augmentation",
+    "name": "Jason - Offline Ticket Context Augmentation (JSON migration draft)",
+    "version": "0.1.0-jsonpreview",
+    "lifecycle": "pilot",
+    "target_type": "ticket",
+    "source_owner": "AOT",
+    "source_registry_version": "0.1.0",
+    "documented_version": "0.1.0",
+    "original_lifecycle": "pilot"
+  },
+  "trigger": {
+    "source_registry_match": {
+      "title_contains": [
+        "offline",
+        "unreachable",
+        "not responding",
+        "lost contact",
+        "lost connection"
+      ]
+    },
+    "details_section_key": "2",
+    "execution_enabled": false
+  },
+  "scope": {
+    "direct_provider_access": false,
+    "preview_only": true,
+    "execution_authority": "none",
+    "scope_section_key": "3"
+  },
+  "expected_state": {
+    "details_section_key": "5",
+    "not_reverified_in_json_runtime": true
+  },
+  "state_model": {
+    "entry_step": "identity_gate",
+    "source_section_key": "6",
+    "context_binding_status": "not_implemented_for_migration_draft"
+  },
+  "steps": [
+    {
+      "id": "identity_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_target_identity_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "evidence_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "evidence_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "authoritative_evidence_complete",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "authorization_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "authorization_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "approved_json_runtime_parity",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "migration_hold"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "migration_hold",
+      "type": "human_review"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "verification": {
+    "authoritative_source": "Legacy source playbook section 17 and provider readbacks; not executed in this JSON draft",
+    "success_condition": "Legacy source Section 17 and Section 18 must pass independently; classification-only draft cannot verify or close"
+  },
+  "completion": {
+    "terminal_disposition": "Human Review (draft only; existing production source unchanged)"
+  },
+  "autonomy": {
+    "activation": "disabled",
+    "allowed_capabilities": []
+  },
+  "procedure": {
+    "section_refs": {
+      "section_goal": "1",
+      "trigger": "2",
+      "scope": "3",
+      "identification": "4",
+      "expected_state": "5",
+      "state_model": "6",
+      "diagnostics": "7",
+      "decision_gates": "8",
+      "remediation": "9",
+      "retry_policy": "10",
+      "periodic_rechecks": "11",
+      "stale_condition": "12",
+      "dependencies": "13",
+      "documentation": "14",
+      "failures": "15",
+      "escalation": "16",
+      "verification": "17",
+      "completion": "18",
+      "final_resolution": "19",
+      "required_capabilities": "20",
+      "acceptance_test": "21",
+      "closure": "22",
+      "autonomy_review": "23"
+    },
+    "section_keys_missing_from_source": [],
+    "diagnostic_substep_titles": [
+      "Step 1: Target DRMM state",
+      "Step 2: DEB corroboration",
+      "Step 3: Same-site peer inventory",
+      "Step 4: Active fixed-server witness",
+      "Step 5: Classification"
+    ],
+    "remediation_substep_titles": [],
+    "live_execution_mapped": false
+  },
+  "legacy_registry": {
+    "source_path": "docs/playbooks/Jason-Offline-Ticket-Context-Augmentation.md",
+    "source_version": "0.1.0",
+    "review_status": "owner_design_approved_acceptance_and_durable_promotion_required",
+    "source_enabled": true,
+    "source_autonomy_activation": "shadow",
+    "source_allowed_capabilities": [
+      "service.ticket.note.create"
+    ],
+    "source_required_gates": [
+      "trigger",
+      "exact_existing_ci",
+      "same_client_identity",
+      "site_context_evidence",
+      "governance_precheck",
+      "autonomy_approved"
+    ],
+    "source_trigger": {
+      "title_contains": [
+        "offline",
+        "unreachable",
+        "not responding",
+        "lost contact",
+        "lost connection"
+      ]
+    }
+  },
+  "source_document": {
+    "path": "docs/playbooks/Jason-Offline-Ticket-Context-Augmentation.md",
+    "source_blob_sha": "1af96e8b0cdd22fd24a60bf3841711cf1ab8b8c9",
+    "prelude_markdown": "# Jason Playbook: Offline Ticket Context Augmentation\n\nStatus: Source implementation complete in PR #658; registry activation remains `shadow` pending controlled acceptance and exact durable owner promotion for unattended internal-note creation.\n\n## Standard Manifest\n\n```yaml\nplaybook:\n  id: offline_ticket_context_augmentation\n  name: Jason - Offline Ticket Context Augmentation\n  version: 0.1.0\n  owner: AOT IT Operations\n  target_type: ticket\n  trigger:\n    provider: Autotask\n    match: credible device/server/host offline language with exact same-client device context\n  ownership:\n    while_open: source_queue\n    release_active_slot_when_waiting: true\n  retry:\n    max_remediation_attempts: 0\n  recheck:\n    enabled: true\n    cadence: 10 minutes while the ticket remains open, or immediately after source-version change\n    stale_after: not_applicable\n  verification:\n    authoritative_source: governed DRMM/DEB/site-witness evidence\n    success_condition: one bounded site-context classification is produced\n  completion:\n    terminal_disposition: source ticket remains unchanged\n  autonomy:\n    allowed_branches:\n      - read_only_context\n      - internal_note_augmentation\n    approval_bound_branches: []\n    disruptive_branches: []\n```\n\n",
+    "sections": [
+      {
+        "key": "1",
+        "title": "Section Goal",
+        "heading_markdown": "## 1. Section Goal",
+        "body_markdown": "\n\n**Goal:** Enrich an open Autotask ticket that credibly reports a managed device/server offline with fast site context before a technician begins troubleshooting, without claiming the ticket, changing its queue/status, consuming an active-work slot, or performing remediation.\n\n**Success means:**\n- the exact ticket/company/CI/DRMM endpoint is verified;\n- Jason distinguishes target availability from site availability;\n- failed PC ICMP is never treated as proof of offline;\n- a fresh governed read from a confirmed fixed same-site server can establish that the broad site-down branch is false;\n- fixed same-site peer evidence can classify the site as confirmed up, likely up, likely down, partial/segment suspected, or unknown;\n- mobile/roaming devices do not count as site witnesses;\n- DEB may corroborate whether the target is online outside DRMM;\n- one concise internal note is written only when evidence changes;\n- no ownership, queue, status, remediation, client communication, or disruptive action occurs.\n\n"
+      },
+      {
+        "key": "2",
+        "title": "Trigger",
+        "heading_markdown": "## 2. Trigger",
+        "body_markdown": "\n\nApply to open Autotask tickets with bounded endpoint-outage language such as:\n- device/server/host/endpoint/workstation/computer/PC offline;\n- device/server/host down;\n- device/server/host unreachable;\n- device/server/host not responding;\n- lost contact / lost connection.\n\nA generic phrase such as \"offline files\" must not trigger this playbook.\n\nThe initial implementation requires an exact existing Autotask configuration item. Missing CI identity is a no-write condition rather than permission to guess.\n\n"
+      },
+      {
+        "key": "3",
+        "title": "Scope and Boundaries",
+        "heading_markdown": "## 3. Scope and Boundaries",
+        "body_markdown": "\n\n### In Scope\n- governed Autotask ticket/CI reads;\n- governed DRMM endpoint/site/peer reads;\n- governed DEB exact-asset read when available;\n- one classifier-approved read-only PowerShell call against a fixed same-site server when available;\n- deterministic site-context classification;\n- one internal Autotask note;\n- durable 10-minute throttle and semantic note suppression.\n\n### Out of Scope\n- ticket ownership or requeue;\n- ticket status/work type/resource mutation;\n- CI association mutation;\n- endpoint remediation;\n- reboot/logoff/service/network changes;\n- client-facing communication;\n- blind subnet scanning;\n- cross-client evidence;\n- use of mobile laptops as site witnesses.\n\nPreserve Central Orchestrator authority, `direct_provider_access=false`, exact requester grants, provider/client isolation, and existing disruption controls.\n\n"
+      },
+      {
+        "key": "4",
+        "title": "Initial Identification",
+        "heading_markdown": "## 4. Initial Identification",
+        "body_markdown": "\n\n1. Read the open ticket.\n2. Confirm the trigger.\n3. Require an existing configuration item.\n4. Read that CI and prove same-company, active identity.\n5. Resolve its exact DRMM UID/hostname.\n6. Read the exact DRMM endpoint.\n7. Use the endpoint's site only after exact target identity is established.\n8. Do **not** run the normal ticket-work-start lifecycle; augmentation intentionally does not claim work.\n\nIf identity is missing/ambiguous, persist the augmentation check and make no ticket mutation.\n\n"
+      },
+      {
+        "key": "5",
+        "title": "Expected State",
+        "heading_markdown": "## 5. Expected State",
+        "body_markdown": "\n\nThe augmentation does not define \"healthy\" for the endpoint. It defines a useful bounded site-context state:\n\n- `site_confirmed_up`\n- `site_likely_up`\n- `site_likely_down`\n- `partial_or_segment_outage_suspected`\n- `site_status_unknown`\n\nSeparately record whether DEB reports the target online while DRMM reports it offline.\n\n"
+      },
+      {
+        "key": "6",
+        "title": "State Model",
+        "heading_markdown": "## 6. State Model",
+        "body_markdown": "\n\n`detected -> identity_verified -> evidence_collecting -> classified -> documented`\n\nNo ownership lifecycle is entered.\n\nPersist at minimum:\n- ticket ID;\n- source version;\n- classification;\n- evidence fingerprint;\n- last check time.\n\n"
+      },
+      {
+        "key": "7",
+        "title": "Diagnostic Workflow",
+        "heading_markdown": "## 7. Diagnostic Workflow",
+        "body_markdown": "\n\n### Step 1: Target DRMM state\nRead exact endpoint current state and site.\n\n### Step 2: DEB corroboration\nWhen the exact same-company DEB asset can be found by hostname, record provider status. If DEB is unavailable or ambiguous, continue without fabricating a result.\n\nDRMM offline + DEB online means contradictory target availability evidence and should be called out as a likely RMM/monitoring-path issue. It does not independently prove the physical site is up.\n\n### Step 3: Same-site peer inventory\nRead same-site DRMM peers. Classify roles conservatively:\n- server = fixed;\n- desktop/workstation = fixed;\n- laptop/notebook/portable = mobile and excluded from site-health proof;\n- unknown role = do not count as a fixed witness.\n\n### Step 4: Active fixed-server witness\nIf a same-site server reports online, Jason may run exactly one classifier-approved read-only command:\n\n`Get-NetIPConfiguration`\n\nFresh returned output proves Jason can actively reach that fixed server through the governed management path. That is strong affirmative evidence that the broad site-down branch is false for the path reaching that server.\n\nThis does not prove every switch/VLAN/segment is healthy.\n\n### Step 5: Classification\n- fresh fixed-server read succeeds + fewer than two fixed peers offline -> **site confirmed up**;\n- fresh fixed-server read succeeds + two or more fixed peers offline -> **partial/segment outage suspected**;\n- at least two fixed peers online, no active-server proof -> **site likely up**;\n- at least two fixed peers offline and no fixed online witness -> **site likely down**;\n- otherwise -> **site status unknown**.\n\nFailed ICMP on a PC is not used as negative evidence in this classifier.\n\n"
+      },
+      {
+        "key": "8",
+        "title": "Decision Gates",
+        "heading_markdown": "## 8. Decision Gates",
+        "body_markdown": "\n\nBefore note creation:\n- exact same-company CI;\n- exact DRMM UID;\n- no cross-client evidence;\n- bounded trigger matched;\n- exact augmentation source/version is owner-promoted for `service.ticket.note.create`;\n- evidence collection completed without identity conflict.\n\n"
+      },
+      {
+        "key": "9",
+        "title": "Remediation",
+        "heading_markdown": "## 9. Remediation",
+        "body_markdown": "\n\nNot applicable.\n\nThe only write is the approved internal note. No ticket state or provider endpoint state changes.\n\n"
+      },
+      {
+        "key": "10",
+        "title": "Retry Policy",
+        "heading_markdown": "## 10. Retry Policy",
+        "body_markdown": "\n\nNo remediation retries.\n\nEvidence collection is throttled to once per 10 minutes per ticket, except a ticket source-version change may make it immediately eligible for reassessment.\n\n"
+      },
+      {
+        "key": "11",
+        "title": "Periodic Rechecks",
+        "heading_markdown": "## 11. Periodic Rechecks",
+        "body_markdown": "\n\nRecheck while the open ticket remains in the governed queue set. Suppress unchanged notes by semantic fingerprint.\n\nDo not create a new note merely because the worker cadence ran.\n\n"
+      },
+      {
+        "key": "12",
+        "title": "Aging / Stale Condition",
+        "heading_markdown": "## 12. Aging / Stale Condition",
+        "body_markdown": "\n\nNot applicable to remediation. The parent Server/Site Offline playbook owns outage aging/escalation.\n\n"
+      },
+      {
+        "key": "13",
+        "title": "Dependency Handling",
+        "heading_markdown": "## 13. Dependency Handling",
+        "body_markdown": "\n\nDependencies:\n- exact CI/DRMM identity;\n- DRMM site/peer reads;\n- DEB exact-asset read when available;\n- read-only PowerShell capability for strongest server witness;\n- internal Autotask note capability;\n- durable augmentation state.\n\nMissing optional evidence reduces confidence; missing identity prevents a write.\n\n"
+      },
+      {
+        "key": "14",
+        "title": "Documentation Requirements",
+        "heading_markdown": "## 14. Documentation Requirements",
+        "body_markdown": "\n\nNote title:\n\n`Jason - Offline Ticket Context`\n\nPreferred body:\n1. **STATUS** — site context.\n2. **NEXT STEP** — technician focus; explicitly state Jason did not take ownership.\n3. **KEY EVIDENCE** — target DRMM/DEB state plus bounded witness list.\n4. **INTERPRETATION** — endpoint vs site/segment context.\n5. **CHANGES MADE** — None; read-only augmentation only.\n\n"
+      },
+      {
+        "key": "15",
+        "title": "Failure Handling",
+        "heading_markdown": "## 15. Failure Handling",
+        "body_markdown": "\n\nA provider/read failure is not an outage conclusion. Fail closed, throttle the failed check, and allow a later reassessment.\n\n"
+      },
+      {
+        "key": "16",
+        "title": "Escalation Criteria",
+        "heading_markdown": "## 16. Escalation Criteria",
+        "body_markdown": "\n\nThis augmentation playbook does not itself escalate or requeue. If it classifies `site_likely_down` or `partial_or_segment_outage_suspected`, the full Server/Site Offline playbook may independently admit the incident under its rapid-response clock.\n\n"
+      },
+      {
+        "key": "17",
+        "title": "Verification",
+        "heading_markdown": "## 17. Verification",
+        "body_markdown": "\n\nVerification is deterministic evidence classification plus provider-verified internal-note creation.\n\n"
+      },
+      {
+        "key": "18",
+        "title": "Completion Criteria",
+        "heading_markdown": "## 18. Completion Criteria",
+        "body_markdown": "\n\nOne augmentation cycle completes after:\n- exact identity;\n- bounded evidence collection;\n- classification;\n- changed-note write/readback if needed;\n- durable throttle state.\n\nThe source ticket remains in its existing queue/status/assignment.\n\n"
+      },
+      {
+        "key": "19",
+        "title": "Final Resolution Note",
+        "heading_markdown": "## 19. Final Resolution Note",
+        "body_markdown": "\n\nNot applicable. This is context augmentation, not incident ownership.\n\n"
+      },
+      {
+        "key": "20",
+        "title": "Required Capabilities",
+        "heading_markdown": "## 20. Required Capabilities",
+        "body_markdown": "\n\nReads:\n- `service.configuration.read`\n- `endpoint.device.read`\n- `endpoint.device.search`\n- `backup.endpoint.asset.search` when available\n- `endpoint.powershell.read` for a fixed-server active witness\n\nAction:\n- `service.ticket.note.create`\n\nNo `service.ticket.update` and no `automation.component.execute` are required.\n\n"
+      },
+      {
+        "key": "21",
+        "title": "Acceptance Test",
+        "heading_markdown": "## 21. Acceptance Test",
+        "body_markdown": "\n\nProve:\n1. technician-owned offline ticket can be augmented;\n2. no queue/status/resource/work-type mutation occurs;\n3. active-work-slot count is unaffected;\n4. online roaming laptop does not prove site health;\n5. live fixed-server read produces `site_confirmed_up`;\n6. live fixed-server read plus multiple fixed-peer failures produces partial/segment classification;\n7. multiple fixed offline peers with no online witness produces `site_likely_down`;\n8. DRMM offline + DEB online is documented as target-provider conflict;\n9. failed PC ping is never converted into confirmed/likely offline by this classifier;\n10. unchanged worker cycles do not create duplicate notes or repeated active server probes inside the throttle window;\n11. no note is written without exact durable owner promotion;\n12. note creation is provider-readback verified.\n\n"
+      },
+      {
+        "key": "22",
+        "title": "Section Goal Closure",
+        "heading_markdown": "## 22. Section Goal Closure",
+        "body_markdown": "\n\nClose when:\n- deterministic module/tests pass;\n- runtime hook/tests pass;\n- exact owner promotion is created for `offline_ticket_context_augmentation@0.1.0`;\n- controlled production ticket proves augmentation without ownership mutation;\n- Grafana/operational reporting exposes augmentation outcomes;\n- remaining provider evidence gaps are documented.\n\n"
+      },
+      {
+        "key": "23",
+        "title": "Autonomous Execution Eligibility and Owner Review",
+        "heading_markdown": "## 23. Autonomous Execution Eligibility and Owner Review",
+        "body_markdown": "\n\nDesign approved by owner on 2026-09-30.\n\nApproved branch:\n- governed reads;\n- one fixed-server read-only witness command;\n- one duplicate-suppressed internal note.\n\nExplicitly not approved by design:\n- ownership/queue/status changes;\n- endpoint/network remediation;\n- client communication;\n- disruption.\n\nSource-controlled implementation must pass acceptance and receive exact durable promotion before unattended ticket-note writes occur.\n"
+      }
+    ]
+  },
+  "migration": {
+    "status": "SOURCE_PRESERVED_STRUCTURED_DRAFT_NOT_RUNTIME_PARITY",
+    "source_version_discrepancy": false,
+    "production_replacement_allowed": false,
+    "staged": false,
+    "activated": false,
+    "required_before_activation": [
+      "Canonical Python JSON semantic validation",
+      "Exact-capability binding and source-scoped argument context verified",
+      "Safe diagnostic and remediation branches mapped to governed capabilities",
+      "Durable retry/wait/terminal lifecycle parity with shared runtime",
+      "Error, negative-evidence and client-boundary regression tests",
+      "Controlled shadow comparison and independent acceptance",
+      "Owner-bound activation and branch-specific autonomous promotion"
+    ],
+    "external_fact_fields_non_authoritative": true
+  }
+}
