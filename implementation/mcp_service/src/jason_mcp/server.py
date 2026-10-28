@@ -6384,6 +6384,31 @@ def _filter_discoverable_capabilities(
     if matches:
         if resource_filter:
             result["resource_capability_available"] = True
+            # A named read may require narrower selectors than a generic
+            # schema-proven read. Advertise the alternative for deliberate
+            # selection, never automatic execution or authorization bypass.
+            generic = [
+                item for item in available
+                if item["capability"] in {
+                    "service.entity.search", "service.entity.read"
+                }
+                and resource_filter in {
+                    v.casefold() for v in item["resource_types"]
+                }
+                and item["capability"] not in {
+                    candidate["capability"] for candidate in matches
+                }
+            ]
+            if generic:
+                result["alternatives"] = generic
+                result["alternative_count"] = len(generic)
+                result["selection_guidance"] = (
+                    "Schema-proven generic Autotask reads are candidate "
+                    "alternatives when a named route lacks appropriate "
+                    "selectors. Select explicitly and independently check "
+                    "provider and requester authorization; never retry "
+                    "a denied read as a generic query."
+                )
         return result
 
     if not resource_filter:
@@ -6649,6 +6674,23 @@ def execute_read_capability(
     )
 
     if result.get("status") != "succeeded":
+        # These are classifications, not authorization shortcuts. Never
+        # automatically retry a denied read through a different capability.
+        reason_codes = result.get("reason_codes") or []
+        if "client_context_required" in reason_codes:
+            result["failure_domain"] = "requester_authorization"
+            result["fallback_permitted"] = False
+        elif result.get("error_code") == "INVALID_CAPABILITY_ARGUMENTS":
+            result["failure_domain"] = "request_construction"
+            result["fallback_permitted"] = False
+            result["operator_message"] = (
+                "Correct the selectors against the discovered capability "
+                "schema before retrying. This is not a provider permission "
+                "failure."
+            )
+        elif str(result.get("error_code") or "").startswith("PROVIDER_HTTP_STATUS_"):
+            result["failure_domain"] = "provider_response"
+            result["fallback_permitted"] = False
         return result
 
     evidence = result.get("evidence")
