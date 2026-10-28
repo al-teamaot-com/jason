@@ -6649,6 +6649,23 @@ def execute_read_capability(
     )
 
     if result.get("status") != "succeeded":
+        # These are classifications, not authorization shortcuts. Never
+        # automatically retry a denied read through a different capability.
+        reason_codes = result.get("reason_codes") or []
+        if "client_context_required" in reason_codes:
+            result["failure_domain"] = "requester_authorization"
+            result["fallback_permitted"] = False
+        elif result.get("error_code") == "INVALID_CAPABILITY_ARGUMENTS":
+            result["failure_domain"] = "request_construction"
+            result["fallback_permitted"] = False
+            result["operator_message"] = (
+                "Correct the selectors against the discovered capability "
+                "schema before retrying. This is not a provider permission "
+                "failure."
+            )
+        elif str(result.get("error_code") or "").startswith("PROVIDER_HTTP_STATUS_"):
+            result["failure_domain"] = "provider_response"
+            result["fallback_permitted"] = False
         return result
 
     evidence = result.get("evidence")
