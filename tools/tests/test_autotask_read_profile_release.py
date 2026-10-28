@@ -83,7 +83,10 @@ def test_duplicate_profile_entries_fail_closed(monkeypatch):
 def test_native_release_code_preserves_profile_during_rollback():
     source = (Path(__file__).resolve().parents[1] /
               "release_manager_host_runner.py").read_text()
-    assert 'env["JASON_PROVIDER_READ_ACTIVATION_PROFILE"] = candidate_autotask_profile' in source
+    assert 'env["JASON_PROVIDER_READ_ACTIVATION_PROFILE"] = source_profile' in source
+    assert 'env["JASON_PROVIDER_READ_ROLLBACK_PROFILE"] = declared_rollback' in source
+    assert 'env = deployment_env' in source
+    assert 'native_deploy_environment(candidate_tree, image, mcp_image, candidate_sha)' in source
     assert 'rollback_env = autotask_rollback_environment(' in source
     assert 'result.pop("JASON_PROVIDER_READ_ACTIVATION_PROFILE", None)' in source
     assert 'result["JASON_PROVIDER_READ_ROLLBACK_PROFILE"] = prior_autotask_profile' in source

@@ -1035,31 +1035,25 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             ["authority.sqlite3", "governed-execution.sqlite3", "support-repair"],
         )
 
-    def test_preprod_preserves_sqlite_data_and_wal_but_skips_regenerable_shm(self):
+    def test_preprod_lists_sqlite_data_but_excludes_volatile_sidecars(self):
         names = (
             "governed-execution.sqlite3\n"
             "governed-execution.sqlite3-wal\n"
             "governed-execution.sqlite3-shm\n"
+            "governed-execution.sqlite3-journal\n"
             "authority.sqlite3\n"
             "authority.sqlite3-shm\n"
             "authority.sqlite3-wal\n"
             "not-sqlite-shm\n"
             "governed-execution.sqlite3-shm-other\n"
         )
-        result = runner.bounded_preprod_openclaw_entries(names)
         self.assertEqual(
-            result,
-            [
-                "governed-execution.sqlite3",
-                "governed-execution.sqlite3-wal",
-                "authority.sqlite3",
-                "authority.sqlite3-wal",
-                "not-sqlite-shm",
-                "governed-execution.sqlite3-shm-other",
-            ],
+            runner.bounded_preprod_openclaw_entries(names),
+            ["governed-execution.sqlite3", "authority.sqlite3", "not-sqlite-shm",
+             "governed-execution.sqlite3-shm-other"],
         )
 
-    def test_preprod_does_not_copy_ephemeral_shm_after_listing_to_docker_cp(self):
+    def test_preprod_never_copies_sqlite_or_volatiles_with_docker_cp(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as td:
             clone = Path(td) / "clone"
@@ -1074,29 +1068,22 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                         "authority.sqlite3\n"
                         "authority.sqlite3-shm"
                     )
-                if cmd[:2] == ["docker", "cp"] and str(cmd[2]).endswith("-shm"):
-                    raise subprocess.CalledProcessError(1, cmd)
                 return ""
             with (
                 patch.object(runner.shutil, "disk_usage", return_value=Mock(free=12 * 1024**3)),
                 patch.object(runner, "run", side_effect=fake_run),
+                patch.object(runner, "verified_live_openclaw_bind", return_value=Path(td)) as bind,
+                patch.object(runner, "transactional_preprod_sqlite_backup") as snapshot,
             ):
                 runner.copy_state_from_live_container("/var/lib/jason/openclaw", clone)
-            copied = [
-                str(cmd[2]).rsplit("/", 1)[-1]
-                for cmd in commands if cmd[:2] == ["docker", "cp"]
-            ]
-            self.assertEqual(
-                copied,
-                [
-                    "governed-execution.sqlite3",
-                    "governed-execution.sqlite3-wal",
-                    "authority.sqlite3",
-                ],
-            )
-            self.assertFalse(any(name.endswith("-shm") for name in copied))
+            copied = [cmd[2] for cmd in commands if cmd[:2] == ["docker", "cp"]]
+            self.assertEqual(copied, [])
+            self.assertEqual(snapshot.call_count, 2)
+            self.assertEqual({c.args[0].name for c in snapshot.call_args_list},
+                             {"governed-execution.sqlite3", "authority.sqlite3"})
+            bind.assert_called_once_with()
 
-    def test_preprod_missing_sqlite_wal_remains_a_hard_clone_failure(self):
+    def test_preprod_missing_sqlite_wal_is_included_in_transactional_snapshot(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as td:
             clone = Path(td) / "clone"
@@ -1111,11 +1098,12 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             with (
                 patch.object(runner.shutil, "disk_usage", return_value=Mock(free=12 * 1024**3)),
                 patch.object(runner, "run", side_effect=fake_run),
+                patch.object(runner, "verified_live_openclaw_bind", return_value=Path(td)),
+                patch.object(runner, "transactional_preprod_sqlite_backup") as snapshot,
             ):
-                with self.assertRaises(subprocess.CalledProcessError):
-                    runner.copy_state_from_live_container("/var/lib/jason/openclaw", clone)
-            self.assertTrue(any(str(cmd[2]).endswith("-wal") for cmd in commands
-                                if cmd[:2] == ["docker", "cp"]))
+                runner.copy_state_from_live_container("/var/lib/jason/openclaw", clone)
+            snapshot.assert_called_once()
+            self.assertFalse(any(c[:2] == ["docker", "cp"] for c in commands))
 
     def test_bounded_preprod_refuses_unsafe_or_oversized_listing(self):
         for value in ("", "../escape\n", "a/b\n", "dup\ndup\n", "entry\n" * 257):
@@ -1137,7 +1125,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                     )
             command.assert_not_called()
 
-    def test_bounded_preprod_copies_authority_but_not_large_event_journal(self):
+    def test_bounded_preprod_snapshots_authority_but_skips_event_history(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as td:
             target = Path(td) / "clone"
@@ -1150,17 +1138,18 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             with (
                 patch.object(runner.shutil, "disk_usage", return_value=Mock(free=12 * 1024**3)),
                 patch.object(runner, "run", side_effect=record),
+                patch.object(runner, "verified_live_openclaw_bind", return_value=Path(td)),
+                patch.object(runner, "transactional_preprod_sqlite_backup") as snapshot,
             ):
-                runner.copy_state_from_live_container(
-                    "/var/lib/jason/openclaw", target,
-                )
+                runner.copy_state_from_live_container("/var/lib/jason/openclaw", target)
             copied = [str(v[2]) for v in commands if v[:2] == ["docker", "cp"]]
-            self.assertEqual(len(copied), 2)
-            self.assertTrue(any(name.endswith("/authority.sqlite3") for name in copied))
-            self.assertTrue(any(name.endswith("/support-repair") for name in copied))
+            self.assertEqual(len(copied), 1)
+            self.assertTrue(copied[0].endswith("/support-repair"))
+            snapshot.assert_called_once()
+            self.assertEqual(snapshot.call_args.args[0].name, "authority.sqlite3")
             self.assertFalse(any("orchestration-events" in name for name in copied))
 
-    def test_bounded_preprod_refuses_growth_past_reserve_after_copy(self):
+    def test_bounded_preprod_refuses_growth_after_transactional_snapshot(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as td:
             target = Path(td) / "clone"
@@ -1174,12 +1163,13 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 patch.object(runner.shutil, "disk_usage",
                              side_effect=[Mock(free=8 * 1024**3), Mock(free=2 * 1024**3)]),
                 patch.object(runner, "run", side_effect=record),
+                patch.object(runner, "verified_live_openclaw_bind", return_value=Path(td)),
+                patch.object(runner, "transactional_preprod_sqlite_backup") as snapshot,
             ):
                 with self.assertRaisesRegex(runner.ReleaseManagerError, "bounded disk capacity"):
-                    runner.copy_state_from_live_container(
-                        "/var/lib/jason/openclaw", target,
-                    )
-            self.assertEqual(len([c for c in seen if c[:2] == ["docker", "cp"]]), 1)
+                    runner.copy_state_from_live_container("/var/lib/jason/openclaw", target)
+            self.assertEqual(len([c for c in seen if c[:2] == ["docker", "cp"]]), 0)
+            snapshot.assert_called_once()
 
     def test_release_manager_defaults_to_managed_source_not_developer_checkout(self):
         self.assertEqual(
@@ -2994,6 +2984,8 @@ def test_preprod_copy_excludes_recursive_scratch_only_from_operational_records(t
         patch.object(runner.shutil, "disk_usage",
                      return_value=Mock(free=12 * 1024**3)),
         patch.object(runner, "run", side_effect=fake_run),
+        patch.object(runner, "verified_live_openclaw_bind", return_value=tmp_path),
+        patch.object(runner, "transactional_preprod_sqlite_backup") as snapshot,
     ):
         runner.copy_state_from_live_container(
             "/var/lib/jason/openclaw", tmp_path / "clone",
@@ -3007,8 +2999,10 @@ def test_preprod_copy_excludes_recursive_scratch_only_from_operational_records(t
                for path in copied)
     assert any(path.endswith("/release-manager/mobile-release-decisions-processed")
                for path in copied)
-    assert any(path.endswith("/reflection.sqlite3") for path in copied)
+    assert not any(path.endswith("/reflection.sqlite3") for path in copied)
     assert any(path.endswith("/support-repair") for path in copied)
+    snapshot.assert_called_once()
+    assert snapshot.call_args.args[0].name == "reflection.sqlite3"
     assert not any(path.endswith("/release-manager/preprod") for path in copied)
     assert not any(path.endswith("/release-manager/worktrees") for path in copied)
     assert not (tmp_path / "clone/release-manager/preprod").exists()
@@ -3354,8 +3348,10 @@ def _exercise_serialized_preprod(monkeypatch, tmp_path, *, fail_health=False):
     monkeypatch.setattr(runner, "wait_health", wait)
     monkeypatch.setattr(runner, "verify_preprod_env",
                         lambda *args: events.append("env_verified"))
-    monkeypatch.setattr(runner, "production_preflight",
-                        lambda *args: events.append("preflight"))
+    def accepted_preflight(*args):
+        events.append("preflight")
+        return "sha256:" + "c" * 64
+    monkeypatch.setattr(runner, "production_preflight", accepted_preflight)
     monkeypatch.setattr(runner, "write_owner_notification_event",
                         lambda *args: events.append("notice"))
     monkeypatch.setattr(runner, "save_record",
@@ -3849,16 +3845,129 @@ class BoundSupportReleaseIdentityTests(unittest.TestCase):
                 retention.assert_not_called()
 
 
-def test_same_profile_rollforward_guard_accepts_source_or_lkg_only():
-    import ast
-    from pathlib import Path
-    source = (Path(__file__).resolve().parents[1] / "release_manager_host_runner.py").read_text()
-    module = ast.parse(source)
-    target = next(node for node in ast.walk(module) if isinstance(node, ast.If)
-                  and "prior_autotask_profile not in declared_pair" in ast.unparse(node.test))
-    predicate = compile(ast.Expression(target.test), "<preflight-guard>", "eval")
-    pair = ("v13", "v10")
-    assert not eval(predicate, {"declared_pair": pair, "prior_autotask_profile": "v13"})
-    assert not eval(predicate, {"declared_pair": pair, "prior_autotask_profile": "v10"})
-    assert eval(predicate, {"declared_pair": pair, "prior_autotask_profile": "v11"})
-    assert eval(predicate, {"declared_pair": None, "prior_autotask_profile": "v13"})
+def test_native_preflight_rejects_lkg_declaration_mismatch(tmp_path):
+    from unittest.mock import patch
+    with (patch.object(runner, "declared_autotask_read_profiles",
+                       return_value=("v13", "v10")),
+          patch.object(runner, "live_autotask_read_profile", return_value="v13"),
+          patch.object(runner, "declared_quickbooks_read_profile", return_value=None)):
+        with __import__("pytest").raises(runner.ReleaseManagerError,
+                                        match="rollback profile disagrees"):
+            runner.native_deploy_environment(tmp_path, "runtime", "mcp", SHA_A)
+
+
+def test_native_preflight_passes_same_bound_env_to_both_scripts(tmp_path):
+    from unittest.mock import patch
+    with (patch.object(runner, "declared_autotask_read_profiles",
+                       return_value=("v13", "v13")),
+          patch.object(runner, "live_autotask_read_profile", return_value="v13"),
+          patch.object(runner, "declared_quickbooks_read_profile", return_value=None)):
+        env = runner.native_deploy_environment(tmp_path, "runtime", "mcp", SHA_A)
+    assert env["JASON_PROVIDER_READ_ACTIVATION_PROFILE"] == "v13"
+    assert env["JASON_PROVIDER_READ_ROLLBACK_PROFILE"] == "v13"
+    assert env["JASON_RUNTIME_PRODUCTION_IMAGE"] == "runtime"
+    assert env["JASON_MCP_PRODUCTION_IMAGE"] == "mcp"
+    assert env["JASON_SOURCE_REVISION_OVERRIDE"] == SHA_A
+
+
+def test_transactional_sqlite_snapshot_includes_uncheckpointed_commits(tmp_path):
+    import sqlite3
+    live = tmp_path / "live"
+    live.mkdir()
+    database = live / "governed-execution.sqlite3"
+    connection = sqlite3.connect(database)
+    try:
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        connection.execute("PRAGMA wal_autocheckpoint=0")
+        connection.execute("CREATE TABLE evidence(id INTEGER PRIMARY KEY, value TEXT)")
+        connection.execute("INSERT INTO evidence(value) VALUES ('committed-wal-row')")
+        connection.commit()
+        assert (live / "governed-execution.sqlite3-wal").exists()
+        clone = tmp_path / "isolated.sqlite3"
+        runner.transactional_preprod_sqlite_backup(database, clone)
+        from contextlib import closing
+        with closing(sqlite3.connect(f"file:{clone}?mode=ro", uri=True)) as copied:
+            assert copied.execute("SELECT value FROM evidence").fetchone()[0] == "committed-wal-row"
+        assert not (tmp_path / "isolated.sqlite3-wal").exists()
+        assert clone.stat().st_mode & 0o077 == 0
+        assert connection.execute("SELECT count(*) FROM evidence").fetchone()[0] == 1
+    finally:
+        connection.close()
+
+
+def test_transactional_sqlite_snapshot_fails_closed_if_main_disappeared(tmp_path):
+    import pytest
+    with pytest.raises(runner.ReleaseManagerError, match="unsafe"):
+        runner.transactional_preprod_sqlite_backup(
+            tmp_path / "gone.sqlite3", tmp_path / "isolated.sqlite3",
+        )
+    assert not (tmp_path / "isolated.sqlite3").exists()
+
+
+def test_verified_live_bind_fails_closed_on_wrong_mount(tmp_path):
+    import json
+    from unittest.mock import patch
+    wrong = [{"Mounts": [{"Type": "bind", "Destination": "/tmp", "Source": str(tmp_path), "RW": True}]}]
+    with patch.object(runner, "output", return_value=json.dumps(wrong)):
+        with __import__("pytest").raises(runner.ReleaseManagerError,
+                                         match="ambiguous"):
+            runner.verified_live_openclaw_bind()
+    valid = [{"Mounts": [{"Type": "bind", "Destination": "/var/lib/jason/openclaw", "Source": str(tmp_path), "RW": True}]}]
+    with patch.object(runner, "output", return_value=json.dumps(valid)):
+        assert runner.verified_live_openclaw_bind() == tmp_path
+
+
+def test_preproduction_fails_on_live_rollback_profile_mismatch_before_scripts(tmp_path):
+    import json
+    import pytest
+    candidate = tmp_path / 'candidate'
+    (candidate / 'config').mkdir(parents=True)
+    (candidate / 'config/autotask-entity-read-profile.json').write_text(
+        json.dumps({'schema_version':'1.0','read_profile':
+                    'itglue-autotask-entra-dynamic-schema-read-catalog-v13',
+                    'rollback_read_profile':
+                    'itglue-autotask-entra-procurement-billing-reconciliation-catalog-v10'}))
+    with (patch.object(runner, 'require_host_reconciler_ready'),
+          patch.object(runner, 'worktree', return_value=candidate),
+          patch.object(runner, 'remove_worktree'),
+          patch.object(runner, 'live_autotask_read_profile',
+                       return_value='itglue-autotask-entra-dynamic-schema-read-catalog-v13'),
+          patch.object(runner, 'declared_quickbooks_read_profile', return_value=None),
+          patch.object(runner, 'run') as script):
+        with pytest.raises(runner.ReleaseManagerError,
+                           match='rollback profile disagrees'):
+            runner.production_preflight(tmp_path,tmp_path,'runtime:real','mcp:real',SHA_A)
+    script.assert_not_called()
+
+
+def test_native_contract_digest_changes_with_rollback_profile_not_worker_uid(tmp_path):
+    base = {
+        'JASON_RUNTIME_PRODUCTION_IMAGE': 'runtime:candidate',
+        'JASON_MCP_PRODUCTION_IMAGE': 'mcp:candidate',
+        'JASON_SOURCE_REVISION_OVERRIDE': SHA_A,
+        'JASON_PROVIDER_READ_ACTIVATION_PROFILE': 'v13',
+        'JASON_PROVIDER_READ_ROLLBACK_PROFILE': 'v13',
+    }
+    digest = runner.native_deploy_contract_digest(base)
+    assert digest.startswith('sha256:')
+    assert len(digest) == 71
+    assert runner.native_deploy_contract_digest({**base,
+        'JASON_DIAGNOSTIC_WORKER_DEVICE_UID': 'different'}) == digest
+    assert runner.native_deploy_contract_digest({**base,
+        'JASON_PROVIDER_READ_ROLLBACK_PROFILE': 'v10'}) != digest
+    assert runner.native_deploy_contract_digest({**base,
+        'JASON_MCP_PRODUCTION_IMAGE': 'mcp:changed'}) != digest
+
+
+def test_transactional_sqlite_snapshot_rejects_disk_budget_before_copy(tmp_path):
+    import sqlite3
+    from unittest.mock import Mock
+    import pytest
+    source = tmp_path / 'real.sqlite3'
+    with sqlite3.connect(source) as conn:
+        conn.execute('CREATE TABLE operational_evidence(v TEXT)')
+    target = tmp_path / 'isolated.sqlite3'
+    with patch.object(runner.shutil, 'disk_usage', return_value=Mock(free=128)):
+        with pytest.raises(runner.ReleaseManagerError, match='isolated capacity'):
+            runner.transactional_preprod_sqlite_backup(source,target)
+    assert not target.exists()

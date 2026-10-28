@@ -24,7 +24,7 @@ import tempfile
 import sys
 import time
 import urllib.request
-from contextlib import contextmanager
+from contextlib import contextmanager, closing
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Mapping
@@ -1424,13 +1424,75 @@ _PREPROD_OPENCLAW_EXCLUDED = frozenset({
 })
 
 
-def _preprod_regenerable_sqlite_shm(name: str) -> bool:
-    # SQLite -shm files are transient WAL-index coordination state, not the
-    # database or committed transaction log. They can vanish after the source
-    # listing but before docker cp, or become invalid across container copies.
-    # Only exact top-level *.sqlite3-shm names are skipped; preserve sqlite3,
-    # sqlite3-wal, and all other production/authority files.
-    return name.endswith(".sqlite3-shm") and len(name) > len(".sqlite3-shm")
+def _preprod_sqlite_sidecar(name: str) -> bool:
+    """Sidecars are transient; a consistent SQLite backup includes committed WAL."""
+    return any(
+        name.endswith(".sqlite3" + suffix)
+        and len(name) > len(".sqlite3" + suffix)
+        for suffix in ("-wal", "-shm", "-journal")
+    )
+
+
+def verified_live_openclaw_bind() -> Path:
+    """Resolve only the real runtime's exact bind, never a developer checkout."""
+    try:
+        containers = json.loads(output(["docker", "inspect", "jason-runtime"]))
+        mounts = containers[0]["Mounts"] if len(containers) == 1 else []
+        matches = [mount for mount in mounts
+                   if mount.get("Type") == "bind"
+                   and mount.get("Destination") == "/var/lib/jason/openclaw"
+                   and mount.get("RW") is True]
+        if len(matches) != 1:
+            raise ReleaseManagerError("live OpenClaw bind identity is ambiguous")
+        path = Path(matches[0]["Source"])
+        if not path.is_absolute() or path.is_symlink() or not path.is_dir():
+            raise ReleaseManagerError("live OpenClaw bind is unsafe")
+        return path
+    except (IndexError, TypeError, KeyError, ValueError, OSError) as exc:
+        raise ReleaseManagerError("live OpenClaw bind cannot be verified") from exc
+
+
+def transactional_preprod_sqlite_backup(source: Path, target: Path) -> None:
+    """Read committed data, including WAL, into a private consistent snapshot.
+
+    Never copy raw journal/WAL files out from under SQLite writers. Use the
+    SQLite online backup API against the proven live bind, with a readonly
+    connection and a separate isolated target. No live process is restarted.
+    """
+    if (source.suffix != ".sqlite3" or source.is_symlink()
+            or not source.is_file() or target.exists() or target.is_symlink()):
+        raise ReleaseManagerError("live SQLite source or isolated target is unsafe")
+    try:
+        uri = source.resolve().as_uri() + "?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True, timeout=4.0)) as live:
+            live.execute("PRAGMA query_only=ON")
+            pages = int(live.execute("PRAGMA page_count").fetchone()[0])
+            page_size = int(live.execute("PRAGMA page_size").fetchone()[0])
+            estimate = pages * page_size
+            if (estimate > _PREPROD_CLONE_MAX_BYTES
+                    or shutil.disk_usage(target.parent).free <
+                    estimate + _PREPROD_DISK_RESERVE_BYTES):
+                raise ReleaseManagerError("SQLite snapshot exceeds bounded isolated capacity")
+            started = time.monotonic()
+            def bounded_progress(status: int, remaining: int, total: int) -> None:
+                if time.monotonic() - started > 120:
+                    raise ReleaseManagerError("SQLite snapshot exceeded bounded time")
+            with closing(sqlite3.connect(str(target), timeout=4.0)) as clone:
+                live.backup(clone, pages=128, progress=bounded_progress, sleep=0.1)
+                # An online backup of a WAL-mode source inherits the WAL-mode
+                # header. Convert ONLY this isolated target to a self-contained
+                # DELETE journal database, never touch the live source.
+                mode = clone.execute("PRAGMA journal_mode=DELETE").fetchone()
+                if mode is None or mode[0].lower() != "delete":
+                    raise ReleaseManagerError("isolated SQLite snapshot is not self-contained")
+        target.chmod(0o600)
+    except (sqlite3.Error, OSError, ValueError, ReleaseManagerError) as exc:
+        target.unlink(missing_ok=True)
+        if isinstance(exc, ReleaseManagerError):
+            raise
+        raise ReleaseManagerError("transactional preprod SQLite snapshot failed") from exc
+
+
 _PREPROD_CLONE_MAX_BYTES = 4 * 1024**3
 _PREPROD_DISK_RESERVE_BYTES = 3 * 1024**3
 # These are recursively nested *snapshots/build trees*, not operational
@@ -1453,7 +1515,7 @@ def bounded_preprod_openclaw_entries(raw: str) -> list[str]:
     return [
         name for name in entries
         if name not in _PREPROD_OPENCLAW_EXCLUDED
-        and not _preprod_regenerable_sqlite_shm(name)
+        and not _preprod_sqlite_sidecar(name)
     ]
 
 
@@ -1477,9 +1539,10 @@ def copy_state_from_live_container(
         shutil.rmtree(destination)
     destination.mkdir(parents=True, exist_ok=True, mode=0o700)
     if container_path == "/var/lib/jason/openclaw":
-        # Docker copies from the live container (never via a mutable host
-        # checkout), but whole-tree docker cp can fill the host disk with
-        # years of append-only orchestration event history.
+        # Non-SQLite state copies from the live container; selected SQLite
+        # databases use the readonly online backup API against the verified
+        # live container bind, never a mutable developer checkout. A whole-tree
+        # docker cp would also multiply years of append-only event history.
         free_at_start = shutil.disk_usage(destination).free
         if free_at_start < _PREPROD_CLONE_MAX_BYTES + _PREPROD_DISK_RESERVE_BYTES:
             raise ReleaseManagerError("insufficient disk headroom for isolated preproduction state")
@@ -1487,12 +1550,17 @@ def copy_state_from_live_container(
             "docker", "exec", "jason-runtime", "python", "-c",
             "import os; print('\\n'.join(sorted(os.listdir('/var/lib/jason/openclaw'))))",
         ]))
-        def guarded_copy(source: str, target: Path) -> None:
-            run(["docker", "cp", f"jason-runtime:{source}", str(target)])
+        def verify_disk_budget() -> None:
             free_now = shutil.disk_usage(destination).free
             if (free_now < _PREPROD_DISK_RESERVE_BYTES
                     or free_at_start - free_now > _PREPROD_CLONE_MAX_BYTES):
                 raise ReleaseManagerError("isolated preproduction state exceeded bounded disk capacity")
+
+        def guarded_copy(source: str, target: Path) -> None:
+            run(["docker", "cp", f"jason-runtime:{source}", str(target)])
+            verify_disk_budget()
+
+        live_sqlite_bind: Path | None = None
 
         for name in names:
             if name == "release-manager":
@@ -1509,6 +1577,16 @@ def copy_state_from_live_container(
                 for child in nested:
                     guarded_copy(container_path + "/" + name + "/" + child,
                                  target / child)
+            elif name.endswith(".sqlite3"):
+                # Verify the bind at first use, and refuse any ambiguous bind.
+                # The backup API includes committed WAL without racing a
+                # disappearing -wal, -shm or -journal sidecar.
+                if live_sqlite_bind is None:
+                    live_sqlite_bind = verified_live_openclaw_bind()
+                transactional_preprod_sqlite_backup(
+                    live_sqlite_bind / name, destination / name,
+                )
+                verify_disk_budget()
             else:
                 guarded_copy(container_path + "/" + name, destination / name)
         if (destination / "release-manager").is_dir() and any(
@@ -1518,6 +1596,8 @@ def copy_state_from_live_container(
             raise ReleaseManagerError("preproduction release cache isolation failed")
         if any((destination / name).exists() for name in _PREPROD_OPENCLAW_EXCLUDED):
             raise ReleaseManagerError("excluded production event journal was copied")
+        if any(_preprod_sqlite_sidecar(name) for name in os.listdir(destination)):
+            raise ReleaseManagerError("isolated preproduction SQLite sidecar was copied")
         # Runtime startup initializes a fresh isolated orchestration journal.
         return
     run(
@@ -1746,20 +1826,76 @@ def verify_preprod_env(name: str, candidate_sha: str) -> None:
             raise ReleaseManagerError(f"pre-production mutation guard mismatch: {key}")
 
 
+def native_deploy_environment(
+    candidate_tree: Path,
+    runtime_image: str,
+    mcp_image: str,
+    candidate_sha: str,
+    *,
+    worker_uid: str | None = None,
+) -> dict[str, str]:
+    """Build the SAME exact source-bound environment in preprod and promotion.
+
+    The runtime and MCP scripts compare the rollback-profile environment to
+    the immutable source declaration. Validate this against the REAL live LKG
+    before advertising readiness, never after a live deployment starts.
+    """
+    env = os.environ.copy()
+    env["JASON_RUNTIME_PRODUCTION_IMAGE"] = runtime_image
+    env["JASON_MCP_PRODUCTION_IMAGE"] = mcp_image
+    env["JASON_SOURCE_REVISION_OVERRIDE"] = exact_sha(candidate_sha, "candidate_sha")
+    if worker_uid is not None:
+        env[worker_enrollment.ENV_NAME] = worker_uid
+    declared = declared_autotask_read_profiles(candidate_tree)
+    if declared is not None:
+        source_profile, declared_rollback = declared
+        actual_live = live_autotask_read_profile()
+        if actual_live != declared_rollback:
+            raise ReleaseManagerError(
+                "source-declared Autotask rollback profile disagrees with verified live LKG"
+            )
+        if os.environ.get("JASON_PROVIDER_READ_ACTIVATION_PROFILE") not in (None, source_profile):
+            raise ReleaseManagerError("invoking Autotask profile override conflicts with immutable candidate")
+        if os.environ.get("JASON_PROVIDER_READ_ROLLBACK_PROFILE") not in (None, declared_rollback):
+            raise ReleaseManagerError("invoking Autotask rollback override conflicts with immutable candidate")
+        env["JASON_PROVIDER_READ_ACTIVATION_PROFILE"] = source_profile
+        env["JASON_PROVIDER_READ_ROLLBACK_PROFILE"] = declared_rollback
+    quickbooks = declared_quickbooks_read_profile(candidate_tree)
+    if quickbooks is not None:
+        if os.environ.get("JASON_QUICKBOOKS_READ_PROFILE") not in (None, quickbooks):
+            raise ReleaseManagerError("invoking QuickBooks profile override conflicts with immutable candidate")
+        env["JASON_QUICKBOOKS_READ_PROFILE"] = quickbooks
+    return env
+
+
+_NATIVE_DEPLOY_CONTRACT_KEYS = (
+    "JASON_RUNTIME_PRODUCTION_IMAGE",
+    "JASON_MCP_PRODUCTION_IMAGE",
+    "JASON_SOURCE_REVISION_OVERRIDE",
+    "JASON_PROVIDER_READ_ACTIVATION_PROFILE",
+    "JASON_PROVIDER_READ_ROLLBACK_PROFILE",
+    "JASON_QUICKBOOKS_READ_PROFILE",
+)
+
+
+def native_deploy_contract_digest(env: Mapping[str, str]) -> str:
+    """Attest only non-secret, source-bound values shared by both scripts."""
+    scope = {key: str(env.get(key, "")) for key in _NATIVE_DEPLOY_CONTRACT_KEYS}
+    raw = json.dumps(scope, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
+
+
 def production_preflight(
     repo: Path,
     state_root: Path,
     image: str,
     mcp_image: str,
     candidate_sha: str,
-) -> None:
+) -> str:
     require_host_reconciler_ready(state_root)
     candidate_tree = worktree(repo, state_root, candidate_sha)
     try:
-        env = os.environ.copy()
-        env["JASON_RUNTIME_PRODUCTION_IMAGE"] = image
-        env["JASON_MCP_PRODUCTION_IMAGE"] = mcp_image
-        env["JASON_SOURCE_REVISION_OVERRIDE"] = candidate_sha
+        env = native_deploy_environment(candidate_tree, image, mcp_image, candidate_sha)
         run(
             [
                 str(
@@ -1786,6 +1922,7 @@ def production_preflight(
             cwd=candidate_tree,
             env=env,
         )
+        return native_deploy_contract_digest(env)
     finally:
         remove_worktree(repo, candidate_tree)
 
@@ -2212,13 +2349,16 @@ def run_preproduction(repo: Path, state_root: Path, record: dict[str, Any]) -> d
         run(["docker", "start", name])
         wait_health(name)
         verify_preprod_env(name, str(candidate["candidate_sha"]))
-        production_preflight(
+        preflight_contract_digest = production_preflight(
             repo,
             state_root,
             image,
             mcp_image,
             str(candidate["candidate_sha"]),
         )
+        if (not isinstance(preflight_contract_digest, str)
+                or not re.fullmatch(r"sha256:[0-9a-f]{64}", preflight_contract_digest)):
+            raise ReleaseManagerError("preproduction native deployment contract not proven")
         rollback_image = image_id("jason-runtime:rollback-current")
         if not rollback_image:
             raise ReleaseManagerError("runtime rollback-current image alias is unavailable")
@@ -2230,6 +2370,8 @@ def run_preproduction(repo: Path, state_root: Path, record: dict[str, Any]) -> d
             "artifact_digest": digest,
             "mcp_artifact_digest": mcp_digest,
             "acceptance_passed": True,
+            "native_deploy_contract_digest": preflight_contract_digest,
+            "sqlite_snapshot_consistency_checked": True,
             "failure_path_tests_passed": True,
             "rollback_readiness_passed": True,
             "writable_state_isolated": True,
@@ -2712,21 +2854,19 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     prior_autotask_profile = (
         live_autotask_read_profile() if candidate_autotask_profile is not None else None
     )
-    if candidate_autotask_profile is not None:
-        declared_pair = declared_autotask_read_profiles(deploy_worktree)
-        if (declared_pair is None or prior_autotask_profile not in declared_pair):
-            raise ReleaseManagerError(
-                "live Autotask profile is neither candidate source nor declared rollback profile"
-            )
-    if (candidate_autotask_profile is not None
-            and os.environ.get("JASON_PROVIDER_READ_ACTIVATION_PROFILE") not in (None, candidate_autotask_profile)):
+    # Run the identical deployment-input validator used by preproduction.
+    # This must happen before CCC and any production state transition.
+    deployment_env = native_deploy_environment(
+        deploy_worktree, image, mcp_image, candidate_sha,
+        worker_uid=candidate_worker_uid,
+    )
+    verified_contract = (record.get("preproduction") or {}).get(
+        "native_deploy_contract_digest"
+    )
+    if (not isinstance(verified_contract, str)
+            or verified_contract != native_deploy_contract_digest(deployment_env)):
         raise ReleaseManagerError(
-            "invoking Autotask profile override conflicts with immutable candidate"
-        )
-    if (candidate_quickbooks_profile is not None
-            and os.environ.get("JASON_QUICKBOOKS_READ_PROFILE") not in (None, candidate_quickbooks_profile)):
-        raise ReleaseManagerError(
-            "invoking QuickBooks profile override conflicts with immutable candidate"
+            "native deployment arguments differ from preproduction-verified contract"
         )
     host_contract = verify_candidate_host_reconciliation_contract(
         deploy_worktree, candidate_sha
@@ -2788,16 +2928,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     gate_transition(repo, state_root, record, "production")
     save_record(state_root, record)
 
-    env = os.environ.copy()
-    env["JASON_RUNTIME_PRODUCTION_IMAGE"] = image
-    env["JASON_MCP_PRODUCTION_IMAGE"] = mcp_image
-    env["JASON_SOURCE_REVISION_OVERRIDE"] = candidate_sha
-    env[worker_enrollment.ENV_NAME] = candidate_worker_uid
-    if candidate_quickbooks_profile is not None:
-        env["JASON_QUICKBOOKS_READ_PROFILE"] = candidate_quickbooks_profile
-    if candidate_autotask_profile is not None:
-        env["JASON_PROVIDER_READ_ACTIVATION_PROFILE"] = candidate_autotask_profile
-        env["JASON_PROVIDER_READ_ROLLBACK_PROFILE"] = prior_autotask_profile
+    env = deployment_env
 
     runtime_attempted = False
     mcp_attempted = False

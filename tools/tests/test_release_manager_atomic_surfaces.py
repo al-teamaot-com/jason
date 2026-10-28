@@ -62,6 +62,16 @@ def record():
             "mcp_image": "jason-mcp:test-a",
             "mcp_artifact_digest": "sha256:mcp-a",
         },
+        # Exercise real rollback fault injection AFTER the production-input
+        # contract gate; no test may bypass that new fail-closed check.
+        "preproduction": {
+            "acceptance_passed": True,
+            "native_deploy_contract_digest": runner.native_deploy_contract_digest({
+                "JASON_RUNTIME_PRODUCTION_IMAGE": "jason-runtime:test-a",
+                "JASON_MCP_PRODUCTION_IMAGE": "jason-mcp:test-a",
+                "JASON_SOURCE_REVISION_OVERRIDE": SHA_A,
+            }),
+        },
         "history": [],
     }
 
