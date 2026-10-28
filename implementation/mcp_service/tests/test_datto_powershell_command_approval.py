@@ -124,6 +124,17 @@ def install_runtime(monkeypatch):
     return approvals, orchestrator_calls
 
 
+def remediation_review(target: str):
+    return {
+        "decision": "recommend", "target_id": target,
+        "problem": "Endpoint protection service is stopped and not responding to user requests.",
+        "evidence_refs": ["corr_mcp_service_status_read"],
+        "expected_improvement": "Start only the stopped protection service to restore protection.",
+        "verification": "Reread the protection service state and EDR status after the action.",
+        "narrower_options": [],
+    }
+
+
 def test_read_only_powershell_needs_no_technician_approval(
     monkeypatch,
 ):
@@ -173,11 +184,8 @@ def test_mutating_powershell_requires_explicit_approval(
         },
     )
 
-    assert result["status"] == "approval_required"
-    assert (
-        "DATTO_POWERSHELL_COMMAND_APPROVAL_REQUIRED"
-        in result["reason_codes"]
-    )
+    assert result["status"] == "rejected"
+    assert "REMEDIATION_ASSESSMENT_REQUIRED" in result["reason_codes"]
     assert approvals == []
     assert calls == []
 
@@ -199,6 +207,7 @@ def test_mutating_powershell_runs_after_explicit_approval(
                     "'EndpointProtectionService'"
                 ),
             },
+            "jason_remediation_review": remediation_review("other-managed-device"),
         },
         explicit_approval=True,
     )
@@ -207,3 +216,27 @@ def test_mutating_powershell_runs_after_explicit_approval(
     assert len(calls) == 1
     assert len(approvals) == 1
     assert approvals[0].decided_by == "person-al"
+
+
+def test_spooler_service_repair_requires_approval_but_avoids_reboot(monkeypatch):
+    set_scope(monkeypatch)
+    approvals, calls = install_runtime(monkeypatch)
+    review = remediation_review("other-managed-device")
+    review["problem"] = "Print Spooler is stopped and print requests remain queued."
+    review["expected_improvement"] = "Restart the Print Spooler only, without rebooting the PC."
+    review["verification"] = "Read spooler status and confirm queued print job completes."
+    result = server._governed_execute(
+        capability_name="automation.component.execute",
+        arguments={
+            "device_uid": "other-managed-device",
+            "component_uid": UID,
+            "variables": {"usrInput": "Restart-Service Spooler"},
+            "jason_remediation_review": review,
+        },
+        explicit_approval=True,
+    )
+    assert result["status"] == "succeeded"
+    assert len(calls) == 1
+    assert len(approvals) == 1
+    assert calls[0].arguments["variables"]["usrInput"] == "Restart-Service Spooler"
+    assert "jason_remediation_review" not in calls[0].arguments
