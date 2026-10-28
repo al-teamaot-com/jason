@@ -288,3 +288,80 @@ def test_kfs_application_status_failure_is_not_falsely_classified_as_http_error(
 def test_kfs_success_status_preserves_read_behavior():
     from connectors.kyocera_kfs.client import KyoceraKfsSessionClient
     KyoceraKfsSessionClient._require_success({"status":{"code":200}},"KFS login")
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected_code"),
+    [
+        (TimeoutError("hidden-credential-content"), "KFS_NETWORK_TIMEOUT"),
+        (ConnectionRefusedError("hidden-credential-content"), "KFS_CONNECTION_REFUSED"),
+        (OSError("hidden-credential-content"), "KFS_NETWORK_IO_FAILURE"),
+    ],
+)
+def test_active_kfs_session_client_reports_safe_network_diagnostic(failure, expected_code):
+    from connectors.kyocera_kfs.client import KyoceraKfsSafeResponseError, KyoceraKfsSessionClient
+
+    class RaisingOpener:
+        def open(self, request, timeout):
+            raise failure
+
+    client=KyoceraKfsSessionClient(credentials(),opener=RaisingOpener())
+    with pytest.raises(KyoceraKfsSafeResponseError) as captured:
+        client._post("/KFS/DeviceList", {"password":"another-secret"})
+    error=captured.value
+    assert error.error_code==expected_code
+    assert error.service=="kyocera_kfs"
+    assert "hidden-credential-content" not in str(error)
+    assert "another-secret" not in str(error)
+
+
+def test_active_kfs_session_client_distinguishes_dns_and_tls():
+    import socket,ssl
+    from urllib.error import URLError
+    from connectors.kyocera_kfs.client import KyoceraKfsSafeResponseError, KyoceraKfsSessionClient
+
+    for reason, expected in (
+        (socket.gaierror(socket.EAI_NONAME,"secret-provider-address"), "KFS_DNS_RESOLUTION"),
+        (ssl.SSLError("secret-invalid-certificate"), "KFS_TLS_FAILURE"),
+    ):
+        class RaisingOpener:
+            def open(self, request, timeout):
+                raise URLError(reason)
+        client=KyoceraKfsSessionClient(credentials(),opener=RaisingOpener())
+        with pytest.raises(KyoceraKfsSafeResponseError) as error:
+            client._post("/KFS/Login", {"password":"not-for-logs"})
+        assert error.value.error_code==expected
+        assert "secret" not in str(error.value)
+
+
+def test_active_kfs_session_client_distinguishes_invalid_json_and_response_shape():
+    from connectors.kyocera_kfs.client import KyoceraKfsSafeResponseError, KyoceraKfsSessionClient
+
+    class Response:
+        def __init__(self,raw):self.raw=raw
+        def __enter__(self):return self
+        def __exit__(self,*args):return False
+        def read(self):return self.raw
+
+    class ReturningOpener:
+        def __init__(self,raw):self.raw=raw
+        def open(self,request,timeout):return Response(self.raw)
+
+    for raw,expected in (
+        (b'not-json-hidden-provider-text',"KFS_INVALID_JSON"),
+        (b'["not-an-object"]',"KFS_INVALID_RESPONSE_SHAPE"),
+    ):
+        client=KyoceraKfsSessionClient(credentials(),opener=ReturningOpener(raw))
+        with pytest.raises(KyoceraKfsSafeResponseError) as error:
+            client._post("/KFS/Login", {"password":"do-not-print"})
+        assert error.value.error_code==expected
+        assert "not-json-hidden-provider-text" not in str(error.value)
+        assert "do-not-print" not in str(error.value)
+
+
+def test_active_kfs_session_connector_uses_patched_session_client_by_default():
+    from connectors.kyocera_kfs.connector import KyoceraKfsConnector
+    from connectors.kyocera_kfs.session_connector import KyoceraKfsSessionConnector
+    from connectors.kyocera_kfs.client import KyoceraKfsSessionClient
+    assert KyoceraKfsConnector is KyoceraKfsSessionConnector
+    assert KyoceraKfsSessionConnector.__init__.__kwdefaults__["client_factory"] is KyoceraKfsSessionClient
