@@ -1060,7 +1060,10 @@ def _contract_client_context_for_identity(
     # Contract reads can be selected by a trusted AOT staff identity with an
     # existing exact observe grant; other sensitive client-scoped read families
     # retain their Owner-only selection rule.
-    if capability_name in {SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ}:
+    if (
+        capability_name in {SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ}
+        and principal not in approval_owner_identities()
+    ):
         app = _runtime()
         bindings = getattr(app, "microsoft_identity_bindings", None)
         trusted = (
