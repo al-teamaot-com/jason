@@ -41,6 +41,7 @@
     "source_section_key": "6",
     "context_binding_status": "not_implemented_for_migration_draft",
     "external_evidence_required": [
+      "evidence_fresh",
       "identity_verified",
       "endpoint_online",
       "evidence_complete",
@@ -70,10 +71,25 @@
             "operator": "eq",
             "value": true
           },
-          "next": "availability_gate"
+          "next": "freshness_gate"
         }
       ],
       "default": "review_identity_blocked"
+    },
+    {
+      "id": "freshness_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "evidence_fresh",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "availability_gate"
+        }
+      ],
+      "default": "review_stale_alert"
     },
     {
       "id": "availability_gate",
@@ -85,10 +101,25 @@
             "operator": "eq",
             "value": true
           },
-          "next": "evidence_gate"
+          "next": "recurrence_gate"
         }
       ],
       "default": "review_waiting_endpoint"
+    },
+    {
+      "id": "recurrence_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "recurrence_threshold_met",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "review_recurring"
+        }
+      ],
+      "default": "evidence_gate"
     },
     {
       "id": "evidence_gate",
@@ -147,14 +178,6 @@
             "value": true
           },
           "next": "review_policy_conflict"
-        },
-        {
-          "when": {
-            "fact": "recurrence_threshold_met",
-            "operator": "eq",
-            "value": true
-          },
-          "next": "review_recurring"
         },
         {
           "when": {
@@ -324,6 +347,13 @@
       "id": "review_wrong_sync_mode",
       "type": "human_review",
       "classification": "wrong_sync_mode",
+      "preview_only": true,
+      "no_side_effects": true
+    },
+    {
+      "id": "review_stale_alert",
+      "type": "human_review",
+      "classification": "stale_alert",
       "preview_only": true,
       "no_side_effects": true
     }
@@ -987,7 +1017,7 @@
     ]
   },
   "migration": {
-    "status": "SHADOW_CLASSIFICATION_SIMULATION_ONLY_NOT_PARITY",
+    "status": "REVIEW_ONLY_EVIDENCE_BRIDGE_NOT_PRODUCTION_ACTIVE",
     "source_version_discrepancy": false,
     "production_replacement_allowed": false,
     "staged": false,
@@ -1005,7 +1035,9 @@
     "source_reconstruction_integrity": "verified_from_original_source_on_conversion",
     "section_semantic_extraction": "source_text_derived_no_provider_execution",
     "classification_simulation_added": "2026-10-28",
-    "operational_state_binding_verified": false
+    "operational_state_binding_verified": false,
+    "evidence_binding_status": "governed-read adapter developed in isolated branch; not production-wired or enabled",
+    "classification_parity": "synthetic and adapter acceptance only; operational parity not accepted"
   },
   "shadow_fixtures": {
     "type": "synthetic_untrusted_evidence",
@@ -1015,7 +1047,8 @@
       "evidence_complete": true,
       "approved_source_policy_confirmed": true,
       "source_in_approved_set": true,
-      "time_sync_healthy": true
+      "time_sync_healthy": true,
+      "evidence_fresh": true
     },
     "cases": [
       {
