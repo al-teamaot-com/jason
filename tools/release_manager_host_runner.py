@@ -353,11 +353,13 @@ def production_window_open(at: datetime | None = None) -> bool:
     return True
 
 
-def run(args: list[str], *, cwd: Path | None = None, env: dict[str, str] | None = None) -> str:
+def run(args: list[str], *, cwd: Path | None = None,
+        env: dict[str, str] | None = None, timeout: int | None = None) -> str:
     completed = subprocess.run(
         args,
         cwd=cwd,
         env=env,
+        timeout=timeout,
         check=True,
         text=True,
         stdout=subprocess.PIPE,
@@ -2547,6 +2549,7 @@ def publish_production_closeout(repo: Path, candidate_sha: str) -> dict[str, str
         [str(script), "production", candidate_sha],
         cwd=repo,
         env=env,
+        timeout=120,
     )
     if "DOCUMENTATION_SUCCESS_RECONCILIATION=PASS mode=production" not in publication:
         raise ReleaseManagerError("production documentation reconciliation did not pass")
@@ -2556,6 +2559,197 @@ def publish_production_closeout(repo: Path, candidate_sha: str) -> dict[str, str
         "documentation": "pass",
         "control_board": "pass",
     }
+
+
+def pending_administrative_closeout(record: dict[str, Any]) -> None:
+    """Persist noncritical work before closing an otherwise verified release."""
+    record["administrative_closeout"] = {
+        "schema_version": "1.0",
+        "documentation_control_board": {"status": "pending", "attempts": 0},
+        "owner_notification": {"status": "pending", "attempts": 0},
+        "needs_retry": True,
+    }
+    production = record.get("production") or {}
+    production["documentation_reconciliation"] = "pending"
+    production["control_board_publication"] = "pending"
+    production["owner_notification"] = "pending"
+    record["production"] = production
+
+
+def run_administrative_closeout(
+    repo: Path, state_root: Path, record: dict[str, Any],
+) -> dict[str, Any]:
+    """Retry post-verification publications without changing production state.
+
+    This function must be called AFTER the release has closed and committed its
+    last-known-good manifest, never from inside the rollback transaction's
+    exception handler. Errors stay in release evidence for later retry.
+    """
+    candidate = exact_sha(
+        str((record.get("release_candidate") or {}).get("candidate_sha") or ""),
+        "candidate_sha",
+    )
+    if (record.get("state") != "closed"
+            or (record.get("production") or {}).get("live_sha") != candidate
+            or not (record.get("production") or {}).get("verified_at")):
+        raise ReleaseManagerError("secondary closeout requires a fully verified closed release")
+    work = record.get("administrative_closeout")
+    if not isinstance(work, dict) or work.get("schema_version") != "1.0":
+        raise ReleaseManagerError("secondary closeout has no recorded post-verification queue")
+    for key in ("documentation_control_board", "owner_notification"):
+        if not isinstance(work.get(key), dict):
+            raise ReleaseManagerError("secondary closeout queue is malformed")
+
+    doc = work["documentation_control_board"]
+    if doc.get("status") != "pass":
+        doc["attempts"] = int(doc.get("attempts") or 0) + 1
+        doc["last_attempt_at"] = now()
+        try:
+            result = publish_production_closeout(repo, candidate)
+            if result != {"documentation": "pass", "control_board": "pass"}:
+                raise ReleaseManagerError("secondary publisher did not prove both outputs")
+        except Exception as exc:
+            doc["status"] = "pending"
+            doc["last_error_type"] = type(exc).__name__[:100]
+            # Avoid propagating output containing provider URLs/tokens or
+            # arbitrary exception strings into owner notification payloads.
+            doc["reason"] = "documentation_or_control_board_publication_failed"
+            record["production"]["documentation_reconciliation"] = "pending"
+            record["production"]["control_board_publication"] = "pending"
+        else:
+            doc["status"] = "pass"
+            doc.pop("last_error_type", None)
+            doc.pop("reason", None)
+            doc["completed_at"] = now()
+            record["production"]["documentation_reconciliation"] = "pass"
+            record["production"]["control_board_publication"] = "pass"
+
+    notification = work["owner_notification"]
+    if notification.get("status") != "pass":
+        notification["attempts"] = int(notification.get("attempts") or 0) + 1
+        notification["last_attempt_at"] = now()
+        try:
+            write_owner_notification_event(
+                state_root, record, "production_queue_completed",
+                owner_action=(
+                    "Production verified; documentation/control-board closeout is "
+                    "pending retry."
+                    if doc["status"] != "pass" else ""
+                ),
+            )
+        except Exception as exc:
+            notification["status"] = "pending"
+            notification["last_error_type"] = type(exc).__name__[:100]
+            notification["reason"] = "owner_notification_publication_failed"
+            record["production"]["owner_notification"] = "pending"
+        else:
+            notification["status"] = "pass"
+            notification.pop("last_error_type", None)
+            notification.pop("reason", None)
+            notification["completed_at"] = now()
+            record["production"]["owner_notification"] = "pass"
+
+    work["needs_retry"] = any(work[key]["status"] != "pass" for key in (
+        "documentation_control_board", "owner_notification",
+    ))
+    work["last_attempt_at"] = now()
+    record["administrative_closeout"] = work
+    save_record(state_root, record)
+    return record
+
+
+def retry_administrative_closeout(
+    repo: Path, state_root: Path, release_id: str,
+) -> dict[str, Any]:
+    """Explicit bounded retry: no deploy, approval, CCC or LKG write."""
+    record = load_record(state_root, release_id)
+    lock = acquire_production_transaction_lock(repo, state_root, record)
+    try:
+        record = load_record(state_root, release_id)
+        sha = exact_sha(
+            str((record.get("release_candidate") or {}).get("candidate_sha") or ""),
+            "candidate_sha",
+        )
+        if output(["git", "-C", str(repo), "rev-parse", "HEAD"]).strip() != sha:
+            raise ReleaseManagerError("secondary retry requires exact historical source checkout")
+        if output(["git", "-C", str(repo), "status", "--porcelain"]).strip():
+            raise ReleaseManagerError("secondary retry cannot use dirty release checkout")
+        # Never publish a stale production status or stale owner completion
+        # notification after newer releases have replaced this candidate.
+        live_production_alignment(sha)
+        return run_administrative_closeout(repo, state_root, record)
+    finally:
+        release_production_transaction_lock(lock)
+
+
+def retry_due_administrative_closeouts(
+    repo: Path, state_root: Path, *, retry_interval_minutes: int = 15,
+) -> int:
+    """Bounded post-verify retry on the existing five-minute manager cadence.
+
+    Never treats a stale closed release as current, never invokes promotion,
+    and never retries a secondary task inside a rollback-critical transaction.
+    Errors are journaled; evidence remains pending for the next scheduled tick.
+    """
+    root = state_root / "records"
+    if not root.is_dir():
+        return 0
+    candidates: list[tuple[str, str]] = []
+    moment = datetime.now(timezone.utc)
+    for path in sorted(root.glob("release-*.json")):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+            if record.get("state") != "closed":
+                continue
+            pending = record.get("administrative_closeout")
+            if not isinstance(pending, dict) or pending.get("needs_retry") is not True:
+                continue
+            sha = exact_sha(str((record.get("release_candidate") or {}).get("candidate_sha") or ""), "candidate_sha")
+            if ((record.get("production") or {}).get("live_sha") != sha
+                    or record.get("release_id") != record_id(sha)):
+                continue
+            attempted = pending.get("last_attempt_at")
+            if attempted:
+                age = (moment - datetime.fromisoformat(str(attempted))).total_seconds()
+                if age < retry_interval_minutes * 60:
+                    continue
+            candidates.append((sha, str(record["release_id"])))
+        except (OSError, json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
+            print("RELEASE_CLOSEOUT_RETRY=INVALID_QUEUE_EVIDENCE type=" + type(exc).__name__, flush=True)
+    if not candidates:
+        return 0
+    # At most one retry per scheduler tick. A release still serving production
+    # must be fully aligned; stale closed releases never publish success.
+    sha, release_id = candidates[-1]
+    work: Path | None = None
+    try:
+        record = load_record(state_root, release_id)
+        lock = acquire_production_transaction_lock(repo, state_root, record)
+    except ReleaseManagerBusy:
+        print("RELEASE_CLOSEOUT_RETRY=DEFERRED_ACTIVE_TRANSACTION", flush=True)
+        return 0
+    except (OSError, ReleaseManagerError) as exc:
+        print("RELEASE_CLOSEOUT_RETRY=GATE_UNAVAILABLE type=" + type(exc).__name__, flush=True)
+        return 0
+    try:
+        record = load_record(state_root, release_id)
+        if record.get("state") != "closed" or (
+                record.get("administrative_closeout") or {}).get("needs_retry") is not True:
+            return 0
+        live_production_alignment(sha)
+        work = worktree(repo, state_root, sha)
+        record = run_administrative_closeout(work, state_root, record)
+        print("RELEASE_CLOSEOUT_RETRY=" + (
+            "PENDING" if record["administrative_closeout"]["needs_retry"] else "COMPLETE"
+        ) + " release=" + release_id, flush=True)
+        return 1
+    except (OSError, ReleaseManagerError, subprocess.SubprocessError) as exc:
+        print("RELEASE_CLOSEOUT_RETRY=DEFERRED type=" + type(exc).__name__ + " release=" + release_id, flush=True)
+        return 0
+    finally:
+        if work is not None:
+            remove_worktree(repo, work)
+        release_production_transaction_lock(lock)
 
 
 def validate_release_record_contract(record: dict[str, Any]) -> None:
@@ -3144,8 +3338,6 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         drift_evidence = production_drift_evidence(state_root)
         production_manifest = capture_production_manifest(candidate_sha)
 
-        closeout = publish_production_closeout(deploy_worktree, candidate_sha)
-
         record["production"] = {
             "live_sha": live["revision"],
             "artifact_digest": live_digest,
@@ -3184,8 +3376,6 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "mcp_revision": alignment["mcp_revision"],
             "host_revision": alignment["host_revision"],
             "host_release": alignment["host_release"],
-            "documentation_reconciliation": closeout["documentation"],
-            "control_board_publication": closeout["control_board"],
             "verified_at": now(),
         }
         record["evidence_bundle"] = {
@@ -3206,6 +3396,9 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "final_state": "closed",
             "closed_at": now(),
         }
+        # Secondary jobs are durably queued BEFORE the critical release closes.
+        # Publication/notification errors never undo a healthy verified release.
+        pending_administrative_closeout(record)
         # The final root-governed last-known-good commit is part of production
         # acceptance. No verified/closed state or success notification may be
         # emitted until that protected transition independently succeeds.
@@ -3217,10 +3410,6 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         gate_transition(repo, state_root, record, "production_verified")
         gate_transition(repo, state_root, record, "closed")
         save_record(state_root, record)
-        write_owner_notification_event(
-            state_root, record, "production_queue_completed"
-        )
-        return record
     except Exception as error:
         rollback_env = quickbooks_rollback_environment(
             os.environ, rollback_sha=rollback_sha, prior_profile=prior_quickbooks_profile
@@ -3352,6 +3541,12 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             )
         save_record(state_root, record)
         raise
+    else:
+        # Release fully verified, LKG committed, and administrative work durably
+        # queued. Never call GitHub or the notification system while holding
+        # the production transaction/freeze exception. The existing five-minute
+        # timer performs these tasks after deployment, with bounded retries.
+        return record
     finally:
         remove_worktree(repo, deploy_worktree)
 
@@ -4060,6 +4255,10 @@ def request_expired_owner_card_renewal(
 
 
 def promote_eligible(repo: Path, state_root: Path) -> bool:
+    # Administrative retry is independent of whether unattended production
+    # promotions are enabled. It uses the existing five-minute timer but never
+    # mutates production, approves any release or reopens the freeze.
+    retry_due_administrative_closeouts(repo, state_root)
     # Keep the required five-minute timer active, but do not allow it to
     # execute a production promotion while Owner has selected manual mode.
     # The normal explicit approve + promote path remains governed and usable.
@@ -4320,6 +4519,8 @@ def main() -> int:
 
     promote = sub.add_parser("promote")
     promote.add_argument("--release-id", required=True)
+    closeout_retry = sub.add_parser("retry-closeout")
+    closeout_retry.add_argument("--release-id", required=True)
 
     recovery = sub.add_parser("recover-baseline")
     recovery.add_argument("--revision", required=True)
@@ -4407,6 +4608,10 @@ def main() -> int:
         record = deploy_production(repo, state_root, load_record(state_root, args.release_id))
         print(json.dumps(record, indent=2))
         return 0
+    if args.command == "retry-closeout":
+        record = retry_administrative_closeout(repo, state_root, args.release_id)
+        print(json.dumps(record, indent=2))
+        return 0 if not record["administrative_closeout"]["needs_retry"] else 2
     if args.command == "approval-only-held":
         print("RELEASE_APPROVAL_ONLY=" + (
             "PUBLISHED" if approval_only_while_promotion_held(repo, state_root)
