@@ -43,10 +43,10 @@ def lab(tmp_path):
 
 def check_preflight(lab, path, live_name, rollback_tag, *,
                     image="candidate", selected=V11, rollback=V10,
-                    live=V10, source=V11):
+                    live=V10, source=V11, declared_rollback=V10):
     root, bins = lab
     declaration = root / "config" / "autotask-entity-read-profile.json"
-    declaration.write_text(json.dumps({"schema_version": "1.0", "read_profile": source, "rollback_read_profile": V10}))
+    declaration.write_text(json.dumps({"schema_version": "1.0", "read_profile": source, "rollback_read_profile": declared_rollback}))
     source_script = (ROOT / path).read_text()
     marker = '\nif [ -z "$REVISION" ]; then'
     assert marker in source_script
@@ -192,4 +192,25 @@ def test_v13_to_v13_roll_forward_keeps_v10_rollback_and_source_gate(
 def test_unknown_live_profile_still_denied(lab,path,live_name,rollback_tag):
     response=check_preflight(lab,path,live_name,rollback_tag,selected=V13,source=V13,rollback=V10,live="unknown-profile")
     assert response.returncode != 0
+    assert "SELECTED_PROFILE=" not in response.stdout
+
+
+@pytest.mark.parametrize("path,live_name,rollback_tag", SCRIPTS)
+def test_v13_approved_same_profile_rollback_declaration_matches_live_lkg(
+        lab,path,live_name,rollback_tag):
+    response=check_preflight(
+        lab,path,live_name,rollback_tag,selected=V13,source=V13,
+        rollback=V13,declared_rollback=V13,live=V13,
+    )
+    assert response.returncode==0,response.stderr
+    assert "SELECTED_PROFILE="+V13 in response.stdout
+
+@pytest.mark.parametrize("path,live_name,rollback_tag", SCRIPTS)
+def test_v13_rollback_declaration_rejects_old_v10_override(
+        lab,path,live_name,rollback_tag):
+    response=check_preflight(
+        lab,path,live_name,rollback_tag,selected=V13,source=V13,
+        rollback=V10,declared_rollback=V13,live=V13,
+    )
+    assert response.returncode!=0
     assert "SELECTED_PROFILE=" not in response.stdout
