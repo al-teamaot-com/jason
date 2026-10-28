@@ -1,43 +1,63 @@
-# Jason JSON playbook migration audit — October 28, 2026
+# Jason JSON playbook conversion — source-preserving drafts
+**Audit date:** October 28, 2026  
+**Change type:** Draft PR documentation and inert JSON source data **only**  
+**Review:** https://github.com/al-teamaot-com/jason/pull/2111
 
-## Scope of this change
+## Outcome
+All **16** entries in `implementation/autonomous_remediation/playbook_registry.json` have a separate JSON v1 **conversion draft** under `docs/playbooks/json/candidates/`.
 
-**Documentation and review artifacts only.** This branch does not change `implementation/autonomous_remediation/playbook_registry.json`, runtime code, prompts, production queues, endpoint actions, grants, owner promotions, MCP control plane state, or release behavior. Do not merge it as a substitute for a production migration.
+- The original playbook Markdown has been preserved, reconstructed and checked in JSON as an inert source document (`source_document.prelude_markdown`, `source_document.sections[]`).
+- Domain-specific diagnostic subsections, remediation branch text, safety checklists, retry and verification sections are also extracted into structured `procedure` fields **without executable capability mapping**.
+- Every candidate conforms to the *review-only* JSON v1 envelope and passes static JavaScript checks for JSON parsing, step-graph reachability/acyclicity, minimum fields, source reconstruction, absent executable remediation, and `autonomy.activation=disabled`.
+- All candidates are `lifecycle=pilot`, have **no JSON runtime activation**, no allowed capability actions, and stop in human review in their preview step graph.
+- **No production JSON runtime registry was modified.** No live Jason playbook was staged, activated, promoted, replaced or deployed. The original production behavior remains governed by its existing source registry and runtime.
+- The *canonical Python semantic validator* and live runtime worker parity **have not yet been executed/proven**. Do not claim these source conversion drafts are production-ready executable playbooks.
 
-- [Machine-readable source registry status](./migration-status-2026-10-28.json): snapshot of the **16 entries** in the source registry, **14 production-classified** and **2 pilot-classified**; their autonomy declarations are *source metadata*, not live activation proof.
-- [Windows Time candidate JSON v1](./candidates/windows_time_source-0.1.1-jsonpreview.json): a **disabled, unstaged, classification-only** data-model preview based on the existing pilot. It contains **no provider execution steps, no permission grants, and no remediation**.
-- Authoritative runtime definition: [JSON Playbook Runtime](../Jason-JSON-Playbook-Runtime.md), with schema [playbook-v1.schema.json](./playbook-v1.schema.json).
-- Authoritative human playbook: [Jason Windows Time Source Self-Heal](../Jason-Windows-Time-Source-Self-Heal.md).
+## Converted playbook inventory
 
-## Current architecture findings
+| Playbook | Registered version | Legacy autonomy declaration | Missing original sections | JSON draft |
+| --- | --- | --- | --- | --- |
+| `backupiq_endpoint_backup` | `1.2.0` | autonomous | None detected | [draft](./candidates/backupiq_endpoint_backup-1.2.0-jsonpreview.json) |
+| `datto_edr_av` | `1.3.0` | autonomous | None detected | [draft](./candidates/datto_edr_av-1.3.0-jsonpreview.json) |
+| `disk_bad_block_event_7` | `1.0.0` | autonomous | None detected | [draft](./candidates/disk_bad_block_event_7-1.0.0-jsonpreview.json) |
+| `dns_agent_diagnostic` | `1.0.0` | autonomous | §23 | [draft](./candidates/dns_agent_diagnostic-1.0.0-jsonpreview.json) |
+| `drmm_recent_alert_reconciliation` | `1.0.0` | autonomous | §20, §21, §22, §23 | [draft](./candidates/drmm_recent_alert_reconciliation-1.0.0-jsonpreview.json) |
+| `gpt_insights_tech_assist` | `0.2.1` | autonomous | None detected | [draft](./candidates/gpt_insights_tech_assist-0.2.1-jsonpreview.json) |
+| `idle_log_off` | `1.1.0` | autonomous | None detected | [draft](./candidates/idle_log_off-1.1.0-jsonpreview.json) |
+| `jason_activity_log` | `1.0.0` | autonomous | None detected | [draft](./candidates/jason_activity_log-1.0.0-jsonpreview.json) |
+| `low_disk_space` | `1.1.0` | autonomous | §23 | [draft](./candidates/low_disk_space-1.1.0-jsonpreview.json) |
+| `offline_ticket_context_augmentation` | `0.1.0` | shadow | None detected | [draft](./candidates/offline_ticket_context_augmentation-0.1.0-jsonpreview.json) |
+| `post_error_investigation` | `1.0.0` | autonomous | §23 | [draft](./candidates/post_error_investigation-1.0.0-jsonpreview.json) |
+| `security_log_self_heal` | `1.0.0` | autonomous | §23 | [draft](./candidates/security_log_self_heal-1.0.0-jsonpreview.json) |
+| `unexpected_shutdown` | `1.1.0` | autonomous | None detected | [draft](./candidates/unexpected_shutdown-1.1.0-jsonpreview.json) |
+| `vulscan_missing_patch` | `1.1.0` | autonomous | None detected | [draft](./candidates/vulscan_missing_patch-1.1.0-jsonpreview.json) |
+| `vulscan_multi_device_split` | `1.0.0` | autonomous | §23 | [draft](./candidates/vulscan_multi_device_split-1.0.0-jsonpreview.json) |
+| `windows_time_source` | `0.1.0` | shadow | None detected | [draft](./candidates/windows_time_source-0.1.0-jsonpreview.json) |
 
-1. The existing source registry (`implementation/autonomous_remediation/playbook_registry.json`, schema version 2) is **not** the same format as the executable JSON v1 documents. Do not replace, concatenate, or bulk-import it.
-2. The repository contains the JSON schema, semantic validation, immutable staging/activation store, MCP admin handlers, and `JsonPlaybookInterpreter`.
-3. The inspected interpreter **returns instructions**; it does not invoke governed providers. Code-search evidence found its direct references in its module and unit tests, but no verified autonomous-ticket-worker integration. This must be proved independently before any production claim.
-4. The JSON v1 validator forbids graph cycles, while operational playbooks commonly require repeated rechecks; reconcile this with the shared durable runtime before migrating a real waiting/retry loop. Do not work around it with an unbounded custom cycle or a fake one-shot completion.
-5. The current interpreter passes declared `arguments` through unchanged. Safe binding of exact ticket/client/CI/device/alert IDs and validated evidence facts into selectors is a prerequisite for provider-facing JSON steps; do not put raw shell, PowerShell, arbitrary URLs, or untrusted runtime substitutions into documents.
-6. Jason's live JSON staged/active registry and exact owner promotions were **not available for verification through the current ChatGPT Jason connector**. Snapshot status is source-only. The [October 28 control board](https://github.com/al-teamaot-com/jason/issues/526) reports production health requires revalidation; do not initiate an uncoordinated release.
+The existing v1 JSON schema and validator: [playbook-v1.schema.json](./playbook-v1.schema.json) and `implementation/autonomous_remediation/playbook_document.py`. The common operational playbook design contract remains [Jason-Playbook-Runtime-Automation-Contract.md](../Jason-Playbook-Runtime-Automation-Contract.md). The [JSON Playbook Runtime](../Jason-JSON-Playbook-Runtime.md) explicitly requires incremental migration and per-playbook acceptance, not unverified mass activation.
 
-## Acceptance sequence (do not skip)
+## Source issues requiring review
 
-1. Confirm the existing JSON validator can validate the preview on a non-production target and record its fingerprint, and run its deterministic branch tests.
-2. Reconcile the exact authoritative capability catalogue and client-scoped argument-binding/evidence-fact contract. All mandatory facts must come from governed source reads, not user-supplied boolean claims.
-3. Prove the JSON runtime's integration with the existing autonomous ticket worker or explicitly record that integration is missing. Reuse the existing work-start/CI/ownership/recheck/documentation and failure-contract boundaries, not a parallel scheduler.
-4. Convert **one** complete low-risk existing playbook with no authorization expansion, preserve Markdown as source reference, and prove parity in a controlled **shadow/dry run**: trigger, correct identity, positive/negative evidence, branch decisions, stale/error paths, durable state, safe waiting, duplicate suppression, and correct terminal verification.
-5. Only then separately review owner-bound activation and *any* autonomy scope changes through existing governance. A JSON definition, successful validation, staged document, or activated registry entry creates **no new execution authority**.
-6. Do not bulk-convert the other 15 entries until first-pilot operational acceptance. Record each subsequent version with exact source/fingerprint, tested scope and independent production acceptance.
+1. **BackupIQ version drift:** `docs/playbooks/Jason-BackupIQ-Datto-Endpoint-Backup.md` declares **1.3.0**, while the source registry declares **1.2.0**. The JSON draft has a registry-based `1.2.0-jsonpreview` identity but preserves and labels the document version; do **not** assert equivalence until reconciled.
+2. **Missing source sections:** `dns_agent_diagnostic`, `low_disk_space`, `post_error_investigation`, `security_log_self_heal`, and `vulscan_multi_device_split` lack canonical Section 23 in their source. `drmm_recent_alert_reconciliation` lacks Sections 20–23. Drafts explicitly retain `missing_in_source_needs_author_review`; they do not fabricate owner approval or acceptance.
+3. **EDR/AV lineage:** The registered `datto_edr_av` source is Python at `implementation/autonomous_remediation/datto_edr_av_playbook.py`. The JSON source-preserving draft uses the corresponding human playbook at `docs/playbooks/Jason-Datto-EDR-AV-Diagnose-Repair.md` and retains the Python path in `legacy_registry.source_path`. It is *not* an automatic Python-to-JSON behavior port.
+4. **Execution gap:** Repository inspection found `JsonPlaybookInterpreter` returning instructions and unit-test coverage, but no verified integration into Jason's current autonomous worker. Existing v1 input bindings for current ticket/client/device/alert selectors, evidence freshness and result verification are not acceptance-proven. Without those, literal declarative steps would be unsafe.
+5. **Waiting/recheck mismatch:** The existing v1 document validator forbids cyclic step graphs. Long-running operational playbooks require durable rechecks; the existing shared runtime must own scheduling and resumption, not a second embedded loop.
+6. **Live acceptance unknown:** GitHub registry autonomy flags describe source intentions, not independently verified current durable promotions and end-to-end behavior. The [October 28 Development & Release Control Board](https://github.com/al-teamaot-com/jason/issues/526) reported production health as requiring fresh host revalidation.
 
-## Explicit limitations
+## Next controlled acceptance steps
 
-The `windows_time_source` JSON preview intentionally **does not claim full feature parity** with its Markdown playbook. It maps deterministic human-review and healthy-evidence classification only. It does not collect Windows Time evidence, perform resync, clear the alert, update a ticket, or reliably schedule recurring rechecks. A `complete` instruction in this **disabled preview** is a *classification terminal*, not evidence that an alert or Autotask ticket has been closed. **Do not stage/activate this preview as a production playbook.**
+1. Run the repository's **canonical** `validate_playbook_document` with each JSON candidate and compare exact registered capability names. Retain the current disabled preview status.
+2. Reconcile source-version and missing-section issues *in documentation first*, without inventing automation authority.
+3. Define exact provider-target and evidence-fact bindings via **existing** Central Orchestrator, shared ticket-work-start lifecycle and verified Autotask/DRMM identities. Do not interpolate arbitrary commands or URLs.
+4. Prove a bounded real JSON-driven workflow for **one** low-risk playbook in shadow against controlled synthetic and live-read scenarios. Include negative evidence, cross-client rejection, waiting/retry persistence, duplicate suppression, terminal readback, and proof that no new write occurs.
+5. Only after true runtime parity and verified acceptance, consider exact-version activation using Jason's existing Release Manager and separate owner-granted autonomy promotion. Preserve existing production playbook as rollback baseline until parity is proven.
+6. Use the source snapshot and per-file blob references to detect future Markdown/registry drift rather than silently replacing reviewed JSON.
 
-## Separate operational knowledge improvements
+## Hard boundaries
 
-The Riggins workstation investigation suggests reusable read-only checks for effective lock/idle policy, DNS/DC locator, and correlated network/event evidence. Add those as domain-specific diagnostics to the existing Windows Idle Log Off, DNS Agent, and connectivity/runbook documentation **under separate documentation-only changes**; do not introduce DNS-server remediations or shorten/remove security lock policy without exact client policy and approval.
-
-## Review/closure
-
-- Treat this branch as a **review-only** JSON authoring milestone.
-- No production health, client ticket, automation component, or release outcome is changed here.
-- No staging, activation, merge, deployment, or production acceptance is claimed.
-- Next recommendation: make a focused JSON runtime/worker parity and selector-binding acceptance plan *after* the currently prioritized P0 production-manager / Teams work, then promote one bounded playbook migration.
+- `direct_provider_access=false`
+- No ad hoc shell, PowerShell or arbitrary provider URL execution from JSON.
+- No new ticket, RMM, Entra, DNS, network, host, security or backup permissions from this conversion.
+- No disruption, service restart, network reset, user logoff, reboot, or silent customer notification.
+- No crossing tenant/company boundaries, no missing-approval fallback, and no production deployment as part of draft authoring.
