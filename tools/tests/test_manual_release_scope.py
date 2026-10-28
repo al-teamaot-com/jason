@@ -146,15 +146,15 @@ def test_all_1020_registered_worktrees_including_last_dirty_overlap_are_checked(
 
     def fake_command(args, cwd=None):
         if args[:3] == ["git", "worktree", "list"]:
-            return "\n".join(f"worktree {p}" for p in paths)
+            return "\n\n".join(f"worktree {p}" for p in paths)
         assert args[:3] == ["git", "status", "--porcelain=v1"]
         inspected.append(cwd)
         assert args[-1] == "shared.py"
         return " M shared.py\n" if cwd == target else ""
 
     monkeypatch.setattr(m, "command", fake_command)
-    overlaps, n = m.dirty_worktrees(tmp_path, {"shared.py"})
-    assert n == count
+    overlaps, n, stale, registered = m.dirty_worktrees(tmp_path, {"shared.py"})
+    assert n == count and registered == count and stale == []
     assert len(inspected) == count
     assert len(set(inspected)) == count
     assert overlaps == [{
@@ -167,7 +167,7 @@ def test_more_than_2000_registered_worktrees_still_fails_closed(monkeypatch, tmp
     paths = [tmp_path / f"registry-{i:05d}" for i in range(2001)]
     def fake_command(args, cwd=None):
         assert args[:3] == ["git", "worktree", "list"]
-        return "\n".join(f"worktree {p}" for p in paths)
+        return "\n\n".join(f"worktree {p}" for p in paths)
     monkeypatch.setattr(m, "command", fake_command)
     with pytest.raises(m.ScopeBlocked, match="incomplete registered worktree set"):
         m.dirty_worktrees(tmp_path, {"shared.py"})
@@ -179,8 +179,58 @@ def test_missing_registered_worktree_still_refuses_scope_review(monkeypatch, tmp
         path.mkdir()
     def fake_command(args, cwd=None):
         if args[:3] == ["git", "worktree", "list"]:
-            return "\n".join(f"worktree {p}" for p in paths)
+            return "\n\n".join(f"worktree {p}" for p in paths)
         return ""
     monkeypatch.setattr(m, "command", fake_command)
+    with pytest.raises(m.ScopeBlocked, match="worktree unavailable"):
+        m.dirty_worktrees(tmp_path, {"shared.py"})
+
+
+
+def test_verified_stale_git_registrations_skipped_without_modifying_worktrees(
+    tmp_path, monkeypatch,
+):
+    existing = [tmp_path / f"present-{i}" for i in range(1020)]
+    stale = [tmp_path / f"missing-{i}" for i in range(26)]
+    for path in existing:
+        path.mkdir()
+    inspected = []
+    parts = [f"worktree {p}\nHEAD {'a' * 40}" for p in existing]
+    parts += [
+        f"worktree {p}\nHEAD {'a' * 40}\nprunable gitdir file points to non-existent location"
+        for p in stale
+    ]
+    def fake_command(args, cwd=None):
+        if args[:3] == ["git", "worktree", "list"]:
+            return "\n\n".join(parts)
+        assert args[:3] == ["git", "status", "--porcelain=v1"]
+        inspected.append(cwd)
+        return " M shared.py\n" if cwd == existing[-1] else ""
+    monkeypatch.setattr(m, "command", fake_command)
+    overlaps, checked, ignored, registered = m.dirty_worktrees(tmp_path, {"shared.py"})
+    assert checked == 1020 and registered == 1046
+    assert len(inspected) == 1020 and set(inspected) == set(existing)
+    assert set(ignored) == {str(p) for p in stale}
+    assert overlaps == [{"path": str(existing[-1]), "changed_files": ["shared.py"]}]
+    assert all(x.is_dir() for x in existing)
+    assert all(not x.exists() for x in stale)
+
+
+def test_prunable_marker_cannot_hide_a_real_worktree(tmp_path, monkeypatch):
+    present = tmp_path / "still-present"
+    present.mkdir()
+    monkeypatch.setattr(
+        m, "command",
+        lambda args, cwd=None: (
+            f"worktree {present}\nHEAD {'a' * 40}\nprunable gitdir file points to non-existent location"
+        ),
+    )
+    with pytest.raises(m.ScopeBlocked, match="marked prunable while present"):
+        m.dirty_worktrees(tmp_path, {"shared.py"})
+
+
+def test_unverified_absent_git_registration_is_never_silently_skipped(tmp_path, monkeypatch):
+    missing = tmp_path / "missing-unverified"
+    monkeypatch.setattr(m, "command", lambda args, cwd=None: f"worktree {missing}")
     with pytest.raises(m.ScopeBlocked, match="worktree unavailable"):
         m.dirty_worktrees(tmp_path, {"shared.py"})

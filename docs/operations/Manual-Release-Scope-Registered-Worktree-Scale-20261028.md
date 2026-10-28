@@ -13,7 +13,8 @@ risk interrupting other engineering work.
 
 The reviewer now accepts up to **2,000** registered worktrees and still
 iterates **every** one with a targeted, read-only `git status` over
-changed release paths. Missing worktrees, status failures, unacknowledged
+changed release paths. Missing worktrees without Git's exact authoritative stale/prunable
+mark, status failures, unacknowledged
 dirty overlaps, unacknowledged open PR overlaps, unknown commits,
 truncated PR inventories and registrations beyond 2,000 all fail closed.
 Regression tests include 1,020 worktrees with the *last* directory
@@ -28,12 +29,15 @@ entrypoint, so later installations cannot silently lose live-read
 acceptance.
 
 **Do not use fake/smaller Git worktree registries or silently omit
-unfinished work as a workaround.** Remove only provably stale Git registry
-records through normal `git worktree prune` after confirming their
-physical worktree paths are absent, preserving current worktrees and all
-branches. Run native full-review against the real entire repository,
-and explicitly acknowledge only inspected merged work and genuine
-parallel overlaps.
+unfinished work.** For truly orphaned registrations, the reviewer now
+accepts only the exact native Git porcelain marker
+`prunable gitdir file points to non-existent location` AND a physically
+absent directory; those are included in the release-scope digest and
+reported separately. Every existing registered directory, even one at
+the end of a 1,000+ entry inventory, still receives a targeted
+`git status`. Missing or ambiguous entries without that marker fail
+closed. No Git worktree deletion, checkout, source tree mutation,
+branch pruning or registry cleanup is required.
 
 Because this fix changes protected main, it requires a **new exact
 SHA**, fresh immutable preproduction and a separate Owner authorization
