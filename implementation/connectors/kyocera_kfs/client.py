@@ -13,6 +13,7 @@ from connectors.core.contracts import (
     ConnectorConfigurationError,
     ConnectorTransportError,
 )
+from connectors.core.http_transport import _safe_network_failure_code
 
 KFS_PUBLIC_API_HOST = "api.kyods.com"
 KFS_DEFAULT_API_URL = f"https://{KFS_PUBLIC_API_HOST}"
@@ -85,6 +86,24 @@ class KyoceraKfsApplicationStatusError(ConnectorTransportError):
         safe_code = code if type(code) is int and 100 <= code <= 999 else "UNKNOWN"
         self.error_code = f"KFS_APPLICATION_STATUS_{safe_code}"
         self.operation = operation  # internal fixed operation label, not response text
+
+
+class KyoceraKfsSafeResponseError(ConnectorTransportError):
+    """A fixed diagnostic for a KFS response that is not usable JSON.
+
+    No provider text, body, Authorization or credential values are retained.
+    """
+
+    _ALLOWED_CODES = frozenset({
+        "NETWORK_TIMEOUT", "DNS_RESOLUTION", "TLS_FAILURE",
+        "CONNECTION_REFUSED", "NETWORK_UNREACHABLE", "NETWORK_IO_FAILURE",
+        "INVALID_JSON", "INVALID_RESPONSE_SHAPE",
+    })
+
+    def __init__(self, code: str):
+        safe_code = code if code in self._ALLOWED_CODES else "NETWORK_IO_FAILURE"
+        super().__init__("Kyocera KFS read could not obtain a valid response", service="kyocera_kfs")
+        self.error_code = f"KFS_{safe_code}"
 
 
 class KyoceraKfsSessionClient:
@@ -170,16 +189,16 @@ class KyoceraKfsSessionClient:
                 service="kyocera_kfs",
             ) from exc
         except (URLError, TimeoutError, OSError) as exc:
-            raise ConnectorTransportError(
-                "Kyocera KFS network request failed", service="kyocera_kfs"
-            ) from exc
+            # Network failure taxonomy is a fixed local classification, not an
+            # uncontrolled exception message or provider response body.
+            raise KyoceraKfsSafeResponseError(_safe_network_failure_code(exc)) from exc
 
         try:
             decoded = json.loads(raw.decode("utf-8")) if raw else {}
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ConnectorTransportError("Kyocera KFS response was not valid JSON") from exc
+            raise KyoceraKfsSafeResponseError("INVALID_JSON") from exc
         if not isinstance(decoded, Mapping):
-            raise ConnectorTransportError("Kyocera KFS response must be a JSON object")
+            raise KyoceraKfsSafeResponseError("INVALID_RESPONSE_SHAPE")
         return dict(decoded)
 
     @staticmethod
