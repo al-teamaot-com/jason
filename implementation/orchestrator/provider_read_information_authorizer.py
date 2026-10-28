@@ -604,12 +604,12 @@ class ProviderReadInformationAuthorizingInvoker:
                 bindings=self.bindings,
             )
         ):
-            raw_output = dict(invocation.output)
-            authorization = _jason_managed_it_glue_envelope(
-                capability_name=resolution.capability_name,
-                output=raw_output,
-            )
-            output = raw_output
+            # Classify the *actual sanitized output* intended for the technician,
+            # not the raw service-account result. Credential-bearing attributes
+            # that have already been removed must not permanently block an
+            # otherwise authorized organization/configuration lookup. Inline
+            # secrets remaining after redaction still fail closed as derived-only.
+            output = dict(invocation.output)
             if resolution.capability_name in {
                 DOCUMENTATION_ATTACHMENT_SEARCH,
                 DOCUMENTATION_ATTACHMENT_READ,
@@ -624,6 +624,10 @@ class ProviderReadInformationAuthorizingInvoker:
                 DOCUMENTATION_FLEXIBLE_ASSET_TYPE_READ,
             }:
                 output = _sanitize_it_glue_credential_key_fields(output)
+            authorization = _jason_managed_it_glue_envelope(
+                capability_name=resolution.capability_name,
+                output=output,
+            )
         else:
             authorization = _service_only_envelope(
                 provider_id=provider_id or "unknown",

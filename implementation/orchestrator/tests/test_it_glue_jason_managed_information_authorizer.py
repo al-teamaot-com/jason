@@ -160,7 +160,7 @@ def test_jason_managed_it_glue_fails_closed_without_positive_requester_authority
     assert invocation.information_authorization.require_allowed(InformationAction.RELEASE).allowed is False
 
 
-def test_sensitive_jason_managed_it_glue_output_is_derived_only() -> None:
+def test_sensitive_credential_fields_are_redacted_and_metadata_is_releasable() -> None:
     invocation = ProviderReadInformationAuthorizingInvoker(
         delegate=_Delegate(
             {
@@ -175,8 +175,10 @@ def test_sensitive_jason_managed_it_glue_output_is_derived_only() -> None:
     )
 
     envelope = invocation.information_authorization
-    assert envelope.handling_class is InformationHandlingClass.DERIVED_OUTPUT_ONLY
+    assert envelope.handling_class is InformationHandlingClass.RELEASABLE
     assert envelope.require_allowed(InformationAction.RELEASE).allowed is True
+
+    assert invocation.output["data"]["items"] == [{"name": "Credential"}]
 
 
 def test_document_search_releases_only_unrestricted_sanitized_metadata() -> None:
@@ -306,7 +308,7 @@ def test_flexible_asset_credential_fields_are_redacted_before_release() -> None:
     }
     envelope = invocation.information_authorization
     assert envelope is not None
-    assert envelope.handling_class is InformationHandlingClass.DERIVED_OUTPUT_ONLY
+    assert envelope.handling_class is InformationHandlingClass.RELEASABLE
     assert envelope.require_allowed(InformationAction.RELEASE).allowed is True
 
 
@@ -394,3 +396,62 @@ def test_document_with_unknown_restriction_state_fails_closed() -> None:
     release = invocation.information_authorization.require_allowed(InformationAction.RELEASE)
     assert release.allowed is False
     assert release.reason_code == "IT_GLUE_DOCUMENT_RESTRICTION_STATE_UNKNOWN"
+
+
+def test_inline_secret_remains_nonreleasable_after_credential_key_redaction() -> None:
+    from orchestrator.information_authorization import FailClosedInformationReleaseAuthorizer
+    output = {
+        "provider": "it_glue",
+        "data": {"items": [{
+            "id": "42", "name": "WAN Notes",
+            "details": "password: should-stay-protected",
+            "credential": "removed-secret",
+        }]},
+    }
+    request = _request(DOCUMENTATION_ORGANIZATION_SEARCH)
+    resolution = _resolution(DOCUMENTATION_ORGANIZATION_SEARCH)
+    result = ProviderReadInformationAuthorizingInvoker(
+        delegate=_Delegate(output), bindings=_Bindings(),
+    ).invoke(request=request, resolution=resolution)
+    assert "credential" not in result.output["data"]["items"][0]
+    assert result.information_authorization.handling_class is InformationHandlingClass.DERIVED_OUTPUT_ONLY
+    release = FailClosedInformationReleaseAuthorizer().authorize_release(
+        request=request, resolution=resolution,
+        output=result.output, authorization=result.information_authorization,
+    )
+    assert release.allowed is False and release.output == {}
+    assert release.reason_code == "DERIVED_OUTPUT_TRANSFORMATION_REQUIRED"
+
+
+def test_safe_it_glue_metadata_can_be_released_without_secrets() -> None:
+    from orchestrator.information_authorization import FailClosedInformationReleaseAuthorizer
+    output = {"provider": "it_glue", "data": {"items": [{
+        "id": "42", "name": "Riggins Company",
+        "credential": "should-never-be-released",
+        "password": "should-never-be-released",
+    }]}}
+    request = _request(DOCUMENTATION_ORGANIZATION_SEARCH)
+    resolution = _resolution(DOCUMENTATION_ORGANIZATION_SEARCH)
+    invocation = ProviderReadInformationAuthorizingInvoker(
+        delegate=_Delegate(output), bindings=_Bindings(),
+    ).invoke(request=request, resolution=resolution)
+    release = FailClosedInformationReleaseAuthorizer().authorize_release(
+        request=request, resolution=resolution,
+        output=invocation.output,
+        authorization=invocation.information_authorization,
+    )
+    assert release.allowed is True
+    assert release.output["data"]["items"] == [{"id":"42", "name":"Riggins Company"}]
+
+
+def test_missing_trusted_identity_never_relaxes_with_redaction() -> None:
+    output = {"provider": "it_glue", "data":{"items":[{
+        "id":"1", "name":"Network", "password":"still-private",
+    }]}}
+    invocation = ProviderReadInformationAuthorizingInvoker(
+        delegate=_Delegate(output), bindings=_Bindings(None),
+    ).invoke(
+        request=_request(DOCUMENTATION_ORGANIZATION_SEARCH),
+        resolution=_resolution(DOCUMENTATION_ORGANIZATION_SEARCH),
+    )
+    assert invocation.information_authorization.require_allowed(InformationAction.RELEASE).allowed is False
