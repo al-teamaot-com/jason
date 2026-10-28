@@ -210,7 +210,21 @@ class WindowsTimeSourceShadowMaintenance:
         cadence: timedelta = timedelta(minutes=15),
         now=lambda: datetime.now(timezone.utc),
         audit=None,
+        json_shadow=None,
+        json_shadow_state=None,
+        json_shadow_allowed_site_uids: frozenset[str] = frozenset(),
+        json_shadow_max_alerts_per_tick: int = 25,
     ) -> None:
+        if (json_shadow is None) != (json_shadow_state is None):
+            raise ValueError("Windows Time JSON shadow needs both adapter and state")
+        if json_shadow is not None and (
+            not json_shadow_allowed_site_uids
+            or "*" in json_shadow_allowed_site_uids
+            or any(not str(uid).strip() for uid in json_shadow_allowed_site_uids)
+        ):
+            raise ValueError("JSON shadow requires exact site UID allowlist")
+        if json_shadow_max_alerts_per_tick < 1 or json_shadow_max_alerts_per_tick > 100:
+            raise ValueError("JSON shadow per-tick bound must be 1..100")
         if cadence < timedelta(minutes=1):
             raise ValueError("cadence must be at least one minute")
         self.reads = reads
@@ -218,6 +232,10 @@ class WindowsTimeSourceShadowMaintenance:
         self.cadence = cadence
         self.now = now
         self.audit = audit
+        self.json_shadow = json_shadow
+        self.json_shadow_state = json_shadow_state
+        self.json_shadow_allowed_site_uids = frozenset(json_shadow_allowed_site_uids)
+        self.json_shadow_max_alerts_per_tick = json_shadow_max_alerts_per_tick
 
     def tick(self) -> bool:
         now = self.now()
@@ -246,10 +264,98 @@ class WindowsTimeSourceShadowMaintenance:
             return summary
         alerts = _alert_items(result)
         summary["open_seen"] = len(alerts)
+
+        json_selected: set[str] = set()
+        json_seen: set[str] = set()
+        if self.json_shadow is not None:
+            # Schedule only a bounded number of exact alert IDs per run.
+            # Rotate through a sorted set every tick to prevent permanent
+            # starvation when the provider returns many matching alerts.
+            matching_uids = sorted({
+                str(item.get("alertUid") or "").strip()
+                for item in alerts if is_time_source_alert(item)
+                and str(item.get("alertUid") or "").strip()
+                and isinstance(item.get("alertSourceInfo"), Mapping)
+                and str(item["alertSourceInfo"].get("siteUid") or "").strip()
+                    in self.json_shadow_allowed_site_uids
+            })
+            if matching_uids:
+                window = min(self.json_shadow_max_alerts_per_tick, len(matching_uids))
+                cadence_seconds = max(60, int(self.cadence.total_seconds()))
+                start = (int(now.timestamp()) // cadence_seconds * window) % len(matching_uids)
+                json_selected = {
+                    matching_uids[(start + i) % len(matching_uids)]
+                    for i in range(window)
+                }
+            summary["json_shadow_selected"] = len(json_selected)
+            summary["json_shadow_outside_site_allowlist"] = len({
+                str(item.get("alertUid") or "").strip()
+                for item in alerts if is_time_source_alert(item)
+                and str(item.get("alertUid") or "").strip()
+                and (
+                    not isinstance(item.get("alertSourceInfo"), Mapping)
+                    or str(item["alertSourceInfo"].get("siteUid") or "").strip()
+                        not in self.json_shadow_allowed_site_uids
+                )
+            })
+            summary["json_shadow_deferred"] = max(
+                0, len(matching_uids) - len(json_selected)
+            )
+            summary["json_shadow_changed"] = 0
+            summary["json_shadow_inconclusive"] = 0
+            summary["json_shadow_failures"] = 0
+
         for alert in alerts:
             if not is_time_source_alert(alert):
                 continue
             summary["matched"] += 1
+            if self.json_shadow is not None:
+                alert_uid = str(alert.get("alertUid") or "").strip()
+                if alert_uid in json_selected and alert_uid not in json_seen:
+                    json_seen.add(alert_uid)
+                    try:
+                        verdict = self.json_shadow.assess(
+                            alert_uid=alert_uid,
+                            now=now,
+                            open_alert_snapshot=result,
+                        )
+                        changed = self.json_shadow_state.record(
+                            verdict,
+                            document_fingerprint=self.json_shadow.document.fingerprint,
+                            when=now,
+                        )
+                        if changed:
+                            summary["json_shadow_changed"] += 1
+                        if verdict.reason_code != (
+                            "DEDICATED_TIME_DIAGNOSTIC_AND_SITE_POLICY_NOT_VERIFIED"
+                        ) and verdict.terminal_step != "review_recurring":
+                            summary["json_shadow_inconclusive"] += 1
+                        if changed and self.audit is not None:
+                            self.audit.record(
+                                "autonomy.windows_time_json_shadow",
+                                {
+                                    "alert_uid": verdict.alert_uid,
+                                    "device_uid": verdict.device_uid,
+                                    "site_uid": verdict.site_uid,
+                                    "terminal_step": verdict.terminal_step,
+                                    "reason_code": verdict.reason_code,
+                                    "decision_fingerprint": (
+                                        self.json_shadow_state.read_one(alert_uid)
+                                        or {}
+                                    ).get("decision_fingerprint"),
+                                    "changed": True,
+                                    "mutated": False,
+                                },
+                            )
+                    except Exception:
+                        # Fail closed but never interrupt the existing
+                        # production Windows Time shadow path.
+                        summary["json_shadow_failures"] += 1
+                        if self.audit is not None:
+                            self.audit.record(
+                                "autonomy.windows_time_json_shadow_failure",
+                                {"alert_uid": alert_uid, "mutated": False},
+                            )
             decision = self._classify(alert, now=now)
             if decision is None:
                 summary["inconclusive"] += 1
