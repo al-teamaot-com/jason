@@ -70,3 +70,39 @@ changes `_governed_execute`, imports the exact-client write selector and
 adds a separate onboarding attestation tool. The functions do not overlap.
 That source review is recorded in PR #2125's Integration coordination field.
 Do not merge or pre-approve #2110 as part of this release candidate.
+
+## MCP/runtime release parity and offline acceptance
+Jason's MCP container composes a separate runtime registry. The native
+`infrastructure/jason-mcp/production-deploy.sh` now forwards explicitly configured routine-RW
+profiles and six dedicated AppRole bind mounts. It preserves previous settings when
+no profile override was given and rejects incomplete, empty or symlinked credential
+mount pairs. These are source-only changes; no live container has been modified.
+
+New offline preproduction tests compose the complete Jason runtime with
+temporary SQLite databases and inert synthetic credential files. They establish:
+profile unset means no write-capability registration; profile enabled without
+credential files remains disabled; synthetic complete pairs register the exact
+two provider invokers; and a missing Entra onboarding-credential pair leaves
+Entra disabled while independently configured IT Glue remains available.
+These simulated tests never send a provider mutation.
+
+### Independent read-only prerequisite findings
+- Release-control last-known-good revision:
+  `b40c2f4a47e60e31e2241e4a4d55759242c2b580`. Its runtime and MCP
+  Docker images and source-release directory were verified present.
+- The connected `al` SSH shell cannot run `sudo -n`; OpenBao is healthy,
+  but there are no provisioned dedicated RW AppRole bootstrap credentials.
+  An authorized administrator must provide an approved provisioning mechanism
+  before actual write secrets can be staged.
+- The only currently verified Microsoft Graph directory-read boundary in
+  the inspected registry maps to AOT's existing internal tenant
+  (`client-aot-internal`, `teamaot.com`), not a separately verified isolated
+  test tenant. Do not create a test identity in that real tenant on this
+  testing authorization alone.
+- The governed IT Glue read path confirmed XYZ Test Company and unrestricted
+  configuration records with organization, notes and update timestamps.
+  A dedicated IT Glue write user/API key is still required for an actual test.
+
+This evidence does not satisfy administrative consent, dedicated write-token
+provisioning, test-tenant validation, live write acceptance, PM preproduction,
+or exact-SHA production authorization.
