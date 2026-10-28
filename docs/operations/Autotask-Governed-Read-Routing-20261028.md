@@ -9,3 +9,5 @@ This release improves capability discovery and diagnostics. It does not grant ad
 - Specialized time-entry, notes, charges and attachment routes continue to enforce their own contracts and disclosure controls.
 
 Acceptance: select an authorized candidate only after checking its actual provider capability and requester authorization; verify live reads, exact IDs and pagination. No automatic fallback on denial, no provider writes, and no changes to production without native release approval.
+
+Troubleshooting: inspect `failure_domain` and the governed capability registry; `request_construction`, `requester_authorization`, and `provider_response` are distinct outcomes. Generic discovery candidates are advisory only, not permission grants or automatic retry targets.
