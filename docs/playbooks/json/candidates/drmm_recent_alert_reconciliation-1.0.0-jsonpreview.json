@@ -135,7 +135,259 @@
     ],
     "diagnostic_substep_titles": [],
     "remediation_substep_titles": [],
-    "live_execution_mapped": false
+    "live_execution_mapped": false,
+    "structured_source_fields": {
+      "identification_checklist": {
+        "source_section_key": "4",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "expected_state_checklist": {
+        "source_section_key": "5",
+        "present": true,
+        "verbatim_bullets": [
+          "- endpoint is currently online;",
+          "- Datto AV is enabled, connected, and engine-ready;",
+          "- EDR identity resolves to an exact agent;",
+          "- current non-archived detection search returns zero active detections."
+        ]
+      },
+      "decision_gate_checklist": {
+        "source_section_key": "8",
+        "present": true,
+        "verbatim_bullets": [
+          "- alert timestamp in current 24-hour window;",
+          "- exact alert UID;",
+          "- exact DRMM device UID;",
+          "- registered verifier;",
+          "- authoritative reads succeed;",
+          "- current healthy state proven;",
+          "- exact durable owner promotion for the reconciliation playbook."
+        ]
+      },
+      "retry_checklist": {
+        "source_section_key": "10",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "recheck_checklist": {
+        "source_section_key": "11",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "stale_checklist": {
+        "source_section_key": "12",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "dependency_checklist": {
+        "source_section_key": "13",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "documentation_checklist": {
+        "source_section_key": "14",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "failure_checklist": {
+        "source_section_key": "15",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "escalation_checklist": {
+        "source_section_key": "16",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "verification_checklist": {
+        "source_section_key": "17",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "completion_checklist": {
+        "source_section_key": "18",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "required_capabilities_source": {
+        "source_section_key": "20",
+        "present": false,
+        "verbatim_bullets": []
+      },
+      "acceptance_test_checklist": {
+        "source_section_key": "21",
+        "present": false,
+        "verbatim_bullets": []
+      },
+      "closure_checklist": {
+        "source_section_key": "22",
+        "present": false,
+        "verbatim_bullets": []
+      },
+      "owner_review_checklist": {
+        "source_section_key": "23",
+        "present": false,
+        "verbatim_bullets": []
+      }
+    },
+    "diagnostic_substeps": [
+      {
+        "id": "7_overview",
+        "heading": "Full workflow",
+        "content_markdown": "\n\n1. Read all currently-open DRMM alerts.\n2. Discard alerts outside the rolling 24-hour window.\n3. Select a registered verifier by alert class.\n4. Run authoritative current-state reads.\n5. Classify healthy, unhealthy, waiting, unsupported, or inconclusive.\n6. Only `healthy` may proceed to mutation.\n\n",
+        "source_section_key": "7"
+      }
+    ],
+    "remediation_branches": [
+      {
+        "id": "9_overview",
+        "heading": "Full workflow",
+        "content_markdown": "\n\nThis playbook performs no endpoint remediation. The only provider mutation is `endpoint.alert.resolve` for the exact verified alert. If an exact linked Autotask ticket remains open, Jason writes one internal resolution note and sets it Complete after alert-resolution readback.\n\n",
+        "source_section_key": "9"
+      }
+    ],
+    "source_section_inventory": [
+      {
+        "section_key": "1",
+        "present": true,
+        "title": "Section Goal",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "2",
+        "present": true,
+        "title": "Trigger",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "3",
+        "present": true,
+        "title": "Scope and Boundaries",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "4",
+        "present": true,
+        "title": "Initial Identification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "5",
+        "present": true,
+        "title": "Expected State",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "6",
+        "present": true,
+        "title": "State Model",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "7",
+        "present": true,
+        "title": "Diagnostic Workflow",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "8",
+        "present": true,
+        "title": "Decision Gates",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "9",
+        "present": true,
+        "title": "Remediation",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "10",
+        "present": true,
+        "title": "Retry Policy",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "11",
+        "present": true,
+        "title": "Periodic Rechecks",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "12",
+        "present": true,
+        "title": "Aging / Stale Condition",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "13",
+        "present": true,
+        "title": "Dependency Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "14",
+        "present": true,
+        "title": "Documentation Requirements",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "15",
+        "present": true,
+        "title": "Failure Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "16",
+        "present": true,
+        "title": "Autotask Reconciliation",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "17",
+        "present": true,
+        "title": "Required Capabilities",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "18",
+        "present": true,
+        "title": "Acceptance Test",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "19",
+        "present": true,
+        "title": "Completion / Section Goal Closure",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "20",
+        "present": false,
+        "title": null,
+        "review_status": "missing_in_source_needs_author_review"
+      },
+      {
+        "section_key": "21",
+        "present": false,
+        "title": null,
+        "review_status": "missing_in_source_needs_author_review"
+      },
+      {
+        "section_key": "22",
+        "present": false,
+        "title": null,
+        "review_status": "missing_in_source_needs_author_review"
+      },
+      {
+        "section_key": "23",
+        "present": false,
+        "title": null,
+        "review_status": "missing_in_source_needs_author_review"
+      }
+    ],
+    "section_semantics": "Source-derived metadata only. Diagnostic commands and remediation branches are inert Markdown, not executable provider calls."
   },
   "legacy_registry": {
     "source_path": "docs/playbooks/Jason-DRMM-Recent-Alert-Reconciliation.md",
@@ -298,6 +550,8 @@
       "Controlled shadow comparison and independent acceptance",
       "Owner-bound activation and branch-specific autonomous promotion"
     ],
-    "external_fact_fields_non_authoritative": true
+    "external_fact_fields_non_authoritative": true,
+    "source_reconstruction_integrity": "verified_from_original_source_on_conversion",
+    "section_semantic_extraction": "source_text_derived_no_provider_execution"
   }
 }
