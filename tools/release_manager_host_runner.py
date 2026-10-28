@@ -2317,7 +2317,35 @@ def consume_owner_approval_requests(repo: Path, state_root: Path) -> int:
     return count
 
 
+def require_candidate_controller_for_preproduction(repo: Path, candidate_sha: str) -> None:
+    """Refuse to certify a release using a superseded Production Manager.
+
+    For a controller-changing release, the installed N controller cannot
+    attest to the native preflight semantics of N+1. An operator must use the
+    immutable reviewed candidate runner. No existing release record is changed
+    by this guard and it never starts a production mutation.
+    """
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    try:
+        reviewed_bytes = subprocess.check_output(
+            ["git", "-C", str(repo), "show",
+             candidate_sha + ":tools/release_manager_host_runner.py"],
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise ReleaseManagerError("candidate Production Manager source cannot be verified") from exc
+    reviewed_digest = "sha256:" + hashlib.sha256(reviewed_bytes).hexdigest()
+    if file_digest(CONTROLLER_SOURCE) != reviewed_digest:
+        raise ReleaseManagerError(
+            "preproduction requires the exact candidate Production Manager controller"
+        )
+
+
 def run_preproduction(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
+    require_candidate_controller_for_preproduction(
+        repo, str((record.get("release_candidate") or {}).get("candidate_sha") or ""),
+    )
     gate_transition(repo, state_root, record, "preproduction")
     candidate = record["release_candidate"]
     image = str(candidate["image"])
