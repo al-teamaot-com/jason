@@ -133,5 +133,7 @@ def test_v12_is_not_the_selected_released_provider_read_profile():
     from pathlib import Path
     root = Path(__file__).resolve().parents[3]
     selected = json.loads((root / "config/autotask-entity-read-profile.json").read_text())["read_profile"]
-    assert selected == "itglue-autotask-entra-comprehensive-entity-read-catalog-v11"
+    # v12 remains dormant. The source explicitly opts into the independent
+    # metadata-proven dynamic v13 profile, not the old name-by-name v12.
+    assert selected == "itglue-autotask-entra-dynamic-schema-read-catalog-v13"
     assert selected != V12_PROFILE

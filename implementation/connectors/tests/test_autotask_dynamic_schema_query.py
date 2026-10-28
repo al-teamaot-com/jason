@@ -59,8 +59,19 @@ class Transport:
             return {"url":"https://webservices3.autotask.net/atservicesrest"}
         entity = url.split("/V1.0/")[-1].split("/")[0]
         if url.endswith("/entityInformation"):
+            # Real 2026-10-28 Autotask response uses a singular info.name
+            # even for plural REST paths. A strict equality check broke
+            # valid dynamic record retrieval.
+            singular={
+                "ActionTypes": "ActionType",
+                "Appointments": "Appointment",
+                "Projects": "Project",
+                "TicketHistory": "TicketHistory",
+                "CompanyToDos": "CompanyToDo",
+                "TaxRegions": "TaxRegion",
+            }.get(entity,entity)
             return {"info":{
-                "name":entity, "canQuery":self.queryable,
+                "name":singular, "canQuery":self.queryable,
                 "userAccessForQuery":self.access,
             }}
         if url.endswith("/entityInformation/fields"):
@@ -288,3 +299,26 @@ def test_customer_bound_disclosure_is_denied_even_if_provider_api_returns_record
     )
     decision=result.information_authorization.require_allowed(InformationAction.RELEASE)
     assert decision.allowed is False
+
+
+
+def test_live_singular_names_are_accepted_as_metadata_not_route_identifiers():
+    for entity in ("ActionTypes", "Appointments", "Projects"):
+        transport = Transport()
+        res = connector(transport).execute(request(entity, select=["id"], page_size=1))
+        assert res.data["items"][0]["id"] == 23
+        assert len(transport.requests) == 4
+        assert transport.requests[-1][0].endswith("/V1.0/"+entity+"/query")
+
+
+def test_missing_or_malformed_live_entity_information_fails_closed():
+    class BadMetadataTransport(Transport):
+        def request(self, **kwargs):
+            if kwargs["url"].endswith("/entityInformation"):
+                return {"info": {"name": "", "canQuery": True, "userAccessForQuery": "All"}}
+            return super().request(**kwargs)
+
+    transport = BadMetadataTransport()
+    with pytest.raises(PermissionError, match="QUERY_NOT_AUTHORIZED"):
+        connector(transport).execute(request("ActionTypes"))
+    assert not any(url.endswith("/query") for url, _ in transport.requests)

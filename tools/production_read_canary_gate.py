@@ -18,6 +18,8 @@ _SHA = re.compile(r"[a-f0-9]{40}\Z")
 _NONCE = re.compile(r"[a-f0-9]{32}\Z")
 _AOT_HUMAN = re.compile(r"(?:person-al|person-entra-[a-f0-9]{12,64})\Z")
 PROFILE_V11 = "itglue-autotask-entra-comprehensive-entity-read-catalog-v11"
+PROFILE_V13 = "itglue-autotask-entra-dynamic-schema-read-catalog-v13"
+_RELEASE_PROFILES = frozenset({PROFILE_V11, PROFILE_V13})
 _DIR = "functional-canary"
 
 
@@ -48,7 +50,7 @@ def begin_authenticated_read_canary(state_root: Path, *, candidate_sha: str, pro
                                     ttl_seconds: int = 360, now: float | None = None) -> dict:
     if not isinstance(candidate_sha, str) or not _SHA.fullmatch(candidate_sha):
         raise LiveReadAcceptanceError("read canary candidate must be exact SHA")
-    if profile != PROFILE_V11 or not 60 <= ttl_seconds <= 600:
+    if profile not in _RELEASE_PROFILES or not 60 <= ttl_seconds <= 600:
         raise LiveReadAcceptanceError("read canary profile/expiry unsupported")
     root = state_root / _DIR
     root.mkdir(mode=0o700, parents=False, exist_ok=True)
@@ -157,6 +159,16 @@ def verify_authenticated_read_canary(state_root: Path, session: dict) -> dict | 
                            and type(p.get("items")) is int and p["items"] in (0, 1)
                            for p in proofs):
                     continue
+                if (session.get("profile") == PROFILE_V13
+                        and not any(
+                            p.get("kind") == "dynamic_schema_search"
+                            and p.get("_authenticated_principal") == identity
+                            and type(p.get("items")) is int and p["items"] in (0, 1)
+                            for p in proofs
+                        )):
+                    # v13's actual feature must be tested by the SAME Entra
+                    # requester, not inferred from v11's existing Projects.
+                    continue
                 return {
                     "status": "PASS",
                     "source_revision": session["candidate_sha"],
@@ -166,6 +178,7 @@ def verify_authenticated_read_canary(state_root: Path, session: dict) -> dict | 
                     "ticket_page_sum": len(ids) + len(second_ids),
                     "exact_id_readback": True,
                     "generic_project_read": True,
+                    **({"dynamic_schema_search": True} if session.get("profile") == PROFILE_V13 else {}),
                     "customer_data_in_receipt": False,
                 }
     return None

@@ -12,6 +12,7 @@ import pytest
 
 from production_read_canary_gate import (
     PROFILE_V11,
+    PROFILE_V13,
     LiveReadAcceptanceError,
     begin_authenticated_read_canary,
     require_authenticated_read_canary,
@@ -221,3 +222,70 @@ def test_do_not_stitch_one_aot_operators_count_to_anothers_tickets(tmp_path):
             payload["principal_id"] = other
             path.write_text(json.dumps(payload))
     assert verify_authenticated_read_canary(tmp_path, session) is None
+
+def _full_v13_receipts(root: Path, session, *, include_dynamic=True, dynamic_actor=CONNECTED_AOT_PRINCIPAL):
+    """All five read classes must derive from the same bound human."""
+    def send(capability, arguments, data, actor=CONNECTED_AOT_PRINCIPAL):
+        return _send(root, session, capability, arguments, data,
+                     principal=actor, profile=PROFILE_V13)
+    assert send("service.ticket.count", ARGS, {"queryCount":72})
+    assert send("service.ticket.search",{**ARGS,"page_size":50},
+                {"items":[{"id":x} for x in range(101,151)]})
+    assert send("service.ticket.search",{**ARGS,"page_size":50,"after_resource_id":150},
+                {"items":[{"id":x} for x in range(151,173)]})
+    assert send("service.ticket.read",{"resource_id":101},{"items":[{"id":101}]})
+    assert send("service.entity.search",{"entity":"Projects","page_size":1},
+                {"items":[{"id":222}]})
+    if include_dynamic:
+        assert send("service.entity.search",
+                    {"entity":"ActionTypes","page_size":1,"select":["id","name"]},
+                    {"items":[{"id":17,"name":"CUSTOMER_DATA_MUST_NOT_APPEAR"}]},
+                    actor=dynamic_actor)
+
+
+def test_v13_requires_real_dynamic_schema_query_as_well_as_ticket_and_projects(tmp_path):
+    session=begin_authenticated_read_canary(
+        tmp_path,candidate_sha=SHA,profile=PROFILE_V13,now=time.time(),
+    )
+    _full_v13_receipts(tmp_path,session)
+    verdict=verify_authenticated_read_canary(tmp_path,session)
+    assert verdict is not None and verdict["status"]=="PASS"
+    assert verdict["dynamic_schema_search"] is True
+    assert verdict["ticket_page_sum"]==72
+    assert verdict["generic_project_read"] is True
+    assert verdict["customer_data_in_receipt"] is False
+    all_receipts="".join(
+        f.read_text() for f in (tmp_path/"functional-canary"/"events").glob("*.json")
+    )
+    assert "CUSTOMER_DATA_MUST_NOT_APPEAR" not in all_receipts
+
+
+def test_v13_missing_dynamic_read_can_never_pass_release(tmp_path):
+    session=begin_authenticated_read_canary(
+        tmp_path,candidate_sha=SHA,profile=PROFILE_V13,now=time.time(),
+    )
+    _full_v13_receipts(tmp_path,session,include_dynamic=False)
+    assert verify_authenticated_read_canary(tmp_path,session) is None
+    with pytest.raises(LiveReadAcceptanceError,match="not verified"):
+        require_authenticated_read_canary(tmp_path,session,max_wait_seconds=0)
+
+
+def test_v13_dynamic_read_by_another_user_cannot_be_stitched_into_release(tmp_path):
+    session=begin_authenticated_read_canary(
+        tmp_path,candidate_sha=SHA,profile=PROFILE_V13,now=time.time(),
+    )
+    _full_v13_receipts(tmp_path,session,dynamic_actor="person-entra-"+"b"*32)
+    assert verify_authenticated_read_canary(tmp_path,session) is None
+
+
+def test_v13_rejects_invented_successful_unvalidated_raw_dynamic_proof(tmp_path):
+    session=begin_authenticated_read_canary(
+        tmp_path,candidate_sha=SHA,profile=PROFILE_V13,now=time.time(),
+    )
+    _full_v13_receipts(tmp_path,session,include_dynamic=False)
+    assert not _send(
+        tmp_path,session,"service.entity.search",
+        {"entity":"OtherEntity","page_size":1,"select":["id","name"]},
+        {"items":[{"id":101}]},profile=PROFILE_V13
+    )
+    assert verify_authenticated_read_canary(tmp_path,session) is None
