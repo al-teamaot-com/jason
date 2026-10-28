@@ -58,6 +58,7 @@ def build_windows_time_source_shadow_maintenance(
     json_shadow_enabled: bool = False,
     json_document_path: Path | None = None,
     json_state_db: Path | None = None,
+    json_shadow_allowed_site_uids: frozenset[str] = frozenset(),
     json_shadow_max_alerts_per_tick: int = 25,
     audit=None,
 ):
@@ -97,5 +98,6 @@ def build_windows_time_source_shadow_maintenance(
         audit=audit,
         json_shadow=json_shadow,
         json_shadow_state=json_shadow_state,
+        json_shadow_allowed_site_uids=json_shadow_allowed_site_uids,
         json_shadow_max_alerts_per_tick=json_shadow_max_alerts_per_tick,
     )
