@@ -57,6 +57,9 @@ from autonomous_remediation.autonomous_principal import (
     AutonomousPrincipal,
     AutonomousRequestFactory,
 )
+from autonomous_remediation.least_disruptive_policy import (
+    assess_remediation, applies_to_remediation,
+)
 from autonomous_remediation.playbook_autonomy_approval import (
     SQLitePlaybookAutonomyApprovalStore,
 )
@@ -3695,11 +3698,16 @@ def _governed_execute(
             "error_code": "capability_not_mcp_action_enabled",
         }
 
+    # Justification is control-plane material, never a provider argument. The
+    # assessment supplies Jason's affirmative benefit judgment and comparison
+    # to narrower fixes; it is NOT approval or source evidence verification.
+    supplied = dict(arguments)
+    remediation_review = supplied.pop("jason_remediation_review", None)
     try:
         canonical_arguments = (
             _canonicalize_governed_action_arguments(
                 capability_name,
-                arguments,
+                supplied,
             )
         )
     except ValueError as exc:
@@ -3765,6 +3773,50 @@ def _governed_execute(
                 datto_approval_reason_code = (
                     "DATTO_COMPONENT_STANDING_APPROVAL_STALE"
                 )
+
+    remediation_policy_id: str | None = None
+    if applies_to_remediation(capability_name):
+        # The current Datto PowerShell classifier is a bounded passive read;
+        # it retains its existing standing authorization path. All actual
+        # state-changing management commands require an affirmative assessment.
+        passive_diagnostic = (
+            capability_name == "automation.component.execute"
+            and (
+                datto_approval_reason_code == "DATTO_POWERSHELL_READ_ONLY_COMMAND"
+                or (datto_approval_mode == "standing_safe"
+                    and selected_component.name.casefold().startswith((
+                        "check ", "get-", "get status ", "query status ",
+                    )))
+            )
+        )
+        if not passive_diagnostic:
+            component = (selected_component.name if capability_name
+                         == "automation.component.execute" else "")
+            try:
+                judgment = assess_remediation(
+                    capability=capability_name,
+                    arguments=canonical_arguments,
+                    review=remediation_review,
+                    component_name=component,
+                    explicit_technician_approval=explicit_approval,
+                )
+            except (TypeError, ValueError) as exc:
+                return {
+                    "status": "rejected", "capability": capability_name,
+                    "error_code": "REMEDIATION_ASSESSMENT_INVALID",
+                    "reason_codes": [type(exc).__name__],
+                }
+            if not judgment.may_proceed_to_authority:
+                return {
+                    "status": "rejected", "capability": capability_name,
+                    "error_code": "REMEDIATION_ACTION_NOT_JUSTIFIED",
+                    "reason_codes": list(judgment.reasons),
+                    "impact": judgment.impact.value,
+                    "action_fingerprint": judgment.action_fingerprint,
+                }
+            remediation_policy_id = (
+                "least-disruptive-remediation-v1:" + judgment.action_fingerprint
+            )
 
     execution_id = f"exec_mcp_action_{uuid4().hex}"
     correlation_id = f"corr_mcp_action_{uuid4().hex}"
@@ -3995,7 +4047,8 @@ def _governed_execute(
         arguments=canonical_arguments,
         requester_kind="human",
         permission_mode="execute",
-        policy_ids=("mcp-governed-execution-v1",),
+        policy_ids=(("mcp-governed-execution-v1", remediation_policy_id)
+                    if remediation_policy_id else ("mcp-governed-execution-v1",)),
         authority_context_id=context.context_id,
         idempotency_key=idempotency_key,
         approval_id=approval_id,
@@ -7362,7 +7415,11 @@ def execute_governed_capability(
     approval; callers must carry that same-turn instruction as
     arguments.explicit_approval=true. Autonomous selection of a per-run
     component must not set that flag and must stop for technician instruction.
-    Classification is never accepted from action arguments.
+    Classification is never accepted from action arguments. For a modifying
+    device/client management action, include `jason_remediation_review` with
+    Jason's evidence references, expected improvement, verification and review
+    of less disruptive alternatives. The server classifies impact itself.
+    Missing or negative justification is not overridden by technician approval.
     """
 
     capability_name = str(capability).strip()

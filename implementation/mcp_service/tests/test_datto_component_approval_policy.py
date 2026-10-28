@@ -104,6 +104,18 @@ def install_runtime(monkeypatch):
     return approvals, orchestrator_calls
 
 
+def remediation_review(target: str, *, reboot: bool = False):
+    return {"decision": "recommend", "target_id": target,
+            "problem": "Endpoint requires targeted repair based on verified diagnostic evidence.",
+            "evidence_refs": ["corr_mcp_ticket_read_diagnostic"],
+            "expected_improvement": "Restore healthy endpoint operation without unnecessary changes.",
+            "verification": "Reread endpoint health and confirm the reported error is cleared.",
+            "narrower_options": ([{"action": "Restart only the affected service",
+                                  "disposition": "attempted_failed",
+                                  "evidence_refs": ["evidence://diagnostic/failed-restart"]}]
+                                if reboot else [])}
+
+
 def test_standing_safe_needs_no_explicit_per_run_approval(monkeypatch):
     set_scope(monkeypatch)
     approvals, calls = install_runtime(monkeypatch)
@@ -134,8 +146,8 @@ def test_per_run_rejected_before_orchestrator_without_explicit_approval(monkeypa
         },
     )
 
-    assert result["status"] == "approval_required"
-    assert "DATTO_COMPONENT_EXPLICIT_APPROVAL_REQUIRED" in result["reason_codes"]
+    assert result["status"] == "rejected"
+    assert "REMEDIATION_ASSESSMENT_REQUIRED" in result["reason_codes"]
     assert approvals == []
     assert calls == []
 
@@ -149,6 +161,7 @@ def test_per_run_proceeds_when_current_technician_instruction_is_carried_as_appr
         arguments={
             "device_uid": "other-managed-device",
             "component_uid": "component-reboot",
+            "jason_remediation_review": remediation_review("other-managed-device", reboot=True),
         },
         explicit_approval=True,
     )
@@ -233,11 +246,13 @@ def test_linux_worker_bound_to_exact_per_run_permission(monkeypatch):
         capability_name="automation.component.execute",
         arguments={"device_uid": "claw2", "component_name": LINUX_SHELL_NAME, "variables": {"usrInput": "uname -srm"}},
     )
-    assert before_approval["status"] == "approval_required"
+    assert before_approval["status"] == "rejected"
+    assert "REMEDIATION_ASSESSMENT_REQUIRED" in before_approval["reason_codes"]
     assert calls == []
     with_approval = server._governed_execute(
         capability_name="automation.component.execute",
-        arguments={"device_uid": "claw2", "component_name": LINUX_SHELL_NAME, "variables": {"usrInput": "uname -srm"}},
+        arguments={"device_uid": "claw2", "component_name": LINUX_SHELL_NAME, "variables": {"usrInput": "uname -srm"},
+                   "jason_remediation_review": remediation_review("claw2")},
         explicit_approval=True,
     )
     assert with_approval["status"] == "succeeded"
@@ -273,12 +288,14 @@ def test_linux_worker_has_separate_server_scope_without_legacy_catalog_entry(mon
         arguments={"device_uid": "claw2", "component_name": LINUX_SHELL_NAME,
                    "variables": {"usrInput": "uname -srm"}},
     )
-    assert unapproved["status"] == "approval_required"
+    assert unapproved["status"] == "rejected"
+    assert "REMEDIATION_ASSESSMENT_REQUIRED" in unapproved["reason_codes"]
     assert calls == []
     approved = server._governed_execute(
         capability_name="automation.component.execute",
         arguments={"device_uid": "claw2", "component_name": LINUX_SHELL_NAME,
-                   "variables": {"usrInput": "uname -srm"}},
+                   "variables": {"usrInput": "uname -srm"},
+                   "jason_remediation_review": remediation_review("claw2")},
         explicit_approval=True,
     )
     assert approved["status"] == "succeeded"
@@ -294,3 +311,64 @@ def test_separate_worker_scope_does_not_change_desktop_diagnostics(monkeypatch):
     )
     assert result["allowlist_name"] == "AOT governed diagnostic pilot"
     assert result["device_class"] == "Desktop"
+
+
+def test_user_approval_does_not_override_jasons_negative_remediation_judgment(monkeypatch):
+    set_scope(monkeypatch)
+    approvals, calls = install_runtime(monkeypatch)
+    review = remediation_review("other-managed-device", reboot=True)
+    review["decision"] = "do_not_run"
+    result = server._governed_execute(
+        capability_name="automation.component.execute",
+        arguments={
+            "device_uid": "other-managed-device",
+            "component_uid": "component-reboot",
+            "jason_remediation_review": review,
+        },
+        explicit_approval=True,
+    )
+    assert result["status"] == "rejected"
+    assert result["error_code"] == "REMEDIATION_ACTION_NOT_JUSTIFIED"
+    assert "REMEDIATION_NOT_RECOMMENDED_BY_JASON" in result["reason_codes"]
+    assert approvals == [] and calls == []
+
+
+def test_reboot_refused_for_print_failure_with_viable_spooler_restart(monkeypatch):
+    set_scope(monkeypatch)
+    approvals, calls = install_runtime(monkeypatch)
+    review = remediation_review("other-managed-device", reboot=True)
+    review["problem"] = "Print Spooler service stopped and the print queue cannot print."
+    review["narrower_options"][0]["disposition"] = "viable"
+    result = server._governed_execute(
+        capability_name="automation.component.execute",
+        arguments={
+            "device_uid": "other-managed-device",
+            "component_uid": "component-reboot",
+            "jason_remediation_review": review,
+        },
+        explicit_approval=True,
+    )
+    assert result["status"] == "rejected"
+    assert "LESS_DISRUPTIVE_EFFECTIVE_ACTION_AVAILABLE" in result["reason_codes"]
+    assert approvals == [] and calls == []
+
+
+def test_exact_technician_approved_reboot_with_failed_narrower_remedy_has_bound_policy(monkeypatch):
+    set_scope(monkeypatch)
+    approvals, calls = install_runtime(monkeypatch)
+    review = remediation_review("other-managed-device", reboot=True)
+    review["problem"] = "Printer queue still fails after verified targeted spooler restart."
+    result = server._governed_execute(
+        capability_name="automation.component.execute",
+        arguments={
+            "device_uid": "other-managed-device",
+            "component_uid": "component-reboot",
+            "jason_remediation_review": review,
+        },
+        explicit_approval=True,
+    )
+    assert result["status"] == "succeeded"
+    assert len(calls) == 1 and len(approvals) == 1
+    assert not any(key == "jason_remediation_review" for key in calls[0].arguments)
+    assert any(value.startswith("least-disruptive-remediation-v1:")
+               for value in calls[0].policy_ids)
