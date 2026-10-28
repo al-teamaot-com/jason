@@ -1,0 +1,303 @@
+{
+  "schema_version": 1,
+  "playbook": {
+    "id": "drmm_recent_alert_reconciliation",
+    "name": "Jason - DRMM Recent Alert Reconciliation (JSON migration draft)",
+    "version": "1.0.0-jsonpreview",
+    "lifecycle": "pilot",
+    "target_type": "provider_object",
+    "source_owner": "AOT",
+    "source_registry_version": "1.0.0",
+    "documented_version": "1.0.0",
+    "original_lifecycle": "production"
+  },
+  "trigger": {
+    "source_registry_match": {
+      "provider": "datto_rmm",
+      "scheduled": true,
+      "lookback_hours": 24
+    },
+    "details_section_key": "2",
+    "execution_enabled": false
+  },
+  "scope": {
+    "direct_provider_access": false,
+    "preview_only": true,
+    "execution_authority": "none",
+    "scope_section_key": "3"
+  },
+  "expected_state": {
+    "details_section_key": "5",
+    "not_reverified_in_json_runtime": true
+  },
+  "state_model": {
+    "entry_step": "identity_gate",
+    "source_section_key": "6",
+    "context_binding_status": "not_implemented_for_migration_draft"
+  },
+  "steps": [
+    {
+      "id": "identity_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_target_identity_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "evidence_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "evidence_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "authoritative_evidence_complete",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "authorization_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "authorization_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "approved_json_runtime_parity",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "migration_hold"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "migration_hold",
+      "type": "human_review"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "verification": {
+    "authoritative_source": "Legacy source playbook section 17 and provider readbacks; not executed in this JSON draft",
+    "success_condition": "Legacy source Section 17 and Section 18 must pass independently; classification-only draft cannot verify or close"
+  },
+  "completion": {
+    "terminal_disposition": "Human Review (draft only; existing production source unchanged)"
+  },
+  "autonomy": {
+    "activation": "disabled",
+    "allowed_capabilities": []
+  },
+  "procedure": {
+    "section_refs": {
+      "section_goal": "1",
+      "trigger": "2",
+      "scope": "3",
+      "identification": "4",
+      "expected_state": "5",
+      "state_model": "6",
+      "diagnostics": "7",
+      "decision_gates": "8",
+      "remediation": "9",
+      "retry_policy": "10",
+      "periodic_rechecks": "11",
+      "stale_condition": "12",
+      "dependencies": "13",
+      "documentation": "14",
+      "failures": "15",
+      "escalation": "16",
+      "verification": "17",
+      "completion": "18",
+      "final_resolution": "19",
+      "required_capabilities": "20",
+      "acceptance_test": "21",
+      "closure": "22",
+      "autonomy_review": "23"
+    },
+    "section_keys_missing_from_source": [
+      "20",
+      "21",
+      "22",
+      "23"
+    ],
+    "diagnostic_substep_titles": [],
+    "remediation_substep_titles": [],
+    "live_execution_mapped": false
+  },
+  "legacy_registry": {
+    "source_path": "docs/playbooks/Jason-DRMM-Recent-Alert-Reconciliation.md",
+    "source_version": "1.0.0",
+    "review_status": "daily_recent_alert_verified_reconciliation",
+    "source_enabled": true,
+    "source_autonomy_activation": "autonomous",
+    "source_allowed_capabilities": [
+      "endpoint.alert.resolve",
+      "service.ticket.note.create",
+      "service.ticket.update"
+    ],
+    "source_required_gates": [
+      "recent_window",
+      "identity",
+      "registered_verifier",
+      "current_state_healthy",
+      "governance_precheck",
+      "autonomy_approved"
+    ],
+    "source_trigger": {
+      "provider": "datto_rmm",
+      "scheduled": true,
+      "lookback_hours": 24
+    }
+  },
+  "source_document": {
+    "path": "docs/playbooks/Jason-DRMM-Recent-Alert-Reconciliation.md",
+    "source_blob_sha": "076872fae94f49d3daa3dc1b8740bd99fee75ee2",
+    "prelude_markdown": "# Jason Playbook: DRMM Recent Alert Reconciliation\n\n```yaml\nplaybook:\n  id: drmm_recent_alert_reconciliation\n  name: Jason - DRMM Recent Alert Reconciliation\n  version: 1.0.0\n  owner: AOT\n  target_type: provider_object\n  trigger:\n    provider: Datto RMM\n    match: currently-open alert whose provider timestamp is within the previous 24 hours\n  ownership:\n    while_open: conditional\n    release_active_slot_when_waiting: true\n  retry:\n    max_remediation_attempts: 0\n  recheck:\n    enabled: false\n    cadence: 24 hours\n    stale_after: not applicable\n  verification:\n    authoritative_source: registered alert-class verifier\n    success_condition: exact triggering condition is proven absent from current device state\n  completion:\n    terminal_disposition: resolve exact DRMM alert and reconcile exact matching Autotask ticket\n  autonomy:\n    allowed_branches:\n      - current-state reads\n      - endpoint.alert.resolve after verified healthy state\n      - exact matching Autotask internal note and completion\n    approval_bound_branches: []\n    disruptive_branches: []\n```\n\n",
+    "sections": [
+      {
+        "key": "1",
+        "title": "Section Goal",
+        "heading_markdown": "## 1. Section Goal",
+        "body_markdown": "\n\nOnce per day, evaluate only currently-open Datto RMM alerts from the previous 24 hours. For alert classes with an explicitly registered authoritative verifier, prove the current endpoint state. If the original unhealthy condition is demonstrably absent, resolve the exact alert, require provider readback, and reconcile the exact linked Autotask ticket. Never use alert age by itself as closure evidence.\n\nSuccess requires both positive and negative acceptance: a proven recovered alert can be closed, while an offline, still-unhealthy, unsupported, or inconclusive alert is not mutated.\n\n"
+      },
+      {
+        "key": "2",
+        "title": "Trigger",
+        "heading_markdown": "## 2. Trigger",
+        "body_markdown": "\n\n- Scheduled runtime maintenance cadence: 24 hours.\n- Rolling provider timestamp lookback: 24 hours.\n- Datto RMM `status=open` only.\n- Alerts older than the lookback are discarded locally before endpoint verification.\n- Historical backlog cleanup is explicitly out of scope.\n\n"
+      },
+      {
+        "key": "3",
+        "title": "Scope and Boundaries",
+        "heading_markdown": "## 3. Scope and Boundaries",
+        "body_markdown": "\n\n### In scope\n- recent open Datto RMM alerts;\n- exact alert/device identity;\n- registered current-state verifier;\n- exact alert resolution;\n- exact linked Autotask ticket reconciliation.\n\n### Out of scope\n- historical alert cleanup;\n- remediation of the underlying endpoint condition;\n- reboot/service restart/software modification;\n- monitor suppression or policy changes;\n- unsupported alert classes;\n- guesses based on age or prior response-component execution.\n\nPreserve Central Orchestrator authority and `direct_provider_access=false`.\n\n"
+      },
+      {
+        "key": "4",
+        "title": "Initial Identification",
+        "heading_markdown": "## 4. Initial Identification",
+        "body_markdown": "\n\nRequire exact alert UID and DRMM device UID. If either is absent, classify inconclusive and do not mutate. Ticket reconciliation requires the exact `ticketNumber` carried by the alert.\n\n"
+      },
+      {
+        "key": "5",
+        "title": "Expected State",
+        "heading_markdown": "## 5. Expected State",
+        "body_markdown": "\n\nHealthy state is verifier-specific. Version 1.0 registers `endpoint_security_threat_ctx` only:\n- endpoint is currently online;\n- Datto AV is enabled, connected, and engine-ready;\n- EDR identity resolves to an exact agent;\n- current non-archived detection search returns zero active detections.\n\n"
+      },
+      {
+        "key": "6",
+        "title": "State Model",
+        "heading_markdown": "## 6. State Model",
+        "body_markdown": "\n\n`scheduled -> recent_open -> supported | unsupported -> verifying -> healthy | unhealthy | waiting | inconclusive -> resolving -> provider_verified -> ticket_reconciled -> complete`\n\nThe daily last-completed timestamp and summary are durable in SQLite so runtime restarts do not cause duplicate daily passes.\n\n"
+      },
+      {
+        "key": "7",
+        "title": "Diagnostic Workflow",
+        "heading_markdown": "## 7. Diagnostic Workflow",
+        "body_markdown": "\n\n1. Read all currently-open DRMM alerts.\n2. Discard alerts outside the rolling 24-hour window.\n3. Select a registered verifier by alert class.\n4. Run authoritative current-state reads.\n5. Classify healthy, unhealthy, waiting, unsupported, or inconclusive.\n6. Only `healthy` may proceed to mutation.\n\n"
+      },
+      {
+        "key": "8",
+        "title": "Decision Gates",
+        "heading_markdown": "## 8. Decision Gates",
+        "body_markdown": "\n\nBefore alert resolution require:\n- alert timestamp in current 24-hour window;\n- exact alert UID;\n- exact DRMM device UID;\n- registered verifier;\n- authoritative reads succeed;\n- current healthy state proven;\n- exact durable owner promotion for the reconciliation playbook.\n\n"
+      },
+      {
+        "key": "9",
+        "title": "Remediation",
+        "heading_markdown": "## 9. Remediation",
+        "body_markdown": "\n\nThis playbook performs no endpoint remediation. The only provider mutation is `endpoint.alert.resolve` for the exact verified alert. If an exact linked Autotask ticket remains open, Jason writes one internal resolution note and sets it Complete after alert-resolution readback.\n\n"
+      },
+      {
+        "key": "10",
+        "title": "Retry Policy",
+        "heading_markdown": "## 10. Retry Policy",
+        "body_markdown": "\n\nNo blind mutation retries. A failed resolution or failed readback is inconclusive and remains open for later/human handling.\n\n"
+      },
+      {
+        "key": "11",
+        "title": "Periodic Rechecks",
+        "heading_markdown": "## 11. Periodic Rechecks",
+        "body_markdown": "\n\nNot applicable within a run. The next scheduled sweep is the normal recheck. Offline endpoints are left untouched.\n\n"
+      },
+      {
+        "key": "12",
+        "title": "Aging / Stale Condition",
+        "heading_markdown": "## 12. Aging / Stale Condition",
+        "body_markdown": "\n\nNot applicable to the daily sweep. Alerts older than 24 hours are outside scope and are not walked historically.\n\n"
+      },
+      {
+        "key": "13",
+        "title": "Dependency Handling",
+        "heading_markdown": "## 13. Dependency Handling",
+        "body_markdown": "\n\nUnsupported alert classes are counted and skipped. New classes require an explicit authoritative verifier and acceptance tests before autonomous resolution is enabled for that class.\n\n"
+      },
+      {
+        "key": "14",
+        "title": "Documentation Requirements",
+        "heading_markdown": "## 14. Documentation Requirements",
+        "body_markdown": "\n\nFor a linked ticket that is reconciled, record status, no-technician-action-required, exact alert UID/device, authoritative healthy evidence, exact provider resolution/readback, and explicitly state that no endpoint remediation or disruptive action occurred.\n\n"
+      },
+      {
+        "key": "15",
+        "title": "Failure Handling",
+        "heading_markdown": "## 15. Failure Handling",
+        "body_markdown": "\n\nFail closed on provider/read failure, endpoint offline, unresolved identity, active detections, unhealthy security engine, unsupported alert class, or failed resolution readback.\n\n"
+      },
+      {
+        "key": "16",
+        "title": "Autotask Reconciliation",
+        "heading_markdown": "## 16. Autotask Reconciliation",
+        "body_markdown": "\n\nOnly reconcile the exact `ticketNumber` carried by the resolved alert. Do not search by fuzzy title/device match. If the ticket is already complete, no duplicate mutation is needed.\n\n"
+      },
+      {
+        "key": "17",
+        "title": "Required Capabilities",
+        "heading_markdown": "## 17. Required Capabilities",
+        "body_markdown": "\n\nReads: `management.alert.search`, `endpoint.device.read`, `endpoint.security.status.read`, `endpoint.security.detection.search`, `endpoint.alert.history.search`, `service.ticket.search`, `service.ticket.read`.\n\nActions: `endpoint.alert.resolve`, `service.ticket.note.create`, `service.ticket.update`.\n\n"
+      },
+      {
+        "key": "18",
+        "title": "Acceptance Test",
+        "heading_markdown": "## 18. Acceptance Test",
+        "body_markdown": "\n\nRequired cases: older-than-24-hours ignored; unsupported alert skipped; active detection refuses closure; offline endpoint waits; healthy security alert resolves exact provider alert and reconciles exact linked ticket; durable scheduler does not rerun before 24 hours.\n\n"
+      },
+      {
+        "key": "19",
+        "title": "Completion / Section Goal Closure",
+        "heading_markdown": "## 19. Completion / Section Goal Closure",
+        "body_markdown": "\n\nProduction-ready when tests pass, exact playbook autonomy promotion exists, runtime is enabled with 24-hour cadence/lookback, and a controlled production pass demonstrates fail-closed behavior plus at least one verified positive closure when a qualifying alert exists.\n"
+      }
+    ]
+  },
+  "migration": {
+    "status": "SOURCE_PRESERVED_STRUCTURED_DRAFT_NOT_RUNTIME_PARITY",
+    "source_version_discrepancy": false,
+    "production_replacement_allowed": false,
+    "staged": false,
+    "activated": false,
+    "required_before_activation": [
+      "Canonical Python JSON semantic validation",
+      "Exact-capability binding and source-scoped argument context verified",
+      "Safe diagnostic and remediation branches mapped to governed capabilities",
+      "Durable retry/wait/terminal lifecycle parity with shared runtime",
+      "Error, negative-evidence and client-boundary regression tests",
+      "Controlled shadow comparison and independent acceptance",
+      "Owner-bound activation and branch-specific autonomous promotion"
+    ],
+    "external_fact_fields_non_authoritative": true
+  }
+}
