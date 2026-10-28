@@ -234,3 +234,32 @@ def test_unverified_absent_git_registration_is_never_silently_skipped(tmp_path, 
     monkeypatch.setattr(m, "command", lambda args, cwd=None: f"worktree {missing}")
     with pytest.raises(m.ScopeBlocked, match="worktree unavailable"):
         m.dirty_worktrees(tmp_path, {"shared.py"})
+
+
+def test_scope_digest_includes_verified_missing_git_registry_evidence(tmp_path, monkeypatch):
+    """Cannot reuse a release receipt after the Git worktree inventory changes."""
+    sha = "a" * 40
+    commits = [{"sha": sha, "subject": "Reviewed feature (#101)", "prs": [101]}]
+    monkeypatch.setattr(m, "source_scope", lambda *_: (commits, ["shared.py"]))
+    monkeypatch.setattr(m, "open_pr_overlaps", lambda *_args, **_kwargs: ([], 0))
+    monkeypatch.setattr(
+        m, "dirty_worktrees",
+        lambda *_: ([], 1020, ["/tmp/stale-Git-entry"], 1046),
+    )
+    initial = m.review(
+        tmp_path, "test/repo", "1" * 40, "2" * 40,
+        allowed_prs=[101], pr_reader=reader([]),
+    )
+    assert initial["status"] == "SCOPE_REVIEWED_NOT_DEPLOYMENT_APPROVED"
+    assert initial["registered_worktrees"] == 1046
+    assert initial["worktrees_inspected"] == 1020
+    assert initial["git_verified_stale_registrations"] == ["/tmp/stale-Git-entry"]
+    monkeypatch.setattr(
+        m, "dirty_worktrees",
+        lambda *_: ([], 1020, ["/tmp/a-different-stale-Git-entry"], 1046),
+    )
+    changed = m.review(
+        tmp_path, "test/repo", "1" * 40, "2" * 40,
+        allowed_prs=[101], pr_reader=reader([]),
+    )
+    assert changed["scope_sha256"] != initial["scope_sha256"]
