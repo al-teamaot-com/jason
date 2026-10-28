@@ -35,3 +35,6 @@ These describe responses demonstrate entity query visibility for the current API
 - Latest pre-documentation commit CI: nine workflows successful.
 - A separately deployed preproduction MCP with isolated authority stores and independently authorized Autotask credentials has NOT been provisioned; do not claim live preproduction acceptance.
 - Native technician time-entry query permission is NOT yet proven against a real provider requester; keep the permission gate disabled until authorized positive and negative provider-backed tests are available.
+
+## Independent test-identity credential gate
+The preproduction-only tool `tools/autotask_preprod_credential_gate.py` checks private credential-file metadata without opening or displaying secrets or contacting Autotask. It explicitly rejects the known production bootstrap, runtime, and data roots. The current preproduction credential directory is not provisioned, so the gate intentionally returns `PRIVATE_DIRECTORY_MISSING_OR_SYMLINK` and refuses a live test. A successful metadata check alone will not establish technician-native impersonation permission: run positive and negative provider-backed tests before enabling reads.
