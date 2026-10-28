@@ -316,6 +316,7 @@ def test_json_shadow_runs_inside_existing_legacy_cadence_without_second_alert_li
         audit=audit,
         json_shadow=observer,
         json_shadow_state=json_state,
+        json_shadow_allowed_site_uids=frozenset({SITE_UID}),
     )
     first = worker.run_once(now=NOW)
     assert first["matched"] == 1
@@ -383,6 +384,7 @@ def test_existing_legacy_worker_keeps_operating_when_json_observer_fails(tmp_pat
         audit=audit,
         json_shadow=FaultyObserver(),
         json_shadow_state=object(),
+        json_shadow_allowed_site_uids=frozenset({SITE_UID}),
     )
     result = worker.run_once(now=NOW)
     assert result["matched"] == 1
@@ -405,6 +407,7 @@ def test_bounded_json_shadow_rotation_does_not_starve_matching_alerts(tmp_path):
         now=lambda: NOW,
         json_shadow=observer,
         json_shadow_state=json_state,
+        json_shadow_allowed_site_uids=frozenset({SITE_UID}),
         json_shadow_max_alerts_per_tick=1,
     )
     result1 = worker.run_once(now=NOW)
@@ -462,3 +465,49 @@ def test_json_shadow_runtime_build_contract_and_default_off():
     assert "JASON_WINDOWS_TIME_JSON_SHADOW_ENABLED:-false" in compose
     assert installed_path in compose
     assert "JASON_WINDOWS_TIME_JSON_SHADOW_MAX_ALERTS_PER_TICK:-25" in compose
+    assert "JASON_WINDOWS_TIME_JSON_SHADOW_SITE_UID_ALLOWLIST:-" in compose
+
+
+
+def test_out_of_scope_site_is_not_observed_by_json_but_legacy_continues(tmp_path):
+    reads = GovernedReadsFixture(
+        current=[alert("outside", site_uid="another-site"), alert("inside")]
+    )
+    observer, json_state = build_windows_time_json_shadow_observer(
+        reads=reads, document_path=PATH, state_db=tmp_path / "json.sqlite3"
+    )
+    state = SQLiteWindowsTimeSourceShadowState(tmp_path / "legacy.sqlite3")
+    worker = WindowsTimeSourceShadowMaintenance(
+        reads=reads, state=state, now=lambda: NOW,
+        json_shadow=observer, json_shadow_state=json_state,
+        json_shadow_allowed_site_uids=frozenset({SITE_UID}),
+    )
+    summary = worker.run_once(now=NOW)
+    assert summary["matched"] == 2
+    assert summary["identified"] == 2
+    assert summary["json_shadow_selected"] == 1
+    assert summary["json_shadow_outside_site_allowlist"] == 1
+    assert json_state.read_one("outside") is None
+    assert json_state.read_one("inside") is not None
+    assert summary["mutations"] == 0
+    json_state.close()
+    state.close()
+
+
+def test_json_shadow_rejects_missing_canary_scope_before_any_reads(tmp_path):
+    reads = GovernedReadsFixture()
+    observer, json_state = build_windows_time_json_shadow_observer(
+        reads=reads, document_path=PATH, state_db=tmp_path / "json.sqlite3"
+    )
+    state = SQLiteWindowsTimeSourceShadowState(tmp_path / "legacy.sqlite3")
+    try:
+        with pytest.raises(ValueError, match="exact site UID allowlist"):
+            WindowsTimeSourceShadowMaintenance(
+                reads=reads, state=state,
+                json_shadow=observer,
+                json_shadow_state=json_state,
+            )
+        assert reads.calls == []
+    finally:
+        state.close()
+        json_state.close()
