@@ -45,7 +45,7 @@ def _all_candidates():
 
 def _source_sha1(content):
     encoded = content.encode("utf-8")
-    return sha1(b"blob " + str(len(encoded)).encode("ascii") + b"\\0" + encoded).hexdigest()
+    return sha1(b"blob " + str(len(encoded)).encode("ascii") + bytes([0]) + encoded).hexdigest()
 
 
 def test_all_16_candidates_pass_canonical_validator_and_have_no_execution_authority():
