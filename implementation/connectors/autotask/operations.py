@@ -5,6 +5,7 @@ import re
 from typing import Any, Mapping
 
 from .verified_read_extensions import v12_entity_read_enabled
+from .dynamic_schema_read import dynamic_generic_entity_eligible
 
 
 @dataclass(frozen=True)
@@ -358,10 +359,20 @@ def _path_values(
                 }
                 and v12_entity_read_enabled(entity)
             )
+            # v13 is a single dynamically compiled GET/query route. The
+            # connected API schema is verified by the read connector *before*
+            # sending any data query. Never add v13 names to the shared
+            # mutation/POST/PATCH/DELETE entity set.
+            v13_candidate_query = (
+                definition.method == "GET"
+                and definition.path_template == "/V1.0/{entity}/query"
+                and dynamic_generic_entity_eligible(entity)
+            )
             if not safe_name or (
                 not schema_only
                 and entity not in APPROVED_AUTOTASK_ENTITIES
                 and not v12_data_read
+                and not v13_candidate_query
             ):
                 raise ValueError(
                     f"Autotask entity is not approved: {entity!r}"

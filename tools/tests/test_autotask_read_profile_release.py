@@ -111,3 +111,22 @@ def test_native_rollback_profiles_must_not_pass_v10_as_candidate_override():
     assert "JASON_PROVIDER_READ_ACTIVATION_PROFILE" not in selected
     assert selected["JASON_PROVIDER_READ_ROLLBACK_PROFILE"] == V10
     assert selected["JASON_SOURCE_REVISION_OVERRIDE"] == "b" * 40
+
+
+def test_v13_dormant_profile_is_declared_for_future_exact_sha_native_review(tmp_path):
+    from connectors.autotask.dynamic_schema_read import DYNAMIC_READ_PROFILE
+    assert DYNAMIC_READ_PROFILE in runner.AUTOTASK_PROVIDER_READ_PROFILES
+    declaration = tmp_path / "config" / "autotask-entity-read-profile.json"
+    declaration.parent.mkdir()
+    declaration.write_text(json.dumps({
+        "schema_version":"1.0",
+        "read_profile":DYNAMIC_READ_PROFILE,
+        "rollback_read_profile":V11,
+    }))
+    assert runner.declared_autotask_read_profiles(tmp_path) == (
+        DYNAMIC_READ_PROFILE,V11,
+    )
+    root=Path(__file__).resolve().parents[2]
+    deployed=json.loads((root/"config/autotask-entity-read-profile.json").read_text())
+    assert deployed["read_profile"]==V11
+    assert deployed["read_profile"]!=DYNAMIC_READ_PROFILE

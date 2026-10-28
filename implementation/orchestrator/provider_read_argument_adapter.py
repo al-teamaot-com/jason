@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from connectors.autotask.verified_read_extensions import v12_entity_read_enabled
+from connectors.autotask.dynamic_schema_read import dynamic_generic_entity_eligible
 
 import json
 import re
@@ -645,13 +646,16 @@ def _autotask_generic_entity_query(
     capability_name: str, arguments: Mapping[str, Any],
 ) -> dict[str, Any]:
     entity = arguments.get("entity")
+    dynamic = dynamic_generic_entity_eligible(entity)
     if not isinstance(entity, str) or not (
         entity in _AUTOTASK_GENERIC_READ_ENTITIES or v12_entity_read_enabled(entity)
+        or dynamic
     ):
         raise ValueError("generic read entity is not yet API-accepted for governed query")
     unsupported = set(arguments) - {
         "entity", "resource_id", "filters", "page_size", "after_resource_id",
         "requested_facts", "result_intent", "completeness_requirement",
+        *(("select",) if dynamic else ()),
     }
     if unsupported:
         raise ValueError("unsupported generic Autotask selector")
@@ -669,11 +673,32 @@ def _autotask_generic_entity_query(
     for field, value in filters.items():
         if not isinstance(field, str) or not _AUTOTASK_GENERIC_FIELD_NAME.fullmatch(field):
             raise ValueError("Autotask filter has invalid canonical field name")
-        if type(value) not in (str, int, float, bool):
+        op = "eq"
+        if dynamic and isinstance(value, Mapping):
+            if set(value) - {"op", "value"} or "op" not in value:
+                raise ValueError("unsupported Autotask structured filter")
+            op = value["op"]
+            value = value.get("value")
+        if dynamic and op in {"exist", "notExist"}:
+            if value is not None:
+                raise ValueError("existence filter does not accept a value")
+            clauses.append({"op": op, "field": field})
+            continue
+        if dynamic and op in {"in", "notIn"}:
+            if (not isinstance(value, list) or not 1 <= len(value) <= 30
+                    or any(type(item) not in (str, int, float, bool)
+                           or (isinstance(item, str) and (not item.strip() or len(item) > 512))
+                           for item in value)):
+                raise ValueError("Autotask list filter is not bounded")
+        elif (type(value) not in (str, int, float, bool)
+              or (isinstance(value, str) and (not value.strip() or len(value) > 512))):
             raise ValueError("Autotask filter value must be a bounded scalar")
-        if isinstance(value, str) and (not value.strip() or len(value) > 512):
-            raise ValueError("Autotask filter text is blank or too large")
-        clauses.append({"op": "eq", "field": field, "value": value})
+        if dynamic and op not in {
+            "eq", "noteq", "gt", "gte", "lt", "lte",
+            "contains", "beginsWith", "endsWith", "in", "notIn",
+        }:
+            raise ValueError("Autotask filter operator not supported")
+        clauses.append({"op": op, "field": field, "value": value})
     raw_id = arguments.get("resource_id")
     exact_id = None
     if raw_id is not None:
@@ -698,13 +723,22 @@ def _autotask_generic_entity_query(
     if not clauses:
         clauses.append({"op": "exist", "field": "id"})
     max_records = 2 if capability_name == SERVICE_ENTITY_READ else _autotask_max_records(arguments)
-    result = {
-        "entity": entity,
-        "search": json.dumps(
-            {"MaxRecords": max_records, "filter": clauses},
-            separators=(",", ":"), sort_keys=True,
-        ),
-    }
+    search = {"MaxRecords": max_records, "filter": clauses}
+    result = {"entity": entity}
+    if dynamic:
+        selected = arguments.get("select")
+        if selected is not None:
+            if (not isinstance(selected, list) or not 1 <= len(selected) <= 31
+                    or any(not isinstance(name, str)
+                           or not _AUTOTASK_GENERIC_FIELD_NAME.fullmatch(name)
+                           for name in selected)
+                    or len(set(selected)) != len(selected)):
+                raise ValueError("select must contain 1-31 unique canonical field names")
+            # Datto's IncludeFields is the actual provider-native projection.
+            # Always include id so exact readback and cursor paging are safe.
+            search["IncludeFields"] = ["id", *[x for x in selected if x != "id"]]
+        result["jason_dynamic_schema_read"] = True
+    result["search"] = json.dumps(search, separators=(",", ":"), sort_keys=True)
     if capability_name == SERVICE_ENTITY_READ:
         result["jason_exact_entity_read_id"] = exact_id
     return result
