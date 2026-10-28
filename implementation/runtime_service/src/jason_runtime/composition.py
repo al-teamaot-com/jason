@@ -181,6 +181,7 @@ from orchestrator.semantic_fact_resolver import DEFAULT_SEMANTIC_FACT_RESOLVER
 from orchestrator.semantic_fact_reasoning import OllamaSemanticFactReasoner
 from orchestrator.semantic_mapping_registry import JsonSemanticMappingRegistryLoader
 from orchestrator.provider_read_authority import GovernedProviderReadAuthorityMatcher
+from .aot_operational_read_authority import ensure_aot_technician_read_authority
 from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
 from orchestrator.service import CentralOrchestrator
 from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
@@ -1548,16 +1549,22 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         now=now,
     )
 
+    identity_repository = SQLiteIdentityRepository(authority_store)
     identity_authority = IdentityAuthorityService(
-        identities=SQLiteIdentityRepository(authority_store),
+        identities=identity_repository,
         grants=SQLiteAuthorityGrantRepository(authority_store),
         approvals=approval_repository,
         contexts=authority_store,
         audit=authority_store,
         capability_matcher=GovernedProviderReadAuthorityMatcher(
-            capabilities=capabilities, providers=providers
+            capabilities=capabilities, providers=providers,
+            identities=identity_repository,
         ),
     )
+    # Mandatory standing observe policy. Authenticated AOT human staff receive
+    # operational reads across approved registered providers; write pathways,
+    # client isolation, source information authorization and audit are intact.
+    ensure_aot_technician_read_authority(identity_authority)
     ensure_meter_history_read_authority(
         identity_authority,
         enabled=settings.kfs_enabled,
