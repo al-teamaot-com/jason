@@ -663,6 +663,49 @@
           "domain_controller_time_configuration"
         ]
       }
+    },
+    {
+      "id": "client_information_request",
+      "name": "Jason - Approved Client Information Requests (Round 1)",
+      "version": "1.0.0",
+      "lifecycle": "pilot",
+      "enabled": true,
+      "source": "docs/playbooks/Jason-Client-Information-Requests-Round1.md",
+      "trigger": {
+        "provider": "autotask",
+        "condition": "exact corroborated missing-fact gap code from authorized diagnostic playbook"
+      },
+      "review_status": "owner_content_approved_source_review_and_live_acceptance_pending",
+      "autonomy": {
+        "activation": "shadow",
+        "required_gates": [
+          "exact_ticket_and_contact",
+          "source_controlled_gap_code",
+          "verified_missing_fact",
+          "recipient_same_company",
+          "notification_enabled",
+          "non_duplicate",
+          "routine_question_class",
+          "profile_enabled",
+          "exact_owner_promotion"
+        ],
+        "allowed_capabilities": [
+          "service.ticket.client.notification.create"
+        ],
+        "policy_id": "playbook-autonomy:client_information_request",
+        "allowed_branches": [
+          "select_verified_gap",
+          "send_approved_question",
+          "verify_notification",
+          "verify_contact_reply",
+          "resume_original_diagnostic"
+        ],
+        "approval_bound_branches": [
+          "context_controlled_question",
+          "human_review_question"
+        ],
+        "disruptive_branches": []
+      }
     }
   ]
 }

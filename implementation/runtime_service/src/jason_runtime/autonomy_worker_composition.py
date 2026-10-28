@@ -23,6 +23,11 @@ from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
 
 from .autonomy_shadow_runtime import GovernedAutonomyReadPort
 from .ticket_split_runtime import SQLiteTicketSplitStore, TicketSplitExecutor
+from .client_information_requests import (
+    ClientQuestionWorkflow,
+    SQLiteClientQuestionLedger,
+    client_question_profile_enabled,
+)
 from .autonomy_targeted_wake_runtime import (
     CompositeAutonomyMaintenance,
     TargetedWakeMaintenance,
@@ -31,6 +36,7 @@ from .autonomy_worker_runtime import (
     GovernedAutonomyActionPort,
     OperationalAutonomyMaintenance,
     SQLiteOperationalWorkStore,
+    CLIENT_QUESTION_SCOPE,
 )
 
 
@@ -117,6 +123,24 @@ def build_autonomy_worker_maintenance(
         completion_notifier=completion_notifier,
         ticket_splitter=ticket_splitter,
     )
+    # No new send authority is created by constructing the worker. A separate
+    # exact activation profile plus durable owner-promoted playbook scope are
+    # both required, and the existing Autotask connector independently checks
+    # recipients and exact approved message bodies.
+    if client_question_profile_enabled():
+        question_reads = GovernedAutonomyReadPort(
+            request_factory=request_factory,
+            orchestrator=orchestrator,
+            policy_id="autonomous-client-question-read-v1",
+        )
+        worker.client_questions = ClientQuestionWorkflow(
+            reads=question_reads, actions=actions,
+            ledger=SQLiteClientQuestionLedger(
+                work_db.with_name("client-questions.sqlite3")
+            ),
+            scope=CLIENT_QUESTION_SCOPE,
+            scope_is_promoted=lambda: worker._scope_is_promoted(CLIENT_QUESTION_SCOPE),
+        )
     targeted_reads = GovernedAutonomyReadPort(
         request_factory=request_factory,
         orchestrator=orchestrator,
