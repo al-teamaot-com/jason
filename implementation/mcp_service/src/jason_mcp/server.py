@@ -6918,8 +6918,12 @@ def verify_release_ticket_read_canary(
             or any(
                 not isinstance(item, dict)
                 or type(item.get("id")) is not int
-                or item["id"] <= 0
-                or set(item) - {"id", "name"}
+                # Autotask ActionTypes ID=0 is a genuine provider row.
+                # This exception does NOT apply to ticket or project IDs.
+                or item["id"] < 0
+                or set(item) != {"id", "name"}
+                or not isinstance(item.get("name"), str)
+                or not item["name"].strip()
                 for item in items
             )
         ):
