@@ -28,6 +28,7 @@ CAPABILITIES = {
 class CapabilityRegistry:
     def __init__(self):
         self.enabled = True
+        self.approval_required = True
         self.metadata = {
             "write_capability": "true",
             "mcp_action_enabled": "true",
@@ -41,7 +42,7 @@ class CapabilityRegistry:
         return SimpleNamespace(
             lifecycle_status=SimpleNamespace(value="active" if self.enabled else "building"),
             metadata=self.metadata,
-            approval=SimpleNamespace(required=True),
+            approval=SimpleNamespace(required=self.approval_required),
         )
 
 
@@ -186,3 +187,12 @@ def test_expired_or_mismatched_approval_denied():
         "tech", "approved", "tech", datetime.now(timezone.utc), None,
     ))
     assert decide(service, approval_id="other-client").outcome is AuthorityOutcome.DENIED
+
+
+def test_routine_write_does_not_trust_nonconnector_or_nonapproval_capability():
+    service, caps, provider, _ = make_runtime()
+    provider.kind = ProviderType.WORKFLOW
+    assert decide(service).outcome is AuthorityOutcome.DENIED
+    provider.kind = ProviderType.EXTERNAL_CONNECTOR
+    caps.approval_required = False
+    assert decide(service).outcome is AuthorityOutcome.DENIED
