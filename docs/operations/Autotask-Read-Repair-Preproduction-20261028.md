@@ -38,3 +38,13 @@ These describe responses demonstrate entity query visibility for the current API
 
 ## Independent test-identity credential gate
 The preproduction-only tool `tools/autotask_preprod_credential_gate.py` checks private credential-file metadata without opening or displaying secrets or contacting Autotask. It explicitly rejects the known production bootstrap, runtime, and data roots. The current preproduction credential directory is not provisioned, so the gate intentionally returns `PRIVATE_DIRECTORY_MISSING_OR_SYMLINK` and refuses a live test. A successful metadata check alone will not establish technician-native impersonation permission: run positive and negative provider-backed tests before enabling reads.
+
+## Credential-isolation hardening (release preparation follow-up)
+The credential metadata gate must also reject symlinked ancestors, path
+traversal, unexpected file or directory ownership, nonregular files, and
+hard-linked credential files. It never reads a credential value. Its successful
+result proves only filesystem metadata and does not prove the credentials are
+isolated from production, an Autotask requester is authorized, or the provider
+enforces technician-specific TimeEntries GET permissions. Test credentials must
+still be provisioned through the approved secrets-admin workflow and provider
+positive/negative acceptance must still be performed before production use.
