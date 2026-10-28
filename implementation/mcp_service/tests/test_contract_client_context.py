@@ -278,3 +278,19 @@ def test_untrusted_aot_staff_cannot_derive_contract_client_scope(monkeypatch):
         bound_client_id=None, capability_name=server.SERVICE_CONTRACT_SEARCH,
         arguments={"company_id": 827},
     ) == (None, None)
+
+
+def test_bound_client_contract_read_rejects_cross_client_selector(monkeypatch):
+    monkeypatch.setattr(server, "_authenticated_identity", lambda: (
+        "person-bound", "aot", "entra", "827"
+    ))
+    monkeypatch.setattr(
+        server, "_governed_read_for_identity",
+        lambda **kw: (_ for _ in ()).throw(AssertionError("provider read forbidden"))
+    )
+    result = server._governed_read(
+        capability_name=server.SERVICE_CONTRACT_SEARCH,
+        arguments={"company_id": 828, "page_size": 5},
+    )
+    assert result["status"] == "denied"
+    assert result["reason_codes"] == ["CLIENT_SCOPE_MISMATCH"]

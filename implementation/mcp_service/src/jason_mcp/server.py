@@ -1162,6 +1162,24 @@ def _governed_read(
         assurance,
         client_id,
     ) = _authenticated_identity()
+    # Reject an explicit cross-client selector before issuing a governed read.
+    # A pre-bound client identity must never use a different company_id,
+    # including when the provider happens to return matching-looking rows.
+    selected_company = arguments.get("company_id")
+    if (
+        client_id is not None
+        and capability_name in {SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ}
+        and selected_company is not None
+        and (
+            isinstance(selected_company, bool)
+            or str(selected_company).strip() != str(client_id)
+        )
+    ):
+        return {
+            "status": "denied",
+            "capability": capability_name,
+            "reason_codes": ["CLIENT_SCOPE_MISMATCH"],
+        }
     client_id, derived_context = _contract_client_context_for_identity(
         principal=principal,
         organization=organization,
