@@ -29,8 +29,10 @@
     "known_source_doc_registry_version_mismatch": [
       "backupiq_endpoint_backup"
     ],
-    "canonical_python_semantic_validation": "not_run",
-    "full_runtime_parity": "not_proven"
+    "canonical_python_semantic_validation": "PASSED 2026-10-28 GitHub Actions 40749435902 at f7bf956b0f0a35a86d72e26923f73832dfd50e58",
+    "full_runtime_parity": "NOT_PROVEN",
+    "windows_time_synthetic_shadow_cases": 15,
+    "windows_time_synthetic_shadow_result": "PASS (all terminal human_review, no execution actions)"
   },
   "migration": {
     "runtime_definition_schema_version": 1,
@@ -39,7 +41,7 @@
     "no_live_activation_or_registry_modification_authorized_by_this_snapshot": true,
     "first_candidate": "windows_time_source",
     "first_candidate_rationale": "Already pilot/shadow with an existing Markdown source and explicit risk gates; migrate only its deterministic classification first, without activating remediation",
-    "next_gate": "Canonical Python JSON v1 semantic validation and a real capability/identity-binding integration plan; first working migrated playbook only after prior P0 production stabilization",
+    "next_gate": "Read-only provider evidence binding into the existing Central Orchestrator and verified shadow behavior parity for the Windows Time pilot; no stage or activation until separately accepted",
     "full_parity_required_before_replacing_legacy": true,
     "migration_phase": "all_source_preserving_json_v1_drafts_created_on_draft_branch",
     "candidate_count": 16,
@@ -54,7 +56,11 @@
       "No accepted provider-capability/argument binding for JSON step execution",
       "No proof that JSON runtime interpreter is integrated into autonomous ticket worker",
       "No accepted wait/recheck runtime parity and no controlled shadow acceptance"
-    ]
+    ],
+    "test_source_path": "implementation/runtime_service/tests/test_json_playbook_migration_candidates.py",
+    "test_ci_run_url": "https://github.com/al-teamaot-com/jason/actions/runs/40749435902",
+    "test_ci_revision": "f7bf956b0f0a35a86d72e26923f73832dfd50e58",
+    "backupiq_discrepancy_issue": "https://github.com/al-teamaot-com/jason/issues/2113"
   },
   "playbooks": [
     {
@@ -92,7 +98,8 @@
       "source_section_gaps": [],
       "document_version": "1.3.0",
       "source_registry_version": "1.2.0",
-      "version_alignment": "SOURCE_DOC_VERSION_CONFLICT_REQUIRES_RECONCILIATION"
+      "version_alignment": "SOURCE_DOC_VERSION_CONFLICT_REQUIRES_RECONCILIATION",
+      "version_reconciliation_issue": "https://github.com/al-teamaot-com/jason/issues/2113"
     },
     {
       "id": "datto_edr_av",
@@ -639,7 +646,11 @@
       "current_json_autonomy_activation": "disabled",
       "source_section_gaps": [],
       "document_version": null,
-      "version_alignment": "no_detected_conflict_or_unstated_document_version"
+      "version_alignment": "no_detected_conflict_or_unstated_document_version",
+      "shadow_simulation_case_count": 15,
+      "shadow_simulation_status": "PASS_canonical_interpreter_synthetic_only",
+      "live_evidence_binding": "NOT_VERIFIED",
+      "staging_status": "NOT_STAGED"
     }
   ]
 }
