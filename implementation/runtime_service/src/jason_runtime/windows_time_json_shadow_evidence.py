@@ -12,6 +12,9 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 import json
+import os
+from pathlib import Path
+import sqlite3
 from typing import Any, Mapping, Protocol
 
 from autonomous_remediation.playbook_document import PlaybookDocument
@@ -94,7 +97,13 @@ class WindowsTimeJsonShadowEvidence:
         self.reads = reads
         self.document = document
 
-    def assess(self, *, alert_uid: str, now: datetime) -> JsonTimeShadowAssessment:
+    def assess(
+        self,
+        *,
+        alert_uid: str,
+        now: datetime,
+        open_alert_snapshot: Mapping[str, Any] | None = None,
+    ) -> JsonTimeShadowAssessment:
         """Look up one exact open alert and classify only verified read evidence.
 
         A listing can be paginated. An absent alert on a partial page is
@@ -119,7 +128,15 @@ class WindowsTimeJsonShadowEvidence:
                 raise ValueError("JSON_SHADOW_UNAPPROVED_READ")
             used.append(capability)
             try:
-                result = self.reads.execute(capability, arguments)
+                if capability == "management.alert.search" and open_alert_snapshot is not None:
+                    # Reuse the already-governed open-alert result from the
+                    # existing maintenance tick; avoid a second full account
+                    # alert listing for every matching alert.
+                    if dict(arguments) != {"status": "open"}:
+                        return None
+                    result = open_alert_snapshot
+                else:
+                    result = self.reads.execute(capability, arguments)
             except Exception:
                 return None  # fail closed without propagating provider internals
             if not isinstance(result, Mapping):
@@ -295,3 +312,136 @@ class WindowsTimeJsonShadowEvidence:
                 "approved_source_policy_confirmed": False,
             },
         )
+
+
+class SQLiteWindowsTimeJsonShadowState:
+    """Additive, independent SQLite state for disabled JSON shadow assessments.
+
+    Uses a distinct database from the existing Windows Time maintenance state.
+    Stores bounded identifiers, reason codes and source hashes only; never raw
+    provider records, credentials, ticket notes, or diagnostic command output.
+    """
+
+    _SCHEMA = """
+    CREATE TABLE IF NOT EXISTS windows_time_json_shadow_state (
+        alert_uid TEXT PRIMARY KEY,
+        device_uid TEXT NOT NULL,
+        site_uid TEXT NOT NULL,
+        terminal_step TEXT NOT NULL,
+        reason_code TEXT NOT NULL,
+        recurrence_count INTEGER,
+        source_fingerprint TEXT,
+        document_fingerprint TEXT NOT NULL,
+        decision_fingerprint TEXT NOT NULL,
+        read_capabilities_json TEXT NOT NULL,
+        correlation_ids_json TEXT NOT NULL,
+        first_seen_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL
+    );
+    """
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._connection = sqlite3.connect(
+            str(self.path), timeout=10.0, isolation_level=None
+        )
+        self._connection.row_factory = sqlite3.Row
+        self._connection.execute("PRAGMA journal_mode=WAL")
+        self._connection.execute("PRAGMA synchronous=FULL")
+        self._connection.executescript(self._SCHEMA)
+        os.chmod(self.path, 0o600)
+
+    def record(
+        self,
+        assessment: JsonTimeShadowAssessment,
+        *,
+        document_fingerprint: str,
+        when: datetime,
+    ) -> bool:
+        """Persist the last assessment; only report a meaningful transition.
+
+        The correlation ID is retained as evidence but deliberately does not
+        participate in the decision fingerprint (new reads get new IDs).
+        """
+        if when.tzinfo is None:
+            raise ValueError("JSON_SHADOW_AWARE_TIME_REQUIRED")
+        stamp = when.astimezone(timezone.utc).isoformat()
+        material = {
+            "alert_uid": assessment.alert_uid,
+            "device_uid": assessment.device_uid,
+            "site_uid": assessment.site_uid,
+            "terminal_step": assessment.terminal_step,
+            "reason_code": assessment.reason_code,
+            "recurrence_count": assessment.recurrence_count,
+            "source_fingerprint": assessment.source_fingerprint,
+            "document_fingerprint": str(document_fingerprint),
+        }
+        decision_fingerprint = sha256(
+            json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        existing = self._connection.execute(
+            "SELECT decision_fingerprint,first_seen_at "
+            "FROM windows_time_json_shadow_state WHERE alert_uid=?",
+            (assessment.alert_uid,),
+        ).fetchone()
+        changed = existing is None or existing["decision_fingerprint"] != decision_fingerprint
+        first_seen = stamp if existing is None else str(existing["first_seen_at"])
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO windows_time_json_shadow_state(
+                    alert_uid,device_uid,site_uid,terminal_step,reason_code,
+                    recurrence_count,source_fingerprint,document_fingerprint,
+                    decision_fingerprint,read_capabilities_json,
+                    correlation_ids_json,first_seen_at,last_seen_at
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(alert_uid) DO UPDATE SET
+                    device_uid=excluded.device_uid,
+                    site_uid=excluded.site_uid,
+                    terminal_step=excluded.terminal_step,
+                    reason_code=excluded.reason_code,
+                    recurrence_count=excluded.recurrence_count,
+                    source_fingerprint=excluded.source_fingerprint,
+                    document_fingerprint=excluded.document_fingerprint,
+                    decision_fingerprint=excluded.decision_fingerprint,
+                    read_capabilities_json=excluded.read_capabilities_json,
+                    correlation_ids_json=excluded.correlation_ids_json,
+                    last_seen_at=excluded.last_seen_at
+                """,
+                (
+                    assessment.alert_uid,
+                    assessment.device_uid,
+                    assessment.site_uid,
+                    assessment.terminal_step,
+                    assessment.reason_code,
+                    assessment.recurrence_count,
+                    assessment.source_fingerprint,
+                    str(document_fingerprint),
+                    decision_fingerprint,
+                    json.dumps(assessment.read_capabilities),
+                    json.dumps(assessment.correlation_ids),
+                    first_seen,
+                    stamp,
+                ),
+            )
+        return changed
+
+    def read_one(self, alert_uid: str) -> Mapping[str, Any] | None:
+        row = self._connection.execute(
+            "SELECT alert_uid,device_uid,site_uid,terminal_step,reason_code,"
+            "recurrence_count,source_fingerprint,document_fingerprint,"
+            "decision_fingerprint,read_capabilities_json,correlation_ids_json,"
+            "first_seen_at,last_seen_at FROM windows_time_json_shadow_state "
+            "WHERE alert_uid=?",
+            (str(alert_uid),),
+        ).fetchone()
+        if row is None:
+            return None
+        value = dict(row)
+        value["read_capabilities"] = json.loads(value.pop("read_capabilities_json"))
+        value["correlation_ids"] = json.loads(value.pop("correlation_ids_json"))
+        return value
+
+    def close(self) -> None:
+        self._connection.close()

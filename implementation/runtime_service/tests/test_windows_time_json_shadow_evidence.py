@@ -17,7 +17,11 @@ if str(IMPLEMENTATION) not in sys.path:
 
 from autonomous_remediation.playbook_document import validate_playbook_document
 from jason_runtime.windows_time_json_shadow_evidence import (
+    SQLiteWindowsTimeJsonShadowState,
     WindowsTimeJsonShadowEvidence,
+)
+from jason_runtime.windows_time_source_shadow_composition import (
+    build_windows_time_json_shadow_observer,
 )
 from jason_runtime.windows_time_source_shadow import (
     SQLiteWindowsTimeSourceShadowState,
@@ -286,3 +290,224 @@ def test_no_arbitrary_fact_or_endpoint_argument_is_accepted():
     with pytest.raises(ValueError, match="AWARE_TIME_REQUIRED"):
         bridge.assess(alert_uid=ALERT_UID, now=datetime(2026, 10, 28))
     assert reads.calls == []
+
+
+class MemoryAudit:
+    def __init__(self):
+        self.events = []
+
+    def record(self, event_type, data):
+        self.events.append((event_type, dict(data)))
+
+
+def test_json_shadow_runs_inside_existing_legacy_cadence_without_second_alert_list(tmp_path):
+    reads = GovernedReadsFixture()
+    observer, json_state = build_windows_time_json_shadow_observer(
+        reads=reads,
+        document_path=PATH,
+        state_db=tmp_path / "json-shadow.sqlite3",
+    )
+    audit = MemoryAudit()
+    legacy_state = SQLiteWindowsTimeSourceShadowState(tmp_path / "legacy.sqlite3")
+    worker = WindowsTimeSourceShadowMaintenance(
+        reads=reads,
+        state=legacy_state,
+        now=lambda: NOW,
+        audit=audit,
+        json_shadow=observer,
+        json_shadow_state=json_state,
+        json_shadow_allowed_site_uids=frozenset({SITE_UID}),
+    )
+    first = worker.run_once(now=NOW)
+    assert first["matched"] == 1
+    assert first["identified"] == 1
+    assert first["mutations"] == 0
+    assert first["json_shadow_changed"] == 1
+    assert first["json_shadow_selected"] == 1
+    assert first["json_shadow_failures"] == 0
+    assert [cap for cap, _ in reads.calls].count("management.alert.search") == 1
+    assert len([x for x in reads.calls if x[0] == "endpoint.device.read"]) == 2
+    assert len([x for x in reads.calls if x[0] == "endpoint.alert.history.search"]) == 2
+    persisted = json_state.read_one(ALERT_UID)
+    assert persisted["terminal_step"] == "review_inconclusive"
+    assert persisted["reason_code"] == "DEDICATED_TIME_DIAGNOSTIC_AND_SITE_POLICY_NOT_VERIFIED"
+    assert len(persisted["decision_fingerprint"]) == 64
+    assert len(persisted["correlation_ids"]) == 3
+    assert len([e for e in audit.events if e[0] == "autonomy.windows_time_json_shadow"]) == 1
+
+    next_result = worker.run_once(now=NOW + timedelta(minutes=15))
+    assert next_result["json_shadow_changed"] == 0
+    assert next_result["json_shadow_failures"] == 0
+    assert next_result["identified"] == 1
+    assert len([e for e in audit.events if e[0] == "autonomy.windows_time_json_shadow"]) == 1
+    persisted_later = json_state.read_one(ALERT_UID)
+    assert persisted_later["decision_fingerprint"] == persisted["decision_fingerprint"]
+    assert persisted_later["first_seen_at"] == persisted["first_seen_at"]
+    assert persisted_later["last_seen_at"] != persisted["last_seen_at"]
+    json_state.close()
+    legacy_state.close()
+
+
+def test_json_shadow_state_survives_restart_without_duplicate_change(tmp_path):
+    reads = GovernedReadsFixture()
+    first_observer, first_store = build_windows_time_json_shadow_observer(
+        reads=reads, document_path=PATH, state_db=tmp_path / "json-shadow.sqlite3"
+    )
+    first = first_observer.assess(alert_uid=ALERT_UID, now=NOW)
+    assert first_store.record(first, document_fingerprint=first_observer.document.fingerprint, when=NOW) is True
+    first_store.close()
+
+    second_observer, second_store = build_windows_time_json_shadow_observer(
+        reads=reads, document_path=PATH, state_db=tmp_path / "json-shadow.sqlite3"
+    )
+    second = second_observer.assess(alert_uid=ALERT_UID, now=NOW + timedelta(minutes=15))
+    assert second_store.record(
+        second, document_fingerprint=second_observer.document.fingerprint,
+        when=NOW + timedelta(minutes=15)
+    ) is False
+    assert second_store.read_one(ALERT_UID)["first_seen_at"] == NOW.isoformat()
+    second_store.close()
+
+
+def test_existing_legacy_worker_keeps_operating_when_json_observer_fails(tmp_path):
+    class FaultyObserver:
+        def assess(self, **_kwargs):
+            raise RuntimeError("synthetic JSON-only failure")
+
+    reads = GovernedReadsFixture()
+    audit = MemoryAudit()
+    state = SQLiteWindowsTimeSourceShadowState(tmp_path / "legacy.sqlite3")
+    worker = WindowsTimeSourceShadowMaintenance(
+        reads=reads,
+        state=state,
+        now=lambda: NOW,
+        audit=audit,
+        json_shadow=FaultyObserver(),
+        json_shadow_state=object(),
+        json_shadow_allowed_site_uids=frozenset({SITE_UID}),
+    )
+    result = worker.run_once(now=NOW)
+    assert result["matched"] == 1
+    assert result["identified"] == 1
+    assert result["json_shadow_failures"] == 1
+    assert result["mutations"] == 0
+    assert any(event == "autonomy.windows_time_json_shadow_failure" for event, _ in audit.events)
+    state.close()
+
+
+def test_bounded_json_shadow_rotation_does_not_starve_matching_alerts(tmp_path):
+    reads = GovernedReadsFixture(current=[alert("alert-a"), alert("alert-b")])
+    observer, json_state = build_windows_time_json_shadow_observer(
+        reads=reads, document_path=PATH, state_db=tmp_path / "json-shadow.sqlite3"
+    )
+    state = SQLiteWindowsTimeSourceShadowState(tmp_path / "legacy.sqlite3")
+    worker = WindowsTimeSourceShadowMaintenance(
+        reads=reads,
+        state=state,
+        now=lambda: NOW,
+        json_shadow=observer,
+        json_shadow_state=json_state,
+        json_shadow_allowed_site_uids=frozenset({SITE_UID}),
+        json_shadow_max_alerts_per_tick=1,
+    )
+    result1 = worker.run_once(now=NOW)
+    result2 = worker.run_once(now=NOW + timedelta(minutes=15))
+    assert result1["matched"] == 2
+    assert result2["matched"] == 2
+    assert result1["json_shadow_selected"] == 1
+    assert result2["json_shadow_selected"] == 1
+    assert result1["json_shadow_deferred"] == 1
+    assert result2["json_shadow_deferred"] == 1
+    assert json_state.read_one("alert-a") is not None
+    assert json_state.read_one("alert-b") is not None
+    json_state.close()
+    state.close()
+
+
+def test_opt_in_requires_inert_document_and_exact_version(tmp_path):
+    reads = GovernedReadsFixture()
+    _, state = build_windows_time_json_shadow_observer(
+        reads=reads, document_path=PATH, state_db=tmp_path / "valid.sqlite3"
+    )
+    state.close()
+
+    bad = json.loads(PATH.read_text(encoding="utf-8"))
+    bad["playbook"]["version"] = "0.1.1-jsonpreview"
+    path = tmp_path / "invalid-version.json"
+    path.write_text(json.dumps(bad), encoding="utf-8")
+    with pytest.raises(ValueError, match="EXACT_VERSION_REQUIRED"):
+        build_windows_time_json_shadow_observer(
+            reads=reads, document_path=path,
+            state_db=tmp_path / "should-not-exist.sqlite3",
+        )
+    assert not (tmp_path / "should-not-exist.sqlite3").exists()
+
+    bad["playbook"]["version"] = "0.1.0-jsonpreview"
+    bad["autonomy"]["activation"] = "autonomous"
+    bad["autonomy"]["allowed_capabilities"] = ["endpoint.alert.resolve"]
+    path.write_text(json.dumps(bad), encoding="utf-8")
+    with pytest.raises(ValueError):
+        build_windows_time_json_shadow_observer(
+            reads=reads, document_path=path,
+            state_db=tmp_path / "should-still-not-exist.sqlite3",
+        )
+    assert not (tmp_path / "should-still-not-exist.sqlite3").exists()
+
+
+def test_json_shadow_runtime_build_contract_and_default_off():
+    docker = (ROOT / "infrastructure/jason-runtime/Dockerfile").read_text(encoding="utf-8")
+    ignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
+    compose = (ROOT / "infrastructure/jason-runtime/compose.yaml").read_text(encoding="utf-8")
+    candidate_path = "docs/playbooks/json/candidates/windows_time_source-0.1.0-jsonpreview.json"
+    installed_path = "/app/config/json-playbooks/windows_time_source-0.1.0-jsonpreview.json"
+    assert f"COPY {candidate_path} {installed_path}" in docker
+    assert f"!{candidate_path}" in ignore
+    assert "JASON_WINDOWS_TIME_JSON_SHADOW_ENABLED:-false" in compose
+    assert installed_path in compose
+    assert "JASON_WINDOWS_TIME_JSON_SHADOW_MAX_ALERTS_PER_TICK:-25" in compose
+    assert "JASON_WINDOWS_TIME_JSON_SHADOW_SITE_UID_ALLOWLIST:-" in compose
+
+
+
+def test_out_of_scope_site_is_not_observed_by_json_but_legacy_continues(tmp_path):
+    reads = GovernedReadsFixture(
+        current=[alert("outside", site_uid="another-site"), alert("inside")]
+    )
+    observer, json_state = build_windows_time_json_shadow_observer(
+        reads=reads, document_path=PATH, state_db=tmp_path / "json.sqlite3"
+    )
+    state = SQLiteWindowsTimeSourceShadowState(tmp_path / "legacy.sqlite3")
+    worker = WindowsTimeSourceShadowMaintenance(
+        reads=reads, state=state, now=lambda: NOW,
+        json_shadow=observer, json_shadow_state=json_state,
+        json_shadow_allowed_site_uids=frozenset({SITE_UID}),
+    )
+    summary = worker.run_once(now=NOW)
+    assert summary["matched"] == 2
+    assert summary["identified"] == 2
+    assert summary["json_shadow_selected"] == 1
+    assert summary["json_shadow_outside_site_allowlist"] == 1
+    assert json_state.read_one("outside") is None
+    assert json_state.read_one("inside") is not None
+    assert summary["mutations"] == 0
+    json_state.close()
+    state.close()
+
+
+def test_json_shadow_rejects_missing_canary_scope_before_any_reads(tmp_path):
+    reads = GovernedReadsFixture()
+    observer, json_state = build_windows_time_json_shadow_observer(
+        reads=reads, document_path=PATH, state_db=tmp_path / "json.sqlite3"
+    )
+    state = SQLiteWindowsTimeSourceShadowState(tmp_path / "legacy.sqlite3")
+    try:
+        with pytest.raises(ValueError, match="exact site UID allowlist"):
+            WindowsTimeSourceShadowMaintenance(
+                reads=reads, state=state,
+                json_shadow=observer,
+                json_shadow_state=json_state,
+            )
+        assert reads.calls == []
+    finally:
+        state.close()
+        json_state.close()

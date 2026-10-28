@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Mapping
+from uuid import UUID
 
 from usage_ledger.ledger import SQLiteUsageLedger
 
@@ -549,6 +550,17 @@ class RuntimeSettings:
         "/var/lib/jason/openclaw/windows-time-source-shadow.sqlite3"
     )
     windows_time_source_shadow_cadence_minutes: int = 15
+    # Separate JSON v1 read-only comparison is opt-in and defaults off.
+    # Production release activation must be separately governed.
+    windows_time_json_shadow_enabled: bool = False
+    windows_time_json_shadow_document_path: Path = Path(
+        "/app/config/json-playbooks/windows_time_source-0.1.0-jsonpreview.json"
+    )
+    windows_time_json_shadow_db: Path = Path(
+        "/var/lib/jason/openclaw/windows-time-json-shadow.sqlite3"
+    )
+    windows_time_json_shadow_max_alerts_per_tick: int = 25
+    windows_time_json_shadow_site_uid_allowlist: frozenset[str] = frozenset()
     autonomy_review_enabled: bool = False
     # The HTTP process must accept authenticated approval responses even
     # when scheduled review generation runs only in the maintenance child.
@@ -1002,6 +1014,26 @@ class RuntimeSettings:
             windows_time_source_shadow_cadence_minutes=int(
                 os.getenv("JASON_WINDOWS_TIME_SOURCE_SHADOW_CADENCE_MINUTES", "15")
             ),
+            windows_time_json_shadow_enabled=os.getenv(
+                "JASON_WINDOWS_TIME_JSON_SHADOW_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            windows_time_json_shadow_document_path=Path(os.getenv(
+                "JASON_WINDOWS_TIME_JSON_SHADOW_DOCUMENT_PATH",
+                "/app/config/json-playbooks/windows_time_source-0.1.0-jsonpreview.json",
+            )),
+            windows_time_json_shadow_db=Path(os.getenv(
+                "JASON_WINDOWS_TIME_JSON_SHADOW_DB",
+                "/var/lib/jason/openclaw/windows-time-json-shadow.sqlite3",
+            )),
+            windows_time_json_shadow_max_alerts_per_tick=int(os.getenv(
+                "JASON_WINDOWS_TIME_JSON_SHADOW_MAX_ALERTS_PER_TICK", "25"
+            )),
+            windows_time_json_shadow_site_uid_allowlist=frozenset(
+                uid.strip()
+                for uid in os.getenv(
+                    "JASON_WINDOWS_TIME_JSON_SHADOW_SITE_UID_ALLOWLIST", ""
+                ).split(",") if uid.strip()
+            ),
             autonomy_review_enabled=os.getenv(
                 "JASON_PLAYBOOK_AUTONOMY_REVIEW_ENABLED", "false"
             ).strip().casefold() in {"1", "true", "yes", "on"},
@@ -1153,6 +1185,24 @@ class RuntimeSettings:
             raise ValueError("JASON_DRMM_RECENT_ALERT_RECONCILIATION_CADENCE_HOURS must be at least 1")
         if self.windows_time_source_shadow_cadence_minutes < 1:
             raise ValueError("JASON_WINDOWS_TIME_SOURCE_SHADOW_CADENCE_MINUTES must be at least 1")
+        if self.windows_time_json_shadow_enabled and not self.windows_time_source_shadow_enabled:
+            raise ValueError("JASON_WINDOWS_TIME_JSON_SHADOW_ENABLED requires existing shadow enabled")
+        if not 1 <= self.windows_time_json_shadow_max_alerts_per_tick <= 100:
+            raise ValueError("JASON_WINDOWS_TIME_JSON_SHADOW_MAX_ALERTS_PER_TICK must be 1..100")
+        if self.windows_time_json_shadow_enabled and not self.windows_time_json_shadow_site_uid_allowlist:
+            raise ValueError("JASON_WINDOWS_TIME_JSON_SHADOW_SITE_UID_ALLOWLIST must be nonempty")
+        if len(self.windows_time_json_shadow_site_uid_allowlist) > 25:
+            raise ValueError("JASON_WINDOWS_TIME_JSON_SHADOW_SITE_UID_ALLOWLIST may list at most 25 sites")
+        for uid in self.windows_time_json_shadow_site_uid_allowlist:
+            try:
+                if str(UUID(uid)) != uid.lower():
+                    raise ValueError("site UID not canonical")
+            except (TypeError, ValueError) as exc:
+                raise ValueError("JASON_WINDOWS_TIME_JSON_SHADOW_SITE_UID_ALLOWLIST requires exact UUIDs") from exc
+        if not str(self.windows_time_json_shadow_document_path).strip():
+            raise ValueError("JASON_WINDOWS_TIME_JSON_SHADOW_DOCUMENT_PATH required")
+        if not str(self.windows_time_json_shadow_db).strip():
+            raise ValueError("JASON_WINDOWS_TIME_JSON_SHADOW_DB required")
         if self.autonomy_review_interval_seconds < 60:
             raise ValueError(
                 "JASON_PLAYBOOK_AUTONOMY_REVIEW_INTERVAL_SECONDS must be at least 60"
@@ -2780,6 +2830,11 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         state_db=settings.windows_time_source_shadow_db,
         promotion_db=settings.autonomy_promotion_db,
         cadence_minutes=settings.windows_time_source_shadow_cadence_minutes,
+        json_shadow_enabled=settings.windows_time_json_shadow_enabled,
+        json_document_path=settings.windows_time_json_shadow_document_path,
+        json_state_db=settings.windows_time_json_shadow_db,
+        json_shadow_max_alerts_per_tick=settings.windows_time_json_shadow_max_alerts_per_tick,
+        json_shadow_allowed_site_uids=settings.windows_time_json_shadow_site_uid_allowlist,
         audit=reflection_audit,
     )
     universal_plan_maintenance = (
