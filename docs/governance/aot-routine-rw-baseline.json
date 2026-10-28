@@ -1,0 +1,135 @@
+{
+  "schema_version": "1.0",
+  "status": "proposed_not_runtime_enforced",
+  "scope": "AOT authenticated technicians; managed clients only",
+  "purpose": "Default routine technician-requested RW policy; no blanket provider authorization; autonomous execution separately authorized",
+  "routine_capabilities": {
+    "service.ticket.update": {
+      "provider": "autotask",
+      "operations": [
+        "status",
+        "priority",
+        "queue",
+        "assigned_resource",
+        "device_association",
+        "ticket_contact"
+      ],
+      "requires": [
+        "authenticated_aot_technician",
+        "authorized_client_scope",
+        "existing_ticket",
+        "post_write_readback"
+      ]
+    },
+    "service.ticket.note.create": {
+      "provider": "autotask",
+      "requires": [
+        "authenticated_aot_technician",
+        "authorized_client_scope",
+        "existing_ticket",
+        "post_write_readback"
+      ]
+    },
+    "automation.component.execute": {
+      "provider": "datto_rmm",
+      "requires": [
+        "authenticated_aot_technician",
+        "authorized_client_scope",
+        "approved_component",
+        "no_disruptive_effect",
+        "job_readback"
+      ]
+    },
+    "documentation.record.upsert": {
+      "provider": "it_glue",
+      "requires": [
+        "authenticated_aot_technician",
+        "authorized_client_scope",
+        "authoritative_fact",
+        "versioned_change",
+        "post_write_readback"
+      ]
+    },
+    "identity.user.create": {
+      "provider": "entra_or_active_directory",
+      "requires": [
+        "authenticated_aot_technician",
+        "authorized_client_scope",
+        "authorized_client_request",
+        "nonprivileged_user",
+        "authoritative_directory_resolved",
+        "duplicate_check",
+        "post_write_readback"
+      ]
+    },
+    "identity.user.profile.update": {
+      "provider": "entra_or_active_directory",
+      "requires": [
+        "authenticated_aot_technician",
+        "authorized_client_scope",
+        "nonprivileged_user",
+        "post_write_readback"
+      ]
+    },
+    "identity.group.membership.update": {
+      "provider": "entra_or_active_directory",
+      "requires": [
+        "authenticated_aot_technician",
+        "authorized_client_scope",
+        "standard_approved_group",
+        "nonprivileged_target",
+        "post_write_readback"
+      ]
+    },
+    "identity.license.assign_existing": {
+      "provider": "microsoft_365",
+      "requires": [
+        "authenticated_aot_technician",
+        "authorized_client_scope",
+        "existing_license_available",
+        "no_purchase",
+        "post_write_readback"
+      ]
+    },
+    "mailbox.shared.create": {
+      "provider": "exchange_online",
+      "requires": [
+        "authenticated_aot_technician",
+        "authorized_client_scope",
+        "authorized_client_request",
+        "nonprivileged_mailbox",
+        "post_write_readback"
+      ]
+    }
+  },
+  "controlled_operations": [
+    "password_reset_existing_user",
+    "mfa_reset",
+    "user_disable_or_session_revoke",
+    "privileged_group_or_admin_role_change",
+    "external_mail_forwarding",
+    "sensitive_mailbox_delegation",
+    "endpoint_isolation_or_quarantine",
+    "security_exclusion_or_disable",
+    "firewall_or_network_change",
+    "disruptive_component_or_reboot",
+    "backup_delete_or_retention_change",
+    "resource_delete",
+    "license_purchase_or_contract_change",
+    "secret_read_or_rotate",
+    "privilege_escalation"
+  ],
+  "invariants": [
+    "existing_jkd001_authority",
+    "central_orchestrator_only",
+    "provider_credentials_not_authority",
+    "exact_client_tenant_scope",
+    "execution_plan_fingerprint",
+    "audit_requester_client_target_before_after",
+    "idempotency_and_post_write_readback",
+    "no_disruption_without_exact_approval",
+    "no_permission_escalation_on_denial",
+    "autonomy_only_by_separately_approved_playbook"
+  ],
+  "implementation_rule": "A capability listed here is not an entitlement and is unavailable until provider adapter, authority binding, identity, input validations and verification are implemented and production-accepted."
+}
