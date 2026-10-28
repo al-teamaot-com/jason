@@ -263,3 +263,108 @@ def test_scope_digest_includes_verified_missing_git_registry_evidence(tmp_path, 
         allowed_prs=[101], pr_reader=reader([]),
     )
     assert changed["scope_sha256"] != initial["scope_sha256"]
+
+
+def test_exact_clean_native_release_worktree_does_not_invalidate_manual_review(
+    repo, monkeypatch,
+):
+    """Regression: runner created its own detached worktree before final scope gate."""
+    root, base, candidate, tmp = repo
+    native_root = tmp / "private-release-manager" / "worktrees"
+    native_root.mkdir(parents=True, mode=0o700)
+    monkeypatch.setattr(m, "INTERNAL_RELEASE_WORKTREE_ROOT", native_root)
+    original = m.review(
+        root, "test/repo", base, candidate, allowed_prs=[101], pr_reader=reader([]),
+    )
+    internal = native_root / (candidate + "-" + "a" * 12)
+    git(root, "worktree", "add", "--detach", str(internal), candidate)
+    reviewed = m.review(
+        root, "test/repo", base, candidate, allowed_prs=[101], pr_reader=reader([]),
+    )
+    assert reviewed["status"] == "SCOPE_REVIEWED_NOT_DEPLOYMENT_APPROVED"
+    assert reviewed["scope_sha256"] == original["scope_sha256"]
+    assert reviewed["registered_worktrees"] == original["registered_worktrees"]
+    assert reviewed["worktrees_inspected"] == original["worktrees_inspected"]
+    assert git(internal, "rev-parse", "HEAD") == candidate
+
+
+def test_native_release_worktree_with_any_uncommitted_change_fails_closed(
+    repo, monkeypatch,
+):
+    root, base, candidate, tmp = repo
+    native_root = tmp / "private-release-manager" / "worktrees"
+    native_root.mkdir(parents=True, mode=0o700)
+    monkeypatch.setattr(m, "INTERNAL_RELEASE_WORKTREE_ROOT", native_root)
+    internal = native_root / (candidate + "-" + "b" * 12)
+    git(root, "worktree", "add", "--detach", str(internal), candidate)
+    # Even an unrelated untracked file must not hide behind the exception.
+    (internal / "unrelated-private-note.txt").write_text("DO NOT DISCARD\n")
+    with pytest.raises(m.ScopeBlocked, match="native release worktree has local modifications"):
+        m.review(
+            root, "test/repo", base, candidate, allowed_prs=[101],
+            pr_reader=reader([]),
+        )
+    assert (internal / "unrelated-private-note.txt").read_text() == "DO NOT DISCARD\n"
+
+
+def test_native_release_worktree_path_cannot_hide_wrong_sha_or_branch(
+    repo, monkeypatch,
+):
+    root, base, candidate, tmp = repo
+    native_root = tmp / "private-release-manager" / "worktrees"
+    native_root.mkdir(parents=True, mode=0o700)
+    monkeypatch.setattr(m, "INTERNAL_RELEASE_WORKTREE_ROOT", native_root)
+    internal = native_root / (candidate + "-" + "c" * 12)
+    git(root, "worktree", "add", "--detach", str(internal), base)
+    with pytest.raises(m.ScopeBlocked, match="not detached at reviewed SHA"):
+        m.review(
+            root, "test/repo", base, candidate, allowed_prs=[101],
+            pr_reader=reader([]),
+        )
+
+
+def test_unrelated_clean_developer_worktree_still_changes_scope_digest(
+    repo, monkeypatch,
+):
+    root, base, candidate, tmp = repo
+    native_root = tmp / "private-release-manager" / "worktrees"
+    native_root.mkdir(parents=True, mode=0o700)
+    monkeypatch.setattr(m, "INTERNAL_RELEASE_WORKTREE_ROOT", native_root)
+    prior = m.review(
+        root, "test/repo", base, candidate, allowed_prs=[101], pr_reader=reader([]),
+    )
+    developer = tmp / "unrelated-developer-worktree"
+    git(root, "worktree", "add", "-b", "feature/new-developer", str(developer), candidate)
+    after = m.review(
+        root, "test/repo", base, candidate, allowed_prs=[101], pr_reader=reader([]),
+    )
+    assert after["scope_sha256"] != prior["scope_sha256"]
+    assert after["registered_worktrees"] == prior["registered_worktrees"] + 1
+    assert after["worktrees_inspected"] == prior["worktrees_inspected"] + 1
+
+
+def test_prunable_missing_native_exact_sha_worktree_does_not_invalidate_review(
+    repo, monkeypatch,
+):
+    """A failed pre-mutation native attempt may leave a Git registry entry."""
+    import shutil
+    root, base, candidate, tmp = repo
+    native_root = tmp / "private-release-manager" / "worktrees"
+    native_root.mkdir(parents=True, mode=0o700)
+    monkeypatch.setattr(m, "INTERNAL_RELEASE_WORKTREE_ROOT", native_root)
+    original = m.review(
+        root, "test/repo", base, candidate, allowed_prs=[101], pr_reader=reader([]),
+    )
+    internal = native_root / (candidate + "-" + "d" * 12)
+    git(root, "worktree", "add", "--detach", str(internal), candidate)
+    shutil.rmtree(internal)
+    assert not internal.exists()
+    raw = git(root, "worktree", "list", "--porcelain")
+    assert "prunable gitdir file points to non-existent location" in raw
+    following = m.review(
+        root, "test/repo", base, candidate, allowed_prs=[101], pr_reader=reader([]),
+    )
+    assert following["scope_sha256"] == original["scope_sha256"]
+    assert following["registered_worktrees"] == original["registered_worktrees"]
+    # The orphaned registry evidence remains intact and can be audited in Git.
+    assert "worktree " + str(internal) in git(root, "worktree", "list", "--porcelain")
