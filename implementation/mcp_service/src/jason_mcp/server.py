@@ -51,6 +51,8 @@ from mcp.server.transport_security import (
 from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
+from orchestrator.routine_write_client_scope import resolve_routine_write_client
+from orchestrator.onboarding_request_attestation import attest_approved_standard_user_request
 from orchestrator.contracts import OrchestrationMode, OrchestrationRequest
 from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
 from autonomous_remediation.autonomous_principal import (
@@ -3702,6 +3704,18 @@ def _governed_execute(
     # assessment supplies Jason's affirmative benefit judgment and comparison
     # to narrower fixes; it is NOT approval or source evidence verification.
     supplied = dict(arguments)
+    try:
+        client_id, supplied = resolve_routine_write_client(
+            capability=capability_name,
+            authenticated_client_id=client_id,
+            arguments=supplied,
+        )
+    except (ValueError, PermissionError) as error:
+        return {
+            "status": "rejected",
+            "capability": capability_name,
+            "error_code": str(error),
+        }
     remediation_review = supplied.pop("jason_remediation_review", None)
     try:
         canonical_arguments = (
@@ -7504,6 +7518,50 @@ def execute_governed_capability(
         arguments=execution_arguments,
         explicit_approval=explicit_approval,
     )
+
+
+@mcp.tool()
+def attest_standard_user_onboarding_request(
+    client_id: str,
+    ticket_number: str,
+    user_principal_name: str,
+    customer_contact_id: int,
+    contact_verified: bool,
+) -> dict[str, Any]:
+    """AOT technician attests an authorized customer onboarding request.
+
+    This creates only a short-lived exact-client / exact-UPN JKD-001
+    approval record for the separate governed user-create workflow.
+    It does not create an account or verify a customer contact itself.
+    The technician must already have confirmed the client contact and ticket.
+    """
+    try:
+        principal, organization, _assurance, bound_client = (
+            _authenticated_write_identity()
+        )
+        app = _runtime()
+        cap = app.capabilities.get_current(
+            capability_name="identity.user.create"
+        )
+        if cap.lifecycle_status.value != "active":
+            raise PermissionError("ONBOARDING_CREATE_CAPABILITY_NOT_ACTIVE")
+        receipt = attest_approved_standard_user_request(
+            authority=app.identity_authority,
+            principal_id=principal,
+            organization_id=organization,
+            authenticated_client_id=bound_client,
+            client_id=client_id,
+            ticket_number=ticket_number,
+            user_principal_name=user_principal_name,
+            customer_contact_id=customer_contact_id,
+            contact_verified=contact_verified,
+        )
+    except (ValueError, PermissionError, RuntimeError, LookupError) as error:
+        return {
+            "status": "rejected",
+            "error_code": str(error),
+        }
+    return {"status": "succeeded", **receipt}
 
 
 def _grafana_component_control_identity(request: StarletteRequest) -> tuple[str, str]:

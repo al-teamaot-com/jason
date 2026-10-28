@@ -1,0 +1,85 @@
+name: Validate AOT Routine RW Release Candidate
+
+on:
+  pull_request:
+    paths:
+      - 'implementation/orchestrator/routine_write_client_scope.py'
+      - 'implementation/orchestrator/onboarding_request_attestation.py'
+      - 'implementation/orchestrator/provider_read_authority.py'
+      - 'implementation/runtime_service/src/jason_runtime/routine_rw_*.py'
+      - 'implementation/runtime_service/src/jason_runtime/composition.py'
+      - 'implementation/connectors/it_glue/configuration_note_update.py'
+      - 'implementation/connectors/microsoft_graph/standard_user_create.py'
+      - 'implementation/connectors/core/openbao_secrets.py'
+      - 'implementation/mcp_service/src/jason_mcp/server.py'
+      - 'infrastructure/jason-runtime/compose.yaml'
+      - 'implementation/runtime_service/tests/test_routine_rw_*.py'
+      - 'implementation/orchestrator/tests/test_routine_write_*.py'
+      - 'implementation/orchestrator/tests/test_onboarding_request_attestation.py'
+      - 'implementation/connectors/tests/test_it_glue_configuration_note_update.py'
+      - 'implementation/connectors/microsoft_graph/test_standard_user_create.py'
+      - '.github/workflows/aot-routine-rw.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  routine-rw-regression:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/cap-001/src:implementation/cap-003/src:implementation/cap-007/src:implementation/connectors/openclaw/src:implementation/runtime_service/src:implementation/mcp_service/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install existing Jason test dependencies
+        run: |
+          python -m pip install --upgrade pip pytest pyyaml
+          python -m pip install ./implementation ./implementation/connectors/openclaw ./implementation/runtime_service ./implementation/mcp_service
+      - name: Compile touched provider, orchestrator and MCP boundaries
+        run: |
+          python -m compileall -q implementation/connectors/it_glue implementation/connectors/microsoft_graph implementation/orchestrator implementation/runtime_service/src implementation/runtime_service/tests implementation/mcp_service/src
+      - name: Validate routine RW, authority and foundational provider regressions
+        run: |
+          python -m pytest -q \
+            implementation/orchestrator/tests/test_routine_write_client_scope.py \
+            implementation/orchestrator/tests/test_onboarding_request_attestation.py \
+            implementation/orchestrator/tests/test_aot_technician_routine_write_authority.py \
+            implementation/runtime_service/tests/test_routine_rw_registration.py \
+            implementation/runtime_service/tests/test_routine_rw_scope.py \
+            implementation/runtime_service/tests/test_routine_rw_credentials_and_invokers.py \
+            implementation/runtime_service/tests/test_aot_routine_write_authority.py \
+            implementation/runtime_service/tests/test_aot_operational_read_authority.py \
+            implementation/runtime_service/tests/test_autotask_ticket_create.py \
+            implementation/runtime_service/tests/test_autotask_ticket_update.py \
+            implementation/runtime_service/tests/test_autotask_internal_note.py \
+            implementation/connectors/tests/test_it_glue_configuration_note_update.py \
+            implementation/connectors/tests/test_it_glue_operations.py \
+            implementation/connectors/tests/test_it_glue_secret_contract.py \
+            implementation/connectors/microsoft_graph/test_standard_user_create.py \
+            implementation/connectors/microsoft_graph/test_user_directory.py \
+            implementation/mcp_service/tests/test_authority_grant_admin.py \
+            implementation/mcp_service/tests/test_contract_client_context.py
+      - name: Validate production Compose is parsed and RW flags default off
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+          data = yaml.safe_load(Path('infrastructure/jason-runtime/compose.yaml').read_text())
+          app = data['services']['jason-runtime']
+          env = app['environment']
+          for key in ('JASON_AOT_ROUTINE_RW_PROFILE',
+                      'JASON_IT_GLUE_ROUTINE_RW_PROFILE',
+                      'JASON_ENTRA_STANDARD_USER_CREATE_PROFILE'):
+              assert env[key].endswith(':-}'), key
+          mounts = app['volumes']
+          assert len([v for v in mounts if 'it-glue-write/' in v]) == 2
+          assert len([v for v in mounts if 'microsoft-graph-user-create/' in v]) == 2
+          assert len([v for v in mounts if 'microsoft-graph-onboarding-password/' in v]) == 2
+          assert all(':-/dev/null}' in v for v in mounts if
+                     ('it-glue-write/' in v or 'microsoft-graph-user-create/' in v
+                      or 'microsoft-graph-onboarding-password/' in v))
+          print('AOT_ROUTINE_RW_COMPOSE_DEFAULT_OFF=PASS')
+          PY

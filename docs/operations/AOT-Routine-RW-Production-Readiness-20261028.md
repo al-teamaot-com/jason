@@ -1,0 +1,63 @@
+# AOT Routine RW — Production Readiness and Activation Runbook
+**Date:** 2026-10-28
+**Status:** Candidate source/integration testing; production promotion and provider acceptance NOT performed.
+**Release policy:** Existing Production Manager exact-SHA release process. Production freeze and unattended incident hold remain active.
+
+## Scope and intended behavior
+This release candidate combines three bounded, existing-governance RW pathways:
+1. Autotask: routine human technician ticket create, ticket update and internal note, using existing provider-native Autotask impersonation and exact intent/plan approval.
+2. IT Glue: notes-only update of one unrestricted IT Glue configuration, with exact client-to-organization verification, prior-revision conflict detection, one PATCH and post-write GET.
+3. Microsoft Entra: standard, **disabled cloud-only** user creation under an approved customer onboarding request, exact UPN, verified cloud source directory, pre-existing sealed initial password, one Graph POST and independent post-write GET. Licensing, groups, secure password handoff and account enablement are separately authorized downstream operations; this candidate is not an entire onboarding workflow.
+
+This reuses JKD-001, J-102, the Central Orchestrator, the existing capability/provider registry and existing OpenBao. There is NO blanket admin grant, no direct provider execution outside the orchestrator, and no routine authorization for disruptive or privileged operations.
+
+## Feature flags — default OFF
+
+| Capability | Runtime environment value | Required extra dependency |
+| --- | --- | --- |
+| Autotask routine human RW | `JASON_AOT_ROUTINE_RW_PROFILE=autotask-ticket-v1` | Existing active Autotask ticket-create/update/note profiles and impersonation/mutation gates |
+| IT Glue configuration notes | `JASON_IT_GLUE_ROUTINE_RW_PROFILE=configuration-notes-v1` | Separate IT Glue write API key, client boundary, exact per-client technician grant |
+| Entra standard cloud user creation | `JASON_ENTRA_STANDARD_USER_CREATE_PROFILE=cloud-user-v1` | Dedicated Graph application with User.Create permission, distinct certificate/credential, authorized client cloud-source boundary, request-specific sealed initial credential, exact per-client technician grant |
+
+Unset each value or use any other value to keep its capability disabled. The production Compose file sets all three to empty by default. For IT Glue and Entra, profile-on alone is insufficient: the registry does not activate without the exact mounted non-empty AppRole bootstrap files.
+
+## Provider-specific prep: IT Glue
+- Provision a **dedicated** IT Glue API user/key that can update only the intended configurations. Verify the provider account's effective rights; an OpenBao role does not limit privileges granted by the actual IT Glue API key.
+- Provision an OpenBao AppRole with only the `jason-itglue-configuration-notes-write-policy.hcl` read policy and secret `secret/data/connectors/it-glue/production/configuration-notes-write` containing `api_key`.
+- Mount a **separate**, root-protected AppRole role_id/secret_id pair to the runtime paths under `/run/jason-secrets/openbao/it-glue-write/`. Neither the read-only IT Glue AppRole nor key is usable as fallback.
+- Create and independently verify a Jason `ClientBoundary` for the exact client with provider `it_glue`, profile `configuration-notes-v1`, validated status, and the numeric IT Glue organization ID as its external tenant ID.
+- Confirm the controlled test configuration's exact ID, actual organization ID, unrestricted state, existing notes and last-updated marker are returned by the provider API. **If the provider does not expose the required unrestricted/revision attributes, leave the capability disabled and implement verified equivalent evidence before activation.**
+- An authorized owner grants `documentation.configuration.update` **execute/approval_required=true** for exact `client_id` to the technician through Jason's existing `grant_exact_authority` tool; not blanket organization-wide authority.
+
+## Provider-specific prep: Microsoft Entra
+- Prepare a separate, consented Microsoft Graph application using the least privilege appropriate for creating regular users (Microsoft Graph User.Create, validate permissions in actual tenant). Do NOT reuse the existing directory-read application.
+- Create a validated `ClientBoundary` for provider `microsoft_graph_user_create`, profile `user-create`, exact managed client, approved app ID and Microsoft tenant GUID, primary managed domain, `external_scope_ids` including `source:entra_cloud`. Cross-check it matches the independently validated client's `microsoft_graph` `directory-read` boundary.
+- Create the distinct OpenBao certificate credential secret `secret/data/connectors/microsoft-graph/production/user-create` (private_key_pem, certificate_pem, certificate_thumbprint, generation), and separately mount its least-privilege AppRole.
+- Create a distinct AppRole for reading the exact hashed onboarding-password secret path `secret/data/connectors/microsoft-graph/onboarding-passwords/<sha256(client_id|request_id|upn)>`; it must not have general credential, token or provider privileges. Provision each sealed credential *before* invoking user creation. Provide out-of-band secure delivery to authorized users; do not return password in chats or ticket notes.
+- The owner grants `identity.user.create` execute/approval_required=true for an exact client/technician through the existing Jason owner-only grant administration. No organization-wide multi-tenant user-create grant.
+- The technician independently verifies the client requester/contact and Autotask ticket, then uses `attest_standard_user_onboarding_request(client_id, ticket_number, user_principal_name, customer_contact_id, contact_verified=true)` to create a 30-minute, exact-UPN attestation receipt. **This records a human attestation, not automated proof of contact identity; do not attest without checking source evidence.** Put receipt's `onboarding_request_id` and exact client_id into the subsequent governed `identity.user.create` request.
+- For AD-synchronized, hybrid, privileged, guest, MFA recovery, privileged groups, purchased licenses, mailbox delegation or already-existing UPNs, do not use this cloud-only create operation.
+
+## Exact authorized action flows
+**Autotask:** authenticated AOT technician → exact active ticket capability → existing Autotask Resource impersonation → independent provider-native authorization → J-102 plan fingerprint/approval → mutation → reread/verify.
+
+**IT Glue:** authenticated AOT technician submits `client_id` and exact configuration id/notes → MCP consumes client_id as a control argument → JKD-001 exact per-client grant and exact short-lived approval → trusted validated client-to-IT Glue organization binding → preimage check → one notes-only PATCH → independent GET.
+
+**Entra:** authenticated AOT technician attests the authorized client ticket/contact and exact requested UPN → existing JKD-001 approval record → exact per-client execution grant → validated client/source/tenant and credential bound to the request → plan commitment → duplicate UPN check → exactly one disabled standard user POST → independent GET/readback. No license/group/user activation without separately accepted workflow.
+
+## Preproduction acceptance — required before declaring production ready
+1. Confirm current protected GitHub `main` SHA and all merged PRs since known-good runtime; check open PR/file overlaps and local worktrees. Never overwrite another developer's work.
+2. Green GitHub validation (including AOT Routine RW CI, MCP discovery, security regressions), code review and exact tested SHA. Document file-level scope and provider credential requirements.
+3. Build an immutable preproduction runtime/MCP pair from exact SHA **with production mutations OFF** and separate test-state files; run independent compile/import/Compose validation.
+4. Verify the three feature flags OFF: Autotask existing read remains functional; IT Glue/Entra remain BUILDING/undiscoverable. Test that missing AppRoles, missing client mapping, wrong tenant, inactive technician and unknown capabilities fail closed.
+5. Set up dedicated **non-production** provider test credentials and a verified test client. Test one reversible Autotask ticket field change and one internal note; then a controlled IT Glue notes change (and compensate using an authorized second change); finally creation of a disabled disposable Entra test user. Check no admin/extra license/group rights, and independently reread exact target. No live test customer action without approval.
+6. Prove duplicate/ambiguous delivery, stale note preimage, revoked grant, invalid/wrong tenant, non-human identity, disabled flags, missing AppRole, password leakage, expired exact-UPN authorization, cross-client request and provider-403 tests. Record only non-sensitive verification metadata.
+7. Verify rollback: ensure precise previous known-good release artifact, PM/circuit status, and ability to disable each profile; never delete created user automatically.
+8. Independently execute current foundational Autotask count → **complete pagination** → exact ticket read and other core affected read canaries both before and after deployment under **real authenticated AOT human** identity; HTTP health alone is insufficient.
+9. Only after the Owner explicitly issues an **exact-SHA freeze exception** and PM review/preproduction acceptance, use the native governed PM prepare/review-impact/promote transaction. Do not remove freeze/incident-hold markers or run direct Docker/shell promotion.
+
+## Rollback and operator outcomes
+Turning off a profile through a governed release prevents future writes, even if a durable exact authority grant or external credential persists. Revoke individual client grants and AppRoles if a source is compromised. A successful Graph account creation is **not** undone by silently deleting the account; follow separately authorized offboarding. A failed post-write provider read is **unverified**, never a claim of successful completion. Record exact correlation and error state.
+
+## Explicit unverified external conditions at source-PR close
+At source-build time, write credentials and OpenBao AppRoles were not provisioned, client write boundaries/permissions were not independently verified in production, no controlled live provider mutation was attempted, and no PM preproduction image/functional canaries were run. The deployment freeze and incident hold remained active. These are acceptance gates, not code-completion claims.
