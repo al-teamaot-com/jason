@@ -140,7 +140,351 @@
       "Step 5: Classification"
     ],
     "remediation_substep_titles": [],
-    "live_execution_mapped": false
+    "live_execution_mapped": false,
+    "structured_source_fields": {
+      "identification_checklist": {
+        "source_section_key": "4",
+        "present": true,
+        "verbatim_bullets": [
+          "1. Read the open ticket.",
+          "2. Confirm the trigger.",
+          "3. Require an existing configuration item.",
+          "4. Read that CI and prove same-company, active identity.",
+          "5. Resolve its exact DRMM UID/hostname.",
+          "6. Read the exact DRMM endpoint.",
+          "7. Use the endpoint's site only after exact target identity is established.",
+          "8. Do **not** run the normal ticket-work-start lifecycle; augmentation intentionally does not claim work."
+        ]
+      },
+      "expected_state_checklist": {
+        "source_section_key": "5",
+        "present": true,
+        "verbatim_bullets": [
+          "- `site_confirmed_up`",
+          "- `site_likely_up`",
+          "- `site_likely_down`",
+          "- `partial_or_segment_outage_suspected`",
+          "- `site_status_unknown`"
+        ]
+      },
+      "decision_gate_checklist": {
+        "source_section_key": "8",
+        "present": true,
+        "verbatim_bullets": [
+          "- exact same-company CI;",
+          "- exact DRMM UID;",
+          "- no cross-client evidence;",
+          "- bounded trigger matched;",
+          "- exact augmentation source/version is owner-promoted for `service.ticket.note.create`;",
+          "- evidence collection completed without identity conflict."
+        ]
+      },
+      "retry_checklist": {
+        "source_section_key": "10",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "recheck_checklist": {
+        "source_section_key": "11",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "stale_checklist": {
+        "source_section_key": "12",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "dependency_checklist": {
+        "source_section_key": "13",
+        "present": true,
+        "verbatim_bullets": [
+          "- exact CI/DRMM identity;",
+          "- DRMM site/peer reads;",
+          "- DEB exact-asset read when available;",
+          "- read-only PowerShell capability for strongest server witness;",
+          "- internal Autotask note capability;",
+          "- durable augmentation state."
+        ]
+      },
+      "documentation_checklist": {
+        "source_section_key": "14",
+        "present": true,
+        "verbatim_bullets": [
+          "1. **STATUS** — site context.",
+          "2. **NEXT STEP** — technician focus; explicitly state Jason did not take ownership.",
+          "3. **KEY EVIDENCE** — target DRMM/DEB state plus bounded witness list.",
+          "4. **INTERPRETATION** — endpoint vs site/segment context.",
+          "5. **CHANGES MADE** — None; read-only augmentation only."
+        ]
+      },
+      "failure_checklist": {
+        "source_section_key": "15",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "escalation_checklist": {
+        "source_section_key": "16",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "verification_checklist": {
+        "source_section_key": "17",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "completion_checklist": {
+        "source_section_key": "18",
+        "present": true,
+        "verbatim_bullets": [
+          "- exact identity;",
+          "- bounded evidence collection;",
+          "- classification;",
+          "- changed-note write/readback if needed;",
+          "- durable throttle state."
+        ]
+      },
+      "required_capabilities_source": {
+        "source_section_key": "20",
+        "present": true,
+        "verbatim_bullets": [
+          "- `service.configuration.read`",
+          "- `endpoint.device.read`",
+          "- `endpoint.device.search`",
+          "- `backup.endpoint.asset.search` when available",
+          "- `endpoint.powershell.read` for a fixed-server active witness",
+          "- `service.ticket.note.create`"
+        ]
+      },
+      "acceptance_test_checklist": {
+        "source_section_key": "21",
+        "present": true,
+        "verbatim_bullets": [
+          "1. technician-owned offline ticket can be augmented;",
+          "2. no queue/status/resource/work-type mutation occurs;",
+          "3. active-work-slot count is unaffected;",
+          "4. online roaming laptop does not prove site health;",
+          "5. live fixed-server read produces `site_confirmed_up`;",
+          "6. live fixed-server read plus multiple fixed-peer failures produces partial/segment classification;",
+          "7. multiple fixed offline peers with no online witness produces `site_likely_down`;",
+          "8. DRMM offline + DEB online is documented as target-provider conflict;",
+          "9. failed PC ping is never converted into confirmed/likely offline by this classifier;",
+          "10. unchanged worker cycles do not create duplicate notes or repeated active server probes inside the throttle window;",
+          "11. no note is written without exact durable owner promotion;",
+          "12. note creation is provider-readback verified."
+        ]
+      },
+      "closure_checklist": {
+        "source_section_key": "22",
+        "present": true,
+        "verbatim_bullets": [
+          "- deterministic module/tests pass;",
+          "- runtime hook/tests pass;",
+          "- exact owner promotion is created for `offline_ticket_context_augmentation@0.1.0`;",
+          "- controlled production ticket proves augmentation without ownership mutation;",
+          "- Grafana/operational reporting exposes augmentation outcomes;",
+          "- remaining provider evidence gaps are documented."
+        ]
+      },
+      "owner_review_checklist": {
+        "source_section_key": "23",
+        "present": true,
+        "verbatim_bullets": [
+          "- governed reads;",
+          "- one fixed-server read-only witness command;",
+          "- one duplicate-suppressed internal note.",
+          "- ownership/queue/status changes;",
+          "- endpoint/network remediation;",
+          "- client communication;",
+          "- disruption."
+        ]
+      }
+    },
+    "diagnostic_substeps": [
+      {
+        "id": "7_sub_1",
+        "heading": "Step 1: Target DRMM state",
+        "content_markdown": "\nRead exact endpoint current state and site.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_2",
+        "heading": "Step 2: DEB corroboration",
+        "content_markdown": "\nWhen the exact same-company DEB asset can be found by hostname, record provider status. If DEB is unavailable or ambiguous, continue without fabricating a result.\n\nDRMM offline + DEB online means contradictory target availability evidence and should be called out as a likely RMM/monitoring-path issue. It does not independently prove the physical site is up.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_3",
+        "heading": "Step 3: Same-site peer inventory",
+        "content_markdown": "\nRead same-site DRMM peers. Classify roles conservatively:\n- server = fixed;\n- desktop/workstation = fixed;\n- laptop/notebook/portable = mobile and excluded from site-health proof;\n- unknown role = do not count as a fixed witness.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_4",
+        "heading": "Step 4: Active fixed-server witness",
+        "content_markdown": "\nIf a same-site server reports online, Jason may run exactly one classifier-approved read-only command:\n\n`Get-NetIPConfiguration`\n\nFresh returned output proves Jason can actively reach that fixed server through the governed management path. That is strong affirmative evidence that the broad site-down branch is false for the path reaching that server.\n\nThis does not prove every switch/VLAN/segment is healthy.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_5",
+        "heading": "Step 5: Classification",
+        "content_markdown": "\n- fresh fixed-server read succeeds + fewer than two fixed peers offline -> **site confirmed up**;\n- fresh fixed-server read succeeds + two or more fixed peers offline -> **partial/segment outage suspected**;\n- at least two fixed peers online, no active-server proof -> **site likely up**;\n- at least two fixed peers offline and no fixed online witness -> **site likely down**;\n- otherwise -> **site status unknown**.\n\nFailed ICMP on a PC is not used as negative evidence in this classifier.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      }
+    ],
+    "remediation_branches": [
+      {
+        "id": "9_overview",
+        "heading": "Full workflow",
+        "content_markdown": "\n\nNot applicable.\n\nThe only write is the approved internal note. No ticket state or provider endpoint state changes.\n\n",
+        "source_section_key": "9"
+      }
+    ],
+    "source_section_inventory": [
+      {
+        "section_key": "1",
+        "present": true,
+        "title": "Section Goal",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "2",
+        "present": true,
+        "title": "Trigger",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "3",
+        "present": true,
+        "title": "Scope and Boundaries",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "4",
+        "present": true,
+        "title": "Initial Identification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "5",
+        "present": true,
+        "title": "Expected State",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "6",
+        "present": true,
+        "title": "State Model",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "7",
+        "present": true,
+        "title": "Diagnostic Workflow",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "8",
+        "present": true,
+        "title": "Decision Gates",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "9",
+        "present": true,
+        "title": "Remediation",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "10",
+        "present": true,
+        "title": "Retry Policy",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "11",
+        "present": true,
+        "title": "Periodic Rechecks",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "12",
+        "present": true,
+        "title": "Aging / Stale Condition",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "13",
+        "present": true,
+        "title": "Dependency Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "14",
+        "present": true,
+        "title": "Documentation Requirements",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "15",
+        "present": true,
+        "title": "Failure Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "16",
+        "present": true,
+        "title": "Escalation Criteria",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "17",
+        "present": true,
+        "title": "Verification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "18",
+        "present": true,
+        "title": "Completion Criteria",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "19",
+        "present": true,
+        "title": "Final Resolution Note",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "20",
+        "present": true,
+        "title": "Required Capabilities",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "21",
+        "present": true,
+        "title": "Acceptance Test",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "22",
+        "present": true,
+        "title": "Section Goal Closure",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "23",
+        "present": true,
+        "title": "Autonomous Execution Eligibility and Owner Review",
+        "review_status": "source_preserved"
+      }
+    ],
+    "section_semantics": "Source-derived metadata only. Diagnostic commands and remediation branches are inert Markdown, not executable provider calls."
   },
   "legacy_registry": {
     "source_path": "docs/playbooks/Jason-Offline-Ticket-Context-Augmentation.md",
@@ -329,6 +673,8 @@
       "Controlled shadow comparison and independent acceptance",
       "Owner-bound activation and branch-specific autonomous promotion"
     ],
-    "external_fact_fields_non_authoritative": true
+    "external_fact_fields_non_authoritative": true,
+    "source_reconstruction_integrity": "verified_from_original_source_on_conversion",
+    "section_semantic_extraction": "source_text_derived_no_provider_execution"
   }
 }
