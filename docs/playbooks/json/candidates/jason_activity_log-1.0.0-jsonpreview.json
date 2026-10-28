@@ -1,0 +1,325 @@
+{
+  "schema_version": 1,
+  "playbook": {
+    "id": "jason_activity_log",
+    "name": "Jason - Managed Activity Log (JSON migration draft)",
+    "version": "1.0.0-jsonpreview",
+    "lifecycle": "pilot",
+    "target_type": "ticket",
+    "source_owner": "AOT",
+    "source_registry_version": "1.0.0",
+    "documented_version": "1.0.0",
+    "original_lifecycle": "production"
+  },
+  "trigger": {
+    "source_registry_match": {
+      "operational_work_state_change": true,
+      "ticket_required": true
+    },
+    "details_section_key": "2",
+    "execution_enabled": false
+  },
+  "scope": {
+    "direct_provider_access": false,
+    "preview_only": true,
+    "execution_authority": "none",
+    "scope_section_key": "3"
+  },
+  "expected_state": {
+    "details_section_key": "5",
+    "not_reverified_in_json_runtime": true
+  },
+  "state_model": {
+    "entry_step": "identity_gate",
+    "source_section_key": "6",
+    "context_binding_status": "not_implemented_for_migration_draft"
+  },
+  "steps": [
+    {
+      "id": "identity_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_target_identity_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "evidence_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "evidence_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "authoritative_evidence_complete",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "authorization_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "authorization_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "approved_json_runtime_parity",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "migration_hold"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "migration_hold",
+      "type": "human_review"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "verification": {
+    "authoritative_source": "Legacy source playbook section 17 and provider readbacks; not executed in this JSON draft",
+    "success_condition": "Legacy source Section 17 and Section 18 must pass independently; classification-only draft cannot verify or close"
+  },
+  "completion": {
+    "terminal_disposition": "Human Review (draft only; existing production source unchanged)"
+  },
+  "autonomy": {
+    "activation": "disabled",
+    "allowed_capabilities": []
+  },
+  "procedure": {
+    "section_refs": {
+      "section_goal": "1",
+      "trigger": "2",
+      "scope": "3",
+      "identification": "4",
+      "expected_state": "5",
+      "state_model": "6",
+      "diagnostics": "7",
+      "decision_gates": "8",
+      "remediation": "9",
+      "retry_policy": "10",
+      "periodic_rechecks": "11",
+      "stale_condition": "12",
+      "dependencies": "13",
+      "documentation": "14",
+      "failures": "15",
+      "escalation": "16",
+      "verification": "17",
+      "completion": "18",
+      "final_resolution": "19",
+      "required_capabilities": "20",
+      "acceptance_test": "21",
+      "closure": "22",
+      "autonomy_review": "23"
+    },
+    "section_keys_missing_from_source": [],
+    "diagnostic_substep_titles": [
+      "Step 1: Read persisted activity",
+      "Step 2: Suppress noise",
+      "Step 3: Render deterministic chunks",
+      "Step 4: Reconcile notes"
+    ],
+    "remediation_substep_titles": [],
+    "live_execution_mapped": false
+  },
+  "legacy_registry": {
+    "source_path": "docs/playbooks/Jason-Activity-Log.md",
+    "source_version": "1.0.0",
+    "review_status": "owner_approved_2026-10-06_live_acceptance_required",
+    "source_enabled": true,
+    "source_autonomy_activation": "autonomous",
+    "source_allowed_capabilities": [
+      "service.ticket.note.create",
+      "service.ticket.note.update"
+    ],
+    "source_required_gates": [
+      "persisted_operational_activity",
+      "exact_ticket_identity",
+      "internal_note_only",
+      "jason_owned_note_update",
+      "append_only_activity_history",
+      "duplicate_state_suppression",
+      "autonomy_approved"
+    ],
+    "source_trigger": {
+      "operational_work_state_change": true,
+      "ticket_required": true
+    }
+  },
+  "source_document": {
+    "path": "docs/playbooks/Jason-Activity-Log.md",
+    "source_blob_sha": "727db8ae9808c3464e1f4eb348944ee4542c64c5",
+    "prelude_markdown": "# Jason Playbook: Managed Activity Log\n\n**Version:** 1.0.0  \n**Status:** Production scope; exact durable owner promotion required  \n**Mode:** Internal documentation only\n\n",
+    "sections": [
+      {
+        "key": "1",
+        "title": "Section Goal",
+        "heading_markdown": "## 1. Section Goal",
+        "body_markdown": "\n\n**Goal:** Keep one readable, chronological Jason work-history note on every ticket that enters Jason's persisted operational-work state, without producing a separate Autotask note for every check or unchanged poll.\n\n**Success means:**\n- meaningful Jason state changes appear in `Jason Activity`;\n- unchanged consecutive state/reason pairs are suppressed;\n- existing history is append-only;\n- long histories roll to `Jason Activity 2`, `Jason Activity 3`, and so on;\n- only Jason-owned internal notes can be updated.\n\n"
+      },
+      {
+        "key": "2",
+        "title": "Trigger",
+        "heading_markdown": "## 2. Trigger",
+        "body_markdown": "\n\nA ticket has persisted Jason operational activity and at least one meaningful state/reason transition.\n\n"
+      },
+      {
+        "key": "3",
+        "title": "Scope and Boundaries",
+        "heading_markdown": "## 3. Scope and Boundaries",
+        "body_markdown": "\n\n### In Scope\n- Jason operational-work state transitions already persisted locally;\n- creation/update of `Jason Activity` internal notes;\n- deterministic rollover when a note body reaches the bounded size.\n\n### Out of Scope\n- client communications;\n- technician/client/workflow note modification;\n- ticket field mutation;\n- remediation;\n- disruptive actions.\n\n"
+      },
+      {
+        "key": "4",
+        "title": "Initial Identification",
+        "heading_markdown": "## 4. Initial Identification",
+        "body_markdown": "\n\n1. Resolve exact ticket ID from persisted operational work.\n2. Read that ticket's existing notes.\n3. Identify at most one exact note for each managed title.\n4. Require the governed note-update boundary to verify creator identity, internal visibility, and note ID.\n\n"
+      },
+      {
+        "key": "5",
+        "title": "Expected State",
+        "heading_markdown": "## 5. Expected State",
+        "body_markdown": "\n\nThe ticket contains a compact chronological activity history reflecting meaningful Jason state transitions, with no duplicate entries for unchanged polling.\n\n"
+      },
+      {
+        "key": "6",
+        "title": "State Model",
+        "heading_markdown": "## 6. State Model",
+        "body_markdown": "\n\n`activity_detected -> rendered -> current | created | appended | rollover_created | blocked`\n\nThe source of truth is `autonomy_ticket_activity`; Autotask is the technician-readable projection.\n\n"
+      },
+      {
+        "key": "7",
+        "title": "Diagnostic Workflow",
+        "heading_markdown": "## 7. Diagnostic Workflow",
+        "body_markdown": "\n\n### Step 1: Read persisted activity\nRead ordered activity rows for the exact ticket.\n\n### Step 2: Suppress noise\nRemove consecutive rows with identical phase and reason.\n\n### Step 3: Render deterministic chunks\nRender stable timestamp/state/result entries and greedily chunk from the beginning. Existing chunk boundaries never move when new rows are appended.\n\n### Step 4: Reconcile notes\n- absent chunk -> create internal note;\n- exact body -> no write;\n- longer body -> append-only managed update;\n- ownership/identity mismatch -> fail closed.\n\n"
+      },
+      {
+        "key": "8",
+        "title": "Decision Gates",
+        "heading_markdown": "## 8. Decision Gates",
+        "body_markdown": "\n\n- persisted operational work exists;\n- exact durable `jason_activity_log@1.0.0` promotion exists;\n- only internal-note create/update capabilities are allowed;\n- note update passes exact Jason ownership verification;\n- revised Activity body preserves the entire prior body as a prefix.\n\n"
+      },
+      {
+        "key": "9",
+        "title": "Remediation",
+        "heading_markdown": "## 9. Remediation",
+        "body_markdown": "\n\nNot applicable. Documentation only.\n\nAllowed mutations:\n- `service.ticket.note.create`\n- `service.ticket.note.update`\n\n"
+      },
+      {
+        "key": "10",
+        "title": "Retry Policy",
+        "heading_markdown": "## 10. Retry Policy",
+        "body_markdown": "\n\nNo provider mutation retry inside one execution plan. Later normal worker cycles may reconcile again after authoritative reread.\n\n"
+      },
+      {
+        "key": "11",
+        "title": "Periodic Rechecks",
+        "heading_markdown": "## 11. Periodic Rechecks",
+        "body_markdown": "\n\nNormal worker scans reevaluate activity. Unchanged activity generates no Autotask write.\n\n"
+      },
+      {
+        "key": "12",
+        "title": "Aging / Stale Condition",
+        "heading_markdown": "## 12. Aging / Stale Condition",
+        "body_markdown": "\n\nHistorical activity remains readable after terminal ticket state. No endless polling entries are appended.\n\n"
+      },
+      {
+        "key": "13",
+        "title": "Dependency Handling",
+        "heading_markdown": "## 13. Dependency Handling",
+        "body_markdown": "\n\nIf note search, ownership verification, provider authorization, or readback is unavailable, skip the documentation mutation and audit the failure. Do not block technical remediation solely because Activity projection failed.\n\n"
+      },
+      {
+        "key": "14",
+        "title": "Documentation Requirements",
+        "heading_markdown": "## 14. Documentation Requirements",
+        "body_markdown": "\n\nEntry format contains:\n- timestamp;\n- human-readable activity label;\n- result/reason;\n- persisted Jason state.\n\nThe full before/after note bodies and SHA-256 values are captured in Jason's managed-note revision audit for every update.\n\n"
+      },
+      {
+        "key": "15",
+        "title": "Failure Handling",
+        "heading_markdown": "## 15. Failure Handling",
+        "body_markdown": "\n\nFail closed on:\n- duplicate managed-note titles;\n- non-Jason creator;\n- client-visible note metadata;\n- attempt to replace rather than append Activity history;\n- provider mutation/readback mismatch.\n\n"
+      },
+      {
+        "key": "16",
+        "title": "Escalation Criteria",
+        "heading_markdown": "## 16. Escalation Criteria",
+        "body_markdown": "\n\nRepeated projection failures are a Jason support condition; they do not authorize altering unrelated ticket data.\n\n"
+      },
+      {
+        "key": "17",
+        "title": "Verification",
+        "heading_markdown": "## 17. Verification",
+        "body_markdown": "\n\nAuthoritative Autotask readback must prove exact body, note ID, internal visibility, title, and Jason creator attribution.\n\n"
+      },
+      {
+        "key": "18",
+        "title": "Completion Criteria",
+        "heading_markdown": "## 18. Completion Criteria",
+        "body_markdown": "\n\nThe latest meaningful persisted activity is represented in the deterministic managed-note projection, or the existing projection is already current.\n\n"
+      },
+      {
+        "key": "19",
+        "title": "Final Resolution Note",
+        "heading_markdown": "## 19. Final Resolution Note",
+        "body_markdown": "\n\nNot applicable. The Activity note itself is the chronological technical record.\n\n"
+      },
+      {
+        "key": "20",
+        "title": "Required Capabilities",
+        "heading_markdown": "## 20. Required Capabilities",
+        "body_markdown": "\n\n- `service.ticket.notes.search`\n- `service.ticket.note.create`\n- `service.ticket.note.update`\n- persisted `autonomy_ticket_activity` state\n\n"
+      },
+      {
+        "key": "21",
+        "title": "Acceptance Test",
+        "heading_markdown": "## 21. Acceptance Test",
+        "body_markdown": "\n\nProve:\n1. first meaningful activity creates `Jason Activity`;\n2. unchanged repeated state creates no write;\n3. a changed state appends to the same note;\n4. attempted overwrite is rejected;\n5. technician/client/workflow note cannot be updated;\n6. internal visibility is preserved;\n7. rollover creates `Jason Activity 2` without changing prior chunk;\n8. full revision audit and SHA-256 evidence exist;\n9. post-write readback verifies exact result.\n\n"
+      },
+      {
+        "key": "22",
+        "title": "Section Goal Closure",
+        "heading_markdown": "## 22. Section Goal Closure",
+        "body_markdown": "\n\nClose after source tests, protected CI, exact durable owner promotion, production deployment, and a controlled live work-ticket verification.\n\n"
+      },
+      {
+        "key": "23",
+        "title": "Autonomous Execution Eligibility and Owner Review",
+        "heading_markdown": "## 23. Autonomous Execution Eligibility and Owner Review",
+        "body_markdown": "\n\nProduction nomination: `autonomy.activation=autonomous`.\n\nExact promoted scope:\n- playbook: `jason_activity_log@1.0.0`\n- policy: `playbook-autonomy:jason_activity_log`\n- capabilities: `service.ticket.note.create`, `service.ticket.note.update`\n\nAny material expansion beyond Jason-owned internal documentation requires new owner review.\n"
+      }
+    ]
+  },
+  "migration": {
+    "status": "SOURCE_PRESERVED_STRUCTURED_DRAFT_NOT_RUNTIME_PARITY",
+    "source_version_discrepancy": false,
+    "production_replacement_allowed": false,
+    "staged": false,
+    "activated": false,
+    "required_before_activation": [
+      "Canonical Python JSON semantic validation",
+      "Exact-capability binding and source-scoped argument context verified",
+      "Safe diagnostic and remediation branches mapped to governed capabilities",
+      "Durable retry/wait/terminal lifecycle parity with shared runtime",
+      "Error, negative-evidence and client-boundary regression tests",
+      "Controlled shadow comparison and independent acceptance",
+      "Owner-bound activation and branch-specific autonomous promotion"
+    ],
+    "external_fact_fields_non_authoritative": true
+  }
+}
