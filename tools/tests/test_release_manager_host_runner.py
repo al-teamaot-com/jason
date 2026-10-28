@@ -4004,3 +4004,99 @@ def test_preproduction_controller_gate_runs_before_state_transition(tmp_path):
             runner.run_preproduction(tmp_path,tmp_path,release)
     transition.assert_not_called()
     assert release["state"]=="release_candidate"
+
+
+def test_restricted_sqlite_uses_confined_snapshot_not_raw_copy(tmp_path):
+    import sqlite3
+    from unittest.mock import patch
+    live=tmp_path/'live'
+    live.mkdir(mode=0o700)
+    source=live/'root-owned.sqlite3'
+    with sqlite3.connect(source) as conn:
+        conn.execute('CREATE TABLE state(k TEXT)')
+    out=tmp_path/'copy.sqlite3'
+    real_access=runner.os.access
+    with (patch.object(runner.os, 'access',
+                       side_effect=lambda p, mode: False if str(p)==str(source)
+                                   else real_access(p,mode)),
+          patch.object(runner, 'confined_readonly_preprod_sqlite_backup') as helper):
+        runner.transactional_preprod_sqlite_backup(source,out)
+    helper.assert_called_once_with(source,out)
+
+
+def test_confined_sqlite_helper_is_readonly_cap_bounded_and_cleans_up(tmp_path):
+    import sqlite3
+    import os
+    from unittest.mock import patch
+    import subprocess
+    live=tmp_path/'live';live.mkdir(mode=0o700)
+    source=live/'root-owned.sqlite3'
+    with sqlite3.connect(source) as conn:
+        conn.execute('CREATE TABLE evidence(k TEXT)')
+    clone_dir=tmp_path/'clone';clone_dir.mkdir(mode=0o700)
+    target=clone_dir/source.name
+    commands=[]
+    def fake_docker(argv,**kwargs):
+        commands.append(list(argv))
+        action=argv[1]
+        if action=='cp':
+            with sqlite3.connect(target) as copied:
+                copied.execute('CREATE TABLE evidence(k TEXT)')
+            target.chmod(0o600)
+        return subprocess.CompletedProcess(argv,0,
+            stdout=b'CONFINED_SQLITE_SNAPSHOT_OK\n' if action=='start' else b'ok\n')
+    with (patch.object(runner, 'verified_live_openclaw_bind',return_value=live),
+          patch.object(runner.subprocess,'run',side_effect=fake_docker)):
+        runner.confined_readonly_preprod_sqlite_backup(source,target)
+    assert [cmd[1] for cmd in commands]==['create','start','cp','rm']
+    create=commands[0]
+    for option,value in (('--network','none'),('--cap-drop','ALL'),
+                         ('--cap-add','DAC_READ_SEARCH'),('--user','0:0')):
+        assert create[create.index(option)+1]==value
+    assert '--read-only' in create
+    assert 'no-new-privileges' in create
+    assert any('target=/live,readonly' in value for value in create)
+    assert not any('target=/live,' in value and 'readonly' not in value
+                   for value in create)
+    assert target.is_file() and target.stat().st_uid==os.getuid()
+    assert not any(clone_dir.glob('.jason-sqlite-snapshot-*'))
+
+
+def test_confined_sqlite_helper_failure_removes_container_and_partial_clone(tmp_path):
+    import sqlite3,subprocess
+    import pytest
+    from unittest.mock import patch
+    live=tmp_path/'live';live.mkdir(mode=0o700)
+    source=live/'restricted.sqlite3'
+    with sqlite3.connect(source) as conn:
+        conn.execute('CREATE TABLE test(k TEXT)')
+    clone_dir=tmp_path/'clone';clone_dir.mkdir(mode=0o700)
+    target=clone_dir/source.name
+    actions=[]
+    def fail_start(argv,**kwargs):
+        actions.append(argv[1])
+        if argv[1]=='start':
+            raise subprocess.CalledProcessError(1,argv)
+        return subprocess.CompletedProcess(argv,0,stdout=b'created')
+    with (patch.object(runner,'verified_live_openclaw_bind',return_value=live),
+          patch.object(runner.subprocess,'run',side_effect=fail_start)):
+        with pytest.raises(runner.ReleaseManagerError,match='confined readonly SQLite backup failed'):
+            runner.confined_readonly_preprod_sqlite_backup(source,target)
+    assert actions==['create','start','rm']
+    assert not target.exists()
+    assert not any(clone_dir.glob('.jason-sqlite-snapshot-*'))
+
+
+def test_confined_sqlite_helper_rejects_wrong_live_bind_before_container(tmp_path):
+    import sqlite3,pytest
+    from unittest.mock import patch
+    live=tmp_path/'live';live.mkdir(mode=0o700)
+    source=live/'readonly.sqlite3'
+    with sqlite3.connect(source) as conn:
+        conn.execute('CREATE TABLE evidence(x TEXT)')
+    clone_dir=tmp_path/'clone';clone_dir.mkdir(mode=0o700)
+    with (patch.object(runner,'verified_live_openclaw_bind',return_value=tmp_path),
+          patch.object(runner.subprocess,'run') as invocation):
+        with pytest.raises(runner.ReleaseManagerError,match='not the live runtime bind'):
+            runner.confined_readonly_preprod_sqlite_backup(source,clone_dir/source.name)
+    invocation.assert_not_called()

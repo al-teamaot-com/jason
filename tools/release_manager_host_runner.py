@@ -1452,6 +1452,115 @@ def verified_live_openclaw_bind() -> Path:
         raise ReleaseManagerError("live OpenClaw bind cannot be verified") from exc
 
 
+_CONFINED_READONLY_SQLITE_SNAPSHOT = r"""
+import os, re, shutil, sqlite3, sys, time
+from pathlib import Path
+from contextlib import closing
+name = sys.argv[1]
+if not re.fullmatch(r'[A-Za-z0-9_.-]+\.sqlite3', name) or name.startswith('.'):
+    raise SystemExit('INVALID_DATABASE_NAME')
+source = Path('/live') / name
+target = Path('/snapshot') / name
+with closing(sqlite3.connect(source.as_uri() + '?mode=ro', uri=True, timeout=4.0)) as live:
+    live.execute('PRAGMA query_only=ON')
+    estimate = int(live.execute('PRAGMA page_count').fetchone()[0]) * int(live.execute('PRAGMA page_size').fetchone()[0])
+    if estimate > 4 * 1024**3 or shutil.disk_usage('/snapshot').free < estimate + 3 * 1024**3:
+        raise SystemExit('BOUNDED_DISK_CAPACITY_EXCEEDED')
+    started = time.monotonic()
+    def progress(status, remaining, total):
+        if time.monotonic() - started > 120:
+            raise SystemExit('BOUNDED_SNAPSHOT_TIME_EXCEEDED')
+    with closing(sqlite3.connect(target, timeout=4.0)) as clone:
+        live.backup(clone, pages=128, progress=progress, sleep=0.1)
+        mode = clone.execute('PRAGMA journal_mode=DELETE').fetchone()
+        if mode is None or mode[0].lower() != 'delete':
+            raise SystemExit('NON_SELF_CONTAINED_SNAPSHOT')
+os.chmod(target, 0o600)
+print('CONFINED_SQLITE_SNAPSHOT_OK')
+"""
+
+
+def confined_readonly_preprod_sqlite_backup(source: Path, target: Path) -> None:
+    """Snapshot a privileged-only live DB in a *separate* restricted helper.
+
+    No root access to the production container, no host sudo, no live writes:
+    read-only verified live bind; isolated writable staging; network disabled.
+    CAP_DAC_READ_SEARCH is solely for the existing root-owned files under the
+    0700 bind directory. The helper has no general write privileges.
+    """
+    if (not re.fullmatch(r"[A-Za-z0-9_.-]+\.sqlite3", source.name)
+            or source.name.startswith('.') or source.is_symlink()
+            or not source.is_file() or target.exists() or target.is_symlink()):
+        raise ReleaseManagerError("restricted SQLite source or target is unsafe")
+    bind = verified_live_openclaw_bind()
+    if source.parent.resolve() != bind.resolve():
+        raise ReleaseManagerError("restricted SQLite source is not the live runtime bind")
+    if source.stat().st_size > _PREPROD_CLONE_MAX_BYTES:
+        raise ReleaseManagerError("restricted SQLite source exceeds snapshot capacity")
+    if shutil.disk_usage(target.parent).free < (
+            source.stat().st_size + _PREPROD_DISK_RESERVE_BYTES):
+        raise ReleaseManagerError("restricted SQLite snapshot lacks isolated disk headroom")
+    if target.parent.is_symlink() or target.parent.stat().st_mode & 0o077:
+        raise ReleaseManagerError("restricted SQLite snapshot parent is not private")
+    stage = Path(tempfile.mkdtemp(prefix=".jason-sqlite-snapshot-", dir=target.parent))
+    # The parent is private (0700). A short-lived writable inner directory
+    # lets the cap-dropped UID 0 helper write without CAP_DAC_OVERRIDE.
+    stage.chmod(0o777)
+    helper_name = "jason-preprod-sqlite-" + uuid4().hex[:16]
+    created = False
+    try:
+        create = [
+            "docker", "create", "--name", helper_name,
+            "--network", "none", "--read-only",
+            "--security-opt", "no-new-privileges",
+            "--cap-drop", "ALL", "--cap-add", "DAC_READ_SEARCH",
+            "--pids-limit", "32", "--memory", "256m",
+            "--user", "0:0",
+            "--mount", f"type=bind,source={bind},target=/live,readonly",
+            "--mount", f"type=bind,source={stage},target=/snapshot",
+            "--entrypoint", "python3", "jason-runtime:production",
+            "-c", _CONFINED_READONLY_SQLITE_SNAPSHOT, source.name,
+        ]
+        subprocess.run(create, check=True, stdout=subprocess.PIPE,
+                       stderr=subprocess.PIPE, timeout=30)
+        created = True
+        completed = subprocess.run(
+            ["docker", "start", "-a", helper_name], check=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=150,
+        )
+        if completed.stdout.strip() != b"CONFINED_SQLITE_SNAPSHOT_OK":
+            raise ReleaseManagerError("confined SQLite helper did not attest success")
+        subprocess.run(
+            ["docker", "cp", f"{helper_name}:/snapshot/{source.name}", str(target)],
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120,
+        )
+        if (target.is_symlink() or not target.is_file()
+                or target.stat().st_uid != os.getuid()
+                or stat.S_IMODE(target.stat().st_mode) != 0o600):
+            raise ReleaseManagerError("confined SQLite snapshot ownership or mode invalid")
+        with closing(sqlite3.connect(target.as_uri() + "?mode=ro", uri=True)) as clone:
+            result = clone.execute("PRAGMA quick_check(1)").fetchone()
+            mode = clone.execute("PRAGMA journal_mode").fetchone()
+            if result != ("ok",) or mode is None or mode[0].lower() != "delete":
+                raise ReleaseManagerError("confined SQLite snapshot integrity failed")
+    except (OSError, ValueError, sqlite3.Error, subprocess.SubprocessError,
+            ReleaseManagerError) as exc:
+        target.unlink(missing_ok=True)
+        if isinstance(exc, ReleaseManagerError):
+            raise
+        raise ReleaseManagerError("confined readonly SQLite backup failed") from exc
+    finally:
+        if created:
+            try:
+                subprocess.run(
+                    ["docker", "rm", "-f", helper_name], check=True,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                raise ReleaseManagerError("confined SQLite helper cleanup failed") from exc
+        shutil.rmtree(stage)
+
+
 def transactional_preprod_sqlite_backup(source: Path, target: Path) -> None:
     """Read committed data, including WAL, into a private consistent snapshot.
 
@@ -1462,6 +1571,9 @@ def transactional_preprod_sqlite_backup(source: Path, target: Path) -> None:
     if (source.suffix != ".sqlite3" or source.is_symlink()
             or not source.is_file() or target.exists() or target.is_symlink()):
         raise ReleaseManagerError("live SQLite source or isolated target is unsafe")
+    if not os.access(source, os.R_OK):
+        confined_readonly_preprod_sqlite_backup(source, target)
+        return
     try:
         uri = source.resolve().as_uri() + "?mode=ro"
         with closing(sqlite3.connect(uri, uri=True, timeout=4.0)) as live:
