@@ -2285,15 +2285,19 @@ def test_ccc_precedes_mutation_and_postflight_precedes_closed_release():
     assert source.index('ccc_postflight = run_release_ccc_gate(') < source.index('set_last_known_good(\n            state_root,\n            production_manifest')
 
 
-def test_production_complete_notification_follows_root_last_known_good_commit():
+def test_post_verification_publication_is_not_a_rollback_gate():
     import inspect
     source = inspect.getsource(runner._deploy_production_locked)
     commit = source.index('set_last_known_good(\n            state_root,\n            production_manifest')
     verified = source.index('gate_transition(repo, state_root, record, "production_verified")')
     closed = source.index('gate_transition(repo, state_root, record, "closed")')
     persisted = source.index('save_record(state_root, record)', closed)
-    complete_notification = source.index('"production_queue_completed"')
-    assert commit < verified < closed < persisted < complete_notification
+    queued = source.index('pending_administrative_closeout(record)')
+    separated = source.index('return record', source.index('else:', persisted))
+    assert queued < commit < verified < closed < persisted < separated
+    assert source.index('except Exception as error:') < separated
+    assert 'publish_production_closeout(' not in source
+    assert '"production_queue_completed"' in inspect.getsource(runner.run_administrative_closeout)
 
 
 def test_release_contract_accepts_emitted_string_risk_enum_with_exact_manifest():
@@ -4100,3 +4104,152 @@ def test_confined_sqlite_helper_rejects_wrong_live_bind_before_container(tmp_pat
         with pytest.raises(runner.ReleaseManagerError,match='not the live runtime bind'):
             runner.confined_readonly_preprod_sqlite_backup(source,clone_dir/source.name)
     invocation.assert_not_called()
+
+
+def test_secondary_closeout_records_failed_publication_but_notifies_and_retries(tmp_path):
+    from unittest.mock import patch
+    candidate = SHA_A
+    record = {
+        'release_id': runner.record_id(candidate), 'state': 'closed',
+        'release_candidate': {'candidate_sha': candidate},
+        'production': {'live_sha': candidate, 'verified_at': runner.now()},
+    }
+    runner.pending_administrative_closeout(record)
+    with (patch.object(runner, 'publish_production_closeout',
+                       side_effect=runner.ReleaseManagerError('secret GitHub URL in exception')) as publish,
+          patch.object(runner, 'write_owner_notification_event') as notification):
+        result = runner.run_administrative_closeout(tmp_path, tmp_path, record)
+    assert result['state'] == 'closed'
+    assert result['production']['documentation_reconciliation'] == 'pending'
+    assert result['production']['control_board_publication'] == 'pending'
+    assert result['production']['owner_notification'] == 'pass'
+    assert result['administrative_closeout']['needs_retry'] is True
+    assert result['administrative_closeout']['documentation_control_board']['attempts'] == 1
+    assert 'secret GitHub URL' not in str(result)
+    publish.assert_called_once()
+    notification.assert_called_once()
+    reread = runner.load_record(tmp_path, result['release_id'])
+    assert reread['state'] == 'closed'
+    assert reread['administrative_closeout']['needs_retry'] is True
+    with (patch.object(runner, 'publish_production_closeout',
+                       return_value={'documentation':'pass','control_board':'pass'}) as publish,
+          patch.object(runner, 'write_owner_notification_event') as notification):
+        finished = runner.run_administrative_closeout(tmp_path, tmp_path, reread)
+    assert finished['state'] == 'closed'
+    assert finished['administrative_closeout']['needs_retry'] is False
+    assert finished['production']['documentation_reconciliation'] == 'pass'
+    assert finished['production']['control_board_publication'] == 'pass'
+    assert finished['administrative_closeout']['documentation_control_board']['attempts'] == 2
+    publish.assert_called_once()
+    notification.assert_not_called()  # idempotent, already posted
+
+
+def test_secondary_closeout_notification_failure_preserves_retry_even_after_documentation_pass(tmp_path):
+    record = {
+        'release_id': runner.record_id(SHA_A), 'state': 'closed',
+        'release_candidate': {'candidate_sha': SHA_A},
+        'production': {'live_sha': SHA_A, 'verified_at': runner.now()},
+    }
+    runner.pending_administrative_closeout(record)
+    with (patch.object(runner, 'publish_production_closeout',
+                       return_value={'documentation':'pass','control_board':'pass'}),
+          patch.object(runner, 'write_owner_notification_event',
+                       side_effect=OSError('synthetic unavailable channel'))):
+        result = runner.run_administrative_closeout(tmp_path, tmp_path, record)
+    assert result['state'] == 'closed'
+    assert result['production']['documentation_reconciliation'] == 'pass'
+    assert result['production']['owner_notification'] == 'pending'
+    assert result['administrative_closeout']['needs_retry'] is True
+    with (patch.object(runner, 'publish_production_closeout') as publish,
+          patch.object(runner, 'write_owner_notification_event') as notify):
+        updated = runner.run_administrative_closeout(tmp_path, tmp_path, result)
+    assert updated['administrative_closeout']['needs_retry'] is False
+    assert updated['production']['owner_notification'] == 'pass'
+    publish.assert_not_called()  # do not republish completed work
+    notify.assert_called_once()
+
+
+def test_automatic_closeout_retry_uses_existing_timer_without_auto_promotion(tmp_path):
+    from unittest.mock import patch
+    record = {
+        'release_id': runner.record_id(SHA_A), 'state': 'closed',
+        'release_candidate': {'candidate_sha': SHA_A},
+        'production': {'live_sha': SHA_A, 'verified_at': runner.now()},
+    }
+    runner.pending_administrative_closeout(record)
+    runner.save_record(tmp_path, record)
+    with (patch.object(runner, 'live_production_alignment', return_value={'runtime_revision':SHA_A}) as live,
+          patch.object(runner, 'acquire_production_transaction_lock', return_value=object()) as acquire,
+          patch.object(runner, 'release_production_transaction_lock') as release,
+          patch.object(runner, 'worktree', return_value=tmp_path) as wt,
+          patch.object(runner, 'remove_worktree') as cleanup,
+          patch.object(runner, 'publish_production_closeout',
+                       return_value={'documentation':'pass','control_board':'pass'}),
+          patch.object(runner, 'write_owner_notification_event') as notify,
+          patch.object(runner.gate, 'load_json',
+                       return_value={'schedule':{'automatic_promotion_enabled':False}})):
+        assert runner.promote_eligible(tmp_path, tmp_path) is False
+    live.assert_called_once_with(SHA_A)
+    acquire.assert_called_once()
+    release.assert_called_once()
+    wt.assert_called_once_with(tmp_path, tmp_path, SHA_A)
+    cleanup.assert_called_once_with(tmp_path, tmp_path)
+    notify.assert_called_once()
+    reread = runner.load_record(tmp_path, record['release_id'])
+    assert reread['state'] == 'closed'
+    assert reread['administrative_closeout']['needs_retry'] is False
+
+
+def test_automatic_closeout_does_not_retry_before_interval_or_for_stale_live_release(tmp_path):
+    record = {
+        'release_id': runner.record_id(SHA_A), 'state': 'closed',
+        'release_candidate': {'candidate_sha': SHA_A},
+        'production': {'live_sha': SHA_A, 'verified_at': runner.now()},
+    }
+    runner.pending_administrative_closeout(record)
+    record['administrative_closeout']['last_attempt_at'] = runner.now()
+    runner.save_record(tmp_path, record)
+    with (patch.object(runner, 'live_production_alignment') as live,
+          patch.object(runner, 'publish_production_closeout') as publish):
+        assert runner.retry_due_administrative_closeouts(tmp_path,tmp_path) == 0
+    live.assert_not_called()
+    publish.assert_not_called()
+    record['administrative_closeout']['last_attempt_at'] = '2020-01-01T00:00:00+00:00'
+    runner.save_record(tmp_path, record)
+    with (patch.object(runner, 'acquire_production_transaction_lock', return_value=object()),
+          patch.object(runner, 'release_production_transaction_lock'),
+          patch.object(runner, 'live_production_alignment',
+                       side_effect=runner.ReleaseManagerError('live SHA superseded')),
+          patch.object(runner, 'worktree') as checkout,
+          patch.object(runner, 'publish_production_closeout') as publish):
+        assert runner.retry_due_administrative_closeouts(tmp_path,tmp_path) == 0
+    checkout.assert_not_called()
+    publish.assert_not_called()
+    assert runner.load_record(tmp_path, record['release_id'])['administrative_closeout']['needs_retry'] is True
+
+
+def test_secondary_closeout_cannot_run_before_release_is_closed(tmp_path):
+    import pytest
+    for state in ('production', 'production_verified', 'production_eligible', 'rolled_back'):
+        record = {
+            'release_id': runner.record_id(SHA_A), 'state': state,
+            'release_candidate': {'candidate_sha': SHA_A},
+            'production': {'live_sha': SHA_A, 'verified_at': runner.now()},
+        }
+        runner.pending_administrative_closeout(record)
+        with (patch.object(runner, 'publish_production_closeout') as publish,
+              pytest.raises(runner.ReleaseManagerError, match='fully verified closed')):
+            runner.run_administrative_closeout(tmp_path, tmp_path, record)
+        publish.assert_not_called()
+
+
+def test_release_manager_timer_runs_post_deploy_retry_when_auto_promotion_disabled():
+    source = (ROOT / 'tools/release_manager_host_runner.py').read_text()
+    retry = source.index('retry_due_administrative_closeouts(repo, state_root)',
+                         source.index('def promote_eligible('))
+    disabled = source.index('automatic_promotion_enabled', retry)
+    assert retry < disabled
+    service = (ROOT / 'infrastructure/openclaw-operations/systemd/user/jason-release-manager.service').read_text()
+    timer = (ROOT / 'infrastructure/openclaw-operations/systemd/user/jason-release-manager.timer').read_text()
+    assert 'promote-eligible' in service
+    assert 'OnCalendar=*-*-* *:00/5:00' in timer

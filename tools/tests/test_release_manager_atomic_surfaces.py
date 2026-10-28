@@ -233,15 +233,22 @@ def test_atomic_deploy_updates_runtime_mcp_host_and_release_manager_before_close
                 "install_release_manager_from_current",
                 side_effect=manager,
             ),
-            patch.object(
-                runner,
-                "publish_production_closeout",
-                return_value={"documentation": "pass", "control_board": "pass"},
-            ),
+            patch.object(runner, "publish_production_closeout") as published,
+            patch.object(runner, "write_owner_notification_event") as notified,
+            patch.object(runner, "open_circuit_breaker") as breaker,
         ):
             result = runner.deploy_production(ROOT, state_root, record())
 
         assert result["state"] == "closed"
+        assert "failure" not in result
+        breaker.assert_not_called()
+        # Administrative integrations do not execute within live promotion.
+        published.assert_not_called()
+        notified.assert_not_called()
+        assert result["administrative_closeout"]["needs_retry"] is True
+        assert result["administrative_closeout"]["documentation_control_board"]["status"] == "pending"
+        assert result["administrative_closeout"]["owner_notification"]["status"] == "pending"
+        assert result["production"]["documentation_reconciliation"] == "pending"
         assert events[:4] == [
             "runtime",
             "mcp",
