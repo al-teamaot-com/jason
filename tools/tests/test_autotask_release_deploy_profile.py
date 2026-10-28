@@ -15,6 +15,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 V10 = "itglue-autotask-entra-procurement-billing-reconciliation-catalog-v10"
 V11 = "itglue-autotask-entra-comprehensive-entity-read-catalog-v11"
+V13 = "itglue-autotask-entra-dynamic-schema-read-catalog-v13"
 SCRIPTS = [
     ("infrastructure/jason-runtime/production-deploy.sh", "jason-runtime", "jason-runtime:rollback-current"),
     ("infrastructure/jason-mcp/production-deploy.sh", "jason-mcp-pilot", "jason-mcp:rollback-current"),
@@ -128,3 +129,54 @@ def test_exact_v10_rollback_without_new_controller_env_overrides(
                                image="rollback", selected="", rollback="", live=V11)
     assert response.returncode == 0, response.stderr
     assert "SELECTED_PROFILE=" + V10 in response.stdout
+
+@pytest.mark.parametrize("path,live_name,rollback_tag", SCRIPTS)
+def test_v13_forward_preflight_uses_exact_source_bound_profile_and_v10_lkg(
+        lab, path, live_name, rollback_tag):
+    response = check_preflight(
+        lab, path, live_name, rollback_tag,
+        selected=V13, source=V13, rollback=V10, live=V10,
+    )
+    assert response.returncode == 0, response.stderr
+    assert "SELECTED_PROFILE=" + V13 in response.stdout
+
+
+@pytest.mark.parametrize("path,live_name,rollback_tag", SCRIPTS)
+def test_v13_forward_preflight_from_legacy_pm_without_profile_overrides(
+        lab, path, live_name, rollback_tag):
+    response = check_preflight(
+        lab, path, live_name, rollback_tag,
+        selected="", source=V13, rollback="", live=V10,
+    )
+    assert response.returncode == 0, response.stderr
+    assert "SELECTED_PROFILE=" + V13 in response.stdout
+
+
+@pytest.mark.parametrize("path,live_name,rollback_tag", SCRIPTS)
+def test_v13_rollback_restores_v10_with_or_without_explicit_override(
+        lab, path, live_name, rollback_tag):
+    for selected, rollback in ((V13,V10), ("","")):
+        response = check_preflight(
+            lab, path, live_name, rollback_tag,
+            image="rollback", source=V13, selected=selected,
+            rollback=rollback, live=V13,
+        )
+        assert response.returncode == 0, response.stderr
+        assert "SELECTED_PROFILE=" + V10 in response.stdout
+
+
+@pytest.mark.parametrize("path,live_name,rollback_tag", SCRIPTS)
+@pytest.mark.parametrize("selected,rollback,live,source", [
+    (V11,V10,V10,V13),
+    (V13,V11,V10,V13),
+    (V13,V10,V11,V13),
+    (V13,V10,V10,"unapproved-profile"),
+])
+def test_v13_mismatched_source_override_rollback_or_live_state_fail_closed(
+        lab,path,live_name,rollback_tag,selected,rollback,live,source):
+    response = check_preflight(
+        lab,path,live_name,rollback_tag,
+        selected=selected,rollback=rollback,live=live,source=source,
+    )
+    assert response.returncode != 0
+    assert "SELECTED_PROFILE=" not in response.stdout

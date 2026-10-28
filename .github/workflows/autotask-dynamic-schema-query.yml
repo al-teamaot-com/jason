@@ -12,6 +12,9 @@ on:
       - 'implementation/connectors/tests/test_autotask_dynamic_schema_query.py'
       - 'implementation/runtime_service/tests/test_provider_read_entra_activation.py'
       - 'tools/tests/test_autotask_read_profile_release.py'
+      - 'tools/tests/test_autotask_release_deploy_profile.py'
+      - 'infrastructure/jason-runtime/production-deploy.sh'
+      - 'infrastructure/jason-mcp/production-deploy.sh'
       - '.github/workflows/autotask-dynamic-schema-query.yml'
   push:
     paths:
@@ -24,6 +27,9 @@ on:
       - 'implementation/connectors/tests/test_autotask_dynamic_schema_query.py'
       - 'implementation/runtime_service/tests/test_provider_read_entra_activation.py'
       - 'tools/tests/test_autotask_read_profile_release.py'
+      - 'tools/tests/test_autotask_release_deploy_profile.py'
+      - 'infrastructure/jason-runtime/production-deploy.sh'
+      - 'infrastructure/jason-mcp/production-deploy.sh'
       - '.github/workflows/autotask-dynamic-schema-query.yml'
 
 jobs:
@@ -58,4 +64,5 @@ jobs:
             implementation/orchestrator/tests/test_autotask_v12_read_extensions.py \
             implementation/orchestrator/tests/test_autotask_generic_read_coverage.py \
             implementation/runtime_service/tests/test_provider_read_entra_activation.py \
-            tools/tests/test_autotask_read_profile_release.py
+            tools/tests/test_autotask_read_profile_release.py \
+            tools/tests/test_autotask_release_deploy_profile.py

@@ -14,7 +14,7 @@ else
   )"
 fi
 
-# Source-declared v11 and last-known-good v10 are both exact-SHA reviewed.
+# Source-declared v13 and last-known-good v10 are both exact-SHA reviewed.
 # PM v10's non-mutating preflight does not inject profile variables; enforce
 # immutable source and verify the current container's known-good profile
 # independently instead of weakening the actual release activation contract.
@@ -27,7 +27,8 @@ if p.is_symlink() or not p.is_file():
     raise SystemExit("DENIED: immutable Autotask read/rollback profile absent")
 o = json.loads(p.read_text(encoding="utf-8"))
 allowed = {"itglue-autotask-entra-procurement-billing-reconciliation-catalog-v10",
-           "itglue-autotask-entra-comprehensive-entity-read-catalog-v11"}
+           "itglue-autotask-entra-comprehensive-entity-read-catalog-v11",
+           "itglue-autotask-entra-dynamic-schema-read-catalog-v13"}
 if (not isinstance(o, dict)
         or set(o) != {"schema_version", "read_profile", "rollback_read_profile"}
         or o.get("schema_version") != "1.0"
