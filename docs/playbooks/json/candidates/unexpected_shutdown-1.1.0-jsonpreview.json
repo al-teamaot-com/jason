@@ -142,7 +142,461 @@
       "Autonomous permitted behavior",
       "Human-review / approval-bound behavior"
     ],
-    "live_execution_mapped": false
+    "live_execution_mapped": false,
+    "structured_source_fields": {
+      "identification_checklist": {
+        "source_section_key": "4",
+        "present": true,
+        "verbatim_bullets": [
+          "1. Resolve exact Autotask ticket, company, site, and configuration item.",
+          "2. Resolve exact DRMM endpoint UID and hostname.",
+          "3. Record alert/event timestamp and timezone.",
+          "4. Determine physical vs virtual device classification.",
+          "5. Record current online state and uptime where available.",
+          "6. Complete the standard Jason work-start lifecycle:",
+          "- queue **Jason**;",
+          "- status **In Progress**;",
+          "- Work Type **Remote Support** where applicable;",
+          "- authoritative readback verification.",
+          "7. Fail closed on identity ambiguity or failed ownership transition."
+        ]
+      },
+      "expected_state_checklist": {
+        "source_section_key": "5",
+        "present": true,
+        "verbatim_bullets": [
+          "- endpoint is online or has an explained current state;",
+          "- shutdown is classified as planned/clean, site-correlated, device-specific, or undetermined;",
+          "- no unresolved BSOD/WHEA/storage/controller/NTFS/disk health concern exists;",
+          "- no unexplained recurrence threshold is met;",
+          "- site correlation is complete enough to support the classification;",
+          "- current monitoring and endpoint health are stable;",
+          "- final documentation and terminal readback succeed."
+        ]
+      },
+      "decision_gate_checklist": {
+        "source_section_key": "8",
+        "present": true,
+        "verbatim_bullets": [
+          "- No -> block/escalate.",
+          "- Yes -> continue.",
+          "- No -> stop before diagnostics.",
+          "- Yes -> continue.",
+          "- No -> Human Review.",
+          "- Yes -> continue.",
+          "- `SITE_ENVIRONMENTAL` -> independent device-risk check.",
+          "- `SITE_CORRELATED_SMALL_SITE` -> independent device-risk check.",
+          "- `DEVICE_SPECIFIC` -> deeper device-specific investigation / Human Review.",
+          "- `UNDETERMINED` -> Human Review.",
+          "- BSOD/BugCheck;",
+          "- WHEA;",
+          "- storage/controller/NTFS errors;",
+          "- physical disk/volume health warnings;",
+          "- reliability read/write errors;",
+          "- unexplained recurrence.",
+          "- Yes -> Human Review.",
+          "- No -> continue."
+        ]
+      },
+      "retry_checklist": {
+        "source_section_key": "10",
+        "present": true,
+        "verbatim_bullets": [
+          "- Maximum one normal evidence collection pass per incident.",
+          "- Retry read/output retrieval rather than redispatching diagnostics when only output retrieval failed.",
+          "- Use bounded provider-read retries under common runtime policy.",
+          "- No endless polling.",
+          "- No duplicate site-event creation for the same site/time bucket."
+        ]
+      },
+      "recheck_checklist": {
+        "source_section_key": "11",
+        "present": true,
+        "verbatim_bullets": [
+          "- target is offline;",
+          "- site devices are recovering;",
+          "- monitor state has not stabilized;",
+          "- current health cannot yet be verified."
+        ]
+      },
+      "stale_checklist": {
+        "source_section_key": "12",
+        "present": true,
+        "verbatim_bullets": [
+          "- endpoint remains unavailable beyond the active recheck window;",
+          "- incident evidence is too old to classify reliably;",
+          "- device identity is stale/duplicate/replaced;",
+          "- required same-site evidence is unavailable;",
+          "- repeated unexplained incidents continue;",
+          "- provider evidence conflicts."
+        ]
+      },
+      "dependency_checklist": {
+        "source_section_key": "13",
+        "present": true,
+        "verbatim_bullets": [
+          "- Autotask ticket/configuration read/search/update/note;",
+          "- DRMM endpoint/search/read/history/audit;",
+          "- active governed `endpoint.powershell.read`;",
+          "- persisted playbook state;",
+          "- scheduled recheck support where used."
+        ]
+      },
+      "documentation_checklist": {
+        "source_section_key": "14",
+        "present": true,
+        "verbatim_bullets": [
+          "- `Jason - Unexpected Shutdown - Asset Validation`",
+          "- `Jason - Unexpected Shutdown - Diagnostic`",
+          "- `Jason - Unexpected Shutdown - Correlation`",
+          "- `Jason - Unexpected Shutdown - Device Specific`",
+          "- `Jason - Unexpected Shutdown - Recheck`",
+          "- `Jason - Unexpected Shutdown - Verification`",
+          "- `Jason - Unexpected Shutdown - Human Review`",
+          "- `Jason - Unexpected Shutdown - Resolution`",
+          "- incident timestamp;",
+          "- shutdown character;",
+          "- site classification;",
+          "- affected and active physical-device counts;",
+          "- site-event ID;",
+          "- VM exclusion statement;",
+          "- recurrence result;",
+          "- WHEA/storage/disk/volume/reliability findings;",
+          "- protected-role status;",
+          "- independent-device-risk result;",
+          "- what changed;",
+          "- final disposition."
+        ]
+      },
+      "failure_checklist": {
+        "source_section_key": "15",
+        "present": true,
+        "verbatim_bullets": [
+          "- ambiguous identity;",
+          "- failed ownership transition;",
+          "- unavailable/malformed alert history;",
+          "- incomplete same-site evidence;",
+          "- failed read-only PowerShell health collection;",
+          "- physical/virtual ambiguity affecting classification;",
+          "- conflicting evidence;",
+          "- missing required capability."
+        ]
+      },
+      "escalation_checklist": {
+        "source_section_key": "16",
+        "present": true,
+        "verbatim_bullets": [
+          "- `DEVICE_SPECIFIC`;",
+          "- `UNDETERMINED`;",
+          "- protected/critical role;",
+          "- 2+ unexplained independent shutdowns in 30 days;",
+          "- BSOD/BugCheck;",
+          "- WHEA;",
+          "- storage/controller/NTFS risk;",
+          "- physical disk/volume health warning;",
+          "- reliability read/write errors;",
+          "- evidence conflict;",
+          "- current instability;",
+          "- disruptive/repair action required."
+        ]
+      },
+      "verification_checklist": {
+        "source_section_key": "17",
+        "present": true,
+        "verbatim_bullets": [
+          "- exact endpoint/ticket identity;",
+          "- current endpoint online/stable;",
+          "- site classification proven;",
+          "- complete read-only health evidence;",
+          "- no unresolved BSOD/WHEA/storage risk;",
+          "- no unexplained independent recurrence;",
+          "- role is eligible for automatic closure;",
+          "- monitoring/alert state is cleared or explained;",
+          "- final note exists;",
+          "- Autotask terminal status write and independent readback succeed."
+        ]
+      },
+      "completion_checklist": {
+        "source_section_key": "18",
+        "present": true,
+        "verbatim_bullets": [
+          "- `SITE_ENVIRONMENTAL` or `SITE_CORRELATED_SMALL_SITE`;",
+          "- eligible workstation;",
+          "- complete clean device health evidence;",
+          "- no independent device risk;",
+          "- successful final documentation;",
+          "- terminal ticket-state readback."
+        ]
+      },
+      "required_capabilities_source": {
+        "source_section_key": "20",
+        "present": true,
+        "verbatim_bullets": [
+          "- Autotask ticket/configuration read/search;",
+          "- Autotask internal note create;",
+          "- Autotask ticket work-start/handoff/update/complete;",
+          "- DRMM endpoint search/read/audit;",
+          "- DRMM alert/history reads;",
+          "- governed `endpoint.powershell.read`;",
+          "- persisted playbook state;",
+          "- scheduled recheck support."
+        ]
+      },
+      "acceptance_test_checklist": {
+        "source_section_key": "21",
+        "present": true,
+        "verbatim_bullets": [
+          "1. one affected workstation at a healthy multi-device site -> `DEVICE_SPECIFIC` and Human Review;",
+          "2. six of eight physical devices affected within ±15 minutes -> `SITE_ENVIRONMENTAL`;",
+          "3. two of two physical devices at a small site -> `SITE_CORRELATED_SMALL_SITE`;",
+          "4. VMs do not count toward physical threshold;",
+          "5. ambiguous/unreadable peers -> `UNDETERMINED`;",
+          "6. site event + clean workstation health -> completion;",
+          "7. site event + Event ID 7/WHEA/reliability/volume-health risk -> Human Review;",
+          "8. protected server role -> Human Review;",
+          "9. offline endpoint -> waiting-device state;",
+          "10. no CHKDSK repair/reboot/storage mutation occurs;",
+          "11. terminal completion is independently read back;",
+          "12. site-event IDs remain stable for tickets in the same incident bucket."
+        ]
+      },
+      "closure_checklist": {
+        "source_section_key": "22",
+        "present": true,
+        "verbatim_bullets": [
+          "- source change is committed;",
+          "- tests pass;",
+          "- PR review/CI passes, including the repository documentation-impact declaration gate;",
+          "- exact 1.1.0 durable autonomy approval is recorded;",
+          "- production deployment is confirmed;",
+          "- one controlled live or historical acceptance proves site correlation and disk-health evidence;",
+          "- Grafana/Project Jason status is updated;",
+          "- any CHKDSK-scan enhancement remains documented as a separate governed capability item."
+        ]
+      },
+      "owner_review_checklist": {
+        "source_section_key": "23",
+        "present": true,
+        "verbatim_bullets": [
+          "- generic shell access;",
+          "- CHKDSK repair;",
+          "- storage repair;",
+          "- reboot/shutdown;",
+          "- firmware/driver changes;",
+          "- device-specific automatic closure.",
+          "- `service.ticket.note.create`",
+          "- `service.ticket.update`"
+        ]
+      }
+    },
+    "diagnostic_substeps": [
+      {
+        "id": "7_sub_1",
+        "heading": "Step 1 — Establish shutdown character",
+        "content_markdown": "\n\nCollect read-only Windows event evidence, including:\n- 6008 unexpected shutdown;\n- Kernel-Power 41;\n- 6006 clean Event Log shutdown;\n- 1074 planned/user/process restart;\n- BugCheck 1001;\n- WHEA;\n- storage/controller/NTFS events such as 7, 9, 11, 51, 55, 57, 98, 129, 140, 153, 154, 157;\n- Windows Update/reboot evidence where available.\n\nClassify:\n- `CLEAN_OR_PLANNED`\n- `ABRUPT_OR_UNCLEAN`\n- `UNDETERMINED`\n\nNever infer root cause from Event 6008 or Event 41 alone.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_2",
+        "heading": "Step 2 — Current endpoint state",
+        "content_markdown": "\n\nCollect:\n- online/offline;\n- uptime / last boot;\n- reboot-required state;\n- current critical DRMM alerts;\n- endpoint role / device type.\n\nOffline devices enter `Waiting Device Access`; they do not consume an active-work slot.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_3",
+        "heading": "Step 3 — DRMM operational correlation",
+        "content_markdown": "\n\nCheck component jobs, scripts, patch/reboot activity, monitor transitions, technician jobs, and other automation near the incident.\n\nA restart is considered planned only when authoritative job/event timestamps align.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_4",
+        "heading": "Step 4 — Recurrence check",
+        "content_markdown": "\n\nSearch a 30-day default window for related shutdown/crash incidents on the same endpoint.\n\nRecurrence becomes device-specific risk when **2 or more unexplained independent incidents** occur within 30 days.\n\nEvents belonging to the same verified site/environmental incident do not count as independent recurring device failures.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_5",
+        "heading": "Step 5 — Site/device correlation",
+        "content_markdown": "\n\nUse an initial **±15 minute** incident window.\n\nCount only distinct physical devices. VM guests do not establish the site threshold.\n\nRecord:\n- affected physical devices;\n- active physical devices at the site;\n- physical peers checked;\n- ambiguous peers;\n- affected/active ratio.\n\nClassification:\n- **SITE_ENVIRONMENTAL** — at least 3 physical devices at the site show correlated unexpected shutdown evidence in the window.\n- **SITE_CORRELATED_SMALL_SITE** — exactly 2 affected physical devices and they represent all known active physical devices at the small site, with no ambiguity.\n- **DEVICE_SPECIFIC** — exactly 1 affected physical device and no unresolved peer ambiguity.\n- **UNDETERMINED** — evidence is insufficient, peers are ambiguous/unreadable, or correlation cannot be proven.\n\nA stable site-event ID is generated from site identity plus the incident-time bucket so separate tickets from the same event converge on one operational event.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_6",
+        "heading": "Step 6 — Independent per-device storage and hardware check",
+        "content_markdown": "\n\nRun governed read-only PowerShell for:\n- `Get-PhysicalDisk` health/operational state;\n- storage reliability counters;\n- `Get-Volume` filesystem/volume health;\n- WHEA history;\n- storage/controller/NTFS event history.\n\nThis check runs even when the shutdown is clearly site/environmental.\n\nDo not treat a site event as proof that every device is healthy.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_7",
+        "heading": "Step 7 — Stability and role check",
+        "content_markdown": "\n\nCritical/protected roles such as server, domain controller, Hyper-V/physical host, database server, or backup repository require Human Review in this version even when site correlation is strong.\n\nWorkstations may proceed toward site-event closure only when all independent health evidence is clean.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      }
+    ],
+    "remediation_branches": [
+      {
+        "id": "9_sub_1",
+        "heading": "Autonomous permitted behavior",
+        "content_markdown": "\n- governed reads;\n- governed read-only endpoint PowerShell;\n- internal Autotask notes;\n- standard queue/status transitions;\n- ticket completion only for a clean verified site-correlated workstation branch.\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      },
+      {
+        "id": "9_sub_2",
+        "heading": "Human-review / approval-bound behavior",
+        "content_markdown": "\n- device-specific shutdown root-cause work;\n- filesystem repair;\n- CHKDSK repair/offline scan;\n- storage repair/replacement;\n- reboot/shutdown;\n- driver/firmware changes;\n- any service interruption.\n\nNo playbook branch self-authorizes repair.\n\n",
+        "source_section_key": "9",
+        "extracted_labels": {}
+      }
+    ],
+    "source_section_inventory": [
+      {
+        "section_key": "1",
+        "present": true,
+        "title": "Section Goal",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "2",
+        "present": true,
+        "title": "Trigger",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "3",
+        "present": true,
+        "title": "Scope and Boundaries",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "4",
+        "present": true,
+        "title": "Initial Identification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "5",
+        "present": true,
+        "title": "Expected State",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "6",
+        "present": true,
+        "title": "State Model",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "7",
+        "present": true,
+        "title": "Diagnostic Workflow",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "8",
+        "present": true,
+        "title": "Decision Gates",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "9",
+        "present": true,
+        "title": "Remediation",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "10",
+        "present": true,
+        "title": "Retry Policy",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "11",
+        "present": true,
+        "title": "Periodic Rechecks",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "12",
+        "present": true,
+        "title": "Aging / Stale Condition",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "13",
+        "present": true,
+        "title": "Dependency Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "14",
+        "present": true,
+        "title": "Documentation Requirements",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "15",
+        "present": true,
+        "title": "Failure Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "16",
+        "present": true,
+        "title": "Escalation Criteria",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "17",
+        "present": true,
+        "title": "Verification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "18",
+        "present": true,
+        "title": "Completion Criteria",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "19",
+        "present": true,
+        "title": "Final Resolution Note",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "20",
+        "present": true,
+        "title": "Required Capabilities",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "21",
+        "present": true,
+        "title": "Acceptance Test",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "22",
+        "present": true,
+        "title": "Section Goal Closure",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "23",
+        "present": true,
+        "title": "Autonomous Execution Eligibility",
+        "review_status": "source_preserved"
+      }
+    ],
+    "section_semantics": "Source-derived metadata only. Diagnostic commands and remediation branches are inert Markdown, not executable provider calls."
   },
   "legacy_registry": {
     "source_path": "docs/playbooks/Jason-Windows-Unexpected-Shutdown-Site-Correlation.md",
@@ -333,6 +787,8 @@
       "Controlled shadow comparison and independent acceptance",
       "Owner-bound activation and branch-specific autonomous promotion"
     ],
-    "external_fact_fields_non_authoritative": true
+    "external_fact_fields_non_authoritative": true,
+    "source_reconstruction_integrity": "verified_from_original_source_on_conversion",
+    "section_semantic_extraction": "source_text_derived_no_provider_execution"
   }
 }
