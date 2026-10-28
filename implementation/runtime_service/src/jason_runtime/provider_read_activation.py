@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from connectors.autotask.dynamic_schema_read import DYNAMIC_READ_PROFILE
 import os
 from dataclasses import dataclass
 
@@ -489,7 +490,13 @@ def apply_provider_read_activation_profile(
         approved_capabilities, provider_capabilities = _governed_catalog_contract(
             expected_catalogs
         )
-    elif normalized == PROVIDER_READ_AUTOTASK_COMPREHENSIVE_ENTITY_READ_PROFILE:
+    elif normalized in {
+        PROVIDER_READ_AUTOTASK_COMPREHENSIVE_ENTITY_READ_PROFILE,
+        DYNAMIC_READ_PROFILE,
+    }:
+        # Same two governed service.entity.search/read capabilities, not one
+        # function per entity. v13 changes only the live provider-schema
+        # candidate gate; it never grants new mutations or output disclosure.
         expected_catalogs = _V11_EXPECTED_PROVIDER_CATALOGS
         approved_capabilities, provider_capabilities = _governed_catalog_contract(
             expected_catalogs

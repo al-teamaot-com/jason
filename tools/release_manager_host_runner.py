@@ -182,6 +182,7 @@ def declared_quickbooks_read_profile(candidate_worktree: Path) -> str | None:
 AUTOTASK_PROVIDER_READ_PROFILES = frozenset({
     "itglue-autotask-entra-procurement-billing-reconciliation-catalog-v10",
     "itglue-autotask-entra-comprehensive-entity-read-catalog-v11",
+    "itglue-autotask-entra-dynamic-schema-read-catalog-v13",
 })
 
 

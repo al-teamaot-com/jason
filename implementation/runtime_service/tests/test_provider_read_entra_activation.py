@@ -125,3 +125,28 @@ def test_v4_explicitly_activates_itglue_autotask_and_entra_reads():
         capability_name
         for capability_name in MICROSOFT_GRAPH_DIRECTORY_CAPABILITIES
     }
+
+
+def test_v13_dynamic_schema_activation_is_one_generic_pair_without_new_mutations():
+    from connectors.autotask.dynamic_schema_read import DYNAMIC_READ_PROFILE
+    from orchestrator.provider_read_capability_catalog import SERVICE_ENTITY_SEARCH, SERVICE_ENTITY_READ
+    from jason_runtime.provider_read_activation import (
+        PROVIDER_READ_AUTOTASK_COMPREHENSIVE_ENTITY_READ_PROFILE,
+    )
+    caps, providers = registries()
+    dynamic = apply_provider_read_activation_profile(
+        capabilities=caps, providers=providers, profile=DYNAMIC_READ_PROFILE,
+    )
+    old_caps, old_providers = registries()
+    v11 = apply_provider_read_activation_profile(
+        capabilities=old_caps, providers=old_providers,
+        profile=PROVIDER_READ_AUTOTASK_COMPREHENSIVE_ENTITY_READ_PROFILE,
+    )
+    assert set(dynamic.capability_names) == set(v11.capability_names)
+    assert set(dynamic.provider_ids) == set(v11.provider_ids)
+    assert SERVICE_ENTITY_SEARCH in dynamic.capability_names
+    assert SERVICE_ENTITY_READ in dynamic.capability_names
+    assert all("service.entity." not in name or name in {
+        SERVICE_ENTITY_SEARCH, SERVICE_ENTITY_READ, "service.entity.describe",
+        "service.entity.fields.describe", "service.entity.udf.fields.describe",
+    } for name in dynamic.capability_names)

@@ -11,6 +11,11 @@ from connectors.core.connector_base import PreparedRequest
 from connectors.core.contracts import ConnectorRequest
 
 from .connector import AutotaskConnector
+from .dynamic_schema_read import (
+    dynamic_generic_entity_eligible,
+    proven_queryable_fields,
+)
+from .operations import APPROVED_AUTOTASK_ENTITIES
 
 
 class TrustedPrincipalBindingResolver(Protocol):
@@ -605,6 +610,96 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
             return [AutotaskImpersonatingConnector._sanitize_attachment_metadata(value) for value in payload]
         return payload
 
+    def _verify_dynamic_schema_query(
+        self,
+        *,
+        request: ConnectorRequest,
+        prepared: PreparedRequest,
+    ) -> None:
+        """Require actual provider query rights and field schema on EVERY read.
+
+        The v13 dynamic route may never trust a public entity name, a cached
+        schema result, an injected path or a client-supplied query string.
+        Source authorization and JKD-001 still happen in the orchestrator.
+        """
+        entity = request.arguments.get("entity")
+        if not dynamic_generic_entity_eligible(entity):
+            raise PermissionError("AUTOTASK_DYNAMIC_ENTITY_NOT_ELIGIBLE")
+        context = request.context
+        if (request.arguments.get("jason_dynamic_schema_read") is not True
+                or context.mode != "observe"
+                or context.organization_id != "aot"
+                or context.client_id is not None
+                or not context.principal_id.startswith("person-")
+                or autotask_requester_authorization_mode()
+                    != AUTOTASK_AUTH_MODE_JASON_MANAGED
+                or request.context.capability != "autotask.entity.query"
+                or prepared.method != "GET"
+                or not prepared.url.endswith("/V1.0/" + entity + "/query")):
+            raise PermissionError("AUTOTASK_DYNAMIC_INTERNAL_READ_AUTHORITY_REQUIRED")
+        params = prepared.params
+        raw = params.get("search") if isinstance(params, Mapping) else None
+        if not isinstance(raw, str):
+            raise PermissionError("AUTOTASK_DYNAMIC_QUERY_REQUIRED")
+        try:
+            search = json.loads(raw)
+        except ValueError as exc:
+            raise PermissionError("AUTOTASK_DYNAMIC_QUERY_INVALID") from exc
+        if not isinstance(search, Mapping):
+            raise PermissionError("AUTOTASK_DYNAMIC_QUERY_INVALID")
+        root = self._api_root(prepared)
+        kwargs = {
+            "method": "GET",
+            "headers": prepared.headers,
+            "params": None,
+            "timeout_seconds": prepared.timeout_seconds,
+        }
+        info = self._transport.request(
+            url=f"{root}/V1.0/{entity}/entityInformation", **kwargs
+        )
+        if not isinstance(info, Mapping):
+            raise PermissionError("AUTOTASK_DYNAMIC_SCHEMA_UNVERIFIED")
+        # An API account may legitimately have no query access even if its
+        # entity is publicly documented; stop before GET /query in that case.
+        actual = info.get("info", info)
+        if (not isinstance(actual, Mapping)
+                or actual.get("name") != entity
+                or actual.get("canQuery") is not True
+                or actual.get("userAccessForQuery") != "All"):
+            raise PermissionError("AUTOTASK_DYNAMIC_PROVIDER_QUERY_NOT_AUTHORIZED")
+        fields = self._transport.request(
+            url=f"{root}/V1.0/{entity}/entityInformation/fields", **kwargs
+        )
+        if not isinstance(fields, Mapping):
+            raise PermissionError("AUTOTASK_DYNAMIC_FIELD_SCHEMA_UNVERIFIED")
+        proven_queryable_fields(
+            entity=entity, entity_metadata=info,
+            field_metadata=fields, query=search,
+        )
+
+    @staticmethod
+    def _project_dynamic_selection(request: ConnectorRequest, result):
+        """Do not release unexpected full fields if API ignored IncludeFields."""
+        if request.arguments.get("jason_dynamic_schema_read") is not True:
+            return result
+        search = json.loads(request.arguments["search"])
+        names = search.get("IncludeFields")
+        if names is None:
+            return result
+        data = result.data
+        items = data.get("items") if isinstance(data, Mapping) else None
+        if not isinstance(items, list) or len(items) > 500:
+            raise PermissionError("AUTOTASK_DYNAMIC_SELECTED_RESPONSE_INVALID")
+        if any(not isinstance(i, Mapping) or "id" not in i for i in items):
+            raise PermissionError("AUTOTASK_DYNAMIC_SELECTED_RESPONSE_INVALID")
+        keep = frozenset(names)
+        projected = [{k: v for k, v in item.items() if k in keep} for item in items]
+        return type(result)(
+            capability=result.capability, provider=result.provider,
+            data={**data, "items": projected},
+            evidence_ids=result.evidence_ids, warnings=result.warnings,
+        )
+
     @staticmethod
     def _verify_generic_exact_entity_result(request: ConnectorRequest, result):
         """Prevent a provider query fallback from returning a different record."""
@@ -639,7 +734,8 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
                 request, super().execute(request)
             )
         if request.context.capability not in self._ATTACHMENT_READ_OPERATIONS:
-            return self._verify_generic_exact_entity_result(request, super().execute(request))
+            result = self._project_dynamic_selection(request, super().execute(request))
+            return self._verify_generic_exact_entity_result(request, result)
         self._verify_attachment_ticket_company(request)
         result = super().execute(request)
         if request.context.capability != "autotask.ticket.attachment.content.get":
@@ -684,6 +780,19 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
             )
         else:
             prepared = super().prepare_request(request, credentials)
+
+        if request.context.capability == "autotask.entity.query":
+            entity = request.arguments.get("entity")
+            if request.arguments.get("jason_dynamic_schema_read") is True:
+                self._verify_dynamic_schema_query(
+                    request=request, prepared=prepared,
+                )
+            elif (isinstance(entity, str)
+                  and dynamic_generic_entity_eligible(entity)
+                  and entity not in APPROVED_AUTOTASK_ENTITIES):
+                # Do not permit lower-level connector callers to skip the
+                # canonical schema-governed query adapter with raw JSON.
+                raise PermissionError("AUTOTASK_DYNAMIC_CANONICAL_SELECTOR_REQUIRED")
 
         if request.context.capability in {
             "autotask.ticket.search",
