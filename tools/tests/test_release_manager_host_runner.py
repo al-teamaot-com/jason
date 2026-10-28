@@ -3847,3 +3847,18 @@ class BoundSupportReleaseIdentityTests(unittest.TestCase):
                         support_item='SUPPORT-OPS-059', support_pr_number=2018,
                     )
                 retention.assert_not_called()
+
+
+def test_same_profile_rollforward_guard_accepts_source_or_lkg_only():
+    import ast
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "release_manager_host_runner.py").read_text()
+    module = ast.parse(source)
+    target = next(node for node in ast.walk(module) if isinstance(node, ast.If)
+                  and "prior_autotask_profile not in declared_pair" in ast.unparse(node.test))
+    predicate = compile(ast.Expression(target.test), "<preflight-guard>", "eval")
+    pair = ("v13", "v10")
+    assert not eval(predicate, {"declared_pair": pair, "prior_autotask_profile": "v13"})
+    assert not eval(predicate, {"declared_pair": pair, "prior_autotask_profile": "v10"})
+    assert eval(predicate, {"declared_pair": pair, "prior_autotask_profile": "v11"})
+    assert eval(predicate, {"declared_pair": None, "prior_autotask_profile": "v13"})
