@@ -1,0 +1,731 @@
+{
+  "schema_version": 1,
+  "playbook": {
+    "id": "backupiq_endpoint_backup",
+    "name": "Jason - BackupIQ Datto Endpoint Backup (JSON migration draft)",
+    "version": "1.2.0-jsonpreview",
+    "lifecycle": "pilot",
+    "target_type": "endpoint",
+    "source_owner": "AOT",
+    "source_registry_version": "1.2.0",
+    "documented_version": "1.3.0",
+    "original_lifecycle": "production"
+  },
+  "trigger": {
+    "source_registry_match": {
+      "title_contains": [
+        "BackupIQ"
+      ]
+    },
+    "details_section_key": "2",
+    "execution_enabled": false
+  },
+  "scope": {
+    "direct_provider_access": false,
+    "preview_only": true,
+    "execution_authority": "none",
+    "scope_section_key": "3"
+  },
+  "expected_state": {
+    "details_section_key": "5",
+    "not_reverified_in_json_runtime": true
+  },
+  "state_model": {
+    "entry_step": "identity_gate",
+    "source_section_key": "6",
+    "context_binding_status": "not_implemented_for_migration_draft"
+  },
+  "steps": [
+    {
+      "id": "identity_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "exact_target_identity_verified",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "evidence_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "evidence_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "authoritative_evidence_complete",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "authorization_gate"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "authorization_gate",
+      "type": "decision",
+      "branches": [
+        {
+          "when": {
+            "fact": "approved_json_runtime_parity",
+            "operator": "eq",
+            "value": true
+          },
+          "next": "migration_hold"
+        }
+      ],
+      "default": "human_review"
+    },
+    {
+      "id": "migration_hold",
+      "type": "human_review"
+    },
+    {
+      "id": "human_review",
+      "type": "human_review"
+    }
+  ],
+  "verification": {
+    "authoritative_source": "Legacy source playbook section 17 and provider readbacks; not executed in this JSON draft",
+    "success_condition": "Legacy source Section 17 and Section 18 must pass independently; classification-only draft cannot verify or close"
+  },
+  "completion": {
+    "terminal_disposition": "Human Review (draft only; existing production source unchanged)"
+  },
+  "autonomy": {
+    "activation": "disabled",
+    "allowed_capabilities": []
+  },
+  "procedure": {
+    "section_refs": {
+      "section_goal": "1",
+      "trigger": "2",
+      "scope": "3",
+      "identification": "4",
+      "expected_state": "5",
+      "state_model": "6",
+      "diagnostics": "7",
+      "decision_gates": "8",
+      "remediation": "9",
+      "retry_policy": "10",
+      "periodic_rechecks": "11",
+      "stale_condition": "12",
+      "dependencies": "13",
+      "documentation": "14",
+      "failures": "15",
+      "escalation": "16",
+      "verification": "17",
+      "completion": "18",
+      "final_resolution": "19",
+      "required_capabilities": "20",
+      "acceptance_test": "21",
+      "closure": "22",
+      "autonomy_review": "23"
+    },
+    "section_keys_missing_from_source": [],
+    "diagnostic_substep_titles": [
+      "A. UniView / Backup.net Public API provider check",
+      "B. DRMM endpoint check",
+      "C. Evidence classification"
+    ],
+    "remediation_substep_titles": [],
+    "live_execution_mapped": false,
+    "structured_source_fields": {
+      "identification_checklist": {
+        "source_section_key": "4",
+        "present": true,
+        "verbatim_bullets": [
+          "- Autotask ticket number and company.",
+          "- DRMM site and exact device UID.",
+          "- DRMM hostname.",
+          "- BackupIQ / UniView asset name and provider asset ID.",
+          "- Any duplicate, renamed, reimaged, retired, or stale objects.",
+          "- Use the exact Autotask company identifier associated with the client boundary; do not assume valid company IDs must be greater than zero. The AOT self-company record legitimately uses company ID `0`.",
+          "- Require a validated `backup_net` company-to-customer boundary before provider reads. Never accept a caller-supplied Backup.net customer UUID as authority.",
+          "- A successful provider query returning an empty Endpoint Backup asset collection is authoritative evidence that no matching provider asset was exposed for that exact validated customer/query at that time. Treat it as a protection/onboarding/asset-placement condition to investigate, not as a connector authorization failure.",
+          "- Customer-boundary validation normally requires exact asset proof when provider assets exist. A zero-asset customer may be validated only when the exact unique provider customer is established and a bounded provider inventory query proves the customer currently has no Endpoint Backup assets."
+        ]
+      },
+      "expected_state_checklist": {
+        "source_section_key": "5",
+        "present": true,
+        "verbatim_bullets": [
+          "- DRMM endpoint is active/managed when expected.",
+          "- Endpoint Backup provider asset exists and matches the endpoint.",
+          "- Backup is enabled.",
+          "- Provider asset is online/recently online as expected.",
+          "- A successful backup exists within the allowed BackupIQ threshold.",
+          "- Endpoint Backup agent software/service is healthy when the device is online.",
+          "- No unresolved duplicate/stale asset condition exists."
+        ]
+      },
+      "decision_gate_checklist": {
+        "source_section_key": "8",
+        "present": true,
+        "verbatim_bullets": [
+          "- exact Autotask client/ticket boundary is established",
+          "- exact DRMM endpoint is established",
+          "- exact same-client Backup.net Endpoint Backup asset is uniquely established",
+          "- DRMM reports the endpoint online",
+          "- backup is expected to be enabled",
+          "- the approved reinstall branch is supported by current evidence",
+          "- no duplicate/reimage/retirement/lifecycle conflict exists",
+          "- the one-reinstall-per-incident limit has not already been consumed",
+          "- the exact installer component is standing-safe for this playbook",
+          "- installer variables are empty/server-governed only; Jason never reads or exposes registration/encryption secrets"
+        ]
+      },
+      "retry_checklist": {
+        "source_section_key": "10",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "recheck_checklist": {
+        "source_section_key": "11",
+        "present": true,
+        "verbatim_bullets": [
+          "- document observation time",
+          "- begin a continuous two-hour online qualification window",
+          "- transition to waiting_backup_cycle",
+          "- Investigate or escalate when progress has not advanced for 12 hours. Do not label an unchanged `inprogress` status as proof of progress.",
+          "- End the special grace period after seven days from the original reinstall baseline, even if progress continues; require technician review for an extension.",
+          "- The ordinary three-hour post-reinstall verification deadline still applies when progress evidence is missing, provider access fails, the agent is not actively backing up, or the evidence is contradictory. API authorization errors must remain visible and actionable, not silently treated as progress.",
+          "- One reinstall maximum per incident remains in force. Do not reset the grace period after retries or create duplicate remediation jobs.",
+          "- Only close the ticket with a new successful backup after the remediation timestamp and independently verified provider health."
+        ]
+      },
+      "stale_checklist": {
+        "source_section_key": "12",
+        "present": true,
+        "verbatim_bullets": [
+          "- retired/replaced endpoint",
+          "- stale DRMM device",
+          "- renamed/reimaged endpoint",
+          "- duplicate provider asset",
+          "- broader management/connectivity problem"
+        ]
+      },
+      "dependency_checklist": {
+        "source_section_key": "13",
+        "present": true,
+        "verbatim_bullets": [
+          "- UniView Public API Client ID",
+          "- UniView Public API Client Secret",
+          "- OAuth client-credentials token acquisition",
+          "- Jason secret-broker/OpenBao storage",
+          "- provider read capability for Endpoint Backup assets/backups/BackupIQ alerts",
+          "- usrDEBTokenSITE or approved per-run token source",
+          "- optional usrDEBEncryptionSITE if the site's policy uses a user-managed encryption key",
+          "1. search for an existing open dependency ticket/issue",
+          "2. suppress duplicates",
+          "3. create one if none exists and authority allows",
+          "4. cross-reference it",
+          "5. set state=configuration_blocked"
+        ]
+      },
+      "documentation_checklist": {
+        "source_section_key": "14",
+        "present": true,
+        "verbatim_bullets": [
+          "- Jason - BackupIQ - Asset Validation",
+          "- Jason - BackupIQ - Provider State",
+          "- Jason - BackupIQ - Recheck",
+          "- Jason - BackupIQ - Diagnostic",
+          "- Jason - BackupIQ - Remediation",
+          "- Jason - BackupIQ - Verification",
+          "- Jason - BackupIQ - Resolution"
+        ]
+      },
+      "failure_checklist": {
+        "source_section_key": "15",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "escalation_checklist": {
+        "source_section_key": "16",
+        "present": true,
+        "verbatim_bullets": [
+          "- asset identity cannot be established",
+          "- DRMM alone reports offline while Backup.net remains online",
+          "- provider API remains unavailable beyond bounded retries",
+          "- backup disabled requires policy decision",
+          "- required installer dependency cannot be resolved server-side",
+          "- the single autonomous reinstall fails",
+          "- device is stale/retired/duplicated",
+          "- clean-install/new-asset decision is required",
+          "- post-reinstall verification cannot establish provider recovery and a new successful backup"
+        ]
+      },
+      "verification_checklist": {
+        "source_section_key": "17",
+        "present": true,
+        "verbatim_bullets": [
+          "- UniView/Backup.net reports the correct asset healthy/online as applicable",
+          "- backup remains enabled",
+          "- a new successful backup timestamp occurs after remediation/recovery",
+          "- DRMM endpoint remains healthy/online long enough to support that backup",
+          "- related BackupIQ condition/alert clears or is no longer current"
+        ]
+      },
+      "completion_checklist": {
+        "source_section_key": "18",
+        "present": true,
+        "verbatim_bullets": []
+      },
+      "required_capabilities_source": {
+        "source_section_key": "20",
+        "present": true,
+        "verbatim_bullets": [
+          "- Autotask ticket read/write/note/create",
+          "- DRMM device/software/component/job/output reads",
+          "- governed component execution",
+          "- standing-safe Datto Endpoint Backup Agent v2 [WIN]",
+          "- Backup.net Endpoint Backup asset and BackupIQ alert reads",
+          "- persisted playbook state and scheduler/rechecks",
+          "- `backup.endpoint.asset.search/read`",
+          "- `backup.endpoint.backup.search` when detailed backup history is required",
+          "- `backup.backupiq.alert.search`",
+          "- OAuth client-credentials broker using OpenBao-held Client ID/Secret",
+          "- provider/client isolation and redaction",
+          "- health/readiness evidence for the Backup.net integration"
+        ]
+      },
+      "acceptance_test_checklist": {
+        "source_section_key": "21",
+        "present": true,
+        "verbatim_bullets": [
+          "- Autotask T20260922.0063",
+          "- Client: Deborah Gittens Virtuol Designs LLC",
+          "- Asset: DGV-50859",
+          "1. exact Autotask/DRMM/provider asset association",
+          "2. API authentication without exposing secrets",
+          "3. provider asset status/last online/last successful backup retrieval",
+          "4. DRMM/provider evidence classification",
+          "5. correct two-hour gate behavior",
+          "6. no reinstall when evidence indicates offline/inactive/stale device",
+          "7. governed reinstall only when evidence supports agent failure and dependencies exist",
+          "8. provider-side successful-backup verification before completion",
+          "9. ticket documentation and bounded retry behavior",
+          "- exact open BackupIQ trigger and Jason queue ownership;",
+          "- exact same-company Autotask CI 544;",
+          "- CI referenceNumber exactly matched DRMM UID `56cf6985-cb5f-fc1c-813c-5782388d403f`;",
+          "- exact Backup.net asset `GWN65TK04`;",
+          "- governed work-start mutation associated the CI, set In Progress, and set Remote Support with one provider PATCH and verified readback;",
+          "- DRMM and Backup.net independently reported the endpoint offline;",
+          "- backup remained enabled;",
+          "- no reinstall/component/configuration change was attempted;",
+          "- the autonomous worker independently classified `inactive_or_offline_device`.",
+          "- production v1 persisted this normal offline condition as terminal `escalated`, which released the slot but prevented automatic online resume;",
+          "- technician-triggered and autonomous execution produced materially duplicate diagnostic notes because note deduplication was origin/title/body dependent."
+        ]
+      },
+      "closure_checklist": {
+        "source_section_key": "22",
+        "present": true,
+        "verbatim_bullets": [
+          "- Backup.net OAuth integration is implemented and registered",
+          "- provider read capabilities are live and client-isolated",
+          "- credentials are stored only in the approved secret system",
+          "- DGV-50859 or another controlled target passes acceptance",
+          "- Grafana/Project Jason status reflects the capability and health",
+          "- remaining limitations are documented"
+        ]
+      },
+      "owner_review_checklist": {
+        "source_section_key": "23",
+        "present": true,
+        "verbatim_bullets": [
+          "- `automation.component.execute`",
+          "- `service.ticket.note.create`",
+          "- `service.ticket.update`",
+          "- exact ticket/client/CI/DRMM/Backup.net identity;",
+          "- dual-source availability classification;",
+          "- **both DRMM and Backup.net offline** => Jason / Waiting Device Access;",
+          "- **DRMM offline only** => evidence note + Help Desk I / Human Review;",
+          "- **Backup.net offline only while DRMM online** => one standing-safe Endpoint Backup reinstall;",
+          "- **Online/Online recent success and no current condition** => verified recovered completion;",
+          "- **Online/Online with persistent condition, stale or failed backup** => diagnose, then one reinstall if no lower-impact repair fits or repair fails;",
+          "- post-reinstall provider verification requiring a new successful backup after the remediation baseline;",
+          "- Help Desk I / Human Review after failed install, unresolved verification, policy/lifecycle ambiguity, or other out-of-scope conditions.",
+          "- `Datto Endpoint Backup Agent v2 [WIN]`",
+          "- UID `f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967`",
+          "- Durable component approval recorded 2026-09-29 by person-al.",
+          "- one autonomous reinstall per incident cycle;",
+          "- no clean-install/new-provider-asset lifecycle mutation;",
+          "- no asset deletion/retirement;",
+          "- no policy/retention change;",
+          "- no restore operation;",
+          "- no registration/encryption secret disclosure;",
+          "- no reboot or other disruptive endpoint action without separate approval."
+        ]
+      }
+    },
+    "diagnostic_substeps": [
+      {
+        "id": "7_sub_1",
+        "heading": "A. UniView / Backup.net Public API provider check",
+        "content_markdown": "\n\nAuthenticate using OAuth 2.0 client credentials through Jason's secret broker/OpenBao. Never log or persist Client Secret or access tokens.\n\nRequired read operations:\n- GET /api/epb/v1/assets filtered to the exact endpoint/asset.\n- GET /v1/backupiq/alerts where useful to confirm provider alert context.\n- GET /v1/backups when needed to inspect recent backup outcomes.\n\nRecord sanitized provider evidence:\n- provider asset ID/name\n- customer\n- status / connectivity state\n- backup enabled state\n- last successful backup timestamp\n- last online timestamp\n- relevant policy/asset state\n- recent backup result where available\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_2",
+        "heading": "B. DRMM endpoint check",
+        "content_markdown": "\n\nRead the exact DRMM device:\n- online/offline state\n- last seen/check-in\n- recent availability evidence\n- reboot required where relevant\n- installed Endpoint Backup software\n- service/process status when online\n\nDo not equate DRMM last_logged_in_user with a live interactive session.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      },
+      {
+        "id": "7_sub_3",
+        "heading": "C. Evidence classification",
+        "content_markdown": "\n\nAvailability is a two-source decision. DRMM and Backup.net must be evaluated independently before Jason decides whether the endpoint is truly offline.\n\n1. **DRMM offline + Backup.net offline**\n   - classify=`true_offline_both_sources`\n   - this is the only normal BackupIQ **true offline** condition\n   - do not reinstall\n   - keep the ticket in Jason, set **Waiting Device Access (38)**, release the active-work slot, and resume when the exact endpoint returns\n\n2. **DRMM offline + Backup.net online**\n   - classify=`drmm_only_offline_conflict`\n   - this is contradictory availability evidence, not true offline\n   - do not reinstall\n   - document DRMM state, provider state, last check-in/online timestamps and backup evidence\n   - move to **Help Desk I (29682833) + Human Review (37)** with verified readback\n\n3. **DRMM online + Backup.net offline**\n   - classify=`backup_agent_connectivity_failure`\n   - endpoint connectivity is proven while the backup provider has lost the agent\n   - the exact approved Endpoint Backup installer/reinstaller may run autonomously\n   - one reinstall maximum per incident cycle\n\n4. **DRMM online + Backup.net online + recent/successful backup**\n   - if no current BackupIQ condition remains: classify=`stale_or_recovered_alert`, document and complete automatically after verified Autotask readback\n   - if contradictory/current BackupIQ evidence remains and no lower-impact repair fits: classify=`persistent_backupiq_condition_after_success`; the approved reinstall may run autonomously\n\n5. **DRMM online + Backup.net online + stale/failed backup**\n   - classify=`backup_failure_or_stale_success`\n   - continue diagnosis for any exact lower-impact repair that clearly fits\n   - if no other repair fits, or a bounded applicable repair does not restore health, the approved reinstall may run autonomously\n   - one reinstall maximum per incident cycle\n\n6. **Backup disabled**\n   - classify=`backup_configuration_issue`\n   - do not reinstall solely for this condition\n   - document and move to **Help Desk I + Human Review**\n\n7. **Provider asset missing/ambiguous/duplicate**\n   - first apply the shared DEB duplicate-resolution rule: one recent online exact-name asset may supersede older offline history when its activity is fresh and newer than every stale duplicate\n   - if multiple current/conflicting exact-name assets remain, classify=`asset_identity_or_lifecycle_issue`\n   - do not guess, clean-install, or create a replacement asset autonomously\n   - document and move to **Help Desk I + Human Review**\n\nA successful installer job is action evidence only. It never proves incident resolution.\n\n",
+        "source_section_key": "7",
+        "extracted_labels": {}
+      }
+    ],
+    "remediation_branches": [
+      {
+        "id": "9_overview",
+        "heading": "Full workflow",
+        "content_markdown": "\n\nApproved standing-safe remediation component:\n\n**Datto Endpoint Backup Agent v2 [WIN]**  \nComponent UID: `f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967`\n\nDurable component approval date: 2026-09-29. The approval is limited to exact managed endpoints under this playbook's identity, evidence, retry, and verification gates.\n\nThe component may use server-governed/site-scoped registration inputs such as `usrDEBTokenSITE` and optional `usrDEBEncryptionSITE`. Jason must not retrieve, log, copy, persist, or expose those secret values. Component invocation uses no caller-supplied secret variables.\n\nAutonomous reinstall is approved when:\n- DRMM is online and Backup.net is offline; or\n- DRMM and Backup.net are online but a current BackupIQ condition/backup failure remains and no lower-impact repair clearly fits; or\n- an applicable bounded lower-impact repair was attempted and the backup condition remains.\n\nClean install/new-provider-asset creation is **not** implied by reinstall authority. If the installer or provider evidence indicates a clean-install/new-asset/lifecycle decision, stop and route to Help Desk I / Human Review.\n\nRecord component UID/name, durable job ID, terminal provider status, sanitized output when available, and interpretation. Installer stdout is useful evidence but provider-side recovery is authoritative.\n\n",
+        "source_section_key": "9"
+      }
+    ],
+    "source_section_inventory": [
+      {
+        "section_key": "1",
+        "present": true,
+        "title": "Section Goal",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "2",
+        "present": true,
+        "title": "Trigger",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "3",
+        "present": true,
+        "title": "Scope and Boundaries",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "4",
+        "present": true,
+        "title": "Initial Identification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "5",
+        "present": true,
+        "title": "Expected State",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "6",
+        "present": true,
+        "title": "State Model",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "7",
+        "present": true,
+        "title": "Diagnostic Workflow",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "8",
+        "present": true,
+        "title": "Decision Gates",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "9",
+        "present": true,
+        "title": "Remediation",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "10",
+        "present": true,
+        "title": "Retry Policy",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "11",
+        "present": true,
+        "title": "Periodic Rechecks",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "12",
+        "present": true,
+        "title": "Aging / Stale Condition",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "13",
+        "present": true,
+        "title": "Dependency Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "14",
+        "present": true,
+        "title": "Documentation Requirements",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "15",
+        "present": true,
+        "title": "Failure Handling",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "16",
+        "present": true,
+        "title": "Escalation Criteria",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "17",
+        "present": true,
+        "title": "Verification",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "18",
+        "present": true,
+        "title": "Completion Criteria",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "19",
+        "present": true,
+        "title": "Final Resolution Note",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "20",
+        "present": true,
+        "title": "Required Capabilities",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "21",
+        "present": true,
+        "title": "Acceptance Test",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "22",
+        "present": true,
+        "title": "Section Goal Closure",
+        "review_status": "source_preserved"
+      },
+      {
+        "section_key": "23",
+        "present": true,
+        "title": "Autonomous Execution Eligibility",
+        "review_status": "source_preserved"
+      }
+    ],
+    "section_semantics": "Source-derived metadata only. Diagnostic commands and remediation branches are inert Markdown, not executable provider calls."
+  },
+  "legacy_registry": {
+    "source_path": "docs/playbooks/Jason-BackupIQ-Datto-Endpoint-Backup.md",
+    "source_version": "1.2.0",
+    "review_status": "autonomous_reinstall_recovered_closure_human_review_routing_owner_approved",
+    "source_enabled": true,
+    "source_autonomy_activation": "autonomous",
+    "source_allowed_capabilities": [
+      "automation.component.execute",
+      "service.ticket.note.create",
+      "service.ticket.update"
+    ],
+    "source_required_gates": [
+      "trigger",
+      "identity",
+      "dual_source_availability",
+      "provider_asset_exact",
+      "evidence_fresh",
+      "governance_precheck",
+      "autonomy_approved"
+    ],
+    "source_trigger": {
+      "title_contains": [
+        "BackupIQ"
+      ]
+    }
+  },
+  "source_document": {
+    "path": "docs/playbooks/Jason-BackupIQ-Datto-Endpoint-Backup.md",
+    "source_blob_sha": "9dde241866ddca31f9640d3deb1e0b3ed5a19228",
+    "prelude_markdown": "# Jason BackupIQ / Datto Endpoint Backup Playbook\n\n## Playbook Manifest\n\n```yaml\nplaybook:\n  id: backupiq_endpoint_backup\n  name: BackupIQ / Datto Endpoint Backup\n  version: 1.3.0\n  owner: AOT\n  target_type: endpoint\n  trigger:\n    provider: Autotask / BackupIQ\n    match: open ticket title begins with \"BackupIQ:\"\n  ownership:\n    while_open: Jason\n    release_active_slot_when_waiting: true\n  retry:\n    max_remediation_attempts: 1\n  recheck:\n    enabled: true\n    cadence: 1h\n    stale_after: 10d\n  verification:\n    authoritative_source: Backup.net / UniView\n    success_condition: successful backup within expected threshold after recovery/remediation\n  completion:\n    terminal_disposition: Complete\n  autonomy:\n    allowed_branches:\n      - identify\n      - classify\n      - wait_true_offline\n      - recheck\n      - resume_on_online\n      - close_recovered\n      - reinstall_agent\n      - verify_reinstall\n      - handoff_human_review\n    approval_bound_branches:\n      - lifecycle_mutation\n      - backup_policy_change\n    disruptive_branches: []\n```\n\nThis playbook inherits the common lifecycle, work-start, identity, waiting/recheck, idempotence, documentation, retry, human-review, completion/readback, and observability behavior from `Jason-Playbook-Runtime-Automation-Contract.md`.\n\n",
+    "sections": [
+      {
+        "key": "1",
+        "title": "Section Goal",
+        "heading_markdown": "## 1. Section Goal",
+        "body_markdown": "\n\nJason must determine whether a BackupIQ ticket represents an inactive endpoint, an Endpoint Backup agent connectivity problem, a disabled/misconfigured backup, a stale asset, or a genuine backup failure; perform only governed remediation supported by evidence; and verify a new successful backup before completion.\n\n"
+      },
+      {
+        "key": "2",
+        "title": "Trigger",
+        "heading_markdown": "## 2. Trigger",
+        "body_markdown": "\n\nApply when an Autotask ticket is created from BackupIQ / UniView indicating an endpoint backup has not completed within the configured threshold, including titles such as \"BackupIQ: Backup for asset is not available for <client>\".\n\nConfirm the ticket, client, endpoint/asset name, alert timestamp, threshold, and associated DRMM site/device before proceeding.\n\nQueue ownership rule:\n\n`Open + actionable BackupIQ => Jason queue`\n\nException: when Jason determines that technician review is required, it must write an actionable internal note, move the ticket to **Help Desk I (29682833)**, set **Human Review (37)**, verify both fields by provider readback, and leave the ticket outside Jason until a human explicitly changes the disposition. The queue normalizer must not pull an explicit BackupIQ Human Review ticket back into Jason.\n\nThe global active-work limit controls concurrent execution only.\n\n"
+      },
+      {
+        "key": "3",
+        "title": "Scope and Boundaries",
+        "heading_markdown": "## 3. Scope and Boundaries",
+        "body_markdown": "\n\nIn scope: Autotask, Datto RMM, BackupIQ/UniView Public API, Datto Endpoint Backup asset state, endpoint software/services, site variables required by the approved installer component, governed remediation, periodic rechecks, ticket documentation, and verification.\n\nOut of scope without separate approval: destructive backup deletion, restoring data, changing retention/policy, removing encryption, deleting provider assets, or borrowing registration/encryption values across clients.\n\nPreserve Central Orchestrator authority, exact requester grants, provider/client isolation, audit, approval rules, and direct_provider_access=false.\n\n"
+      },
+      {
+        "key": "4",
+        "title": "Initial Identification",
+        "heading_markdown": "## 4. Initial Identification",
+        "body_markdown": "\n\nIdentify:\n- Autotask ticket number and company.\n- DRMM site and exact device UID.\n- DRMM hostname.\n- BackupIQ / UniView asset name and provider asset ID.\n- Any duplicate, renamed, reimaged, retired, or stale objects.\n\nUse the UniView Public API as authoritative for Endpoint Backup provider state and DRMM as authoritative for endpoint management/connectivity state.\n\nBoundary rules:\n- Use the exact Autotask company identifier associated with the client boundary; do not assume valid company IDs must be greater than zero. The AOT self-company record legitimately uses company ID `0`.\n- Require a validated `backup_net` company-to-customer boundary before provider reads. Never accept a caller-supplied Backup.net customer UUID as authority.\n- A successful provider query returning an empty Endpoint Backup asset collection is authoritative evidence that no matching provider asset was exposed for that exact validated customer/query at that time. Treat it as a protection/onboarding/asset-placement condition to investigate, not as a connector authorization failure.\n- Customer-boundary validation normally requires exact asset proof when provider assets exist. A zero-asset customer may be validated only when the exact unique provider customer is established and a bounded provider inventory query proves the customer currently has no Endpoint Backup assets.\n\nIf the provider asset cannot be uniquely matched to the DRMM endpoint, set state=identification_blocked, document the ambiguity, and escalate rather than guessing.\n\nApply the global CI-association gate from the shared runtime contract before substantive diagnostics. If queue/work-start transition or authoritative readback fails, fail closed and do not continue ticket-specific diagnostics.\n\n"
+      },
+      {
+        "key": "5",
+        "title": "Expected State",
+        "heading_markdown": "## 5. Expected State",
+        "body_markdown": "\n\nHealthy state requires:\n- DRMM endpoint is active/managed when expected.\n- Endpoint Backup provider asset exists and matches the endpoint.\n- Backup is enabled.\n- Provider asset is online/recently online as expected.\n- A successful backup exists within the allowed BackupIQ threshold.\n- Endpoint Backup agent software/service is healthy when the device is online.\n- No unresolved duplicate/stale asset condition exists.\n\n"
+      },
+      {
+        "key": "6",
+        "title": "State Model",
+        "heading_markdown": "## 6. State Model",
+        "body_markdown": "\n\nidentified -> provider_check -> endpoint_check -> classify\nclassify -> waiting_device | waiting_backup_cycle | diagnosing | stale_asset_review | configuration_blocked\ndiagnosing -> remediating -> verifying -> complete\nAny state may transition to escalated.\n\nPersist ticket, DRMM device UID, UniView asset ID, classification, last provider query time, last successful backup, last online timestamp, current retry count, next recheck time, last meaningful evidence fingerprint, last ticket-note fingerprint, active job/correlation ID, and terminal-disposition state.\n\nWaiting states retain Jason queue ownership and normally release the active-work slot.\n\n"
+      },
+      {
+        "key": "7",
+        "title": "Diagnostic Workflow",
+        "heading_markdown": "## 7. Diagnostic Workflow",
+        "body_markdown": "\n\n### A. UniView / Backup.net Public API provider check\n\nAuthenticate using OAuth 2.0 client credentials through Jason's secret broker/OpenBao. Never log or persist Client Secret or access tokens.\n\nRequired read operations:\n- GET /api/epb/v1/assets filtered to the exact endpoint/asset.\n- GET /v1/backupiq/alerts where useful to confirm provider alert context.\n- GET /v1/backups when needed to inspect recent backup outcomes.\n\nRecord sanitized provider evidence:\n- provider asset ID/name\n- customer\n- status / connectivity state\n- backup enabled state\n- last successful backup timestamp\n- last online timestamp\n- relevant policy/asset state\n- recent backup result where available\n\n### B. DRMM endpoint check\n\nRead the exact DRMM device:\n- online/offline state\n- last seen/check-in\n- recent availability evidence\n- reboot required where relevant\n- installed Endpoint Backup software\n- service/process status when online\n\nDo not equate DRMM last_logged_in_user with a live interactive session.\n\n### C. Evidence classification\n\nAvailability is a two-source decision. DRMM and Backup.net must be evaluated independently before Jason decides whether the endpoint is truly offline.\n\n1. **DRMM offline + Backup.net offline**\n   - classify=`true_offline_both_sources`\n   - this is the only normal BackupIQ **true offline** condition\n   - do not reinstall\n   - keep the ticket in Jason, set **Waiting Device Access (38)**, release the active-work slot, and resume when the exact endpoint returns\n\n2. **DRMM offline + Backup.net online**\n   - classify=`drmm_only_offline_conflict`\n   - this is contradictory availability evidence, not true offline\n   - do not reinstall\n   - document DRMM state, provider state, last check-in/online timestamps and backup evidence\n   - move to **Help Desk I (29682833) + Human Review (37)** with verified readback\n\n3. **DRMM online + Backup.net offline**\n   - classify=`backup_agent_connectivity_failure`\n   - endpoint connectivity is proven while the backup provider has lost the agent\n   - the exact approved Endpoint Backup installer/reinstaller may run autonomously\n   - one reinstall maximum per incident cycle\n\n4. **DRMM online + Backup.net online + recent/successful backup**\n   - if no current BackupIQ condition remains: classify=`stale_or_recovered_alert`, document and complete automatically after verified Autotask readback\n   - if contradictory/current BackupIQ evidence remains and no lower-impact repair fits: classify=`persistent_backupiq_condition_after_success`; the approved reinstall may run autonomously\n\n5. **DRMM online + Backup.net online + stale/failed backup**\n   - classify=`backup_failure_or_stale_success`\n   - continue diagnosis for any exact lower-impact repair that clearly fits\n   - if no other repair fits, or a bounded applicable repair does not restore health, the approved reinstall may run autonomously\n   - one reinstall maximum per incident cycle\n\n6. **Backup disabled**\n   - classify=`backup_configuration_issue`\n   - do not reinstall solely for this condition\n   - document and move to **Help Desk I + Human Review**\n\n7. **Provider asset missing/ambiguous/duplicate**\n   - first apply the shared DEB duplicate-resolution rule: one recent online exact-name asset may supersede older offline history when its activity is fresh and newer than every stale duplicate\n   - if multiple current/conflicting exact-name assets remain, classify=`asset_identity_or_lifecycle_issue`\n   - do not guess, clean-install, or create a replacement asset autonomously\n   - document and move to **Help Desk I + Human Review**\n\nA successful installer job is action evidence only. It never proves incident resolution.\n\n"
+      },
+      {
+        "key": "8",
+        "title": "Decision Gates",
+        "heading_markdown": "## 8. Decision Gates",
+        "body_markdown": "\n\nBefore autonomous reinstall all must be true:\n- exact Autotask client/ticket boundary is established\n- exact DRMM endpoint is established\n- exact same-client Backup.net Endpoint Backup asset is uniquely established\n- DRMM reports the endpoint online\n- backup is expected to be enabled\n- the approved reinstall branch is supported by current evidence\n- no duplicate/reimage/retirement/lifecycle conflict exists\n- the one-reinstall-per-incident limit has not already been consumed\n- the exact installer component is standing-safe for this playbook\n- installer variables are empty/server-governed only; Jason never reads or exposes registration/encryption secrets\n\nThe two-hour online qualification from older design revisions is not required for the specific **DRMM online + Backup.net offline** condition. DRMM already proves endpoint access and provider-offline evidence supports the agent-connectivity repair.\n\nFor Online/Online stale/failed or persistent-alert conditions, prefer an exact lower-impact repair when one exists. If none fits, reinstall is an approved bounded fallback.\n\n"
+      },
+      {
+        "key": "9",
+        "title": "Remediation",
+        "heading_markdown": "## 9. Remediation",
+        "body_markdown": "\n\nApproved standing-safe remediation component:\n\n**Datto Endpoint Backup Agent v2 [WIN]**  \nComponent UID: `f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967`\n\nDurable component approval date: 2026-09-29. The approval is limited to exact managed endpoints under this playbook's identity, evidence, retry, and verification gates.\n\nThe component may use server-governed/site-scoped registration inputs such as `usrDEBTokenSITE` and optional `usrDEBEncryptionSITE`. Jason must not retrieve, log, copy, persist, or expose those secret values. Component invocation uses no caller-supplied secret variables.\n\nAutonomous reinstall is approved when:\n- DRMM is online and Backup.net is offline; or\n- DRMM and Backup.net are online but a current BackupIQ condition/backup failure remains and no lower-impact repair clearly fits; or\n- an applicable bounded lower-impact repair was attempted and the backup condition remains.\n\nClean install/new-provider-asset creation is **not** implied by reinstall authority. If the installer or provider evidence indicates a clean-install/new-asset/lifecycle decision, stop and route to Help Desk I / Human Review.\n\nRecord component UID/name, durable job ID, terminal provider status, sanitized output when available, and interpretation. Installer stdout is useful evidence but provider-side recovery is authoritative.\n\n"
+      },
+      {
+        "key": "10",
+        "title": "Retry Policy",
+        "heading_markdown": "## 10. Retry Policy",
+        "body_markdown": "\n\nMaximum **one autonomous Endpoint Backup reinstall per incident/playbook cycle**.\n\nA reinstall attempt includes provider pre-check, endpoint pre-check, exact component execution, terminal job evidence, provider recheck, and successful-backup verification.\n\nNever enter an uninstall/reinstall loop. If the reinstall fails, cannot be verified, or the provider remains unhealthy after the bounded verification window, document the evidence and move to **Help Desk I + Human Review**.\n\n"
+      },
+      {
+        "key": "11",
+        "title": "Periodic Rechecks",
+        "heading_markdown": "## 11. Periodic Rechecks",
+        "body_markdown": "\n\nWhile waiting_device, recheck at least hourly unless ticket policy specifies a different cadence. The ticket remains in the Jason queue but releases its active-work slot.\n\nUnchanged rechecks update persisted state only and do not create duplicate Autotask notes.\n\nTechnician-triggered, autonomous, resumed, and scheduled executions use the same semantic BackupIQ note classes. A second execution reaching the same classification with materially equivalent evidence must not write a second diagnostic note merely because its actor/origin or title wording differs.\n\nWhen the device becomes online:\n- document observation time\n- begin a continuous two-hour online qualification window\n- transition to waiting_backup_cycle\n\nIf it goes offline during the window, reset the two-hour qualification.\n\n### Initial full backup grace period (progress-gated)\n\nInitial full backups after installation or reinstallation may take several days. Continue the existing scheduled recheck when the **exact** Backup.net asset explicitly reports `inprogress`/`running`, the DRMM endpoint is online, and the provider supplies a valid numeric progress percentage (0-100). Persist the last percentage and timestamp of the last observed advance across worker restarts. A new higher percentage refreshes the **stall clock only**, not the absolute grace-period ceiling. Suppress materially identical diagnostic notes and repeat notifications within this one incident; never suppress a different asset, a new critical failure, or a genuine worsening condition.\n\n- Investigate or escalate when progress has not advanced for 12 hours. Do not label an unchanged `inprogress` status as proof of progress.\n- End the special grace period after seven days from the original reinstall baseline, even if progress continues; require technician review for an extension.\n- The ordinary three-hour post-reinstall verification deadline still applies when progress evidence is missing, provider access fails, the agent is not actively backing up, or the evidence is contradictory. API authorization errors must remain visible and actionable, not silently treated as progress.\n- One reinstall maximum per incident remains in force. Do not reset the grace period after retries or create duplicate remediation jobs.\n- Only close the ticket with a new successful backup after the remediation timestamp and independently verified provider health.\n\nThe runtime must not assume Backup.net returns a particular progress field: absence of a documented numeric provider field means the grace period cannot be automatically granted and a capability/schema enhancement is required. Monitor telemetry and deduplicate *notification events* at their actual source; suppressing repeated notes in Jason does not by itself suppress provider-originated email alerts.\n\nDuring post-reinstall verification, poll provider state on a reasonable cadence. Completion requires the exact Backup.net asset to be online and a **new successful backup timestamp after the reinstall baseline**. Use a bounded verification window (currently three hours). If the endpoint becomes truly offline (both DRMM and Backup.net offline), transition to Waiting Device Access and resume verification later. DRMM-only offline during verification is a Human Review handoff.\n\n"
+      },
+      {
+        "key": "12",
+        "title": "Aging / Stale Condition",
+        "heading_markdown": "## 12. Aging / Stale Condition",
+        "body_markdown": "\n\nIf the device remains offline more than 10 days, stop normal retry behavior and investigate:\n- retired/replaced endpoint\n- stale DRMM device\n- renamed/reimaged endpoint\n- duplicate provider asset\n- broader management/connectivity problem\n\nDo not retry indefinitely.\n\n"
+      },
+      {
+        "key": "13",
+        "title": "Dependency Handling",
+        "heading_markdown": "## 13. Dependency Handling",
+        "body_markdown": "\n\nRequired API dependency:\n- UniView Public API Client ID\n- UniView Public API Client Secret\n- OAuth client-credentials token acquisition\n- Jason secret-broker/OpenBao storage\n- provider read capability for Endpoint Backup assets/backups/BackupIQ alerts\n\nRequired install dependency:\n- usrDEBTokenSITE or approved per-run token source\n- optional usrDEBEncryptionSITE if the site's policy uses a user-managed encryption key\n\nIf a required dependency is missing:\n1. search for an existing open dependency ticket/issue\n2. suppress duplicates\n3. create one if none exists and authority allows\n4. cross-reference it\n5. set state=configuration_blocked\n\nNever include secret values in the dependency ticket.\n\n"
+      },
+      {
+        "key": "14",
+        "title": "Documentation Requirements",
+        "heading_markdown": "## 14. Documentation Requirements",
+        "body_markdown": "\n\nDocument provider query, DRMM state, classification, online-duration gate, diagnostic results, dependency presence, remediation jobs, rechecks, and final verification.\n\nRecommended note titles:\n- Jason - BackupIQ - Asset Validation\n- Jason - BackupIQ - Provider State\n- Jason - BackupIQ - Recheck\n- Jason - BackupIQ - Diagnostic\n- Jason - BackupIQ - Remediation\n- Jason - BackupIQ - Verification\n- Jason - BackupIQ - Resolution\n\n"
+      },
+      {
+        "key": "15",
+        "title": "Failure Handling",
+        "heading_markdown": "## 15. Failure Handling",
+        "body_markdown": "\n\nTreat API authentication failure, provider timeout, unmatched asset, contradictory DRMM/provider state, missing component output, missing site variable, and denied action authority as explicit failures. Document them and fail closed.\n\n"
+      },
+      {
+        "key": "16",
+        "title": "Escalation Criteria",
+        "heading_markdown": "## 16. Escalation Criteria",
+        "body_markdown": "\n\nUse Human Review when a technician decision is specifically required. Escalate only for operational failure/out-of-scope conditions.\n\nEscalate or hand off to **Help Desk I (29682833) / Human Review (37)** when:\n- asset identity cannot be established\n- DRMM alone reports offline while Backup.net remains online\n- provider API remains unavailable beyond bounded retries\n- backup disabled requires policy decision\n- required installer dependency cannot be resolved server-side\n- the single autonomous reinstall fails\n- device is stale/retired/duplicated\n- clean-install/new-asset decision is required\n- post-reinstall verification cannot establish provider recovery and a new successful backup\n\nHuman-review notes must include DRMM state/last check-in, Backup.net state/last online, last successful backup, exact endpoint/provider asset identity, actions attempted, job/correlation IDs where available, and the specific reason human review is required. Never include secret values.\n\n"
+      },
+      {
+        "key": "17",
+        "title": "Verification",
+        "heading_markdown": "## 17. Verification",
+        "body_markdown": "\n\nA component success is not incident resolution.\n\nPreferred authoritative resolution evidence:\n- UniView/Backup.net reports the correct asset healthy/online as applicable\n- backup remains enabled\n- a new successful backup timestamp occurs after remediation/recovery\n- DRMM endpoint remains healthy/online long enough to support that backup\n- related BackupIQ condition/alert clears or is no longer current\n\n"
+      },
+      {
+        "key": "18",
+        "title": "Completion Criteria",
+        "heading_markdown": "## 18. Completion Criteria",
+        "body_markdown": "\n\nComplete only when the endpoint/provider asset mapping is correct, classification is established, required work is documented, and provider evidence shows a successful backup within the expected window or the alert is proven stale/recovered.\n\nA successful component/job result is not resolution. Terminal Autotask disposition must be written and independently read back before state=complete.\n\n"
+      },
+      {
+        "key": "19",
+        "title": "Final Resolution Note",
+        "heading_markdown": "## 19. Final Resolution Note",
+        "body_markdown": "\n\nInclude original BackupIQ condition, classification/root cause, DRMM availability, provider asset state, last successful backup before/after, remediation attempts, final provider verification timestamp, and disposition. Never include credentials/tokens.\n\n"
+      },
+      {
+        "key": "20",
+        "title": "Required Capabilities",
+        "heading_markdown": "## 20. Required Capabilities",
+        "body_markdown": "\n\nExisting:\n- Autotask ticket read/write/note/create\n- DRMM device/software/component/job/output reads\n- governed component execution\n- standing-safe Datto Endpoint Backup Agent v2 [WIN]\n- Backup.net Endpoint Backup asset and BackupIQ alert reads\n- persisted playbook state and scheduler/rechecks\n\nRequired governed read capabilities:\n- `backup.endpoint.asset.search/read`\n- `backup.endpoint.backup.search` when detailed backup history is required\n- `backup.backupiq.alert.search`\n- OAuth client-credentials broker using OpenBao-held Client ID/Secret\n- provider/client isolation and redaction\n- health/readiness evidence for the Backup.net integration\n\n"
+      },
+      {
+        "key": "21",
+        "title": "Acceptance Test",
+        "heading_markdown": "## 21. Acceptance Test",
+        "body_markdown": "\n\nInitial controlled production acceptance target:\n- Autotask T20260922.0063\n- Client: Deborah Gittens Virtuol Designs LLC\n- Asset: DGV-50859\n\nAcceptance must prove:\n1. exact Autotask/DRMM/provider asset association\n2. API authentication without exposing secrets\n3. provider asset status/last online/last successful backup retrieval\n4. DRMM/provider evidence classification\n5. correct two-hour gate behavior\n6. no reinstall when evidence indicates offline/inactive/stale device\n7. governed reinstall only when evidence supports agent failure and dependencies exist\n8. provider-side successful-backup verification before completion\n9. ticket documentation and bounded retry behavior\n\nDo not run the live API acceptance test until credentials are installed through the approved secret path.\n\n### 2026-09-29 controlled reference-runtime acceptance\n\nProduction case: `T20260928.0082 / TUS-50822 / Terramar`.\n\nProven:\n- exact open BackupIQ trigger and Jason queue ownership;\n- exact same-company Autotask CI 544;\n- CI referenceNumber exactly matched DRMM UID `56cf6985-cb5f-fc1c-813c-5782388d403f`;\n- exact Backup.net asset `GWN65TK04`;\n- governed work-start mutation associated the CI, set In Progress, and set Remote Support with one provider PATCH and verified readback;\n- DRMM and Backup.net independently reported the endpoint offline;\n- backup remained enabled;\n- no reinstall/component/configuration change was attempted;\n- the autonomous worker independently classified `inactive_or_offline_device`.\n\nAcceptance findings:\n- production v1 persisted this normal offline condition as terminal `escalated`, which released the slot but prevented automatic online resume;\n- technician-triggered and autonomous execution produced materially duplicate diagnostic notes because note deduplication was origin/title/body dependent.\n\nThis v2 branch therefore implements resumable `waiting_device_access:backupiq_investigate` semantics and requires semantic cross-origin note deduplication. Production deployment proved legacy offline-state migration and unchanged-note behavior. The waiting -> online resume transition is Owner-approved to execute when the exact endpoint naturally returns online, but its live transition proof remains an acceptance item. Recovered-alert completion and agent remediation remain separately gated.\n\nIntegration review: PR #604 supersedes #603. Its shared-runtime overlap is VulScan-specific and does not conflict with the BackupIQ waiting/resume changes in this playbook branch.\n\nThe PR integration gate is coordinated with #596, #603, and #604.\n\n"
+      },
+      {
+        "key": "22",
+        "title": "Section Goal Closure",
+        "heading_markdown": "## 22. Section Goal Closure",
+        "body_markdown": "\n\nClose the Section Goal after:\n- Backup.net OAuth integration is implemented and registered\n- provider read capabilities are live and client-isolated\n- credentials are stored only in the approved secret system\n- DGV-50859 or another controlled target passes acceptance\n- Grafana/Project Jason status reflects the capability and health\n- remaining limitations are documented\n\n"
+      },
+      {
+        "key": "23",
+        "title": "Autonomous Execution Eligibility",
+        "heading_markdown": "## 23. Autonomous Execution Eligibility",
+        "body_markdown": "\n\n### Owner-approved production scope — BackupIQ 1.2.0\n\nApproval owner: person-al  \nApproval date: 2026-09-29  \nPolicy: `playbook-autonomy:backupiq_endpoint_backup`\n\nRequired action capabilities:\n- `automation.component.execute`\n- `service.ticket.note.create`\n- `service.ticket.update`\n\nApproved autonomous behavior:\n- exact ticket/client/CI/DRMM/Backup.net identity;\n- dual-source availability classification;\n- **both DRMM and Backup.net offline** => Jason / Waiting Device Access;\n- **DRMM offline only** => evidence note + Help Desk I / Human Review;\n- **Backup.net offline only while DRMM online** => one standing-safe Endpoint Backup reinstall;\n- **Online/Online recent success and no current condition** => verified recovered completion;\n- **Online/Online with persistent condition, stale or failed backup** => diagnose, then one reinstall if no lower-impact repair fits or repair fails;\n- post-reinstall provider verification requiring a new successful backup after the remediation baseline;\n- Help Desk I / Human Review after failed install, unresolved verification, policy/lifecycle ambiguity, or other out-of-scope conditions.\n\nStanding-safe component:\n- `Datto Endpoint Backup Agent v2 [WIN]`\n- UID `f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967`\n- Durable component approval recorded 2026-09-29 by person-al.\n\nHard boundaries:\n- one autonomous reinstall per incident cycle;\n- no clean-install/new-provider-asset lifecycle mutation;\n- no asset deletion/retirement;\n- no policy/retention change;\n- no restore operation;\n- no registration/encryption secret disclosure;\n- no reboot or other disruptive endpoint action without separate approval.\n\nThe prior `backupiq_endpoint_backup@1.1.0` approval remains historical rollback evidence only. Version 1.2.0 requires a new durable playbook-autonomy promotion for the exact three-capability set before production execution.\n\n"
+      }
+    ]
+  },
+  "migration": {
+    "status": "SOURCE_PRESERVED_STRUCTURED_DRAFT_NOT_RUNTIME_PARITY",
+    "source_version_discrepancy": true,
+    "production_replacement_allowed": false,
+    "staged": false,
+    "activated": false,
+    "required_before_activation": [
+      "Canonical Python JSON semantic validation",
+      "Exact-capability binding and source-scoped argument context verified",
+      "Safe diagnostic and remediation branches mapped to governed capabilities",
+      "Durable retry/wait/terminal lifecycle parity with shared runtime",
+      "Error, negative-evidence and client-boundary regression tests",
+      "Controlled shadow comparison and independent acceptance",
+      "Owner-bound activation and branch-specific autonomous promotion"
+    ],
+    "external_fact_fields_non_authoritative": true,
+    "source_reconstruction_integrity": "verified_from_original_source_on_conversion",
+    "section_semantic_extraction": "source_text_derived_no_provider_execution"
+  }
+}
