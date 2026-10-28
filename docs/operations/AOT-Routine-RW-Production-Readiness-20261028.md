@@ -61,3 +61,12 @@ Turning off a profile through a governed release prevents future writes, even if
 
 ## Explicit unverified external conditions at source-PR close
 At source-build time, write credentials and OpenBao AppRoles were not provisioned, client write boundaries/permissions were not independently verified in production, no controlled live provider mutation was attempted, and no PM preproduction image/functional canaries were run. The deployment freeze and incident hold remained active. These are acceptance gates, not code-completion claims.
+
+## Concurrent MCP read work (#2110)
+PR #2110 is an independently gated Autotask **read** preproduction change.
+Its reviewed MCP server patch touches `_contract_client_context_for_identity`
+and `_governed_read` for staff contract/company scoping; this RW candidate
+changes `_governed_execute`, imports the exact-client write selector and
+adds a separate onboarding attestation tool. The functions do not overlap.
+That source review is recorded in PR #2125's Integration coordination field.
+Do not merge or pre-approve #2110 as part of this release candidate.
