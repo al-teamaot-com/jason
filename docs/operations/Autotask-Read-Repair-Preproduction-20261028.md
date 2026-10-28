@@ -27,3 +27,11 @@ Using governed service.entity.describe against live Autotask:
 - Contracts: canQuery=true, userAccessForQuery=All, create/update/delete=None.
 
 These describe responses demonstrate entity query visibility for the current API metadata context, **not** that requester-specific native impersonation has been verified. The explicit labor read gate remains DENY. Preproduction must prove the native requester header and provider enforcement (including a denied unauthorized requester) before activating the labor read. No production environment flags should be changed as a substitute for proof.
+
+## Isolated host acceptance — 2026-10-28
+- Isolated Git worktree: /home/al/jason-worktrees/autotask-read-preprod-20261028; source pin f74a704eec200550c94eae20af9d71c327f73b3c prior to this documentation addition.
+- Ran 74 automated tests successfully across contract context, provider read foundation, native-labor connector simulations, company adapter, and requester information authorizer.
+- All tests used local source with mock/fake provider transport where applicable; no production container, environment configuration, or database was modified.
+- Latest pre-documentation commit CI: nine workflows successful.
+- A separately deployed preproduction MCP with isolated authority stores and independently authorized Autotask credentials has NOT been provisioned; do not claim live preproduction acceptance.
+- Native technician time-entry query permission is NOT yet proven against a real provider requester; keep the permission gate disabled until authorized positive and negative provider-backed tests are available.
