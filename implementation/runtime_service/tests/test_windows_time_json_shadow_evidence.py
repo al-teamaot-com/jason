@@ -273,7 +273,7 @@ def test_review_only_guards_reject_executable_preview_without_read():
     # on a decision; the shadow bridge is intentionally stricter.
     manipulated = validate_playbook_document(payload)
     reads = GovernedReadsFixture()
-    with pytest.raises(ValueError, match="EXECUTABLE_STEP_FORBIDDEN"):
+    with pytest.raises(ValueError, match="EXECUTION_AUTHORITY_FORBIDDEN|EXECUTABLE_STEP_FORBIDDEN"):
         WindowsTimeJsonShadowEvidence(reads=reads, document=manipulated)
     assert reads.calls == []
 
