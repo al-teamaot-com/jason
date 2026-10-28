@@ -14,6 +14,11 @@ import subprocess
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
 PR = re.compile(r"#([0-9]+)")
+# 2026-10-28: production registered 1,020 parallel worktrees, exceeding
+# the historical 600-worktree ceiling. Every registered checkout still must
+# be inspected. 2,000 is a bounded fail-closed ceiling, not permission to
+# skip, prune or implicitly acknowledge other developers' changes.
+MAX_REGISTERED_WORKTREES = 2000
 
 
 class ScopeBlocked(ValueError):
@@ -74,7 +79,7 @@ def source_scope(repo, baseline, candidate):
 def dirty_worktrees(repo, changed):
     lines = command(["git", "worktree", "list", "--porcelain"], repo).splitlines()
     paths = [Path(line[9:]) for line in lines if line.startswith("worktree ")]
-    if not 1 <= len(paths) <= 600:
+    if not 1 <= len(paths) <= MAX_REGISTERED_WORKTREES:
         raise ScopeBlocked("incomplete registered worktree set")
     overlaps = []
     for path in paths:

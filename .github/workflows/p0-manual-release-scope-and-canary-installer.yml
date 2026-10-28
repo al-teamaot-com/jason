@@ -1,0 +1,34 @@
+name: P0 Manual Scope and Release Canary Installer
+
+on:
+  pull_request:
+    paths:
+      - 'tools/manual_release_scope.py'
+      - 'tools/install_release_manager.py'
+      - 'tools/tests/test_manual_release_scope.py'
+      - 'tools/tests/test_release_manager_read_canary_installer.py'
+      - '.github/workflows/p0-manual-release-scope-and-canary-installer.yml'
+  push:
+    paths:
+      - 'tools/manual_release_scope.py'
+      - 'tools/install_release_manager.py'
+      - 'tools/tests/test_manual_release_scope.py'
+      - 'tools/tests/test_release_manager_read_canary_installer.py'
+      - '.github/workflows/p0-manual-release-scope-and-canary-installer.yml'
+
+jobs:
+  bounded-all-worktrees-and-exact-canary-module:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test harness
+        run: python -m pip install pytest
+      - name: Require bounded complete worktree review and canonical helper packaging
+        env:
+          PYTHONPATH: tools
+        run: |
+          python -m py_compile tools/manual_release_scope.py tools/install_release_manager.py
+          python -m pytest -q tools/tests/test_manual_release_scope.py tools/tests/test_release_manager_read_canary_installer.py

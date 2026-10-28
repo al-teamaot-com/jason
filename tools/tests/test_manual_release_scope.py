@@ -131,3 +131,56 @@ def test_paged_pr_file_list_detects_overlap(repo, monkeypatch):
     items, count = m.open_pr_overlaps("test/repo", {"shared.py"}, reader=reader(prs))
     assert count == 1
     assert items[0]["changed_files"] == ["shared.py"]
+
+
+def test_all_1020_registered_worktrees_including_last_dirty_overlap_are_checked(
+    tmp_path, monkeypatch,
+):
+    """Real host has >1,000 worktrees; don't silently skip later developers."""
+    count = 1020
+    paths = [tmp_path / f"reviewed-{i:04d}" for i in range(count)]
+    for path in paths:
+        path.mkdir()
+    target = paths[-1]
+    inspected = []
+
+    def fake_command(args, cwd=None):
+        if args[:3] == ["git", "worktree", "list"]:
+            return "\n".join(f"worktree {p}" for p in paths)
+        assert args[:3] == ["git", "status", "--porcelain=v1"]
+        inspected.append(cwd)
+        assert args[-1] == "shared.py"
+        return " M shared.py\n" if cwd == target else ""
+
+    monkeypatch.setattr(m, "command", fake_command)
+    overlaps, n = m.dirty_worktrees(tmp_path, {"shared.py"})
+    assert n == count
+    assert len(inspected) == count
+    assert len(set(inspected)) == count
+    assert overlaps == [{
+        "path": str(target),
+        "changed_files": ["shared.py"],
+    }]
+
+
+def test_more_than_2000_registered_worktrees_still_fails_closed(monkeypatch, tmp_path):
+    paths = [tmp_path / f"registry-{i:05d}" for i in range(2001)]
+    def fake_command(args, cwd=None):
+        assert args[:3] == ["git", "worktree", "list"]
+        return "\n".join(f"worktree {p}" for p in paths)
+    monkeypatch.setattr(m, "command", fake_command)
+    with pytest.raises(m.ScopeBlocked, match="incomplete registered worktree set"):
+        m.dirty_worktrees(tmp_path, {"shared.py"})
+
+
+def test_missing_registered_worktree_still_refuses_scope_review(monkeypatch, tmp_path):
+    paths = [tmp_path / f"present-{i}" for i in range(3)]
+    for path in paths[:2]:
+        path.mkdir()
+    def fake_command(args, cwd=None):
+        if args[:3] == ["git", "worktree", "list"]:
+            return "\n".join(f"worktree {p}" for p in paths)
+        return ""
+    monkeypatch.setattr(m, "command", fake_command)
+    with pytest.raises(m.ScopeBlocked, match="worktree unavailable"):
+        m.dirty_worktrees(tmp_path, {"shared.py"})
