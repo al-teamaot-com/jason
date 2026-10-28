@@ -54,3 +54,15 @@ canary**, including ticket count, exact 50+cursor pagination, exact ID,
 Projects and a genuine selected ActionTypes read. If the record query fails
 or the metadata receipt is absent, rollback is mandatory. The source tests
 are not substituted for live read acceptance.
+
+## Connected acceptance execution
+
+During the source-bound live acceptance window, an authenticated AOT human
+must issue the real Jason `service.entity.search` query with precisely
+`{"entity":"ActionTypes","page_size":1,"select":["id","name"]}` through the
+normal governed read capability. Do **not** substitute `entityInformation`,
+a local container HTTP probe or a fixture: none of those create an eligible
+`dynamic_schema_search` receipt. Verify that the separate ticket count,
+page cursor, exact read and Projects receipts all come from the same Entra
+principal. Preserve metadata-only evidence and fail with native rollback
+if any source-bound receipt is absent.
