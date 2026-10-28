@@ -101,6 +101,7 @@ def test_governed_read_forwards_only_derived_contract_client(monkeypatch):
 
 def test_org_scoped_nonowner_cannot_select_contract_client(monkeypatch):
     monkeypatch.setattr(server, "approval_owner_identities", lambda: frozenset({"person-owner"}))
+    monkeypatch.setattr(server, "_runtime", lambda: SimpleNamespace(microsoft_identity_bindings=None))
     monkeypatch.setattr(server, "_governed_read_for_identity", lambda **kwargs: (_ for _ in ()).throw(AssertionError("company read must not run for nonowner")))
     assert server._contract_client_context_for_identity(
         principal="person-observer", organization="aot", assurance="entra",
