@@ -1355,9 +1355,12 @@ def _deterministic_resource_contracts(
     return tuple(contracts)
 
 
-def build_runtime_application(settings: RuntimeSettings, *, universal_approval_handler=None,
+def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile: str = "all",
+                              health_probe=None, universal_approval_handler=None,
         teams_workflow_approval_handlers: Mapping[str, Any] | None = None) -> RuntimeHttpApplication:
     settings.validate()
+    if maintenance_profile not in {"all", "ticket_worker", "auxiliary"}:
+        raise ValueError("unknown maintenance profile")
 
     authority_store = SQLiteIdentityAuthorityStore(settings.authority_db)
     approval_repository = SQLiteApprovalRepository(authority_store)
@@ -2805,25 +2808,47 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
             gateway_url=settings.teams_gateway_internal_url,
             token_file=settings.teams_proactive_token_file,
         )
-    autonomy_maintenance = CompositeAutonomyMaintenance(
-        release_mobile_maintenance,
-        owner_uat_maintenance,
-        universal_plan_maintenance,
-        universal_plan_status_maintenance,
-        playbook_review_maintenance,
-        autonomous_work_lifecycle_notification_maintenance,
-        autonomous_deployment_completion_notification_maintenance,
-        release_manager_owner_notification_maintenance,
-        self_heal_escalation_notification_maintenance,
-        support_repair_reasoning_maintenance,
-        autonomous_repair_deployment_maintenance,
-        operational_autonomy_maintenance,
-        drmm_recent_alert_reconciliation_maintenance,
-        procurement_billing_audit_maintenance,
-        procurement_approval_maintenance,
-        windows_time_source_shadow_maintenance,
-        shadow_autonomy_maintenance,
-    )
+    if maintenance_profile == "ticket_worker":
+        autonomy_maintenance = CompositeAutonomyMaintenance(operational_autonomy_maintenance)
+    elif maintenance_profile == "auxiliary":
+        autonomy_maintenance = CompositeAutonomyMaintenance(
+            release_mobile_maintenance,
+            owner_uat_maintenance,
+            universal_plan_maintenance,
+            universal_plan_status_maintenance,
+            playbook_review_maintenance,
+            autonomous_work_lifecycle_notification_maintenance,
+            autonomous_deployment_completion_notification_maintenance,
+            release_manager_owner_notification_maintenance,
+            self_heal_escalation_notification_maintenance,
+            support_repair_reasoning_maintenance,
+            autonomous_repair_deployment_maintenance,
+            drmm_recent_alert_reconciliation_maintenance,
+            procurement_billing_audit_maintenance,
+            procurement_approval_maintenance,
+            windows_time_source_shadow_maintenance,
+            shadow_autonomy_maintenance,
+        )
+    else:
+        autonomy_maintenance = CompositeAutonomyMaintenance(
+            release_mobile_maintenance,
+            owner_uat_maintenance,
+            universal_plan_maintenance,
+            universal_plan_status_maintenance,
+            playbook_review_maintenance,
+            autonomous_work_lifecycle_notification_maintenance,
+            autonomous_deployment_completion_notification_maintenance,
+            release_manager_owner_notification_maintenance,
+            self_heal_escalation_notification_maintenance,
+            support_repair_reasoning_maintenance,
+            autonomous_repair_deployment_maintenance,
+            operational_autonomy_maintenance,
+            drmm_recent_alert_reconciliation_maintenance,
+            procurement_billing_audit_maintenance,
+            procurement_approval_maintenance,
+            windows_time_source_shadow_maintenance,
+            shadow_autonomy_maintenance,
+        )
     ticket_attention_relay.bind(autonomy_maintenance)
 
     return RuntimeHttpApplication(
@@ -2839,4 +2864,5 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         microsoft_identity_bindings=bindings,
         microsoft_user_directory=microsoft_directory.directory,
         maintenance=autonomy_maintenance,
+        health_probe=health_probe,
     )
