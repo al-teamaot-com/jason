@@ -301,7 +301,13 @@ def test_company_existence_requires_exact_provider_item_not_only_success():
 
     good = {"status": "succeeded", "evidence": {"data": {"item": {"id": 827}}}}
     assert server._exact_company_evidence_matches(good, requested_company_id=827)
+    assert server._exact_company_evidence_matches(
+        {"status": "succeeded", "evidence": {"data": {"item": {"id": "827"}}}},
+        requested_company_id=827,
+    )
     for bad in (
+        {"status": "succeeded", "evidence": {"data": {"item": {"id": "827.0"}}}},
+        {"status": "succeeded", "evidence": {"data": {"item": {"id": 827.0}}}},
         {"status": "succeeded"},
         {"status": "succeeded", "evidence": {"data": {"item": None}}},
         {"status": "succeeded", "evidence": {"data": {"item": {"id": 828}}}},

@@ -43,3 +43,10 @@ rules are unchanged; no added provider permissions or reads are introduced.
 - A passing unit suite or read-only existing production provider query does not
   prove the new candidate end-to-end provider authorization. Do not bypass the
   production freeze or owner exact-SHA deployment authorization.
+
+## Concurrent source integration
+
+Integration coordination: #2125 #2128 #2129 #2131. The MCP server
+file overlaps routine read/write branches, but the source review merge-tree
+showed clean non-overlapping portions. Reconcile after source merge; do not
+overwrite other branches or activate deferred write capabilities.
