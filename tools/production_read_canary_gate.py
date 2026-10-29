@@ -169,12 +169,21 @@ def verify_authenticated_read_canary(state_root: Path, session: dict) -> dict | 
                          and p.get("_authenticated_principal") == identity]
                 if not any(p.get("id") in ids for p in reads):
                     continue
-                if not any(p.get("kind") == "project_search"
-                           and p.get("_authenticated_principal") == identity
-                           and type(p.get("items")) is int and p["items"] in (0, 1)
-                           for p in proofs):
+                # The prior immutable MCP may implement the documented
+                # pre-release ticket-only one-call probe. Every release must
+                # prove count/pages/exact read before mutation, while the new
+                # catalog-specific generic reads are mandatory after cutover.
+                # Never claim a generic feature passed unless it was observed.
+                generic_proved = any(
+                    p.get("kind") == "project_search"
+                    and p.get("_authenticated_principal") == identity
+                    and type(p.get("items")) is int and p["items"] in (0, 1)
+                    for p in proofs
+                )
+                if session.get("phase") != "before" and not generic_proved:
                     continue
-                if (session.get("profile") == PROFILE_V13
+                if (session.get("phase") != "before"
+                        and session.get("profile") == PROFILE_V13
                         and not any(
                             p.get("kind") == "dynamic_schema_search"
                             and p.get("_authenticated_principal") == identity
@@ -192,8 +201,10 @@ def verify_authenticated_read_canary(state_root: Path, session: dict) -> dict | 
                     "ticket_pages": 2 if second_ids else 1,
                     "ticket_page_sum": len(ids) + len(second_ids),
                     "exact_id_readback": True,
-                    "generic_project_read": True,
-                    **({"dynamic_schema_search": True} if session.get("profile") == PROFILE_V13 else {}),
+                    "generic_project_read": generic_proved,
+                    **({"dynamic_schema_search": True}
+                       if session.get("profile") == PROFILE_V13
+                       and session.get("phase") != "before" else {}),
                     "customer_data_in_receipt": False,
                     # Bind before/after observations to the same frozen
                     # Autotask time window and authenticated human without

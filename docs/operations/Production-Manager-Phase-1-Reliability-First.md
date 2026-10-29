@@ -26,12 +26,15 @@ Make Jason's **existing foundational functions reliable** before expanding autom
 ### Mandatory authenticated Autotask canary for every release (source candidate)
 
 The native release transaction must verify the same genuine AOT-authorized
-requester's ticket count, complete bounded pagination, exact ticket read and
-activated catalog-specific generic reads **before the first production mutation
-and again after the complete runtime/MCP/host/controller cutover**. This is
-mandatory even for a change unrelated to Autotask, not conditional on changing
-the read activation profile. The current supported v11/v13 profiles require
-Projects; v13 also requires the dynamic ActionTypes query. A genuine failure
+requester's ticket count, complete bounded pagination and exact ticket read
+**before the first production mutation and again after the complete
+runtime/MCP/host/controller cutover**. This is mandatory even for a change
+unrelated to Autotask, not conditional on changing the read activation profile.
+The postflight also requires activated catalog-specific generic reads:
+v11/v13 Projects; v13 dynamic ActionTypes. The baseline can be an older
+immutable MCP release whose historical single-call BEFORE probe contains
+only ticket reads; its preflight must still prove real ticket behavior, and
+unobserved generic reads must never be reported as verified. A genuine failure
 must block promotion before any mutation or trigger native LKG rollback after
 cutover. A test fixture, HTTP status, service-only identity or stale
 receipt cannot satisfy either gate.

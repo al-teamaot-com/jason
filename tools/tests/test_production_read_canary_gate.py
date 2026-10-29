@@ -384,3 +384,36 @@ def test_phase_digest_detects_changing_autotask_scope_or_authenticated_human(tmp
     after = require_authenticated_read_canary(tmp_path, post, max_wait_seconds=0)
     assert after["ticket_window_digest"] != before["ticket_window_digest"]
     assert after["authenticated_principal_digest"] != before["authenticated_principal_digest"]
+
+
+def test_historical_mcp_preflight_ticket_only_is_accepted_but_not_as_generic_read(tmp_path):
+    pre = begin_authenticated_read_canary(
+        tmp_path, candidate_sha=SHA, profile=PROFILE_V13,
+        phase="before", now=time.time(),
+    )
+    assert _send(tmp_path, pre, "service.ticket.count", ARGS,
+                 {"queryCount": 72}, profile=PROFILE_V13)
+    assert _send(tmp_path, pre, "service.ticket.search",
+                 {**ARGS, "page_size": 50},
+                 {"items": [{"id": x} for x in range(101, 151)]},
+                 profile=PROFILE_V13)
+    assert _send(tmp_path, pre, "service.ticket.search",
+                 {**ARGS, "page_size": 50, "after_resource_id": 150},
+                 {"items": [{"id": x} for x in range(151, 173)]},
+                 profile=PROFILE_V13)
+    assert _send(tmp_path, pre, "service.ticket.read",
+                 {"resource_id": 101}, {"items": [{"id": 101}]},
+                 profile=PROFILE_V13)
+    before = require_authenticated_read_canary(tmp_path, pre, max_wait_seconds=0)
+    assert before["status"] == "PASS"
+    assert before["phase"] == "before"
+    assert before["generic_project_read"] is False
+    assert "dynamic_schema_search" not in before
+
+    after = begin_authenticated_read_canary(
+        tmp_path, candidate_sha=SHA, profile=PROFILE_V13, phase="after",
+        replacing_verified_session=pre,
+    )
+    assert verify_authenticated_read_canary(tmp_path, after) is None
+    for path in (tmp_path / "functional-canary/events").glob(pre["nonce"] + "-*.json"):
+        assert pre["nonce"] in path.name  # no before proof crosses nonce boundary
