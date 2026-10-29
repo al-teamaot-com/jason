@@ -829,3 +829,50 @@ def test_legacy_owner_pilot_refuses_silent_v2_risk_policy_upgrade(tmp_path):
     cfg.validate()
     with pytest.raises(PermissionError, match="mode and reviewed policy version"):
         build_runtime_application(cfg)
+
+
+
+def test_json_time_shadow_flag_requires_existing_worker_and_exact_site_canary(tmp_path):
+    import pytest
+
+    base = _settings(tmp_path)
+    base.validate()
+    assert base.windows_time_json_shadow_enabled is False
+
+    alone = replace(base, windows_time_json_shadow_enabled=True)
+    with pytest.raises(ValueError, match="requires existing shadow enabled"):
+        alone.validate()
+
+    missing_scope = replace(
+        base, windows_time_source_shadow_enabled=True,
+        windows_time_json_shadow_enabled=True,
+    )
+    with pytest.raises(ValueError, match="SITE_UID_ALLOWLIST must be nonempty"):
+        missing_scope.validate()
+
+    invalid = replace(
+        missing_scope,
+        windows_time_json_shadow_site_uid_allowlist=frozenset({"*"}),
+    )
+    with pytest.raises(ValueError, match="exact UUIDs"):
+        invalid.validate()
+
+    valid_uid = "17065ca1-dfdf-4c6b-95c7-8a8a5f5dc14a"
+    eligible = replace(
+        missing_scope,
+        windows_time_json_shadow_site_uid_allowlist=frozenset({valid_uid}),
+    )
+    eligible.validate()
+    assert eligible.windows_time_json_shadow_site_uid_allowlist == frozenset({valid_uid})
+    assert eligible.windows_time_json_shadow_max_alerts_per_tick == 25
+
+
+def test_json_time_shadow_rejects_unbounded_alert_scan(tmp_path):
+    import pytest
+
+    cfg = replace(
+        _settings(tmp_path),
+        windows_time_json_shadow_max_alerts_per_tick=101,
+    )
+    with pytest.raises(ValueError, match="MAX_ALERTS_PER_TICK must be 1..100"):
+        cfg.validate()
