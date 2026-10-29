@@ -234,3 +234,46 @@ def test_accepted_gateway_reference_is_not_falsely_delivered(tmp_path):
     maintenance.tick()
     assert len(notifier.calls)==1
     store.close()
+
+
+
+def test_ticket_start_and_completion_precede_large_existing_blocker_backlog(tmp_path):
+    """Owner must hear about new active work before 100 older block alerts."""
+    store = SQLiteOperationalWorkStore(tmp_path / "owner-priority.sqlite3")
+    now = datetime.now(timezone.utc)
+    for i in range(100):
+        store.queue_teams_notification(
+            ticket_id=143400 + i,
+            playbook_id="canonical_ticket_assessment",
+            note_title="Teams - Owner Action - unsupported_capability - no_playbook",
+            fingerprint=f"{i:064x}",
+            event_type="work_blocked",
+            arguments={
+                "work_id": f"T20261029.{i:04}",
+                "work_title": "Requires technician review",
+                "summary": "No applicable playbook",
+                "owner_action": "Review blocked ticket",
+            },
+            now=now - timedelta(minutes=5),
+        )
+    for i, event in enumerate(("work_started", "work_completed", "patch_completed")):
+        store.queue_teams_notification(
+            ticket_id=143800 + i,
+            playbook_id="vulscan_missing_patch",
+            note_title=f"Teams - Ticket Activity - {event}",
+            fingerprint=f"{i+1000:064x}",
+            event_type=event,
+            arguments={
+                "work_id": f"T20261029.{i+2000:04}",
+                "work_title": "Active ticket processing",
+                "summary": "Confirmed lifecycle event",
+            },
+            now=now - timedelta(seconds=2),
+        )
+    due = store.due_teams_notifications(now=now, limit=4)
+    assert {x["event_type"] for x in due[:3]} == {
+        "work_started", "work_completed", "patch_completed",
+    }
+    assert due[3]["event_type"] == "work_blocked"
+    assert len(outbox(store)) == 103
+    store.close()
