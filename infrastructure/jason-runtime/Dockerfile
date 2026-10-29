@@ -10,6 +10,9 @@ WORKDIR /app
 
 COPY implementation /app/implementation
 COPY config /app/config
+# Ship only the reviewed disabled JSON v1 shadow document as image-owned data.
+# The runtime cannot modify this document or gain authority from it.
+COPY docs/playbooks/json/candidates/windows_time_source-0.1.0-jsonpreview.json /app/config/json-playbooks/windows_time_source-0.1.0-jsonpreview.json
 
 # Release Manager checks out pinned source under restrictive 0077 permissions.
 # Docker COPY preserves those modes and root ownership. Normalize the
