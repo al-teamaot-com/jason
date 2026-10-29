@@ -90,3 +90,14 @@ Owner deployment approval for the exact SHA. Live acceptance must show
 continuous worker scans while Teams is slow, actual human Teams delivery,
 a real available-device promoted-playbook ticket being fully resolved, and
 verified PSA/worker agreement. Green tests alone are not closure of #770.
+
+## Concurrent integration review
+
+PRs #2125 and #2128 register routine read/write capabilities and provider
+invokers in separate composition blocks. This source only installs a
+ticket-notification maintenance lane, with no new routine RW activation.
+PR #2126 separately adds optional Windows Time JSON shadow configuration and
+existing shadow constructor inputs. This notification fix does not depend on,
+enable or change the JSON pilot. Protected main merge and Production Manager
+must preserve all unrelated changes; none is silently included in the
+bounded ticket-notification scope.
