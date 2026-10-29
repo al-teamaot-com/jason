@@ -100,10 +100,12 @@ def plan_unit_removals(
     if len(delta) > MAX_AUTO_REMOVALS:
         raise UnitDeltaError("too many candidate-only units for automatic removal")
     removable = []
-    try:
-        expected_owner = 0 if scope == "system" else pwd.getpwnam("al").pw_uid
-    except KeyError as exc:
-        raise UnitDeltaError("canonical host operator identity unavailable") from exc
+    expected_owner = None
+    if enforce_owner:
+        try:
+            expected_owner = 0 if scope == "system" else pwd.getpwnam("al").pw_uid
+        except KeyError as exc:
+            raise UnitDeltaError("canonical host operator identity unavailable") from exc
     # Stop triggering timers/path units before dependent service units.
     for unit in sorted(delta, key=lambda name: (name.endswith(".service"), name)):
         installed = installed_dir / unit
