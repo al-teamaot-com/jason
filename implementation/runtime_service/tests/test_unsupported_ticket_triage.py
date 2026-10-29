@@ -686,3 +686,45 @@ def test_helpdesk_ticket_never_requeued_even_with_handoff_promotion(tmp_path):
     assert len(actions.calls) == 1
     assert actions.calls[0][1] == "service.ticket.note.create"
     store.close()
+
+
+def test_at_most_two_promoted_note_attempts_per_scan_and_no_starvation(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    items = [ticket(ticket_id=200001 + i, title="Space Issue") for i in range(5)]
+    worker, store, actions = make_worker(
+        tmp_path, items, NoteReadStub(), max_triage=2,
+    )
+    now = datetime.now(timezone.utc)
+    for item in items:
+        store.record_unsupported_triage(
+            ticket_id=int(item.resource_id),
+            ticket_number=item.context["ticketNumber"],
+            source_version="v1", category="disk_capacity",
+            state="read_only_assessed",
+            evidence={
+                "ticket_id": int(item.resource_id), "company_verified": True,
+                "triage_logic_version": "passive_rmm_audit_v3",
+                "note_draft": "JASON READ-ONLY INVESTIGATION\n",
+            },
+            next_step="Review passive audit", attempts=0,
+            checked_at=now.isoformat(),
+            next_due_at=(now + timedelta(days=1)).isoformat(),
+        )
+
+    observed = set()
+    attempts = []
+    def attempted_once(candidate, record, *, now):
+        identity = int(candidate.resource_id)
+        if identity in observed:
+            return False
+        observed.add(identity)
+        attempts.append(identity)
+        return True
+
+    worker._maybe_publish_unsupported_triage_note = attempted_once
+    worker.tick()
+    assert attempts == [200001, 200002]
+    worker.tick()
+    assert attempts == [200001, 200002, 200003, 200004]
+    assert actions.calls == []
+    store.close()

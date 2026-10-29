@@ -47,7 +47,7 @@ inherit a remediation or GPT Insights scope. After promotion Jason:
 3. Issues a separately owner-promoted note.create or note.update only when
    the proposed body differs, with noteType=3 and publish=2.
 4. Reads back the note, requiring the exact managed title and full body.
-5. Records the fingerprint only after readback. Failed writes retry with
+5. Records the fingerprint only after readback. At most two note publication attempts run per worker scan. Failed writes retry with
    durable 5-60 minute backoff and avoid duplicate notes after restart.
 
 Human-review handoff is a second independent promotion, scope

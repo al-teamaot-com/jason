@@ -2680,6 +2680,7 @@ class OperationalAutonomyMaintenance:
             ),
         )
         attempted = 0
+        note_attempted = 0
         for candidate, unsupported_reason in order:
             if attempted >= self.max_unsupported_triage_per_scan:
                 break
@@ -2696,9 +2697,11 @@ class OperationalAutonomyMaintenance:
                 try:
                     due = datetime.fromisoformat(str(previous["next_due_at"]))
                     if due.tzinfo is not None and due > now:
-                        self._maybe_publish_unsupported_triage_note(
-                            candidate, previous, now=now,
-                        )
+                        if note_attempted < self.max_unsupported_triage_per_scan:
+                            if self._maybe_publish_unsupported_triage_note(
+                                candidate, previous, now=now,
+                            ):
+                                note_attempted += 1
                         continue
                 except (TypeError, ValueError):
                     pass
@@ -2794,10 +2797,11 @@ class OperationalAutonomyMaintenance:
                 last_error=error,
             )
             stored = self.store.unsupported_triage(ticket_id)
-            if stored is not None:
-                self._maybe_publish_unsupported_triage_note(
+            if stored is not None and note_attempted < self.max_unsupported_triage_per_scan:
+                if self._maybe_publish_unsupported_triage_note(
                     candidate, stored, now=now,
-                )
+                ):
+                    note_attempted += 1
             self._audit_diagnostic(
                 "autonomy.unsupported_ticket.readonly_triage",
                 {"ticket_id": ticket_id, "state": state, "category": category,
@@ -2806,39 +2810,39 @@ class OperationalAutonomyMaintenance:
 
     def _maybe_publish_unsupported_triage_note(
         self, candidate, record: Mapping[str, Any], *, now: datetime,
-    ) -> None:
+    ) -> bool:
         """Internal note only after separate exact owner promotion and readback.
 
         A failed write never changes the diagnostic state, never gets treated
         as success, and is retried with a bounded durable backoff.
         """
         if not self._scope_is_promoted(UNSUPPORTED_TRIAGE_NOTE_SCOPE):
-            return
+            return False
         if candidate.context.get("_jason_assigned_elsewhere") is True:
-            return
+            return False
         evidence = record.get("evidence")
         if not isinstance(evidence, Mapping) or evidence.get("company_verified") is not True:
-            return
+            return False
         # Do not publish transient read errors. Document them only after
         # repeated failures have been classified for human review.
         state = str(record.get("state") or "")
         if state in {"read_failed_retry", "governance_blocked"}:
-            return
+            return False
         body = evidence.get("note_draft")
         if not isinstance(body, str) or not body.startswith("JASON READ-ONLY INVESTIGATION"):
-            return
+            return False
         ticket_id = int(candidate.resource_id)
         digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
         if self.store.last_note_fingerprint(
             ticket_id, UNSUPPORTED_TRIAGE_NOTE_SCOPE.playbook_id, TRIAGE_NOTE_TITLE,
         ) == digest:
-            return
+            return False
         prior = self.store.unsupported_note_delivery(ticket_id)
         if prior is not None and str(prior.get("fingerprint")) == digest:
             try:
                 retry_at = datetime.fromisoformat(str(prior["next_due_at"]))
                 if retry_at.tzinfo is not None and retry_at > now:
-                    return
+                    return False
             except (TypeError, ValueError):
                 pass
         attempts = (
@@ -2900,6 +2904,8 @@ class OperationalAutonomyMaintenance:
                 {"ticket_id": ticket_id, "attempts": attempts,
                  "error_type": type(exc).__name__},
             )
+        # This result counts against the bounded, per-scan mutation budget.
+        return True
 
     def _maybe_handoff_unsupported_ticket(self, candidate, *, state: str) -> None:
         """An exact promoted write may only return Jason-owned blocked work.
