@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jason.local/schemas/deployment-manifest.schema.json",
+  "title": "Jason Deployment Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "deployment_id",
+    "instance_id",
+    "environment",
+    "generated_at",
+    "platform",
+    "configuration",
+    "components",
+    "schemas",
+    "providers",
+    "runtime",
+    "identity_sha256"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "deployment_id": { "type": "string", "minLength": 1 },
+    "instance_id": { "type": "string", "minLength": 1 },
+    "environment": { "enum": ["development", "candidate", "production"] },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "platform": { "$ref": "#/$defs/releaseIdentity" },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "deployment_revision",
+        "msp_configuration_revision",
+        "msp_policy_revision",
+        "playbook_revision"
+      ],
+      "properties": {
+        "deployment_revision": { "$ref": "#/$defs/sha256" },
+        "msp_configuration_revision": { "$ref": "#/$defs/sha256" },
+        "msp_policy_revision": { "$ref": "#/$defs/sha256" },
+        "playbook_revision": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "components": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/component" }
+    },
+    "schemas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["store", "version"],
+        "properties": {
+          "store": { "type": "string", "minLength": 1 },
+          "version": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "providers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["provider_id", "enabled", "capability_bundle_revision"],
+        "properties": {
+          "provider_id": { "type": "string", "minLength": 1 },
+          "enabled": { "type": "boolean" },
+          "capability_bundle_revision": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "architecture", "python", "container_runtime", "compose"],
+      "properties": {
+        "os": { "type": "string", "minLength": 1 },
+        "architecture": { "type": "string", "minLength": 1 },
+        "python": { "type": "string", "minLength": 1 },
+        "container_runtime": { "type": "string", "minLength": 1 },
+        "compose": { "type": "string", "minLength": 1 }
+      }
+    },
+    "identity_sha256": { "$ref": "#/$defs/sha256" }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "releaseIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["release_version", "source_sha", "artifact_digest"],
+      "properties": {
+        "release_version": { "type": "string", "minLength": 1 },
+        "source_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "artifact_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "kind",
+        "required",
+        "release_version",
+        "source_sha",
+        "artifact_digest"
+      ],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 },
+        "required": { "type": "boolean" },
+        "release_version": { "type": "string", "minLength": 1 },
+        "source_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "artifact_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}

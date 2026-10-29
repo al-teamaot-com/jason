@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jason.local/schemas/msp-configuration.schema.json",
+  "title": "Jason MSP Configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "msp", "providers", "communications", "capability_bundles"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "msp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["organization_id", "display_name", "timezone"],
+      "properties": {
+        "organization_id": { "type": "string", "minLength": 1 },
+        "display_name": { "type": "string", "minLength": 1 },
+        "timezone": { "type": "string", "minLength": 1 }
+      }
+    },
+    "providers": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/provider" }
+    },
+    "communications": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "default_sender": { "type": ["string", "null"] },
+        "teams_targets": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "capability_bundles": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "secret_reference", "settings"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "secret_reference": { "type": ["string", "null"] },
+        "settings": { "type": "object", "additionalProperties": true }
+      }
+    }
+  }
+}
