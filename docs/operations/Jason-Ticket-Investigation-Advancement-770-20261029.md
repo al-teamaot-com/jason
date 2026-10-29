@@ -128,3 +128,82 @@ profile and real ticket/company/provider evidence, complete triage and
 worker regression suites, assess current intake/disposition coverage,
 and verify sustained actual eligible-ticket advancement. Do not close
 issue #770 merely because this investigation correction passes.
+
+
+## Follow-up: general read-only intake assurance (preproduction-only)
+
+A ticket's assessment/diagnosis is not the same as its remediation admission.
+The worker can continue to gather bounded, governed evidence for otherwise
+unsupported monitored New/Emergency tickets even if:
+- a technician already owns the ticket (assessment only: no claim, no ticket
+  note, no queue/status reassignment or client message); or
+- a matching remediation playbook exists but lacks exact Owner promotion
+  (recorded as needing playbook promotion, not permission to execute).
+
+This is a generic rule, not an exception for ticket 143272. User, service,
+infrastructure, and combined user/device cases use the contact-first
+investigation taxonomy. The source version of read-only triage is bumped so
+prior persisted outcomes can be reconsidered on their next evaluation.
+
+Read-only triage has an independent, bounded four-ticket-per-scan default
+budget. Governed internal-note publication remains capped at two successful
+attempts per scan under the existing separately promoted playbook, the exact
+two-pilot-ticket allowlist, and technician-ownership safeguards. The two
+active remediation-work slots and all disruptive-action approval checks
+remain unchanged.
+
+Urgency and priority are respected; among equally ranked tickets, unowned
+intake is assessed before assigned technician work. Every assessment records
+the admission reason and source version in the durable evidence ledger.
+No extra provider capabilities, contact permissions, endpoint execution,
+or production approval are conferred by this adjustment.
+
+Live operational acceptance still must prove review/disposition coverage
+for the unsupported/blocked backlog, fair rechecks, and safe handoff
+notifications rather than treating scan health or a green unit test as
+successful ticket resolution.
+
+## Follow-up: Teams notification independence from ticket resolution
+
+**Confirmed live defect:** VulScan T20261028.0040 and T20261028.0042 are
+Complete in Autotask, with completedDate and a verified status, but Jason's
+persisted work incorrectly says blocked after the old synchronous
+_notify_patch_completion raised a Teams delivery error.
+A Teams transport error is not an endpoint/PSA repair failure.
+
+The worker now writes bounded owner pickup/completion and patch-completion
+notification intents into the existing private operational SQLite store,
+before any governed Teams send. The outbox persists a stable event
+fingerprint, exact ticket/playbook association, retry due time, attempt count,
+last error type, and provider message-reference state. Delivery is independent
+of the limited two active remediation slots and continues even if a later
+Autotask discovery temporarily fails. No Teams error can unwind an already
+readback-verified ticket disposition.
+
+A provider message ID is required to mark delivery; an accepted: reference
+is stored as unverified and will not be silently replayed as though
+delivery was proven. Transient failures back off 5 to 60 minutes and are
+attempted at most four per scan. Messages older than 24 hours expire into
+explicit undelivered evidence rather than flooding the owner after a future
+repair; no historical message is retroactively claimed delivered.
+
+A separate bounded reconciliation for work blocked specifically by the old
+Teams completion error performs an exact governed Autotask ticket read,
+requires matching ticket ID, ticket number, same-company ID, completedDate and
+Complete status. **Only then** it corrects Jason's persisted phase to
+complete and emits an outbox completion event. It never repeats remediation,
+reopens a ticket, changes ticket queue/status, or edits the endpoint. Missing,
+mismatched or noncomplete PSA evidence leaves the row blocked.
+
+### Acceptance
+- Lifecycle pickup/completion retries survive process restart with one
+  durable send intent and no duplicate after provider-backed delivery.
+- Synthetic accepted receipt is recorded as unverified, never delivered.
+- Existing completed VulScan ticket with old notification-blocked state
+  reconciles after exact PSA readback, with zero provider mutations.
+- Company/ticket/status mismatch denies reconciliation.
+- A failing Teams transport cannot block or reverse a verified ticket
+  completion. Owner notification status remains observable independently.
+- Queue discovery failures do not suppress due notification retries.
+- Production acceptance requires real Teams receipt, exact Autotask readback,
+  restored start/completion cards and documented handling of old blocked work.

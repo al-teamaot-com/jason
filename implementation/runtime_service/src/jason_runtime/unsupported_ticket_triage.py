@@ -461,7 +461,8 @@ def render_triage_note(
     safe_states = {
         "read_only_assessed", "needs_device_identity", "needs_company_identity",
         "needs_security_review", "needs_playbook_review",
-        "needs_execution_authority", "needs_diagnostic_evidence",
+        "needs_playbook_promotion", "needs_execution_authority",
+        "needs_diagnostic_evidence",
         "diagnostic_not_applicable", "device_availability_unknown",
         "waiting_device_access", "needs_human_review",
         "governance_blocked", "read_failed_retry",
@@ -486,6 +487,10 @@ def render_triage_note(
     ]
     if evidence.get("company_verified") is True:
         lines.append("- Autotask ticket company association: verified")
+    if evidence.get("read_only_investigation") is True:
+        lines.append("- Investigation is advisory and independent of remediation admission")
+    if evidence.get("remediation_promotion_required") is True:
+        lines.append("- Matching remediation playbook not promoted; execution NOT authorized")
     scope = evidence.get("investigation_scope")
     if isinstance(scope, str) and scope in set(SCOPE_BY_CATEGORY.values()):
         lines.append("- Investigation scope: " + scope.replace("_", " "))

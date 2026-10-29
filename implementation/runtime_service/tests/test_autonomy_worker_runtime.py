@@ -5335,7 +5335,7 @@ def test_assigned_new_ticket_with_singular_gpt_insight_can_be_claimed(tmp_path: 
     store.close()
 
 
-def test_assigned_unsupported_ticket_skips_note_history_read(tmp_path: Path):
+def test_assigned_unsupported_ticket_gets_advisory_read_without_claim(tmp_path: Path):
     class TrackingReads(Reads):
         def __init__(self):
             super().__init__()
@@ -5365,8 +5365,13 @@ def test_assigned_unsupported_ticket_skips_note_history_read(tmp_path: Path):
 
     worker.tick()
 
-    assert reads.notes_called is False
+    assert reads.notes_called is True
+    assessment = store.unsupported_triage(140933)
+    assert assessment is not None
+    assert assessment["state"] == "needs_playbook_review"
+    assert assessment["evidence"]["read_only_investigation"] is True
     assert store.get(140933) is None
+    assert actions.calls == []
     store.close()
 
 
