@@ -30,6 +30,13 @@
 - Live acceptance requires an AOT technician principal and provider-native Autotask Resource mapping; test controlled XYZ Test Company ticket creation, update, and **internal note** with independent readbacks; verify no unauthorized client writes or unintended notifications; preserve preimages for reversible fields; check service principal/foreign/disabled identities fail closed. Ticket creation and note operations require their own exact human authorization and safe provider checks.
 - Any failed production health, guardrail, provider-scope or post-deploy verification must trigger the last-known-good rollback, and the global production freeze and auto-promotion hold must be restored.
 
+## Explicit concurrent work reconciliation
+
+- #2125 and #2128 both touch the production runtime/MCP deployment scripts and Compose. They add broad IT Glue/Entra integration that is intentionally **not** copied into this narrow branch. This branch adds one scoped Autotask environment variable and retains the current Stage A deployment behavior and complete original provider-read activation profile.
+- #2126 also touches Compose for Windows Time. Its source is not overwritten or merged here; its implementation is retained in stacked #2129. The later Stage C restack must combine its disabled JSON shadow settings with this branch's independent default-OFF Autotask setting.
+- All old branches, commits and unaccepted provider adapters remain in GitHub. This branch is an *additive minimal extraction*, not a rewrite or rejection of those changes.
+- There is **no independent reviewer approval yet**. A green CI run cannot be treated as a substitute for the separate code/security review and provider acceptance gates.
+
 ## Unrelated development and stacked Stage C
 
 Original broad draft #2128 remains intact for later independent IT Glue and Entra work; nothing in that branch is discarded. Stacked Stage C #2129 remains unchanged while its JSON read-only pilot is reconciled against the final accepted Stage B1 merge result. Stage C is always disabled until separately authorized and verified.
