@@ -907,3 +907,49 @@ def test_terminal_failed_handoff_does_not_retry_unbounded(tmp_path):
     assert actions.calls == []
     assert store.unsupported_handoff_delivery(200001)["attempts"] == 3
     store.close()
+
+
+@pytest.mark.parametrize("title,contact_id,ci_id,expected", [
+    ("General account issue", 42, None, "needs_playbook_review"),
+    ("Network disconnections and screen timeout settings reverting", 42, None, "needs_playbook_review"),
+    ("Service outage for remote users", None, None, "needs_playbook_review"),
+    ("Linux logs cleared", None, None, "needs_playbook_review"),
+    ("Disk space issue", 42, None, "needs_device_identity"),
+    ("Windows activation failed", None, None, "needs_device_identity"),
+])
+def test_optional_ci_never_blocks_non_endpoint_investigation(
+        title, contact_id, ci_id, expected):
+    calls = []
+    def read(capability, args):
+        calls.append(capability)
+        if capability == "service.ticket.notes.search":
+            return {"items": [{"id": 1}]}
+        if capability == "service.contact.read":
+            return {"item": {"id": 42, "companyID": 777}}
+        raise AssertionError("No endpoint access expected: " + capability)
+    result = gather(
+        ticket_id=200001, company_id=777, configuration_item_id=ci_id,
+        ticket_snapshot={"id": 200001, "companyID": 777,
+                         "contactID": contact_id, "configurationItemID": ci_id},
+        title=title, unsupported_reason="", read=read)
+    assert result.state == expected
+    assert "service.configuration.read" not in calls
+    assert "endpoint.device.read" not in calls
+    if contact_id:
+        assert result.evidence["contact_verified"] is True
+
+
+def test_mismatched_contact_company_rejected_before_endpoint_access():
+    calls = []
+    def read(capability, args):
+        calls.append(capability)
+        if capability == "service.ticket.notes.search":
+            return {"items": []}
+        if capability == "service.contact.read":
+            return {"item": {"id": 42, "companyID": 999}}
+        raise AssertionError(capability)
+    with pytest.raises(ValueError, match="contact_identity_unverified"):
+        gather(ticket_id=200001, company_id=777, configuration_item_id=None,
+               ticket_snapshot={"id": 200001, "companyID": 777, "contactID": 42},
+               title="Network disconnect", unsupported_reason="", read=read)
+    assert "endpoint.device.read" not in calls

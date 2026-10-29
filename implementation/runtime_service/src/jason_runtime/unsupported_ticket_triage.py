@@ -52,6 +52,8 @@ def category_for(title: str, unsupported_reason: str) -> str:
         or unsupported_reason == "windows_licensing_diagnostics_candidate"
     ):
         return "windows_licensing"
+    if any(term in title for term in ("network disconnection", "network disconnect", "screen timeout", "sleep setting", "power setting")):
+        return "user_device_settings"
     if "rocketagent" in title:
         return "rocketagent_service"
     if "space issue" in title or "disk space" in title or "hard disk full" in title:
@@ -65,6 +67,12 @@ def category_for(title: str, unsupported_reason: str) -> str:
 
 
 NEXT_STEPS = {
+    "user_device_settings": (
+        "Correlate affected user, network disconnect timing, Windows power/screen policy, "
+        "and recent update evidence. Resolve device identity against the same customer "
+        "before endpoint diagnostics; do not modify power or network settings without "
+        "the appropriate governed authority."
+    ),
     "windows_licensing": (
         "Validate Windows activation and entitlement. A non-licensed status "
         "is diagnostic evidence, not permission to change licensing."
@@ -225,12 +233,30 @@ def gather(
         )
     )
 
+    # Contact identity is useful even when an endpoint CI is absent.
+    contact_id = int(ticket.get("contactID") or 0)
+    if contact_id > 0:
+        contact = _item(read("service.contact.read", {"resource_id": contact_id}))
+        if (contact is None or _positive_id(contact.get("id")) != contact_id
+                or _positive_id(contact.get("companyID")) != actual_company):
+            raise ValueError("contact_identity_unverified")
+        evidence["contact_verified"] = True
+        evidence["contact_id"] = contact_id
+
+    # A CI is mandatory for endpoint access, not general investigation.
+    device_required = category in {"windows_licensing", "rocketagent_service", "disk_capacity"}
     source_ci = ticket.get("configurationItemID")
     source_ci_id = int(source_ci or 0)
     if source_ci_id == 0 and not configuration_item_id:
+        if device_required:
+            return TriageResult(
+                "needs_device_identity", category, evidence,
+                "Find and verify an exact same-company CI or endpoint before endpoint diagnostics. " + next_step,
+            )
         return TriageResult(
-            "needs_device_identity", category, evidence,
-            "Associate an exact same-company CI; " + next_step,
+            "needs_playbook_review", category, evidence,
+            "Ticket assessed using verified company/contact and note context; "
+            "no CI is necessary to continue non-endpoint investigation. " + next_step,
         )
     if not source_ci_id or source_ci_id != int(configuration_item_id or 0):
         raise ValueError("ticket_ci_mismatch")
@@ -310,7 +336,7 @@ def gather(
         )
     if category == "security_review":
         return TriageResult("needs_security_review", category, evidence, next_step)
-    if category == "general":
+    if category in ("general", "user_device_settings"):
         return TriageResult("needs_playbook_review", category, evidence, next_step)
     return TriageResult("read_only_assessed", category, evidence, next_step)
 
@@ -343,7 +369,7 @@ def render_triage_note(
         raise ValueError("unsupported triage note state")
     allowed_categories = {
         "disk_capacity", "windows_licensing", "rocketagent_service",
-        "security_review", "general",
+        "security_review", "general", "user_device_settings",
     }
     if category not in allowed_categories:
         raise ValueError("unsupported triage note category")
@@ -357,6 +383,8 @@ def render_triage_note(
     ]
     if evidence.get("company_verified") is True:
         lines.append("- Autotask ticket company association: verified")
+    if evidence.get("contact_verified") is True:
+        lines.append("- Autotask contact and company association: verified")
     if evidence.get("rmm_identity_verified") is True:
         lines.append("- Exact same-company configuration/DRMM device: verified")
     if isinstance(evidence.get("online"), bool):
