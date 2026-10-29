@@ -1027,6 +1027,37 @@ def _project_endpoint_collection(
     result["items"] = _safe(provider_data)
     return result
 
+def _exact_company_evidence_matches(
+    result: Mapping[str, Any],
+    *,
+    requested_company_id: int,
+) -> bool:
+    """Require a real provider record for the exact selected company.
+
+    A successful HTTP/query response can legitimately carry data.item=None
+    for an unknown ID; a successful status alone is not company-existence
+    evidence and cannot authorize deriving a client-specific context.
+    """
+    if result.get("status") != "succeeded":
+        return False
+    evidence = result.get("evidence")
+    if not isinstance(evidence, Mapping):
+        return False
+    data = evidence.get("data")
+    if not isinstance(data, Mapping):
+        return False
+    item = data.get("item")
+    if not isinstance(item, Mapping):
+        return False
+    actual = item.get("id")
+    if isinstance(actual, bool) or not isinstance(actual, (str, int)):
+        return False
+    try:
+        return int(actual) == requested_company_id
+    except (TypeError, ValueError):
+        return False
+
+
 def _contract_client_context_for_identity(
     *,
     principal: str,
@@ -1054,14 +1085,32 @@ def _contract_client_context_for_identity(
         company_id = str(int(raw_company_id))
     except (TypeError, ValueError):
         return bound_client_id, None
-    if int(company_id) < 0:
+    if int(company_id) <= 0:
         return bound_client_id, None
     if bound_client_id is not None:
         return bound_client_id, None
 
-    # Organization-scoped client selection is owner-only. Reuse Jason's existing
-    # authenticated owner allowlist rather than inventing a second owner concept.
-    if principal not in approval_owner_identities():
+    # Contract reads can be selected by a trusted AOT staff identity with an
+    # existing exact observe grant; other sensitive client-scoped read families
+    # retain their Owner-only selection rule.
+    if (
+        capability_name in {SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ}
+        and principal not in approval_owner_identities()
+    ):
+        app = _runtime()
+        bindings = getattr(app, "microsoft_identity_bindings", None)
+        trusted = (
+            bindings.find_active_by_jason_identity(jason_identity_id=principal)
+            if bindings is not None else None
+        )
+        if (
+            organization != "aot"
+            or trusted is None
+            or getattr(trusted, "status", None) != "active"
+            or getattr(trusted, "client_id", None) is not None
+        ):
+            return None, None
+    elif principal not in approval_owner_identities():
         return None, None
 
     # Prove the selected Autotask company exists through the ordinary governed
@@ -1074,7 +1123,9 @@ def _contract_client_context_for_identity(
         capability_name=SERVICE_COMPANY_READ,
         arguments={"resource_id": int(company_id)},
     )
-    if company.get("status") != "succeeded":
+    if not _exact_company_evidence_matches(
+        company, requested_company_id=int(company_id),
+    ):
         return None, None
 
     app = _runtime()
@@ -1146,6 +1197,24 @@ def _governed_read(
         assurance,
         client_id,
     ) = _authenticated_identity()
+    # Reject an explicit cross-client selector before issuing a governed read.
+    # A pre-bound client identity must never use a different company_id,
+    # including when the provider happens to return matching-looking rows.
+    selected_company = arguments.get("company_id")
+    if (
+        client_id is not None
+        and capability_name in {SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ}
+        and selected_company is not None
+        and (
+            isinstance(selected_company, bool)
+            or str(selected_company).strip() != str(client_id)
+        )
+    ):
+        return {
+            "status": "denied",
+            "capability": capability_name,
+            "reason_codes": ["CLIENT_SCOPE_MISMATCH"],
+        }
     client_id, derived_context = _contract_client_context_for_identity(
         principal=principal,
         organization=organization,

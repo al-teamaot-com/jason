@@ -28,6 +28,8 @@ from .provider_read_capability_catalog import (
     AUTOTASK_PROVIDER,
     SERVICE_COMPANY_READ,
     SERVICE_COMPANY_SEARCH,
+    SERVICE_CONTACT_READ,
+    SERVICE_NOTIFICATION_HISTORY_SEARCH,
     SERVICE_CONFIGURATION_READ,
     SERVICE_CONFIGURATION_SEARCH,
     SERVICE_ENTITY_SEARCH,
@@ -81,6 +83,17 @@ _AUTONOMOUS_WORKER_READS = frozenset(
     }
 )
 _AUTONOMOUS_WORKER_POLICY = "autonomous-worker-read-v1"
+# Separate read-only evidence boundary for the client-question lifecycle.
+# Do NOT expand the general autonomous-worker allowlist. This profile is
+# disabled by default and cannot be reused by other service principals.
+_AUTONOMOUS_CLIENT_QUESTION_READS = frozenset({
+    SERVICE_TICKET_READ,
+    SERVICE_CONTACT_READ,
+    SERVICE_TICKET_NOTES_SEARCH,
+    SERVICE_NOTIFICATION_HISTORY_SEARCH,
+})
+_AUTONOMOUS_CLIENT_QUESTION_POLICY = "autonomous-client-question-read-v1"
+_AUTONOMOUS_CLIENT_QUESTION_PROFILE_ENV = "JASON_CLIENT_INFORMATION_REQUEST_PROFILE"
 
 # Retained only for the provider-native impersonation compatibility path. The
 # temporary Jason-managed path derives its eligible reads from the registered
@@ -219,6 +232,23 @@ def _autonomous_worker_requester_authorization_proven(
     )
 
 
+def _autonomous_client_question_read_authorized(
+    *, request: OrchestrationRequest, capability_name: str,
+) -> bool:
+    return bool(
+        os.getenv(_AUTONOMOUS_CLIENT_QUESTION_PROFILE_ENV, "").strip()
+        == "approved-round1-v1"
+        and capability_name in _AUTONOMOUS_CLIENT_QUESTION_READS
+        and request.authority_allowed
+        and request.authority_context_id
+        and request.permission_mode == "observe"
+        and request.requester_kind == "service"
+        and request.principal_id == _AUTONOMOUS_SHADOW_PRINCIPAL
+        and _AUTONOMOUS_CLIENT_QUESTION_POLICY in request.policy_ids
+        and request.orchestration_mode is OrchestrationMode.EXECUTE
+    )
+
+
 def _autonomous_shadow_requester_authorization_proven(
     *,
     request: OrchestrationRequest,
@@ -335,6 +365,17 @@ class AutotaskImpersonationInformationAuthorizer:
                     "jkd001_authority_context",
                     "central_orchestrator_governed_read",
                     _AUTONOMOUS_WORKER_POLICY,
+                )
+            elif _autonomous_client_question_read_authorized(
+                request=request,
+                capability_name=resolution.capability_name,
+            ):
+                basis = (
+                    "jason_managed",
+                    "internal_client_question_evidence",
+                    "jkd001_authority_context",
+                    "central_orchestrator_governed_read",
+                    _AUTONOMOUS_CLIENT_QUESTION_POLICY,
                 )
             elif _autonomous_shadow_requester_authorization_proven(
                 request=request,

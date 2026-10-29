@@ -26,7 +26,7 @@ def test_org_scoped_owner_derives_one_minute_exact_observe_context(monkeypatch):
     calls=[]
     def company_read(**kwargs):
         calls.append(kwargs)
-        return {"status":"succeeded"}
+        return {"status":"succeeded","evidence":{"data":{"item":{"id":333}}}}
     now=datetime.now(timezone.utc)
     base_context=server.ExecutionContext(
         context_id="base", correlation_id="base-corr", principal_id="person-owner",
@@ -77,7 +77,7 @@ def test_org_scoped_context_fails_closed_when_company_read_fails(monkeypatch):
 def test_org_scoped_context_fails_closed_without_administer_authority(monkeypatch):
     authority=Authority(server.AuthorityOutcome.DENIED)
     monkeypatch.setattr(server, "approval_owner_identities", lambda: frozenset({"person-observer"}))
-    monkeypatch.setattr(server, "_governed_read_for_identity", lambda **kwargs: {"status":"succeeded"})
+    monkeypatch.setattr(server, "_governed_read_for_identity", lambda **kwargs: {"status":"succeeded","evidence":{"data":{"item":{"id":333}}}})
     monkeypatch.setattr(server, "_runtime", lambda: SimpleNamespace(identity_authority=authority))
     assert server._contract_client_context_for_identity(
         principal="person-observer", organization="aot", assurance="entra",
@@ -101,6 +101,7 @@ def test_governed_read_forwards_only_derived_contract_client(monkeypatch):
 
 def test_org_scoped_nonowner_cannot_select_contract_client(monkeypatch):
     monkeypatch.setattr(server, "approval_owner_identities", lambda: frozenset({"person-owner"}))
+    monkeypatch.setattr(server, "_runtime", lambda: SimpleNamespace(microsoft_identity_bindings=None))
     monkeypatch.setattr(server, "_governed_read_for_identity", lambda **kwargs: (_ for _ in ()).throw(AssertionError("company read must not run for nonowner")))
     assert server._contract_client_context_for_identity(
         principal="person-observer", organization="aot", assurance="entra",
@@ -116,7 +117,7 @@ def test_org_scoped_owner_derives_resolution_memory_client_context(monkeypatch):
 
     def company_read(**kwargs):
         calls.append(kwargs)
-        return {"status": "succeeded"}
+        return {"status": "succeeded", "evidence": {"data": {"item": {"id": 196}}}}
 
     now = datetime.now(timezone.utc)
     base_context = server.ExecutionContext(
@@ -215,4 +216,142 @@ def test_nonowner_cannot_select_resolution_memory_client(monkeypatch):
             "device_role": "workstation",
             "platform": "windows",
         },
+    ) == (None, None)
+
+
+def test_aot_trusted_staff_contract_context_with_exact_observe_authority(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    base_context = server.ExecutionContext(
+        context_id="base-staff", correlation_id="staff-corr",
+        principal_id="person-tech", organization_id="aot", client_id=None,
+        capability=server.SERVICE_CONTRACT_SEARCH,
+        requested_mode=server.PermissionMode.OBSERVE,
+        maximum_mode=server.PermissionMode.OBSERVE,
+        outcome=server.AuthorityOutcome.ALLOWED,
+        approval_required=False, matched_grants=("exact-staff-observe",),
+        authentication_assurance="entra", issued_at=now,
+        expires_at=now + timedelta(minutes=5),
+    )
+    authority = Authority(server.AuthorityOutcome.ALLOWED)
+    authority.evaluate = lambda request: SimpleNamespace(
+        outcome=server.AuthorityOutcome.ALLOWED,
+        execution_context=base_context,
+    )
+    class Contexts:
+        def __init__(self):
+            self.saved = []
+        def put_context(self, context):
+            self.saved.append(context)
+    authority.contexts = Contexts()
+    authority.audit = None
+    trusted = SimpleNamespace(status="active", client_id=None)
+    bindings = SimpleNamespace(
+        find_active_by_jason_identity=lambda *, jason_identity_id:
+            trusted if jason_identity_id == "person-tech" else None
+    )
+    app = SimpleNamespace(identity_authority=authority, microsoft_identity_bindings=bindings)
+    monkeypatch.setattr(server, "_runtime", lambda: app)
+    monkeypatch.setattr(server, "approval_owner_identities", lambda: frozenset({"person-owner"}))
+    monkeypatch.setattr(server, "_governed_read_for_identity", lambda **kw: {"status":"succeeded","evidence":{"data":{"item":{"id":827}}}})
+    client, context = server._contract_client_context_for_identity(
+        principal="person-tech", organization="aot", assurance="entra",
+        bound_client_id=None, capability_name=server.SERVICE_CONTRACT_SEARCH,
+        arguments={"company_id": 827},
+    )
+    assert client == "827"
+    assert context.client_id == "827"
+    assert context.maximum_mode == server.PermissionMode.OBSERVE
+    assert context.matched_grants == ("exact-staff-observe",)
+
+
+def test_untrusted_aot_staff_cannot_derive_contract_client_scope(monkeypatch):
+    app = SimpleNamespace(microsoft_identity_bindings=SimpleNamespace(
+        find_active_by_jason_identity=lambda **kwargs: None
+    ))
+    monkeypatch.setattr(server, "_runtime", lambda: app)
+    monkeypatch.setattr(server, "_governed_read_for_identity",
+                        lambda **kw: (_ for _ in ()).throw(AssertionError("no provider read")))
+    assert server._contract_client_context_for_identity(
+        principal="person-unbound", organization="aot", assurance="entra",
+        bound_client_id=None, capability_name=server.SERVICE_CONTRACT_SEARCH,
+        arguments={"company_id": 827},
+    ) == (None, None)
+
+
+def test_bound_client_contract_read_rejects_cross_client_selector(monkeypatch):
+    monkeypatch.setattr(server, "_authenticated_identity", lambda: (
+        "person-bound", "aot", "entra", "827"
+    ))
+    monkeypatch.setattr(
+        server, "_governed_read_for_identity",
+        lambda **kw: (_ for _ in ()).throw(AssertionError("provider read forbidden"))
+    )
+    result = server._governed_read(
+        capability_name=server.SERVICE_CONTRACT_SEARCH,
+        arguments={"company_id": 828, "page_size": 5},
+    )
+    assert result["status"] == "denied"
+    assert result["reason_codes"] == ["CLIENT_SCOPE_MISMATCH"]
+
+
+def test_company_existence_requires_exact_provider_item_not_only_success():
+    import pytest
+
+    good = {"status": "succeeded", "evidence": {"data": {"item": {"id": 827}}}}
+    assert server._exact_company_evidence_matches(good, requested_company_id=827)
+    assert server._exact_company_evidence_matches(
+        {"status": "succeeded", "evidence": {"data": {"item": {"id": "827"}}}},
+        requested_company_id=827,
+    )
+    for bad in (
+        {"status": "succeeded", "evidence": {"data": {"item": {"id": "827.0"}}}},
+        {"status": "succeeded", "evidence": {"data": {"item": {"id": 827.0}}}},
+        {"status": "succeeded"},
+        {"status": "succeeded", "evidence": {"data": {"item": None}}},
+        {"status": "succeeded", "evidence": {"data": {"item": {"id": 828}}}},
+        {"status": "succeeded", "evidence": {"data": {"items": [{"id": 827}]}}},
+        {"status": "succeeded", "evidence": {"data": {"item": {"id": True}}}},
+        {"status": "denied", "evidence": {"data": {"item": {"id": 827}}}},
+    ):
+        assert not server._exact_company_evidence_matches(
+            bad, requested_company_id=827,
+        )
+
+
+def test_empty_success_company_record_does_not_derive_scope_or_evaluate_grant(monkeypatch):
+    authority = Authority(server.AuthorityOutcome.ALLOWED)
+    monkeypatch.setattr(
+        server, "approval_owner_identities", lambda: frozenset({"person-owner"})
+    )
+    monkeypatch.setattr(
+        server, "_runtime", lambda: SimpleNamespace(identity_authority=authority)
+    )
+    # Success with a null/mismatched/invalid company record must not produce
+    # a derived context or even evaluate a contract grant.
+    for item in (None, {}, {"id": 99999998}, {"id": True}):
+        monkeypatch.setattr(
+            server, "_governed_read_for_identity",
+            lambda **kw: {
+                "status": "succeeded", "evidence": {"data": {"item": item}},
+            },
+        )
+        assert server._contract_client_context_for_identity(
+            principal="person-owner", organization="aot", assurance="entra",
+            bound_client_id=None, capability_name=server.SERVICE_CONTRACT_SEARCH,
+            arguments={"company_id": 99999999},
+        ) == (None, None)
+    assert authority.requests == []
+
+
+def test_invalid_zero_company_id_cannot_derive_client_context(monkeypatch):
+    monkeypatch.setattr(
+        server, "_governed_read_for_identity",
+        lambda **kw: (_ for _ in ()).throw(AssertionError("no provider lookup")),
+    )
+    assert server._contract_client_context_for_identity(
+        principal="person-owner", organization="aot", assurance="entra",
+        bound_client_id=None, capability_name=server.SERVICE_CONTRACT_SEARCH,
+        arguments={"company_id": 0},
     ) == (None, None)

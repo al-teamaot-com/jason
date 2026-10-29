@@ -211,6 +211,13 @@ VULSCAN_SPLIT_SCOPE = PlaybookScope(
         "service.ticket.update",
     ),
 )
+CLIENT_QUESTION_SCOPE = PlaybookScope(
+    playbook_id="client_information_request",
+    playbook_version="1.0.0",
+    policy_id="playbook-autonomy:client_information_request",
+    required_action_capabilities=("service.ticket.client.notification.create",),
+)
+
 VULSCAN_CLIENT_DISPOSITION_SCOPE = PlaybookScope(
     playbook_id="vulscan_missing_patch",
     playbook_version="1.1.0",
@@ -544,6 +551,7 @@ class SQLiteOperationalWorkStore:
             ") "
             "AND phase NOT LIKE 'waiting_device_access:%' "
             "AND phase NOT LIKE 'waiting_recheck:%' "
+            "AND phase NOT LIKE 'waiting_client_information:%' "
             "ORDER BY updated_at,ticket_id"
         ).fetchall()
         return tuple(self._row(row) for row in rows)
@@ -960,6 +968,7 @@ class OperationalAutonomyMaintenance:
         audit=None,
         completion_notifier=None,
         ticket_splitter=None,
+        client_questions=None,
     ) -> None:
         if not 1 <= int(max_active_work_items) <= 20:
             raise ValueError("max_active_work_items must be between 1 and 20")
@@ -982,6 +991,7 @@ class OperationalAutonomyMaintenance:
         self.audit = audit
         self.completion_notifier = completion_notifier
         self.ticket_splitter = ticket_splitter
+        self.client_questions = client_questions
         self._next_due = 0.0
         self._resource_automation_cache: dict[int, bool] = {}
         self._ticket_status_cache: dict[int, str] = {}
@@ -1646,6 +1656,124 @@ class OperationalAutonomyMaintenance:
                 evidence_fingerprint=evidence_fingerprint,
             )
 
+    def request_client_information_for_work(
+        self, work: OperationalWork, *, question_id: str,
+        missing_fact_code: str, evidence_hash: str,
+    ) -> str:
+        """Only a promoted diagnostic playbook may suspend for an exact question."""
+        if self.client_questions is None:
+            raise OperationalAutonomyError("client question workflow is disabled")
+        current = self.store.get(work.ticket_id)
+        if current is None or current != work:
+            raise OperationalAutonomyError("client question work state is stale")
+        if work.phase in TERMINAL_PHASES or work.phase.startswith("waiting_"):
+            raise OperationalAutonomyError("client question cannot suspend current phase")
+        if not self._scope_is_promoted(self._scope_for_work(work)):
+            raise OperationalAutonomyError("diagnostic playbook promotion is missing")
+        if not self._scope_is_promoted(CLIENT_QUESTION_SCOPE):
+            raise OperationalAutonomyError("client question promotion is missing")
+        result = self.client_questions.request(
+            ticket_id=work.ticket_id, question_id=question_id,
+            missing_fact_code=missing_fact_code,
+            evidence_hash=evidence_hash, corroborated=True,
+            resume_phase=work.phase,
+        )
+        if result in {"delivery_pending", "already_reserved"}:
+            self.store.put(self._replace(
+                work, phase=f"waiting_client_information:{work.phase}",
+                last_reason=f"Waiting for verified reply to approved {question_id}.",
+            ))
+        return result
+
+    def _resume_client_question_work(self, reply, candidates: Mapping[int, Any]) -> bool:
+        candidate = candidates.get(reply.ticket_id)
+        if candidate is None or str(candidate.source_queue).strip().casefold() != "jason":
+            return False
+        try:
+            if int(candidate.context.get("companyID") or 0) != reply.company_id:
+                return False
+        except (TypeError, ValueError):
+            return False
+        work = self.store.get(reply.ticket_id)
+        if work is None:
+            # The safe initial-intake branch has no previously claimed
+            # remediation phase. Its verified reply is re-evaluated by the
+            # ordinary ticket worker on the next/remaining scan cycle.
+            return (
+                reply.resume_phase == "queue_reassessment"
+                and str(candidate.context.get("ticketNumber") or "")
+                == reply.ticket_number
+            )
+        if work.company_id != reply.company_id:
+            return False
+        if work.ticket_number != reply.ticket_number:
+            return False
+        try:
+            if not self._scope_is_promoted(self._scope_for_work(work)):
+                return False
+        except (OperationalAutonomyError, TypeError, ValueError):
+            return False
+        if not reply.resume_phase:
+            return False
+        # Retrying after a successful work-store write is safe: the ledger
+        # transition may not yet have been committed during the first pass.
+        if work.phase == reply.resume_phase:
+            return True
+        if work.phase != f"waiting_client_information:{reply.resume_phase}":
+            return False
+        self.store.put(self._replace(
+            work, phase=reply.resume_phase,
+            last_reason=(
+                f"Client response to {reply.question_id} verified in Autotask "
+                f"note {reply.reply_note_id}; diagnostic work resuming."
+            ),
+        ))
+        return True
+
+    def _maybe_request_missing_client_description(self, candidate) -> None:
+        """Bounded autonomous example using authoritative missing-fact evidence.
+
+        Never solicit generic monitoring alerts, technician-created tickets,
+        non-Jason tickets or requests whose originating client is unverified.
+        """
+        if self.client_questions is None or not self._scope_is_promoted(CLIENT_QUESTION_SCOPE):
+            return
+        if str(candidate.source_queue).strip().casefold() != "jason":
+            return
+        ticket = candidate.context
+        if str(ticket.get("_jason_source_status_label") or "").strip().casefold() not in {
+            "new", "in progress",
+        }:
+            return
+        if str(ticket.get("description") or "").strip():
+            return
+        try:
+            ticket_id = int(candidate.resource_id)
+            company_id = int(ticket.get("companyID") or 0)
+            contact_id = int(ticket.get("contactID") or 0)
+            originating_contact_id = int(ticket.get("createdByContactID") or 0)
+        except (TypeError, ValueError):
+            return
+        if ticket_id <= 0 or company_id <= 0 or contact_id <= 0:
+            return
+        if originating_contact_id != contact_id:
+            return
+        if self.store.get(ticket_id) is not None:
+            return
+        if self.client_questions.ledger.has_question(ticket_id, "JQ-001"):
+            return
+        # Only the same objective absence in the authoritative ticket permits
+        # the engine to send. It will repeat the ticket/notes reads itself.
+        evidence_hash = hashlib.sha256(
+            f"{ticket_id}|{company_id}|{contact_id}|missing_description_v1".encode()
+        ).hexdigest()
+        self.client_questions.request(
+            ticket_id=ticket_id, question_id="JQ-001",
+            missing_fact_code="problem_description_missing",
+            evidence_hash=evidence_hash, corroborated=True,
+            resume_phase="queue_reassessment",
+        )
+
     def tick(self) -> None:
         now = self.monotonic()
         if now < self._next_due:
@@ -1660,6 +1788,22 @@ class OperationalAutonomyMaintenance:
             return
         by_id = {int(item.resource_id): item for item in candidates}
         self._reconcile_orphaned_waiting_device_rows(by_id)
+        if self.client_questions is not None and self._scope_is_promoted(CLIENT_QUESTION_SCOPE):
+            # Only a fresh client-created ticket with a truly missing
+            # description may trigger this initial question automatically.
+            for item in candidates[: self.max_candidate_evaluations_per_scan]:
+                try:
+                    self._maybe_request_missing_client_description(item)
+                except Exception as exc:
+                    self._audit_diagnostic(
+                        "client_question.initial_intake.failed",
+                        {"ticket_id": int(item.resource_id), "error_type": type(exc).__name__},
+                    )
+            # Read-only recovery of delivered questions and contact-authored
+            # replies, followed by a bounded existing-playbook state advance.
+            self.client_questions.reconcile(
+                on_verified_reply=lambda row: self._resume_client_question_work(row, by_id),
+            )
 
         # GPT Insights is a technician-assist augmentation for every eligible
         # Help Desk I / New ticket. It is independent of remediation matching and
