@@ -110,6 +110,11 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 runner.release_scheduled_control_units(SHA_A)
             with self.assertRaisesRegex(runner.ReleaseManagerError, "immutable release unavailable"):
                 runner.release_scheduled_control_units(SHA_B)
+            # An alias to a different immutable release must not inherit its
+            # unit requirements by impersonating a reviewed exact SHA.
+            (Path(td) / SHA_B).symlink_to(release, target_is_directory=True)
+            with self.assertRaisesRegex(runner.ReleaseManagerError, "immutable release unavailable"):
+                runner.release_scheduled_control_units(SHA_B)
             with self.assertRaises(runner.ReleaseManagerError):
                 runner.release_scheduled_control_units("not-a-sha")
 
