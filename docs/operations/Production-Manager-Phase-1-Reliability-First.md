@@ -23,6 +23,35 @@ Make Jason's **existing foundational functions reliable** before expanding autom
 8. **Verification or rollback.** Verify new runtime/MCP/host/controller/image/unit identities, health and fresh independent CCC/drift. Repeat the same authorized foundational ticket canary **after promotion** with a fixed window and exact-ticket read; run feature-specific checks. If any mandatory gate fails, initiate native known-good rollback, verify restored identities and foundational read behavior, keep the circuit breaker OPEN if unresolved, and report exact evidence. A healthy HTTP status alone is not acceptance.
 9. **Closeout and observability.** Persist immutable source IDs, read-canary summary (never customer content), pre/post results, approvals, independent manifests, rollback readiness, deployment and functional verification, any warning and follow-up. Mark production acceptance only with all required evidence and zero unresolved critical defect.
 
+### Mandatory authenticated Autotask canary for every release (source candidate)
+
+The native release transaction must verify the same genuine AOT-authorized
+requester's ticket count, complete bounded pagination, exact ticket read and
+activated catalog-specific generic reads **before the first production mutation
+and again after the complete runtime/MCP/host/controller cutover**. This is
+mandatory even for a change unrelated to Autotask, not conditional on changing
+the read activation profile. The current supported v11/v13 profiles require
+Projects; v13 also requires the dynamic ActionTypes query. A genuine failure
+must block promotion before any mutation or trigger native LKG rollback after
+cutover. A test fixture, HTTP status, service-only identity or stale
+receipt cannot satisfy either gate.
+
+Both phases use distinct nonce-bound, exact-candidate-sha sessions. The
+single MCP canary tool supports both phases; the provider release identity
+and permitted read path remain unchanged. Verify that the pre/post created
+window digest and SHA-salted authenticated principal digest agree; raw ticket
+contents, ticket IDs and human identity do not belong in release receipts.
+Only a verified preflight from the same exact candidate may be replaced by
+the postflight intent. Unknown profile, missing consent, absent authenticated
+AOT operator, expired/mismatched proof or no authorized provider result
+remains **BLOCKED**, never silently downgraded to a synthetic canary.
+
+**Operational limitation:** The pre/post acceptance requires a genuine
+authenticated requester using Jason's ordinary read capability. This source
+change does not grant unattended service-provider rights or invent a
+technician identity. Preproduction tests can prove control flow and negative
+cases but cannot substitute for a later owner-authorized live acceptance.
+
 ## Phase-1 operating constraints
 
 - The existing **incident hold** continues to block unattended promotion; do not remove it during the freeze.

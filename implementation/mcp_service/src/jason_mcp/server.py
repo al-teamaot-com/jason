@@ -6951,11 +6951,11 @@ def verify_release_ticket_read_canary(
     running_revision = str(os.environ.get("JASON_SOURCE_REVISION") or "").strip()
     profile = str(os.environ.get("JASON_PROVIDER_READ_ACTIVATION_PROFILE") or "").strip()
     v11_post_release = (
-        phase == "after"
+        phase in ("before", "after")
         and profile == "itglue-autotask-entra-comprehensive-entity-read-catalog-v11"
     )
     v13_post_release = (
-        phase == "after"
+        phase in ("before", "after")
         and profile == "itglue-autotask-entra-dynamic-schema-read-catalog-v13"
     )
     expanded_post_release = v11_post_release or v13_post_release
@@ -6994,7 +6994,7 @@ def verify_release_ticket_read_canary(
         }
 
     if expanded_post_release:
-        # The new generic read path is also mandatory. It must succeed for
+        # The generic read path is mandatory before AND after. It must succeed for
         # the same already-authenticated requester; no service-level fallback
         # is permitted. This query emits its independent metadata-only receipt
         # through the normal execute_read_capability read path.
@@ -7044,7 +7044,7 @@ def verify_release_ticket_read_canary(
         summary = {**summary, "generic_project_read_verified": True}
 
     if v13_post_release:
-        # The v13 activation cannot be declared successful based solely on
+        # The v13 release canary cannot pass before OR after based solely on
         # v11 tickets/Projects. Use the SAME authenticated human and one
         # arbitrary ordinary entity outside the former fixed whitelist.
         # Any source, field permission or connector denial fails the release.

@@ -69,13 +69,18 @@ def test_full_live_owner_read_attestation_passes_with_exact_pagination(tmp_path)
     session = _start(tmp_path)
     _full(tmp_path, session)
     verdict = verify_authenticated_read_canary(tmp_path, session)
-    assert verdict == {
+    assert {
+        key: value for key, value in verdict.items()
+        if key not in ("ticket_window_digest", "authenticated_principal_digest")
+    } == {
         "status": "PASS", "source_revision": SHA,
         "identity": "authenticated-aot-human-jason-managed", "ticket_count": 72,
         "ticket_pages": 2, "ticket_page_sum": 72,
         "exact_id_readback": True, "generic_project_read": True,
         "customer_data_in_receipt": False,
     }
+    assert len(verdict["ticket_window_digest"]) == 64
+    assert len(verdict["authenticated_principal_digest"]) == 64
     assert require_authenticated_read_canary(tmp_path, session, max_wait_seconds=0) == verdict
     content = "".join(p.read_text() for p in (tmp_path / "functional-canary" / "events").glob("*.json"))
     assert "NEVER STORE" not in content
@@ -186,7 +191,13 @@ def test_read_expansion_is_gated_in_actual_pm_before_post_certification():
     ccc = script.index("run_release_ccc_gate(", wait)
     close = script.index("gate_transition(repo, state_root, record, \"closed\")", ccc)
     assert start < wait < ccc < close
-    assert "candidate_autotask_profile != prior_autotask_profile" in script
+    # A release that does not touch Autotask must still prove Autotask works.
+    assert "candidate_autotask_profile != prior_autotask_profile" not in script
+    assert "profile=prior_autotask_profile, phase=\"before\"" in script
+    assert "profile=target_autotask_profile, phase=\"after\"" in script
+    assert script.index("verified_owner_read_canary_preflight =") < script.index(
+        'gate_transition(repo, state_root, record, "production")'
+    )
 
 
 def test_exact_read_duplicate_items_rejected_even_when_id_matches(tmp_path):
@@ -289,3 +300,87 @@ def test_v13_rejects_invented_successful_unvalidated_raw_dynamic_proof(tmp_path)
         {"items":[{"id":101}]},profile=PROFILE_V13
     )
     assert verify_authenticated_read_canary(tmp_path,session) is None
+
+
+def test_foundational_pre_and_post_require_independent_verified_nonces(tmp_path):
+    pre = begin_authenticated_read_canary(
+        tmp_path, candidate_sha=SHA, profile=PROFILE_V13, phase="before",
+        now=time.time(),
+    )
+    assert pre["phase"] == "before"
+    with pytest.raises(LiveReadAcceptanceError, match="active"):
+        begin_authenticated_read_canary(
+            tmp_path, candidate_sha=SHA, profile=PROFILE_V13, phase="after",
+            replacing_verified_session=pre,
+        )
+    _full_v13_receipts(tmp_path, pre)
+    before = require_authenticated_read_canary(tmp_path, pre, max_wait_seconds=0)
+    assert before["phase"] == "before"
+    post = begin_authenticated_read_canary(
+        tmp_path, candidate_sha=SHA, profile=PROFILE_V13, phase="after",
+        replacing_verified_session=pre,
+    )
+    assert post["nonce"] != pre["nonce"]
+    assert verify_authenticated_read_canary(tmp_path, post) is None
+    with pytest.raises(LiveReadAcceptanceError, match="not verified"):
+        require_authenticated_read_canary(tmp_path, post, max_wait_seconds=0)
+    _full_v13_receipts(tmp_path, post)
+    after = require_authenticated_read_canary(tmp_path, post, max_wait_seconds=0)
+    assert after["phase"] == "after"
+    assert before["ticket_window_digest"] == after["ticket_window_digest"]
+    assert before["authenticated_principal_digest"] == after["authenticated_principal_digest"]
+    assert before["ticket_count"] == after["ticket_count"]
+
+
+def test_pre_post_replacement_rejects_wrong_candidate_and_session(tmp_path):
+    pre = begin_authenticated_read_canary(
+        tmp_path, candidate_sha=SHA, profile=PROFILE_V11, phase="before",
+        now=time.time(),
+    )
+    _full(tmp_path, pre)
+    with pytest.raises(LiveReadAcceptanceError, match="active"):
+        begin_authenticated_read_canary(
+            tmp_path, candidate_sha="b" * 40, profile=PROFILE_V11,
+            phase="after", replacing_verified_session=pre,
+        )
+    with pytest.raises(LiveReadAcceptanceError, match="active"):
+        begin_authenticated_read_canary(
+            tmp_path, candidate_sha=SHA, profile=PROFILE_V11,
+            phase="after", replacing_verified_session={**pre, "nonce": "0" * 32},
+        )
+    with pytest.raises(LiveReadAcceptanceError, match="only after"):
+        begin_authenticated_read_canary(
+            tmp_path, candidate_sha=SHA, profile=PROFILE_V11,
+            phase="before", replacing_verified_session=pre,
+        )
+
+
+def test_phase_digest_detects_changing_autotask_scope_or_authenticated_human(tmp_path):
+    pre = begin_authenticated_read_canary(
+        tmp_path, candidate_sha=SHA, profile=PROFILE_V11,
+        phase="before", now=time.time(),
+    )
+    _full(tmp_path, pre)
+    before = require_authenticated_read_canary(tmp_path, pre, max_wait_seconds=0)
+    post = begin_authenticated_read_canary(
+        tmp_path, candidate_sha=SHA, profile=PROFILE_V11,
+        phase="after", replacing_verified_session=pre,
+    )
+    changed_window = {
+        "created_after": "2026-10-25T00:00:00-04:00",
+        "created_before": "2026-10-27T00:00:00-04:00",
+    }
+    actor = "person-entra-" + "b" * 32
+    def send(capability, arguments, data):
+        assert _send(tmp_path, post, capability, arguments, data,
+                     principal=actor)
+    send("service.ticket.count", changed_window, {"queryCount": 1})
+    send("service.ticket.search", {**changed_window, "page_size": 50},
+         {"items": [{"id": 123}]})
+    send("service.ticket.read", {"resource_id": 123},
+         {"items": [{"id": 123}]})
+    send("service.entity.search", {"entity": "Projects", "page_size": 1},
+         {"items": [{"id": 42}]})
+    after = require_authenticated_read_canary(tmp_path, post, max_wait_seconds=0)
+    assert after["ticket_window_digest"] != before["ticket_window_digest"]
+    assert after["authenticated_principal_digest"] != before["authenticated_principal_digest"]

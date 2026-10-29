@@ -6,6 +6,7 @@ post-deployment evidence from successful, normally authorized MCP tools.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -47,11 +48,17 @@ def _owned_private_json(path: Path) -> dict | None:
 
 
 def begin_authenticated_read_canary(state_root: Path, *, candidate_sha: str, profile: str,
-                                    ttl_seconds: int = 360, now: float | None = None) -> dict:
+                                    ttl_seconds: int = 360, now: float | None = None,
+                                    phase: str | None = None,
+                                    replacing_verified_session: dict | None = None) -> dict:
     if not isinstance(candidate_sha, str) or not _SHA.fullmatch(candidate_sha):
         raise LiveReadAcceptanceError("read canary candidate must be exact SHA")
     if profile not in _RELEASE_PROFILES or not 60 <= ttl_seconds <= 600:
         raise LiveReadAcceptanceError("read canary profile/expiry unsupported")
+    if phase not in (None, "before", "after"):
+        raise LiveReadAcceptanceError("read canary phase unsupported")
+    if replacing_verified_session is not None and phase != "after":
+        raise LiveReadAcceptanceError("verified canary may be replaced only after promotion")
     root = state_root / _DIR
     root.mkdir(mode=0o700, parents=False, exist_ok=True)
     folder = root.lstat()
@@ -73,8 +80,16 @@ def begin_authenticated_read_canary(state_root: Path, *, candidate_sha: str, pro
     }
     intent = root / "intent.json"
     previous = _owned_private_json(intent)
+    if phase is not None:
+        payload["phase"] = phase
     if previous and previous.get("expires_at", 0) > created:
-        raise LiveReadAcceptanceError("an earlier pending owner canary is active")
+        # Rotate only a proven preflight from the SAME exact candidate; never
+        # erase an unverified or unrelated active acceptance session.
+        if (phase != "after" or replacing_verified_session != previous
+                or previous.get("phase") != "before"
+                or previous.get("candidate_sha") != candidate_sha
+                or verify_authenticated_read_canary(state_root, previous) is None):
+            raise LiveReadAcceptanceError("an earlier pending owner canary is active")
     data = (json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n").encode()
     tmp = root / ("." + nonce + ".tmp")
     fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0), 0o600)
@@ -180,6 +195,16 @@ def verify_authenticated_read_canary(state_root: Path, session: dict) -> dict | 
                     "generic_project_read": True,
                     **({"dynamic_schema_search": True} if session.get("profile") == PROFILE_V13 else {}),
                     "customer_data_in_receipt": False,
+                    # Bind before/after observations to the same frozen
+                    # Autotask time window and authenticated human without
+                    # exposing ticket IDs, identity or customer contents.
+                    "ticket_window_digest": hashlib.sha256(
+                        json.dumps(scope, sort_keys=True, separators=(",", ":")).encode()
+                    ).hexdigest(),
+                    "authenticated_principal_digest": hashlib.sha256(
+                        (session["candidate_sha"] + ":" + identity).encode()
+                    ).hexdigest(),
+                    **({"phase": session["phase"]} if session.get("phase") in ("before", "after") else {}),
                 }
     return None
 

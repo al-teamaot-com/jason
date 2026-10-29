@@ -3244,9 +3244,10 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     previous_worker_uid = worker_enrollment.live_diagnostic_uid(output)
     prior_quickbooks_profile = live_quickbooks_read_profile()
     candidate_autotask_profile = declared_autotask_read_profile(deploy_worktree)
-    prior_autotask_profile = (
-        live_autotask_read_profile() if candidate_autotask_profile is not None else None
-    )
+    # Ticket search/read is foundational even for non-Autotask releases:
+    # require provider-backed evidence on BOTH sides of every promotion.
+    prior_autotask_profile = live_autotask_read_profile()
+    target_autotask_profile = candidate_autotask_profile or prior_autotask_profile
     # Run the identical deployment-input validator used by preproduction.
     # This must happen before CCC and any production state transition.
     deployment_env = native_deploy_environment(
@@ -3275,15 +3276,17 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
 
     controller_pin = controller_identity(deploy_worktree)
     baseline_manifest = capture_production_manifest(rollback_sha)
-    owner_read_canary_session = None
-    if (candidate_autotask_profile is not None
-            and candidate_autotask_profile != prior_autotask_profile):
-        # Start the post-deploy *real connected owner* acceptance witness before
-        # any production mutation. Empty/stale/synthetic evidence cannot pass.
-        owner_read_canary_session = owner_read_canary.begin_authenticated_read_canary(
-            state_root, candidate_sha=candidate_sha,
-            profile=candidate_autotask_profile,
-        )
+    # A real OAuth-bound AOT technician must verify count, exhaustive
+    # pagination and exact ID through the ordinary governed MCP reader BEFORE
+    # mutation. The release's unique nonce prevents replay across SHAs.
+    owner_read_canary_preflight = owner_read_canary.begin_authenticated_read_canary(
+        state_root, candidate_sha=candidate_sha,
+        profile=prior_autotask_profile, phase="before",
+    )
+    verified_owner_read_canary_preflight = owner_read_canary.require_authenticated_read_canary(
+        state_root, owner_read_canary_preflight,
+    )
+    record["pre_mutation_authenticated_read_canary"] = verified_owner_read_canary_preflight
     record["controller_pin"] = controller_pin
     record["last_known_good_manifest"] = baseline_manifest
     record["pre_mutation_health"] = {
@@ -3379,14 +3382,27 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
 
         controller_verified = verify_controller_identity(controller_pin, deploy_worktree, installed_candidate=True)
         smoke = run_functional_smoke_tests(candidate_sha)
-        verified_owner_read_canary = None
-        if owner_read_canary_session is not None:
-            # This waits for genuine OAuth-bound, governed MCP tool reads:
-            # ticket count, exact pagination, exact ticket read and the newly
-            # added generic Projects query. No synthetic provider-health
-            # canary, status endpoint or fixture may satisfy this gate.
-            verified_owner_read_canary = owner_read_canary.require_authenticated_read_canary(
-                state_root, owner_read_canary_session,
+        # Start a NEW nonce under the final live activation profile. The old
+        # preflight can be replaced only if it is independently verified and
+        # belongs to the same exact candidate. This cannot reuse before-
+        # deployment provider observations as proof of working production.
+        owner_read_canary_postflight = owner_read_canary.begin_authenticated_read_canary(
+            state_root, candidate_sha=candidate_sha,
+            profile=target_autotask_profile, phase="after",
+            replacing_verified_session=owner_read_canary_preflight,
+        )
+        verified_owner_read_canary = owner_read_canary.require_authenticated_read_canary(
+            state_root, owner_read_canary_postflight,
+        )
+        # Preserve the same frozen Autotask window and the same authenticated
+        # human across the cutover. The salt is bound to the exact candidate,
+        # and neither a ticket body nor a human identity is persisted.
+        if (verified_owner_read_canary.get("ticket_window_digest")
+                != verified_owner_read_canary_preflight.get("ticket_window_digest")
+                or verified_owner_read_canary.get("authenticated_principal_digest")
+                != verified_owner_read_canary_preflight.get("authenticated_principal_digest")):
+            raise ReleaseManagerError(
+                "foundational pre/post canary window or authenticated principal changed"
             )
         # Certification is mandatory BEFORE verified/closed or new LKG. A
         # non-PASS or stale/wrong-SHA report raises inside the rollback block.
@@ -3406,6 +3422,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "ccc_post_mutation": ccc_postflight,
             "functional_smoke_tests_passed": bool(smoke.get("passed")),
             "functional_smoke_tests": smoke,
+            "pre_mutation_authenticated_read_canary": verified_owner_read_canary_preflight,
             "authenticated_owner_read_canary": verified_owner_read_canary,
             "controller_identity_verified": True,
             "controller_handoff": controller_verified["controller_handoff"],
@@ -3448,6 +3465,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "preproduction": record.get("preproduction"),
             "pre_mutation_health": record.get("pre_mutation_health"),
             "functional_smoke_tests": smoke,
+            "pre_mutation_authenticated_read_canary": verified_owner_read_canary_preflight,
             "authenticated_owner_read_canary": verified_owner_read_canary,
             "production_manifest": production_manifest,
             "desired_state_drift_evidence": drift_evidence,
