@@ -19,6 +19,17 @@ A discovery finding is **never** an executable capability. It must advance throu
 
 Ticket merging is an acceptance use case rather than a special-case script: verify retention of timeline, related notes, attachments, unposted/posted time and charges, billing associations, links, original/retained ticket identity, client and contact, notification semantics and rollback/conservation. Do not simulate a native merge by copying notes and closing a ticket unless explicitly approved as a documented equivalent.
 
-## Initial implementation scope
+## Existing ticket-worker compatibility (PR #2144)
 
-This first PR creates an inert inventory-and-diff library, CLI, and regression tests. It does **not** yet wire authenticated provider/UI collectors, dynamic provider adapter construction or ticket merging. Those are required before claiming technician parity or production readiness. Production freeze remains in effect.
+The protected-main baseline includes ticket-worker supervised admission, read-only unsupported-ticket triage, durable note drafts and independently promoted note/handoff pilots from issue #770. Future technician actions must **reuse**, not duplicate, the existing governed Central Orchestrator capabilities and execution-plan/approval/readback infrastructure:
+
+- `service.ticket.note.create` and `service.ticket.note.update` support a two-ticket, owner-promotion-gated internal note pilot under `unsupported_readonly_triage_note` v1.0.0.
+- `service.ticket.update` supports a **separately** promoted handoff under `unsupported_triage_human_review` v1.0.0, only after verified internal note and eligible Jason-owned ticket state.
+- Each existing source registry entry, even enabled and lifecycle=production, is **not proof of live owner promotion**; scope, source version, client, note ownership and provider readback must be checked independently.
+- A native `Merge Into Another Ticket` operation is **not** interchangeable with note or ticket-status updates; use a verified native provider or governed technician UI adapter, retaining Autotask's original merge semantics.
+
+The source-driven report now inventories registered ticket-action workflows with `--workflow-registry implementation/autonomous_remediation/playbook_registry.json`. That report is review-only; it never schedules work, registers new capabilities or authorizes a mutation. See `docs/operations/Autotask-Technician-Parity-Overlap-20261029.md`.
+
+## Current implementation scope
+
+This draft PR provides an inert capability/feature diff, a governed entityInformation evidence projector, source-registered workflow overlap inventory, report CLI, and tests. The overlapping #770 runtime has not been modified. It does **not** yet wire automated authenticated provider/UI collectors, dynamic governed provider/UI execution adapters, or native ticket merging. Those are required before claiming full technician parity or provider-backed preproduction acceptance. Production freeze remains in effect.

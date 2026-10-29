@@ -1,7 +1,7 @@
-"""Provider-neutral technician operation gap inventory for Autotask.
+"""Evidence-only comparison of Autotask provider routes and technician UI features.
 
-Discovery is evidence only. Neither live metadata nor UI observations grant
-permission to execute, register capabilities, or construct provider requests.
+Neither observed metadata nor UI operation names register or authorize new
+capabilities. Provider paths are *catalog evidence*, never executable input.
 """
 from __future__ import annotations
 
@@ -12,7 +12,10 @@ from typing import Any
 
 from .operations import AUTOTASK_OPERATIONS
 
-_SAFE_ENTITY = re.compile(r"[A-Z][A-Za-z0-9]{1,79}\Z")
+_PROVIDER_PATH = re.compile(
+    r"/V1[.]0/[A-Z][A-Za-z0-9]{1,79}(?:/[A-Za-z0-9_{}-]+)*\Z"
+)
+_FEATURE_ID = re.compile(r"[a-z][a-z0-9_.-]{2,120}\Z")
 _ACTIONS = frozenset({"GET", "POST", "PATCH", "DELETE"})
 
 
@@ -24,6 +27,7 @@ class CapabilityGap:
     path: str
     status: str
     reason: str
+    feature_id: str = ""
 
 
 def discover_gaps(
@@ -31,50 +35,73 @@ def discover_gaps(
     *,
     technician_ui_operations: list[Mapping[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
-    """Compare trusted observations to the registered provider operation catalog.
+    """Compare reviewed observations to exact *registered provider route* names.
 
-    Inputs must be independently authenticated and collected from approved
-    sources. No operation is executed or promoted by this function.
+    UI features have no implied REST path; even a UI observation containing an
+    API-like path is never accepted as proof of a registered API capability.
     """
     registered = {
-        (definition.method.upper(), definition.path_template.rstrip("/").lower())
+        (definition.method.upper(), definition.path_template.rstrip("/").casefold())
         for definition in AUTOTASK_OPERATIONS.values()
     }
-    observations: list[tuple[str, Mapping[str, Any]]] = [
-        ("provider_api", item) for item in provider_operations
-    ]
-    observations.extend(
-        ("technician_ui", item)
-        for item in (technician_ui_operations or [])
-    )
+    observations = [("provider_api", item) for item in provider_operations]
+    observations.extend(("technician_ui", x) for x in (technician_ui_operations or []))
     findings: dict[tuple[str, str, str], CapabilityGap] = {}
+    if len(observations) > 1000:
+        raise ValueError("capability inventory exceeds review bound")
     for source, item in observations:
         if not isinstance(item, Mapping):
             raise ValueError("operation observation must be an object")
-        method, path, name = (item.get(key) for key in ("method", "path", "operation"))
-        if not all(isinstance(v, str) for v in (method, path, name)):
-            raise ValueError("operation requires string method, path, and operation")
-        method = method.strip().upper()
-        path = path.strip().rstrip("/")
+        name = item.get("operation")
+        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 160:
+            raise ValueError("operation name required")
         name = name.strip()
-        if method not in _ACTIONS or not name or len(name) > 160:
-            raise ValueError("invalid operation")
-        if not path.startswith("/V1.0/") or len(path) > 250 or any(
-            c in path for c in ("?", "#", "\\", "://")
-        ):
-            raise ValueError("untrusted provider path")
-        entity = path.split("/")[2]
-        if not _SAFE_ENTITY.fullmatch(entity):
-            raise ValueError("invalid entity path")
-        # UI-only actions can have no REST representation. They are included
-        # as documented UI observations but are NOT executable.
-        registered_match = (method, path.lower()) in registered
-        status = "registered_provider_route" if registered_match else "candidate_requires_review"
-        reason = (
-            "Registered route; runtime capability and requester authority still required"
-            if registered_match
-            else "No registered matching provider route; verify technician eligibility, API support, semantics and governance"
+        feature_id = item.get("feature_id", "")
+        if source == "technician_ui" and feature_id:
+            # UI-only actions have a durable semantic ID and no invented API URL.
+            surface = item.get("surface")
+            if (not isinstance(feature_id, str)
+                    or not _FEATURE_ID.fullmatch(feature_id)
+                    or not isinstance(surface, str)
+                    or not _FEATURE_ID.fullmatch(surface)):
+                raise ValueError("UI feature identity/surface invalid")
+            method, path = "UI", ""
+            registered_match = False
+            status = "candidate_requires_review"
+            reason = "Technician UI feature: verify permission, semantics and supported API or governed UI adapter"
+            evidence_key = feature_id
+        else:
+            method, path = item.get("method"), item.get("path")
+            if not isinstance(method, str) or not isinstance(path, str):
+                raise ValueError("operation requires method and path")
+            method = method.strip().upper()
+            path = path.strip().rstrip("/")
+            if method not in _ACTIONS or not _PROVIDER_PATH.fullmatch(path):
+                raise ValueError("untrusted provider operation")
+            # A documented UI gesture can never *authorize* a provider route.
+            registered_match = (
+                source == "provider_api" and (method, path.casefold()) in registered
+            )
+            status = (
+                "registered_provider_route" if registered_match
+                else "candidate_requires_review"
+            )
+            reason = (
+                "Registered route; runtime capability, requester scope and provider authority still required"
+                if registered_match
+                else "No proven executable route: verify provider semantics, technician scope and governance"
+            )
+            evidence_key = path.casefold()
+        key = (source, method, evidence_key)
+        if key in findings:
+            raise ValueError("duplicate/conflicting operation observation")
+        findings[key] = CapabilityGap(
+            source=source,
+            operation=name,
+            method=method,
+            path=path,
+            status=status,
+            reason=reason,
+            feature_id=feature_id if isinstance(feature_id, str) else "",
         )
-        key = (source, method, path.lower())
-        findings[key] = CapabilityGap(source, name, method, path, status, reason)
     return [asdict(v) for _, v in sorted(findings.items())]
