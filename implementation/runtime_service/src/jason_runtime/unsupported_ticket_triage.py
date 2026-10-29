@@ -44,27 +44,74 @@ class TriageResult:
     next_step: str
 
 
-def category_for(title: str, unsupported_reason: str) -> str:
-    """Choose a fixed, read-only diagnostic; never synthesize a shell command."""
-    title = str(title or "").casefold()
+def category_for(title: str, unsupported_reason: str, description: str = "") -> str:
+    """Classify bounded ticket context, not just an often-uninformative title.
+
+    This controls read-only investigation only, never authorization to execute.
+    """
+    context = (str(title or "") + " " + str(description or "")[:12000]).casefold()
     if (
-        "licence" in title or "license" in title or "activation" in title
+        any(term in context for term in ("licence", "license", "activation"))
         or unsupported_reason == "windows_licensing_diagnostics_candidate"
     ):
         return "windows_licensing"
-    if "rocketagent" in title:
+    if "rocketagent" in context:
         return "rocketagent_service"
-    if "space issue" in title or "disk space" in title or "hard disk full" in title:
+    if any(term in context for term in ("space issue", "disk space", "hard disk full")):
         return "disk_capacity"
-    if any(term in title for term in (
-        "threat", "edr", "security logs cleared", "linux logs cleared",
-        "risky sign", "suspicious sign", "indirect command",
+    if any(term in context for term in (
+        "threat", "edr", "security logs cleared",
+        "linux logs cleared", "risky sign", "suspicious sign", "indirect command",
     )):
         return "security_review"
+    if (
+        ("network" in context and any(t in context for t in ("disconnect", "connectivity")))
+        or ("screen" in context and any(t in context for t in ("timeout", "goes black", "sleep")))
+        or any(t in context for t in ("sleep settings", "power settings"))
+    ):
+        return "user_device_settings"
+    if any(t in context for t in (
+        "microsoft 365", "office 365", "exchange online", "mailbox",
+        "password reset", "conditional access", "mfa", "sign-in",
+        "sign in", "account locked",
+    )):
+        return "account_service"
+    if any(t in context for t in (
+        "dhcp", "dns server", "firewall", "domain controller",
+        "site outage", "server outage", "vpn gateway",
+    )):
+        return "infrastructure_service"
     return "general"
 
 
+SCOPE_BY_CATEGORY = {
+    "windows_licensing": "device",
+    "rocketagent_service": "device",
+    "disk_capacity": "device",
+    "user_device_settings": "user_device",
+    "account_service": "user_service",
+    "infrastructure_service": "infrastructure",
+    "security_review": "security",
+    "general": "general",
+}
+
+
 NEXT_STEPS = {
+    "account_service": (
+        "Investigate the affected identity or service using governed account/service "
+        "evidence; a device association is not required to begin. Apply an approved "
+        "playbook or request only the specific missing facts."
+    ),
+    "infrastructure_service": (
+        "Investigate the affected infrastructure/service and company scope. "
+        "A workstation CI is not a prerequisite; provider changes remain governed."
+    ),
+    "user_device_settings": (
+        "Correlate affected user, network disconnect timing, Windows power/screen policy, "
+        "and recent update evidence. Resolve device identity against the same customer "
+        "before endpoint diagnostics; do not modify power or network settings without "
+        "the appropriate governed authority."
+    ),
     "windows_licensing": (
         "Validate Windows activation and entitlement. A non-licensed status "
         "is diagnostic evidence, not permission to change licensing."
@@ -192,10 +239,13 @@ def gather(
     silently requiring any new information-release authority.
     """
     ticket_id = _positive_id(ticket_id)
-    category = category_for(title, unsupported_reason)
-    next_step = NEXT_STEPS[category]
-    evidence: dict[str, Any] = {"ticket_id": ticket_id}
     ticket = ticket_snapshot
+    category = category_for(title, unsupported_reason, str(ticket.get("description") or "") if isinstance(ticket, Mapping) else "")
+    next_step = NEXT_STEPS[category]
+    evidence: dict[str, Any] = {
+        "ticket_id": ticket_id,
+        "investigation_scope": SCOPE_BY_CATEGORY[category],
+    }
     if not isinstance(ticket, Mapping) or _positive_id(ticket.get("id")) != ticket_id:
         raise ValueError("ticket_readback_mismatch")
     # Missing company on an otherwise real ticket is a human identity gap,
@@ -225,13 +275,80 @@ def gather(
         )
     )
 
+    # Verify a linked contact under the explicit worker read policy. A temporary
+    # failure in this optional association must not block unrelated safe reads.
+    contact_raw = ticket.get("contactID")
+    try:
+        contact_id = int(contact_raw or 0)
+    except (TypeError, ValueError):
+        contact_id = 0
+    if contact_id > 0:
+        evidence["contact_associated"] = True
+        evidence["contact_id"] = contact_id
+        try:
+            contact = _item(read("service.contact.read", {"resource_id": contact_id}))
+        except Exception:
+            evidence["contact_lookup_unavailable"] = True
+        else:
+            if (contact is None or _positive_id(contact.get("id")) != contact_id
+                    or _positive_id(contact.get("companyID")) != actual_company):
+                raise ValueError("contact_identity_unverified")
+            evidence["contact_verified"] = True
+
+    # Endpoints require exact same-company CI + UID evidence. User/service and
+    # infrastructure investigations never require a workstation association.
+    device_required = category in {
+        "windows_licensing", "rocketagent_service", "disk_capacity",
+    }
+    if category in {"general", "account_service", "infrastructure_service", "security_review"}:
+        state = "needs_security_review" if category == "security_review" else "needs_playbook_review"
+        return TriageResult(
+            state, category, evidence,
+            "Company and available contact/note context assessed independently of any CI. " + next_step,
+        )
+
     source_ci = ticket.get("configurationItemID")
-    source_ci_id = int(source_ci or 0)
+    try:
+        source_ci_id = int(source_ci or 0)
+    except (TypeError, ValueError):
+        source_ci_id = 0
+
     if source_ci_id == 0 and not configuration_item_id:
+        if category == "user_device_settings":
+            # A title is only a search hint. Never attach a CI or send endpoint
+            # commands based on a textual hostname. Search within the company.
+            hint = re.match(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]{3,63})\s*[-:]\s*", str(title or ""))
+            if hint:
+                candidate_name = hint.group(1)
+                evidence["device_title_hint_unverified"] = candidate_name
+                try:
+                    candidate_data = read("service.configuration.search", {
+                        "company_id": actual_company, "name": candidate_name,
+                        "page_size": 25,
+                    })
+                    entries = candidate_data.get("items")
+                    if not isinstance(entries, list):
+                        raise ValueError("configuration_search_invalid")
+                    evidence["same_company_ci_search_count"] = sum(
+                        1 for entry in entries
+                        if isinstance(entry, Mapping)
+                        and int(entry.get("companyID") or 0) == actual_company
+                        and str(entry.get("rmmDeviceAuditHostname") or entry.get("referenceTitle") or "").strip().casefold() == candidate_name.casefold()
+                        and entry.get("isActive") is True
+                    )
+                except Exception:
+                    evidence["ci_search_unavailable"] = True
+            return TriageResult(
+                "needs_diagnostic_evidence", category, evidence,
+                "Continue user and configuration-policy investigation. A title hostname is "
+                "unverified and no ticket CI is associated; only use a device after "
+                "exact same-company CI/endpoint verification. " + next_step,
+            )
         return TriageResult(
             "needs_device_identity", category, evidence,
-            "Associate an exact same-company CI; " + next_step,
+            "Find and verify an exact same-company CI or endpoint before endpoint diagnostics. " + next_step,
         )
+
     if not source_ci_id or source_ci_id != int(configuration_item_id or 0):
         raise ValueError("ticket_ci_mismatch")
 
@@ -265,9 +382,14 @@ def gather(
     evidence["hostname"] = (endpoint_host or ci_host)[:128]
     online = endpoint.get("online")
     if not isinstance(online, bool):
+        if category == "user_device_settings":
+            return TriageResult("needs_diagnostic_evidence", category, evidence, next_step)
         return TriageResult("device_availability_unknown", category, evidence, next_step)
     evidence["online"] = online
     if not online:
+        if category == "user_device_settings":
+            return TriageResult("needs_diagnostic_evidence", category, evidence,
+                                "Device offline; continue user/policy investigation without endpoint execution. " + next_step)
         return TriageResult("waiting_device_access", category, evidence, next_step)
 
     operating_system = str(
@@ -310,6 +432,12 @@ def gather(
         )
     if category == "security_review":
         return TriageResult("needs_security_review", category, evidence, next_step)
+    if category == "user_device_settings":
+        return TriageResult(
+            "needs_diagnostic_evidence", category, evidence,
+            "Endpoint identity verified, but live policy/network diagnosis requires "
+            "separately authorized evidence collection. " + next_step,
+        )
     if category == "general":
         return TriageResult("needs_playbook_review", category, evidence, next_step)
     return TriageResult("read_only_assessed", category, evidence, next_step)
@@ -343,7 +471,8 @@ def render_triage_note(
         raise ValueError("unsupported triage note state")
     allowed_categories = {
         "disk_capacity", "windows_licensing", "rocketagent_service",
-        "security_review", "general",
+        "security_review", "general", "user_device_settings",
+        "account_service", "infrastructure_service",
     }
     if category not in allowed_categories:
         raise ValueError("unsupported triage note category")
@@ -357,6 +486,16 @@ def render_triage_note(
     ]
     if evidence.get("company_verified") is True:
         lines.append("- Autotask ticket company association: verified")
+    scope = evidence.get("investigation_scope")
+    if isinstance(scope, str) and scope in set(SCOPE_BY_CATEGORY.values()):
+        lines.append("- Investigation scope: " + scope.replace("_", " "))
+    if evidence.get("contact_verified") is True:
+        lines.append("- Autotask contact and company association: verified")
+    elif evidence.get("contact_lookup_unavailable") is True:
+        lines.append("- Ticket contact linked; governed contact lookup unavailable")
+    host_hint = evidence.get("device_title_hint_unverified")
+    if isinstance(host_hint, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{3,63}", host_hint):
+        lines.append("- Title-only device hint (UNVERIFIED): " + host_hint)
     if evidence.get("rmm_identity_verified") is True:
         lines.append("- Exact same-company configuration/DRMM device: verified")
     if isinstance(evidence.get("online"), bool):

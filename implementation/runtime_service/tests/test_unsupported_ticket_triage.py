@@ -401,7 +401,7 @@ def test_ticket_id_conflict_in_governed_search_snapshot_is_identity_review(tmp_p
     worker, store, actions = make_worker(tmp_path, [item], reads)
     worker.tick()
     result = store.unsupported_triage(200001)
-    assert result["state"] == "needs_device_identity"
+    assert result["state"] == "needs_company_identity"
     assert result["last_error"] == "ValueError"
     assert result["attempts"] == 1
     assert reads.calls == []
@@ -424,7 +424,7 @@ def test_prior_production_policy_denial_is_reevaluated_once_after_upgrade(tmp_pa
     worker.tick()
     row = store.unsupported_triage(200001)
     assert row["state"] == "needs_execution_authority"
-    assert row["evidence"]["triage_logic_version"] == "passive_rmm_audit_v3"
+    assert row["evidence"]["triage_logic_version"] == "contact_first_context_v4"
     assert all(cap != "service.ticket.read" for cap, _ in reads.calls)
     first_count = len(reads.calls)
     worker.tick()
@@ -906,4 +906,235 @@ def test_terminal_failed_handoff_does_not_retry_unbounded(tmp_path):
     )
     assert actions.calls == []
     assert store.unsupported_handoff_delivery(200001)["attempts"] == 3
+    store.close()
+
+
+@pytest.mark.parametrize("title,contact_id,ci_id,expected", [
+    ("General account issue", 42, None, "needs_playbook_review"),
+    ("Network disconnections and screen timeout settings reverting", 42, None, "needs_diagnostic_evidence"),
+    ("Service outage for remote users", None, None, "needs_playbook_review"),
+    ("Linux logs cleared", None, None, "needs_security_review"),
+    ("Disk space issue", 42, None, "needs_device_identity"),
+    ("Windows activation failed", None, None, "needs_device_identity"),
+])
+def test_optional_ci_never_blocks_non_endpoint_investigation(
+        title, contact_id, ci_id, expected):
+    calls = []
+    def read(capability, args):
+        calls.append(capability)
+        if capability == "service.ticket.notes.search":
+            return {"items": [{"id": 1}]}
+        if capability == "service.contact.read":
+            return {"item": {"id": 42, "companyID": 777}}
+        raise AssertionError("No endpoint access expected: " + capability)
+    result = gather(
+        ticket_id=200001, company_id=777, configuration_item_id=ci_id,
+        ticket_snapshot={"id": 200001, "companyID": 777,
+                         "contactID": contact_id, "configurationItemID": ci_id},
+        title=title, unsupported_reason="", read=read)
+    assert result.state == expected
+    assert "service.configuration.read" not in calls
+    assert "endpoint.device.read" not in calls
+    if contact_id:
+        assert result.evidence["contact_verified"] is True
+
+
+def test_mismatched_contact_company_rejected_before_endpoint_access():
+    calls = []
+    def read(capability, args):
+        calls.append(capability)
+        if capability == "service.ticket.notes.search":
+            return {"items": []}
+        if capability == "service.contact.read":
+            return {"item": {"id": 42, "companyID": 999}}
+        raise AssertionError(capability)
+    with pytest.raises(ValueError, match="contact_identity_unverified"):
+        gather(ticket_id=200001, company_id=777, configuration_item_id=None,
+               ticket_snapshot={"id": 200001, "companyID": 777, "contactID": 42},
+               title="Network disconnect", unsupported_reason="", read=read)
+    assert "endpoint.device.read" not in calls
+
+
+
+def test_real_ticket_shape_143272_contact_first_no_ci_and_title_hint():
+    calls = []
+    def read(capability, args):
+        calls.append((capability, dict(args)))
+        if capability == "service.ticket.notes.search":
+            return {"items": [{"id": 30532713, "title": "Jason - Governed Read-Only Investigation"}]}
+        if capability == "service.contact.read":
+            return {"item": {"id": 30683105, "companyID": 827}}
+        if capability == "service.configuration.search":
+            assert args == {"company_id": 827, "name": "202315PC14", "page_size": 25}
+            return {"items": []}
+        raise AssertionError("No endpoint/device actions allowed: " + capability)
+    result = gather(
+        ticket_id=143272, company_id=827, configuration_item_id=None,
+        ticket_snapshot={
+            "id": 143272, "companyID": 827, "contactID": 30683105,
+            "configurationItemID": None,
+            "description": (
+                "IT Service Request - Network Connectivity & Computer Sleep Settings. "
+                "Computer frequently disconnects from network; the screen goes black "
+                "after three minutes. Windows updates revert screen timeout settings."
+            ),
+        },
+        title="202315PC14 -", unsupported_reason="no_promoted_playbook", read=read)
+    assert result.category == "user_device_settings"
+    assert result.state == "needs_diagnostic_evidence"
+    assert result.evidence["investigation_scope"] == "user_device"
+    assert result.evidence["contact_verified"] is True
+    assert result.evidence["device_title_hint_unverified"] == "202315PC14"
+    assert result.evidence["same_company_ci_search_count"] == 0
+    assert [cap for cap, _ in calls] == [
+        "service.ticket.notes.search", "service.contact.read",
+        "service.configuration.search",
+    ]
+    assert "no ticket CI" in result.next_step
+    assert "endpoint.device.read" not in [cap for cap, _ in calls]
+
+
+@pytest.mark.parametrize("title,description,category", (
+    ("Sign-in problem", "User cannot sign in to Microsoft 365", "account_service"),
+    ("Print Server -", "DHCP issue on domain controller", "infrastructure_service"),
+    ("General assistance", "Please review our accounting application", "general"),
+    ("Linux logs cleared", "Server alert", "security_review"),
+))
+def test_nonendpoint_context_skips_irrelevant_existing_ci(title, description, category):
+    calls = []
+    def read(cap, args):
+        calls.append(cap)
+        assert cap == "service.ticket.notes.search"
+        return {"items": []}
+    result = gather(
+        ticket_id=200001, company_id=777, configuration_item_id=1100,
+        ticket_snapshot={"id": 200001, "companyID": 777,
+                         "description": description, "configurationItemID": 1100},
+        title=title, unsupported_reason="", read=read,
+    )
+    assert result.category == category
+    assert result.state == (
+        "needs_security_review" if category == "security_review"
+        else "needs_playbook_review"
+    )
+    assert calls == ["service.ticket.notes.search"]
+
+
+def test_denied_optional_contact_read_does_not_block_user_service_assessment():
+    def read(cap, args):
+        if cap == "service.ticket.notes.search":
+            return {"items": []}
+        if cap == "service.contact.read":
+            raise PermissionError("INFORMATION_RELEASE_DENIED")
+        raise AssertionError(cap)
+    result = gather(
+        ticket_id=200001, company_id=777, configuration_item_id=None,
+        ticket_snapshot={"id": 200001, "companyID": 777,
+                         "contactID": 42, "configurationItemID": None,
+                         "description": "Microsoft 365 mailbox problem"},
+        title="User mail issue", unsupported_reason="", read=read,
+    )
+    assert result.category == "account_service"
+    assert result.state == "needs_playbook_review"
+    assert result.evidence["contact_lookup_unavailable"] is True
+    assert result.evidence.get("contact_verified") is None
+
+
+def test_worker_persists_non_escalating_contact_first_triage_for_143272_shape(tmp_path):
+    source = ticket(title="202315PC14 -", queue="Jason", status="In Progress")
+    source = replace(source, context={
+        **source.context,
+        "configurationItemID": None,
+        "contactID": 42,
+        "description": (
+            "Customer reports recurring network disconnections. "
+            "Screen automatically goes black after three minutes. "
+            "Computer sleep settings revert after Windows updates."
+        ),
+    })
+    class ContactFirstRead(ReadStub):
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.search":
+                self.calls.append((capability, dict(arguments)))
+                assert arguments["company_id"] == 777
+                return {"status": "succeeded", "evidence": {"data": {"items": []}}}
+            return super().execute(capability, arguments)
+
+    reads = ContactFirstRead()
+    worker, store, actions = make_worker(tmp_path, [source], reads)
+    worker.tick()
+    record = store.unsupported_triage(200001)
+    assert record is not None
+    assert record["category"] == "user_device_settings"
+    assert record["state"] == "needs_diagnostic_evidence"
+    assert record["evidence"]["device_title_hint_unverified"] == "202315PC14"
+    assert record["evidence"]["contact_associated"] is True
+    assert record["evidence"]["contact_lookup_unavailable"] is True
+    assert record["evidence"].get("contact_verified") is None
+    assert record["evidence"]["triage_logic_version"] == "contact_first_context_v4"
+    assert store.get(200001) is None
+    assert actions.calls == []
+    assert [name for name, _ in reads.calls] == [
+        "service.ticket.notes.search", "service.configuration.search",
+    ]
+    assert "needs device identity" not in record["evidence"]["note_draft"].casefold()
+    worker.tick()
+    assert store.unsupported_triage(200001)["state"] == "needs_diagnostic_evidence"
+    store.close()
+
+
+def test_worker_separate_contact_read_port_verifies_same_company_context(tmp_path):
+    source = ticket(title="Account issue", queue="Jason", status="In Progress")
+    source = replace(source, context={**source.context,
+                                      "contactID": 42, "configurationItemID": None,
+                                      "description": "Microsoft 365 mailbox issue"})
+    reads = ReadStub()
+    class AuthorizedContactPort:
+        calls = []
+        def execute(self, capability, arguments):
+            self.calls.append((capability, dict(arguments)))
+            return {"status": "succeeded", "evidence": {"data": {
+                "item": {"id": 42, "companyID": 777},
+            }}}
+    contact = AuthorizedContactPort()
+    worker, store, actions = make_worker(tmp_path, [source], reads)
+    worker.contact_reads = contact
+    worker.tick()
+    record = store.unsupported_triage(200001)
+    assert record["category"] == "account_service"
+    assert record["state"] == "needs_playbook_review"
+    assert record["evidence"]["contact_verified"] is True
+    assert record["evidence"].get("contact_lookup_unavailable") is None
+    assert contact.calls == [("service.contact.read", {"resource_id": 42})]
+    assert "service.contact.read" not in [cap for cap, _ in reads.calls]
+    assert actions.calls == []
+    store.close()
+
+
+def test_worker_contact_company_conflict_is_not_mislabeled_device_identity(tmp_path):
+    source = ticket(title="Account issue", queue="Jason", status="In Progress")
+    source = replace(source, context={
+        **source.context, "contactID": 42, "configurationItemID": None,
+        "description": "Microsoft 365 account question",
+    })
+    reads = ReadStub()
+    class ConflictingContactPort:
+        def execute(self, capability, arguments):
+            assert capability == "service.contact.read"
+            assert arguments == {"resource_id": 42}
+            return {"status": "succeeded", "evidence": {"data": {
+                "item": {"id": 42, "companyID": 999},
+            }}}
+    worker, store, actions = make_worker(tmp_path, [source], reads)
+    worker.contact_reads = ConflictingContactPort()
+    worker.tick()
+    record = store.unsupported_triage(200001)
+    assert record["state"] == "needs_company_identity"
+    assert record["category"] == "account_service"
+    assert record["last_error"] == "ValueError"
+    assert "contact" in record["next_step"].casefold()
+    assert "needs device identity" not in record["evidence"]["note_draft"].casefold()
+    assert all(cap not in {"service.configuration.read", "endpoint.device.read"}
+               for cap, _ in reads.calls)
+    assert actions.calls == []
     store.close()

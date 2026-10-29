@@ -117,7 +117,7 @@ from .unsupported_ticket_triage import (
 
 # Force a single safe re-evaluation of old read-policy-denied rows after an
 # implementation change, without editing production SQLite state manually.
-UNSUPPORTED_TRIAGE_LOGIC_VERSION = "passive_rmm_audit_v3"
+UNSUPPORTED_TRIAGE_LOGIC_VERSION = "contact_first_context_v4"
 from .managed_ticket_notes import (
     GPT_INSIGHTS_TITLE,
     exact_named_note,
@@ -1135,6 +1135,7 @@ class OperationalAutonomyMaintenance:
         completion_notifier=None,
         ticket_splitter=None,
         client_questions=None,
+        contact_reads=None,
     ) -> None:
         if not 1 <= int(max_active_work_items) <= 20:
             raise ValueError("max_active_work_items must be between 1 and 20")
@@ -1167,6 +1168,7 @@ class OperationalAutonomyMaintenance:
         self.completion_notifier = completion_notifier
         self.ticket_splitter = ticket_splitter
         self.client_questions = client_questions
+        self.contact_reads = contact_reads
         self._next_due = 0.0
         self._resource_automation_cache: dict[int, bool] = {}
         self._ticket_status_cache: dict[int, str] = {}
@@ -2759,7 +2761,9 @@ class OperationalAutonomyMaintenance:
                     pass
             attempted += 1
             title = str(candidate.context.get("title") or "")
-            category = unsupported_triage_category(title, unsupported_reason)
+            category = unsupported_triage_category(
+                title, unsupported_reason, str(candidate.context.get("description") or ""),
+            )
             prior_attempts = int(previous.get("attempts") or 0) if previous else 0
             attempts = prior_attempts + 1
             error = None
@@ -2772,7 +2776,7 @@ class OperationalAutonomyMaintenance:
                     ticket_snapshot=candidate.context,
                     title=title,
                     unsupported_reason=unsupported_reason,
-                    read=self._read_data,
+                    read=self._triage_read_data,
                 )
                 state = result.state
                 category = result.category
@@ -2791,15 +2795,25 @@ class OperationalAutonomyMaintenance:
                 # Persist a durable outcome and allow later tickets to proceed.
                 error = type(exc).__name__
                 code = str(exc).upper()
-                identity_codes = {
+                company_identity_codes = {
                     "TICKET_READBACK_MISMATCH", "TICKET_COMPANY_MISMATCH",
+                    "CONTACT_IDENTITY_UNVERIFIED",
+                }
+                device_identity_codes = {
                     "TICKET_CI_MISMATCH", "CONFIGURATION_IDENTITY_UNVERIFIED",
                     "ENDPOINT_IDENTITY_MISMATCH", "ENDPOINT_HOSTNAME_MISMATCH",
                 }
-                if type(exc) is ValueError and code in identity_codes:
+                if type(exc) is ValueError and code in company_identity_codes:
+                    state = "needs_company_identity"
+                    next_step = (
+                        "Conflicting ticket/customer/contact identity evidence; "
+                        "technician must verify company and contact before user-scoped reads."
+                    )
+                    next_due = now + timedelta(hours=4)
+                elif type(exc) is ValueError and code in device_identity_codes:
                     state = "needs_device_identity"
                     next_step = (
-                        "Conflicting authoritative ticket/CI/endpoint evidence; "
+                        "Conflicting authoritative CI/endpoint evidence; "
                         "technician must verify identity before any device read."
                     )
                     next_due = now + timedelta(hours=4)
@@ -8359,6 +8373,27 @@ class OperationalAutonomyMaintenance:
                 origin=origin,
             )
         return True
+
+    def _triage_read_data(self, capability: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        if capability == "service.contact.read":
+            if self.contact_reads is None:
+                raise OperationalAutonomyError("CONTACT_READ_PROFILE_NOT_ENABLED")
+            result = self.contact_reads.execute(capability, arguments)
+            return self._validated_read_data(result)
+        return self._read_data(capability, arguments)
+
+    @staticmethod
+    def _validated_read_data(result: Mapping[str, Any]) -> dict[str, Any]:
+        if str(result.get("status") or "") != "succeeded":
+            raise OperationalAutonomyError(
+                "governed read failed: "
+                + str(result.get("error_code") or result.get("reason_codes"))
+            )
+        evidence = result.get("evidence")
+        if not isinstance(evidence, Mapping):
+            raise OperationalAutonomyError("governed read returned no evidence mapping")
+        data = evidence.get("data")
+        return dict(data) if isinstance(data, Mapping) else dict(evidence)
 
     def _read_data(self, capability: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         result = self.reads.execute(capability, arguments)
