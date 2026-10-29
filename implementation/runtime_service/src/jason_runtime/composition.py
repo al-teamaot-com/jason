@@ -2820,8 +2820,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             audit=reflection_audit,
             interval_seconds=15,
         )
+        # Auxiliary settings disable ticket admission, not owner-notification delivery.
         if maintenance_profile != "ticket_worker"
-        and settings.autonomy_worker_enabled
+        and (maintenance_profile == "auxiliary" or settings.autonomy_worker_enabled)
         and autonomous_completion_notifier is not None
         else None
     )
