@@ -10,6 +10,8 @@ from jason_runtime.composition import RuntimeSettings
 from jason_runtime.maintenance_process import (
     autonomy_maintenance_enabled,
     http_runtime_settings,
+    ticket_worker_runtime_settings,
+    auxiliary_maintenance_runtime_settings,
     run_autonomy_maintenance_process,
 )
 
@@ -122,3 +124,25 @@ def test_nonexecuting_owner_uat_has_exactly_one_maintenance_issuer(monkeypatch):
     assert serving.owner_uat_session_id == "OwnerUAT20261017Pilot"
     assert serving.owner_uat_worker_enabled is False
     assert autonomy_maintenance_enabled(serving) is False
+
+
+def test_ticket_worker_and_auxiliary_profiles_do_not_duplicate_admission(monkeypatch):
+    monkeypatch.setenv("JASON_OLLAMA_MODEL", "qwen3:1.7b")
+    settings = replace(
+        RuntimeSettings.from_env(),
+        autonomy_worker_enabled=True,
+        autonomy_shadow_enabled=True,
+        autonomy_review_enabled=True,
+        support_repair_autonomy_enabled=True,
+    )
+    ticket = ticket_worker_runtime_settings(settings)
+    auxiliary = auxiliary_maintenance_runtime_settings(settings)
+    assert ticket.autonomy_worker_enabled is True
+    assert ticket.autonomy_shadow_enabled is False
+    assert ticket.autonomy_review_enabled is False
+    assert ticket.support_repair_autonomy_enabled is False
+    assert auxiliary.autonomy_worker_enabled is False
+    assert auxiliary.autonomy_shadow_enabled is True
+    assert auxiliary.autonomy_review_enabled is True
+    assert auxiliary.support_repair_autonomy_enabled is True
+    assert ticket.autonomy_worker_db == auxiliary.autonomy_worker_db
