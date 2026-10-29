@@ -6398,3 +6398,54 @@ def test_legacy_pickup_fingerprint_does_not_resend_on_upgrade():
     )
     worker._notify_ticket_event(work, "pickup", "In Progress")
     assert sends == []
+
+
+def test_live_worker_scan_enqueues_each_unsupported_ticket_without_teams_io(tmp_path):
+    """Unknown intake still enters the durable owner-notification outbox."""
+    base = candidate(title="Unclassified application form data issue")
+    item = replace(
+        base,
+        source_queue="Help Desk I",
+        context={
+            **base.context,
+            "title": "Unclassified application form data issue",
+            "description": "User requires unusual client-specific app troubleshooting",
+            "_jason_source_status_label": "New",
+        },
+    )
+    class NeverSendDuringScan:
+        def __init__(self):
+            self.calls = []
+        def send(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            raise AssertionError("Ticket worker made a synchronous Teams call")
+    notifier = NeverSendDuringScan()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    actions = Actions()
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=Reads(), actions=actions, store=store,
+        promotion_store=PromotionStore(),
+        completion_notifier=notifier,
+        max_unsupported_triage_per_scan=1,
+        interval_seconds=30,
+        monotonic=iter((0.0, 31.0)).__next__,
+    )
+    worker.tick()
+    assert store.classification_state(140933) == "unsupported_capability"
+    rows = store._connection.execute(
+        "SELECT event_type,state,arguments_json FROM autonomy_teams_notification_outbox"
+    ).fetchall()
+    assert len(rows)==1 and rows[0]["event_type"]=="work_blocked"
+    assert rows[0]["state"]=="pending"
+    args=json.loads(rows[0]["arguments_json"])
+    assert "T20260925.9999" in args["summary"]
+    assert "playbook" in args["owner_action"].casefold()
+    assert notifier.calls == []
+    assert actions.calls == []
+    worker.tick()
+    assert store._connection.execute(
+        "SELECT count(*) FROM autonomy_teams_notification_outbox"
+    ).fetchone()[0] == 1
+    assert notifier.calls == []
+    store.close()
