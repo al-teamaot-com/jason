@@ -460,6 +460,24 @@ class SQLiteOperationalWorkStore:
         last_error TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS autonomy_teams_notification_outbox (
+        event_key TEXT PRIMARY KEY,
+        ticket_id INTEGER NOT NULL,
+        playbook_id TEXT NOT NULL,
+        note_title TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        arguments_json TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'pending',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_due_at TEXT NOT NULL,
+        last_error TEXT,
+        message_id TEXT,
+        recorded_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS ix_autonomy_teams_notification_due
+       ON autonomy_teams_notification_outbox(state, next_due_at);
+
     CREATE TABLE IF NOT EXISTS autonomy_unsupported_note_delivery (
         ticket_id INTEGER PRIMARY KEY,
         fingerprint TEXT NOT NULL,
@@ -623,6 +641,68 @@ class SQLiteOperationalWorkStore:
             "ORDER BY updated_at,ticket_id"
         ).fetchall()
         return tuple(self._row(row) for row in rows)
+
+    def list_notification_blocked(self, *, limit: int = 8) -> tuple[OperationalWork, ...]:
+        # Historical verified VulScan completions may have been incorrectly
+        # marked blocked after an unrelated Teams transport exception.
+        rows = self._connection.execute(
+            "SELECT * FROM autonomy_operational_work WHERE phase='blocked' "
+            "AND last_reason LIKE '%autonomous completion Teams notification failed%' "
+            "ORDER BY updated_at,ticket_id LIMIT ?",
+            (min(8, max(1, int(limit))),),
+        ).fetchall()
+        return tuple(self._row(row) for row in rows)
+
+    def queue_teams_notification(
+        self, *, ticket_id: int, playbook_id: str, note_title: str,
+        fingerprint: str, event_type: str, arguments: Mapping[str, Any],
+        now: datetime,
+    ) -> str:
+        event_key = hashlib.sha256(
+            f"{ticket_id}|{playbook_id}|{note_title}|{fingerprint}".encode("utf-8")
+        ).hexdigest()
+        if event_type not in {"work_started", "work_completed", "patch_completed"}:
+            raise ValueError("unsupported owner notification event")
+        serialized = json.dumps(dict(arguments), sort_keys=True)
+        if len(serialized) > 2400:
+            raise ValueError("owner notification exceeds bounded payload")
+        with self._connection:
+            self._connection.execute(
+                "INSERT OR IGNORE INTO autonomy_teams_notification_outbox("
+                "event_key,ticket_id,playbook_id,note_title,fingerprint,"
+                "event_type,arguments_json,state,next_due_at,recorded_at)"
+                " VALUES (?,?,?,?,?,?,?,'pending',?,?)",
+                (event_key, int(ticket_id), playbook_id, note_title, fingerprint,
+                 event_type, serialized, now.isoformat(), now.isoformat()),
+            )
+        return event_key
+
+    def due_teams_notifications(
+        self, *, now: datetime, limit: int = 4,
+    ) -> tuple[Mapping[str, Any], ...]:
+        rows = self._connection.execute(
+            "SELECT * FROM autonomy_teams_notification_outbox "
+            "WHERE state='pending' AND next_due_at<=? "
+            "ORDER BY next_due_at,recorded_at LIMIT ?",
+            (now.isoformat(), min(4, max(1, int(limit)))),
+        ).fetchall()
+        return tuple(dict(r) for r in rows)
+
+    def record_teams_notification_result(
+        self, *, event_key: str, state: str, attempts: int,
+        next_due_at: datetime, last_error: str | None,
+        message_id: str | None = None,
+    ) -> None:
+        if state not in {"pending", "delivered", "unverified", "expired"}:
+            raise ValueError("invalid notification delivery state")
+        with self._connection:
+            self._connection.execute(
+                "UPDATE autonomy_teams_notification_outbox SET "
+                "state=?,attempts=?,next_due_at=?,last_error=?,message_id=? "
+                "WHERE event_key=?",
+                (state,int(attempts),next_due_at.isoformat(),
+                 last_error,message_id,event_key),
+            )
 
     def list_waiting_device_access(self) -> tuple[OperationalWork, ...]:
         rows = self._connection.execute(
@@ -1196,6 +1276,141 @@ class OperationalAutonomyMaintenance:
             return "On Hold"
         return None
 
+    def _drain_teams_notifications(self) -> None:
+        """Out-of-band notification retry; ticket work is never failed by Teams."""
+        if (self.completion_notifier is None
+                or not callable(getattr(self.store, "due_teams_notifications", None))):
+            return
+        now = datetime.now(timezone.utc)
+        try:
+            due = self.store.due_teams_notifications(now=now, limit=4)
+        except Exception as exc:
+            self._audit_diagnostic("ticket_teams_outbox_read_failed", {
+                "error_type": type(exc).__name__,
+            })
+            return
+        for row in due:
+            event_key = str(row["event_key"])
+            attempts = int(row["attempts"]) + 1
+            # Old notifications are retained as explicit undelivered evidence,
+            # not sent weeks later as if the ticket had just started.
+            try:
+                created = datetime.fromisoformat(str(row["recorded_at"]))
+                if now - created > timedelta(hours=24):
+                    self.store.record_teams_notification_result(
+                        event_key=event_key, state="expired", attempts=attempts,
+                        next_due_at=now + timedelta(days=365),
+                        last_error="older_than_24h",
+                    )
+                    continue
+            except (ValueError, TypeError):
+                continue
+            try:
+                arguments = json.loads(str(row["arguments_json"]))
+                result = self.completion_notifier.send(
+                    str(row["event_type"]), **arguments,
+                )
+                if not isinstance(result, Mapping):
+                    raise OperationalAutonomyError("Teams receipt missing")
+                message_id = str(result.get("message_id") or "").strip()
+                if not message_id:
+                    raise OperationalAutonomyError("Teams message reference missing")
+                synthetic = result.get("message_id_synthetic",
+                                       message_id.startswith("accepted:"))
+                if type(synthetic) is not bool:
+                    raise OperationalAutonomyError("Teams receipt type malformed")
+                state = "unverified" if synthetic else "delivered"
+                self.store.record_teams_notification_result(
+                    event_key=event_key, state=state, attempts=attempts,
+                    next_due_at=now + timedelta(days=365),
+                    last_error=None, message_id=message_id,
+                )
+                if not synthetic:
+                    try:
+                        self.store.remember_note_fingerprint(
+                            int(row["ticket_id"]), str(row["playbook_id"]),
+                            str(row["note_title"]), str(row["fingerprint"]),
+                        )
+                    except Exception:
+                        # Outbox delivered marker is durable. A secondary
+                        # fingerprint failure cannot authorize a duplicate.
+                        pass
+                if self.audit is not None:
+                    try:
+                        self._audit_diagnostic("ticket_teams_outbox_result", {
+                            "ticket_id": int(row["ticket_id"]),
+                            "event_type": str(row["event_type"]), "state": state,
+                        })
+                    except Exception:
+                        pass
+            except Exception as exc:
+                # A failed provider transport is never authority to reverse
+                # or retry the successful underlying Autotask/endpoint action.
+                retry_seconds = min(3600, 300 * (2 ** min(attempts - 1, 4)))
+                self.store.record_teams_notification_result(
+                    event_key=event_key, state="pending", attempts=attempts,
+                    next_due_at=now + timedelta(seconds=retry_seconds),
+                    last_error=type(exc).__name__,
+                )
+                if self.audit is not None:
+                    try:
+                        self._audit_diagnostic("ticket_teams_notification_failed", {
+                            "ticket_id": int(row["ticket_id"]),
+                            "event_type": str(row["event_type"]),
+                            "attempts": attempts, "error_type": type(exc).__name__,
+                        })
+                    except Exception:
+                        pass
+
+    def _reconcile_completed_notification_blocks(self) -> None:
+        """Recover verified PSA completions stranded by historic Teams failures."""
+        selector = getattr(self.store, "list_notification_blocked", None)
+        if not callable(selector):
+            return
+        for work in selector(limit=4):
+            try:
+                data = self._read_data("service.ticket.read", {
+                    "resource_id": work.ticket_id,
+                })
+                items = data.get("items")
+                if not isinstance(items, list) or len(items) != 1:
+                    raise OperationalAutonomyError(
+                        "completion reconciliation requires exactly one ticket"
+                    )
+                ticket = items[0]
+                if not isinstance(ticket, Mapping):
+                    raise OperationalAutonomyError("ticket readback malformed")
+                if (int(ticket.get("id") or 0) != work.ticket_id
+                        or int(ticket.get("companyID") or 0) != work.company_id
+                        or str(ticket.get("ticketNumber") or "") != work.ticket_number):
+                    raise OperationalAutonomyError(
+                        "completion reconciliation ticket/company mismatch"
+                    )
+                status = str(ticket.get("status") or "").casefold()
+                if not (ticket.get("completedDate") and status in {"5", "complete"}):
+                    # Never claim completion without authoritative PSA agreement.
+                    self._audit_diagnostic("ticket_teams_block_not_psa_complete", {
+                        "ticket_id": work.ticket_id,
+                    })
+                    continue
+                self.store.put(self._replace(
+                    work, phase="complete", job_uid=None, component_uid=None,
+                    last_reason=(
+                        "Autotask completion date, status, company and ticket "
+                        "readback verified. Prior Teams delivery failure was "
+                        "not a ticket remediation failure."
+                    ),
+                ))
+                self._notify_ticket_event(work, "status_change", "Complete")
+                self._audit_diagnostic("ticket_teams_block_completion_reconciled", {
+                    "ticket_id": work.ticket_id,
+                })
+            except Exception as exc:
+                self._audit_diagnostic("ticket_teams_block_reconcile_failed", {
+                    "ticket_id": work.ticket_id,
+                    "error_type": type(exc).__name__,
+                })
+
     def _notify_ticket_event(self, work: OperationalWork, event: str, status: str) -> None:
         """Best-effort owner Teams card only after Autotask readback verification.
 
@@ -1229,6 +1444,28 @@ class OperationalAutonomyMaintenance:
             f"Ticket: {work.ticket_number} | Device: {work.hostname or 'Not linked'} | "
             f"Status: {status} | Action: {'Picked up by Jason' if category == 'pickup' else 'Completed by Jason'}"
         )
+        if callable(getattr(self.store, "queue_teams_notification", None)):
+            try:
+                self.store.queue_teams_notification(
+                    ticket_id=work.ticket_id,
+                    playbook_id=work.playbook_id,
+                    note_title=note_title,
+                    fingerprint=fingerprint,
+                    event_type=event_type,
+                    arguments={
+                        "work_id": work.ticket_number[:80],
+                        "work_title": work.title[:180],
+                        "summary": summary[:400],
+                    },
+                    now=datetime.now(timezone.utc),
+                )
+                self._drain_teams_notifications()
+            except Exception:
+                # Even a disk-full outbox error must not undo PSA verification.
+                pass
+            return
+        # Backward-compatible lightweight unit test store: all real workers
+        # must provide the durable outbox methods above.
         try:
             self.completion_notifier.send(
                 event_type,
@@ -1956,6 +2193,9 @@ class OperationalAutonomyMaintenance:
         if now < self._next_due:
             return
         self._next_due = now + self.interval_seconds
+        # Independent delivery must proceed even when Autotask discovery is
+        # temporarily unavailable. A Teams outage never changes ticket state.
+        self._drain_teams_notifications()
 
         try:
             candidates = tuple(self.queue_source.reconcile_candidates())
@@ -1965,6 +2205,7 @@ class OperationalAutonomyMaintenance:
             return
         by_id = {int(item.resource_id): item for item in candidates}
         self._reconcile_orphaned_waiting_device_rows(by_id)
+        self._reconcile_completed_notification_blocks()
         if self.client_questions is not None and self._scope_is_promoted(CLIENT_QUESTION_SCOPE):
             # Only a fresh client-created ticket with a truly missing
             # description may trigger this initial question automatically.
@@ -7649,18 +7890,37 @@ class OperationalAutonomyMaintenance:
             == fingerprint
         ):
             return
-        self.completion_notifier.send(
-            "patch_completed",
-            ticket_number=work.ticket_number,
-            hostname=work.hostname,
-            patch_summary=patch_summary[:300],
-        )
-        self.store.remember_note_fingerprint(
-            work.ticket_id,
-            work.playbook_id,
-            note_title,
-            fingerprint,
-        )
+        arguments = {
+            "ticket_number": work.ticket_number[:80],
+            "hostname": work.hostname[:120],
+            "patch_summary": patch_summary[:300],
+        }
+        if callable(getattr(self.store, "queue_teams_notification", None)):
+            try:
+                self.store.queue_teams_notification(
+                    ticket_id=work.ticket_id,
+                    playbook_id=work.playbook_id,
+                    note_title=note_title,
+                    fingerprint=fingerprint,
+                    event_type="patch_completed",
+                    arguments=arguments,
+                    now=datetime.now(timezone.utc),
+                )
+                self._drain_teams_notifications()
+            except Exception:
+                pass  # Verified PSA state is authoritative, not Teams transport.
+            return
+        try:
+            self.completion_notifier.send("patch_completed", **arguments)
+            self.store.remember_note_fingerprint(
+                work.ticket_id, work.playbook_id, note_title, fingerprint,
+            )
+        except Exception as exc:
+            self._audit_diagnostic("ticket_teams_notification_failed", {
+                "ticket_id": work.ticket_id,
+                "event_type": "patch_completed",
+                "error_type": type(exc).__name__,
+            })
 
     def _complete(self, work: OperationalWork, stdout: str) -> None:
         summary = self._bounded_health_summary(stdout)
