@@ -1109,3 +1109,32 @@ def test_worker_separate_contact_read_port_verifies_same_company_context(tmp_pat
     assert "service.contact.read" not in [cap for cap, _ in reads.calls]
     assert actions.calls == []
     store.close()
+
+
+def test_worker_contact_company_conflict_is_not_mislabeled_device_identity(tmp_path):
+    source = ticket(title="Account issue", queue="Jason", status="In Progress")
+    source = replace(source, context={
+        **source.context, "contactID": 42, "configurationItemID": None,
+        "description": "Microsoft 365 account question",
+    })
+    reads = ReadStub()
+    class ConflictingContactPort:
+        def execute(self, capability, arguments):
+            assert capability == "service.contact.read"
+            assert arguments == {"resource_id": 42}
+            return {"status": "succeeded", "evidence": {"data": {
+                "item": {"id": 42, "companyID": 999},
+            }}}
+    worker, store, actions = make_worker(tmp_path, [source], reads)
+    worker.contact_reads = ConflictingContactPort()
+    worker.tick()
+    record = store.unsupported_triage(200001)
+    assert record["state"] == "needs_company_identity"
+    assert record["category"] == "account_service"
+    assert record["last_error"] == "ValueError"
+    assert "contact" in record["next_step"].casefold()
+    assert "needs device identity" not in record["evidence"]["note_draft"].casefold()
+    assert all(cap not in {"service.configuration.read", "endpoint.device.read"}
+               for cap, _ in reads.calls)
+    assert actions.calls == []
+    store.close()
