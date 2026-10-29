@@ -3,6 +3,13 @@
 !implementation/**
 !config/
 !config/**
+# Exactly one reviewed JSON v1 candidate is packaged for the optional
+# disabled-by-default Windows Time shadow observer.
+!docs/
+!docs/playbooks/
+!docs/playbooks/json/
+!docs/playbooks/json/candidates/
+!docs/playbooks/json/candidates/windows_time_source-0.1.0-jsonpreview.json
 !infrastructure/
 !infrastructure/jason-mcp/
 !infrastructure/jason-mcp/Dockerfile
