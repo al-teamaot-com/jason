@@ -12,7 +12,10 @@ ownership guards still apply. It does not claim assigned technician tickets
 or non-Jason In Progress discovery tickets.
 
 ## Evidence and authorization boundaries
-- Governed exact ticket and note history reads, both ticket-ID bound.
+- Use the exact-ID, authoritative ticket snapshot already obtained by the
+  governed queue search. Do not call service.ticket.read: the standing
+  autonomous-worker information-release policy intentionally does not permit
+  that separate capability. Governed notes-history read remains ticket-ID bound.
 - Verify same-company ticket and active configuration item; require exact
   DRMM UID and matching endpoint identity/hostname before device diagnostics.
   No cross-tenant guessing or device-name inference.
@@ -30,6 +33,10 @@ count, checked-at, next-due and error type. Outcomes include read_only_assessed,
 needs_company_identity, needs_device_identity, waiting_device_access,
 diagnostic_not_applicable, needs_security_review, needs_playbook_review,
 governance_blocked, read_failed_retry and needs_human_review.
+
+Old triage rows recorded by the earlier implementation as governance_blocked
+are re-evaluated once on upgrade via a safe, versioned evidence marker;
+production SQLite rows are not edited directly.
 
 A successful read-only assessment refreshes daily or upon source version
 change; offline tickets retry after 15 minutes, missing identity after four

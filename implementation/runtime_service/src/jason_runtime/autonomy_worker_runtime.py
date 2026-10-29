@@ -111,6 +111,10 @@ from .gpt_insights import (
     render_insight as render_gpt_insight,
 )
 from .unsupported_ticket_triage import gather as gather_unsupported_triage, category_for as unsupported_triage_category
+
+# Force a single safe re-evaluation of old read-policy-denied rows after an
+# implementation change, without editing production SQLite state manually.
+UNSUPPORTED_TRIAGE_LOGIC_VERSION = "queue_snapshot_v2"
 from .managed_ticket_notes import (
     GPT_INSIGHTS_TITLE,
     exact_named_note,
@@ -2624,7 +2628,13 @@ class OperationalAutonomyMaintenance:
             ticket_id = int(candidate.resource_id)
             version = str(candidate.source_version or "").strip() or None
             previous = self.store.unsupported_triage(ticket_id)
-            if previous is not None and previous.get("source_version") == version:
+            if (
+                previous is not None
+                and previous.get("source_version") == version
+                and isinstance(previous.get("evidence"), Mapping)
+                and previous["evidence"].get("triage_logic_version")
+                == UNSUPPORTED_TRIAGE_LOGIC_VERSION
+            ):
                 try:
                     due = datetime.fromisoformat(str(previous["next_due_at"]))
                     if due.tzinfo is not None and due > now:
@@ -2643,13 +2653,17 @@ class OperationalAutonomyMaintenance:
                     ticket_id=ticket_id,
                     company_id=int(candidate.context.get("companyID") or 0),
                     configuration_item_id=(int(ci) if ci not in (None, "", 0, "0") else None),
+                    ticket_snapshot=candidate.context,
                     title=title,
                     unsupported_reason=unsupported_reason,
                     read=self._read_data,
                 )
                 state = result.state
                 category = result.category
-                evidence = result.evidence
+                evidence = {
+                    "triage_logic_version": UNSUPPORTED_TRIAGE_LOGIC_VERSION,
+                    **result.evidence,
+                }
                 next_step = result.next_step
                 attempts = 0
                 hours = (24 if state == "read_only_assessed" else
@@ -2693,7 +2707,10 @@ class OperationalAutonomyMaintenance:
                         "Governed evidence read failed; bounded retry is scheduled."
                     )
                     next_due = now + timedelta(minutes=min(60, 5 * 2 ** min(attempts - 1, 4)))
-                evidence = {"ticket_id": ticket_id}
+                evidence = {
+                    "ticket_id": ticket_id,
+                    "triage_logic_version": UNSUPPORTED_TRIAGE_LOGIC_VERSION,
+                }
             self.store.record_unsupported_triage(
                 ticket_id=ticket_id,
                 ticket_number=str(candidate.context.get("ticketNumber") or ticket_id),

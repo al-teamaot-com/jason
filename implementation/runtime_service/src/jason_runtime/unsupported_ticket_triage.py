@@ -140,18 +140,24 @@ def gather(
     ticket_id: int,
     company_id: int,
     configuration_item_id: int | None,
+    ticket_snapshot: Mapping[str, Any],
     title: str,
     unsupported_reason: str,
     read: Callable[[str, Mapping[str, Any]], Mapping[str, Any]],
 ) -> TriageResult:
-    """Run only exact-ID governed reads; never infer endpoint identity from title."""
+    """Verify authoritative queue-search snapshot; run only allowed governed reads.
+
+    The production worker read policy intentionally denies service.ticket.read.
+    Queue discovery has already fetched the current ticket using the governed
+    service.ticket.search capability; use that exact snapshot rather than
+    silently requiring any new information-release authority.
+    """
     ticket_id = _positive_id(ticket_id)
     category = category_for(title, unsupported_reason)
     next_step = NEXT_STEPS[category]
     evidence: dict[str, Any] = {"ticket_id": ticket_id}
-    data = read("service.ticket.read", {"ticket_id": ticket_id})
-    ticket = _item(data)
-    if ticket is None or _positive_id(ticket.get("id")) != ticket_id:
+    ticket = ticket_snapshot
+    if not isinstance(ticket, Mapping) or _positive_id(ticket.get("id")) != ticket_id:
         raise ValueError("ticket_readback_mismatch")
     # Missing company on an otherwise real ticket is a human identity gap,
     # not grounds to infer a tenant from a CI or hostname.

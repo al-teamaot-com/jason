@@ -29,14 +29,11 @@ class ReadStub:
     def execute(self, capability, arguments):
         self.calls.append((capability, dict(arguments)))
         if capability == "service.ticket.read":
+            raise AssertionError("worker has no service.ticket.read authority")
+        if capability == "service.ticket.notes.search":
             if self.fail_next_ticket:
                 self.fail_next_ticket = False
                 return {"status": "denied", "error_code": "PROVIDER_TRANSPORT_FAILURE"}
-            content = {"items": [{
-                "id": arguments["ticket_id"], "companyID": self.company_id,
-                "configurationItemID": 1100,
-            }]}
-        elif capability == "service.ticket.notes.search":
             content = {"items": [{"id": 8, "title": "Ticket arrived"}]}
         elif capability == "service.configuration.read":
             content = {"item": {
@@ -126,13 +123,14 @@ def test_gather_exact_same_company_identity_and_license_whitelist():
         result = reads.execute(capability, args)
         return dict(result["evidence"]["data"])
 
-    result = gather(
+    result = gather(ticket_snapshot={"id":200001,"companyID":777,"configurationItemID":1100},
         ticket_id=200001, company_id=777, configuration_item_id=1100,
         title="License Status", unsupported_reason="windows_licensing_diagnostics_candidate",
         read=read,
     )
     assert result.state == "read_only_assessed"
     assert result.evidence["company_verified"] is True
+    assert all(cap != "service.ticket.read" for cap, _ in reads.calls)
     assert result.evidence["rmm_identity_verified"] is True
     assert result.evidence["notes_observed"] == 1
     assert result.evidence["diagnostic"] == [{"Name": "Windows 11 Pro", "LicenseStatus": 1}]
@@ -151,7 +149,7 @@ def test_unverified_endpoint_blocks_powershell_and_fails_closed():
         return reads.execute(capability, args)["evidence"]["data"]
 
     with pytest.raises(ValueError, match="endpoint_identity_mismatch"):
-        gather(ticket_id=200001, company_id=777, configuration_item_id=1100,
+        gather(ticket_snapshot={"id":200001,"companyID":777,"configurationItemID":1100}, ticket_id=200001, company_id=777, configuration_item_id=1100,
                title="License Status", unsupported_reason="", read=read)
     assert not any(cap == "endpoint.powershell.read" for cap, _ in reads.calls)
 
@@ -162,9 +160,9 @@ def test_wrong_company_fails_before_configuration_or_endpoint_reads():
         return reads.execute(capability, args)["evidence"]["data"]
 
     with pytest.raises(ValueError, match="ticket_company_mismatch"):
-        gather(ticket_id=200001, company_id=888, configuration_item_id=1100,
+        gather(ticket_snapshot={"id":200001,"companyID":777,"configurationItemID":1100}, ticket_id=200001, company_id=888, configuration_item_id=1100,
                title="License Status", unsupported_reason="", read=read)
-    assert [cap for cap, _ in reads.calls] == ["service.ticket.read"]
+    assert reads.calls == []
 
 
 def test_offline_ticket_never_executes_powershell():
@@ -173,7 +171,7 @@ def test_offline_ticket_never_executes_powershell():
     def read(capability, args):
         return reads.execute(capability, args)["evidence"]["data"]
 
-    result = gather(ticket_id=200001, company_id=777, configuration_item_id=1100,
+    result = gather(ticket_snapshot={"id":200001,"companyID":777,"configurationItemID":1100}, ticket_id=200001, company_id=777, configuration_item_id=1100,
                     title="License Status", unsupported_reason="", read=read)
     assert result.state == "waiting_device_access"
     assert not any(cap == "endpoint.powershell.read" for cap, _ in reads.calls)
@@ -185,7 +183,7 @@ def test_non_windows_device_does_not_receive_windows_command():
     def read(capability, args):
         return reads.execute(capability, args)["evidence"]["data"]
 
-    result = gather(ticket_id=200001, company_id=777, configuration_item_id=1100,
+    result = gather(ticket_snapshot={"id":200001,"companyID":777,"configurationItemID":1100}, ticket_id=200001, company_id=777, configuration_item_id=1100,
                     title="License Status", unsupported_reason="", read=read)
     assert result.state == "diagnostic_not_applicable"
     assert not any(cap == "endpoint.powershell.read" for cap, _ in reads.calls)
@@ -311,7 +309,7 @@ def test_missing_company_id_is_a_human_identity_outcome(tmp_path):
     result = store.unsupported_triage(200001)
     assert result["state"] == "needs_company_identity"
     assert result["next_step"].startswith("Verify the customer/company")
-    assert [cap for cap, _ in reads.calls] == ["service.ticket.read"]
+    assert reads.calls == []
     assert actions.calls == []
     store.close()
 
@@ -336,7 +334,7 @@ def test_security_and_generic_cases_never_assert_resolution(tmp_path, title, exp
 def test_authorization_denial_is_persisted_not_retried_each_scan(tmp_path):
     class DenyingRead(ReadStub):
         def execute(self, capability, arguments):
-            if capability == "service.ticket.read":
+            if capability == "service.ticket.notes.search":
                 self.calls.append((capability, arguments))
                 return {"status": "denied", "error_code": "INFORMATION_RELEASE_DENIED"}
             return super().execute(capability, arguments)
@@ -348,7 +346,7 @@ def test_authorization_denial_is_persisted_not_retried_each_scan(tmp_path):
     assert result["state"] == "governance_blocked"
     assert result["last_error"] == "OperationalAutonomyError"
     worker.tick()
-    assert sum(cap == "service.ticket.read" for cap, _ in reads.calls) == 1
+    assert sum(cap == "service.ticket.notes.search" for cap, _ in reads.calls) == 1
     assert actions.calls == []
     store.close()
 
@@ -390,15 +388,54 @@ def test_repeated_provider_errors_signal_human_review_without_remediation(tmp_pa
     store.close()
 
 
-def test_company_conflict_is_identity_review_not_provider_retry(tmp_path):
+def test_ticket_id_conflict_in_governed_search_snapshot_is_identity_review(tmp_path):
     reads = ReadStub()
-    reads.company_id = 999
-    worker, store, actions = make_worker(tmp_path, [ticket()], reads)
+    item = ticket()
+    # QueueCandidate must agree with the signed service.ticket.search record.
+    item = replace(item, context={**item.context, "id": 200002})
+    worker, store, actions = make_worker(tmp_path, [item], reads)
     worker.tick()
     result = store.unsupported_triage(200001)
     assert result["state"] == "needs_device_identity"
     assert result["last_error"] == "ValueError"
     assert result["attempts"] == 1
-    assert [name for name, _ in reads.calls] == ["service.ticket.read"]
+    assert reads.calls == []
     assert actions.calls == []
     store.close()
+
+
+def test_prior_production_policy_denial_is_reevaluated_once_after_upgrade(tmp_path):
+    reads = ReadStub()
+    worker, store, actions = make_worker(tmp_path, [ticket()], reads)
+    store.record_unsupported_triage(
+        ticket_id=200001, ticket_number="T20261029.200001",
+        source_version="v1", category="windows_licensing",
+        state="governance_blocked", evidence={"ticket_id": 200001},
+        next_step="Governed ticket.read denied under previous code",
+        attempts=1, checked_at="2026-10-29T10:00:00+00:00",
+        next_due_at="2026-10-30T10:00:00+00:00",
+        last_error="OperationalAutonomyError",
+    )
+    worker.tick()
+    row = store.unsupported_triage(200001)
+    assert row["state"] == "read_only_assessed"
+    assert row["evidence"]["triage_logic_version"] == "queue_snapshot_v2"
+    assert all(cap != "service.ticket.read" for cap, _ in reads.calls)
+    first_count = len(reads.calls)
+    worker.tick()
+    assert len(reads.calls) == first_count
+    assert actions.calls == []
+    store.close()
+
+
+def test_snapshot_path_preserves_existing_autonomous_information_release_boundary():
+    from orchestrator.autotask_information_authorizer import (
+        _AUTONOMOUS_WORKER_READS, SERVICE_TICKET_READ,
+        SERVICE_TICKET_SEARCH, SERVICE_TICKET_NOTES_SEARCH,
+        SERVICE_CONFIGURATION_READ,
+    )
+
+    assert SERVICE_TICKET_SEARCH in _AUTONOMOUS_WORKER_READS
+    assert SERVICE_TICKET_NOTES_SEARCH in _AUTONOMOUS_WORKER_READS
+    assert SERVICE_CONFIGURATION_READ in _AUTONOMOUS_WORKER_READS
+    assert SERVICE_TICKET_READ not in _AUTONOMOUS_WORKER_READS
