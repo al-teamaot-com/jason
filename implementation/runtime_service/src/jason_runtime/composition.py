@@ -350,6 +350,8 @@ from .procurement_teams_flow import (
 from .autonomy_shadow_composition import build_autonomy_shadow_maintenance
 from .autonomy_targeted_wake_runtime import TicketAttentionRelay
 from .autonomy_worker_composition import build_autonomy_worker_maintenance
+from .autonomy_teams_notification_maintenance import TicketOwnerNotificationMaintenance
+from .autonomy_worker_runtime import SQLiteOperationalWorkStore
 from .daily_drmm_alert_reconciliation_composition import build_daily_drmm_alert_reconciliation_maintenance
 from .windows_time_source_shadow_composition import build_windows_time_source_shadow_maintenance
 from .autonomy_targeted_wake_runtime import CompositeAutonomyMaintenance
@@ -2808,10 +2810,26 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             gateway_url=settings.teams_gateway_internal_url,
             token_file=settings.teams_proactive_token_file,
         )
+    # The ticket worker only persists Teams intents. Auxiliary is a separate
+    # supervised runtime process; slow Teams providers must never delay ticket
+    # discovery, admission, readback verification or scan heartbeats.
+    ticket_owner_notification_maintenance = (
+        TicketOwnerNotificationMaintenance(
+            store=SQLiteOperationalWorkStore(settings.autonomy_worker_db),
+            notifier=autonomous_completion_notifier,
+            audit=reflection_audit,
+            interval_seconds=15,
+        )
+        if maintenance_profile != "ticket_worker"
+        and settings.autonomy_worker_enabled
+        and autonomous_completion_notifier is not None
+        else None
+    )
     if maintenance_profile == "ticket_worker":
         autonomy_maintenance = CompositeAutonomyMaintenance(operational_autonomy_maintenance)
     elif maintenance_profile == "auxiliary":
         autonomy_maintenance = CompositeAutonomyMaintenance(
+            ticket_owner_notification_maintenance,
             release_mobile_maintenance,
             owner_uat_maintenance,
             universal_plan_maintenance,
@@ -2831,6 +2849,7 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         )
     else:
         autonomy_maintenance = CompositeAutonomyMaintenance(
+            ticket_owner_notification_maintenance,
             release_mobile_maintenance,
             owner_uat_maintenance,
             universal_plan_maintenance,

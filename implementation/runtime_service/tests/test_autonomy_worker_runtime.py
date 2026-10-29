@@ -6398,3 +6398,171 @@ def test_legacy_pickup_fingerprint_does_not_resend_on_upgrade():
     )
     worker._notify_ticket_event(work, "pickup", "In Progress")
     assert sends == []
+
+
+def test_live_worker_scan_enqueues_each_unsupported_ticket_without_teams_io(tmp_path):
+    """Unknown intake still enters the durable owner-notification outbox."""
+    base = candidate(title="Unclassified application form data issue")
+    item = replace(
+        base,
+        source_queue="Help Desk I",
+        context={
+            **base.context,
+            "title": "Unclassified application form data issue",
+            "description": "User requires unusual client-specific app troubleshooting",
+            "_jason_source_status_label": "New",
+        },
+    )
+    class NeverSendDuringScan:
+        def __init__(self):
+            self.calls = []
+        def send(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            raise AssertionError("Ticket worker made a synchronous Teams call")
+    notifier = NeverSendDuringScan()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    actions = Actions()
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(item),
+        reads=Reads(), actions=actions, store=store,
+        promotion_store=PromotionStore(),
+        completion_notifier=notifier,
+        max_unsupported_triage_per_scan=1,
+        interval_seconds=30,
+        monotonic=iter((0.0, 31.0)).__next__,
+    )
+    worker.tick()
+    assert store.classification_state(140933) == "unsupported_capability"
+    rows = store._connection.execute(
+        "SELECT event_type,state,arguments_json FROM autonomy_teams_notification_outbox"
+    ).fetchall()
+    assert len(rows)==1 and rows[0]["event_type"]=="work_blocked"
+    assert rows[0]["state"]=="pending"
+    args=json.loads(rows[0]["arguments_json"])
+    assert "T20260925.9999" in args["summary"]
+    assert "playbook" in args["owner_action"].casefold()
+    assert notifier.calls == []
+    assert actions.calls == []
+    worker.tick()
+    assert store._connection.execute(
+        "SELECT count(*) FROM autonomy_teams_notification_outbox"
+    ).fetchone()[0] == 1
+    assert notifier.calls == []
+    store.close()
+
+
+def test_backupiq_stuck_active_install_job_escalates_without_redispatch(tmp_path, monkeypatch):
+    """Live regression: provider active for 2+h must not block a slot forever."""
+    from datetime import timedelta
+    class JobReads:
+        def execute(self, capability, arguments):
+            assert capability == "automation.job.read"
+            assert arguments == {"resource_id": "original-job-1"}
+            return {
+                "status": "succeeded",
+                "evidence": {"data": {"job": {
+                    "status": "active", "resource_id": "original-job-1",
+                }}},
+            }
+    actions=Actions()
+    store=SQLiteOperationalWorkStore(tmp_path / "stuck-job.sqlite3")
+    worker=OperationalAutonomyMaintenance(
+        queue_source=QueueSource(backupiq_candidate()),
+        reads=JobReads(), actions=actions, store=store,
+        promotion_store=PromotionStore(promoted=("backupiq_endpoint_backup",)),
+        interval_seconds=60,
+    )
+    started=(datetime.now(timezone.utc)-timedelta(hours=2,minutes=30)).isoformat()
+    work=OperationalWork(
+        ticket_id=141185,ticket_number="T20260925.0003",
+        title=backupiq_candidate().context["title"],
+        playbook_id="backupiq_endpoint_backup",source_queue="Jason",
+        company_id=333,configuration_item_id=1259,device_uid="backup-device-1",
+        hostname="APD-50399",phase="backupiq_reinstall_wait",
+        job_uid="original-job-1",component_uid="original-component-1",
+        repair_attempts=1,
+        last_reason=f"backupiq_reinstall_started_at={started}; Installer dispatched.",
+    )
+    store.put(work)
+    observed=[]
+    monkeypatch.setattr(worker,"_write_note",lambda *args,**kwargs:observed.append((args,kwargs)))
+    worker._poll_backupiq_reinstall(work)
+    final=store.get(work.ticket_id)
+    assert final is not None and final.phase=="escalated"
+    assert final.job_uid=="original-job-1"
+    assert final.component_uid=="original-component-1"
+    assert final.repair_attempts==1
+    assert len(observed)==1
+    note=observed[0][0][1]
+    assert "original-job-1" in note
+    assert "nonterminal" in note
+    assert "No second reinstall" in note
+    assert not any(x[1]=="automation.component.execute" for x in actions.calls)
+    assert [args["payload"] for _,cap,args in actions.calls if cap=="service.ticket.update"] == [{
+        "id":141185,"queueID":"Help Desk I","status":"Human Review",
+    }]
+    store.close()
+
+
+def test_backupiq_recent_active_install_job_keeps_polling_without_mutation(tmp_path, monkeypatch):
+    from datetime import timedelta
+    class JobReads:
+        def execute(self, capability, arguments):
+            assert capability=="automation.job.read"
+            return {"status":"succeeded","evidence":{"data":{"job":{"status":"running"}}}}
+    actions=Actions()
+    store=SQLiteOperationalWorkStore(tmp_path / "recent-job.sqlite3")
+    worker=OperationalAutonomyMaintenance(
+        queue_source=QueueSource(backupiq_candidate()),
+        reads=JobReads(),actions=actions,store=store,
+        promotion_store=PromotionStore(promoted=("backupiq_endpoint_backup",)),
+        interval_seconds=60,
+    )
+    started=(datetime.now(timezone.utc)-timedelta(minutes=30)).isoformat()
+    work=OperationalWork(
+        ticket_id=141185,ticket_number="T20260925.0003",
+        title=backupiq_candidate().context["title"],
+        playbook_id="backupiq_endpoint_backup",source_queue="Jason",
+        company_id=333,configuration_item_id=1259,
+        device_uid="backup-device-1",hostname="APD-50399",
+        phase="backupiq_reinstall_wait",job_uid="original-job-1",
+        component_uid="original-component-1",repair_attempts=1,
+        last_reason=f"backupiq_reinstall_started_at={started}; Installer dispatched.",
+    )
+    store.put(work)
+    monkeypatch.setattr(worker,"_write_note",lambda *args,**kw:pytest.fail("no note while job fresh"))
+    worker._poll_backupiq_reinstall(work)
+    assert store.get(work.ticket_id).phase=="backupiq_reinstall_wait"
+    assert actions.calls==[]
+    store.close()
+
+
+def test_backupiq_nonterminal_job_without_dispatch_timestamp_avoids_infinite_wait(tmp_path,monkeypatch):
+    class JobReads:
+        def execute(self, capability, arguments):
+            assert capability=="automation.job.read"
+            return {"status":"succeeded","evidence":{"data":{"job":{"status":"queued"}}}}
+    actions=Actions()
+    store=SQLiteOperationalWorkStore(tmp_path / "missing-baseline.sqlite3")
+    worker=OperationalAutonomyMaintenance(
+        queue_source=QueueSource(backupiq_candidate()),
+        reads=JobReads(),actions=actions,store=store,
+        promotion_store=PromotionStore(promoted=("backupiq_endpoint_backup",)),
+        interval_seconds=60,
+    )
+    work=OperationalWork(
+        ticket_id=141185,ticket_number="T20260925.0003",
+        title=backupiq_candidate().context["title"],
+        playbook_id="backupiq_endpoint_backup",source_queue="Jason",
+        company_id=333,configuration_item_id=1259,device_uid="backup-device-1",
+        hostname="APD-50399",phase="backupiq_reinstall_wait",
+        job_uid="original-job-1",component_uid="original-component-1",
+        repair_attempts=1,last_reason="Original provider job present, dispatch timestamp absent.",
+    )
+    store.put(work)
+    monkeypatch.setattr(worker,"_write_note",lambda *args,**kw:pytest.fail("no guessing note"))
+    worker._poll_backupiq_reinstall(work)
+    assert store.get(work.ticket_id).phase=="escalated"
+    assert store.get(work.ticket_id).job_uid=="original-job-1"
+    assert not any(x[1]=="automation.component.execute" for x in actions.calls)
+    store.close()
