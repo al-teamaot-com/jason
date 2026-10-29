@@ -28,6 +28,91 @@ SHA_B = "b" * 40
 
 
 class ReleaseManagerHostRunnerTests(unittest.TestCase):
+    def test_historical_release_does_not_require_future_watchdog(self):
+        with tempfile.TemporaryDirectory() as td, patch.object(runner, "RELEASE_ROOT", Path(td)):
+            old = Path(td) / SHA_B
+            user = old / "infrastructure/openclaw-operations/systemd/user"
+            system = old / "infrastructure/openclaw-operations/systemd"
+            user.mkdir(parents=True)
+            system.mkdir(parents=True, exist_ok=True)
+            (user / "jason-release-manager.timer").write_text("[Timer]\n")
+            (system / "jason-delegation-maintenance.timer").write_text("[Timer]\n")
+            requirements = runner.release_scheduled_control_units(SHA_B)
+            self.assertEqual(requirements, (
+                ("jason-release-manager.timer",),
+                ("jason-delegation-maintenance.timer",),
+            ))
+            active = {"jason-release-manager.timer", "jason-delegation-maintenance.timer"}
+            with patch.object(runner, "unit_active",
+                              side_effect=lambda name, *, user: name in active):
+                states = runner.scheduled_control_alignment(SHA_B)
+            self.assertEqual(states, {name: "active" for name in active})
+            # A candidate-introduced watchdog left active after rollback fails.
+            active.add("jason-production-drift-watchdog.timer")
+            with patch.object(runner, "unit_active",
+                              side_effect=lambda name, *, user: name in active):
+                with self.assertRaisesRegex(runner.ReleaseManagerError,
+                                            "undeclared release control timer"):
+                    runner.scheduled_control_alignment(SHA_B)
+
+    def test_new_release_requires_only_its_declared_control_timers(self):
+        import json
+        with tempfile.TemporaryDirectory() as td, patch.object(runner, "RELEASE_ROOT", Path(td)):
+            candidate = Path(td) / SHA_A
+            policy = candidate / "config/production-desired-state.json"
+            policy.parent.mkdir(parents=True)
+            policy.write_text(json.dumps({
+                "schema_version": "1.0",
+                "required_user_units": ["jason-release-manager.timer"],
+                "required_system_units": ["jason-production-drift-watchdog.timer"],
+            }))
+            user = candidate / "infrastructure/openclaw-operations/systemd/user"
+            system = candidate / "infrastructure/openclaw-operations/systemd"
+            user.mkdir(parents=True)
+            system.mkdir(parents=True, exist_ok=True)
+            (user / "jason-release-manager.timer").write_text("[Timer]\n")
+            (system / "jason-production-drift-watchdog.timer").write_text("[Timer]\n")
+            self.assertEqual(runner.release_scheduled_control_units(SHA_A),
+                             (("jason-release-manager.timer",),
+                              ("jason-production-drift-watchdog.timer",)))
+            with patch.object(runner, "unit_active", return_value=False):
+                with self.assertRaisesRegex(runner.ReleaseManagerError,
+                                            "required release control timer"):
+                    runner.scheduled_control_alignment(SHA_A)
+            (system / "jason-production-drift-watchdog.timer").unlink()
+            with self.assertRaisesRegex(runner.ReleaseManagerError,
+                                        "required release timer source missing"):
+                runner.release_scheduled_control_units(SHA_A)
+
+    def test_release_timer_contract_rejects_malformed_and_untrusted_inputs(self):
+        import json
+        with tempfile.TemporaryDirectory() as td, patch.object(runner, "RELEASE_ROOT", Path(td)):
+            release = Path(td) / SHA_A
+            policy = release / "config/production-desired-state.json"
+            policy.parent.mkdir(parents=True)
+            policy.write_text("{broken")
+            with self.assertRaisesRegex(runner.ReleaseManagerError, "malformed"):
+                runner.release_scheduled_control_units(SHA_A)
+            policy.write_text(json.dumps({
+                "schema_version": "1.0",
+                "required_user_units": ["jason-release-manager.timer",
+                                        "jason-release-manager.timer"],
+                "required_system_units": [],
+            }))
+            with self.assertRaisesRegex(runner.ReleaseManagerError, "list invalid"):
+                runner.release_scheduled_control_units(SHA_A)
+            policy.unlink()
+            policy.symlink_to("/dev/null")
+            with self.assertRaisesRegex(runner.ReleaseManagerError, "symlink"):
+                runner.release_scheduled_control_units(SHA_A)
+            policy.unlink()
+            with self.assertRaisesRegex(runner.ReleaseManagerError, "no known"):
+                runner.release_scheduled_control_units(SHA_A)
+            with self.assertRaisesRegex(runner.ReleaseManagerError, "immutable release unavailable"):
+                runner.release_scheduled_control_units(SHA_B)
+            with self.assertRaises(runner.ReleaseManagerError):
+                runner.release_scheduled_control_units("not-a-sha")
+
     def test_root_host_reconciliation_is_always_production_control_core(self):
         for path in (
             "tools/reconcile_production_host_services.sh",
