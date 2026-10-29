@@ -45,11 +45,15 @@ class ReadStub:
                 "resource_id": self.endpoint_uid, "hostname": "PC-7",
                 "operatingSystem": self.os, "online": self.online,
             }}
+        elif capability == "endpoint.audit.read":
+            content = {"audit": {"logicalDisks": [
+                {"description": "Local Fixed Disk", "diskIdentifier": "C:",
+                 "freespace": 63 * 1024 ** 3, "size": 254 * 1024 ** 3},
+                {"description": "Network Drive", "diskIdentifier": "Z:",
+                 "freespace": 1, "size": 1},
+            ]}}
         elif capability == "endpoint.powershell.read":
-            content = {"stdout": json.dumps([{
-                "Name": "Windows 11 Pro", "LicenseStatus": 1,
-                "PartialProductKey": "SECRET-DO-NOT-COPY",
-            }])}
+            raise AssertionError("Generic read-only triage cannot launch endpoint jobs")
         else:
             raise AssertionError(capability)
         return {"status": "succeeded", "evidence": {"data": content}}
@@ -128,17 +132,14 @@ def test_gather_exact_same_company_identity_and_license_whitelist():
         title="License Status", unsupported_reason="windows_licensing_diagnostics_candidate",
         read=read,
     )
-    assert result.state == "read_only_assessed"
+    assert result.state == "needs_execution_authority"
     assert result.evidence["company_verified"] is True
     assert all(cap != "service.ticket.read" for cap, _ in reads.calls)
     assert result.evidence["rmm_identity_verified"] is True
     assert result.evidence["notes_observed"] == 1
-    assert result.evidence["diagnostic"] == [{"Name": "Windows 11 Pro", "LicenseStatus": 1}]
-    assert "SECRET-DO-NOT-COPY" not in json.dumps(result.evidence)
-    assert reads.calls[-1] == (
-        "endpoint.powershell.read",
-        {"device_uid": "device-7", "command": WINDOWS_LICENSING_READ, "timeout_seconds": 45},
-    )
+    assert "diagnostic" not in result.evidence
+    assert all(cap != "endpoint.powershell.read" for cap, _ in reads.calls)
+    assert "separately governed" in result.next_step
 
 
 def test_unverified_endpoint_blocks_powershell_and_fails_closed():
@@ -191,22 +192,25 @@ def test_non_windows_device_does_not_receive_windows_command():
 
 def test_unsupported_triage_persists_without_ticket_mutations(tmp_path):
     reads = ReadStub()
-    worker, store, actions = make_worker(tmp_path, [ticket()], reads)
+    worker, store, actions = make_worker(tmp_path, [ticket(title="Space Issue")], reads)
     worker.tick()
     record = store.unsupported_triage(200001)
     assert record["state"] == "read_only_assessed"
-    assert record["category"] == "windows_licensing"
+    assert record["category"] == "disk_capacity"
     assert record["evidence"]["rmm_identity_verified"] is True
+    assert record["evidence"]["disk_audit"][0]["drive"] == "C:"
+    assert record["evidence"]["disk_audit"][0]["free_percent"] == 24.8
     assert record["next_step"]
     assert store.get(200001) is None
     assert store.latest_scan().eligible == 0
     assert store.latest_scan().selected == 0
     assert actions.calls == []
-    assert sum(x[0] == "endpoint.powershell.read" for x in reads.calls) == 1
+    assert not any(name == "endpoint.powershell.read" for name, _ in reads.calls)
+    assert sum(x[0] == "endpoint.audit.read" for x in reads.calls) == 1
 
     # Existing evidence is not recollected every minute.
     worker.tick()
-    assert sum(x[0] == "endpoint.powershell.read" for x in reads.calls) == 1
+    assert sum(x[0] == "endpoint.audit.read" for x in reads.calls) == 1
     store.close()
 
     # Durable record survives worker restart.
@@ -217,13 +221,13 @@ def test_unsupported_triage_persists_without_ticket_mutations(tmp_path):
 
 def test_source_change_triggers_retriage(tmp_path):
     reads = ReadStub()
-    item = ticket()
+    item = ticket(title="Space Issue")
     worker, store, _ = make_worker(tmp_path, [item], reads)
     worker.tick()
     worker.queue_source = Queue(replace(item, source_version="v2"))
     worker.tick()
     assert store.unsupported_triage(200001)["source_version"] == "v2"
-    assert sum(x[0] == "endpoint.powershell.read" for x in reads.calls) == 2
+    assert sum(x[0] == "endpoint.audit.read" for x in reads.calls) == 2
     store.close()
 
 
@@ -231,7 +235,7 @@ def test_one_read_failure_does_not_starve_second_ticket_and_retries_when_due(tmp
     reads = ReadStub()
     reads.fail_next_ticket = True
     worker, store, actions = make_worker(
-        tmp_path, [ticket(ticket_id=200001), ticket(ticket_id=200002)], reads,
+        tmp_path, [ticket(ticket_id=200001, title="Space Issue"), ticket(ticket_id=200002, title="Space Issue")], reads,
     )
     worker.tick()
     first = store.unsupported_triage(200001)
@@ -418,8 +422,8 @@ def test_prior_production_policy_denial_is_reevaluated_once_after_upgrade(tmp_pa
     )
     worker.tick()
     row = store.unsupported_triage(200001)
-    assert row["state"] == "read_only_assessed"
-    assert row["evidence"]["triage_logic_version"] == "queue_snapshot_v2"
+    assert row["state"] == "needs_execution_authority"
+    assert row["evidence"]["triage_logic_version"] == "passive_rmm_audit_v3"
     assert all(cap != "service.ticket.read" for cap, _ in reads.calls)
     first_count = len(reads.calls)
     worker.tick()
@@ -439,3 +443,246 @@ def test_snapshot_path_preserves_existing_autonomous_information_release_boundar
     assert SERVICE_TICKET_NOTES_SEARCH in _AUTONOMOUS_WORKER_READS
     assert SERVICE_CONFIGURATION_READ in _AUTONOMOUS_WORKER_READS
     assert SERVICE_TICKET_READ not in _AUTONOMOUS_WORKER_READS
+
+
+def test_passive_disk_read_has_no_endpoint_execution_and_excludes_other_drives():
+    from jason_runtime.unsupported_ticket_triage import _audit_disk_evidence
+
+    raw = {"audit": {"logicalDisks": [
+        {"description": "Local Fixed Disk", "diskIdentifier": "C:",
+         "freespace": 63 * 1024**3, "size": 254 * 1024**3,
+         "serialNumber": "SECRET-DO-NOT-COPY"},
+        {"description": "Network Drive", "diskIdentifier": "Z:",
+         "freespace": 99, "size": 100},
+        {"description": "Local Fixed Disk", "diskIdentifier": "D:",
+         "freespace": -1, "size": 100},
+    ]}}
+    disks = _audit_disk_evidence(raw)
+    assert len(disks) == 1
+    assert disks[0]["drive"] == "C:"
+    assert disks[0]["free_percent"] == 24.8
+    assert "SECRET-DO-NOT-COPY" not in json.dumps(disks)
+
+
+def test_missing_disk_audit_does_not_claim_success():
+    reads = ReadStub()
+    original_execute = reads.execute
+
+    def no_disks(capability, arguments):
+        if capability == "endpoint.audit.read":
+            return {"status": "succeeded",
+                    "evidence": {"data": {"audit": {"logicalDisks": []}}}}
+        return original_execute(capability, arguments)
+
+    reads.execute = no_disks
+    result = gather(
+        ticket_snapshot={"id": 200001, "companyID": 777, "configurationItemID": 1100},
+        ticket_id=200001, company_id=777, configuration_item_id=1100,
+        title="Space Issue", unsupported_reason="",
+        read=lambda cap, args: dict(reads.execute(cap, args)["evidence"]["data"]),
+    )
+    assert result.state == "needs_diagnostic_evidence"
+    assert "diagnostic" not in result.evidence
+    assert all(name != "endpoint.powershell.read" for name, _ in reads.calls)
+
+
+class PromotionForTriage:
+    def __init__(self, handoff=False):
+        self.handoff = handoff
+
+    def find_scope_approved(self, **kwargs):
+        if kwargs.get("playbook_id") == "unsupported_readonly_triage_note":
+            return object()
+        if kwargs.get("playbook_id") == "unsupported_triage_human_review" and self.handoff:
+            return object()
+        return None
+
+
+class NoteReadStub(ReadStub):
+    def __init__(self):
+        super().__init__()
+        self.notes = [{"id": 8, "title": "Ticket arrived", "description": "Internal history"}]
+
+    def execute(self, capability, arguments):
+        if capability == "service.ticket.notes.search":
+            self.calls.append((capability, dict(arguments)))
+            return {"status": "succeeded", "evidence": {"data": {"items": list(self.notes)}}}
+        return super().execute(capability, arguments)
+
+
+class NoteActionStub:
+    def __init__(self, reads, *, verify_handoff=True):
+        self.reads = reads
+        self.verify_handoff = verify_handoff
+        self.calls = []
+
+    def execute(self, scope, capability, arguments):
+        payload = dict(arguments.get("payload") or {})
+        self.calls.append((scope.playbook_id, capability, payload))
+        if capability in ("service.ticket.note.create", "service.ticket.note.update"):
+            assert scope.playbook_id == "unsupported_readonly_triage_note"
+            assert payload["ticketID"] == 200001
+            assert payload["title"] == "Jason - Governed Read-Only Investigation"
+            assert payload["noteType"] == 3
+            assert payload["publish"] == 2
+            existing = next((r for r in self.reads.notes
+                             if r["title"] == payload["title"]), None)
+            if existing:
+                assert capability == "service.ticket.note.update"
+                assert payload["id"] == existing["id"]
+                existing["description"] = payload["description"]
+            else:
+                assert capability == "service.ticket.note.create"
+                self.reads.notes.append({
+                    "id": 9001,
+                    "title": payload["title"],
+                    "description": payload["description"],
+                })
+            return {"data": {"status": "succeeded"}}
+        if capability == "service.ticket.update":
+            assert scope.playbook_id == "unsupported_triage_human_review"
+            assert payload == {"id": 200001, "queueID": "Help Desk I",
+                               "status": "Human Review"}
+            if self.verify_handoff:
+                return {"data": {"jasonVerification": {
+                    "readbackVerified": True,
+                    "verifiedFields": ["queueID", "status"],
+                }}}
+            return {"data": {"jasonVerification": {"readbackVerified": False}}}
+        raise AssertionError(capability)
+
+
+def test_readonly_evidence_draft_staged_without_any_note_promotion(tmp_path):
+    reads = NoteReadStub()
+    worker, store, actions = make_worker(
+        tmp_path, [ticket(title="Space Issue")], reads,
+    )
+    worker.tick()
+    row = store.unsupported_triage(200001)
+    assert row["state"] == "read_only_assessed"
+    body = row["evidence"]["note_draft"]
+    assert body.startswith("JASON READ-ONLY INVESTIGATION")
+    assert "Datto audit volume C:" in body
+    assert "63.0 GiB free" in body
+    assert "CHANGES MADE" in body
+    assert "Not resolved or closed" in body
+    assert "service.ticket.note.create" not in [x[0] for x in reads.calls]
+    assert actions.calls == []
+    assert store.last_note_fingerprint(
+        200001, "unsupported_readonly_triage_note",
+        "Jason - Governed Read-Only Investigation",
+    ) is None
+    store.close()
+
+
+def test_exact_note_promotion_posts_once_and_requires_provider_readback(tmp_path):
+    reads = NoteReadStub()
+    worker, store, _ = make_worker(
+        tmp_path, [ticket(title="Space Issue")], reads,
+    )
+    worker.promotion_store = PromotionForTriage()
+    actions = NoteActionStub(reads)
+    worker.actions = actions
+    worker.tick()
+    assert len(actions.calls) == 1
+    assert actions.calls[0][1] == "service.ticket.note.create"
+    assert "Datto audit volume C:" in reads.notes[-1]["description"]
+    assert store.last_note_fingerprint(
+        200001, "unsupported_readonly_triage_note",
+        "Jason - Governed Read-Only Investigation",
+    )
+    worker.tick()
+    assert len(actions.calls) == 1
+    store.close()
+
+
+def test_existing_note_reconciles_without_create_or_duplicate(tmp_path):
+    reads = NoteReadStub()
+    worker, store, _ = make_worker(
+        tmp_path, [ticket(title="Space Issue")], reads,
+    )
+    worker.tick()
+    body = store.unsupported_triage(200001)["evidence"]["note_draft"]
+    reads.notes.append({
+        "id": 9001, "title": "Jason - Governed Read-Only Investigation",
+        "description": body,
+    })
+    worker.promotion_store = PromotionForTriage()
+    worker.actions = NoteActionStub(reads)
+    worker.tick()
+    assert worker.actions.calls == []
+    assert store.last_note_fingerprint(
+        200001, "unsupported_readonly_triage_note",
+        "Jason - Governed Read-Only Investigation",
+    )
+    store.close()
+
+
+def test_human_review_handoff_requires_separate_promotion_and_queue_status_readback(tmp_path):
+    from datetime import datetime, timezone
+    from jason_runtime.unsupported_ticket_triage import render_triage_note
+    source = ticket(title="Space Issue", queue="Jason")
+    reads = NoteReadStub()
+    worker, store, _ = make_worker(tmp_path, [source], reads)
+    worker.promotion_store = PromotionForTriage(handoff=True)
+    actions = NoteActionStub(reads, verify_handoff=False)
+    worker.actions = actions
+    now = datetime.now(timezone.utc)
+    evidence = {"company_verified": True, "ticket_id": 200001, "notes_observed": 1}
+    evidence["note_draft"] = render_triage_note(
+        ticket_number="T20261029.0001", state="needs_human_review",
+        category="general", evidence=evidence,
+        next_step="Technician must inspect the failed provider evidence path.",
+    )
+    record = {"state": "needs_human_review", "evidence": evidence}
+    worker._maybe_publish_unsupported_triage_note(source, record, now=now)
+    assert [cap for _, cap, _ in actions.calls] == [
+        "service.ticket.note.create", "service.ticket.update",
+    ]
+    assert store.last_note_fingerprint(
+        200001, "unsupported_readonly_triage_note",
+        "Jason - Governed Read-Only Investigation",
+    ) is None
+    assert store.unsupported_note_delivery(200001)["attempts"] == 1
+
+    # Retry sees the already-posted note; it must not create a duplicate.
+    with store._connection:
+        store._connection.execute(
+            "UPDATE autonomy_unsupported_note_delivery SET next_due_at=? WHERE ticket_id=?",
+            ("2020-01-01T00:00:00+00:00", 200001),
+        )
+    actions.verify_handoff = True
+    worker._maybe_publish_unsupported_triage_note(source, record, now=now)
+    assert [cap for _, cap, _ in actions.calls] == [
+        "service.ticket.note.create", "service.ticket.update",
+        "service.ticket.update",
+    ]
+    assert store.last_note_fingerprint(
+        200001, "unsupported_readonly_triage_note",
+        "Jason - Governed Read-Only Investigation",
+    )
+    store.close()
+
+
+def test_helpdesk_ticket_never_requeued_even_with_handoff_promotion(tmp_path):
+    from datetime import datetime, timezone
+    from jason_runtime.unsupported_ticket_triage import render_triage_note
+    source = ticket(title="Space Issue", queue="Help Desk I")
+    reads = NoteReadStub()
+    worker, store, _ = make_worker(tmp_path, [source], reads)
+    worker.promotion_store = PromotionForTriage(handoff=True)
+    actions = NoteActionStub(reads)
+    worker.actions = actions
+    evidence = {"company_verified": True, "ticket_id": 200001}
+    evidence["note_draft"] = render_triage_note(
+        ticket_number="T20261029.0001", state="needs_human_review",
+        category="general", evidence=evidence,
+        next_step="Technician must review provider evidence.",
+    )
+    worker._maybe_publish_unsupported_triage_note(
+        source, {"state": "needs_human_review", "evidence": evidence},
+        now=datetime.now(timezone.utc),
+    )
+    assert len(actions.calls) == 1
+    assert actions.calls[0][1] == "service.ticket.note.create"
+    store.close()
