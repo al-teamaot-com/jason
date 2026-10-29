@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+import pytest
 from unittest.mock import patch
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,6 +27,114 @@ class BindingStore:
         if jason_identity_id != "person-al":
             raise AssertionError("recipient substitution attempted")
         return self.binding
+
+
+class EntraOwnerBindingStore:
+    """Use the actual runtime binding-store interface, not an invented identity."""
+    def __init__(self, *bindings):
+        self.bindings = bindings
+        self.email_reads = []
+
+    def find_active_by_jason_identity(self, *, jason_identity_id):
+        assert jason_identity_id == "person-al"
+        return None
+
+    def find_active_by_email(self, *, email_address):
+        self.email_reads.append(email_address)
+        matches = [
+            x for x in self.bindings
+            if x.status == "active" and x.email_address.casefold() == email_address
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+
+class TestEntraOwnerBinding:
+    @staticmethod
+    def request():
+        return SimpleNamespace(
+            capability_name="communication.teams.autonomy.completion.send",
+            principal_id="jason-autonomy-worker", permission_mode="execute",
+            organization_id="aot", client_id=None,
+            arguments={
+                "event_type": "production_queue_completed",
+                "work_id": "release-" + "a" * 16,
+                "summary": "Production verified",
+                "candidate_sha": "a" * 40,
+            },
+        )
+
+    @staticmethod
+    def owner(*, email="al@teamaot.com", client_id=None, status="active",
+              object_id="aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"):
+        return SimpleNamespace(
+            status=status,
+            email_address=email,
+            client_id=client_id,
+            jason_identity_id="person-entra-" + object_id.replace("-", "").lower(),
+            microsoft_tenant_id="f7054323-d52b-4863-8c2f-1898f0b6077c",
+            microsoft_object_id=object_id,
+        )
+
+    def prepare(self, store, tmp_path):
+        token = tmp_path / "token"
+        token.write_text("synthetic-not-sent")
+        invoker = AutonomousCompletionTeamsInvoker(
+            gateway_url="http://example.invalid", token_file=token, bindings=store,
+        )
+        request = self.request()
+        resolution = SimpleNamespace(
+            selected_provider_id="microsoft_teams_gateway_autonomy_completion"
+        )
+        return invoker.prepare_execution_plan(request=request, resolution=resolution)
+
+    def test_current_enta_owner_binding_resolves_exact_recipient(self, tmp_path):
+        store = EntraOwnerBindingStore(self.owner())
+        plan = self.prepare(store, tmp_path).plan
+        assert store.email_reads == ["al@teamaot.com"]
+        assert plan.symbolic_resolutions["recipient_jason_identity"] == (
+            "person-entra-aaaaaaaabbbb4ccc8dddeeeeeeeeeeee"
+        )
+        assert plan.symbolic_resolutions["recipient_owner_alias"] == "person-al"
+        assert plan.resource_identifier == (
+            "f7054323-d52b-4863-8c2f-1898f0b6077c:"
+            "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+        )
+
+    def test_owner_binding_absent_ambiguous_revoked_or_wrong_account_denied(self, tmp_path):
+        cases = (
+            (),
+            (self.owner(status="revoked"),),
+            (self.owner(email="someone-else@teamaot.com"),),
+            (self.owner(client_id="a-customer"),),
+            (self.owner(), self.owner(object_id="bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee")),
+        )
+        for idx, records in enumerate(cases):
+            with pytest.raises(PermissionError):
+                self.prepare(EntraOwnerBindingStore(*records), tmp_path)
+
+    def test_owner_binding_wrong_jason_identity_denied(self, tmp_path):
+        owner = self.owner()
+        owner.jason_identity_id = "person-other"
+        with pytest.raises(PermissionError):
+            self.prepare(EntraOwnerBindingStore(owner), tmp_path)
+
+    def test_email_recipient_override_denied_even_with_valid_owner(self, tmp_path):
+        store = EntraOwnerBindingStore(self.owner())
+        # Invalid extra recipient is always rejected by bounded event arguments.
+        token = tmp_path / "token"
+        token.write_text("synthetic-not-sent")
+        invoker = AutonomousCompletionTeamsInvoker(
+            gateway_url="http://example.invalid", token_file=token, bindings=store,
+        )
+        req = self.request()
+        req.arguments["recipient"] = "different@example.com"
+        with pytest.raises(ValueError):
+            invoker.prepare_execution_plan(
+                request=req,
+                resolution=SimpleNamespace(
+                    selected_provider_id="microsoft_teams_gateway_autonomy_completion",
+                ),
+            )
 
 
 class Notifier:
@@ -533,3 +642,70 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_owner_notifications_expire_historical_backlog_without_sending(tmp_path):
+    events = tmp_path / "owner-notification-events"
+    events.mkdir()
+    for name, created in (
+        ("ancient-release", "2026-09-20T11:00:00+00:00"),
+        ("recent-release", "2026-10-29T15:55:00+00:00"),
+    ):
+        (events / f"{name}.json").write_text(json.dumps({
+            "event_type": "production_queue_entered",
+            "release_id": name,
+            "candidate_sha": "a" * 40,
+            "description": "Controlled production release",
+            "created_at": created,
+        }))
+    notifier = Notifier()
+    maint = ReleaseManagerOwnerNotificationMaintenance(
+        notifier=notifier, state_root=tmp_path,
+        now=lambda: datetime(2026, 10, 29, 16, 5, tzinfo=timezone.utc),
+    )
+    assert maint.tick() is True
+    assert [kw["work_id"] for _, kw in notifier.calls] == ["recent-release"]
+    expired = tmp_path / "owner-notification-expired" / "ancient-release.json"
+    assert json.loads(expired.read_text())["state"] == "expired_without_delivery"
+    assert not (tmp_path / "owner-notification-delivered" / "ancient-release.json").exists()
+
+
+def test_owner_notification_failure_has_durable_backoff_and_eventual_success(tmp_path):
+    events = tmp_path / "owner-notification-events"
+    events.mkdir()
+    (events / "release.json").write_text(json.dumps({
+        "event_type": "production_queue_completed",
+        "release_id": "release-recent",
+        "candidate_sha": "b" * 40,
+        "description": "Production certified",
+        "created_at": "2026-10-29T16:00:00+00:00",
+    }))
+    class RecoveringNotifier(Notifier):
+        def send(self, event_type, **kwargs):
+            self.calls.append((event_type, kwargs))
+            if len(self.calls) == 1:
+                raise RuntimeError("transient Teams transport failure")
+            return {"message_id": "provider-receipt-1", "message_id_synthetic": False}
+    now = [datetime(2026, 10, 29, 16, 2, tzinfo=timezone.utc)]
+    notifier = RecoveringNotifier()
+    maint = ReleaseManagerOwnerNotificationMaintenance(
+        notifier=notifier, state_root=tmp_path, interval_seconds=15,
+        now=lambda: now[0],
+    )
+    assert maint.tick() is False
+    failed = tmp_path / "owner-notification-failed" / "release.json"
+    error = json.loads(failed.read_text())
+    assert error["attempts"] == 1
+    assert error["error_type"] == "RuntimeError"
+    assert error["next_due_at"] == "2026-10-29T16:07:00+00:00"
+    assert len(notifier.calls) == 1
+    now[0] = datetime(2026, 10, 29, 16, 3, tzinfo=timezone.utc)
+    assert maint.tick() is False
+    assert len(notifier.calls) == 1
+    now[0] = datetime(2026, 10, 29, 16, 8, tzinfo=timezone.utc)
+    assert maint.tick() is True
+    assert len(notifier.calls) == 2
+    assert json.loads((tmp_path / "owner-notification-delivered" / "release.json").read_text())["message_id"] == "provider-receipt-1"
+    now[0] = datetime(2026, 10, 29, 16, 9, tzinfo=timezone.utc)
+    assert maint.tick() is False
+    assert len(notifier.calls) == 2

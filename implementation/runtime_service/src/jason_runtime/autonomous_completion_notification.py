@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +46,10 @@ PROVIDER = "microsoft_teams_gateway_autonomy_completion"
 PROFILE_ENV = "JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE"
 PROFILE = "person-al-v1"
 RECIPIENT_JASON_IDENTITY = "person-al"
+# The historical logical owner alias is not present in newer Entra-authenticated
+# Teams binding stores. Pin fallback to the AOT owner's exact verified email;
+# require a single active, AOT (non-client), Entra-derived identity mapping.
+RECIPIENT_OWNER_EMAIL = "al@teamaot.com"
 
 EXECUTE_GRANT_ID = "grant-jason-autonomy-worker-teams-autonomy-completion-v1"
 
@@ -560,6 +565,31 @@ class AutonomousCompletionTeamsInvoker:
         binding = self.bindings.find_active_by_jason_identity(
             jason_identity_id=RECIPIENT_JASON_IDENTITY
         )
+        if binding is None:
+            # Legacy person-al was replaced by person-entra-<object-id> in
+            # authenticated Teams auto-enrollment. Resolve the same owner
+            # through the trusted persistence layer; never enumerate identities,
+            # accept an argument recipient, or choose an arbitrary active user.
+            lookup = getattr(self.bindings, "find_active_by_email", None)
+            binding = (
+                lookup(email_address=RECIPIENT_OWNER_EMAIL)
+                if callable(lookup) else None
+            )
+            if binding is not None:
+                try:
+                    expected_identity = (
+                        "person-entra-" +
+                        uuid.UUID(str(binding.microsoft_object_id)).hex
+                    )
+                except (ValueError, AttributeError, TypeError):
+                    raise PermissionError("owner Teams binding identity is invalid")
+                if (
+                    str(getattr(binding, "email_address", "") or "").strip().casefold()
+                    != RECIPIENT_OWNER_EMAIL
+                    or str(getattr(binding, "jason_identity_id", "")) != expected_identity
+                    or getattr(binding, "client_id", None) is not None
+                ):
+                    raise PermissionError("owner Teams binding identity mismatch")
         if binding is None or getattr(binding, "status", None) != "active":
             raise PermissionError("person-al Teams identity binding unavailable")
         tenant = str(binding.microsoft_tenant_id).strip()
@@ -589,7 +619,10 @@ class AutonomousCompletionTeamsInvoker:
             normalized_path="/internal/proactive/send",
             normalized_payload=payload,
             material_parameters={"event_type": event},
-            symbolic_resolutions={"recipient_jason_identity": RECIPIENT_JASON_IDENTITY},
+            symbolic_resolutions={
+                "recipient_jason_identity": str(binding.jason_identity_id),
+                "recipient_owner_alias": RECIPIENT_JASON_IDENTITY,
+            },
         )
         return PreparedExecutionPlan(
             plan=plan,
@@ -849,6 +882,15 @@ def build_work_lifecycle_notification_maintenance(
     )
 
 
+def _private_atomic_notification_record(path: Path, data: Mapping[str, Any]) -> None:
+    """Persist terminal or retry state without falsely claiming delivery."""
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temp = path.with_suffix(path.suffix + ".tmp")
+    temp.write_text(json.dumps(dict(data), sort_keys=True) + "\n", encoding="utf-8")
+    os.chmod(temp, 0o600)
+    os.replace(temp, path)
+
+
 @dataclass(slots=True)
 class ReleaseManagerOwnerNotificationMaintenance:
     notifier: GovernedAutonomousCompletionNotifier
@@ -865,7 +907,7 @@ class ReleaseManagerOwnerNotificationMaintenance:
             self.now = lambda: datetime.now(timezone.utc)
 
     def tick(self) -> bool:
-        from datetime import timedelta
+        from datetime import timedelta, timezone
         current = self.now()
         if self._next_due_at is not None and current < self._next_due_at:
             return False
@@ -873,6 +915,12 @@ class ReleaseManagerOwnerNotificationMaintenance:
         events = self.state_root / "owner-notification-events"
         notified = self.state_root / "owner-notification-delivered"
         unverified = self.state_root / "owner-notification-unverified"
+        failed = self.state_root / "owner-notification-failed"
+        expired = self.state_root / "owner-notification-expired"
+        # Do not flood the Owner with historical production alerts after a
+        # recipient-binding repair. Retain immutable evidence, not fake success.
+        max_send_attempts_per_tick = 8
+        send_attempts = 0
         if not events.exists():
             return False
         notified.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -884,7 +932,8 @@ class ReleaseManagerOwnerNotificationMaintenance:
         }
         for path in sorted(events.glob("*.json"), key=lambda item: item.stat().st_mtime):
             marker = notified / path.name
-            if marker.exists() or (unverified / path.name).exists():
+            if (marker.exists() or (unverified / path.name).exists()
+                    or (expired / path.name).exists()):
                 continue
             try:
                 payload = json.loads(path.read_text(encoding="utf-8"))
@@ -893,6 +942,37 @@ class ReleaseManagerOwnerNotificationMaintenance:
             event_type = str(payload.get("event_type") or "").strip().casefold()
             if event_type not in allowed:
                 continue
+            issued = payload.get("created_at")
+            if issued:
+                try:
+                    timestamp = datetime.fromisoformat(str(issued).replace("Z", "+00:00"))
+                    if timestamp.tzinfo is None:
+                        continue  # malformed source evidence: never send
+                except (ValueError, TypeError):
+                    continue
+                if current.astimezone(timezone.utc) - timestamp.astimezone(timezone.utc) > timedelta(hours=24):
+                    expired.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    _private_atomic_notification_record(
+                        expired / path.name, {
+                            "event_type": event_type,
+                            "expired_at": current.isoformat(),
+                            "state": "expired_without_delivery",
+                            "reason": "production_notification_older_than_24h",
+                        },
+                    )
+                    continue
+            old_failure = failed / path.name
+            prior = {}
+            if old_failure.exists():
+                try:
+                    prior = json.loads(old_failure.read_text(encoding="utf-8"))
+                    retry_at = prior.get("next_due_at")
+                    if retry_at and datetime.fromisoformat(str(retry_at)) > current:
+                        continue
+                except (OSError, ValueError, TypeError):
+                    continue
+            if send_attempts >= max_send_attempts_per_tick:
+                break
             release_id = str(payload.get("release_id") or "").strip()
             candidate = str(payload.get("candidate_sha") or "").strip().casefold()
             description = str(payload.get("description") or "").strip()
@@ -908,6 +988,7 @@ class ReleaseManagerOwnerNotificationMaintenance:
                 if not owner_action:
                     continue
                 arguments["owner_action"] = owner_action
+            send_attempts += 1
             try:
                 result = self.notifier.send(event_type, **arguments)
                 message_id, synthetic = _notification_receipt(result)
@@ -923,18 +1004,18 @@ class ReleaseManagerOwnerNotificationMaintenance:
                 # Never let one undelivered release event suppress subsequent alerts.
                 # Keep the original event pending for a later retry and persist
                 # independent failure evidence without leaking provider secrets.
-                failed = self.state_root / "owner-notification-failed"
+                attempts = min(12, int(prior.get("attempts", 0)) + 1)
+                retry_seconds = min(3600, 300 * (2 ** min(attempts - 1, 4)))
                 failed.mkdir(parents=True, exist_ok=True, mode=0o700)
-                failure_path = failed / path.name
-                failure_temp = failure_path.with_suffix(failure_path.suffix + ".tmp")
-                failure_temp.write_text(
-                    json.dumps({"event_type": event_type, "release_id": release_id,
-                                "failed_at": current.isoformat(),
-                                "error_type": type(exc).__name__}, sort_keys=True) + "\n",
-                    encoding="utf-8",
+                _private_atomic_notification_record(
+                    failed / path.name, {
+                        "event_type": event_type, "release_id": release_id,
+                        "failed_at": current.isoformat(),
+                        "next_due_at": (current + timedelta(seconds=retry_seconds)).isoformat(),
+                        "attempts": attempts,
+                        "error_type": type(exc).__name__,
+                    },
                 )
-                os.chmod(failure_temp, 0o600)
-                os.replace(failure_temp, failure_path)
                 continue
             temp = marker.with_suffix(marker.suffix + ".tmp")
             temp.write_text(
