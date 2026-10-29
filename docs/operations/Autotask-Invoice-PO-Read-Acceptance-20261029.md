@@ -34,3 +34,57 @@ All calls went through Jason's governed MCP read capability (no direct provider 
 - [ ] Cross-client and negative disclosure acceptance
 - [ ] Isolated preproduction tests and ticket-regression verification
 - [ ] Production release approval (separate; not granted)
+
+
+## Isolated implementation update — 2026-10-29 (NOT deployed)
+
+Branch: `fix/autotask-invoice-po-read-2147`. Worktree:
+`/home/al/jason-worktrees/invoice-po-read-2147`. Changes are
+preproduction source and offline regression tests only.
+
+### Functional changes
+- Compute exact-cent vendor invoice line totals, freight, tax and fees from
+  source evidence; preserve reported vs calculated total and unexplained
+  differences. Keep mismatch drafts visible for Human Review but reject
+  purchasing finalization until corrected.
+- Prepopulate PO review card charges from the source rather than silently
+  defaulting freight/tax/fees to zero. Preserve first-line quantity.
+- Reject invoice submission if the selected first-line quantity or charges
+  differ from the documented source. Do not pretend a mismatched invoice is
+  balanced. A source with no invoice total has no reconciliation proof.
+- Reject legacy single-line PO execution with nonzero tax/fees before **any**
+  provider mutation because the current PO connector cannot deterministically
+  write those fields. The multi-line executor's existing guard remains.
+- Before a new PO from an invoice with a known invoice number, perform a
+  governed exact `service.purchase.order.search` for the vendor/invoice
+  pair. Stop if an existing PO matches, rather than creating another one.
+  Write the vendor invoice number to newly created POs.
+- For a verified ticket-bound PO, set Autotask `externalPONumber` to the
+  actual service ticket number, distinct from the internal Autotask PO ID.
+- Prevent simultaneous client-quote creation and PO placement; customer
+  acceptance of the estimate is a separate workflow.
+- Enforce a 100-source-line ingestion limit; no unbounded read fanout.
+
+### Tests
+180 focused local tests passed across procurement workflows, source convergence,
+PO line execution, approvals, Autotask read capability/catalog coverage,
+and new invoice fidelity / duplicate prevention. Compile checks and
+`git diff --check` passed. The tests use fake/mock provider writes and do
+NOT establish real invoice/PO mutation production acceptance.
+
+### Important remaining blockers and boundaries
+- Live Autotask invoice and BillingItems metadata for the effective API user
+  still report `userAccessForQuery=None`. Authorized provider access
+  correction and actual governed readback acceptance are outstanding.
+- Native Teams attachment acquisition is not yet production-accepted (#759).
+- Multi-line source drafts still require manual review; Teams card finalization
+  remains blocked until complete line-plan, spending-threshold and idempotent
+  write acceptance can be proved for all lines.
+- Existing-PO detection is a submission-time duplicate guard, **not** a
+  completed existing-PO reconciliation or concurrency-safe cross-request
+  uniqueness guarantee. A second live check prior to PO commit, item
+  comparison and race/idempotency tests remain required.
+- A quote cannot both create a client estimate and place a purchase in the
+  same action; a separate client-acceptance evidence path is still needed.
+- No provider settings, tenant permissions, financial records, or tickets were
+  modified. No protected main merge or production deployment authorized.
