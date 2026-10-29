@@ -1,0 +1,48 @@
+name: Validate Windows Time JSON Stage C Restack
+
+on:
+  pull_request:
+    paths:
+      - 'implementation/runtime_service/src/jason_runtime/windows_time*'
+      - 'implementation/runtime_service/src/jason_runtime/composition.py'
+      - 'implementation/runtime_service/tests/test_windows_time*'
+      - 'implementation/runtime_service/tests/test_json_playbook_migration_candidates.py'
+      - 'implementation/runtime_service/tests/test_composition.py'
+      - 'config/json-playbooks/**'
+      - 'docs/playbooks/json/**'
+      - 'docs/operations/Project-Jason-20261029-Stage-C-After-B1-Restack.md'
+      - '.github/workflows/windows-time-json-stage-c-restack.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  read-only-json-shadow-and-b1-concurrency:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/cap-001/src:implementation/cap-003/src:implementation/cap-007/src:implementation/connectors/openclaw/src:implementation/runtime_service/src:implementation/mcp_service/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install current Jason dependencies
+        run: |
+          python -m pip install --upgrade pip pytest
+          python -m pip install ./implementation ./implementation/connectors/openclaw ./implementation/runtime_service ./implementation/mcp_service
+      - name: Verify read-only JSON shadow and narrowed Autotask authority coexist
+        run: |
+          python -m pytest -q \
+            implementation/runtime_service/tests/test_json_playbook_migration_candidates.py \
+            implementation/runtime_service/tests/test_windows_time_json_shadow_evidence.py \
+            implementation/runtime_service/tests/test_windows_time_source_shadow.py \
+            implementation/runtime_service/tests/test_composition.py \
+            implementation/runtime_service/tests/test_autotask_only_stage_b_release_wiring.py \
+            implementation/runtime_service/tests/test_aot_routine_write_authority.py \
+            implementation/orchestrator/tests/test_aot_technician_routine_write_authority.py
+      - name: Source safety / deployment scripts
+        run: |
+          bash -n infrastructure/jason-runtime/production-deploy.sh
+          bash -n infrastructure/jason-mcp/production-deploy.sh
+          git diff --check
