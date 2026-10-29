@@ -1,0 +1,45 @@
+name: Validate Autotask-only Stage B1
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/aot-autotask-only-stage-b.yml'
+      - 'infrastructure/jason-runtime/compose.yaml'
+      - 'infrastructure/jason-runtime/production-deploy.sh'
+      - 'infrastructure/jason-mcp/production-deploy.sh'
+      - 'implementation/runtime_service/tests/test_autotask_only_stage_b_release_wiring.py'
+      - 'docs/operations/Jason-Stage-B-Autotask-Only-Release-20261029.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  autotask-only-scoped-authorization:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: implementation:implementation/cap-001/src:implementation/cap-003/src:implementation/cap-007/src:implementation/connectors/openclaw/src:implementation/runtime_service/src:implementation/mcp_service/src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install current Jason dependencies
+        run: |
+          python -m pip install --upgrade pip pytest pyyaml
+          python -m pip install ./implementation ./implementation/connectors/openclaw ./implementation/runtime_service ./implementation/mcp_service
+      - name: Verify Autotask-only scope, standing authority, and ticket boundaries
+        run: |
+          python -m pytest -q \
+            implementation/runtime_service/tests/test_autotask_only_stage_b_release_wiring.py \
+            implementation/runtime_service/tests/test_aot_routine_write_authority.py \
+            implementation/orchestrator/tests/test_aot_technician_routine_write_authority.py \
+            implementation/runtime_service/tests/test_autotask_ticket_create.py \
+            implementation/runtime_service/tests/test_autotask_ticket_update.py \
+            implementation/runtime_service/tests/test_autotask_internal_note.py \
+            implementation/mcp_service/tests/test_generic_governed_execution_contract.py
+      - name: Native deploy shell and source diff checks
+        run: |
+          bash -n infrastructure/jason-runtime/production-deploy.sh
+          bash -n infrastructure/jason-mcp/production-deploy.sh
+          git diff --check
