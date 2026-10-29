@@ -205,6 +205,8 @@ jobs:
           PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q \
             tools/tests/test_release_manager_atomic_surfaces.py \
             tools/tests/test_release_host_reconciler_contract.py \
+            tools/tests/test_historical_rollback_unit_cleanup.py \
+            tools/tests/test_reconcile_managed_unit_delta.py \
             tools/tests/test_release_exporter_port_guard.py \
             tools/tests/test_reconcile_production_host_services.py \
             tools/tests/test_approval_unit_install_order.py \

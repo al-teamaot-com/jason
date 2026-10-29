@@ -20,9 +20,13 @@ REQUESTS = SPOOL / "requests"
 RESULTS = SPOOL / "results"
 CANDIDATE_SCRIPTS = SPOOL / "candidate-scripts"
 CURRENT = Path("/opt/jason/current")
+RELEASE_ROOT = Path("/opt/jason/releases")
+SYSTEM_UNIT_DIR = Path("/etc/systemd/system")
+USER_UNIT_DIR = Path("/home/al/.config/systemd/user")
 REPO = Path("/home/al/.local/lib/jason/engineering-source-repo")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 ROOT_RECOVERY_POLICY = Path("/etc/jason/release-readback-recovery/production-desired-state.json")
+TRUSTED_UNIT_DELTA_PLANNER = Path("/usr/local/lib/jason/reconcile_managed_unit_delta.py")
 SOURCE_DRIFT_POLICY = "config/production-desired-state.json"
 POLICY_UNIT_LISTS = (
     "required_system_units", "allowed_system_units",
@@ -345,6 +349,162 @@ def _candidate_reconcile_script(source_revision: str) -> Path:
 
 
 
+def _trusted_unit_delta_planner():
+    """Use only the root-staged, non-writable, reviewed unit planner."""
+    source = TRUSTED_UNIT_DELTA_PLANNER
+    info = source.lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0
+            or info.st_mode & 0o022):
+        raise HostReconcileError("trusted unit-delta planner is missing or writable")
+    spec = importlib.util.spec_from_file_location("jason_root_unit_delta", source)
+    if spec is None or spec.loader is None:
+        raise HostReconcileError("trusted unit-delta planner cannot load")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _historical_unit_cleanup_plan(source_revision: str):
+    """Preflight rollback-only candidate units before *any* unit mutation."""
+    target = RELEASE_ROOT / source_revision
+    policy = target / "config/production-desired-state.json"
+    if policy.is_symlink():
+        raise HostReconcileError("historical release policy is a symlink")
+    if policy.exists():
+        return None  # Modern exact-release script performs its own delta.
+    helper = _trusted_root_policy_helper()
+    control = helper._json(helper._root_only(
+        helper.ROOT / "production-control-state.json"
+    ))
+    lkg = ((control.get("last_known_good") or {}).get("manifest") or {})
+    previous = ((control.get("previous_last_known_good") or {}).get("manifest") or {})
+    breaker = (control.get("circuit_breaker") or {}).get("state")
+    authorized = (lkg.get("complete") is True and lkg.get("revision") == source_revision)
+    authorized = authorized or (
+        breaker == "open" and previous.get("complete") is True
+        and previous.get("revision") == source_revision
+    )
+    if not authorized:
+        raise HostReconcileError("historical rollback is not protected LKG")
+    planner = _trusted_unit_delta_planner()
+    root = RELEASE_ROOT
+    prior = planner.pinned_release(CURRENT.resolve(strict=True), root)
+    target = planner.pinned_release(target, root)
+    if prior == target:
+        # No trustworthy candidate-only unit source is available to remove;
+        # normal release validation will reject any unexplained orphan.
+        return None
+    system = planner.plan_unit_removals(
+        prior, target, SYSTEM_UNIT_DIR,
+        scope="system", enforce_owner=True,
+    )
+    user = planner.plan_unit_removals(
+        prior, target, USER_UNIT_DIR,
+        scope="user", enforce_owner=True,
+    )
+    if len(system) + len(user) > 8:
+        raise HostReconcileError("historical candidate-only unit delta too large")
+    return planner, prior, tuple(system), tuple(user)
+
+
+def _reconcile_historical_release_units(source_revision: str, request_id: str) -> list[str]:
+    """Remove only verified candidate-owned units during protected LKG rollback.
+
+    No provider, endpoint, unrelated systemd or policy mutation is authorized.
+    Every file is exact-candidate byte-identical, both scopes are preplanned,
+    and an owner-only backup is retained before any removal.
+    """
+    plan = _historical_unit_cleanup_plan(source_revision)
+    if plan is None:
+        return []
+    planner, prior, system, user = plan
+    if not system and not user:
+        return []
+    if (not REQUEST_ID.fullmatch(request_id)
+            or request_id.startswith(".") or ".." in request_id):
+        raise HostReconcileError("invalid rollback backup identity")
+    backup_root = SPOOL / "historical-unit-backups"
+    backup_root.mkdir(mode=0o700, exist_ok=True)
+    backup_meta = backup_root.lstat()
+    if (not stat.S_ISDIR(backup_meta.st_mode)
+            or backup_meta.st_uid != 0 or stat.S_IMODE(backup_meta.st_mode) != 0o700):
+        raise HostReconcileError("rollback backup root is not private root-owned state")
+    folder = backup_root / request_id
+    folder.mkdir(mode=0o700)
+    removed: list[str] = []
+    user_env = {
+        "HOME": "/home/al", "XDG_RUNTIME_DIR": "/run/user/1000",
+        "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+    }
+    for scope, names, installed_dir in (
+        ("system", system, SYSTEM_UNIT_DIR),
+        ("user", user, USER_UNIT_DIR),
+    ):
+        for unit in names:
+            installed = installed_dir / unit
+            definition = planner.candidate_unit_file(prior, unit, scope)
+            if (installed.is_symlink() or not installed.is_file()
+                    or installed.read_bytes() != definition.read_bytes()):
+                raise HostReconcileError("candidate-only unit changed after preflight")
+            backup = folder / (scope + "-" + unit)
+            # No-follow read and exclusive root-only backup: a symlink swap
+            # in the writable user-unit directory must never be followed.
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            source_fd = os.open(installed, flags)
+            try:
+                metadata = os.fstat(source_fd)
+                if (not stat.S_ISREG(metadata.st_mode)
+                        or metadata.st_uid != (0 if scope == "system" else 1000)
+                        or metadata.st_size > 65536):
+                    raise HostReconcileError("candidate unit owner/type/size changed")
+                content = os.read(source_fd, 65537)
+                if content != definition.read_bytes():
+                    raise HostReconcileError("candidate unit content changed after preflight")
+            finally:
+                os.close(source_fd)
+            backup_fd = os.open(backup,
+                               os.O_CREAT | os.O_EXCL | os.O_WRONLY
+                               | getattr(os, "O_NOFOLLOW", 0), 0o600)
+            try:
+                os.write(backup_fd, content)
+                os.fchown(backup_fd, 0, 0)
+                os.fchmod(backup_fd, 0o600)
+                os.fsync(backup_fd)
+            finally:
+                os.close(backup_fd)
+            if scope == "system":
+                prefix = ["systemctl"]
+            else:
+                prefix = ["runuser", "-u", "al", "--", "env"] + [
+                    key + "=" + value for key, value in user_env.items()
+                ] + ["systemctl", "--user"]
+            subprocess.run(prefix + ["disable", "--now", unit], check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            if installed.is_symlink() or installed.read_bytes() != content:
+                raise HostReconcileError("unit changed during protected removal")
+            installed.unlink()
+            removed.append(scope + ":" + unit)
+        if names:
+            subprocess.run(
+                (["systemctl"] if scope == "system" else [
+                    "runuser", "-u", "al", "--", "env"
+                ] + [key + "=" + value for key, value in user_env.items()]
+                + ["systemctl", "--user"]) + ["daemon-reload"],
+                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            )
+            # Remove only failed-state records for exact removed units.
+            for unit in names:
+                subprocess.run(
+                    (["systemctl"] if scope == "system" else [
+                        "runuser", "-u", "al", "--", "env"
+                    ] + [key + "=" + value for key, value in user_env.items()]
+                    + ["systemctl", "--user"]) + ["reset-failed", unit],
+                    check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                )
+    return removed
+
+
 def _historical_post_success_documentation_failure(detail: str, source_revision: str) -> bool:
     """Accept only an old-script documentation-publication failure after critical alignment."""
     required = (
@@ -421,6 +581,10 @@ def _process(path: Path) -> None:
                     "target immutable release directory is not root-owned"
                 )
             os.chmod(release_dir, 0o755)
+
+        historical_removed_units = _reconcile_historical_release_units(
+            source_revision, request_id,
+        )
 
         script_env = os.environ.copy()
         script_env.update(
@@ -503,6 +667,8 @@ def _process(path: Path) -> None:
             success=True,
             detail=("ROOT_POLICY_MIGRATION=" + root_policy_result
                     + "\nROOT_POLICY_PREFLIGHT=" + policy_preflight
+                    + "\nHISTORICAL_RELEASE_UNIT_CLEANUP="
+                    + (",".join(historical_removed_units) if historical_removed_units else "NOT_REQUIRED")
                     + "\n" + completed.stdout),
         )
     except Exception as exc:

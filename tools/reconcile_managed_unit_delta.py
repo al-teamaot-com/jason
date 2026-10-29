@@ -32,6 +32,29 @@ class UnitDeltaError(ValueError):
 
 def declared_units(release: Path, scope: str) -> set[str]:
     path = release / "config/production-desired-state.json"
+    if path.is_symlink():
+        raise UnitDeltaError("immutable release unit policy is a symlink")
+    if not path.exists():
+        # Historical immutable baselines (e.g. 72bf...) predate the
+        # desired-state manifest. Only unit definitions actually present in
+        # the exact rollback release count as declared; unknown files/symlinks
+        # must never become a blanket permission to remove installed units.
+        roots = RELATIVE_SYSTEM_SOURCES if scope == "system" else RELATIVE_USER_SOURCES
+        names: set[str] = set()
+        for relative in roots:
+            folder = release / relative
+            if folder.is_symlink():
+                raise UnitDeltaError("legacy unit source directory is a symlink")
+            if not folder.exists():
+                continue
+            for candidate in folder.glob("jason-*"):
+                if candidate.is_symlink():
+                    raise UnitDeltaError("legacy release unit source is a symlink")
+                if candidate.is_file() and UNIT.fullmatch(candidate.name):
+                    names.add(candidate.name)
+        if not names:
+            raise UnitDeltaError("historical release contains no trusted unit definitions")
+        return names
     data = json.loads(path.read_text(encoding="utf-8"))
     if data.get("schema_version") != "1.0":
         raise UnitDeltaError("unsupported production desired-state schema")

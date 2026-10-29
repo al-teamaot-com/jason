@@ -58,6 +58,13 @@ def main(*, stage_only: bool = False) -> int:
         LIB / "protected_root_policy_migration.py",
         0o755,
     )
+    # Stage the same reviewed unit-delta planner that the root worker uses
+    # for legacy rollback cleanup. Never load it from a mutable worktree.
+    install(
+        ROOT / "tools" / "reconcile_managed_unit_delta.py",
+        LIB / "reconcile_managed_unit_delta.py",
+        0o755,
+    )
     install(
         ROOT / "tools" / "release_host_reconcile_worker.py",
         LIB / "release_host_reconcile_worker.py",

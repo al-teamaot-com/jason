@@ -23,6 +23,28 @@ Make Jason's **existing foundational functions reliable** before expanding autom
 8. **Verification or rollback.** Verify new runtime/MCP/host/controller/image/unit identities, health and fresh independent CCC/drift. Repeat the same authorized foundational ticket canary **after promotion** with a fixed window and exact-ticket read; run feature-specific checks. If any mandatory gate fails, initiate native known-good rollback, verify restored identities and foundational read behavior, keep the circuit breaker OPEN if unresolved, and report exact evidence. A healthy HTTP status alone is not acceptance.
 9. **Closeout and observability.** Persist immutable source IDs, read-canary summary (never customer content), pre/post results, approvals, independent manifests, rollback readiness, deployment and functional verification, any warning and follow-up. Mark production acceptance only with all required evidence and zero unresolved critical defect.
 
+### Root-governed cleanup for pre-manifest historical rollbacks
+
+The existing immutable host release reconciler is the only authorized unit
+cleanup path. If a protected exact LKG predates
+`production-desired-state.json`, the root worker compares canonical unit
+definitions in that exact immutable release against the currently installed
+candidate's reviewed manifest, for both system and user units. Only an
+independently verified LKG may use this compatibility mode.
+
+The root helper preflights both scopes before any mutation, requires a
+byte-identical installed candidate unit and correct ownership, rejects
+untrusted symlinks and bulk removals, and stores a private root-owned
+per-request backup before disabling/removing a candidate-only unit. No
+unrelated services or customer endpoints may be touched. A failed/uncertain
+cleanup must block release verification and keep protected recovery active.
+Historical release files are never modified or patched in place.
+
+A green isolated test does **not** prove the live historical rollback.
+The complete cleanup, service health, protected policy, old/new controller,
+and source-manifest readback remain part of the separately authorized
+production acceptance gate.
+
 ### Mandatory authenticated Autotask canary for every release (source candidate)
 
 The native release transaction must verify the same genuine AOT-authorized
