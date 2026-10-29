@@ -103,6 +103,7 @@ def make_worker(tmp_path, items, reads, *, max_triage=2):
     worker = OperationalAutonomyMaintenance(
         queue_source=Queue(*items), reads=reads, actions=actions, store=store,
         promotion_store=NoPromotion(), max_unsupported_triage_per_scan=max_triage,
+        triage_note_pilot_ticket_ids=(200001, 200002),
         interval_seconds=30, monotonic=iter((0.0, 31.0, 62.0, 93.0, 124.0)).__next__,
     )
     return worker, store, actions
@@ -634,7 +635,8 @@ def test_human_review_handoff_requires_separate_promotion_and_queue_status_readb
         category="general", evidence=evidence,
         next_step="Technician must inspect the failed provider evidence path.",
     )
-    record = {"state": "needs_human_review", "evidence": evidence}
+    record = {"state": "needs_human_review", "evidence": evidence,
+              "source_version": "v1", "ticket_number": source.context["ticketNumber"]}
     worker._maybe_publish_unsupported_triage_note(source, record, now=now)
     assert [cap for _, cap, _ in actions.calls] == [
         "service.ticket.note.create", "service.ticket.update",
@@ -642,13 +644,15 @@ def test_human_review_handoff_requires_separate_promotion_and_queue_status_readb
     assert store.last_note_fingerprint(
         200001, "unsupported_readonly_triage_note",
         "Jason - Governed Read-Only Investigation",
-    ) is None
-    assert store.unsupported_note_delivery(200001)["attempts"] == 1
+    )
+    assert store.unsupported_note_delivery(200001)["attempts"] == 0
+    assert store.unsupported_handoff_delivery(200001)["state"] == "retry_pending"
+    assert store.unsupported_handoff_delivery(200001)["attempts"] == 1
 
-    # Retry sees the already-posted note; it must not create a duplicate.
+    # Retry sees the already-verified note and must not create a duplicate.
     with store._connection:
         store._connection.execute(
-            "UPDATE autonomy_unsupported_note_delivery SET next_due_at=? WHERE ticket_id=?",
+            "UPDATE autonomy_unsupported_handoff_delivery SET next_due_at=? WHERE ticket_id=?",
             ("2020-01-01T00:00:00+00:00", 200001),
         )
     actions.verify_handoff = True
@@ -661,6 +665,9 @@ def test_human_review_handoff_requires_separate_promotion_and_queue_status_readb
         200001, "unsupported_readonly_triage_note",
         "Jason - Governed Read-Only Investigation",
     )
+    assert store.unsupported_handoff_delivery(200001)["state"] == "verified"
+    worker._maybe_publish_unsupported_triage_note(source, record, now=now)
+    assert len(actions.calls) == 3
     store.close()
 
 
@@ -680,7 +687,8 @@ def test_helpdesk_ticket_never_requeued_even_with_handoff_promotion(tmp_path):
         next_step="Technician must review provider evidence.",
     )
     worker._maybe_publish_unsupported_triage_note(
-        source, {"state": "needs_human_review", "evidence": evidence},
+        source, {"state": "needs_human_review", "evidence": evidence,
+                 "source_version": "v1", "ticket_number": source.context["ticketNumber"]},
         now=datetime.now(timezone.utc),
     )
     assert len(actions.calls) == 1
@@ -727,4 +735,175 @@ def test_at_most_two_promoted_note_attempts_per_scan_and_no_starvation(tmp_path)
     worker.tick()
     assert attempts == [200001, 200002, 200003, 200004]
     assert actions.calls == []
+    store.close()
+
+
+def test_note_pilot_registry_and_runtime_scope_are_exactly_aligned():
+    import json
+    from jason_runtime.autonomy_worker_composition import TRIAGE_NOTE_PILOT_TICKET_IDS
+    from jason_runtime.autonomy_worker_runtime import (
+        UNSUPPORTED_TRIAGE_NOTE_SCOPE, UNSUPPORTED_TRIAGE_HANDOFF_SCOPE,
+    )
+    registry = json.loads((
+        Path(__file__).resolve().parents[2] / "autonomous_remediation"
+        / "playbook_registry.json"
+    ).read_text())
+    by_id = {p["id"]: p for p in registry["playbooks"]}
+    assert TRIAGE_NOTE_PILOT_TICKET_IDS == (143305, 143272)
+    for scope in (UNSUPPORTED_TRIAGE_NOTE_SCOPE, UNSUPPORTED_TRIAGE_HANDOFF_SCOPE):
+        entry = by_id[scope.playbook_id]
+        assert entry["lifecycle"] == "production" and entry["enabled"] is True
+        assert entry["version"] == scope.playbook_version
+        assert entry["autonomy"]["policy_id"] == scope.policy_id
+        assert tuple(entry["autonomy"]["allowed_capabilities"]) == tuple(
+            scope.required_action_capabilities
+        )
+        assert entry["autonomy"]["pilot_ticket_ids"] == list(TRIAGE_NOTE_PILOT_TICKET_IDS)
+
+
+def test_promotion_never_writes_to_a_ticket_outside_pilot(tmp_path):
+    reads = NoteReadStub()
+    worker, store, _ = make_worker(tmp_path, [ticket(ticket_id=200003, title="Space Issue")], reads)
+    worker.promotion_store = PromotionForTriage(handoff=True)
+    actions = NoteActionStub(reads)
+    worker.actions = actions
+    worker.tick()
+    assert store.unsupported_triage(200003)["state"] == "read_only_assessed"
+    assert actions.calls == []
+    assert store.unsupported_note_delivery(200003) is None
+    store.close()
+
+
+def test_stale_draft_is_not_published_even_with_promotion(tmp_path):
+    from datetime import datetime, timezone
+    reads = NoteReadStub()
+    worker, store, _ = make_worker(tmp_path, [ticket(title="Space Issue")], reads)
+    worker.promotion_store = PromotionForTriage()
+    actions = NoteActionStub(reads)
+    worker.actions = actions
+    worker._maybe_publish_unsupported_triage_note(
+        ticket(title="Space Issue", version="v2"),
+        {"state": "read_only_assessed", "source_version": "v1",
+         "ticket_number": ticket().context["ticketNumber"],
+         "evidence": {"company_verified": True,
+                      "note_draft": "JASON READ-ONLY INVESTIGATION\nNot resolved"}},
+        now=datetime.now(timezone.utc),
+    )
+    assert actions.calls == []
+    store.close()
+
+
+def test_unowned_same_title_note_is_not_overwritten(tmp_path):
+    reads = NoteReadStub()
+    reads.notes.append({
+        "id": 9999, "title": "Jason - Governed Read-Only Investigation",
+        "description": "Manual note not owned by pilot",
+    })
+    worker, store, _ = make_worker(tmp_path, [ticket(title="Space Issue")], reads)
+    worker.promotion_store = PromotionForTriage()
+    actions = NoteActionStub(reads)
+    worker.actions = actions
+    worker.tick()
+    row = store.unsupported_note_delivery(200001)
+    assert row is not None and row["attempts"] == 1
+    assert row["last_error"] == "OperationalAutonomyError"
+    assert reads.notes[-1]["description"] == "Manual note not owned by pilot"
+    assert actions.calls == []
+    store.close()
+
+
+def test_later_handoff_promotion_resumes_after_note_was_already_verified(tmp_path):
+    from datetime import datetime, timezone
+    from jason_runtime.unsupported_ticket_triage import render_triage_note
+    source = ticket(title="Space Issue", queue="Jason")
+    reads = NoteReadStub()
+    worker, store, _ = make_worker(tmp_path, [source], reads)
+    actions = NoteActionStub(reads)
+    worker.actions = actions
+    worker.promotion_store = PromotionForTriage(handoff=False)
+    now = datetime.now(timezone.utc)
+    evidence = {"company_verified": True, "ticket_id": 200001}
+    evidence["note_draft"] = render_triage_note(
+        ticket_number="T20261029.0001", state="needs_device_identity",
+        category="general", evidence=evidence, next_step="Associate a verified CI",
+    )
+    record = {"state": "needs_device_identity", "evidence": evidence,
+              "source_version": "v1", "ticket_number": source.context["ticketNumber"]}
+    worker._maybe_publish_unsupported_triage_note(source, record, now=now)
+    assert [x[1] for x in actions.calls] == ["service.ticket.note.create"]
+    assert store.unsupported_handoff_delivery(200001) is None
+    # Owner may approve handoff independently after publishing a note.
+    worker.promotion_store = PromotionForTriage(handoff=True)
+    worker._maybe_publish_unsupported_triage_note(source, record, now=now)
+    assert [x[1] for x in actions.calls] == [
+        "service.ticket.note.create", "service.ticket.update",
+    ]
+    assert store.unsupported_handoff_delivery(200001)["state"] == "verified"
+    store.close()
+
+
+def test_later_handoff_denied_when_managed_note_was_edited(tmp_path):
+    from datetime import datetime, timezone
+    from jason_runtime.unsupported_ticket_triage import render_triage_note
+    source = ticket(title="Space Issue", queue="Jason")
+    reads = NoteReadStub()
+    worker, store, _ = make_worker(tmp_path, [source], reads)
+    actions = NoteActionStub(reads)
+    worker.actions = actions
+    worker.promotion_store = PromotionForTriage(handoff=False)
+    now = datetime.now(timezone.utc)
+    evidence = {"company_verified": True, "ticket_id": 200001}
+    evidence["note_draft"] = render_triage_note(
+        ticket_number="T20261029.0001", state="needs_device_identity",
+        category="general", evidence=evidence, next_step="Associate a verified CI",
+    )
+    record = {"state": "needs_device_identity", "evidence": evidence,
+              "source_version": "v1", "ticket_number": source.context["ticketNumber"]}
+    worker._maybe_publish_unsupported_triage_note(source, record, now=now)
+    assert len(actions.calls) == 1
+    reads.notes[-1]["description"] = "A technician changed this note"
+    worker.promotion_store = PromotionForTriage(handoff=True)
+    worker._maybe_publish_unsupported_triage_note(source, record, now=now)
+    assert len(actions.calls) == 1
+    assert store.unsupported_handoff_delivery(200001)["state"] == "retry_pending"
+    assert store.unsupported_handoff_delivery(200001)["last_error"] == "OperationalAutonomyError"
+    store.close()
+
+
+def test_terminal_failed_handoff_does_not_retry_unbounded(tmp_path):
+    from datetime import datetime, timezone
+    from hashlib import sha256
+    from jason_runtime.unsupported_ticket_triage import render_triage_note
+    source = ticket(title="Space Issue", queue="Jason")
+    reads = NoteReadStub()
+    worker, store, _ = make_worker(tmp_path, [source], reads)
+    worker.promotion_store = PromotionForTriage(handoff=True)
+    actions = NoteActionStub(reads)
+    worker.actions = actions
+    body = render_triage_note(
+        ticket_number="T20261029.0001", state="needs_device_identity",
+        category="general", evidence={"company_verified": True},
+        next_step="Validate a same-company configuration item",
+    )
+    fingerprint = sha256(body.encode("utf-8")).hexdigest()
+    store.remember_note_fingerprint(
+        200001, "unsupported_readonly_triage_note",
+        "Jason - Governed Read-Only Investigation", fingerprint,
+    )
+    store.record_unsupported_handoff_delivery(
+        ticket_id=200001, note_fingerprint=fingerprint,
+        state="needs_human_review", attempts=3,
+        next_due_at="2020-01-01T00:00:00+00:00",
+        last_error="OperationalAutonomyError",
+    )
+    record = {
+        "state": "needs_device_identity", "source_version": "v1",
+        "ticket_number": source.context["ticketNumber"],
+        "evidence": {"company_verified": True, "note_draft": body},
+    }
+    worker._maybe_publish_unsupported_triage_note(
+        source, record, now=datetime.now(timezone.utc),
+    )
+    assert actions.calls == []
+    assert store.unsupported_handoff_delivery(200001)["attempts"] == 3
     store.close()

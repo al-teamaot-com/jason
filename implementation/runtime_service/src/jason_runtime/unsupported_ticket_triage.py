@@ -214,7 +214,16 @@ def gather(
     notes = read("service.ticket.notes.search", {"ticket_id": ticket_id}).get("items")
     if not isinstance(notes, list):
         raise ValueError("notes_readback_invalid")
-    evidence["notes_observed"] = len(notes)
+    # Exclude the managed diagnostic note itself so its creation cannot
+    # generate a changed note count and an unnecessary self-update loop.
+    evidence["notes_observed"] = sum(
+        1 for note in notes
+        if not (
+            isinstance(note, Mapping)
+            and str(note.get("title") or "").strip()
+            == "Jason - Governed Read-Only Investigation"
+        )
+    )
 
     source_ci = ticket.get("configurationItemID")
     source_ci_id = int(source_ci or 0)
@@ -372,7 +381,7 @@ def render_triage_note(
             if not re.fullmatch(r"[A-Z]:", drive) or size <= 0 or free < 0 or free > size:
                 continue
             lines.append(
-                f"- Datto audit volume {drive}: {free / 1073741824:.1f} GiB free "
+                f"- Datto audit volume {drive} {free / 1073741824:.1f} GiB free "
                 f"of {size / 1073741824:.1f} GiB "
                 f"({free / size * 100:.1f}% free)"
             )

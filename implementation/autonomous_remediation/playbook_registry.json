@@ -706,6 +706,105 @@
         ],
         "disruptive_branches": []
       }
+    },
+    {
+      "id": "unsupported_readonly_triage_note",
+      "name": "Jason - Bounded Unsupported Ticket Investigation Note",
+      "version": "1.0.0",
+      "lifecycle": "production",
+      "enabled": true,
+      "source": "docs/playbooks/Jason-Unsupported-ReadOnly-Triage-Note-Pilot.md",
+      "trigger": {
+        "ticket_ids": [
+          143305,
+          143272
+        ],
+        "requires_unsupported_triage_ledger": true
+      },
+      "review_status": "pilot_registered_not_owner_promoted",
+      "autonomy": {
+        "activation": "autonomous",
+        "pilot_ticket_ids": [
+          143305,
+          143272
+        ],
+        "required_gates": [
+          "source_ticket_id_allowlist",
+          "autotask_queue_admission",
+          "not_assigned_elsewhere",
+          "exact_source_version_and_ticket_number",
+          "verified_company",
+          "durable_evidence_and_note_draft",
+          "exact_owner_promotion",
+          "governed_internal_note_only",
+          "readback_verified",
+          "duplicate_suppression"
+        ],
+        "allowed_capabilities": [
+          "service.ticket.note.create",
+          "service.ticket.note.update"
+        ],
+        "policy_id": "playbook-autonomy:unsupported_readonly_triage_note",
+        "allowed_branches": [
+          "publish_verified_internal_note",
+          "update_proven_owned_managed_note"
+        ],
+        "approval_bound_branches": [
+          "note.create",
+          "note.update"
+        ],
+        "disruptive_branches": []
+      }
+    },
+    {
+      "id": "unsupported_triage_human_review",
+      "name": "Jason - Controlled Human Review Handoff",
+      "version": "1.0.0",
+      "lifecycle": "production",
+      "enabled": true,
+      "source": "docs/playbooks/Jason-Unsupported-Triage-Human-Review-Handoff-Pilot.md",
+      "trigger": {
+        "ticket_ids": [
+          143305,
+          143272
+        ],
+        "source_queue": "Jason",
+        "requires_state_in": [
+          "needs_human_review",
+          "needs_device_identity",
+          "needs_execution_authority",
+          "needs_security_review",
+          "needs_playbook_review"
+        ]
+      },
+      "review_status": "pilot_registered_not_owner_promoted",
+      "autonomy": {
+        "activation": "autonomous",
+        "pilot_ticket_ids": [
+          143305,
+          143272
+        ],
+        "required_gates": [
+          "source_ticket_id_allowlist",
+          "ticket_in_jason_queue",
+          "jason_owned",
+          "needs_human_review",
+          "verified_internal_investigation_note",
+          "exact_owner_promotion",
+          "readback_verified_queue_and_status"
+        ],
+        "allowed_capabilities": [
+          "service.ticket.update"
+        ],
+        "policy_id": "playbook-autonomy:unsupported_triage_human_review",
+        "allowed_branches": [
+          "move_to_help_desk_i_human_review"
+        ],
+        "approval_bound_branches": [
+          "service.ticket.update"
+        ],
+        "disruptive_branches": []
+      }
     }
   ]
 }
