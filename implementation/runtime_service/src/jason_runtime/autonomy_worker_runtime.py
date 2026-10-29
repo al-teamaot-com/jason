@@ -661,7 +661,7 @@ class SQLiteOperationalWorkStore:
         event_key = hashlib.sha256(
             f"{ticket_id}|{playbook_id}|{note_title}|{fingerprint}".encode("utf-8")
         ).hexdigest()
-        if event_type not in {"work_started", "work_completed", "patch_completed"}:
+        if event_type not in {"work_started", "work_completed", "patch_completed", "work_blocked"}:
             raise ValueError("unsupported owner notification event")
         serialized = json.dumps(dict(arguments), sort_keys=True)
         if len(serialized) > 2400:
@@ -865,6 +865,13 @@ class SQLiteOperationalWorkStore:
             (int(ticket_id),),
         ).fetchone()
         return None if row is None else str(row["state"])
+
+    def classification_disposition(self, ticket_id: int) -> tuple[str, str] | None:
+        row = self._connection.execute(
+            "SELECT state,reason_code FROM autonomy_ticket_classification WHERE ticket_id=?",
+            (int(ticket_id),),
+        ).fetchone()
+        return None if row is None else (str(row["state"]), str(row["reason_code"]))
 
     def ticket_activity(self, ticket_id: int) -> tuple[Mapping[str, Any], ...]:
         rows = self._connection.execute(
@@ -1277,90 +1284,15 @@ class OperationalAutonomyMaintenance:
         return None
 
     def _drain_teams_notifications(self) -> None:
-        """Out-of-band notification retry; ticket work is never failed by Teams."""
-        if (self.completion_notifier is None
-                or not callable(getattr(self.store, "due_teams_notifications", None))):
-            return
-        now = datetime.now(timezone.utc)
-        try:
-            due = self.store.due_teams_notifications(now=now, limit=4)
-        except Exception as exc:
-            self._audit_diagnostic("ticket_teams_outbox_read_failed", {
-                "error_type": type(exc).__name__,
-            })
-            return
-        for row in due:
-            event_key = str(row["event_key"])
-            attempts = int(row["attempts"]) + 1
-            # Old notifications are retained as explicit undelivered evidence,
-            # not sent weeks later as if the ticket had just started.
-            try:
-                created = datetime.fromisoformat(str(row["recorded_at"]))
-                if now - created > timedelta(hours=24):
-                    self.store.record_teams_notification_result(
-                        event_key=event_key, state="expired", attempts=attempts,
-                        next_due_at=now + timedelta(days=365),
-                        last_error="older_than_24h",
-                    )
-                    continue
-            except (ValueError, TypeError):
-                continue
-            try:
-                arguments = json.loads(str(row["arguments_json"]))
-                result = self.completion_notifier.send(
-                    str(row["event_type"]), **arguments,
-                )
-                if not isinstance(result, Mapping):
-                    raise OperationalAutonomyError("Teams receipt missing")
-                message_id = str(result.get("message_id") or "").strip()
-                if not message_id:
-                    raise OperationalAutonomyError("Teams message reference missing")
-                synthetic = result.get("message_id_synthetic",
-                                       message_id.startswith("accepted:"))
-                if type(synthetic) is not bool:
-                    raise OperationalAutonomyError("Teams receipt type malformed")
-                state = "unverified" if synthetic else "delivered"
-                self.store.record_teams_notification_result(
-                    event_key=event_key, state=state, attempts=attempts,
-                    next_due_at=now + timedelta(days=365),
-                    last_error=None, message_id=message_id,
-                )
-                if not synthetic:
-                    try:
-                        self.store.remember_note_fingerprint(
-                            int(row["ticket_id"]), str(row["playbook_id"]),
-                            str(row["note_title"]), str(row["fingerprint"]),
-                        )
-                    except Exception:
-                        # Outbox delivered marker is durable. A secondary
-                        # fingerprint failure cannot authorize a duplicate.
-                        pass
-                if self.audit is not None:
-                    try:
-                        self._audit_diagnostic("ticket_teams_outbox_result", {
-                            "ticket_id": int(row["ticket_id"]),
-                            "event_type": str(row["event_type"]), "state": state,
-                        })
-                    except Exception:
-                        pass
-            except Exception as exc:
-                # A failed provider transport is never authority to reverse
-                # or retry the successful underlying Autotask/endpoint action.
-                retry_seconds = min(3600, 300 * (2 ** min(attempts - 1, 4)))
-                self.store.record_teams_notification_result(
-                    event_key=event_key, state="pending", attempts=attempts,
-                    next_due_at=now + timedelta(seconds=retry_seconds),
-                    last_error=type(exc).__name__,
-                )
-                if self.audit is not None:
-                    try:
-                        self._audit_diagnostic("ticket_teams_notification_failed", {
-                            "ticket_id": int(row["ticket_id"]),
-                            "event_type": str(row["event_type"]),
-                            "attempts": attempts, "error_type": type(exc).__name__,
-                        })
-                    except Exception:
-                        pass
+        """Kept for controlled tests; real delivery runs in the auxiliary lane."""
+        from .autonomy_teams_notification_maintenance import (
+            drain_owner_notification_outbox,
+        )
+        drain_owner_notification_outbox(
+            store=self.store,
+            notifier=self.completion_notifier,
+            audit=self._audit_diagnostic if self.audit is not None else None,
+        )
 
     def _reconcile_completed_notification_blocks(self) -> None:
         """Recover verified PSA completions stranded by historic Teams failures."""
@@ -1459,7 +1391,8 @@ class OperationalAutonomyMaintenance:
                     },
                     now=datetime.now(timezone.utc),
                 )
-                self._drain_teams_notifications()
+                # A separate supervised auxiliary process sends this event.
+                # Never wait for an external Teams provider inside a PSA scan.
             except Exception:
                 # Even a disk-full outbox error must not undo PSA verification.
                 pass
@@ -2193,10 +2126,6 @@ class OperationalAutonomyMaintenance:
         if now < self._next_due:
             return
         self._next_due = now + self.interval_seconds
-        # Independent delivery must proceed even when Autotask discovery is
-        # temporarily unavailable. A Teams outage never changes ticket state.
-        self._drain_teams_notifications()
-
         try:
             candidates = tuple(self.queue_source.reconcile_candidates())
         except Exception:
@@ -2965,7 +2894,197 @@ class OperationalAutonomyMaintenance:
             human_review=human_review,
         )
         self.store.record_scan(snapshot)
+        # Owner escalation is durable and never sends Teams from this worker.
+        # Backlog gets one event per ticket/disposition without consuming a
+        # remediation slot or interfering with the verified scan heartbeat.
+        try:
+            self._enqueue_owner_attention(candidates, classifications)
+        except Exception as exc:
+            if self.audit is not None:
+                self._audit_diagnostic("ticket_owner_attention_enqueue_failed", {
+                    "error_type": type(exc).__name__,
+                })
         self._emit_scan_reflection(snapshot)
+
+    _OWNER_ATTENTION_STATES = frozenset({
+        "unsupported_capability", "governance_blocked", "waiting_human_review",
+        "waiting_device_access",
+    })
+    _OWNER_ATTENTION_DEPENDENCIES = frozenset({
+        "patch_approval_pending", "client_notification_authority_pending",
+        "active_capacity_full",
+    })
+    _OWNER_ACTION_BY_REASON = {
+        "no_applicable_promoted_playbook": (
+            "Technician: identify the issue and approve an applicable playbook "
+            "or take ownership of the investigation."
+        ),
+        "windows_licensing_diagnostics_candidate": (
+            "Technician: check Windows activation and licensing entitlement; "
+            "approve a governed diagnostic playbook before remediation."
+        ),
+        "playbook_not_promoted": (
+            "Owner: review and explicitly promote the exact applicable playbook "
+            "before autonomous remediation."
+        ),
+        "backupiq_queue_normalization_failed": (
+            "Technician: verify Autotask queue permissions and correct the "
+            "failed governed BackupIQ queue association."
+        ),
+        "worker_blocked": (
+            "Technician: review Jason's persisted block and resolve the exact "
+            "identity, evidence, provider, or permission failure."
+        ),
+        "human_review_handoff_failed": (
+            "Technician: verify the required Human Review ticket handoff "
+            "and Autotask update authority."
+        ),
+        "admission_identity_or_governance_failure": (
+            "Technician: verify the ticket/company/device identity and "
+            "governed execution permission."
+        ),
+        "technician_review_required": (
+            "Technician: review Jason's existing handoff and choose the next "
+            "safe action or request missing client information."
+        ),
+        "approval_required": (
+            "Owner: review the exact pending governed action and explicitly "
+            "approve or reject it."
+        ),
+        "endpoint_offline_corroborated_deb": (
+            "Technician: confirm endpoint availability or wait for reconnection; "
+            "Jason will retry the existing playbook after exact access returns."
+        ),
+        "endpoint_offline_deb_unconfirmed": (
+            "Technician: verify the device/backup reporting path and access; "
+            "no endpoint action was attempted."
+        ),
+        "drmm_access_unavailable_device_online_deb": (
+            "Technician: restore Datto RMM device access; backup evidence alone "
+            "does not grant remote action permission."
+        ),
+        "patch_approval_pending": (
+            "Owner: approve or defer the exact outstanding VulScan KBs; "
+            "no patch approval is granted by this message."
+        ),
+        "client_notification_authority_pending": (
+            "Owner: review the required client notification authority or "
+            "assign a technician for the customer communication."
+        ),
+        "active_capacity_full": (
+            "No new permission required: Jason must admit this work when an "
+            "active remediation slot opens. Technician may reprioritize."
+        ),
+    }
+
+    def _enqueue_owner_attention(
+        self,
+        candidates: Sequence[Any],
+        classifications: Mapping[int, tuple[str, str, str | None, bool]],
+    ) -> None:
+        if self.completion_notifier is None:
+            return
+        for candidate in candidates:
+            ticket_id = int(candidate.resource_id)
+            disposition = classifications.get(ticket_id)
+            if disposition is None:
+                continue
+            state, reason_code = disposition[0], disposition[1]
+            if (
+                state not in self._OWNER_ATTENTION_STATES
+                and not (
+                    state == "waiting_dependency"
+                    and reason_code in self._OWNER_ATTENTION_DEPENDENCIES
+                )
+            ):
+                continue
+            ticket = candidate.context
+            number = str(ticket.get("ticketNumber") or "").strip()
+            title = " ".join(str(ticket.get("title") or "").split())
+            if not number or not title:
+                # Unknown source identity is a scan defect, not permission to
+                # construct a misleading Teams card with invented ticket IDs.
+                continue
+            try:
+                company_id = int(ticket.get("companyID") or 0)
+            except (TypeError, ValueError):
+                company_id = 0
+            client_name = " ".join(str(
+                ticket.get("companyName") or ticket.get("_jason_company_name") or ""
+            ).split())
+            client = (
+                client_name[:75]
+                if client_name else
+                "Autotask company #" + str(company_id)
+                if company_id > 0 else "Not verified"
+            )
+            work = self.store.get(ticket_id)
+            try:
+                ci_id = int(ticket.get("configurationItemID") or 0)
+            except (TypeError, ValueError):
+                ci_id = 0
+            device = (
+                str(work.hostname)[:75]
+                if work is not None and work.hostname else
+                "CI #" + str(ci_id) if ci_id > 0 else "Unlinked"
+            )
+            triage = (
+                self.store.unsupported_triage(ticket_id)
+                if state == "unsupported_capability" else None
+            )
+            if (triage is not None and
+                    str(triage.get("source_version") or "") !=
+                    str(disposition[2] or "")):
+                triage = None  # never present previous-version triage as current
+            checked = (
+                "governed read-only triage: " +
+                str(triage.get("state") or "unverified")[:45]
+                if triage is not None else
+                "Autotask queue, status and promoted-playbook assessment"
+            )
+            summary = (
+                f"Ticket {number}; Client {client}; Device {device}; "
+                f"State {state}; Reason {reason_code}; Checked {checked}."
+            )
+            next_step = (
+                str(triage.get("next_step") or "").strip()
+                if triage is not None else ""
+            )
+            owner_action = (
+                next_step
+                or self._OWNER_ACTION_BY_REASON.get(
+                    reason_code,
+                    "Technician: review the exact ticket and Jason decision; "
+                    "supply missing evidence or authorized next action.",
+                )
+            )
+            note_title = f"Teams - Owner Action - {state} - {reason_code}"
+            fingerprint = hashlib.sha256(
+                f"owner-action-v1|{ticket_id}|{state}|{reason_code}".encode()
+            ).hexdigest()
+            try:
+                self.store.queue_teams_notification(
+                    ticket_id=ticket_id,
+                    playbook_id=(
+                        work.playbook_id if work is not None
+                        else "canonical_ticket_assessment"
+                    ),
+                    note_title=note_title, fingerprint=fingerprint,
+                    event_type="work_blocked",
+                    arguments={
+                        "work_id": number[:80],
+                        "work_title": title[:180],
+                        "summary": summary[:400],
+                        "owner_action": owner_action[:300],
+                    },
+                    now=datetime.now(timezone.utc),
+                )
+            except Exception as exc:
+                if self.audit is not None:
+                    self._audit_diagnostic(
+                        "ticket_owner_attention_enqueue_failed",
+                        {"ticket_id": ticket_id, "error_type": type(exc).__name__},
+                    )
 
     def _triage_unsupported(self, candidates: Sequence[tuple[Any, str]]) -> None:
         """Bounded diagnosis only; zero provider writes, claims or resolutions."""
@@ -7906,7 +8025,7 @@ class OperationalAutonomyMaintenance:
                     arguments=arguments,
                     now=datetime.now(timezone.utc),
                 )
-                self._drain_teams_notifications()
+                # The independent notification maintenance drains this outbox.
             except Exception:
                 pass  # Verified PSA state is authoritative, not Teams transport.
             return

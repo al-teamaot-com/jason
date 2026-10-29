@@ -6,6 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from jason_runtime.autonomy_teams_notification_maintenance import (
+    TicketOwnerNotificationMaintenance,
+)
 from jason_runtime.autonomy_worker_runtime import (
     OperationalAutonomyMaintenance,
     OperationalWork,
@@ -123,6 +126,8 @@ def test_verified_patch_completion_survives_teams_failure_and_retries_once(tmp_p
     work = vulscan_work()
     store.put(work)
     worker._notify_patch_completion(work, patch_summary="KB installed and verified")
+    assert notifier.calls == []  # ticket worker never sends
+    worker._drain_teams_notifications()  # independent auxiliary simulation
     assert store.get(work.ticket_id).phase == "complete"
     queued = outbox(store)
     assert len(queued) == 1
@@ -159,6 +164,8 @@ def test_accepted_synthetic_reference_never_claims_delivery_or_auto_resends(tmp_
     notifier = Notifier(synthetic=True)
     worker, store, actions = build(tmp_path, notifier=notifier)
     worker._notify_ticket_event(vulscan_work(), "pickup", "In Progress")
+    assert notifier.calls == []  # no network I/O on ticket worker
+    worker._drain_teams_notifications()
     record = outbox(store)
     assert len(record) == 1
     assert record[0]["state"] == "unverified"
@@ -222,6 +229,8 @@ def test_ticket_pickup_notification_uses_durable_outbox_without_duplicate_or_psa
     worker._notify_ticket_event(work,"pickup","In Progress")
     assert store.get(work.ticket_id).phase=="claim"
     assert len(outbox(store))==1
+    assert notifier.calls == []
+    worker._drain_teams_notifications()
     assert len(notifier.calls)==1  # backoff
     assert actions.calls==[]
     store.close()
@@ -242,6 +251,12 @@ def test_readonly_reconciliation_and_notification_outbox_survive_psa_queue_outag
         now=now,
     )
     worker.tick()
+    assert notifier.calls == []  # PSA outage must not trigger or stall Teams I/O
+    independent = TicketOwnerNotificationMaintenance(
+        store=store, notifier=notifier, interval_seconds=15,
+        monotonic=iter([0.0, 16.0]).__next__,
+    )
+    independent.tick()
     assert len(notifier.calls)==1
     assert outbox(store)[0]["state"]=="delivered"
     assert store.get(work.ticket_id).phase=="complete"
