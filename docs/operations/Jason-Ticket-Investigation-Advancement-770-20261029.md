@@ -128,3 +128,37 @@ profile and real ticket/company/provider evidence, complete triage and
 worker regression suites, assess current intake/disposition coverage,
 and verify sustained actual eligible-ticket advancement. Do not close
 issue #770 merely because this investigation correction passes.
+
+
+## Follow-up: general read-only intake assurance (preproduction-only)
+
+A ticket's assessment/diagnosis is not the same as its remediation admission.
+The worker can continue to gather bounded, governed evidence for otherwise
+unsupported monitored New/Emergency tickets even if:
+- a technician already owns the ticket (assessment only: no claim, no ticket
+  note, no queue/status reassignment or client message); or
+- a matching remediation playbook exists but lacks exact Owner promotion
+  (recorded as needing playbook promotion, not permission to execute).
+
+This is a generic rule, not an exception for ticket 143272. User, service,
+infrastructure, and combined user/device cases use the contact-first
+investigation taxonomy. The source version of read-only triage is bumped so
+prior persisted outcomes can be reconsidered on their next evaluation.
+
+Read-only triage has an independent, bounded four-ticket-per-scan default
+budget. Governed internal-note publication remains capped at two successful
+attempts per scan under the existing separately promoted playbook, the exact
+two-pilot-ticket allowlist, and technician-ownership safeguards. The two
+active remediation-work slots and all disruptive-action approval checks
+remain unchanged.
+
+Urgency and priority are respected; among equally ranked tickets, unowned
+intake is assessed before assigned technician work. Every assessment records
+the admission reason and source version in the durable evidence ledger.
+No extra provider capabilities, contact permissions, endpoint execution,
+or production approval are conferred by this adjustment.
+
+Live operational acceptance still must prove review/disposition coverage
+for the unsupported/blocked backlog, fair rechecks, and safe handoff
+notifications rather than treating scan health or a green unit test as
+successful ticket resolution.

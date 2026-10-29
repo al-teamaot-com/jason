@@ -260,15 +260,20 @@ def test_one_read_failure_does_not_starve_second_ticket_and_retries_when_due(tmp
     store.close()
 
 
-def test_assigned_ticket_and_in_progress_helpdesk_skip_generic_triage(tmp_path):
+def test_assigned_new_ticket_gets_readonly_assessment_without_claim_or_note(tmp_path):
     reads = ReadStub()
     worker, store, actions = make_worker(
         tmp_path, [ticket(assigned=True), ticket(ticket_id=200002, status="In Progress")], reads,
     )
     worker.tick()
-    assert reads.calls == []
-    assert store.unsupported_triage(200001) is None
+    assessed = store.unsupported_triage(200001)
+    assert assessed is not None
+    assert assessed["state"] == "needs_execution_authority"
+    assert assessed["evidence"]["read_only_investigation"] is True
     assert store.unsupported_triage(200002) is None
+    assert store.get(200001) is None
+    assert store.get(200002) is None
+    assert reads.calls
     assert actions.calls == []
     store.close()
 
@@ -424,7 +429,7 @@ def test_prior_production_policy_denial_is_reevaluated_once_after_upgrade(tmp_pa
     worker.tick()
     row = store.unsupported_triage(200001)
     assert row["state"] == "needs_execution_authority"
-    assert row["evidence"]["triage_logic_version"] == "contact_first_context_v4"
+    assert row["evidence"]["triage_logic_version"] == "read_only_admission_assurance_v5"
     assert all(cap != "service.ticket.read" for cap, _ in reads.calls)
     first_count = len(reads.calls)
     worker.tick()
@@ -1071,7 +1076,7 @@ def test_worker_persists_non_escalating_contact_first_triage_for_143272_shape(tm
     assert record["evidence"]["contact_associated"] is True
     assert record["evidence"]["contact_lookup_unavailable"] is True
     assert record["evidence"].get("contact_verified") is None
-    assert record["evidence"]["triage_logic_version"] == "contact_first_context_v4"
+    assert record["evidence"]["triage_logic_version"] == "read_only_admission_assurance_v5"
     assert store.get(200001) is None
     assert actions.calls == []
     assert [name for name, _ in reads.calls] == [
@@ -1136,5 +1141,89 @@ def test_worker_contact_company_conflict_is_not_mislabeled_device_identity(tmp_p
     assert "needs device identity" not in record["evidence"]["note_draft"].casefold()
     assert all(cap not in {"service.configuration.read", "endpoint.device.read"}
                for cap, _ in reads.calls)
+    assert actions.calls == []
+    store.close()
+
+
+
+def test_unpromoted_playbook_does_not_block_readonly_investigation(tmp_path):
+    from jason_runtime.autonomy_worker_runtime import EDR_SCOPE
+    reads = ReadStub()
+    candidate = ticket(title="Microsoft 365 mailbox problem")
+    worker, store, actions = make_worker(tmp_path, [candidate], reads)
+    worker._match_scope = lambda context: EDR_SCOPE
+    worker.tick()
+    assessment = store.unsupported_triage(200001)
+    assert assessment is not None
+    assert assessment["category"] == "account_service"
+    assert assessment["state"] == "needs_playbook_promotion"
+    assert assessment["evidence"]["remediation_promotion_required"] is True
+    assert assessment["evidence"]["admission_reason"] == "playbook_not_promoted"
+    assert "not received exact governed promotion" in assessment["next_step"]
+    assert "execution NOT authorized" in assessment["evidence"]["note_draft"]
+    assert store.get(200001) is None
+    assert store.latest_scan().selected == 0
+    assert actions.calls == []
+    assert [name for name, _ in reads.calls] == ["service.ticket.notes.search"]
+    store.close()
+
+
+def test_assigned_ticket_cannot_publish_even_with_independent_pilot_promotion(tmp_path):
+    source = ticket(assigned=True, title="Microsoft 365 mailbox issue")
+    reads = NoteReadStub()
+    worker, store, _ = make_worker(tmp_path, [source], reads)
+    worker.promotion_store = PromotionForTriage()
+    actions = NoteActionStub(reads)
+    worker.actions = actions
+    worker.tick()
+    assert store.unsupported_triage(200001) is not None
+    assert store.unsupported_note_delivery(200001) is None
+    assert actions.calls == []
+    store.close()
+
+
+def test_readonly_intake_has_bounded_independent_default_budget(tmp_path):
+    reads = ReadStub()
+    candidates = [ticket(ticket_id=200001 + offset,
+                         title="Microsoft 365 mailbox problem")
+                  for offset in range(9)]
+    worker = OperationalAutonomyMaintenance(
+        queue_source=Queue(*candidates),
+        reads=reads,
+        actions=NoMutation(),
+        store=SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3"),
+        promotion_store=NoPromotion(),
+        interval_seconds=30,
+        monotonic=iter((0.0, 31.0, 62.0, 93.0)).__next__,
+    )
+    try:
+        assert worker.max_active_work_items == 2
+        assert worker.max_unsupported_triage_per_scan == 4
+        worker.tick()
+        assert sum(worker.store.unsupported_triage(int(i.resource_id)) is not None
+                   for i in candidates) == 4
+        worker.tick()
+        assert sum(worker.store.unsupported_triage(int(i.resource_id)) is not None
+                   for i in candidates) == 8
+        assert worker.store.latest_scan().selected == 0
+        assert worker.store.list_open() == ()
+    finally:
+        worker.store.close()
+
+
+
+def test_unowned_intake_is_assessed_before_equal_priority_assigned_ticket(tmp_path):
+    assigned = ticket(ticket_id=200001, assigned=True,
+                      title="Microsoft 365 sign-in issue")
+    unowned = ticket(ticket_id=200002, assigned=False,
+                     title="Microsoft 365 sign-in issue")
+    reads = ReadStub()
+    worker, store, actions = make_worker(
+        tmp_path, [assigned, unowned], reads, max_triage=1)
+    worker.tick()
+    assert store.unsupported_triage(200001) is None
+    assert store.unsupported_triage(200002)["state"] == "needs_playbook_review"
+    worker.tick()
+    assert store.unsupported_triage(200001)["state"] == "needs_playbook_review"
     assert actions.calls == []
     store.close()

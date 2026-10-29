@@ -117,7 +117,7 @@ from .unsupported_ticket_triage import (
 
 # Force a single safe re-evaluation of old read-policy-denied rows after an
 # implementation change, without editing production SQLite state manually.
-UNSUPPORTED_TRIAGE_LOGIC_VERSION = "contact_first_context_v4"
+UNSUPPORTED_TRIAGE_LOGIC_VERSION = "read_only_admission_assurance_v5"
 from .managed_ticket_notes import (
     GPT_INSIGHTS_TITLE,
     exact_named_note,
@@ -1127,7 +1127,7 @@ class OperationalAutonomyMaintenance:
         max_active_work_items: int = 2,
         max_admission_attempts_per_scan: int = 4,
         max_candidate_evaluations_per_scan: int = 40,
-        max_unsupported_triage_per_scan: int = 2,
+        max_unsupported_triage_per_scan: int = 4,
         triage_note_pilot_ticket_ids: Iterable[int] = (),
         interval_seconds: int = 60,
         monotonic: Callable[[], float] = time.monotonic,
@@ -2512,11 +2512,11 @@ class OperationalAutonomyMaintenance:
                     unsupported_reason,
                     item.source_version, False,
                 )
-                # A missing playbook does not grant action permission. Still
-                # collect bounded, read-only evidence for unassigned intake.
-                # Technician-owned cases are left alone entirely.
-                if item.context.get("_jason_assigned_elsewhere") is not True:
-                    unsupported_triage_candidates.append((item, unsupported_reason))
+                # Read-only investigation is separate from remediation admission:
+                # a technician-owned New ticket still benefits from durable
+                # evidence without being claimed, updated or requeued. The
+                # note publisher separately blocks writes to human-owned work.
+                unsupported_triage_candidates.append((item, unsupported_reason))
                 continue
             if not self._scope_is_promoted(scope):
                 governance_blocked += 1
@@ -2524,6 +2524,10 @@ class OperationalAutonomyMaintenance:
                     "governance_blocked", "playbook_not_promoted",
                     item.source_version, False,
                 )
+                # An unpromoted remediation scope is NOT a reason to skip
+                # governed read-only investigation. No playbook approval is
+                # inferred; persist what can be learned without executing it.
+                unsupported_triage_candidates.append((item, "playbook_not_promoted"))
                 continue
             if item.context.get("_jason_assigned_elsewhere") is True:
                 assigned_elsewhere += 1
@@ -2730,11 +2734,19 @@ class OperationalAutonomyMaintenance:
             key=lambda pair: (
                 -int(pair[0].urgent),
                 -int(pair[0].priority),
+                # Preserve fair intake service when a technician already owns
+                # a ticket: both are investigated, but unowned work is first
+                # at the same urgency/priority.
+                int(pair[0].context.get("_jason_assigned_elsewhere") is True),
                 int(pair[0].resource_id),
             ),
         )
         attempted = 0
         note_attempted = 0
+        # AOT's two-active-ticket limit controls mutations/remediation.
+        # Read-only evidence collection has its own bounded scan budget.
+        # Note publication remains separately capped at two per scan.
+        max_note_attempts = 2
         for candidate, unsupported_reason in order:
             if attempted >= self.max_unsupported_triage_per_scan:
                 break
@@ -2751,7 +2763,7 @@ class OperationalAutonomyMaintenance:
                 try:
                     due = datetime.fromisoformat(str(previous["next_due_at"]))
                     if due.tzinfo is not None and due > now:
-                        if note_attempted < self.max_unsupported_triage_per_scan:
+                        if note_attempted < max_note_attempts:
                             if self._maybe_publish_unsupported_triage_note(
                                 candidate, previous, now=now,
                             ):
@@ -2782,11 +2794,24 @@ class OperationalAutonomyMaintenance:
                 category = result.category
                 evidence = {
                     "triage_logic_version": UNSUPPORTED_TRIAGE_LOGIC_VERSION,
+                    "read_only_investigation": True,
+                    "admission_reason": unsupported_reason,
                     **result.evidence,
                 }
                 next_step = result.next_step
+                if unsupported_reason == "playbook_not_promoted":
+                    evidence["remediation_promotion_required"] = True
+                    if state in {"needs_playbook_review", "read_only_assessed"}:
+                        state = "needs_playbook_promotion"
+                    next_step = (
+                        "A matching remediation playbook exists but has not "
+                        "received exact governed promotion. Read-only evidence "
+                        "collection may continue; do not execute or claim work. "
+                        + next_step
+                    )
                 attempts = 0
                 hours = (24 if state == "read_only_assessed" else
+                         4 if state == "needs_playbook_promotion" else
                          4 if state in {"needs_device_identity", "needs_company_identity"} else
                          0.25 if state == "waiting_device_access" else 1)
                 next_due = now + timedelta(hours=hours)
@@ -2863,7 +2888,7 @@ class OperationalAutonomyMaintenance:
                 last_error=error,
             )
             stored = self.store.unsupported_triage(ticket_id)
-            if stored is not None and note_attempted < self.max_unsupported_triage_per_scan:
+            if stored is not None and note_attempted < max_note_attempts:
                 if self._maybe_publish_unsupported_triage_note(
                     candidate, stored, now=now,
                 ):
