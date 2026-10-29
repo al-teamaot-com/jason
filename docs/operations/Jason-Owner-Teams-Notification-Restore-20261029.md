@@ -60,3 +60,11 @@ ticket-start and one governed release-complete message, verify provider-backed
 receipt and human Teams arrival, check queued event reconciliation, ensure no
 historical notification flood and no regression in governed ticket processing.
 A green CI run alone is not a production Teams delivery guarantee.
+
+## Concurrent presentation changes
+
+Review of still-open PR #1971 confirms its changes to the notification
+renderer are visual presentation-only; it does not change recipient identity
+resolution, send governance, or durable release notification retry. Keep the
+two PRs separate and preserve the prior card renderer until #1971 is
+independently reviewed and accepted.
