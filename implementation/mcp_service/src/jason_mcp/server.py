@@ -1027,6 +1027,37 @@ def _project_endpoint_collection(
     result["items"] = _safe(provider_data)
     return result
 
+def _exact_company_evidence_matches(
+    result: Mapping[str, Any],
+    *,
+    requested_company_id: int,
+) -> bool:
+    """Require a real provider record for the exact selected company.
+
+    A successful HTTP/query response can legitimately carry data.item=None
+    for an unknown ID; a successful status alone is not company-existence
+    evidence and cannot authorize deriving a client-specific context.
+    """
+    if result.get("status") != "succeeded":
+        return False
+    evidence = result.get("evidence")
+    if not isinstance(evidence, Mapping):
+        return False
+    data = evidence.get("data")
+    if not isinstance(data, Mapping):
+        return False
+    item = data.get("item")
+    if not isinstance(item, Mapping):
+        return False
+    actual = item.get("id")
+    if isinstance(actual, bool) or not isinstance(actual, (str, int)):
+        return False
+    try:
+        return int(actual) == requested_company_id
+    except (TypeError, ValueError):
+        return False
+
+
 def _contract_client_context_for_identity(
     *,
     principal: str,
@@ -1054,7 +1085,7 @@ def _contract_client_context_for_identity(
         company_id = str(int(raw_company_id))
     except (TypeError, ValueError):
         return bound_client_id, None
-    if int(company_id) < 0:
+    if int(company_id) <= 0:
         return bound_client_id, None
     if bound_client_id is not None:
         return bound_client_id, None
@@ -1092,7 +1123,9 @@ def _contract_client_context_for_identity(
         capability_name=SERVICE_COMPANY_READ,
         arguments={"resource_id": int(company_id)},
     )
-    if company.get("status") != "succeeded":
+    if not _exact_company_evidence_matches(
+        company, requested_company_id=int(company_id),
+    ):
         return None, None
 
     app = _runtime()
