@@ -68,6 +68,8 @@ def fixture(tmp_path, monkeypatch, *, approved=True):
         _root_only=lambda path: path,
         _json=lambda path: state,
     )
+    monkeypatch.setattr(worker.pwd, "getpwnam",
+                        lambda account: SimpleNamespace(pw_uid=os.getuid()))
     monkeypatch.setattr(worker, "RELEASE_ROOT", releases)
     monkeypatch.setattr(worker, "CURRENT", current)
     monkeypatch.setattr(worker, "SYSTEM_UNIT_DIR", installed_system)

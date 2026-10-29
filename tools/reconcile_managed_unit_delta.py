@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pwd
 import re
 from pathlib import Path
 
@@ -99,6 +100,10 @@ def plan_unit_removals(
     if len(delta) > MAX_AUTO_REMOVALS:
         raise UnitDeltaError("too many candidate-only units for automatic removal")
     removable = []
+    try:
+        expected_owner = 0 if scope == "system" else pwd.getpwnam("al").pw_uid
+    except KeyError as exc:
+        raise UnitDeltaError("canonical host operator identity unavailable") from exc
     # Stop triggering timers/path units before dependent service units.
     for unit in sorted(delta, key=lambda name: (name.endswith(".service"), name)):
         installed = installed_dir / unit
@@ -108,7 +113,7 @@ def plan_unit_removals(
             continue
         if not installed.is_file():
             raise UnitDeltaError(f"installed unit is not a regular file: {unit}")
-        if enforce_owner and installed.stat().st_uid != (0 if scope == "system" else 1000):
+        if enforce_owner and installed.stat().st_uid != expected_owner:
             raise UnitDeltaError(f"unexpected owner of installed unit: {unit}")
         source = candidate_unit_file(candidate, unit, scope)
         if installed.read_bytes() != source.read_bytes():

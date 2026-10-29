@@ -432,9 +432,10 @@ def _reconcile_historical_release_units(source_revision: str, request_id: str) -
     folder = backup_root / request_id
     folder.mkdir(mode=0o700)
     removed: list[str] = []
+    operator_uid = pwd.getpwnam("al").pw_uid
     user_env = {
-        "HOME": "/home/al", "XDG_RUNTIME_DIR": "/run/user/1000",
-        "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/1000/bus",
+        "HOME": "/home/al", "XDG_RUNTIME_DIR": "/run/user/" + str(operator_uid),
+        "DBUS_SESSION_BUS_ADDRESS": "unix:path=/run/user/" + str(operator_uid) + "/bus",
         "PATH": "/usr/local/bin:/usr/bin:/bin",
     }
     for scope, names, installed_dir in (
@@ -455,7 +456,7 @@ def _reconcile_historical_release_units(source_revision: str, request_id: str) -
             try:
                 metadata = os.fstat(source_fd)
                 if (not stat.S_ISREG(metadata.st_mode)
-                        or metadata.st_uid != (0 if scope == "system" else 1000)
+                        or metadata.st_uid != (0 if scope == "system" else pwd.getpwnam("al").pw_uid)
                         or metadata.st_size > 65536):
                     raise HostReconcileError("candidate unit owner/type/size changed")
                 content = os.read(source_fd, 65537)
