@@ -2,23 +2,26 @@
 
 **Purpose:** Review and integration evidence only. Stage A source was merged through PR #2127, but no production deployment, additional protected-main merges, Production Manager promotion, freeze exception, provider write or capability activation is authorized by this document.
 
-**Generated UTC:** 2026-10-28T21:58:31+00:00
+**Generated UTC:** 2026-10-29T00:24:20+00:00
 **Last independently observed live runtime/MCP revision:** `b40c2f4a47e60e31e2241e4a4d55759242c2b580` (both containers matched in read-only Docker inspection).
-**Protected-main source baseline:** `1586dd9da10c23d7988d684a7c0b254c6353bef1` (PR #2127 Stage A merged).
-**Stage A native Production Manager release candidate:** `release-1586dd9da10c23d7`, exact source `1586dd9da10c23d7988d684a7c0b254c6353bef1`, owner approval **false**. Native preproduction is pending. The first attempt was safely stopped because copying 28 GB of OpenClaw state and 3.1 GB of authority state to the 24 GB-free root disk would have exhausted space; the partial scratch was deleted and only the private preproduction scratch location was redirected to the separate local archive volume (199 GB available at start). No production container was restarted. The prior mainline `release-2a51d03464ef0d1b` PM record was `production_eligible` with owner approval false, but is superseded by this source merge; it was not deployed.
+**Protected-main source baseline:** `d71cde5d24bdd65e67cb5c44d29eaf5f104edcbf` (source-only #2127 and P0 exact company evidence fix #2132 merged).
+**Stage A release control:** Prior candidate `release-1586dd9da10c23d7` was **demoted to development** after a live governed read proved that `service.company.read` may succeed with a null company record. P0 #2132 corrected the false existence proof and was merged into protected main as `d71cde5d24bdd65e67cb5c44d29eaf5f104edcbf`. A new exact-source PM record, independent image/preprod/rollback checks and protected-main CI are required; owner approval remains **false**. Provider-backed existing governed read-only company `contains` and actual Contracts selector tests passed, but the new runtime and requester-specific labor read are not deployed or independently provider-accepted. No production restart or capability activation occurred. The prior state-isolation scratch disk correction remains in place for bounded PM preproduction.
 
 ## Staged release order and immutable upstream references
 
-1. **Reads A:** Merged PR #2127 as protected-main commit `1586dd9da10c23d7988d684a7c0b254c6353bef1`; isolated integration merge `f4a6d9563046e29bc0bfdaba984c851a66997b51`, source PR #2110 `70faec63315acbd71866322a19be2a955471e434`. Read-only company contains search and governed technician contract context. Time-entry read remains deny-by-default until native provider-specific requester authorization evidence.
-2. **Routine RW B:** Current stacked PR #2128 review commit `0eca97fcc382e9090c8ea15878a18800e40fbac2` reconciles protected main after A; original integration merge `e558db52defcfeb64809b947a42d4995aa78502a`; source PR #2125 exact `151ba07dc9f5f377d7e69add70d226fd9ee48a12`. Includes Autotask controlled RW plus separate default-disabled IT Glue and Entra adapters; do not grant new roles, secrets, permissions or write activation by bundling.
-3. **Windows Time JSON C:** Review PR #2129 is rebased via a clean merge onto the updated Stage B review commit `0eca97fcc382e9090c8ea15878a18800e40fbac2`. This review worktree merges source PR #2126 `3fb983c7333b89eea5a57749b63df3d27c31d4a5` over B; origin PRs #2111, #2118, #2122. JSON shadow defaults off; no site allowlist is granted by source. The 16 JSON conversion drafts remain non-executable, and the 17th `client_information_request@1.0.0` is independently governed and explicitly excluded from those drafts.
+1. **Reads A:** Merged PR #2127 and P0 exact-company proof PR #2132 into protected main `d71cde5d24bdd65e67cb5c44d29eaf5f104edcbf`; isolated integration merge `f4a6d9563046e29bc0bfdaba984c851a66997b51`, source PR #2110 `70faec63315acbd71866322a19be2a955471e434`. Read-only company contains search and governed technician contract context. Time-entry read remains deny-by-default until native provider-specific requester authorization evidence.
+2. **Routine RW B:** Current stacked PR #2128 review commit `6fc2b60ea4ee5adff8d615833b548388512ab1b8` reconciles protected main after A; original integration merge `e558db52defcfeb64809b947a42d4995aa78502a`; source PR #2125 exact `151ba07dc9f5f377d7e69add70d226fd9ee48a12`. Includes Autotask controlled RW plus separate default-disabled IT Glue and Entra adapters; do not grant new roles, secrets, permissions or write activation by bundling.
+3. **Windows Time JSON C:** Review PR #2129 is rebased via a clean merge onto the updated Stage B review commit `6fc2b60ea4ee5adff8d615833b548388512ab1b8`. This review worktree merges source PR #2126 `3fb983c7333b89eea5a57749b63df3d27c31d4a5` over B; origin PRs #2111, #2118, #2122. JSON shadow defaults off; no site allowlist is granted by source. The 16 JSON conversion drafts remain non-executable, and the 17th `client_information_request@1.0.0` is independently governed and explicitly excluded from those drafts.
 4. **Client questions:** Source PR #2123 is already included in baseline main. Its owner-approved text is not authorization to send. Client notifications stay disabled until controlled end-to-end acceptance, policy permission and separate explicit activation.
 5. The operator must issue a **distinct, SHA-bound approval** after the candidate is merged to protected main and PM exact-image review is complete. No PR, draft or source commit is a deploy permit.
 
 ## Mandatory review of unrelated protected-main changes
 
-Protected main is **36 git commits** ahead of the last-known-good live revision. It now includes the source-only PR #2127 merge. All commits are in scope for any normal full-main Production Manager release, whether or not the owner intended only one feature:
+Protected main is **39 git commits** ahead of the last-known-good live revision. In addition to #2127 and #2132, the mainline includes already-merged routine RW, client-question and KFS work. All of these commits are within the normal PM full-main release blast radius, even for a read-only Stage A release:
 
+- `d71cde5d2 | Stage A: require exact company evidence before deriving client scope (#2132)`
+- `86f35e6a4 | Extend exact-company record shape and integration coordination tests`
+- `832c2d502 | Deny derived Autotask client context without exact company evidence`
 - `1586dd9da | Integrate governed Autotask read repairs from PR #2127`
 - `f4a6d9563 | Integrate Autotask governed reads with 2026-10-28 protected main`
 - `2a51d0346 | Merge pull request #2123 from al-teamaot-com/feature/client-question-library-round1-20261028`
@@ -56,13 +59,14 @@ Protected main is **36 git commits** ahead of the last-known-good live revision.
 - `8fd221ad6 | test(preprod): cover company partial search and ticket time-entry request boundaries`
 - `ee61a4be0 | fix(preprod): use bounded contains search for Autotask company name`
 
-The **37 changed paths** on protected main since LKG are:
+The **38 changed paths** on protected main since LKG are:
 
 - `config/client_communications/information_requests_round1.json`
 - `docs/operations/AOT-Client-Information-Requests-Round1.md`
 - `docs/operations/AOT-Routine-Autotask-RW-Pilot.md`
 - `docs/operations/AOT-Routine-ITGlue-Configuration-Notes-RW-20261028.md`
 - `docs/operations/AOT-Standard-Entra-User-Create-20261028.md`
+- `docs/operations/Autotask-Exact-Company-Context-Proof-20261028.md`
 - `docs/operations/Autotask-Read-Repair-Preproduction-20261028.md`
 - `docs/operations/Autotask-Read-Repair-Production-Handoff-20261028.md`
 - `docs/operations/KFS-Live-Session-Read-Error-Taxonomy-20261028.md`
@@ -98,10 +102,10 @@ The **37 changed paths** on protected main since LKG are:
 
 ## Exact integration diff inventory
 
-- Read repair adds or modifies **8 paths**.
-- RW coordination adds or modifies **26 paths** relative to Reads A.
-- Windows Time source merge adds or modifies **30 paths** relative to RW B.
-- This staged candidate index differs from the last-known-good source in **88 distinct paths**; the complete list follows. This is a **source-impact inventory**, not a verified production container manifest:
+- Protected-main Stage A source contains 38 changed paths since live LKG, including the P0 exact company evidence fix.
+- Stage B adds/modifies **26 paths** relative to protected main; its default-disabled and separately governed writes require independent acceptance.
+- Stage C adds/modifies **31 paths** relative to Stage B; Windows Time JSON shadow remains disabled.
+- The complete staged candidate differs from last-known-good source in **89 distinct paths**. This is a source-impact inventory, **not** an authorized or validated production container manifest:
 
 - `.dockerignore`
 - `.github/workflows/aot-routine-rw.yml`
@@ -114,6 +118,7 @@ The **37 changed paths** on protected main since LKG are:
 - `docs/operations/AOT-Routine-ITGlue-Configuration-Notes-RW-20261028.md`
 - `docs/operations/AOT-Routine-RW-Production-Readiness-20261028.md`
 - `docs/operations/AOT-Standard-Entra-User-Create-20261028.md`
+- `docs/operations/Autotask-Exact-Company-Context-Proof-20261028.md`
 - `docs/operations/Autotask-Read-Repair-Preproduction-20261028.md`
 - `docs/operations/Autotask-Read-Repair-Production-Handoff-20261028.md`
 - `docs/operations/KFS-Live-Session-Read-Error-Taxonomy-20261028.md`
@@ -203,7 +208,7 @@ The **37 changed paths** on protected main since LKG are:
 
 ## Outstanding hard gates — do not bypass
 
-**Autotask:** Provide dedicated isolated preproduction read-only identity and credential mount with no production credential reuse; its metadata gate currently rejects the missing directory. Prove authorized partial-name and contract reads, cross-client negative cases, native TimeEntries positive/negative impersonation on populated ticket, and release acceptance ticket-count/pagination/exact-read. Keep time-entry gate off if provider authority is unproven.
+**Autotask:** No new isolated Autotask test identity can be provisioned by the owner. Existing governed **read-only** Autotask connector established provider query shape: exact company records, bounded partial-name contains, and exact company-filtered Contracts with a genuine matching record. The Stage A source now explicitly rejects successful but null/mismatched company-read records before any context is derived. Unit and security tests passed, but the newly merged source still requires a new exact-SHA PM acceptance, protected-main checks and authorized positive/negative runtime canaries; existing provider connector results alone do not prove new runtime client-disclosure behavior. **Never enable requester-specific TimeEntries without real native requester permission proof**; keep it fail-closed. A restricted read-only release may exclude labor and writes, with a separate exact-SHA owner deployment authorization.
 
 **IT Glue / Entra:** Dedicated least-privilege IT Glue configuration-notes write key and separate Entra Graph User.Create app/test tenant, private OpenBao credentials and explicit exact-client grants do not exist in accepted end-to-end state. Run positive and negative readback canaries only in an independently authorized test organization/tenant; do not substitute live client accounts or force provision new roles without external approval. Keep both profiles off.
 
