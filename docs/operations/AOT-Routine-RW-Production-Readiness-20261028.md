@@ -107,3 +107,50 @@ These simulated tests never send a provider mutation.
 This evidence does not satisfy administrative consent, dedicated write-token
 provisioning, test-tenant validation, live write acceptance, PM preproduction,
 or exact-SHA production authorization.
+
+## OpenBao AppRole commissioning and concurrent PR review — 2026-10-29
+The AOT owner executed the approved interactive one-time local provisioning script
+with administrator credentials entered only into the host terminal. The observed
+non-secret receipts were:
+
+- `APPROLE_CREATED_AND_PROTECTED=jason-itglue-configuration-notes-write`
+- `APPROLE_CREATED_AND_PROTECTED=jason-microsoft-graph-user-create`
+- `APPROLE_CREATED_AND_PROTECTED=jason-microsoft-graph-onboarding-password`
+- `APPROLE_PROVISIONING=PASS`, `PRODUCTION_DEPLOYMENT=NO`,
+  `PROVIDER_API_KEYS_CREATED=NO`, `TEMPORARY_ADMIN_SESSION_REVOKED=YES`
+
+OpenBao remains initialized and unsealed. Noninteractive `al` cannot inspect
+root-only bootstrap files and must not bypass root custody. Dedicated provider
+API keys, Graph application consent, exact client mappings, and genuine write
+acceptance are **not** supplied by AppRole creation alone.
+
+The currently deployed protected release advanced independently to
+`d71cde5d24bdd65e67cb5c44d29eaf5f104edcbf`. This is now the release
+controller's recorded **last known good** and both live container source
+revisions. The prior LKG `b40c2f4a47e60e31e2241e4a4d55759242c2b580`
+remains in the recorded previous slot. Future exact-SHA release review must use
+the **current** verified rollback SHA, not the original 2026-10-28 snapshot.
+The full combined RW source branch was merged non-destructively with latest
+protected main; focused tests passed and the isolated worktree remained clean.
+
+Two overlapping PRs were reviewed without being modified or merged:
+
+- **PR #2128**: the current exact source tree matched the reconciled PR #2125
+  tree, so there is no distinct file-content delta to apply. This is a duplicate
+  release-candidate source line, not additional permission to deploy.
+- **PR #2137**: intentionally narrow Autotask-only Stage B1 release. It changes
+  the MCP/runtime deployment scripts and Compose file by limiting rollout to
+  the opt-in Autotask profile, whereas this candidate also includes separately
+  disabled IT Glue and Entra capabilities. The difference is intentional and
+  must be resolved by release sequencing rather than merging both rollout
+  policies blindly. Preserve the independent Autotask-first pilot.
+
+The provider credential next step is dedicated IT Glue custom API key creation
+under IT Glue **Admin > Settings > API Keys**, with *Password Access disabled*.
+A source-independent, local-only staging helper was prepared at
+`/home/al/jason-admin-tools/stage-itglue-rw-api-key.py`. Its `--check-only`
+mode passed against the unsealed local OpenBao. It accepts the key and OpenBao
+administrator password via non-echoing local terminal prompts and uses KV v2
+CAS=0 to prevent overwrite; it has **not** been run with a key. Vendor key
+creation is via the IT Glue administrator UI and cannot be silently inferred
+from existing read-only credentials.
