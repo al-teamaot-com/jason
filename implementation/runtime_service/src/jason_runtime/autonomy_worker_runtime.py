@@ -339,6 +339,8 @@ SECURITY_LOG_SELF_HEAL_UID = "cdd297b4-378f-4ffc-b272-56833e926c81"
 BACKUPIQ_INSTALLER_NAME = "Datto Endpoint Backup Agent v2 [WIN]"
 BACKUPIQ_INSTALLER_UID = "f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967"
 BACKUPIQ_REINSTALL_VERIFY_SECONDS = 3 * 60 * 60
+# Human review only; never cancel or re-execute a nonterminal Datto job.
+BACKUPIQ_REINSTALL_JOB_STALL_SECONDS = 2 * 60 * 60
 BACKUPIQ_INITIAL_BACKUP_MAX_SECONDS = 7 * 24 * 60 * 60
 BACKUPIQ_PROGRESS_STALL_SECONDS = 12 * 60 * 60
 LOW_DISK_SYSMON_CLEANUP_NAME = "Sysmon - Clear C:\\Sysmon Folder - AOT"
@@ -6968,6 +6970,43 @@ class OperationalAutonomyMaintenance:
         job = job_data.get("job") if isinstance(job_data.get("job"), Mapping) else job_data
         status = str(job.get("status") or "").strip().casefold()
         if status in {"active", "running", "queued", "pending", "scheduled"}:
+            started_at = self._backupiq_timestamp_from_reason(
+                work, "backupiq_reinstall_started_at"
+            )
+            if started_at is None:
+                self._persist_human_review_escalation(
+                    work, reason=(
+                        "BackupIQ reinstall job remains nonterminal, but the "
+                        "trusted dispatch timestamp is missing. Technician "
+                        "must verify the existing Datto job and ticket."
+                    ),
+                )
+                return
+            age_seconds = (datetime.now(timezone.utc) - started_at).total_seconds()
+            if age_seconds >= BACKUPIQ_REINSTALL_JOB_STALL_SECONDS:
+                # Provider active state does not prove failure. Persist
+                # observation; never redispatch, cancel, restart or close.
+                self._write_note(
+                    work,
+                    (
+                        "Single approved Endpoint Backup reinstall is still "
+                        f"nonterminal after {int(age_seconds / 60)} minutes. "
+                        f"Job={work.job_uid}; Component={work.component_uid}; "
+                        f"ProviderStatus={status}; Device={work.hostname}. "
+                        "No second reinstall, job cancellation, endpoint restart, "
+                        "or ticket completion attempted. Technician must verify "
+                        "the exact Datto job and new backup result."
+                    ),
+                    "Jason - BackupIQ - Job Progress Review",
+                )
+                self._persist_human_review_escalation(
+                    work, reason=(
+                        "BackupIQ reinstall job remains nonterminal for at least "
+                        f"{BACKUPIQ_REINSTALL_JOB_STALL_SECONDS // 60} minutes; "
+                        f"job={work.job_uid}; status={status}. "
+                        "Technician verify exact job; do not redispatch."
+                    ),
+                )
             return
         if status not in {"completed", "complete", "success", "succeeded", "finished"}:
             self._write_note(
