@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Iterable
 
@@ -116,9 +117,20 @@ def build_autonomy_worker_maintenance(
         actions=actions,
         store=SQLiteTicketSplitStore(work_db.with_name("ticket-split.sqlite3")),
     )
+    # New authority is enabled only through its separate reviewed profile.
+    contact_reads = (
+        GovernedAutonomyReadPort(
+            request_factory=request_factory,
+            orchestrator=orchestrator,
+            policy_id="autonomous-ticket-contact-context-read-v1",
+        )
+        if os.getenv("JASON_TICKET_CONTACT_CONTEXT_PROFILE", "") == "approved-v1"
+        else None
+    )
     worker = OperationalAutonomyMaintenance(
         queue_source=queue_source,
         reads=reads,
+        contact_reads=contact_reads,
         actions=actions,
         store=SQLiteOperationalWorkStore(work_db),
         promotion_store=promotion_store,

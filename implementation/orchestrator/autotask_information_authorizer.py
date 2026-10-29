@@ -83,6 +83,11 @@ _AUTONOMOUS_WORKER_READS = frozenset(
     }
 )
 _AUTONOMOUS_WORKER_POLICY = "autonomous-worker-read-v1"
+# Contact details are a distinct, opt-in evidence surface. Never widen the
+# general worker policy by implication or use the client-question profile.
+_AUTONOMOUS_TICKET_CONTACT_READS = frozenset({SERVICE_CONTACT_READ})
+_AUTONOMOUS_TICKET_CONTACT_POLICY = "autonomous-ticket-contact-context-read-v1"
+_AUTONOMOUS_TICKET_CONTACT_PROFILE_ENV = "JASON_TICKET_CONTACT_CONTEXT_PROFILE"
 # Separate read-only evidence boundary for the client-question lifecycle.
 # Do NOT expand the general autonomous-worker allowlist. This profile is
 # disabled by default and cannot be reused by other service principals.
@@ -232,6 +237,22 @@ def _autonomous_worker_requester_authorization_proven(
     )
 
 
+def _autonomous_ticket_contact_read_authorized(
+    *, request: OrchestrationRequest, capability_name: str,
+) -> bool:
+    return bool(
+        os.getenv(_AUTONOMOUS_TICKET_CONTACT_PROFILE_ENV, "").strip() == "approved-v1"
+        and capability_name in _AUTONOMOUS_TICKET_CONTACT_READS
+        and request.authority_allowed
+        and request.authority_context_id
+        and request.permission_mode == "observe"
+        and request.requester_kind == "service"
+        and request.principal_id == _AUTONOMOUS_SHADOW_PRINCIPAL
+        and _AUTONOMOUS_TICKET_CONTACT_POLICY in request.policy_ids
+        and request.orchestration_mode is OrchestrationMode.EXECUTE
+    )
+
+
 def _autonomous_client_question_read_authorized(
     *, request: OrchestrationRequest, capability_name: str,
 ) -> bool:
@@ -365,6 +386,17 @@ class AutotaskImpersonationInformationAuthorizer:
                     "jkd001_authority_context",
                     "central_orchestrator_governed_read",
                     _AUTONOMOUS_WORKER_POLICY,
+                )
+            elif _autonomous_ticket_contact_read_authorized(
+                request=request,
+                capability_name=resolution.capability_name,
+            ):
+                basis = (
+                    "jason_managed",
+                    "internal_autonomy_ticket_contact_context",
+                    "jkd001_authority_context",
+                    "central_orchestrator_governed_read",
+                    _AUTONOMOUS_TICKET_CONTACT_POLICY,
                 )
             elif _autonomous_client_question_read_authorized(
                 request=request,
