@@ -41,7 +41,7 @@ exact-SHA release authorization, successful health checks, and protected rollbac
 desk queues without creating new playbooks for each sender or requiring a device
 association. **Success means** deterministic high-confidence classification,
 verified company **and Autotask site/location**, no user/client/technician
-activity, one audited administrative closure, and verified PSA completion.
+activity or time entries, one audited administrative closure, and verified PSA completion.
 Ambiguous, security, backup, financial, transactional, or actual support
 messages remain available for human action.
 
@@ -74,7 +74,8 @@ Read the exact Autotask ticket fresh and match its ID, number, source,
 classification, company, location, and open status to the queue candidate.
 Verify a positive companyID and companyLocationID; require an active company
 with matching ID from `service.company.read`. Check complete ticket note
-history; reject substantive technician/client notes and unknown note types.
+history and time entries; reject substantive technician/client notes,
+unknown note types and any existing technician time entries.
 A site is **required**; a device and user are **optional** and cannot be
 fabricated. An existing configuration item excludes this administrative
 cleanup flow; the regular global device association rule still applies to
@@ -105,8 +106,9 @@ A terminal `complete` ticket is not reprocessed.
    ticket process and no cleanup action.
 2. **Identity:** Read ticket, active company, company-location ID; no guesses,
    cross-client inheritance or use of unmatched RMM sites.
-3. **Human activity:** Read notes; system-generated workflow entries only.
-   Client/technician entries or unrecognized notes exclude cleanup.
+3. **Human activity:** Read notes and ticket time entries; system-generated
+   workflow notes only. Client/technician notes, any time entries or an
+   unavailable time-entry read exclude cleanup.
 4. **Readback:** Immediately prior to completion, repeat authoritative ticket,
    company/site and note-history checks. Compare source ticket number, company
    and site to persisted work and verify Jason queue/In Progress status.
@@ -115,7 +117,7 @@ A terminal `complete` ticket is not reprocessed.
 
 Require all: high-confidence deterministic trigger; Email source; New status;
 valid same-company Autotask site/location; active company; no CI; original
-ticket number/ID and source unchanged; system-only notes; exact playbook/version
+ticket number/ID and source unchanged; system-only notes; no time entries; exact playbook/version
 Owner promotion for note create + ticket update; spare bounded active slot;
 fresh pre-write re-read; no existing action in progress; correct requester
 authority. A failure means **no automatic completion**.
@@ -204,7 +206,8 @@ system was modified, and that no unsubscribe link was followed.
 ## 20. Required Capabilities
 
 Governed `service.ticket.read`, `service.company.read`,
-`service.ticket.notes.search`, `service.ticket.note.create`,
+`service.ticket.notes.search`, `service.ticket.time.entry.search`,
+`service.ticket.note.create`,
 `service.ticket.update`; existing queue discovery, durable owner
 promotion, note fingerprinting, workflow status and lifecycle notifications.
 No DRMM read/write or user account capability is needed.
@@ -214,7 +217,7 @@ No DRMM read/write or user account capability is needed.
 Preproduction tests must show: known marketing and out-of-office examples
 classify correctly; backup, security, payment and client request examples
 do not; missing site/company or active CI do not trigger changes; human
-notes block; unpromoted scope does zero writes; promoted scope claims, notes,
+notes or time entries block; unpromoted scope does zero writes; promoted scope claims, notes,
 completes with exact readback; restart and unchanged-scan duplicate
 suppression; verification failure leaves the ticket open for review;
 no customer communication triggered by our note in the real test policy.

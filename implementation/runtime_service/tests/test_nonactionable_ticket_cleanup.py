@@ -77,7 +77,7 @@ def test_site_is_mandatory_user_and_device_are_not():
 
 
 class ReadPort:
-    def __init__(self, ticket, *, human_note=False):
+    def __init__(self, ticket, *, human_note=False, time_entry=False):
         self.ticket = ticket
         self.notes = (
             [{"creatorResourceID": 29682899, "noteType": 3,
@@ -87,10 +87,13 @@ class ReadPort:
               "title": "Workflow Rule Fired", "createdByContactID": None}]
         )
         self.calls = []
+        self.time_entries = [{"id": 8201}] if time_entry else []
 
     def execute(self, capability, arguments):
         self.calls.append((capability, deepcopy(arguments)))
-        if capability == "service.ticket.read":
+        if capability == "service.ticket.time.entry.search":
+            data = {"items": deepcopy(self.time_entries)}
+        elif capability == "service.ticket.read":
             data = {"items": [deepcopy(self.ticket)]}
         elif capability == "service.company.read":
             data = {"item": {"id": 1162, "companyName": "Atlantic Office Technologies",
@@ -160,9 +163,9 @@ class Source:
         ),)
 
 
-def build_worker(tmp_path, *, promoted=True, ticket=None, human_note=False):
+def build_worker(tmp_path, *, promoted=True, ticket=None, human_note=False, time_entry=False):
     ticket = deepcopy(ticket or vendor_offer())
-    reads = ReadPort(ticket, human_note=human_note)
+    reads = ReadPort(ticket, human_note=human_note, time_entry=time_entry)
     actions = Actions(reads)
     store = SQLiteOperationalWorkStore(tmp_path / "operational.sqlite3")
     worker = OperationalAutonomyMaintenance(
@@ -259,3 +262,11 @@ def test_unverified_completion_response_never_marks_worker_complete(tmp_path):
     actions.execute = completion_without_readback
     worker.tick()
     assert store.get(143268).phase != "complete"
+
+
+
+def test_existing_technician_time_entry_never_autocompletes(tmp_path):
+    worker, actions, store = build_worker(tmp_path, time_entry=True)
+    worker.tick()
+    assert actions.calls == []
+    assert store.get(143268) is None

@@ -2179,6 +2179,14 @@ class OperationalAutonomyMaintenance:
         other_notes = [n for n in notes if n not in own_notes]
         if not cleanup_only_system_notes(other_notes):
             raise OperationalAutonomyError("cleanup excluded: technician/client activity on ticket")
+        time_data = self._read_data("service.ticket.time.entry.search", {
+            "ticket_id": ticket_id, "page_size": 100,
+        })
+        time_entries = time_data.get("items")
+        if not isinstance(time_entries, list) or time_entries:
+            raise OperationalAutonomyError(
+                "cleanup excluded: time entries exist or time-entry evidence is unavailable"
+            )
         if own_notes and self.store.last_note_fingerprint(
             ticket_id, NONACTIONABLE_CLEANUP_SCOPE.playbook_id, own_title
         ) is None:
