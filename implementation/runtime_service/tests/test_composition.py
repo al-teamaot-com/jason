@@ -853,6 +853,7 @@ def test_auxiliary_process_sends_queued_ticket_owner_notifications_even_when_adm
         autonomy_worker_enabled=True,
         autonomy_worker_db=tmp_path / "operational.sqlite3",
         autonomy_promotion_db=tmp_path / "promotion.sqlite3",
+        autonomy_targeted_wake_db=tmp_path / "targeted-wake.sqlite3",
     )
     auxiliary_settings = auxiliary_maintenance_runtime_settings(settings)
     assert auxiliary_settings.autonomy_worker_enabled is False
