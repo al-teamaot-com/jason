@@ -88,3 +88,54 @@ NOT establish real invoice/PO mutation production acceptance.
   same action; a separate client-acceptance evidence path is still needed.
 - No provider settings, tenant permissions, financial records, or tickets were
   modified. No protected main merge or production deployment authorized.
+
+
+## Owner correction — ChatGPT-first procurement document intake, 2026-10-29
+
+**Authoritative UX:** AOT staff upload vendor invoices, quotes, estimates
+and related source documents into **ChatGPT**, not the Teams chat. The
+ChatGPT model extracts normalized invoice/line data under the user's ChatGPT
+experience to reduce reliance on separately metered document-AI API calls.
+Jason receives only the bounded facts and evidence through the canonical
+governed procurement workflow. Teams is retained for existing signed
+approvals, genuine unresolved business review, exceptions, and outcome
+notifications. No new bot, approval engine, or alternate Autotask write path.
+
+### Existing source vs. live availability
+
+- `implementation/mcp_service/src/jason_mcp/server.py` already contains
+  `@mcp.tool() process_procurement_invoice`, which accepts vendor name,
+  invoice number, document reference, line items, item totals, shipping,
+  taxes, fees and optional SHA-256. It binds the authenticated Microsoft
+  identity, calls `ProcurementTeamsFlow.handle_vendor_document`, and uses
+  existing Teams procurement review delivery.
+- The **currently exposed ChatGPT Jason integration tool list does not
+  include** `process_procurement_invoice`. Do not call source code
+  registration or a healthy MCP ping sufficient proof of availability.
+  Diagnose schema publication/tool exposure and verify from a fresh
+  authenticated ChatGPT conversation before declaring acceptance.
+- Existing `implementation/mcp_service/tests/test_procurement_mcp_handoff.py`
+  covers the source path. In the isolated system Python used for this branch,
+  this suite could not be collected because optional `mcp` dependency was
+  not installed (`ModuleNotFoundError: No module named 'mcp'`). This is an
+  **environment/dependency test gap**, not evidence that the code itself
+  passes or fails in a correctly provisioned MCP runtime. Don't install
+  dependencies into production as a workaround.
+
+### Acceptance first
+1. One authenticated AOT staff member uploads a representative invoice PDF
+   through ChatGPT and obtains structured, exact source facts without a new
+   paid OCR/LLM document-analysis API call.
+2. Authenticated Jason `process_procurement_invoice` action is discoverable
+   and invokes the existing normalized draft path, with full source provenance,
+   including a durable, verifiable original-file reference and hash where
+   supported. Avoid relying only on a filename or claimed hash.
+3. Reuse established product/vendor/ticket matching, duplicates, invoice
+   amount fidelity and staff-specific Autotask UDF approval logic.
+4. Teams sends only necessary review/approval or exception cards; under-limit,
+   fully verified requests should not require a redundant approval decision.
+5. Provider-backed no-write pilot is followed by authorized preproduction
+   acceptance and eventual separate production release authorization.
+
+Teams-native invoice attachment ingestion is an optional secondary channel;
+it must not delay this ChatGPT-first path.
