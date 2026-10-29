@@ -685,7 +685,8 @@ class SQLiteOperationalWorkStore:
         rows = self._connection.execute(
             "SELECT * FROM autonomy_teams_notification_outbox "
             "WHERE state='pending' AND next_due_at<=? "
-            "ORDER BY next_due_at,recorded_at LIMIT ?",
+            "ORDER BY CASE WHEN event_type IN (\'work_started\',\'work_completed\',\'patch_completed\') THEN 0 ELSE 1 END, "
+            "next_due_at,recorded_at LIMIT ?",
             (now.isoformat(), min(4, max(1, int(limit)))),
         ).fetchall()
         return tuple(dict(r) for r in rows)
