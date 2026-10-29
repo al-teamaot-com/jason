@@ -40,6 +40,11 @@ from .autonomy_worker_runtime import (
 )
 
 
+# Narrow, source-reviewed pilot only. No note or ticket update is permitted
+# until an independent durable owner promotion is recorded for each playbook.
+TRIAGE_NOTE_PILOT_TICKET_IDS = (143305, 143272)
+
+
 def build_autonomy_worker_maintenance(
     *,
     enabled: bool,
@@ -118,6 +123,7 @@ def build_autonomy_worker_maintenance(
         store=SQLiteOperationalWorkStore(work_db),
         promotion_store=promotion_store,
         max_active_work_items=max_active_work_items,
+        triage_note_pilot_ticket_ids=TRIAGE_NOTE_PILOT_TICKET_IDS,
         interval_seconds=interval_seconds,
         audit=audit,
         completion_notifier=completion_notifier,

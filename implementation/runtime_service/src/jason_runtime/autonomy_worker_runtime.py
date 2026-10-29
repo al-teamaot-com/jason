@@ -285,6 +285,14 @@ UNSUPPORTED_TRIAGE_NOTE_SCOPE = PlaybookScope(
         "service.ticket.note.update",
     ),
 )
+UNSUPPORTED_TRIAGE_HANDOFF_STATES = frozenset({
+    "needs_human_review",
+    "needs_device_identity",
+    "needs_execution_authority",
+    "needs_security_review",
+    "needs_playbook_review",
+})
+
 UNSUPPORTED_TRIAGE_HANDOFF_SCOPE = PlaybookScope(
     playbook_id="unsupported_triage_human_review",
     playbook_version="1.0.0",
@@ -441,6 +449,15 @@ class SQLiteOperationalWorkStore:
         selected INTEGER NOT NULL,
         waiting_device INTEGER NOT NULL,
         human_review INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS autonomy_unsupported_handoff_delivery (
+        ticket_id INTEGER PRIMARY KEY,
+        note_fingerprint TEXT NOT NULL,
+        state TEXT NOT NULL,
+        attempts INTEGER NOT NULL,
+        next_due_at TEXT NOT NULL,
+        last_error TEXT
     );
 
     CREATE TABLE IF NOT EXISTS autonomy_unsupported_note_delivery (
@@ -915,6 +932,34 @@ class SQLiteOperationalWorkStore:
                 ),
             )
 
+    def unsupported_handoff_delivery(self, ticket_id: int) -> Mapping[str, Any] | None:
+        row = self._connection.execute(
+            "SELECT ticket_id,note_fingerprint,state,attempts,next_due_at,last_error "
+            "FROM autonomy_unsupported_handoff_delivery WHERE ticket_id=?",
+            (int(ticket_id),),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def record_unsupported_handoff_delivery(
+        self, *, ticket_id: int, note_fingerprint: str, state: str,
+        attempts: int, next_due_at: str, last_error: str | None,
+    ) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO autonomy_unsupported_handoff_delivery (
+                    ticket_id,note_fingerprint,state,attempts,next_due_at,last_error
+                ) VALUES (?,?,?,?,?,?)
+                ON CONFLICT(ticket_id) DO UPDATE SET
+                    note_fingerprint=excluded.note_fingerprint,
+                    state=excluded.state,
+                    attempts=excluded.attempts,
+                    next_due_at=excluded.next_due_at,
+                    last_error=excluded.last_error
+                """,
+                (ticket_id,note_fingerprint,state,attempts,next_due_at,last_error),
+            )
+
     def unsupported_note_delivery(self, ticket_id: int) -> Mapping[str, Any] | None:
         row = self._connection.execute(
             "SELECT ticket_id,fingerprint,attempts,next_due_at,last_error "
@@ -1083,6 +1128,7 @@ class OperationalAutonomyMaintenance:
         max_admission_attempts_per_scan: int = 4,
         max_candidate_evaluations_per_scan: int = 40,
         max_unsupported_triage_per_scan: int = 2,
+        triage_note_pilot_ticket_ids: Iterable[int] = (),
         interval_seconds: int = 60,
         monotonic: Callable[[], float] = time.monotonic,
         audit=None,
@@ -1109,6 +1155,12 @@ class OperationalAutonomyMaintenance:
         self.max_admission_attempts_per_scan = int(max_admission_attempts_per_scan)
         self.max_candidate_evaluations_per_scan = int(max_candidate_evaluations_per_scan)
         self.max_unsupported_triage_per_scan = int(max_unsupported_triage_per_scan)
+        pilot_ids = tuple(int(value) for value in triage_note_pilot_ticket_ids)
+        if len(pilot_ids) > 5 or any(value <= 0 for value in pilot_ids):
+            raise ValueError("triage note pilot must contain at most five positive ticket IDs")
+        if len(pilot_ids) != len(set(pilot_ids)):
+            raise ValueError("triage note pilot ticket IDs must be unique")
+        self.triage_note_pilot_ticket_ids = frozenset(pilot_ids)
         self.interval_seconds = int(interval_seconds)
         self.monotonic = monotonic
         self.audit = audit
@@ -2820,6 +2872,20 @@ class OperationalAutonomyMaintenance:
             return False
         if candidate.context.get("_jason_assigned_elsewhere") is True:
             return False
+        ticket_id = int(candidate.resource_id)
+        if ticket_id not in self.triage_note_pilot_ticket_ids:
+            return False
+        # Source-version binding: do not publish a stale draft after a human
+        # or another worker has changed the Autotask ticket.
+        record_version = str(record.get("source_version") or "").strip()
+        current_version = str(candidate.source_version or "").strip()
+        if not current_version or record_version != current_version:
+            return False
+        if (
+            str(record.get("ticket_number") or "").strip()
+            != str(candidate.context.get("ticketNumber") or "").strip()
+        ):
+            return False
         evidence = record.get("evidence")
         if not isinstance(evidence, Mapping) or evidence.get("company_verified") is not True:
             return False
@@ -2831,12 +2897,15 @@ class OperationalAutonomyMaintenance:
         body = evidence.get("note_draft")
         if not isinstance(body, str) or not body.startswith("JASON READ-ONLY INVESTIGATION"):
             return False
-        ticket_id = int(candidate.resource_id)
         digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
         if self.store.last_note_fingerprint(
             ticket_id, UNSUPPORTED_TRIAGE_NOTE_SCOPE.playbook_id, TRIAGE_NOTE_TITLE,
         ) == digest:
-            return False
+            # A later separate handoff promotion must resume already-verified
+            # note work; do not require a new note mutation to trigger it.
+            return self._maybe_handoff_unsupported_ticket(
+                candidate, state=state, body=body, note_fingerprint=digest, now=now,
+            )
         prior = self.store.unsupported_note_delivery(ticket_id)
         if prior is not None and str(prior.get("fingerprint")) == digest:
             try:
@@ -2856,6 +2925,18 @@ class OperationalAutonomyMaintenance:
             if not isinstance(notes, list):
                 raise OperationalAutonomyError("triage notes readback missing")
             existing = exact_named_note(notes, title=TRIAGE_NOTE_TITLE)
+            if existing is not None and str(existing.get("description") or "") != body:
+                # Reject same-title collisions and human edits. Never claim
+                # ownership of a note the worker did not previously verify.
+                known_fingerprint = self.store.last_note_fingerprint(
+                    ticket_id, UNSUPPORTED_TRIAGE_NOTE_SCOPE.playbook_id,
+                    TRIAGE_NOTE_TITLE,
+                )
+                if not known_fingerprint:
+                    raise OperationalAutonomyError("triage managed note ownership not proven")
+                current_body = str(existing.get("description") or "")
+                if hashlib.sha256(current_body.encode("utf-8")).hexdigest() != known_fingerprint:
+                    raise OperationalAutonomyError("triage managed note modified externally")
             if existing is None or str(existing.get("description") or "") != body:
                 mutation = managed_note_mutation(
                     ticket_id=ticket_id, title=TRIAGE_NOTE_TITLE,
@@ -2875,11 +2956,9 @@ class OperationalAutonomyMaintenance:
                 existing = exact_named_note(after, title=TRIAGE_NOTE_TITLE)
                 if existing is None or str(existing.get("description") or "") != body:
                     raise OperationalAutonomyError("triage note readback not verified")
-            # Only register the whole documented handoff complete after the
-            # separately promoted queue/status action (when applicable) passes
-            # provider readback too. A denied handoff remains retryable and
-            # cannot trigger duplicate note creation.
-            self._maybe_handoff_unsupported_ticket(candidate, state=state)
+            # The diagnostic note is independently complete once its provider
+            # readback matches; a later distinct handoff may retry without
+            # creating or updating the note again.
             self.store.remember_note_fingerprint(
                 ticket_id, UNSUPPORTED_TRIAGE_NOTE_SCOPE.playbook_id,
                 TRIAGE_NOTE_TITLE, digest,
@@ -2892,6 +2971,9 @@ class OperationalAutonomyMaintenance:
             self._audit_diagnostic(
                 "autonomy.unsupported_ticket.internal_note.verified",
                 {"ticket_id": ticket_id, "state": state},
+            )
+            self._maybe_handoff_unsupported_ticket(
+                candidate, state=state, body=body, note_fingerprint=digest, now=now,
             )
         except Exception as exc:
             self.store.record_unsupported_note_delivery(
@@ -2907,45 +2989,93 @@ class OperationalAutonomyMaintenance:
         # This result counts against the bounded, per-scan mutation budget.
         return True
 
-    def _maybe_handoff_unsupported_ticket(self, candidate, *, state: str) -> None:
-        """An exact promoted write may only return Jason-owned blocked work.
+    def _maybe_handoff_unsupported_ticket(
+        self, candidate, *, state: str, body: str,
+        note_fingerprint: str, now: datetime,
+    ) -> bool:
+        """Independent, idempotent, owner-promoted ticket handoff.
 
-        A ticket already in a Help Desk queue is never reclassified here.
-        No status change is authorized by the note promotion.
+        Authorization or evidence failures are durable, never hidden under a
+        successful note publication. Provider status must be verified before
+        the handoff is counted.
         """
-        if state != "needs_human_review" or not candidate.owned_by_jason:
-            return
-        if str(candidate.source_queue).strip().casefold() != "jason":
-            return
-        if not self._scope_is_promoted(UNSUPPORTED_TRIAGE_HANDOFF_SCOPE):
-            return
+        if state not in UNSUPPORTED_TRIAGE_HANDOFF_STATES:
+            return False
         ticket_id = int(candidate.resource_id)
-        result = self.actions.execute(
-            UNSUPPORTED_TRIAGE_HANDOFF_SCOPE,
-            "service.ticket.update", {
-                "payload": {
-                    "id": ticket_id, "queueID": "Help Desk I",
-                    "status": "Human Review",
-                },
-            },
+        if ticket_id not in self.triage_note_pilot_ticket_ids:
+            return False
+        if not candidate.owned_by_jason or str(candidate.source_queue).strip().casefold() != "jason":
+            return False
+        if not self._scope_is_promoted(UNSUPPORTED_TRIAGE_HANDOFF_SCOPE):
+            return False
+        previous = self.store.unsupported_handoff_delivery(ticket_id)
+        if previous is not None and previous.get("note_fingerprint") == note_fingerprint:
+            if previous.get("state") in {"verified", "needs_human_review"}:
+                # A terminal failed handoff needs technician intervention, not
+                # another unattended queue mutation attempt.
+                return False
+            try:
+                due = datetime.fromisoformat(str(previous["next_due_at"]))
+                if due.tzinfo is not None and due > now:
+                    return False
+            except (TypeError, ValueError):
+                pass
+        attempts = (
+            int(previous["attempts"]) + 1
+            if previous is not None and previous.get("note_fingerprint") == note_fingerprint
+            else 1
         )
-        data = self._action_data(result)
-        verification = data.get("jasonVerification")
-        fields = verification.get("verifiedFields") if isinstance(verification, Mapping) else None
-        if not (
-            isinstance(verification, Mapping)
-            and verification.get("readbackVerified") is True
-            and isinstance(fields, Sequence)
-            and not isinstance(fields, (str, bytes))
-            and {"queueID", "status"}.issubset({str(field) for field in fields})
-        ):
-            raise OperationalAutonomyError(
-                "unsupported triage handoff queue/status readback not verified"
+        try:
+            # Always verify the current Autotask note before any queue/status
+            # write, even if the local fingerprint was previously persisted.
+            notes = self._read_data("service.ticket.notes.search", {"ticket_id": ticket_id}).get("items")
+            if not isinstance(notes, list):
+                raise OperationalAutonomyError("handoff current notes readback missing")
+            managed = exact_named_note(notes, title=TRIAGE_NOTE_TITLE)
+            if managed is None or str(managed.get("description") or "") != body:
+                raise OperationalAutonomyError("handoff note no longer matches verified evidence")
+            result = self.actions.execute(
+                UNSUPPORTED_TRIAGE_HANDOFF_SCOPE,
+                "service.ticket.update",
+                {"payload": {
+                    "id": ticket_id, "queueID": "Help Desk I", "status": "Human Review",
+                }},
             )
-        self._audit_diagnostic(
-            "autonomy.unsupported_ticket.human_review.verified",
-            {"ticket_id": ticket_id},
-        )
+            data = self._action_data(result)
+            verification = data.get("jasonVerification")
+            fields = verification.get("verifiedFields") if isinstance(verification, Mapping) else None
+            if not (
+                isinstance(verification, Mapping)
+                and verification.get("readbackVerified") is True
+                and isinstance(fields, Sequence)
+                and not isinstance(fields, (str, bytes))
+                and {"queueID", "status"}.issubset({str(field) for field in fields})
+            ):
+                raise OperationalAutonomyError("handoff queue/status readback not verified")
+            self.store.record_unsupported_handoff_delivery(
+                ticket_id=ticket_id, note_fingerprint=note_fingerprint,
+                state="verified", attempts=0,
+                next_due_at=(now + timedelta(days=365)).isoformat(),
+                last_error=None,
+            )
+            self._audit_diagnostic(
+                "autonomy.unsupported_ticket.human_review.verified",
+                {"ticket_id": ticket_id, "state": state},
+            )
+        except Exception as exc:
+            self.store.record_unsupported_handoff_delivery(
+                ticket_id=ticket_id, note_fingerprint=note_fingerprint,
+                state="retry_pending" if attempts < 3 else "needs_human_review",
+                attempts=attempts,
+                next_due_at=(now + timedelta(minutes=min(60, 5 * 2 ** min(attempts - 1, 4)))).isoformat(),
+                last_error=type(exc).__name__,
+            )
+            self._audit_diagnostic(
+                "autonomy.unsupported_ticket.human_review.pending",
+                {"ticket_id": ticket_id, "attempts": attempts,
+                 "error_type": type(exc).__name__},
+            )
+        return True
 
     def _emit_scan_reflection(self, snapshot: TicketScanSnapshot) -> None:
         if self.audit is None:
