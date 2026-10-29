@@ -15,9 +15,10 @@ The first production executor is the health-only Datto EDR/AV path.  It may:
 * rerun the authoritative health component;
 * document and close only after Status=Healthy is observed.
 
-It never handles threat-triggered tickets, never schedules a reboot, never runs
-generic PowerShell, and never performs the clean-uninstall recovery branch.
-Those remain approval-gated by design.
+It never remediates threat-triggered tickets, schedules reboots, runs
+free-form PowerShell, or performs clean-uninstall recovery. Unsupported
+tickets may receive bounded read-only evidence collection using fixed
+commands only; changing anything remains approval-gated.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ import re
 import sqlite3
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 from uuid import uuid4
@@ -109,6 +110,7 @@ from .gpt_insights import (
     material_fingerprint as gpt_insights_fingerprint,
     render_insight as render_gpt_insight,
 )
+from .unsupported_ticket_triage import gather as gather_unsupported_triage, category_for as unsupported_triage_category
 from .managed_ticket_notes import (
     GPT_INSIGHTS_TITLE,
     exact_named_note,
@@ -412,6 +414,20 @@ class SQLiteOperationalWorkStore:
         selected INTEGER NOT NULL,
         waiting_device INTEGER NOT NULL,
         human_review INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS autonomy_unsupported_triage (
+        ticket_id INTEGER PRIMARY KEY,
+        ticket_number TEXT NOT NULL,
+        source_version TEXT,
+        category TEXT NOT NULL,
+        state TEXT NOT NULL,
+        evidence_json TEXT NOT NULL,
+        next_step TEXT NOT NULL,
+        attempts INTEGER NOT NULL,
+        checked_at TEXT NOT NULL,
+        next_due_at TEXT NOT NULL,
+        last_error TEXT
     );
 
     CREATE TABLE IF NOT EXISTS autonomy_ticket_classification (
@@ -864,6 +880,47 @@ class SQLiteOperationalWorkStore:
                 ),
             )
 
+    def unsupported_triage(self, ticket_id: int) -> Mapping[str, Any] | None:
+        row = self._connection.execute(
+            "SELECT * FROM autonomy_unsupported_triage WHERE ticket_id=?",
+            (int(ticket_id),),
+        ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result["evidence"] = json.loads(result.pop("evidence_json"))
+        return result
+
+    def record_unsupported_triage(
+        self, *, ticket_id: int, ticket_number: str, source_version: str | None,
+        category: str, state: str, evidence: Mapping[str, Any], next_step: str,
+        attempts: int, checked_at: str, next_due_at: str, last_error: str | None = None,
+    ) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO autonomy_unsupported_triage(
+                    ticket_id,ticket_number,source_version,category,state,
+                    evidence_json,next_step,attempts,checked_at,next_due_at,last_error
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(ticket_id) DO UPDATE SET
+                    ticket_number=excluded.ticket_number,
+                    source_version=excluded.source_version,
+                    category=excluded.category,
+                    state=excluded.state,
+                    evidence_json=excluded.evidence_json,
+                    next_step=excluded.next_step,
+                    attempts=excluded.attempts,
+                    checked_at=excluded.checked_at,
+                    next_due_at=excluded.next_due_at,
+                    last_error=excluded.last_error
+                """,
+                (int(ticket_id), str(ticket_number), source_version, str(category),
+                 str(state), json.dumps(dict(evidence), sort_keys=True),
+                 str(next_step), int(attempts), str(checked_at),
+                 str(next_due_at), last_error),
+            )
+
     def close(self) -> None:
         self._connection.close()
 
@@ -963,6 +1020,7 @@ class OperationalAutonomyMaintenance:
         max_active_work_items: int = 2,
         max_admission_attempts_per_scan: int = 4,
         max_candidate_evaluations_per_scan: int = 40,
+        max_unsupported_triage_per_scan: int = 2,
         interval_seconds: int = 60,
         monotonic: Callable[[], float] = time.monotonic,
         audit=None,
@@ -976,6 +1034,8 @@ class OperationalAutonomyMaintenance:
             raise ValueError("max_admission_attempts_per_scan must be between 1 and 20")
         if not 1 <= int(max_candidate_evaluations_per_scan) <= 200:
             raise ValueError("max_candidate_evaluations_per_scan must be between 1 and 200")
+        if not 1 <= int(max_unsupported_triage_per_scan) <= 20:
+            raise ValueError("max_unsupported_triage_per_scan must be between 1 and 20")
         if int(interval_seconds) < 30:
             raise ValueError("operational autonomy interval must be at least 30 seconds")
         self.queue_source = queue_source
@@ -986,6 +1046,7 @@ class OperationalAutonomyMaintenance:
         self.max_active_work_items = int(max_active_work_items)
         self.max_admission_attempts_per_scan = int(max_admission_attempts_per_scan)
         self.max_candidate_evaluations_per_scan = int(max_candidate_evaluations_per_scan)
+        self.max_unsupported_triage_per_scan = int(max_unsupported_triage_per_scan)
         self.interval_seconds = int(interval_seconds)
         self.monotonic = monotonic
         self.audit = audit
@@ -1836,6 +1897,7 @@ class OperationalAutonomyMaintenance:
                             },
                         )
 
+        unsupported_triage_candidates: list[tuple[Any, str]] = []
         classifications: dict[
             int, tuple[str, str, str | None, bool]
         ] = {}
@@ -2328,11 +2390,17 @@ class OperationalAutonomyMaintenance:
             scope = self._match_scope(item.context)
             if scope is None:
                 unsupported += 1
+                unsupported_reason = self._unsupported_capability_reason(item.context)
                 classifications[ticket_id] = (
                     "unsupported_capability",
-                    self._unsupported_capability_reason(item.context),
+                    unsupported_reason,
                     item.source_version, False,
                 )
+                # A missing playbook does not grant action permission. Still
+                # collect bounded, read-only evidence for unassigned intake.
+                # Technician-owned cases are left alone entirely.
+                if item.context.get("_jason_assigned_elsewhere") is not True:
+                    unsupported_triage_candidates.append((item, unsupported_reason))
                 continue
             if not self._scope_is_promoted(scope):
                 governance_blocked += 1
@@ -2452,6 +2520,10 @@ class OperationalAutonomyMaintenance:
                 True,
             )
 
+        # Always run after established playbooks, so generic evidence reads
+        # cannot starve already-admitted or newly eligible remediation.
+        self._triage_unsupported(unsupported_triage_candidates)
+
         # Keep one readable Jason Activity work log per ticket. The durable
         # local activity ledger is authoritative; unchanged consecutive state is
         # suppressed and Autotask notes are updated only through the Jason-owned
@@ -2533,6 +2605,113 @@ class OperationalAutonomyMaintenance:
         )
         self.store.record_scan(snapshot)
         self._emit_scan_reflection(snapshot)
+
+    def _triage_unsupported(self, candidates: Sequence[tuple[Any, str]]) -> None:
+        """Bounded diagnosis only; zero provider writes, claims or resolutions."""
+        now = datetime.now(timezone.utc)
+        order = sorted(
+            candidates,
+            key=lambda pair: (
+                -int(pair[0].urgent),
+                -int(pair[0].priority),
+                int(pair[0].resource_id),
+            ),
+        )
+        attempted = 0
+        for candidate, unsupported_reason in order:
+            if attempted >= self.max_unsupported_triage_per_scan:
+                break
+            ticket_id = int(candidate.resource_id)
+            version = str(candidate.source_version or "").strip() or None
+            previous = self.store.unsupported_triage(ticket_id)
+            if previous is not None and previous.get("source_version") == version:
+                try:
+                    due = datetime.fromisoformat(str(previous["next_due_at"]))
+                    if due.tzinfo is not None and due > now:
+                        continue
+                except (TypeError, ValueError):
+                    pass
+            attempted += 1
+            title = str(candidate.context.get("title") or "")
+            category = unsupported_triage_category(title, unsupported_reason)
+            prior_attempts = int(previous.get("attempts") or 0) if previous else 0
+            attempts = prior_attempts + 1
+            error = None
+            try:
+                ci = candidate.context.get("configurationItemID")
+                result = gather_unsupported_triage(
+                    ticket_id=ticket_id,
+                    company_id=int(candidate.context.get("companyID") or 0),
+                    configuration_item_id=(int(ci) if ci not in (None, "", 0, "0") else None),
+                    title=title,
+                    unsupported_reason=unsupported_reason,
+                    read=self._read_data,
+                )
+                state = result.state
+                category = result.category
+                evidence = result.evidence
+                next_step = result.next_step
+                attempts = 0
+                hours = (24 if state == "read_only_assessed" else
+                         4 if state in {"needs_device_identity", "needs_company_identity"} else
+                         0.25 if state == "waiting_device_access" else 1)
+                next_due = now + timedelta(hours=hours)
+            except Exception as exc:
+                # Never retain untrusted provider exception messages or data.
+                # Persist a durable outcome and allow later tickets to proceed.
+                error = type(exc).__name__
+                code = str(exc).upper()
+                identity_codes = {
+                    "TICKET_READBACK_MISMATCH", "TICKET_COMPANY_MISMATCH",
+                    "TICKET_CI_MISMATCH", "CONFIGURATION_IDENTITY_UNVERIFIED",
+                    "ENDPOINT_IDENTITY_MISMATCH", "ENDPOINT_HOSTNAME_MISMATCH",
+                }
+                if type(exc) is ValueError and code in identity_codes:
+                    state = "needs_device_identity"
+                    next_step = (
+                        "Conflicting authoritative ticket/CI/endpoint evidence; "
+                        "technician must verify identity before any device read."
+                    )
+                    next_due = now + timedelta(hours=4)
+                elif "INFORMATION_RELEASE_DENIED" in code or "AUTHORIZATION" in code:
+                    state = "governance_blocked"
+                    next_step = (
+                        "Owner must resolve governed read authorization; "
+                        "the worker did not bypass the denied capability."
+                    )
+                    next_due = now + timedelta(hours=24)
+                elif attempts >= 3:
+                    state = "needs_human_review"
+                    next_step = (
+                        "Three or more consecutive governed diagnostic attempts failed; "
+                        "a technician must review the provider evidence path."
+                    )
+                    next_due = now + timedelta(hours=4)
+                else:
+                    state = "read_failed_retry"
+                    next_step = (
+                        "Governed evidence read failed; bounded retry is scheduled."
+                    )
+                    next_due = now + timedelta(minutes=min(60, 5 * 2 ** min(attempts - 1, 4)))
+                evidence = {"ticket_id": ticket_id}
+            self.store.record_unsupported_triage(
+                ticket_id=ticket_id,
+                ticket_number=str(candidate.context.get("ticketNumber") or ticket_id),
+                source_version=version,
+                category=category,
+                state=state,
+                evidence=evidence,
+                next_step=next_step,
+                attempts=attempts,
+                checked_at=now.isoformat(),
+                next_due_at=next_due.isoformat(),
+                last_error=error,
+            )
+            self._audit_diagnostic(
+                "autonomy.unsupported_ticket.readonly_triage",
+                {"ticket_id": ticket_id, "state": state, "category": category,
+                 "attempts": attempts, "last_error_type": error},
+            )
 
     def _emit_scan_reflection(self, snapshot: TicketScanSnapshot) -> None:
         if self.audit is None:
