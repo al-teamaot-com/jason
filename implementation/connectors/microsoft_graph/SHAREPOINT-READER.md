@@ -53,6 +53,24 @@ The build_sharepoint_read_manifest factory declares the four reusable read-only 
 
 ## October 30 integration-gate review: PRs #2125 and #2128
 
-## October 30 integration-gate review: PRs #2125 and #2128
-
 The required repository-hygiene gate found that #2125 and #2128 also modify `implementation/connectors/core/openbao_secrets.py`. Their inspected patches add distinct `it_glue.readwrite` and `microsoft_graph.user_create` secret paths and field allowlists; this SharePoint PR adds only `microsoft_graph.sharepoint_read` keys and a separately scoped certificate secret. The changes are additive and conceptually compatible, but both overlapping workstreams must survive later integration and receive full secret lifecycle regression tests. **Integration coordination: #2125, #2128** is declared in this PR body. No live secret provisioning, credential values or production approval is implied.
+
+## AOT-only validated SharePoint service binding gate — October 30
+
+## AOT-only validated SharePoint service binding gate — October 30
+
+\`require_validated_sharepoint_service_boundary\` now verifies a **separate** active Kernel \`microsoft_graph_sharepoint\` tenant binding with \`profile=sharepoint-read\`, expected AOT client ID \`client-aot-internal\`, domain \`teamaot.com\`, a validated Entra service principal, and a validation timestamp. A mail or directory-read boundary is not a substitute. The KFS runtime calls this guard before making its approved document-reader available, and rechecks it on every cached document-identity lookup. Tests deny wrong tenant, cross-client, revoked, pending, wrong profile, no service principal and absent validation.
+
+**Current host evidence (read-only):** AOT's Microsoft directory and mail boundaries are validated, but no separate \`microsoft_graph_sharepoint\` profile is present in the live boundary database. The canonical provider-secret \`--check-only\` contract passes. This remote user cannot inspect the root-protected AppRole staging directory (normal \`stat\` permission denied; \`sudo -n\` requires a password). Therefore **do not claim the AppRole credentials are absent** from this inspection; a privileged metadata check and exact AppRole verification are still required. The dedicated Entra registration and certificate listed above were previously documented but not independently revalidated in this session.
+
+### Privileged controlled-release prerequisites
+
+The owner has approved **read-only use of existing AOT SharePoint copier logs and delivery receipts** (#2176). This approval does not grant broader permissions or deploy code.
+
+- Validate the existing dedicated SharePoint Entra app, read grant, certificate and tenant binding without revealing credential values.
+- Use the canonical \`tools/provider_secret.py create microsoft_graph_sharepoint\` lifecycle **only under approved privileged release control**, not with a copied directory/mail AppRole.
+- Create and validate the dedicated \`microsoft_graph_sharepoint\` \`sharepoint-read\` Kernel client boundary via the canonical onboarding/identity service; do not insert a forged validated record into SQLite.
+- Restrict the AOT service to exact approved Admin Documents site/drive/item grants with bounded expiry. Document manifest changes and boundary revocation must invalidate cached customer claims before the next report.
+- Verify an allowed Jason-workload metadata/content read, forbidden file/tenant/client denial, version/digest audit, and failure-safe result. Then test LaToshia's exact KFS top-five question with verified customer mapping and explicit meter exceptions.
+
+No protected-main merge, credential mutation, production container restart, or production deployment was performed in this development session. A release still requires full CI, independent review, exact candidate/rollback SHAs and final owner authorization.
