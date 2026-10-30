@@ -41,6 +41,10 @@ def reader(*, status="NOT_APPROVED", reported_kb="5123456",
         if capability == "endpoint.device.read":
             return {"status": "succeeded", "evidence": {
                 "record": {"resource_id": uid, "hostname": hostname}}}
+        if capability == "endpoint.patch_policy.search":
+            return {"status": "succeeded", "evidence": {"data": {"policies": [
+                {"policyUid": "weekly-workstations"},
+            ]}}}
         if capability == "endpoint.patch.search":
             return {"status": "succeeded", "evidence": {"data": {"patches": [
                 {"kbArticleId": reported_kb, "installStatus": status},
@@ -63,6 +67,7 @@ def test_reads_exact_endpoint_and_kb_via_governed_capabilities():
     assert result[0].release_date == date(2026, 10, 13)
     assert calls == [
         ("endpoint.device.read", {"resource_id": "rmm-10"}),
+        ("endpoint.patch_policy.search", {"resource_id": "rmm-10"}),
         ("endpoint.patch.search", {"resource_id": "rmm-10", "kb": "KB5123456"}),
     ]
 
@@ -112,7 +117,7 @@ def test_duplicate_ticket_for_same_verified_device_is_not_double_counted():
     read, calls = reader()
     result = collect([target(), target()], read)
     assert len(result) == 1
-    assert len(calls) == 2
+    assert len(calls) == 3
 
 
 def test_metadata_must_be_present_and_verified():
@@ -121,3 +126,16 @@ def test_metadata_must_be_present_and_verified():
         collect_governed_patch_observations(
             targets=[target()], metadata_by_kb={}, read=read, now=NOW)
     assert calls == []
+
+
+def test_unassigned_policy_is_not_attributed_to_device():
+    read, _ = reader()
+    with pytest.raises(VulscanPatchEvidenceError, match="policy"):
+        collect([target(policy_id="unassigned-policy")], read)
+
+
+def test_denied_patch_policy_read_fails_without_patch_status_guess():
+    read, calls = reader(failures=("endpoint.patch_policy.search",))
+    with pytest.raises(VulscanPatchEvidenceError):
+        collect([target()], read)
+    assert all(cap != "endpoint.patch.search" for cap, _ in calls)
