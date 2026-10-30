@@ -733,6 +733,42 @@ def test_unresolved_triage_outcomes_handoff_only_with_exact_promotion(
     store.close()
 
 
+@pytest.mark.parametrize("changed_field,new_value", [
+    ("companyID", 888),
+    ("queueID", 29682833),
+    ("status", 7),
+    ("assignedResourceID", 1234),
+])
+def test_handoff_rechecks_live_ticket_and_never_overwrites_human_changes(
+    tmp_path, changed_field, new_value,
+):
+    from datetime import datetime, timezone
+    from jason_runtime.unsupported_ticket_triage import render_triage_note
+
+    source = ticket(title="Unresolved issue", queue="Jason")
+    reads = NoteReadStub()
+    reads.current_ticket[changed_field] = new_value
+    worker, store, _ = make_worker(tmp_path, [source], reads)
+    worker.promotion_store = PromotionForTriage(handoff=True)
+    actions = NoteActionStub(reads)
+    worker.actions = actions
+    evidence = {"ticket_id": 200001, "company_verified": True}
+    evidence["note_draft"] = render_triage_note(
+        ticket_number=source.context["ticketNumber"],
+        state="needs_diagnostic_evidence", category="user_device_settings",
+        evidence=evidence, next_step="Human follow-up is required.",
+    )
+    worker._maybe_publish_unsupported_triage_note(source, {
+        "state": "needs_diagnostic_evidence", "evidence": evidence,
+        "source_version": "v1", "ticket_number": source.context["ticketNumber"],
+    }, now=datetime.now(timezone.utc))
+    assert [cap for _, cap, _ in actions.calls] == ["service.ticket.note.create"]
+    handoff = store.unsupported_handoff_delivery(200001)
+    assert handoff["state"] == "retry_pending"
+    assert handoff["last_error"] == "OperationalAutonomyError"
+    store.close()
+
+
 def test_helpdesk_ticket_never_requeued_even_with_handoff_promotion(tmp_path):
     from datetime import datetime, timezone
     from jason_runtime.unsupported_ticket_triage import render_triage_note
