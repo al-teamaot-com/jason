@@ -15,9 +15,11 @@ on:
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/src/jason_runtime/kfs_meter_history.py'
       - 'implementation/runtime_service/src/jason_runtime/kfs_customer_document_evidence.py'
+      - 'implementation/runtime_service/src/jason_runtime/kfs_customer_document_source.py'
       - 'implementation/runtime_service/tests/test_kfs_meter_history.py'
       - 'implementation/runtime_service/tests/test_kfs_fleet_rank.py'
       - 'implementation/runtime_service/tests/test_kfs_customer_document_evidence.py'
+      - 'implementation/runtime_service/tests/test_kfs_customer_document_source.py'
       - 'implementation/runtime_service/pyproject.toml'
       - 'infrastructure/jason-runtime/**'
       - 'infrastructure/kfs-collector/**'
@@ -38,9 +40,11 @@ on:
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/src/jason_runtime/kfs_meter_history.py'
       - 'implementation/runtime_service/src/jason_runtime/kfs_customer_document_evidence.py'
+      - 'implementation/runtime_service/src/jason_runtime/kfs_customer_document_source.py'
       - 'implementation/runtime_service/tests/test_kfs_meter_history.py'
       - 'implementation/runtime_service/tests/test_kfs_fleet_rank.py'
       - 'implementation/runtime_service/tests/test_kfs_customer_document_evidence.py'
+      - 'implementation/runtime_service/tests/test_kfs_customer_document_source.py'
       - 'implementation/runtime_service/pyproject.toml'
       - 'infrastructure/jason-runtime/**'
       - 'infrastructure/kfs-collector/**'
@@ -73,6 +77,7 @@ jobs:
           python -m pytest implementation/runtime_service/tests/test_kfs_meter_history.py -q
           python -m pytest implementation/runtime_service/tests/test_kfs_fleet_rank.py -q
           python -m pytest implementation/runtime_service/tests/test_kfs_customer_document_evidence.py -q
+          python -m pytest implementation/runtime_service/tests/test_kfs_customer_document_source.py -q
           python -m pytest tools/tests/test_provider_secret_provision.py -q
       - name: Verify KFS remains credential-safe and fail-closed by default
         run: |
