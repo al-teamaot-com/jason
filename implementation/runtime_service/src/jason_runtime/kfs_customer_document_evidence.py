@@ -7,7 +7,9 @@ filesystem scan, arbitrary URL fetch, API call, write, or customer-identity gues
 """
 from __future__ import annotations
 
+import base64
 import hashlib
+import hmac
 import io
 import re
 from zipfile import BadZipFile, ZipFile
@@ -52,6 +54,88 @@ class ApprovedSharePointWorkbook:
             raise ValueError("document is not an approved copier-log or receipt class")
         if not self.content.startswith(b"PK"):
             raise ValueError("approved Excel document is not a ZIP container")
+
+
+def document_from_governed_sharepoint_reads(
+    *,
+    tenant_id: str,
+    site_id: str,
+    drive_id: str,
+    item_id: str,
+    metadata_before: object,
+    content_result: object,
+    metadata_after: object,
+) -> ApprovedSharePointWorkbook:
+    """Bridge the existing governed SharePoint reader's verified output format.
+
+    Callers MUST have separately authenticated the Jason requester, tenant,
+    site/library/item release policy, and all three read operations. Requiring
+    identical before/after eTags prevents accepting bytes from a file that
+    changed during the read. This adapter never fetches network resources.
+    """
+    def evidence(result: object, *, operation: str) -> Mapping[str, object]:
+        if getattr(result, "provider", None) != "microsoft_graph":
+            raise PermissionError("source must be the governed Microsoft Graph reader")
+        if getattr(result, "capability", None) != operation:
+            raise PermissionError("unexpected governed SharePoint operation")
+        data = getattr(result, "data", None)
+        if not isinstance(data, Mapping):
+            raise ValueError("invalid governed SharePoint result data")
+        return data
+
+    before = evidence(metadata_before, operation="knowledge.document.metadata.read").get("item")
+    after = evidence(metadata_after, operation="knowledge.document.metadata.read").get("item")
+    content = evidence(content_result, operation="knowledge.document.content.read")
+    if not isinstance(before, Mapping) or not isinstance(after, Mapping):
+        raise ValueError("versioned source metadata is required")
+    required = ("id", "name", "eTag", "size", "lastModifiedDateTime", "webUrl", "site_id", "drive_id")
+    if any(not before.get(key) and before.get(key) != 0 for key in required):
+        raise ValueError("governed source metadata is incomplete")
+    if any(before.get(key) != after.get(key) for key in required):
+        raise ValueError("source document changed during read")
+    if before["id"] != item_id or before["site_id"] != site_id or before["drive_id"] != drive_id:
+        raise PermissionError("source identity does not match authorized selectors")
+    if not isinstance(before["size"], int) or isinstance(before["size"], bool):
+        raise ValueError("source document size is invalid")
+    if not 0 < before["size"] <= 10 * 1024 * 1024:
+        raise ValueError("source document exceeds safe size")
+    if not str(before["name"]).casefold().endswith(".xlsx"):
+        raise ValueError("source must be an approved xlsx document")
+    file_meta = before.get("file")
+    if not isinstance(file_meta, Mapping) or file_meta.get("mimeType") != (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    ):
+        raise ValueError("source media type is not approved")
+    b64 = content.get("content_b64")
+    if not isinstance(b64, str) or len(b64) > 15 * 1024 * 1024:
+        raise ValueError("bounded source content is unavailable")
+    if content.get("encoding") != "base64":
+        raise ValueError("governed document encoding is invalid")
+    try:
+        raw = base64.b64decode(b64, validate=True)
+    except (ValueError, Exception) as exc:
+        raise ValueError("invalid base64 document evidence") from exc
+    if len(raw) != before["size"] or content.get("byte_length") != len(raw):
+        raise ValueError("source byte size differs from authorized metadata")
+    digest = hashlib.sha256(raw).hexdigest()
+    if not isinstance(content.get("sha256"), str) or not hmac.compare_digest(
+        digest, content["sha256"]
+    ):
+        raise ValueError("source digest validation failed")
+    modified_at = datetime.fromisoformat(
+        str(before["lastModifiedDateTime"]).replace("Z", "+00:00")
+    )
+    return ApprovedSharePointWorkbook(
+        tenant_id=tenant_id,
+        site_id=site_id,
+        drive_id=drive_id,
+        item_id=item_id,
+        etag=str(before["eTag"]),
+        filename=str(before["name"]),
+        web_url=str(before["webUrl"]),
+        modified_at=modified_at,
+        content=raw,
+    )
 
 
 @dataclass(frozen=True, slots=True)
