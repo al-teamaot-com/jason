@@ -23,6 +23,9 @@ def target(*, client_id="company-12", policy_id="policy-weekly",
         kb="KB5123456", client_id=client_id, policy_id=policy_id,
         device_id=device_id, device_uid=device_uid, hostname=hostname,
         identity_verified=status_verified,
+        policy_kb_attribution_verified=True,
+        policy_kb_attribution_reference="governed-fixture-per-policy-attribution",
+        policy_kb_attribution_checked_at=NOW,
     )
     props.update(changes)
     return VerifiedPatchTarget(**props)
