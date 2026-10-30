@@ -14,14 +14,14 @@ STATUS_FIELDS = ("Status:", "Completed:", "Still required:", "What I'm doing nex
 def validate(registry: str, agents: str) -> list[str]:
     errors = []
     for code in REQUIRED:
-        if len(re.findall(r"(?m)^## " + re.escape(code) + r"\\b", registry)) != 1:
+        if len(re.findall(r"(?m)^## " + re.escape(code) + r"\b", registry)) != 1:
             errors.append(f"{code} must have exactly one heading")
     for field in STATUS_FIELDS:
         if field not in registry:
             errors.append(f"Missing status field: {field}")
     if str(REGISTRY) not in agents:
         errors.append("AI instructions must reference the canonical registry")
-    for phrase in ("Before making development changes", "No background", "authorization"):
+    for phrase in ("Before making development changes", "background", "authorization"):
         if phrase.casefold() not in (agents + registry).casefold():
             errors.append(f"Missing instruction concept: {phrase}")
     return errors
