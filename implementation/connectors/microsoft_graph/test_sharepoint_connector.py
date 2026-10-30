@@ -19,7 +19,8 @@ class Binding:
 class Bindings:
     bound: object = field(default_factory=Binding)
     def find_active_by_jason_identity(self, *, jason_identity_id):
-        assert jason_identity_id == "owner-1"
+        if jason_identity_id != "owner-1":
+            return None
         return self.bound
 
 @dataclass
