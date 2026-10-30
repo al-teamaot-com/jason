@@ -19,6 +19,9 @@ on:
       - 'implementation/orchestrator/tests/test_resource_capability_catalog.py'
       - 'implementation/runtime_service/src/jason_runtime/datto_component_scope.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
+      - 'implementation/runtime_service/src/jason_runtime/vulscan_datto_review_evidence.py'
+      - 'implementation/runtime_service/src/jason_runtime/vulscan_v2_preproduction_factory.py'
+      - 'implementation/runtime_service/tests/test_vulscan_datto_review_evidence.py'
       - 'implementation/runtime_service/tests/test_datto_automation_runtime.py'
       - 'implementation/runtime_service/tests/test_datto_component_execution_regression.py'
       - 'deploy/openbao/config/jason-datto-rmm-execution-policy.hcl'
@@ -53,6 +56,9 @@ on:
       - 'implementation/orchestrator/tests/test_resource_capability_catalog.py'
       - 'implementation/runtime_service/src/jason_runtime/datto_component_scope.py'
       - 'implementation/runtime_service/src/jason_runtime/provider_reads.py'
+      - 'implementation/runtime_service/src/jason_runtime/vulscan_datto_review_evidence.py'
+      - 'implementation/runtime_service/src/jason_runtime/vulscan_v2_preproduction_factory.py'
+      - 'implementation/runtime_service/tests/test_vulscan_datto_review_evidence.py'
       - 'implementation/runtime_service/tests/test_datto_automation_runtime.py'
       - 'implementation/runtime_service/tests/test_datto_component_execution_regression.py'
       - 'deploy/openbao/config/jason-datto-rmm-execution-policy.hcl'
@@ -111,6 +117,7 @@ jobs:
           python -m pytest implementation/runtime_service/tests/test_vulscan_governed_patch_source.py -q
           python -m pytest implementation/runtime_service/tests/test_vulscan_policy_kb_attribution.py -q
           python -m pytest implementation/runtime_service/tests/test_vulscan_owner_disposition_evidence.py -q
+          python -m pytest implementation/runtime_service/tests/test_vulscan_datto_review_evidence.py -q
           python -m pytest implementation/runtime_service/tests/test_vulscan_v2_complete_shadow_acceptance.py -q
           python -m pytest implementation/connectors/tests/test_datto_rmm_automation_reads.py -q
           python -m pytest implementation/connectors/tests/test_datto_rmm_automation_manifest.py -q
