@@ -34,3 +34,13 @@ The historical breaker has two exhausted attempts and cannot be automatically re
 Code-level mitigation: preproduction tests passed; protected CI and production release still gated.
 Current breaker: **not recovered**.
 VulScan V2 PR #2178: remains draft with its own live Datto read acceptance and owner Teams delivery gates. Avoid conflating this infrastructure diagnostic change with its feature scope.
+
+
+## Owner-approved manual recovery — verified result, 2026-10-30 20:48:55 UTC
+- Explicit conversational Owner authorization applied to exactly ONE manual native Release Manager revalidation of protected LKG `cb76e14f9f42ec4f914b10967db1d408c271c1aa`. The normal automatic recovery budget was already exhausted and was **not reset**.
+- Preflight passed: all 10 immutable LKG fields, fresh clean drift, systemd running/no failed units, no production transaction lock, no pending protected transitions, active root transition timer.
+- The installed canonical `release_manager_host_runner.revalidate_circuit_breaker` submitted one request to the already installed independent root-owned transition worker. Process exited 0 after a verified root transition; no fallback CLI, direct protected write, sudo bypass or second attempt.
+- Protected readback: `circuit_breaker.state=closed`, `reason=root_verified_revalidate`, `revalidated_revision=cb76e14f9f42ec4f914b10967db1d408c271c1aa`, `updated_at=2026-10-30T20:48:55.711952+00:00`. Current drift PASS/zero problems; no failed systemd units. GitHub issue #1078 records exact authorization and verification evidence.
+- **Additional audit bug confirmed:** after the recovery completed, the still-installed scheduled recovery manager rewrote its closed-state ledger to `already_closed` and dropped `attempts` (now 0), retaining only `last_revalidation_attempt=root_revalidation_rejected`. The historical two-attempt provenance was recorded in issue #1078 *before* the scheduled compaction. The PR adds a closed-state path that retains all original attempts, validates shape and fails closed if corrupted; this is a future safeguard and was not deployed as part of the manual recovery. The current installed ledger is not manually restored or altered.
+- Development-only tests: 63 isolated recovery/root/drift regressions passed at `8dc387ce1f7ee0bbd9107c275f639fbbbe7db8a5`. Protected CI must still be fully green at the eventual final head.
+- **Production root-breaker incident recovered.** This does NOT lift the independently ordered global production freeze, authorize any feature release, prove VulScan V2 live Datto site/policy reads, or signify PR #2181 deployment. Exact-SHA approval is still required for later feature promotion.
