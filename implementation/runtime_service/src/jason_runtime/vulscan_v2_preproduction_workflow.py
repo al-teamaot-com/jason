@@ -63,6 +63,11 @@ class VulscanV2PreproductionWorkflow:
         tuple[Any, ...], Mapping[str, Any]]:
         if now.tzinfo is None:
             raise VulscanPatchEvidenceError("V2 snapshot requires timezone-aware time")
+        # Deny before ANY inventory/Datto reads. A missing disposition source
+        # must not be mistaken for verified absence of an Owner deferral.
+        if self.review_disposition_read is None:
+            raise VulscanPatchEvidenceError(
+                "complete governed owner disposition source unavailable")
         inventory = self.inventory_reader()
         if (not isinstance(inventory, VerifiedVulscanTargetInventory)
                 or inventory.full_scope_verified is not True
@@ -72,9 +77,6 @@ class VulscanV2PreproductionWorkflow:
         targets = inventory.targets
         if not targets:
             return (), {}
-        if self.review_disposition_read is None:
-            raise VulscanPatchEvidenceError(
-                "complete governed owner disposition source unavailable")
         requested_kbs = {item.kb.strip().upper() for item in targets}
         metadata = {}
         for kb in sorted(requested_kbs):
