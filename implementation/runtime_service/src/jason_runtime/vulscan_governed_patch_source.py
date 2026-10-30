@@ -13,6 +13,10 @@ from zoneinfo import ZoneInfo
 
 from .vulscan_patch_approval_aging import PatchApprovalObservation
 from .vulscan_patch_approval_notification import MicrosoftKBMetadata
+from .vulscan_owner_disposition_evidence import (
+    VerifiedPatchReviewDisposition, VulscanReviewDispositionUnavailable,
+    verify_patch_review_disposition,
+)
 
 _KB = re.compile(r"^KB[0-9]{5,9}$")
 _STATES = frozenset({"INSTALLED", "APPROVED_PENDING", "NOT_APPROVED", "INSTALL_ERROR", "FAILED"})
@@ -104,6 +108,7 @@ def collect_governed_patch_observations(
     metadata_by_kb: Mapping[str, MicrosoftKBMetadata],
     read: Callable[[str, Mapping[str, Any]], Mapping[str, Any]],
     now: datetime,
+    review_disposition_read: Callable[[VerifiedPatchTarget], VerifiedPatchReviewDisposition] | None = None,
 ) -> tuple[PatchApprovalObservation, ...]:
     """Fail the entire batch on missing, ambiguous, or contradictory provider facts.
 
@@ -129,6 +134,10 @@ def collect_governed_patch_observations(
             raise VulscanPatchEvidenceError("contradictory duplicate target")
         seen[key] = target
 
+    # An incomplete/absent decision registry cannot attest the absence of an
+    # Owner deferral. Reject before executing even read-only provider calls.
+    if review_disposition_read is None:
+        raise VulscanPatchEvidenceError("complete governed owner disposition source unavailable")
     observed_date = now.astimezone(ZoneInfo("America/New_York")).date()
     findings: list[PatchApprovalObservation] = []
     for key, target in sorted(seen.items()):
@@ -137,6 +146,22 @@ def collect_governed_patch_observations(
         if (metadata is None or metadata.source_verified is not True
                 or metadata.kb.upper() != kb):
             raise VulscanPatchEvidenceError("authoritative Microsoft KB release evidence missing")
+        try:
+            review = verify_patch_review_disposition(
+                review_disposition_read(target),
+                kb=kb, client_id=target.client_id,
+                policy_id=target.policy_id, device_uid=target.device_uid,
+                now=now,
+            )
+        except Exception as exc:
+            raise VulscanPatchEvidenceError(
+                "verified current owner deferral/decline coverage unavailable"
+            ) from exc
+        intentionally_deferred = review.disposition in {"deferred", "declined"}
+        superseded = review.disposition == "superseded"
+        if (target.intentional_deferral and not intentionally_deferred
+                or target.superseded and not superseded):
+            raise VulscanPatchEvidenceError("contradictory owner review disposition evidence")
         try:
             device_result = read("endpoint.device.read", {"resource_id": target.device_uid})
             endpoint = _canonical_record(device_result, capability="endpoint.device.read")
@@ -171,8 +196,8 @@ def collect_governed_patch_observations(
             observed_date=observed_date, policy_id=target.policy_id,
             client_id=target.client_id, device_id=target.device_id,
             approval_state=status, source_verified=True,
-            intentional_deferral=target.intentional_deferral,
-            superseded=target.superseded,
+            intentional_deferral=intentionally_deferred,
+            superseded=superseded,
             actively_exploited=target.actively_exploited,
             exploitation_verified=target.exploitation_verified,
         ))
