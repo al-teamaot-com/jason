@@ -53,7 +53,8 @@ not running a job or registering standing-safe authority.
 4. Check recent *server-observed* device health: user idle, acceptable CPU
    and disk activity, sufficient free space, power source, no equivalent
    existing Datto repair job, and no previous attempt for this incident.
-   Missing/stale/ambiguous safety facts **defer**, not execute.
+   Site/global concurrent-repair caps prevent simultaneous heavy maintenance
+   across endpoints. Missing/stale/ambiguous safety facts **defer**, not execute.
 5. Prohibit reboot, logoff, network reset, user application termination and
    disruptive service restart. An action that may noticeably affect users
    needs its own explicit approval; do not infer permission from the owner's

@@ -32,6 +32,8 @@ def verified_policy(**changes):
         max_cpu_percent=30.0,
         max_disk_busy_percent=30.0,
         min_free_gb=10.0,
+        max_active_site_repairs=1,
+        max_active_global_repairs=3,
         max_observation_age_seconds=300,
     )
     return replace(baseline, **changes)
@@ -42,6 +44,8 @@ def verified_observation(**changes):
         ticket_id="T-123",
         device_uid="device-xyz",
         ticket_bound_device_uid="device-xyz",
+        ticket_site_id="site-a",
+        device_site_id="site-a",
         ticket_client_id="client-a",
         device_client_id="client-a",
         component_uid=UID,
@@ -59,6 +63,8 @@ def verified_observation(**changes):
         free_gb=30.0,
         on_ac_power=True,
         existing_repair_job=False,
+        active_site_repairs=0,
+        active_global_repairs=0,
         incident_repair_attempts=0,
         reboot_requested=False,
     )
@@ -97,6 +103,8 @@ def test_default_policy_is_disabled_even_with_perfect_machine_evidence():
         ({"min_free_gb": None}, "FREE_SPACE_LIMIT_NOT_CONFIGURED"),
         ({"min_free_gb": float("nan")}, "FREE_SPACE_LIMIT_NOT_CONFIGURED"),
         ({"max_cpu_percent": float("nan")}, "RESOURCE_LIMIT_NOT_CONFIGURED"),
+        ({"max_active_site_repairs": None}, "CONCURRENCY_LIMIT_NOT_CONFIGURED"),
+        ({"max_active_global_repairs": 0}, "CONCURRENCY_LIMIT_NOT_CONFIGURED"),
     ],
 )
 def test_unverified_policy_blocks(changes, reason):
@@ -119,6 +127,8 @@ def test_unverified_policy_blocks(changes, reason):
         ({"ticket_id": ""}, "TICKET_DEVICE_SCOPE_MISMATCH"),
         ({"device_uid": ""}, "TICKET_DEVICE_SCOPE_MISMATCH"),
         ({"ticket_bound_device_uid": "different-device"}, "TICKET_DEVICE_SCOPE_MISMATCH"),
+        ({"device_site_id": "site-b"}, "TICKET_DEVICE_SCOPE_MISMATCH"),
+        ({"ticket_site_id": ""}, "TICKET_DEVICE_SCOPE_MISMATCH"),
         ({"os_family": "linux"}, "OS_NOT_ELIGIBLE"),
         ({"repair_evidence_codes": frozenset({"computer_sluggish"})}, "CONFIRMED_CORRUPTION_EVIDENCE_REQUIRED"),
         ({"repair_evidence_codes": frozenset()}, "CONFIRMED_CORRUPTION_EVIDENCE_REQUIRED"),
@@ -126,6 +136,7 @@ def test_unverified_policy_blocks(changes, reason):
         ({"reboot_requested": True}, "REBOOT_REQUEST_NOT_ALLOWED"),
         ({"reboot_requested": None}, "REBOOT_REQUEST_NOT_ALLOWED"),
         ({"incident_repair_attempts": 1}, "REPAIR_ATTEMPT_ALREADY_CONSUMED"),
+        ({"incident_repair_attempts": False}, "REPAIR_ATTEMPT_ALREADY_CONSUMED"),
     ],
 )
 def test_hard_safety_conflicts_block(changes, reason):
@@ -151,6 +162,10 @@ def test_hard_safety_conflicts_block(changes, reason):
         ({"on_ac_power": False}, "WAIT_SAFE_POWER_STATE"),
         ({"existing_repair_job": None}, "WAIT_EXISTING_REPAIR_JOB"),
         ({"existing_repair_job": True}, "WAIT_EXISTING_REPAIR_JOB"),
+        ({"active_site_repairs": 1}, "WAIT_SITE_REPAIR_CAPACITY"),
+        ({"active_global_repairs": 3}, "WAIT_GLOBAL_REPAIR_CAPACITY"),
+        ({"active_site_repairs": None}, "WAIT_SITE_REPAIR_CAPACITY"),
+        ({"active_global_repairs": -1}, "WAIT_GLOBAL_REPAIR_CAPACITY"),
         ({"cpu_percent": 95.0}, "WAIT_CPU_IDLE"),
         ({"cpu_percent": None}, "WAIT_CPU_IDLE"),
         ({"cpu_percent": float("nan")}, "WAIT_CPU_IDLE"),

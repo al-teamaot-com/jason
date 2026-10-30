@@ -50,6 +50,8 @@ class CertifiedRepairPolicy:
     max_cpu_percent: float | None = None
     max_disk_busy_percent: float | None = None
     min_free_gb: float | None = None
+    max_active_site_repairs: int | None = None
+    max_active_global_repairs: int | None = None
     max_observation_age_seconds: int = 300
 
 
@@ -60,6 +62,8 @@ class RepairObservation:
     ticket_id: str
     device_uid: str
     ticket_bound_device_uid: str
+    ticket_site_id: str
+    device_site_id: str
     ticket_client_id: str
     device_client_id: str
     component_uid: str
@@ -77,6 +81,8 @@ class RepairObservation:
     free_gb: float | None
     on_ac_power: bool | None
     existing_repair_job: bool | None
+    active_site_repairs: int | None
+    active_global_repairs: int | None
     incident_repair_attempts: int
     reboot_requested: bool | None
 
@@ -135,6 +141,8 @@ def evaluate_repair_admission(
         blocked.append("LIVE_SCRIPT_REVISION_UNVERIFIED")
 
     if (not observed.ticket_id or not observed.device_uid
+            or not observed.ticket_site_id or not observed.device_site_id
+            or observed.ticket_site_id != observed.device_site_id
             or not observed.ticket_bound_device_uid
             or observed.device_uid != observed.ticket_bound_device_uid
             or not observed.ticket_client_id or not observed.device_client_id
@@ -146,7 +154,9 @@ def evaluate_repair_admission(
         blocked.append("CONFIRMED_CORRUPTION_EVIDENCE_REQUIRED")
     if observed.reboot_requested is not False:
         blocked.append("REBOOT_REQUEST_NOT_ALLOWED")
-    if observed.incident_repair_attempts != 0:
+    if (isinstance(observed.incident_repair_attempts, bool)
+            or not isinstance(observed.incident_repair_attempts, int)
+            or observed.incident_repair_attempts != 0):
         blocked.append("REPAIR_ATTEMPT_ALREADY_CONSUMED")
 
     age = None
@@ -167,6 +177,22 @@ def evaluate_repair_admission(
         deferred.append("WAIT_SAFE_POWER_STATE")
     if observed.existing_repair_job is not False:
         deferred.append("WAIT_EXISTING_REPAIR_JOB")
+
+    # Heavy repairs must remain fleet-bounded, even on different endpoints.
+    # A missing/invalid trusted policy cap blocks; missing/stale live counts
+    # defer. This is independent of exact per-device idempotency.
+    concurrency_limits = (
+        (policy.max_active_site_repairs, observed.active_site_repairs,
+         "WAIT_SITE_REPAIR_CAPACITY"),
+        (policy.max_active_global_repairs, observed.active_global_repairs,
+         "WAIT_GLOBAL_REPAIR_CAPACITY"),
+    )
+    for limit, active, reason in concurrency_limits:
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+            blocked.append("CONCURRENCY_LIMIT_NOT_CONFIGURED")
+        elif (isinstance(active, bool) or not isinstance(active, int)
+              or active < 0 or active >= limit):
+            deferred.append(reason)
 
     limits = (
         (policy.max_cpu_percent, observed.cpu_percent, "WAIT_CPU_IDLE"),
