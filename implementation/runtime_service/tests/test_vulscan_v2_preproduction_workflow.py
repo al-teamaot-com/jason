@@ -54,6 +54,10 @@ def make_flow(tmp_path, *, state=None, targets=None, coverage=True,
             endpoint = next(item for item in targets if item.device_uid == uid)
             return {"status": "succeeded", "evidence": {
                 "record": {"resource_id": uid, "hostname": endpoint.hostname}}}
+        if capability == "endpoint.patch_policy.search":
+            return {"status": "succeeded", "evidence": {"data": {"policies": [
+                {"policyUid": policy} for policy in ("policy-weekly", "policy-servers")
+            ]}}}
         if capability == "endpoint.patch.search":
             return {"status": "succeeded", "evidence": {"data": {"patches": [{
                 "kbArticleId": "5123456", "installStatus": state["installStatus"],
@@ -75,7 +79,7 @@ def test_shadow_evaluates_without_queue_or_send(tmp_path):
     assert (result.mode, result.candidate_count, result.enqueued_count) == ("shadow", 1, 0)
     assert flow.store.due_patch_approval_notifications(now=NOW) == ()
     assert [cap for cap, _ in reads] == [
-        "endpoint.device.read", "endpoint.patch.search"
+        "endpoint.device.read", "endpoint.patch_policy.search", "endpoint.patch.search"
     ]
 
 
@@ -174,7 +178,7 @@ def test_auxiliary_shadow_cadence_is_read_only_and_non_spamming(tmp_path):
     assert maintenance.tick().candidate_count == 1
     assert maintenance.tick() is None
     assert maintenance.tick().candidate_count == 1
-    assert len(reads) == 4
+    assert len(reads) == 6
     assert flow.store.due_patch_approval_notifications(now=NOW) == ()
 
 
