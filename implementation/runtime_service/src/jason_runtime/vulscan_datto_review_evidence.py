@@ -48,6 +48,7 @@ class VerifiedDattoPolicyManualReview:
     site_uid: str
     device_uid: str
     policy_uid: str
+    patch_id: str
     decision: str
     manual_table_complete: bool
     assigned_policy_verified: bool
@@ -58,7 +59,7 @@ class VerifiedDattoPolicyManualReview:
 
 
 def verify_datto_manual_policy_review(
-    proof: Any, *, target: VerifiedPatchTarget, now: datetime,
+    proof: Any, *, target: VerifiedPatchTarget, patch_id: str, now: datetime,
 ) -> VerifiedDattoPolicyManualReview:
     """Reject inferred negative evidence, stale tables, and cross-client joins."""
     if not isinstance(proof, VerifiedDattoPolicyManualReview):
@@ -67,7 +68,9 @@ def verify_datto_manual_policy_review(
             or proof.client_id != target.client_id
             or proof.site_uid != target.site_uid
             or proof.device_uid != target.device_uid
-            or proof.policy_uid != target.policy_id):
+            or proof.policy_uid != target.policy_id
+            or proof.patch_id != patch_id
+            or not _UID.fullmatch(patch_id)):
         raise DattoManualReviewUnavailable("Datto policy review scope mismatch")
     if (proof.decision not in _DECISIONS
             or proof.manual_table_complete is not True
@@ -144,6 +147,9 @@ class DattoRmmPatchReviewReader:
         kb = str(patch.get("kbArticleId") or "").strip()
         if kb.lstrip("0") != target.kb[2:].lstrip("0"):
             raise DattoManualReviewUnavailable("Datto device patch KB identity mismatch")
+        patch_id = str(patch.get("patchId") or "").strip()
+        if not _UID.fullmatch(patch_id):
+            raise DattoManualReviewUnavailable("exact Datto patch ID is missing")
         status = str(patch.get("installStatus") or "").strip().upper()
         if status != "NOT_APPROVED":
             raise DattoManualReviewUnavailable("Datto patch not in a reviewable NOT_APPROVED state")
@@ -166,7 +172,8 @@ class DattoRmmPatchReviewReader:
         # no deliberate denial. The authoritative Datto policy list is required.
         try:
             manual = verify_datto_manual_policy_review(
-                self.policy_manual_review_read(target), target=target, now=current,
+                self.policy_manual_review_read(target),
+                target=target, patch_id=patch_id, now=current,
             )
         except Exception as exc:
             raise DattoManualReviewUnavailable(
