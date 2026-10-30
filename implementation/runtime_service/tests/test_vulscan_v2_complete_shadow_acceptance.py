@@ -13,6 +13,7 @@ from jason_runtime.vulscan_microsoft_public_source import (
 )
 from jason_runtime.vulscan_microsoft_release_evidence import MicrosoftPatchEvidenceUnavailable
 from jason_runtime.vulscan_owner_disposition_evidence import VerifiedPatchReviewDisposition
+from jason_runtime.vulscan_datto_review_evidence import VerifiedDattoPolicyManualReview
 from jason_runtime.vulscan_policy_kb_attribution import VerifiedPolicyKBAttribution
 from jason_runtime.vulscan_v2_preproduction_factory import build_vulscan_v2_shadow_workflow
 from jason_runtime.vulscan_v2_site_inventory import (
@@ -56,7 +57,8 @@ def scoped_sites():
 
 def build(tmp_path, *, patch_state=None, gate=None, ms_grant=None,
           review_state=None, review_source_available=True,
-          policy_attribution_available=True, policy_state=None):
+          policy_attribution_available=True, policy_state=None,
+          datto_manual_decision=None, datto_manual_override=False):
     patch_state = patch_state or {"installStatus": "NOT_APPROVED"}
     review_state = review_state if review_state is not None else {"disposition": "review_pending"}
     reads = []
@@ -83,7 +85,8 @@ def build(tmp_path, *, patch_state=None, gate=None, ms_grant=None,
         if capability == "endpoint.patch.search":
             return {"status": "succeeded", "evidence": {
                 "items": [{"kbArticleId": "5127648",
-                           "installStatus": patch_state["installStatus"]}],
+                           "installStatus": patch_state["installStatus"],
+                           "manualOverride": datto_manual_override}],
                 "pageDetails": {"count": 12, "totalCount": 12,
                                 "nextPageUrl": None},
                 "exact_selector_match": True, "ambiguous": False,
@@ -106,13 +109,28 @@ def build(tmp_path, *, patch_state=None, gate=None, ms_grant=None,
             checked_at=NOW, source_reference="approved-complete-technician-decision-store",
             full_scope_verified=True,
         )
+    def datto_policy_manual_read(item):
+        return VerifiedDattoPolicyManualReview(
+            kb=item.kb, client_id=item.client_id,
+            site_uid=item.site_uid, device_uid=item.device_uid,
+            policy_uid=item.policy_id, decision=datto_manual_decision,
+            manual_table_complete=True, assigned_policy_verified=True,
+            full_scope_verified=True, checked_at=NOW,
+            source_reference="governed-datto-complete-manual-approval-table",
+        )
     transport = MicrosoftTransportFixture()
     store = SQLiteOperationalWorkStore(tmp_path / "v2-shadow.db")
     flow = build_vulscan_v2_shadow_workflow(
         store=store, authorized_site_inventory_read=scoped_sites,
         governed_read=governed_read,
         can_read_microsoft_public_docs=ms_grant or (lambda: True),
-        governed_review_disposition_read=review_read if review_source_available else None,
+        governed_review_disposition_read=(
+            review_read if review_source_available and datto_manual_decision is None
+            else None
+        ),
+        governed_datto_manual_policy_review_read=(
+            datto_policy_manual_read if datto_manual_decision is not None else None
+        ),
         governed_policy_attribution_read=(
             policy_attribution_read if policy_attribution_available else None),
         authority_gate=gate,
@@ -198,3 +216,78 @@ def test_effective_not_approved_is_insufficient_if_policy_is_not_unapproved(tmp_
     with pytest.raises(ValueError, match="attribution"):
         flow.evaluate_once(now=NOW)
     assert store.due_patch_approval_notifications(now=NOW) == ()
+
+
+
+def test_datto_policy_manual_negative_proof_yields_one_shadow_candidate(tmp_path):
+    flow, store, reads, _ = build(
+        tmp_path, datto_manual_decision="no_manual_denial")
+    result = flow.evaluate_once(now=NOW)
+    assert result.mode == "shadow"
+    assert result.candidate_count == 1 and result.enqueued_count == 0
+    assert len([x for x, _ in reads if x == "endpoint.patch.search"]) == 2
+    assert store.due_patch_approval_notifications(now=NOW) == ()
+
+
+def test_datto_manually_denied_policy_suppresses_full_shadow_kb(tmp_path):
+    flow, store, reads, _ = build(
+        tmp_path, datto_manual_decision="manual_not_approved")
+    result = flow.evaluate_once(now=NOW)
+    assert result.mode == "shadow"
+    assert result.candidate_count == 0
+    assert store.due_patch_approval_notifications(now=NOW) == ()
+
+
+def test_datto_device_manual_override_suppresses_full_shadow_kb(tmp_path):
+    flow, store, reads, _ = build(
+        tmp_path, datto_manual_decision="no_manual_denial",
+        datto_manual_override=True)
+    result = flow.evaluate_once(now=NOW)
+    assert result.mode == "shadow"
+    assert result.candidate_count == 0
+    assert store.due_patch_approval_notifications(now=NOW) == ()
+
+
+def test_datto_manual_decision_rechecked_before_queued_notification_send(tmp_path):
+    # The existing pre-send read must observe a Datto decision changing from
+    # no deliberate denial to a manual Do not approve.
+    flow, store, reads, _ = build(
+        tmp_path, datto_manual_decision="no_manual_denial",
+        gate=lambda: True)
+    flow.evaluate_once(now=NOW, enqueue=True)
+    queued = store.due_patch_approval_notifications(now=NOW)
+    assert len(queued) == 1
+    flow.review_disposition_read.policy_manual_review_read = lambda item: (
+        VerifiedDattoPolicyManualReview(
+            kb=item.kb, client_id=item.client_id, site_uid=item.site_uid,
+            device_uid=item.device_uid, policy_uid=item.policy_id,
+            decision="manual_not_approved", manual_table_complete=True,
+            assigned_policy_verified=True, full_scope_verified=True,
+            checked_at=NOW,
+            source_reference="governed-datto-new-manual-denial",
+        )
+    )
+    from datetime import date
+    from jason_runtime.vulscan_patch_approval_notification import PreparedPatchNotification
+    import json
+    p = json.loads(queued[0]["arguments_json"])
+    notice = PreparedPatchNotification(
+        kb=p["kb"], stage=p["stage"], released=date.fromisoformat(p["released"]),
+        age_days=p["age_days"], policy_ids=tuple(p["policy_ids"]),
+        affected_clients=p["affected_clients"],
+        affected_devices=p["affected_devices"], idempotency_key=p["idempotency_key"],
+        text=p["text"],
+    )
+    assert flow.verify_current(notice, now=NOW) is False
+
+
+def test_factory_does_not_allow_two_competing_review_sources(tmp_path):
+    from jason_runtime.vulscan_v2_preproduction_factory import build_vulscan_v2_shadow_workflow
+    with pytest.raises(ValueError, match="competing"):
+        build_vulscan_v2_shadow_workflow(
+            store=object(), authorized_site_inventory_read=scoped_sites,
+            governed_read=lambda *_: {},
+            can_read_microsoft_public_docs=lambda: True,
+            governed_review_disposition_read=lambda item: object(),
+            governed_datto_manual_policy_review_read=lambda item: object(),
+        )
