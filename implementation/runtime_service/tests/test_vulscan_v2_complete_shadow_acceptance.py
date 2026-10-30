@@ -13,6 +13,7 @@ from jason_runtime.vulscan_microsoft_public_source import (
 )
 from jason_runtime.vulscan_microsoft_release_evidence import MicrosoftPatchEvidenceUnavailable
 from jason_runtime.vulscan_owner_disposition_evidence import VerifiedPatchReviewDisposition
+from jason_runtime.vulscan_policy_kb_attribution import VerifiedPolicyKBAttribution
 from jason_runtime.vulscan_v2_preproduction_factory import build_vulscan_v2_shadow_workflow
 from jason_runtime.vulscan_v2_site_inventory import (
     ApprovedDattoSiteScope, ApprovedDattoSiteInventory,
@@ -54,7 +55,8 @@ def scoped_sites():
 
 
 def build(tmp_path, *, patch_state=None, gate=None, ms_grant=None,
-          review_state=None, review_source_available=True):
+          review_state=None, review_source_available=True,
+          policy_attribution_available=True, policy_state=None):
     patch_state = patch_state or {"installStatus": "NOT_APPROVED"}
     review_state = review_state if review_state is not None else {"disposition": "review_pending"}
     reads = []
@@ -89,6 +91,14 @@ def build(tmp_path, *, patch_state=None, gate=None, ms_grant=None,
             }}
         assert False, f"unexpected read capability: {capability}"
 
+    def policy_attribution_read(site_uid, client_id, device_uid, kb):
+        return VerifiedPolicyKBAttribution(
+            kb=kb, client_id=client_id, site_uid=site_uid, device_uid=device_uid,
+            policy_states=(("weekly", policy_state or "NOT_APPROVED"),),
+            full_scope_verified=True, observed_at=NOW,
+            source_reference="verified-governed-actual-KB-policy-status",
+        )
+
     def review_read(item):
         return VerifiedPatchReviewDisposition(
             kb=item.kb, client_id=item.client_id, policy_id=item.policy_id,
@@ -103,6 +113,8 @@ def build(tmp_path, *, patch_state=None, gate=None, ms_grant=None,
         governed_read=governed_read,
         can_read_microsoft_public_docs=ms_grant or (lambda: True),
         governed_review_disposition_read=review_read if review_source_available else None,
+        governed_policy_attribution_read=(
+            policy_attribution_read if policy_attribution_available else None),
         authority_gate=gate,
         microsoft_transport=transport,
         microsoft_source_clock=lambda: NOW,
@@ -170,4 +182,19 @@ def test_signed_owner_exception_suppresses_full_kb_notification(tmp_path, state)
     result = flow.evaluate_once(now=NOW)
     assert result.mode == "shadow"
     assert result.candidate_count == 0
+    assert store.due_patch_approval_notifications(now=NOW) == ()
+
+
+def test_missing_kb_specific_policy_attribution_is_never_inferred_from_assigned_policy(tmp_path):
+    flow, store, reads, docs = build(tmp_path, policy_attribution_available=False)
+    with pytest.raises(ValueError, match="attribution source"):
+        flow.evaluate_once(now=NOW)
+    assert reads == [] and docs.calls == []
+    assert store.due_patch_approval_notifications(now=NOW) == ()
+
+
+def test_effective_not_approved_is_insufficient_if_policy_is_not_unapproved(tmp_path):
+    flow, store, reads, docs = build(tmp_path, policy_state="APPROVED_PENDING")
+    with pytest.raises(ValueError, match="attribution"):
+        flow.evaluate_once(now=NOW)
     assert store.due_patch_approval_notifications(now=NOW) == ()
