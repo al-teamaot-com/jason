@@ -237,3 +237,88 @@ The first milestone is complete when Jason can, in source/tests only:
 5. construct the correct Datto quick-job request without sending it to production.
 
 Production remains read-only until a later explicitly approved activation step.
+
+
+
+## Failure-class correction evidence (2026-10-30, preproduction)
+
+- **Observed symptom:** a correctly identified, owner-approved `Change Hostname [WIN]`
+  quick-job request on an eligible workstation was rejected **before Datto was
+  contacted**: `component variable is not approved by the allowlist`.
+- **Failure class:** catalog-visible and owner-approved component actions can
+  lack a consistent reviewed variable contract at execution-plan preparation;
+  runtime policy and provider component semantics may drift independently.
+- **Violated invariant:** authority and component discovery do not by
+  themselves authorize unspecified variables or a different concrete plan.
+  The safe request must have a reproducible, exact, bounded parameter contract.
+- **General correction:** reusable source-declared `SourceComponentContract`
+  registry and one shared validator, independent of endpoint, ticket or
+  conversation text; exact provider UID/name binding; fail-closed input and
+  identity checks; retain separate human and provider authority.
+- **Regression diversity:** unrelated hostname, backup-log and event-log
+  inputs exercise boolean restrictions, validated Windows names, literal
+  searches, length/range limits and an unrelated synthetic future component.
+  Both UID and name mismatches must fail even for a previously accepted field.
+- **Operational state:** draft source only. There has been no provider job, no
+  staged rename, no reboot and no production approval expansion under this
+  correction. Additional script safety and provider-backed acceptance are
+  still required.
+
+## Source-controlled component input validation (preproduction engineering pattern)
+
+**Status:** Implemented in draft source only, pending safety review, provider-backed
+acceptance, protected integration and exact-SHA release authorization. This
+section does not claim a production activation or standing-safe classification.
+
+The canonical `automation.component.execute` capability continues to use the
+Central Orchestrator's per-action identity, approval, client and device scoping,
+execution-plan binding, idempotency, and output readback. The Datto adapter's
+input validator is a separate **conservative safety contract**, not a source of
+human authority. It must not grant a new capability or imply that a component
+is certified read-only.
+
+To add one *reviewed* component with sensitive input parameters:
+
+1. Resolve its current UID, name, category, variables and script behavior
+   through governed Datto discovery. Do not infer execution safety from a
+   component title, description or a previous approval record.
+2. Record the selected canonical capability, expected result, risk, target
+   classes, per-run/standing-safe classification and owner decision in the
+   existing workstream or approval record.
+3. Define the reviewed, **provider-specific** variable constraints as a
+   declarative `SourceComponentContract` in
+   `implementation/connectors/datto_rmm/source_component_contracts.py`.
+   Bind the contract to the exact Datto UID **and** display name. No per-client,
+   device, ticket or user identifiers belong in this source registry.
+4. Use the shared `ComponentVariablePolicy` validator, which supports bounded
+   scalars, selection enumerations, booleans (including permitted literal
+   values), safe Windows hostnames, and bounded literal search terms. Do not
+   introduce a new conditional per component or special-case error message
+   into the provider transport.
+5. Fail closed for any partial UID/name collision, missing/unknown variables,
+   unsupported values, runtime variable-policy override, or metadata drift.
+   The source-owned contract takes precedence over generic runtime field
+   policy for an exact reviewed identity.
+6. Add deterministic tests demonstrating the normal request shape, invalid
+   inputs, arbitrary-variable injection, cross-identity drift, and at least one
+   unrelated synthetic component using the same general validation mechanism.
+7. Separately verify runtime execution scope, dedicated provider execution
+   identity, Datto API Component Level, explicit approval where required,
+   exact plan fingerprint and job result/readback. Prepare source against
+   current protected `main`; use the normal Production Manager release lane.
+
+Initial contracts from owner-authorized issue
+[`#2174`](https://github.com/al-teamaot-com/jason/issues/2174)
+include non-reboot Windows hostname staging, bounded Endpoint Backup
+error-log retrieval and bounded Windows event-log search. The no-reboot
+contract allows `usrReboot=false` **only**. It never approves a subsequent
+reboot, a security-service restart, or BackupIQ asset deletion. Any future
+reboot must use a different action and obtain its own exact authorization.
+
+**Construction example:** `source_component_contracts.py` and
+`implementation/connectors/tests/test_datto_owner_2174_variable_contracts.py`.
+**Release boundary:** component variable contracts are not equivalent to
+activation of the corresponding component on Jason or in Datto's API Component
+Level. No production grant, Datto job, or endpoint change is authorized
+merely by merging this source code. Documentation must distinguish intended
+state from observed production evidence.

@@ -84,13 +84,13 @@ def test_no_reboot_rename_requires_both_inputs_and_rejects_unknown(vars):
 
 def test_unapproved_component_uid_does_not_inherit_hostname_variable_contract():
     changed_uid = ("12345678-0000-0000-0000-000000000001", RENAME[1])
-    with pytest.raises(PermissionError, match="variable is not approved"):
+    with pytest.raises(PermissionError, match="source-locked component identity mismatch"):
         prepare(changed_uid, {"usrNewName": "AOT-50282", "usrReboot": False})
 
 
 def test_unapproved_component_name_does_not_inherit_hostname_variable_contract():
     changed_name = (RENAME[0], "Change Hostname [WIN] renamed")
-    with pytest.raises(PermissionError, match="variable is not approved"):
+    with pytest.raises(PermissionError, match="source-locked component identity mismatch"):
         prepare(changed_name, {"usrNewName": "AOT-50282", "usrReboot": False})
 
 
@@ -189,3 +189,49 @@ def test_source_locked_diagnostics_reject_runtime_variable_policy_override(ident
             ),
             observed_component_name=identity[1],
         )
+
+
+def test_source_locked_resolution_rejects_any_partial_identity_collision():
+    from connectors.datto_rmm.source_component_contracts import (
+        resolve_source_component_contract,
+    )
+
+    assert resolve_source_component_contract(*RENAME) is not None
+    assert resolve_source_component_contract("unrelated-uid", "Unrelated component") is None
+    with pytest.raises(PermissionError, match="source-locked component identity mismatch"):
+        resolve_source_component_contract(RENAME[0], "Different component")
+    with pytest.raises(PermissionError, match="source-locked component identity mismatch"):
+        resolve_source_component_contract("different-uid", RENAME[1])
+
+
+def test_source_locked_contract_pattern_is_reusable_for_unrelated_component():
+    from connectors.datto_rmm.source_component_contracts import (
+        SourceComponentContract,
+        resolve_source_component_contract,
+    )
+    from connectors.datto_rmm.component_execution import ComponentVariablePolicy
+
+    arbitrary_diagnostic = SourceComponentContract(
+        uid="vendor-opaque-uid-new",
+        name="Future Safe Diagnostic",
+        variables=({"name": "IncludeSecrets", "variable_type": "boolean",
+                    "required": True, "allowed_values": ("false",)},),
+    )
+    matched = resolve_source_component_contract(
+        arbitrary_diagnostic.uid, arbitrary_diagnostic.name,
+        contracts=(arbitrary_diagnostic,),
+    )
+    assert matched is arbitrary_diagnostic
+    field = ComponentVariablePolicy(**matched.variables[0])
+    assert DattoRmmComponentExecutionPolicy._normalize_variable_value(field, False) == "false"
+    with pytest.raises(PermissionError, match="value is not allowlisted"):
+        DattoRmmComponentExecutionPolicy._normalize_variable_value(field, True)
+
+
+def test_source_locked_contract_registry_is_unambiguous():
+    from connectors.datto_rmm.source_component_contracts import SOURCE_COMPONENT_CONTRACTS
+
+    uids = [contract.uid for contract in SOURCE_COMPONENT_CONTRACTS]
+    names = [contract.name.casefold() for contract in SOURCE_COMPONENT_CONTRACTS]
+    assert len(uids) == len(set(uids))
+    assert len(names) == len(set(names))

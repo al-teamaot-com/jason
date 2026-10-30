@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, Mapping, Protocol
 
+from .source_component_contracts import resolve_source_component_contract
+
 
 @dataclass(frozen=True, slots=True)
 class ComponentVariablePolicy:
@@ -128,18 +130,6 @@ class DattoRmmComponentExecutionPolicy:
     )
     _BITLOCKER_TPM_AUDIT_NAME = "BitLocker & TPM Audit [WIN]"
 
-    # Approved 2026-10-30 component-input contracts. These do not confer
-    # standing-safe classification or approval to dispatch a provider job.
-    # Every contract is bound to BOTH the exact live component UID and name.
-    _HOSTNAME_CHANGE_UID = "479d1a75-8f98-42b7-b6fb-408242bcc17e"
-    _HOSTNAME_CHANGE_NAME = "Change Hostname [WIN]"
-    _BACKUP_LOG_ERRORS_UID = "3770a86b-26d4-414f-a87c-87a0835f4278"
-    _BACKUP_LOG_ERRORS_NAME = (
-        "Datto Endpoint Backup: Retrieve Errors and Warnings from Logs [WIN]"
-    )
-    _EVENT_LOG_SEARCH_UID = "6725d709-f3b4-415f-b6f7-4185ebde71df"
-    _EVENT_LOG_SEARCH_NAME = "AOT Event log search Ver09192024"
-
     # Exact reviewed Datto identity for the arbitrary PowerShell runner.
     # Variable permission is deliberately bound to both UID and display name.
     # The runtime scope independently forces this component to per_run.
@@ -164,21 +154,16 @@ class DattoRmmComponentExecutionPolicy:
         cls,
         entry: ComponentAllowlistEntry,
     ) -> tuple[ComponentVariablePolicy, ...]:
-        # Source-owned safety restrictions cannot be widened by an additional
-        # runtime allowlist policy. In particular, no configured variable
-        # contract may turn usrReboot=true into an approved hostname action.
-        source_locked = {
-            (cls._HOSTNAME_CHANGE_UID, cls._HOSTNAME_CHANGE_NAME.casefold()),
-            (cls._BACKUP_LOG_ERRORS_UID, cls._BACKUP_LOG_ERRORS_NAME.casefold()),
-            (cls._EVENT_LOG_SEARCH_UID, cls._EVENT_LOG_SEARCH_NAME.casefold()),
-        }
-        if (
-            entry.variable_policies
-            and (
-                entry.provider_component_uid,
-                entry.display_name.casefold(),
-            ) not in source_locked
-        ):
+        # Source-owned exact-identity contracts have precedence over runtime
+        # policy fields; a runtime allowlist cannot expand their safe inputs.
+        source_contract = resolve_source_component_contract(
+            entry.provider_component_uid, entry.display_name
+        )
+        if source_contract is not None:
+            return tuple(
+                ComponentVariablePolicy(**policy) for policy in source_contract.variables
+            )
+        if entry.variable_policies:
             return entry.variable_policies
 
         # Source-controlled variable contracts remain exact and fail closed.
@@ -236,74 +221,6 @@ class DattoRmmComponentExecutionPolicy:
                     variable_type="string",
                     required=False,
                     maximum_length=256,
-                ),
-            )
-
-        # No-reboot rename is an owner-approved per-run action. Refuse
-        # usrReboot=true even when a caller has exact EXECUTE authority.
-        # The endpoint still needs a future, separately approved restart
-        # for Windows to adopt the staged computer name.
-        if (
-            entry.provider_component_uid == cls._HOSTNAME_CHANGE_UID
-            and entry.display_name.casefold()
-            == cls._HOSTNAME_CHANGE_NAME.casefold()
-        ):
-            return (
-                ComponentVariablePolicy(
-                    name="usrNewName",
-                    variable_type="hostname",
-                    required=True,
-                    maximum_length=15,
-                ),
-                ComponentVariablePolicy(
-                    name="usrReboot",
-                    variable_type="boolean",
-                    required=True,
-                    allowed_values=("false",),
-                ),
-            )
-
-        # Diagnostic log extraction is bounded and must not request the
-        # support-only expanded output containing additional information.
-        if (
-            entry.provider_component_uid == cls._BACKUP_LOG_ERRORS_UID
-            and entry.display_name.casefold()
-            == cls._BACKUP_LOG_ERRORS_NAME.casefold()
-        ):
-            return (
-                ComponentVariablePolicy(
-                    name="usrMaxResults",
-                    variable_type="selection",
-                    required=True,
-                    allowed_values=("25", "50", "100"),
-                ),
-                ComponentVariablePolicy(
-                    name="usrAdditionalInfo",
-                    variable_type="boolean",
-                    required=True,
-                    allowed_values=("false",),
-                ),
-            )
-
-        # Limit event-log search to a short, non-script search term and
-        # a bounded window. Output still requires normal data redaction.
-        if (
-            entry.provider_component_uid == cls._EVENT_LOG_SEARCH_UID
-            and entry.display_name.casefold()
-            == cls._EVENT_LOG_SEARCH_NAME.casefold()
-        ):
-            return (
-                ComponentVariablePolicy(
-                    name="SearchTerm",
-                    variable_type="search_term",
-                    required=True,
-                    maximum_length=80,
-                ),
-                ComponentVariablePolicy(
-                    name="DaysBack",
-                    variable_type="selection",
-                    required=True,
-                    allowed_values=("1", "3", "7", "14"),
                 ),
             )
 
