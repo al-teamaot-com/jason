@@ -84,6 +84,9 @@ def build(tmp_path, *, patch_state=None, gate=None, ms_grant=None,
             }}
         if capability == "endpoint.patch.search":
             return {"status": "succeeded", "evidence": {
+                "provider": "datto_rmm",
+                "provider_capability": "datto_rmm.device.patches.list",
+                "collection_key": "patches",
                 "items": [{"kbArticleId": "5127648",
                            "installStatus": patch_state["installStatus"],
                            "manualOverride": datto_manual_override}],
