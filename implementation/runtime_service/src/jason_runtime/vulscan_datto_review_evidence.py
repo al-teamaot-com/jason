@@ -126,7 +126,10 @@ class DattoRmmPatchReviewReader:
         if not isinstance(evidence, Mapping):
             raise DattoManualReviewUnavailable("governed Datto patch provenance missing")
         page = evidence.get("pageDetails")
-        if (evidence.get("bounded") is not False
+        if (evidence.get("provider") != "datto_rmm"
+                or evidence.get("provider_capability") != "datto_rmm.device.patches.list"
+                or evidence.get("collection_key") != "patches"
+                or evidence.get("bounded") is not False
                 or not isinstance(page, Mapping)
                 or page.get("nextPageUrl") not in (None, "")
                 or evidence.get("ambiguous") is True
