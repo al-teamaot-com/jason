@@ -670,7 +670,7 @@ class SQLiteOperationalWorkStore:
         event_key = hashlib.sha256(
             f"{ticket_id}|{playbook_id}|{note_title}|{fingerprint}".encode("utf-8")
         ).hexdigest()
-        if event_type not in {"work_started", "work_completed", "patch_completed", "work_blocked"}:
+        if event_type not in {"work_started", "work_completed", "patch_completed", "work_blocked", "patch_approval_aging"}:
             raise ValueError("unsupported owner notification event")
         serialized = json.dumps(dict(arguments), sort_keys=True)
         if len(serialized) > 2400:
@@ -686,12 +686,45 @@ class SQLiteOperationalWorkStore:
             )
         return event_key
 
+    def queue_patch_approval_notification(
+        self, *, notification: Any, now: datetime,
+    ) -> str:
+        """Queue one KB/stage notification in the EXISTING Teams outbox.
+
+        ticket_id=0 is the documented cross-ticket KB aggregation sentinel.
+        This entry is never treated as an Autotask ticket/note.
+        """
+        if getattr(notification, "stage", "") not in {
+            "day16_notice", "day21_escalation", "urgent_review"
+        }:
+            raise ValueError("patch event must be a verified actionable stage")
+        if not str(getattr(notification, "idempotency_key", "")).startswith("vulscan-aging-"):
+            raise ValueError("patch event identity invalid")
+        arguments = {
+            "kb": notification.kb,
+            "stage": notification.stage,
+            "released": notification.released.isoformat(),
+            "age_days": notification.age_days,
+            "policy_ids": list(notification.policy_ids),
+            "affected_clients": notification.affected_clients,
+            "affected_devices": notification.affected_devices,
+            "idempotency_key": notification.idempotency_key,
+            "text": notification.text,
+        }
+        return self.queue_teams_notification(
+            ticket_id=0, playbook_id="vulscan_patch_approval_aging",
+            note_title=f"VulScan-{notification.kb}-{notification.stage}",
+            fingerprint=notification.idempotency_key,
+            event_type="patch_approval_aging", arguments=arguments, now=now,
+        )
+
     def due_teams_notifications(
         self, *, now: datetime, limit: int = 4,
     ) -> tuple[Mapping[str, Any], ...]:
         rows = self._connection.execute(
             "SELECT * FROM autonomy_teams_notification_outbox "
             "WHERE state='pending' AND next_due_at<=? "
+            "AND event_type!='patch_approval_aging' "
             "ORDER BY CASE WHEN event_type IN (\'work_started\',\'work_completed\',\'patch_completed\') THEN 0 ELSE 1 END, "
             "next_due_at,recorded_at LIMIT ?",
             (now.isoformat(), min(4, max(1, int(limit)))),
@@ -713,6 +746,29 @@ class SQLiteOperationalWorkStore:
                 (state,int(attempts),next_due_at.isoformat(),
                  last_error,message_id,event_key),
             )
+
+    def due_patch_approval_notifications(
+        self, *, now: datetime, limit: int = 4,
+    ) -> tuple[Mapping[str, Any], ...]:
+        rows = self._connection.execute(
+            "SELECT * FROM autonomy_teams_notification_outbox "
+            "WHERE state='pending' AND event_type='patch_approval_aging' "
+            "AND next_due_at<=? ORDER BY next_due_at, recorded_at LIMIT ?",
+            (now.isoformat(), min(4, max(1, int(limit)))),
+        ).fetchall()
+        return tuple(dict(row) for row in rows)
+
+    def claim_patch_approval_notification(self, *, event_key: str) -> bool:
+        """Claim before sending: uncertain sends require reconciliation, not replay."""
+        with self._connection:
+            result = self._connection.execute(
+                "UPDATE autonomy_teams_notification_outbox "
+                "SET state='sending', attempts=attempts+1 "
+                "WHERE event_key=? AND state='pending' "
+                "AND event_type='patch_approval_aging'",
+                (event_key,),
+            )
+        return result.rowcount == 1
 
     def list_waiting_device_access(self) -> tuple[OperationalWork, ...]:
         rows = self._connection.execute(
