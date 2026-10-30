@@ -122,6 +122,34 @@ def test_builder_fails_before_graph_import_without_dedicated_approle(tmp_path):
         )
 
 
+def seed_approved_sharepoint_boundary(db_path):
+    """Synthetic validated Entra consent record for combined preproduction QA."""
+    from kernel.client_boundaries import (
+        BoundaryStatus, ClientBoundary,
+        SQLiteClientBoundaryRepository, SQLiteClientBoundaryStore,
+    )
+    store = SQLiteClientBoundaryStore(db_path)
+    try:
+        repository = SQLiteClientBoundaryRepository(store)
+        repository.add(ClientBoundary(
+            id="synthetic-aot-sharepoint-consent",
+            client_id="client-aot-internal",
+            provider="microsoft_graph_sharepoint",
+            external_tenant_id=TENANT,
+            primary_domain="teamaot.com",
+            profile="sharepoint-read",
+            application_id="2cc50c39-39f6-481c-8065-73487623bcc9",
+            status=BoundaryStatus.VALIDATED,
+            consent_transaction_id="preproduction-fixture",
+            created_at=NOW,
+            consented_at=NOW,
+            validated_at=NOW,
+            service_principal_id="approved-synthetic-sharepoint-service",
+        ))
+    finally:
+        store.close()
+
+
 def test_enabled_builder_reuses_existing_governed_sharepoint_reader(tmp_path):
     """Only runs when both development PRs are present in the QA checkout."""
     pytest.importorskip("connectors.microsoft_graph.sharepoint_connector")
@@ -135,6 +163,7 @@ def test_enabled_builder_reuses_existing_governed_sharepoint_reader(tmp_path):
     secret.write_text("synthetic-test-only-secret", encoding="utf-8")
     role.chmod(0o600)
     secret.chmod(0o600)
+    seed_approved_sharepoint_boundary(tmp_path / "boundaries.sqlite3")
     cache = build_governed_copier_evidence_cache(
         manifest_path=manifest_path,
         boundary_db=tmp_path / "boundaries.sqlite3",
@@ -148,6 +177,7 @@ def test_enabled_builder_reuses_existing_governed_sharepoint_reader(tmp_path):
     connector = cache._loader.connector
     assert connector.organization_bindings is not None
     assert len(connector.authorizer.grants) == 1
+    assert cache._authorization_expires_at == NOW + timedelta(days=7)
     assert connector.bindings.find_active_by_jason_identity(
         jason_identity_id="any-human"
     ) is None
@@ -180,3 +210,25 @@ def test_runtime_configuration_has_default_off_and_kfs_dependency_gate():
     assert "if self.kfs_copier_evidence_enabled and not self.kfs_enabled:" in source
     assert "build_governed_copier_evidence_cache" in source
     assert "customer_evidence_resolver=copier_evidence_resolver" in source
+
+
+def test_sharepoint_builder_rejects_unvalidated_tenant_even_with_role_files(tmp_path):
+    """A document grant and synthetic AppRole files are not Entra consent."""
+    pytest.importorskip("connectors.microsoft_graph.sharepoint_connector")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(approved_manifest()), encoding="utf-8")
+    manifest_path.chmod(0o600)
+    role = tmp_path / "role_id"
+    secret = tmp_path / "secret_id"
+    role.write_text("synthetic-role", encoding="utf-8")
+    secret.write_text("synthetic-secret", encoding="utf-8")
+    role.chmod(0o600)
+    secret.chmod(0o600)
+    with pytest.raises(PermissionError, match="Dedicated validated"):
+        build_governed_copier_evidence_cache(
+            manifest_path=manifest_path,
+            boundary_db=tmp_path / "boundaries.sqlite3",
+            openbao_url="http://127.0.0.1:8200",
+            role_id_path=role, secret_id_path=secret,
+            transport=object(), audit=object(), now=NOW,
+        )
