@@ -14,6 +14,7 @@ from jason_runtime.kfs_customer_document_source import (
     ApprovedAotCopierEvidenceSnapshot,
     ApprovedAotCopierSource,
     GovernedAotCopierSourceLoader,
+    GovernedAotCopierEvidenceCache,
 )
 
 NOW = datetime(2026, 10, 30, tzinfo=timezone.utc)
@@ -161,3 +162,42 @@ def test_no_unauthorized_client_scope_or_mutation_in_source_manifest():
     loader(reader).refresh(now=NOW)
     assert all(context.client_id is None for context, _ in reader.events)
     assert all(context.mode == "observe" for context, _ in reader.events)
+
+
+
+def test_customer_evidence_cache_refreshes_only_when_expired():
+    reader = FakeGovernedReader()
+    cache = GovernedAotCopierEvidenceCache(
+        loader=loader(reader), max_age_hours=24,
+    )
+    first = cache.index_for_rank(NOW)
+    assert first.match(serial_number="1G55503749").status == "verified"
+    assert len(reader.events) == 3
+    second = cache.index_for_rank(NOW + timedelta(hours=2))
+    assert second is first
+    assert len(reader.events) == 3
+    third = cache.index_for_rank(NOW + timedelta(hours=25))
+    assert third is not first
+    assert len(reader.events) == 6
+
+
+def test_customer_evidence_cache_fails_closed_when_refresh_is_denied():
+    reader = FakeGovernedReader()
+    cache = GovernedAotCopierEvidenceCache(loader=loader(reader))
+    cache.index_for_rank(NOW)
+    reader.rejected.add("document-1")
+    with pytest.raises(PermissionError, match="not approved"):
+        cache.index_for_rank(NOW + timedelta(hours=25))
+    # Prior identity evidence must not remain usable after failed refresh.
+    with pytest.raises(PermissionError, match="not approved"):
+        cache.index_for_rank(NOW + timedelta(hours=25))
+
+
+def test_customer_evidence_cache_rejects_invalid_time_and_ttl():
+    reader = FakeGovernedReader()
+    with pytest.raises(ValueError, match="TTL"):
+        GovernedAotCopierEvidenceCache(loader=loader(reader), max_age_hours=0)
+    cache = GovernedAotCopierEvidenceCache(loader=loader(reader))
+    with pytest.raises(ValueError, match="timezone"):
+        cache.index_for_rank(NOW.replace(tzinfo=None))
+    assert reader.events == []
