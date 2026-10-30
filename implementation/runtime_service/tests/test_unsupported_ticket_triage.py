@@ -799,6 +799,38 @@ def test_handoff_rejects_missing_or_duplicate_exact_ticket_readback(tmp_path, co
     store.close()
 
 
+@pytest.mark.parametrize("status_label", [
+    "Waiting Customer", "Waiting Device Access", "On Hold", "Complete", "",
+])
+def test_unresolved_triage_does_not_overwrite_waiting_or_unknown_status(
+    tmp_path, status_label,
+):
+    from datetime import datetime, timezone
+    from jason_runtime.unsupported_ticket_triage import render_triage_note
+
+    source = ticket(title="Unresolved but already waiting", queue="Jason",
+                    status=status_label)
+    reads = NoteReadStub()
+    worker, store, _ = make_worker(tmp_path, [source], reads)
+    worker.promotion_store = PromotionForTriage(handoff=True)
+    actions = NoteActionStub(reads)
+    worker.actions = actions
+    evidence = {"company_verified": True, "ticket_id": 200001}
+    evidence["note_draft"] = render_triage_note(
+        ticket_number=source.context["ticketNumber"],
+        state="needs_diagnostic_evidence", category="user_device_settings",
+        evidence=evidence, next_step="Preserve the ticket's waiting dependency.",
+    )
+    worker._maybe_publish_unsupported_triage_note(source, {
+        "state": "needs_diagnostic_evidence", "evidence": evidence,
+        "source_version": "v1", "ticket_number": source.context["ticketNumber"],
+    }, now=datetime.now(timezone.utc))
+    assert [cap for _, cap, _ in actions.calls] == ["service.ticket.note.create"]
+    assert store.unsupported_handoff_delivery(200001) is None
+    assert not any(name == "service.ticket.search" for name, _ in reads.calls)
+    store.close()
+
+
 def test_helpdesk_ticket_never_requeued_even_with_handoff_promotion(tmp_path):
     from datetime import datetime, timezone
     from jason_runtime.unsupported_ticket_triage import render_triage_note
