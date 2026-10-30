@@ -3412,6 +3412,15 @@ class OperationalAutonomyMaintenance:
             return False
         if not candidate.owned_by_jason or str(candidate.source_queue).strip().casefold() != "jason":
             return False
+        # A Waiting Customer / On Hold / Waiting Device Access ticket already
+        # has a dependency. Never overwrite that lifecycle just because an
+        # earlier read-only assessment has no autonomous resolution branch.
+        # Unknown source status must fail closed rather than infer readiness.
+        current_status = str(
+            candidate.context.get("_jason_source_status_label") or ""
+        ).strip().casefold()
+        if current_status not in {"new", "in progress"}:
+            return False
         if not self._scope_is_promoted(UNSUPPORTED_TRIAGE_HANDOFF_SCOPE):
             return False
         previous = self.store.unsupported_handoff_delivery(ticket_id)
