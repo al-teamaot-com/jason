@@ -8,12 +8,17 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable, Mapping
 
 from .vulscan_governed_patch_source import (
     VerifiedPatchTarget, VulscanPatchEvidenceError,
 )
 from .vulscan_v2_preproduction_workflow import VerifiedVulscanTargetInventory
+from .vulscan_policy_kb_attribution import (
+    VerifiedPolicyKBAttribution, verified_unapproved_policy_ids,
+    PolicyKBAttributionUnavailable,
+)
 
 _KB = re.compile(r"^[0-9]{5,9}$")
 _UID = re.compile(r"^[A-Za-z0-9-]{1,100}$")
@@ -67,6 +72,8 @@ def _records(response: Any, *, capability: str, collection_key: str) -> tuple[Ma
 def collect_vulscan_v2_scoped_inventory(
     *, site_inventory: ApprovedDattoSiteInventory,
     read: Callable[[str, Mapping[str, Any]], Mapping[str, Any]],
+    policy_attribution_read: Callable[[str, str, str, str], VerifiedPolicyKBAttribution] | None = None,
+    now: datetime | None = None,
 ) -> VerifiedVulscanTargetInventory:
     """Only read, prove, and return exact targets. No Teams or ticket actions."""
     if (not isinstance(site_inventory, ApprovedDattoSiteInventory)
@@ -74,6 +81,13 @@ def collect_vulscan_v2_scoped_inventory(
             or not site_inventory.source_reference.strip()
             or not 0 < len(site_inventory.sites) <= _MAX_SITES):
         raise VulscanPatchEvidenceError("complete authorized Datto site scope not available")
+    # A collection of assigned policy UIDs does not establish which policy
+    # caused a KB's effective NOT_APPROVED status. Do not call Datto until the
+    # bounded independent attribution reader and clock are present.
+    if (policy_attribution_read is None or not isinstance(now, datetime)
+            or now.tzinfo is None):
+        raise VulscanPatchEvidenceError(
+            "complete governed KB-to-policy attribution source unavailable")
     # Validate the WHOLE client-to-site mapping before any Datto read to
     # avoid partial cross-client access on a later invalid/duplicate site.
     seen_site: set[str] = set()
@@ -146,7 +160,18 @@ def collect_vulscan_v2_scoped_inventory(
             if not policy_ids:
                 raise VulscanPatchEvidenceError("unapproved KB has no verified assigned policy")
             for kb in sorted(kbs):
-                for policy_uid in sorted(policy_ids):
+                try:
+                    provenance = policy_attribution_read(site.site_uid, site.client_id, uid, kb)
+                    attributable = verified_unapproved_policy_ids(
+                        provenance, kb=kb, client_id=site.client_id,
+                        site_uid=site.site_uid, device_uid=uid,
+                        assigned_policy_ids=policy_ids, now=now,
+                    )
+                except Exception as exc:
+                    raise VulscanPatchEvidenceError(
+                        "governed KB-specific patch policy attribution unavailable"
+                    ) from exc
+                for policy_uid in attributable:
                     key = (kb, site.client_id, policy_uid, uid)
                     targets[key] = VerifiedPatchTarget(
                         kb=kb, client_id=site.client_id, policy_id=policy_uid,
