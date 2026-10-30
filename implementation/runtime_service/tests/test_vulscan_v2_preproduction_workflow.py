@@ -54,7 +54,7 @@ def make_flow(tmp_path, *, state=None, targets=None, coverage=True,
             endpoint = next(item for item in targets if item.device_uid == uid)
             return {"status": "succeeded", "evidence": {
                 "record": {"resource_id": uid, "hostname": endpoint.hostname}}}
-        if capability == "endpoint.patch_policy.search":
+        if capability == "endpoint.patch.policy.search":
             return {"status": "succeeded", "evidence": {"data": {"policies": [
                 {"policyUid": policy} for policy in ("policy-weekly", "policy-servers")
             ]}}}
@@ -79,7 +79,7 @@ def test_shadow_evaluates_without_queue_or_send(tmp_path):
     assert (result.mode, result.candidate_count, result.enqueued_count) == ("shadow", 1, 0)
     assert flow.store.due_patch_approval_notifications(now=NOW) == ()
     assert [cap for cap, _ in reads] == [
-        "endpoint.device.read", "endpoint.patch_policy.search", "endpoint.patch.search"
+        "endpoint.device.read", "endpoint.patch.policy.search", "endpoint.patch.search"
     ]
 
 
