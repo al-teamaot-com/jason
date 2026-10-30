@@ -449,6 +449,17 @@ class KfsMeterHistoryStore:
             warnings.append("Inventoried devices are missing from the meter comparison")
         if exceptions:
             warnings.append("Missing, reset, or inconsistent monthly meters for some printers")
+        customer_mapping_missing_count = sum(
+            not item["customer_mapping_verified"] for item in ranked + exceptions
+        )
+        color_zero_verified_count = sum(
+            item["color_counter_status"] == "zero_verified_from_total_and_bw"
+            for item in ranked + exceptions
+        )
+        if customer_mapping_missing_count:
+            warnings.append(
+                f"KFS customer assignments missing for {customer_mapping_missing_count} managed printers"
+            )
         if any(not item["customer_mapping_verified"] for item in ranked[:limit]):
             warnings.append("A ranked printer is missing its customer assignment in KFS")
 
@@ -466,6 +477,8 @@ class KfsMeterHistoryStore:
             "fleet_devices_in_inventory": inventory_count,
             "fleet_devices_in_history": len(devices),
             "eligible_devices": len(ranked), "exception_count": len(exceptions),
+            "customer_mapping_missing_count": customer_mapping_missing_count,
+            "color_zero_verified_count": color_zero_verified_count,
             "top_devices": ranked[:limit], "exceptions": exceptions,
             "coverage_verified": coverage_verified,
             "complete": (
