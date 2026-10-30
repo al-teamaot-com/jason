@@ -61,7 +61,7 @@ Read governed queue snapshot, a fresh exact-ID Autotask ticket immediately befor
 
 ## 8. Decision Gates
 
-Require exact pilot ID, Jason queue and ownership, one of seven explicit unresolved technician-review outcomes, verified internal investigation note, separately owner-promoted scope unsupported_triage_human_review 1.0.0, unchanged source and valid target queue/status. Hand off only if current ticket still needs human follow-up; never treat read_only_assessed as incident resolution.
+Require exact pilot ID, Jason queue and ownership, one of seven explicit unresolved technician-review outcomes, verified internal investigation note, separately owner-promoted scope unsupported_triage_human_review 1.0.0, unchanged source and valid target queue/status. Hand off only if current ticket still needs human follow-up; never treat read_only_assessed as incident resolution. **The current ticket status must be New or In Progress.** Tickets already Waiting Customer, Waiting Device Access, On Hold, Complete, or with an unknown status must retain that state; classification alone does not authorize overriding a waiting dependency.
 
 ## 9. Remediation
 
@@ -113,7 +113,7 @@ Governed ticket search and notes search; exact separately promoted service.ticke
 
 ## 21. Acceptance Test
 
-Test a controlled simulated Jason-owned needs_human_review ticket, evidence-only read_only_assessed and needs_diagnostic_evidence cases, unpromoted denial, partial readback and retry, duplicate suppression, and human-owned exclusions. Inject changes in the fresh ticket's company, queue, status and assignee; require zero ticket updates and a durable bounded retry. Live handoff only when a permitted pilot ticket naturally qualifies and the exact Owner promotion is present.
+Test a controlled simulated Jason-owned needs_human_review ticket, evidence-only read_only_assessed and needs_diagnostic_evidence cases, unpromoted denial, partial readback and retry, duplicate suppression, and human-owned exclusions. Inject changes in the fresh ticket's company, queue, status and assignee; require zero ticket updates and a durable bounded retry. Also verify that Waiting Customer, Waiting Device Access, On Hold, Complete and unknown source status never attempt a handoff, even with a promoted scope. Live handoff only when a permitted pilot ticket naturally qualifies and the exact Owner promotion is present.
 
 ## 22. Section Goal Closure
 
