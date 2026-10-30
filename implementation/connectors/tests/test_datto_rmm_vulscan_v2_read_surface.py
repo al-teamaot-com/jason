@@ -19,7 +19,7 @@ from orchestrator.resource_capability_catalog import (
 def test_provider_routes_exact_documented_read_only_endpoints():
     assert DattoRmmConnector._resolve_operation(
         "datto_rmm.device.patch_policies.list", {"resource_id": "device-123"}
-    ) == ("/api/v2/device/device-123/policies/patch-management", {"page": 0, "max": 250})
+    ) == ("/api/v2/device/device-123/site/patch-management", {"page": 0, "max": 250})
     assert DattoRmmConnector._resolve_operation(
         "datto_rmm.site.patches.list", {"site_uid": "site-789"}
     ) == ("/api/v2/site/site-789/patches", {"page": 0, "max": 250})
@@ -81,7 +81,7 @@ def test_patch_policy_pagination_is_bounded_without_silent_truncation():
     path, params = DattoRmmConnector._resolve_operation(
         "datto_rmm.device.patch_policies.list",
         {"device_uid": "dev-1", "page": 3, "max": 5000})
-    assert path == "/api/v2/device/dev-1/policies/patch-management"
+    assert path == "/api/v2/device/dev-1/site/patch-management"
     assert params == {"page": 3, "max": 250}
     assert DattoRmmConnector.adaptive_collection_keys[
         "datto_rmm.device.patch_policies.list"] == "policies"
