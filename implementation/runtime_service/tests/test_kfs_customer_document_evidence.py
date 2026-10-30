@@ -175,3 +175,39 @@ def test_unauthorized_or_macro_enabled_file_is_rejected():
             item_id=doc.item_id, etag=doc.etag, web_url=doc.web_url,
             filename="Copier log.xlsm", modified_at=doc.modified_at, content=doc.content,
         )
+
+
+def test_named_aot_meter_log_correlated_with_explicit_header_and_exact_serial():
+    doc = source(
+        name="ST MATTHEWS CATHOLIC SCHOOL  Log (ID# 1202, 1203, 1206, 1207).xlsx",
+        sheet=[("October meter logs", [
+            ("St. Matthews yearly overages to be billed in August",),
+            ("Teacher workroom ID# 1207 8003i sn# RRG2301432",),
+        ])],
+    )
+    match = index(doc).match(serial_number="RRG2301432")
+    assert match.status == "verified"
+    assert match.customer_name == "ST MATTHEWS CATHOLIC SCHOOL"
+    assert match.evidence[0].source_item_id == doc.item_id
+
+
+def test_named_log_without_corroborating_customer_heading_is_not_trusted():
+    doc = source(
+        name="ST MATTHEWS CATHOLIC SCHOOL Log (ID# 1207).xlsx",
+        sheet=[("October meter logs", [
+            ("Another customer's meter sheet",),
+            ("Teacher workroom ID# 1207 8003i sn# RRG2301432",),
+        ])],
+    )
+    assert index(doc).match(serial_number="RRG2301432").status == "not_found"
+
+
+def test_generic_multi_customer_log_filename_is_not_customer_evidence():
+    doc = source(
+        name="eCopiers (Virginia Health Services)14 machines (3 year CPC log).xlsx",
+        sheet=[("October meter logs", [
+            ("eCopier Solutions",),
+            ("Teacher workroom ID# 1207 8003i sn# RRG2301432",),
+        ])],
+    )
+    assert index(doc).match(serial_number="RRG2301432").status == "not_found"
