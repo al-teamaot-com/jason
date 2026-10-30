@@ -209,6 +209,8 @@ def test_monochrome_device_without_color_counter_uses_exact_zero(monkeypatch):
     assert report["top_devices"][0]["black_white_pages"] == 45
     assert report["top_devices"][0]["color_pages"] == 0
     assert report["top_devices"][0]["color_counter_status"] == "zero_verified_from_total_and_bw"
+    assert report["color_zero_verified_count"] == 1
+    assert report["customer_mapping_missing_count"] == 0
     assert "color: missing meter boundary" not in report["top_devices"][0]["warnings"]
     assert "LEFT JOIN kfs_devices" in cur.sql
 
@@ -243,4 +245,5 @@ def test_missing_customer_is_explicit_and_prevents_complete_claim(monkeypatch):
     assert report["complete"] is False
     assert report["top_devices"][0]["customer"] == "Unknown (not mapped in KFS)"
     assert report["top_devices"][0]["customer_mapping_verified"] is False
+    assert report["customer_mapping_missing_count"] == 1
     assert any("customer assignment" in message for message in report["warnings"])
