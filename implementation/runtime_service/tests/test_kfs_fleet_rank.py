@@ -79,3 +79,19 @@ def test_fleet_ranking_rejects_unbounded_limit(monkeypatch):
     with pytest.raises(ValueError, match="limit"):
         store.fleet_rank(arguments={"limit": 9999}, start=datetime.now(timezone.utc),
                          end=datetime.now(timezone.utc))
+
+
+def test_future_month_fleet_ranking_rejected_before_db(monkeypatch):
+    from jason_runtime.kfs_meter_history import GovernedKfsMeterHistoryInvoker
+    from orchestrator.print_capability_catalog import PRINT_FLEET_USAGE_RANK, KYOCERA_KFS_PROVIDER
+    from types import SimpleNamespace
+    store, cursor = store_with_rows(monkeypatch, [])
+    invoker = GovernedKfsMeterHistoryInvoker(store)
+    request = SimpleNamespace(permission_mode="observe", organization_id="aot",
+                              client_id=None, capability_name=PRINT_FLEET_USAGE_RANK,
+                              arguments={"month": "2099-01"})
+    resolution = SimpleNamespace(selected_provider_id=KYOCERA_KFS_PROVIDER,
+                                 capability_name=PRINT_FLEET_USAGE_RANK)
+    with pytest.raises(ValueError, match="must have started"):
+        invoker.invoke(request=request, resolution=resolution)
+    assert cursor.sql == ""
