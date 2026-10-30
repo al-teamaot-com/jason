@@ -10,6 +10,9 @@ from datetime import datetime, timezone
 
 from .vulscan_governed_patch_source import VerifiedPatchTarget
 from .vulscan_owner_disposition_evidence import VerifiedPatchReviewDisposition
+from .vulscan_datto_review_evidence import (
+    DattoRmmPatchReviewReader, VerifiedDattoPolicyManualReview,
+)
 from .vulscan_policy_kb_attribution import VerifiedPolicyKBAttribution
 from .vulscan_microsoft_public_source import (
     BoundedOfficialMicrosoftHTTP, GovernedMicrosoftKBReleaseReader,
