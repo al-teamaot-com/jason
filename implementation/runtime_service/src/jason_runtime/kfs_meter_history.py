@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 from zoneinfo import ZoneInfo
 
 from kernel.identity_authority import AuthorityGrant, PermissionMode
@@ -593,6 +593,9 @@ def resolve_period(arguments: Mapping[str, Any]) -> tuple[datetime, datetime]:
 @dataclass(frozen=True, slots=True)
 class GovernedKfsMeterHistoryInvoker:
     store: KfsMeterHistoryStore
+    # The optional resolver is injected by trusted, feature-gated runtime
+    # composition. It is never selected or overridden by conversation input.
+    customer_evidence_resolver: Callable[[datetime], ApprovedCustomerEvidenceIndex] | None = None
 
     def invoke(
         self,
@@ -623,7 +626,15 @@ class GovernedKfsMeterHistoryInvoker:
             if start >= now:
                 raise ValueError("fleet usage ranking period must have started")
             effective_end = min(end, now)
-            data = self.store.fleet_rank(
+            store = self.store
+            if self.customer_evidence_resolver is not None:
+                source = self.customer_evidence_resolver(now)
+                if not isinstance(source, ApprovedCustomerEvidenceIndex):
+                    raise RuntimeError("governed copier evidence provider returned an invalid index")
+                if not isinstance(self.store, KfsMeterHistoryStore):
+                    raise RuntimeError("governed copier enrichment requires the immutable meter history store")
+                store = replace(self.store, customer_evidence_index=source)
+            data = store.fleet_rank(
                 arguments=request.arguments, start=start, end=effective_end,
             )
         else:
