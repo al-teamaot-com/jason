@@ -42,6 +42,10 @@ def drain_patch_approval_notifications(
             except Exception:
                 pass
 
+    # Crash-safe reconciliation: a claimed send older than five minutes
+    # cannot be replayed because the provider outcome may be unknown.
+    store.reconcile_inflight_patch_approval_notifications(
+        older_than=current - timedelta(minutes=5))
     attempts = 0
     for row in store.due_patch_approval_notifications(now=current, limit=4):
         key = str(row["event_key"])
@@ -99,7 +103,7 @@ def drain_patch_approval_notifications(
             )
             continue
 
-        if not store.claim_patch_approval_notification(event_key=key):
+        if not store.claim_patch_approval_notification(event_key=key, now=current):
             continue
         attempts += 1
         try:
