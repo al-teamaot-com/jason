@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
 from zoneinfo import ZoneInfo
@@ -288,20 +288,32 @@ class KfsMeterHistoryStore:
     def fleet_rank(
         self, *, arguments: Mapping[str, Any], start: datetime, end: datetime,
     ) -> Mapping[str, Any]:
-        """One bounded read-only database query for fleet-wide month usage."""
+        """Rank observed print impressions against the last completed KFS inventory.
+
+        KFS keeps historical devices indefinitely, so using all meter history as the
+        inventory produces false top-five results. A complete report requires an
+        inventory from one successful recent collector run, every inventoried
+        device accounted for, and valid deltas for all those devices.
+        """
         limit = int(arguments.get("limit") or 5)
         hours = int(arguments.get("boundary_hours") or 36)
         if not 1 <= limit <= 100:
             raise ValueError("limit must be between 1 and 100")
         if not 1 <= hours <= 168:
             raise ValueError("boundary_hours must be between 1 and 168")
+
         sql = """
-            WITH devices AS (
-                SELECT DISTINCT device_id
-                FROM kfs_meter_readings
-                WHERE device_id IS NOT NULL
-                  AND reading_at >= %s - (%s * interval '1 hour')
-                  AND reading_at <= %s + (%s * interval '1 hour')
+            WITH latest_snapshot AS (
+                SELECT id, ended_at, device_count, error_count
+                FROM kfs_runs
+                WHERE status = 'ok' AND ended_at IS NOT NULL AND ended_at <= %s
+                ORDER BY ended_at DESC
+                LIMIT 1
+            ), devices AS (
+                SELECT DISTINCT s.device_id
+                FROM kfs_device_status_readings s
+                JOIN latest_snapshot r ON s.run_id = r.id
+                WHERE s.device_id IS NOT NULL AND s.device_id <> ''
             ), boundaries AS (
                 SELECT d.device_id, counter.counter_name,
                        b.counter_value AS start_value, b.reading_at AS start_at,
@@ -330,43 +342,61 @@ class KfsMeterHistoryStore:
                     LIMIT 1
                 ) e ON TRUE
             )
-            SELECT device_id, counter_name, start_value, start_at, end_value, end_at,
-                   customer_name, equipment_id, serial_number
-            FROM boundaries
-            ORDER BY device_id, counter_name
+            SELECT b.device_id, b.counter_name, b.start_value, b.start_at,
+                   b.end_value, b.end_at, b.customer_name, b.equipment_id, b.serial_number,
+                   r.id, r.ended_at, r.device_count, r.error_count,
+                   (SELECT COUNT(*) FROM devices)
+            FROM latest_snapshot r
+            LEFT JOIN boundaries b ON TRUE
+            ORDER BY b.device_id, b.counter_name
         """
-        params = (start, hours, end, hours,
-                  start, hours, start, hours, start,
-                  end, hours, end, hours, end)
+        params = (
+            end, start, hours, start, hours, start,
+            end, hours, end, hours, end,
+        )
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, params)
                 rows = cur.fetchall()
+
         devices: dict[str, dict[str, Any]] = {}
-        for device_id, counter, before, before_at, after, after_at, customer, equipment, serial in rows:
+        snapshot_id = None
+        snapshot_ended_at = None
+        reported_count = None
+        snapshot_errors = None
+        inventory_count = 0
+        for row in rows:
+            device_id, counter, before, before_at, after, after_at, customer, equipment, serial = row[:9]
+            run_id, run_ended_at, run_count, run_errors, inventory_count = row[9:]
+            snapshot_id = run_id
+            snapshot_ended_at = run_ended_at
+            reported_count = run_count
+            snapshot_errors = run_errors
+            if not device_id:
+                continue
             item = devices.setdefault(device_id, {
                 "device_id": device_id, "customer": customer or "",
                 "printer_id": equipment or serial or device_id,
                 "counts": {}, "latest_reading_at": None, "warnings": [],
             })
             delta = None
-            if before is not None and after is not None and before_at is not None and after_at is not None:
+            if (before is not None and after is not None
+                    and before_at is not None and after_at is not None):
                 difference = int(after) - int(before)
-                # A period-end sample selected before the requested boundary
-                # may be earlier than the start boundary during short periods.
                 if difference >= 0 and after_at > before_at:
                     delta = difference
                 else:
-                    item["warnings"].append(f"{counter}: invalid/reset boundary")
+                    item["warnings"].append(f"{counter}: invalid or reset meter boundary")
             else:
-                item["warnings"].append(f"{counter}: missing boundary")
+                item["warnings"].append(f"{counter}: missing meter boundary")
             item["counts"][counter] = delta
             if after_at is not None and (
                 item["latest_reading_at"] is None or after_at > item["latest_reading_at"]
             ):
                 item["latest_reading_at"] = after_at
-        ranked = []
-        exceptions = []
+
+        ranked: list[dict[str, Any]] = []
+        exceptions: list[dict[str, Any]] = []
         for item in devices.values():
             counts = item.pop("counts")
             item["black_white_pages"] = counts.get("blackWhite")
@@ -383,17 +413,39 @@ class KfsMeterHistoryStore:
         for item in ranked + exceptions:
             if item["latest_reading_at"] is not None:
                 item["latest_reading_at"] = item["latest_reading_at"].isoformat()
+
+        warnings: list[str] = []
+        if snapshot_id is None or snapshot_ended_at is None:
+            warnings.append("No successful KFS collection snapshot exists for the reporting period")
+        elif end - snapshot_ended_at > timedelta(hours=36):
+            warnings.append("Latest successful KFS inventory snapshot is stale")
+        if snapshot_errors is None or snapshot_errors != 0:
+            warnings.append("KFS inventory collection contains errors or lacks an error count")
+        if reported_count is None or int(reported_count) != inventory_count:
+            warnings.append("KFS reported device count differs from inventory records")
+        if inventory_count != len(devices):
+            warnings.append("Inventoried devices are missing from the meter comparison")
+        if exceptions:
+            warnings.append("Missing, reset, or inconsistent monthly meters for some printers")
+
+        coverage_verified = (
+            snapshot_id is not None and snapshot_ended_at is not None
+            and timedelta(0) <= end - snapshot_ended_at <= timedelta(hours=36)
+            and snapshot_errors == 0 and reported_count is not None
+            and int(reported_count) == inventory_count == len(devices)
+        )
         return {
             "period_start": start.isoformat(), "period_end": end.isoformat(),
+            "inventory_run_id": str(snapshot_id) if snapshot_id is not None else None,
+            "inventory_reading_at": snapshot_ended_at.isoformat() if snapshot_ended_at else None,
+            "fleet_devices_reported": reported_count,
+            "fleet_devices_in_inventory": inventory_count,
             "fleet_devices_in_history": len(devices),
             "eligible_devices": len(ranked), "exception_count": len(exceptions),
             "top_devices": ranked[:limit], "exceptions": exceptions,
-            "complete": False,
-            "coverage_verified": False,
-            "warnings": [
-                "Fleet inventory count has not been reconciled against KFS device inventory; ranking is provisional",
-                * (["Missing or invalid meter boundaries for some devices"] if exceptions else []),
-            ],
+            "coverage_verified": coverage_verified,
+            "complete": coverage_verified and not exceptions,
+            "warnings": warnings,
         }
 
 def resolve_period(arguments: Mapping[str, Any]) -> tuple[datetime, datetime]:
