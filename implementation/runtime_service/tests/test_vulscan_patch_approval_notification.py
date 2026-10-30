@@ -14,7 +14,7 @@ from jason_runtime.autonomy_worker_runtime import SQLiteOperationalWorkStore
 from jason_runtime.vulscan_patch_approval_aging import PatchApprovalObservation
 from jason_runtime.vulscan_patch_approval_notification import (
     CanonicalPatchTeamsNotifier, MicrosoftKBMetadata, prepare_patch_notifications,
-    verified_microsoft_kb_url,
+    verified_microsoft_kb_url, verify_notification_against_fresh_evidence,
 )
 from jason_runtime.vulscan_patch_approval_outbox import (
     drain_patch_approval_notifications,
@@ -216,3 +216,20 @@ def test_old_unsent_alert_expires_without_notification_flood(tmp_path):
     notifier.send_prepared.assert_not_called()
     assert store._connection.execute(
         "SELECT state FROM autonomy_teams_notification_outbox").fetchone()[0] == "expired"
+
+
+
+def test_live_recheck_proof_suppresses_approved_or_deferred_status():
+    notice = plan([obs()])[0]
+    source = {"KB5123456": meta()}
+    assert verify_notification_against_fresh_evidence(
+        notice, [obs()], source, now=NOW)
+    assert not verify_notification_against_fresh_evidence(
+        notice, [obs(approval_state="APPROVED")], source, now=NOW)
+    assert not verify_notification_against_fresh_evidence(
+        notice, [obs(intentional_deferral=True)], source, now=NOW)
+    assert not verify_notification_against_fresh_evidence(
+        notice, [obs(policy="other-policy")], source, now=NOW)
+    assert not verify_notification_against_fresh_evidence(
+        notice, [obs(observed_date=RELEASE + timedelta(days=15))],
+        source, now=NOW)
