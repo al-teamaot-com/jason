@@ -149,3 +149,32 @@ The normal KFS runtime composition now includes a **disabled-by-default** govern
 Source selection has been verified by the AOT delegated SharePoint connector: AOT Admin Documents site ID \`absolnet.sharepoint.com,c85a85f8-6a50-4569-880f-d261c65df2bb,e5b7a724-dc9b-406b-aed8-2961f1f71153\` and its Documents drive; three reviewed source IDs are in the inactive manifest. This discovery does not establish Jason workload access.
 
 **Outstanding external actions:** dedicate/provision the SharePoint read AppRole, validate the AOT \`microsoft_graph_sharepoint\` tenant/client boundary and release grants, test authorized and forbidden Graph calls with service identity, then complete authentic user-question acceptance, scope, rollback and owner exact-SHA deployment approval. The three offline/unreadable monthly KFS printer meters remain explicitly flagged, not estimated.
+
+## October 30 final preproduction security and provider evidence
+
+## October 30 final preproduction security and provider evidence
+
+**Exact source scope:** This is a controlled internal AOT observe-only report. The approved documents are three exact items under AOT Admin Documents, not all of SharePoint. The three source IDs and the AOT tenant ID are already in the inactive preproduction manifest.
+
+**Consent and credential facts verified read-only on the running Jason host:**
+- The live Kernel client-boundary database contains one validated AOT directory-read profile and separate AOT mail profiles, all for tenant \`f7054323-d52b-4863-8c2f-1898f0b6077c\`, client \`client-aot-internal\`.
+- **No** \`microsoft_graph_sharepoint\` / \`sharepoint-read\` validated binding is registered. This is an independently verified authorization blocker.
+- The canonical command \`python3 tools/provider_secret.py create microsoft_graph_sharepoint --check-only\` returned \`status=pass\` and \`network_contacted=false\`; it validates the secret lifecycle **contract only**.
+- The current nonprivileged remote command identity cannot stat the root-protected SharePoint AppRole directory; \`sudo -n\` requires a password. Therefore credential **presence or absence is not independently verified**. Earlier statements describing the AppRole as definitely missing should not be relied upon without a privileged metadata check.
+- The SharePoint reader development documentation identifies an Entra application and registered public certificate; actual application consent and private key availability require a privileged read-only confirmation. Do not import/reuse an existing mail or directory AppRole in its place.
+
+**New release guards:** The SharePoint runtime now demands a separate consented \`microsoft_graph_sharepoint\`, \`sharepoint-read\`, \`client-aot-internal\`, \`teamaot.com\` boundary with validated state and service principal. AOT document evidence is invalidated on **every** use if the root-managed exact-source manifest changes, the boundary is revoked, or its approved expiration has passed, even if cached data is under 24 hours old. These checks are strictly in the preproduction branches and do not alter the running production runtime.
+
+**October full-month exceptions:** Three inventoried KFS devices have no verifiable October start boundary: \`1FU6517861\` first reported October 20, \`RC10103305\` first reported October 12, and \`RC11Y06141\` has no meter-history rows. Do **not** infer their October 1 counts or report fleet-wide complete usage. Current month-to-date ranking from the other 432 valid records remains explicitly provisional.
+
+**Validation:** Both development branches merge without conflicts in an isolated checkout. The latest combined read-only source integration, protected identity, exact-document authorization, and KFS regression suite passed 142 tests with engineering standards PASS. The newest GitHub overall Jason CI jobs on each PR were blocked by installation **API rate limit HTTP 403** in \`tools/change_integration_gate.py\`; they did not show functional assertions failing. The gate remains required, and the PRs remain unmerged drafts. No provider credential was accessed or production modification performed in this investigation.
+
+### Remaining operator-facing dependencies (not implicitly approved)
+
+1. Have an appropriately privileged owner verify the existing **dedicated** registered SharePoint Entra application, consented read scope, and root-staged certificate metadata without disclosing private keys. Provision the canonical isolated OpenBao AppRole/credential profile only through the approved controlled release procedure.
+2. Create/validate the exact AOT \`microsoft_graph_sharepoint\`, \`sharepoint-read\` Kernel boundary using the canonical identity process and actual Entra application/service principal. Do not manually forge a validated record.
+3. Install a root-managed, time-bounded allowlist manifest from the preproduction template. Authorize only the three reviewed document IDs and keep document content internal.
+4. Run positive and negative **provider-backed** Graph tests using Jason's dedicated identity, including mismatched tenant, wrong document and revoked grant, then perform an authenticated Adam/LaToshia report query.
+5. Resolve or clearly preserve the three meter gaps, review customer-name differences such as \`Marcella Operator\` versus \`Marcella Operator LLC\`, clear all required GitHub/release gates, verify exact merged release and rollback SHA, and obtain final owner exact-SHA deployment authorization.
+
+Production KFS/SharePoint functionality has **not** been deployed or verified.
