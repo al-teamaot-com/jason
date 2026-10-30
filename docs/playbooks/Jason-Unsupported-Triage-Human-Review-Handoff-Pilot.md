@@ -37,7 +37,7 @@ Goal: move an eligible Jason-owned unsupported case needing human action to Help
 
 ## 2. Trigger
 
-Trigger only for pilot ticket IDs 143305 or 143272 with source queue Jason, owned_by_jason=true, persisted state needing technician assistance (needs_human_review, needs_device_identity, needs_execution_authority, needs_security_review, or needs_playbook_review), and verified note. No forced state changes to manufacture pilot eligibility.
+Trigger only for pilot ticket IDs 143305 or 143272 with source queue Jason, owned_by_jason=true, persisted state needing technician assistance (needs_human_review, needs_device_identity, needs_execution_authority, needs_security_review, needs_playbook_review, needs_diagnostic_evidence, or read_only_assessed), and verified note. The last two outcomes indicate insufficient evidence or a completed read-only assessment without verified resolution; neither permits autonomous closure. No forced state changes to manufacture pilot eligibility.
 
 ## 3. Scope and Boundaries
 
@@ -61,7 +61,7 @@ Read governed queue snapshot, exact internal notes, prior diagnostic evidence an
 
 ## 8. Decision Gates
 
-Require exact pilot ID, Jason queue and ownership, one of five explicit technician-review outcomes, verified internal investigation note, separately owner-promoted scope unsupported_triage_human_review 1.0.0, unchanged source and valid target queue/status.
+Require exact pilot ID, Jason queue and ownership, one of seven explicit unresolved technician-review outcomes, verified internal investigation note, separately owner-promoted scope unsupported_triage_human_review 1.0.0, unchanged source and valid target queue/status. Hand off only if current ticket still needs human follow-up; never treat read_only_assessed as incident resolution.
 
 ## 9. Remediation
 
@@ -113,7 +113,7 @@ Governed ticket search and notes search; exact separately promoted service.ticke
 
 ## 21. Acceptance Test
 
-Test a controlled simulated Jason-owned needs_human_review ticket, unpromoted denial, partial readback and retry, and human-owned exclusions. Live handoff only when a permitted pilot ticket naturally qualifies.
+Test a controlled simulated Jason-owned needs_human_review ticket, evidence-only read_only_assessed and needs_diagnostic_evidence cases, unpromoted denial, partial readback and retry, duplicate suppression, and human-owned exclusions. Live handoff only when a permitted pilot ticket naturally qualifies and the exact Owner promotion is present.
 
 ## 22. Section Goal Closure
 
