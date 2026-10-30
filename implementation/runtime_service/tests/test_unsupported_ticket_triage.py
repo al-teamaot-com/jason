@@ -90,6 +90,9 @@ def ticket(*, ticket_id=200001, title="Windows License Status failed",
         source_version=version, context={
             "id": ticket_id, "ticketNumber": f"T20261029.{ticket_id}",
             "title": title, "companyID": company_id,
+            "queueID": 29683489 if queue == "Jason" else 29682833,
+            "status": 1 if status == "New" else 7,
+            "assignedResourceID": None,
             "configurationItemID": 1100,
             "_jason_source_status_label": status,
             "_jason_assigned_elsewhere": assigned,
@@ -508,11 +511,19 @@ class NoteReadStub(ReadStub):
     def __init__(self):
         super().__init__()
         self.notes = [{"id": 8, "title": "Ticket arrived", "description": "Internal history"}]
+        self.current_ticket = {
+            "id": 200001, "companyID": 777, "queueID": 29683489,
+            "status": 1, "assignedResourceID": None,
+        }
 
     def execute(self, capability, arguments):
         if capability == "service.ticket.notes.search":
             self.calls.append((capability, dict(arguments)))
             return {"status": "succeeded", "evidence": {"data": {"items": list(self.notes)}}}
+        if capability == "service.ticket.search":
+            self.calls.append((capability, dict(arguments)))
+            assert arguments == {"resource_id": 200001, "page_size": 2}
+            return {"status": "succeeded", "evidence": {"data": {"items": [dict(self.current_ticket)]}}}
         return super().execute(capability, arguments)
 
 
