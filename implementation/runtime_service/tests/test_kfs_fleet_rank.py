@@ -247,3 +247,104 @@ def test_missing_customer_is_explicit_and_prevents_complete_claim(monkeypatch):
     assert report["top_devices"][0]["customer_mapping_verified"] is False
     assert report["customer_mapping_missing_count"] == 1
     assert any("customer assignment" in message for message in report["warnings"])
+
+
+def test_fleet_report_enriches_missing_customer_from_authorized_sharepoint_evidence(monkeypatch):
+    from dataclasses import replace
+    from datetime import timedelta
+    from io import BytesIO
+    from openpyxl import Workbook
+    from jason_runtime.kfs_customer_document_evidence import (
+        ApprovedCustomerEvidenceIndex, ApprovedSharePointWorkbook,
+    )
+    start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 10, 30, tzinfo=timezone.utc)
+    rows = []
+    for device_id, serial, total, bw, color in (
+        ("a", "1G55503749", 125, 125, 0),
+        ("b", "RRG2301432", 50, 50, 0),
+    ):
+        for counter, delta in (("total", total), ("blackWhite", bw), ("color", color)):
+            rows.append((device_id, counter, 100, start, 100 + delta, end,
+                         "", "", serial))
+    wb = Workbook()
+    ws = wb.active
+    ws["A1"] = "CO. NAME:"
+    ws["B1"] = "Marcella Operator LLC"
+    ws["A2"] = "S/N:"
+    ws["B2"] = "1G55503749"
+    ws2 = wb.create_sheet("St Matthews")
+    ws2["A1"] = "CO. NAME:"
+    ws2["B1"] = "St. Matthews Catholic School"
+    ws2["A2"] = "S/N:"
+    ws2["B2"] = "RRG2301432"
+    buf = BytesIO()
+    wb.save(buf)
+    wb.close()
+    doc = ApprovedSharePointWorkbook(
+        tenant_id="aot", site_id="approved", drive_id="admin-documents",
+        item_id="doc-1", etag="etag-1",
+        web_url="https://aot.sharepoint.com/copiers/document",
+        filename="AOT Copier Delivery Receipts.xlsx",
+        modified_at=end - timedelta(days=2), content=buf.getvalue(),
+    )
+    evidence = ApprovedCustomerEvidenceIndex.from_documents(
+        documents=(doc,), tenant_id="aot",
+        allowed_site_ids=frozenset({"approved"}),
+        allowed_drive_ids=frozenset({"admin-documents"}), now=end,
+    )
+    store, _ = store_with_rows(monkeypatch, rows)
+    store = replace(store, customer_evidence_index=evidence)
+    result = store.fleet_rank(arguments={"limit": 2}, start=start, end=end)
+    assert result["fleet_devices_reported"] == 2
+    assert result["supplemental_mapping_count"] == 2
+    assert result["customer_mapping_missing_count"] == 0
+    assert result["customer_mapping_conflict_count"] == 0
+    assert result["complete"] is True
+    assert [item["customer"] for item in result["top_devices"]] == [
+        "Marcella Operator LLC", "St. Matthews Catholic School",
+    ]
+    assert all(item["customer_mapping_source"] == "aot_sharepoint" for item in result["top_devices"])
+    assert all(item["customer_evidence"][0]["item_id"] == "doc-1" for item in result["top_devices"])
+
+
+def test_fleet_report_marks_conflicting_document_and_kfs_customer(monkeypatch):
+    from dataclasses import replace
+    from datetime import timedelta
+    from io import BytesIO
+    from openpyxl import Workbook
+    from jason_runtime.kfs_customer_document_evidence import (
+        ApprovedCustomerEvidenceIndex, ApprovedSharePointWorkbook,
+    )
+    start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 10, 30, tzinfo=timezone.utc)
+    rows = [
+        ("a", counter, 100, start, 100 + value, end, "KFS Customer", "A", "1G55503749")
+        for counter, value in (("total", 12), ("blackWhite", 12), ("color", 0))
+    ]
+    wb = Workbook()
+    wb.active.append(("CO. NAME:", "Other Customer"))
+    wb.active.append(("S/N:", "1G55503749"))
+    buf = BytesIO()
+    wb.save(buf)
+    wb.close()
+    doc = ApprovedSharePointWorkbook(
+        tenant_id="aot", site_id="approved", drive_id="admin-documents",
+        item_id="doc-2", etag="etag-2",
+        web_url="https://aot.sharepoint.com/copiers/document-2",
+        filename="AOT Copier Delivery Receipts.xlsx",
+        modified_at=end - timedelta(days=2), content=buf.getvalue(),
+    )
+    index = ApprovedCustomerEvidenceIndex.from_documents(
+        documents=(doc,), tenant_id="aot",
+        allowed_site_ids=frozenset({"approved"}),
+        allowed_drive_ids=frozenset({"admin-documents"}), now=end,
+    )
+    store, _ = store_with_rows(monkeypatch, rows)
+    report = replace(store, customer_evidence_index=index).fleet_rank(
+        arguments={}, start=start, end=end,
+    )
+    assert report["customer_mapping_conflict_count"] == 1
+    assert report["complete"] is False
+    assert report["top_devices"][0]["customer"] == "Conflict (requires customer review)"
+    assert report["top_devices"][0]["customer_mapping_verified"] is False
