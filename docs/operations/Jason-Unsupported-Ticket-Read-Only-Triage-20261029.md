@@ -62,3 +62,22 @@ This is **diagnosis only**, not verified resolution. Publishing internal notes,
 human escalation and actionable generic playbook advancement require separate
 governed promotion, provider readback and real-ticket acceptance. Issue #770
 remains open until eligible tickets are consistently advanced and resolved.
+
+## Explicit security-intake classification refinement (2026-10-30)
+
+Unmatched incoming tickets that explicitly report phishing or a Duo Windows
+logon/security-status monitoring failure are categorized as `security_review`,
+so their read-only investigation produces a security-review next step instead
+of a generic missing-playbook outcome. This is a **triage-only** change:
+`needs_security_review` is not an autonomous permission to close the ticket,
+change security tooling, or execute an endpoint command. Payment and other
+transactional notices are not reclassified by this rule. The normal exact
+company/CI checks, owner-notification controls, source-bound deduplication,
+and explicit playbook promotion are unchanged.
+
+Acceptance requires positive security-signal tests, negative transactional
+classification tests, and ticket-worker regressions. Even after the source
+is merged and released, classify success separately from actual ticket
+advancement: the owner must verify a governed approved next step and the
+corresponding provider-backed completion or human handoff. Source merge
+alone does not close reliability issue #770.
