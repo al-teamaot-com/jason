@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Mapping, Protocol
@@ -18,7 +19,7 @@ class ComponentVariablePolicy:
     def __post_init__(self) -> None:
         if not self.name.strip():
             raise ValueError("component variable name must be non-empty")
-        if self.variable_type not in {"string", "boolean", "date", "selection"}:
+        if self.variable_type not in {"string", "boolean", "date", "selection", "hostname", "search_term"}:
             raise ValueError("unsupported component variable type")
         if self.maximum_length < 1 or self.maximum_length > 20_000:
             raise ValueError("component variable maximum length must be 1..20000")
@@ -127,6 +128,18 @@ class DattoRmmComponentExecutionPolicy:
     )
     _BITLOCKER_TPM_AUDIT_NAME = "BitLocker & TPM Audit [WIN]"
 
+    # Approved 2026-10-30 component-input contracts. These do not confer
+    # standing-safe classification or approval to dispatch a provider job.
+    # Every contract is bound to BOTH the exact live component UID and name.
+    _HOSTNAME_CHANGE_UID = "479d1a75-8f98-42b7-b6fb-408242bcc17e"
+    _HOSTNAME_CHANGE_NAME = "Change Hostname [WIN]"
+    _BACKUP_LOG_ERRORS_UID = "3770a86b-26d4-414f-a87c-87a0835f4278"
+    _BACKUP_LOG_ERRORS_NAME = (
+        "Datto Endpoint Backup: Retrieve Errors and Warnings from Logs [WIN]"
+    )
+    _EVENT_LOG_SEARCH_UID = "6725d709-f3b4-415f-b6f7-4185ebde71df"
+    _EVENT_LOG_SEARCH_NAME = "AOT Event log search Ver09192024"
+
     # Exact reviewed Datto identity for the arbitrary PowerShell runner.
     # Variable permission is deliberately bound to both UID and display name.
     # The runtime scope independently forces this component to per_run.
@@ -151,7 +164,21 @@ class DattoRmmComponentExecutionPolicy:
         cls,
         entry: ComponentAllowlistEntry,
     ) -> tuple[ComponentVariablePolicy, ...]:
-        if entry.variable_policies:
+        # Source-owned safety restrictions cannot be widened by an additional
+        # runtime allowlist policy. In particular, no configured variable
+        # contract may turn usrReboot=true into an approved hostname action.
+        source_locked = {
+            (cls._HOSTNAME_CHANGE_UID, cls._HOSTNAME_CHANGE_NAME.casefold()),
+            (cls._BACKUP_LOG_ERRORS_UID, cls._BACKUP_LOG_ERRORS_NAME.casefold()),
+            (cls._EVENT_LOG_SEARCH_UID, cls._EVENT_LOG_SEARCH_NAME.casefold()),
+        }
+        if (
+            entry.variable_policies
+            and (
+                entry.provider_component_uid,
+                entry.display_name.casefold(),
+            ) not in source_locked
+        ):
             return entry.variable_policies
 
         # Source-controlled variable contracts remain exact and fail closed.
@@ -209,6 +236,74 @@ class DattoRmmComponentExecutionPolicy:
                     variable_type="string",
                     required=False,
                     maximum_length=256,
+                ),
+            )
+
+        # No-reboot rename is an owner-approved per-run action. Refuse
+        # usrReboot=true even when a caller has exact EXECUTE authority.
+        # The endpoint still needs a future, separately approved restart
+        # for Windows to adopt the staged computer name.
+        if (
+            entry.provider_component_uid == cls._HOSTNAME_CHANGE_UID
+            and entry.display_name.casefold()
+            == cls._HOSTNAME_CHANGE_NAME.casefold()
+        ):
+            return (
+                ComponentVariablePolicy(
+                    name="usrNewName",
+                    variable_type="hostname",
+                    required=True,
+                    maximum_length=15,
+                ),
+                ComponentVariablePolicy(
+                    name="usrReboot",
+                    variable_type="boolean",
+                    required=True,
+                    allowed_values=("false",),
+                ),
+            )
+
+        # Diagnostic log extraction is bounded and must not request the
+        # support-only expanded output containing additional information.
+        if (
+            entry.provider_component_uid == cls._BACKUP_LOG_ERRORS_UID
+            and entry.display_name.casefold()
+            == cls._BACKUP_LOG_ERRORS_NAME.casefold()
+        ):
+            return (
+                ComponentVariablePolicy(
+                    name="usrMaxResults",
+                    variable_type="selection",
+                    required=True,
+                    allowed_values=("25", "50", "100"),
+                ),
+                ComponentVariablePolicy(
+                    name="usrAdditionalInfo",
+                    variable_type="boolean",
+                    required=True,
+                    allowed_values=("false",),
+                ),
+            )
+
+        # Limit event-log search to a short, non-script search term and
+        # a bounded window. Output still requires normal data redaction.
+        if (
+            entry.provider_component_uid == cls._EVENT_LOG_SEARCH_UID
+            and entry.display_name.casefold()
+            == cls._EVENT_LOG_SEARCH_NAME.casefold()
+        ):
+            return (
+                ComponentVariablePolicy(
+                    name="SearchTerm",
+                    variable_type="search_term",
+                    required=True,
+                    maximum_length=80,
+                ),
+                ComponentVariablePolicy(
+                    name="DaysBack",
+                    variable_type="selection",
+                    required=True,
+                    allowed_values=("1", "3", "7", "14"),
                 ),
             )
 
@@ -382,6 +477,27 @@ class DattoRmmComponentExecutionPolicy:
                 date.fromisoformat(normalized)
             except ValueError as exc:
                 raise ValueError("date component variable must use YYYY-MM-DD") from exc
+        elif policy.variable_type == "hostname":
+            if not isinstance(value, str):
+                raise ValueError("hostname component variable must be text")
+            normalized = value.strip()
+            if (
+                len(normalized) > 15
+                or not re.fullmatch(
+                    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,13}[A-Za-z0-9])?",
+                    normalized,
+                )
+                or normalized.isdecimal()
+            ):
+                raise ValueError("hostname component variable is invalid")
+        elif policy.variable_type == "search_term":
+            if not isinstance(value, str):
+                raise ValueError("search term must be text")
+            normalized = value.strip()
+            # Avoid passing PowerShell expression or statement syntax into
+            # a provider component whose full script has not been audited.
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._:/\-]{0,79}", normalized):
+                raise ValueError("search term contains unsupported characters")
         else:
             if not isinstance(value, (str, int, float)) or isinstance(value, bool):
                 raise ValueError("component variable must be a scalar value")
@@ -390,7 +506,7 @@ class DattoRmmComponentExecutionPolicy:
         if len(normalized) > policy.maximum_length:
             raise ValueError("component variable exceeds approved maximum length")
 
-        if policy.variable_type == "selection" and normalized not in policy.allowed_values:
+        if policy.allowed_values and normalized not in policy.allowed_values:
             raise PermissionError("component variable value is not allowlisted")
 
         return normalized
