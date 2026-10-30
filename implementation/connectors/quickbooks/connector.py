@@ -54,14 +54,14 @@ _CAPABILITY_OPERATIONS = {
     QUICKBOOKS_BILL_SEARCH: ("query", "Bill"),
     QUICKBOOKS_BILL_PAYMENT_SEARCH: ("query", "BillPayment"),
     QUICKBOOKS_BILL_PAYMENT_READ: ("entity_read", "billpayment"),
-    QUICKBOOKS_PAYMENT_SEARCH: ("query", "Payment"),
-    QUICKBOOKS_DEPOSIT_SEARCH: ("query", "Deposit"),
-    QUICKBOOKS_PURCHASE_SEARCH: ("query", "Purchase"),
-    QUICKBOOKS_TRANSFER_SEARCH: ("query", "Transfer"),
-    QUICKBOOKS_JOURNAL_ENTRY_SEARCH: ("query", "JournalEntry"),
-    QUICKBOOKS_CREDIT_MEMO_SEARCH: ("query", "CreditMemo"),
-    QUICKBOOKS_VENDOR_CREDIT_SEARCH: ("query", "VendorCredit"),
-    QUICKBOOKS_REFUND_RECEIPT_SEARCH: ("query", "RefundReceipt"),
+    QUICKBOOKS_PAYMENT_SEARCH: ("transaction_query", "Payment"),
+    QUICKBOOKS_DEPOSIT_SEARCH: ("transaction_query", "Deposit"),
+    QUICKBOOKS_PURCHASE_SEARCH: ("transaction_query", "Purchase"),
+    QUICKBOOKS_TRANSFER_SEARCH: ("transaction_query", "Transfer"),
+    QUICKBOOKS_JOURNAL_ENTRY_SEARCH: ("transaction_query", "JournalEntry"),
+    QUICKBOOKS_CREDIT_MEMO_SEARCH: ("transaction_query", "CreditMemo"),
+    QUICKBOOKS_VENDOR_CREDIT_SEARCH: ("transaction_query", "VendorCredit"),
+    QUICKBOOKS_REFUND_RECEIPT_SEARCH: ("transaction_query", "RefundReceipt"),
     QUICKBOOKS_PROFIT_LOSS_READ: ("report", "ProfitAndLoss"),
     QUICKBOOKS_BALANCE_SHEET_READ: ("report", "BalanceSheet"),
 }
@@ -217,6 +217,8 @@ class QuickBooksConnector:
             if operation == "entity_read"
             else _QUERY_ARGUMENTS
             if operation == "query"
+            else _QUERY_ARGUMENTS | _REPORT_ARGUMENTS
+            if operation == "transaction_query"
             else _REPORT_ARGUMENTS
         )
         unexpected = sorted(set(arguments) - set(allowed))
@@ -234,7 +236,7 @@ class QuickBooksConnector:
             if not identifier.isascii() or not identifier.isdecimal() or len(identifier) > 20 or int(identifier) < 1:
                 raise ConnectorConfigurationError("QuickBooks billpayment_id must be a positive numeric ID.")
 
-        if operation == "query":
+        if operation in {"query", "transaction_query"}:
             try:
                 start = int(arguments.get("start_position", 1))
                 maximum = int(arguments.get("max_results", 100))
@@ -247,7 +249,7 @@ class QuickBooksConnector:
                     "QuickBooks start_position must be positive and max_results 1-1000."
                 )
 
-        if operation == "report":
+        if operation in {"report", "transaction_query"}:
             start_date = arguments.get("start_date")
             end_date = arguments.get("end_date")
             parsed_start = _optional_iso_date(start_date, "start_date")
@@ -272,11 +274,21 @@ class QuickBooksConnector:
         if operation == "entity_read" and entity == "billpayment":
             payment_id = quote(str(arguments["billpayment_id"]), safe="")
             return f"{company_base}/billpayment/{payment_id}", None
-        if operation == "query" and entity is not None:
+        if operation in {"query", "transaction_query"} and entity is not None:
             start = int(arguments.get("start_position", 1))
             maximum = int(arguments.get("max_results", 100))
+            where = ""
+            if operation == "transaction_query":
+                filters = []
+                for key, operator in (("start_date", ">="), ("end_date", "<=")):
+                    value = arguments.get(key)
+                    if value:
+                        validated = _optional_iso_date(value, key)
+                        filters.append(f"TxnDate {operator} '{validated.isoformat()}'")
+                if filters:
+                    where = " where " + " and ".join(filters)
             query = (
-                f"select * from {entity} "
+                f"select * from {entity}{where} "
                 f"startposition {start} maxresults {maximum}"
             )
             return f"{company_base}/query", {"query": query}

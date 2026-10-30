@@ -236,7 +236,7 @@ def quickbooks_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             purpose="Read historical Payment entities from the OAuth-authorized QuickBooks company.",
             resource_types="accounting_transaction",
             operation="search",
-            selector_keys="start_position,max_results",
+            selector_keys="start_position,max_results,start_date,end_date",
             fact_hints="historical transaction Payment reconciliation ledger read only",
         ),
         _read_capability(
@@ -246,7 +246,7 @@ def quickbooks_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             purpose="Read historical Deposit entities from the OAuth-authorized QuickBooks company.",
             resource_types="accounting_transaction",
             operation="search",
-            selector_keys="start_position,max_results",
+            selector_keys="start_position,max_results,start_date,end_date",
             fact_hints="historical transaction Deposit reconciliation ledger read only",
         ),
         _read_capability(
@@ -256,7 +256,7 @@ def quickbooks_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             purpose="Read historical Purchase entities from the OAuth-authorized QuickBooks company.",
             resource_types="accounting_transaction",
             operation="search",
-            selector_keys="start_position,max_results",
+            selector_keys="start_position,max_results,start_date,end_date",
             fact_hints="historical transaction Purchase reconciliation ledger read only",
         ),
         _read_capability(
@@ -266,7 +266,7 @@ def quickbooks_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             purpose="Read historical Transfer entities from the OAuth-authorized QuickBooks company.",
             resource_types="accounting_transaction",
             operation="search",
-            selector_keys="start_position,max_results",
+            selector_keys="start_position,max_results,start_date,end_date",
             fact_hints="historical transaction Transfer reconciliation ledger read only",
         ),
         _read_capability(
@@ -276,7 +276,7 @@ def quickbooks_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             purpose="Read historical JournalEntry entities from the OAuth-authorized QuickBooks company.",
             resource_types="accounting_transaction",
             operation="search",
-            selector_keys="start_position,max_results",
+            selector_keys="start_position,max_results,start_date,end_date",
             fact_hints="historical transaction JournalEntry reconciliation ledger read only",
         ),
         _read_capability(
@@ -286,7 +286,7 @@ def quickbooks_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             purpose="Read historical CreditMemo entities from the OAuth-authorized QuickBooks company.",
             resource_types="accounting_transaction",
             operation="search",
-            selector_keys="start_position,max_results",
+            selector_keys="start_position,max_results,start_date,end_date",
             fact_hints="historical transaction CreditMemo reconciliation ledger read only",
         ),
         _read_capability(
@@ -296,7 +296,7 @@ def quickbooks_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             purpose="Read historical VendorCredit entities from the OAuth-authorized QuickBooks company.",
             resource_types="accounting_transaction",
             operation="search",
-            selector_keys="start_position,max_results",
+            selector_keys="start_position,max_results,start_date,end_date",
             fact_hints="historical transaction VendorCredit reconciliation ledger read only",
         ),
         _read_capability(
@@ -306,7 +306,7 @@ def quickbooks_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             purpose="Read historical RefundReceipt entities from the OAuth-authorized QuickBooks company.",
             resource_types="accounting_transaction",
             operation="search",
-            selector_keys="start_position,max_results",
+            selector_keys="start_position,max_results,start_date,end_date",
             fact_hints="historical transaction RefundReceipt reconciliation ledger read only",
         ),
         _read_capability(
