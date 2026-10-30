@@ -201,3 +201,47 @@ def test_customer_evidence_cache_rejects_invalid_time_and_ttl():
     with pytest.raises(ValueError, match="timezone"):
         cache.index_for_rank(NOW.replace(tzinfo=None))
     assert reader.events == []
+
+
+
+def test_cached_customer_claims_expire_with_document_authorization_not_cache_ttl():
+    reader = FakeGovernedReader()
+    approved_until = NOW + timedelta(minutes=15)
+    cache = GovernedAotCopierEvidenceCache(
+        loader=loader(reader), max_age_hours=24,
+        authorization_expires_at=approved_until,
+    )
+    assert cache.index_for_rank(NOW).match(
+        serial_number="1G55503749",
+    ).status == "verified"
+    assert len(reader.events) == 3
+    # The local cache would still be fresh, but the underlying authorization
+    # is now expired. Do not attempt a network refresh or return old claims.
+    with pytest.raises(PermissionError, match="authorization has expired"):
+        cache.index_for_rank(approved_until)
+    assert cache._snapshot is None
+    assert len(reader.events) == 3
+    with pytest.raises(PermissionError, match="authorization has expired"):
+        cache.index_for_rank(approved_until + timedelta(seconds=1))
+    assert len(reader.events) == 3
+
+
+def test_snapshot_rejects_expired_document_grant_even_when_fresh():
+    reader = FakeGovernedReader()
+    idx = loader(reader).refresh(now=NOW)
+    snapshot = ApprovedAotCopierEvidenceSnapshot(
+        index=idx, refreshed_at=NOW, max_age_hours=24,
+        authorization_expires_at=NOW + timedelta(minutes=1),
+    )
+    assert snapshot.usable_at(NOW + timedelta(seconds=40)) is idx
+    with pytest.raises(PermissionError, match="authorization has expired"):
+        snapshot.usable_at(NOW + timedelta(minutes=1))
+
+
+def test_cache_rejects_naive_document_authorization_expiration():
+    reader = FakeGovernedReader()
+    with pytest.raises(ValueError, match="timezone"):
+        GovernedAotCopierEvidenceCache(
+            loader=loader(reader),
+            authorization_expires_at=NOW.replace(tzinfo=None),
+        )
