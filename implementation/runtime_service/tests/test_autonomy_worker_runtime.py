@@ -4031,6 +4031,95 @@ def test_vulscan_not_approved_for_ten_days_hands_off_as_human_review(tmp_path: P
 
 
 
+def test_vulscan_v2_supervised_approval_does_not_trigger_legacy_ten_day_handoff(tmp_path: Path):
+    class VulscanReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.configuration.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"item": {
+                        "id": 68,
+                        "companyID": 597,
+                        "isActive": True,
+                        "referenceNumber": "vul-device-1",
+                        "referenceTitle": "GAI-DT2850",
+                    }}},
+                }
+            if capability == "endpoint.device.read":
+                return {
+                    "status": "succeeded",
+                    "evidence": {"record": {
+                        "resource_id": "vul-device-1",
+                        "hostname": "GAI-DT2850",
+                        "online": True,
+                        "reboot_required": False,
+                    }},
+                }
+            if capability == "endpoint.patch.search":
+                kb = str(arguments["kb"])
+                return {
+                    "status": "succeeded",
+                    "evidence": {"data": {"patches": [{
+                        "kbArticleId": kb.replace("KB", ""),
+                        "installStatus": "NOT_APPROVED",
+                        "rebootRequired": True,
+                    }]}},
+                }
+            return super().execute(capability, arguments)
+
+    actions = Actions()
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    worker = OperationalAutonomyMaintenance(
+        queue_source=QueueSource(vulscan_candidate()),
+        reads=VulscanReads(),
+        actions=actions,
+        store=store,
+        promotion_store=PromotionStore(promoted=("vulscan_missing_patch",)),
+        max_active_work_items=2,
+        interval_seconds=30,
+        monotonic=iter((0.0, 31.0)).__next__,
+        vulscan_v2_approval_supervisor=lambda work, rows: (
+            bool(rows) and all(status == "NOT_APPROVED" for _kb, status, _reboot in rows)
+        ),
+    )
+
+    worker.tick()
+    waiting = store.get(141183)
+    assert waiting is not None
+    old = datetime.now(timezone.utc) - timedelta(days=11)
+    store.put(
+        replace(
+            waiting,
+            last_reason=(
+                "VulScan waiting for patch approval; "
+                f"first_not_approved_at={old.isoformat()}; "
+                "one or more exact KBs remain NOT_APPROVED."
+            ),
+            updated_at=(datetime.now(timezone.utc) - timedelta(days=2)).isoformat(),
+        )
+    )
+
+    worker.tick()
+    final = store.get(141183)
+    assert final is not None
+    assert final.phase == "waiting_patch_approval"
+    updates = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.update"
+    ]
+    assert not any(update.get("queueID") == "Help Desk I" for update in updates)
+    notes = [
+        args["payload"]
+        for _, capability, args in actions.calls
+        if capability == "service.ticket.note.create"
+    ]
+    assert any("VulScan V2" in note["description"] for note in notes)
+    assert not any("HUMAN REVIEW REQUIRED" in note["description"] for note in notes)
+    store.close()
+
+
+
 def test_vulscan_all_exact_kbs_installed_without_reboot_completes(tmp_path: Path):
     class InstalledReads(Reads):
         def execute(self, capability, arguments):
