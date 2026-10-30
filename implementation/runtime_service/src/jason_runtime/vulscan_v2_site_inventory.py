@@ -74,18 +74,22 @@ def collect_vulscan_v2_scoped_inventory(
             or not site_inventory.source_reference.strip()
             or not 0 < len(site_inventory.sites) <= _MAX_SITES):
         raise VulscanPatchEvidenceError("complete authorized Datto site scope not available")
+    # Validate the WHOLE client-to-site mapping before any Datto read to
+    # avoid partial cross-client access on a later invalid/duplicate site.
     seen_site: set[str] = set()
-    targets: dict[tuple[str, str, str, str], VerifiedPatchTarget] = {}
-    processed_patches = 0
-    processed_devices: set[str] = set()
-
-    for site in sorted(site_inventory.sites, key=lambda s: s.site_uid):
+    for site in site_inventory.sites:
         if (not site.client_binding_verified
                 or not _UID.fullmatch(site.site_uid)
                 or not _UID.fullmatch(site.client_id)
                 or site.site_uid in seen_site):
             raise VulscanPatchEvidenceError("unverified, invalid, or duplicate client/site scope")
         seen_site.add(site.site_uid)
+
+    targets: dict[tuple[str, str, str, str], VerifiedPatchTarget] = {}
+    processed_patches = 0
+    processed_devices: set[str] = set()
+
+    for site in sorted(site_inventory.sites, key=lambda s: s.site_uid):
         site_result = read("management.site.patch.search", {
             "resource_id": site.site_uid,
             "completeness_requirement": "complete",
