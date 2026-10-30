@@ -12,6 +12,7 @@ from jason_runtime.vulscan_microsoft_public_source import (
     OfficialMicrosoftFetchedDocument, WINDOWS_RELEASE_SOURCES,
 )
 from jason_runtime.vulscan_microsoft_release_evidence import MicrosoftPatchEvidenceUnavailable
+from jason_runtime.vulscan_owner_disposition_evidence import VerifiedPatchReviewDisposition
 from jason_runtime.vulscan_v2_preproduction_factory import build_vulscan_v2_shadow_workflow
 from jason_runtime.vulscan_v2_site_inventory import (
     ApprovedDattoSiteScope, ApprovedDattoSiteInventory,
@@ -52,8 +53,10 @@ def scoped_sites():
     )
 
 
-def build(tmp_path, *, patch_state=None, gate=None, ms_grant=None):
+def build(tmp_path, *, patch_state=None, gate=None, ms_grant=None,
+          review_state=None, review_source_available=True):
     patch_state = patch_state or {"installStatus": "NOT_APPROVED"}
+    review_state = review_state if review_state is not None else {"disposition": "review_pending"}
     reads = []
     def governed_read(capability, args):
         reads.append((capability, args))
@@ -86,12 +89,20 @@ def build(tmp_path, *, patch_state=None, gate=None, ms_grant=None):
             }}
         assert False, f"unexpected read capability: {capability}"
 
+    def review_read(item):
+        return VerifiedPatchReviewDisposition(
+            kb=item.kb, client_id=item.client_id, policy_id=item.policy_id,
+            device_uid=item.device_uid, disposition=review_state["disposition"],
+            checked_at=NOW, source_reference="approved-complete-technician-decision-store",
+            full_scope_verified=True,
+        )
     transport = MicrosoftTransportFixture()
     store = SQLiteOperationalWorkStore(tmp_path / "v2-shadow.db")
     flow = build_vulscan_v2_shadow_workflow(
         store=store, authorized_site_inventory_read=scoped_sites,
         governed_read=governed_read,
         can_read_microsoft_public_docs=ms_grant or (lambda: True),
+        governed_review_disposition_read=review_read if review_source_available else None,
         authority_gate=gate,
         microsoft_transport=transport,
         microsoft_source_clock=lambda: NOW,
@@ -140,4 +151,23 @@ def test_public_microsoft_read_revocation_fails_closed(tmp_path):
     flow, store, _, _ = build(tmp_path, ms_grant=lambda: False)
     with pytest.raises(PermissionError):
         flow.evaluate_once(now=NOW)
+    assert store.due_patch_approval_notifications(now=NOW) == ()
+
+
+def test_no_governed_owner_decision_read_cannot_be_treated_as_no_deferral(tmp_path):
+    flow, store, reads, docs = build(tmp_path, review_source_available=False)
+    with pytest.raises(ValueError, match="owner disposition"):
+        flow.evaluate_once(now=NOW)
+    assert reads == []
+    assert docs.calls == []
+    assert store.due_patch_approval_notifications(now=NOW) == ()
+
+
+@pytest.mark.parametrize("state", ["deferred", "declined", "superseded"])
+def test_signed_owner_exception_suppresses_full_kb_notification(tmp_path, state):
+    review_state = {"disposition": state}
+    flow, store, reads, docs = build(tmp_path, review_state=review_state)
+    result = flow.evaluate_once(now=NOW)
+    assert result.mode == "shadow"
+    assert result.candidate_count == 0
     assert store.due_patch_approval_notifications(now=NOW) == ()
