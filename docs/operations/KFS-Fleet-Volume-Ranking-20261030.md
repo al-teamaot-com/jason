@@ -83,3 +83,30 @@ Source lookup links (AOT authentication required):
 - [AOT machine list](https://absolnet.sharepoint.com/sites/AOTAdminDocuments/_layouts/15/Doc.aspx?sourcedoc=%7B5A4D7211-E5A3-4D48-A131-9E6B0C985BAB%7D&file=Machine+list.docx&action=default&mobileredirect=true&web=1)
 
 These are **candidate mappings supported by internal documents, not yet activated for Jason**, and they may represent different legal customer, site, equipment owner, and invoice/billing identities. To satisfy full reporting rather than hardcode the current top five, engineering needs an approved canonical device-serial to client identity source, conflict resolution precedence, owner audit and refresh policy, and a read-only governed mapping adapter. Neither empty `kfs_autotask_mapping` nor non-specific shared group ID `CNWZDCC` can act as affirmative customer evidence. Do not persist the four names into KFS, Autotask or production database without mapping authority and acceptance. Continue provider-backed usage report with conspicuous `Unknown (not mapped)` caveats in the meantime.
+
+
+## Authorized supplemental SharePoint customer evidence (owner approval 2026-10-30)
+
+The owner approved AOT's existing copier logs and delivery receipts **as supplemental read-only customer-identification evidence**. The approval is recorded in GitHub issues [#2176](https://github.com/al-teamaot-com/jason/issues/2176) and [#1117](https://github.com/al-teamaot-com/jason/issues/1117). It does **not** grant new Entra/Graph permissions, authorize credential reuse, allow provider writes, change KFS/Autotask records, or grant a production deployment.
+
+Implemented on the current KFS development branch:
+
+- \`kfs_customer_document_evidence.py\` accepts only versioned, bounded, pre-authorized AOT SharePoint \`.xlsx\` document bytes from an injected **trusted** governed source. It does not make Graph calls or access ChatGPT connector credentials.
+- Parsing is non-destructive (\`openpyxl\`, data-only, read-only, external links disabled), with bounds on compressed/uncompressed size, sheet count, aggregate rows, individual row columns, and number of documents.
+- Matches use exact serial numbers, a single explicit sheet-wide company label or a customer-specific named meter log corroborated by an in-sheet heading. Multi-customer row tables or stacked receipts without row-level association are intentionally NOT interpreted.
+- Indexing requires an explicit approved Microsoft tenant, site, document library, source item identity, eTag and modification time. Stale documents and unsupported classes are rejected/excluded. An index may not silently add a source from another site or library.
+- Multiple documents identifying one serial are corroboration only when their customer names normalize identically. Distinct names, including truncated/changed legal entity names, are **conflicts**. Different KFS and SharePoint customer names are also conflicts; the report marks the device for review instead of silently overwriting KFS.
+- The KFS fleet report can consume an optional, immutable customer evidence index at its existing read-only calculation boundary. Mapping evidence in the output includes source drive/item, eTag, SHA-256 of source bytes, and worksheet. The file contents and credentials are not published in the report.
+- With no authenticated document evidence supplied, behavior remains unchanged and missing customer names remain marked Unknown. This is the **default**. No new production runtime activation has occurred.
+
+### Required authentication and information-release integration
+
+Do not implement an ad-hoc SharePoint client in KFS. The reusable Microsoft Graph SharePoint reader already exists under [PR #1330](https://github.com/al-teamaot-com/jason/pull/1330) / issue [#1117](https://github.com/al-teamaot-com/jason/issues/1117), but is draft, not active in Jason production. It requires the dedicated Jason workload identity, verified AOT tenant/site/library selectors, document-level release policy, approved \`knowledge.document.metadata.read\` and \`knowledge.document.content.read\` capabilities, and a source-revision-consistent read before providing the approved document bytes to the index. **ChatGPT's separately connected delegated SharePoint account is not that identity.**
+
+The KFS application must never read arbitrary site URLs, accept user-specified source paths or credentials, infer customer identity from shared KFS groups, or accept an unverified cached snapshot. It should fail closed if the approved reader cannot supply bounded current evidence or there are conflicting source records. A verified source materialization/refresh and evidence audit are dependencies before live Jason/Teams acceptance.
+
+### Nonproduction evidence
+
+An isolated development checkout passed a focused 31-test parser+fleet-ranking suite including explicit label extraction, same-sheet boundaries, two-source conflicts, source scope rejection, old source exclusion, a 435-device ranking fixture, and a corroborated single-customer log layout. Source eCopier workbook structure was examined through AOT's delegated SharePoint connector: separate worksheets have \`Company:\` and \`Serial #:\` labels, with serials \`1G55503749\`, \`1G55504297\`, \`1G55503694\`. One worksheet spells its customer \`Atlantic View Operato\`, whereas the AOT delivery receipt shows \`Atlantic View Operator\`; these are not automatically canonicalized without an approved alias decision.
+
+These passing tests **do not** prove that Jason can authenticate to AOT SharePoint, ingest source documents unattended, or deliver a fully verified top-five report today. The latest GitHub CI must be checked against its exact head before release. Preserve the production freeze and separate exact-SHA approval.
