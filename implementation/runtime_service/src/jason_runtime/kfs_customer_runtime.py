@@ -198,4 +198,7 @@ def build_governed_copier_evidence_cache(
         principal_id=manifest.principal_id,
         sources=manifest.sources,
     )
-    return GovernedAotCopierEvidenceCache(loader=loader, max_age_hours=24)
+    return GovernedAotCopierEvidenceCache(
+        loader=loader, max_age_hours=24,
+        authorization_expires_at=manifest.grant_expires_at,
+    )
