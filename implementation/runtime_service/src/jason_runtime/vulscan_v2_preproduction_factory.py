@@ -6,6 +6,7 @@ authority is performed here. Caller supplies currently authorized read ports.
 from __future__ import annotations
 
 from typing import Any, Callable, Mapping
+from datetime import datetime, timezone
 
 from .vulscan_governed_patch_source import VerifiedPatchTarget
 from .vulscan_microsoft_public_source import (
@@ -24,6 +25,7 @@ def build_vulscan_v2_shadow_workflow(
     can_read_microsoft_public_docs: Callable[[], bool],
     authority_gate: Callable[[], bool] | None = None,
     microsoft_transport: BoundedOfficialMicrosoftHTTP | None = None,
+    microsoft_source_clock: Callable[[], datetime] | None = None,
 ) -> VulscanV2PreproductionWorkflow:
     """Create a dormant provider-verified workflow.
 
@@ -35,6 +37,7 @@ def build_vulscan_v2_shadow_workflow(
     reader = GovernedMicrosoftKBReleaseReader(
         transport=transport,
         can_read_official_public_docs=can_read_microsoft_public_docs,
+        current_time=microsoft_source_clock or (lambda: datetime.now(timezone.utc)),
     )
     return VulscanV2PreproductionWorkflow(
         store=store,
