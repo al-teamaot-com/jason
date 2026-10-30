@@ -34,6 +34,14 @@ ACCOUNTING_INVOICE_SEARCH = "accounting.invoice.search"
 ACCOUNTING_BILL_SEARCH = "accounting.bill.search"
 ACCOUNTING_BILL_PAYMENT_SEARCH = "accounting.billpayment.search"
 ACCOUNTING_BILL_PAYMENT_READ = "accounting.billpayment.read"
+ACCOUNTING_PAYMENT_SEARCH = "accounting.payment.search"
+ACCOUNTING_DEPOSIT_SEARCH = "accounting.deposit.search"
+ACCOUNTING_PURCHASE_SEARCH = "accounting.purchase.search"
+ACCOUNTING_TRANSFER_SEARCH = "accounting.transfer.search"
+ACCOUNTING_JOURNAL_ENTRY_SEARCH = "accounting.journalentry.search"
+ACCOUNTING_CREDIT_MEMO_SEARCH = "accounting.creditmemo.search"
+ACCOUNTING_VENDOR_CREDIT_SEARCH = "accounting.vendorcredit.search"
+ACCOUNTING_REFUND_RECEIPT_SEARCH = "accounting.refundreceipt.search"
 ACCOUNTING_PROFIT_LOSS_READ = "accounting.report.profitloss.read"
 ACCOUNTING_BALANCE_SHEET_READ = "accounting.report.balancesheet.read"
 
@@ -47,6 +55,14 @@ QUICKBOOKS_CAPABILITIES = frozenset(
         ACCOUNTING_BILL_SEARCH,
         ACCOUNTING_BILL_PAYMENT_SEARCH,
         ACCOUNTING_BILL_PAYMENT_READ,
+        ACCOUNTING_PAYMENT_SEARCH,
+        ACCOUNTING_DEPOSIT_SEARCH,
+        ACCOUNTING_PURCHASE_SEARCH,
+        ACCOUNTING_TRANSFER_SEARCH,
+        ACCOUNTING_JOURNAL_ENTRY_SEARCH,
+        ACCOUNTING_CREDIT_MEMO_SEARCH,
+        ACCOUNTING_VENDOR_CREDIT_SEARCH,
+        ACCOUNTING_REFUND_RECEIPT_SEARCH,
         ACCOUNTING_PROFIT_LOSS_READ,
         ACCOUNTING_BALANCE_SHEET_READ,
     }
@@ -212,6 +228,86 @@ def quickbooks_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             operation="read",
             selector_keys="billpayment_id",
             fact_hints="billpayment linked bill payment account check bank account reference",
+        ),
+        _read_capability(
+            now=now,
+            name=ACCOUNTING_PAYMENT_SEARCH,
+            display_name="Search Accounting Payment",
+            purpose="Read historical Payment entities from the OAuth-authorized QuickBooks company.",
+            resource_types="accounting_transaction",
+            operation="search",
+            selector_keys="start_position,max_results",
+            fact_hints="historical transaction Payment reconciliation ledger read only",
+        ),
+        _read_capability(
+            now=now,
+            name=ACCOUNTING_DEPOSIT_SEARCH,
+            display_name="Search Accounting Deposit",
+            purpose="Read historical Deposit entities from the OAuth-authorized QuickBooks company.",
+            resource_types="accounting_transaction",
+            operation="search",
+            selector_keys="start_position,max_results",
+            fact_hints="historical transaction Deposit reconciliation ledger read only",
+        ),
+        _read_capability(
+            now=now,
+            name=ACCOUNTING_PURCHASE_SEARCH,
+            display_name="Search Accounting Purchase",
+            purpose="Read historical Purchase entities from the OAuth-authorized QuickBooks company.",
+            resource_types="accounting_transaction",
+            operation="search",
+            selector_keys="start_position,max_results",
+            fact_hints="historical transaction Purchase reconciliation ledger read only",
+        ),
+        _read_capability(
+            now=now,
+            name=ACCOUNTING_TRANSFER_SEARCH,
+            display_name="Search Accounting Transfer",
+            purpose="Read historical Transfer entities from the OAuth-authorized QuickBooks company.",
+            resource_types="accounting_transaction",
+            operation="search",
+            selector_keys="start_position,max_results",
+            fact_hints="historical transaction Transfer reconciliation ledger read only",
+        ),
+        _read_capability(
+            now=now,
+            name=ACCOUNTING_JOURNAL_ENTRY_SEARCH,
+            display_name="Search Accounting JournalEntry",
+            purpose="Read historical JournalEntry entities from the OAuth-authorized QuickBooks company.",
+            resource_types="accounting_transaction",
+            operation="search",
+            selector_keys="start_position,max_results",
+            fact_hints="historical transaction JournalEntry reconciliation ledger read only",
+        ),
+        _read_capability(
+            now=now,
+            name=ACCOUNTING_CREDIT_MEMO_SEARCH,
+            display_name="Search Accounting CreditMemo",
+            purpose="Read historical CreditMemo entities from the OAuth-authorized QuickBooks company.",
+            resource_types="accounting_transaction",
+            operation="search",
+            selector_keys="start_position,max_results",
+            fact_hints="historical transaction CreditMemo reconciliation ledger read only",
+        ),
+        _read_capability(
+            now=now,
+            name=ACCOUNTING_VENDOR_CREDIT_SEARCH,
+            display_name="Search Accounting VendorCredit",
+            purpose="Read historical VendorCredit entities from the OAuth-authorized QuickBooks company.",
+            resource_types="accounting_transaction",
+            operation="search",
+            selector_keys="start_position,max_results",
+            fact_hints="historical transaction VendorCredit reconciliation ledger read only",
+        ),
+        _read_capability(
+            now=now,
+            name=ACCOUNTING_REFUND_RECEIPT_SEARCH,
+            display_name="Search Accounting RefundReceipt",
+            purpose="Read historical RefundReceipt entities from the OAuth-authorized QuickBooks company.",
+            resource_types="accounting_transaction",
+            operation="search",
+            selector_keys="start_position,max_results",
+            fact_hints="historical transaction RefundReceipt reconciliation ledger read only",
         ),
         _read_capability(
             now=now,

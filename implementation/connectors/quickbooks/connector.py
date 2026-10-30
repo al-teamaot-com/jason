@@ -34,6 +34,14 @@ QUICKBOOKS_INVOICE_SEARCH = "quickbooks.invoice.search"
 QUICKBOOKS_BILL_SEARCH = "quickbooks.bill.search"
 QUICKBOOKS_BILL_PAYMENT_SEARCH = "quickbooks.billpayment.search"
 QUICKBOOKS_BILL_PAYMENT_READ = "quickbooks.billpayment.read"
+QUICKBOOKS_PAYMENT_SEARCH = "quickbooks.payment.search"
+QUICKBOOKS_DEPOSIT_SEARCH = "quickbooks.deposit.search"
+QUICKBOOKS_PURCHASE_SEARCH = "quickbooks.purchase.search"
+QUICKBOOKS_TRANSFER_SEARCH = "quickbooks.transfer.search"
+QUICKBOOKS_JOURNAL_ENTRY_SEARCH = "quickbooks.journalentry.search"
+QUICKBOOKS_CREDIT_MEMO_SEARCH = "quickbooks.creditmemo.search"
+QUICKBOOKS_VENDOR_CREDIT_SEARCH = "quickbooks.vendorcredit.search"
+QUICKBOOKS_REFUND_RECEIPT_SEARCH = "quickbooks.refundreceipt.search"
 QUICKBOOKS_PROFIT_LOSS_READ = "quickbooks.report.profit_loss.read"
 QUICKBOOKS_BALANCE_SHEET_READ = "quickbooks.report.balance_sheet.read"
 
@@ -46,6 +54,14 @@ _CAPABILITY_OPERATIONS = {
     QUICKBOOKS_BILL_SEARCH: ("query", "Bill"),
     QUICKBOOKS_BILL_PAYMENT_SEARCH: ("query", "BillPayment"),
     QUICKBOOKS_BILL_PAYMENT_READ: ("entity_read", "billpayment"),
+    QUICKBOOKS_PAYMENT_SEARCH: ("query", "Payment"),
+    QUICKBOOKS_DEPOSIT_SEARCH: ("query", "Deposit"),
+    QUICKBOOKS_PURCHASE_SEARCH: ("query", "Purchase"),
+    QUICKBOOKS_TRANSFER_SEARCH: ("query", "Transfer"),
+    QUICKBOOKS_JOURNAL_ENTRY_SEARCH: ("query", "JournalEntry"),
+    QUICKBOOKS_CREDIT_MEMO_SEARCH: ("query", "CreditMemo"),
+    QUICKBOOKS_VENDOR_CREDIT_SEARCH: ("query", "VendorCredit"),
+    QUICKBOOKS_REFUND_RECEIPT_SEARCH: ("query", "RefundReceipt"),
     QUICKBOOKS_PROFIT_LOSS_READ: ("report", "ProfitAndLoss"),
     QUICKBOOKS_BALANCE_SHEET_READ: ("report", "BalanceSheet"),
 }
