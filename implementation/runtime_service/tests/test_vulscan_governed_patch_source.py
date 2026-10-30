@@ -139,3 +139,55 @@ def test_denied_patch_policy_read_fails_without_patch_status_guess():
     with pytest.raises(VulscanPatchEvidenceError):
         collect([target()], read)
     assert all(cap != "endpoint.patch.search" for cap, _ in calls)
+
+
+def test_actual_jason_governed_collection_envelope_shape():
+    """Anonymized structure derived from a governed live endpoint.patch.search."""
+    calls = []
+    def live_read(capability, arguments):
+        calls.append(capability)
+        if capability == "endpoint.device.read":
+            return {"status": "succeeded", "evidence": {
+                "record": {"resource_id": "rmm-10", "hostname": "PC-10"}}}
+        if capability == "endpoint.patch.policy.search":
+            return {"status": "succeeded", "evidence": {
+                "collection_key": "policies",
+                "items": [{"policyUid": "weekly-workstations"}],
+                "pageDetails": {"count": 1, "totalCount": 1, "nextPageUrl": None},
+                "bounded": False,
+            }}
+        return {"status": "succeeded", "evidence": {
+            "collection_key": "patches",
+            "items": [{"kbArticleId": "5123456", "installStatus": "NOT_APPROVED"}],
+            "item_count_returned": 1,
+            "pageDetails": {"count": 34, "totalCount": 34, "nextPageUrl": None},
+            "exact_selector_match": True, "ambiguous": False, "bounded": False,
+        }}
+    result = collect([target()], live_read)
+    assert result[0].kb == "KB5123456"
+    assert result[0].approval_state == "NOT_APPROVED"
+    assert calls == ["endpoint.device.read", "endpoint.patch.policy.search", "endpoint.patch.search"]
+
+
+def test_truncated_or_ambiguous_governed_collection_is_rejected():
+    def make_read(*, policies_truncated=False, patch_ambiguous=False):
+        def read(capability, arguments):
+            if capability == "endpoint.device.read":
+                return {"status": "succeeded", "evidence": {
+                    "record": {"resource_id": "rmm-10", "hostname": "PC-10"}}}
+            if capability == "endpoint.patch.policy.search":
+                return {"status": "succeeded", "evidence": {
+                    "items": [{"uid": "weekly-workstations"}],
+                    "pageDetails": {"totalCount": 2 if policies_truncated else 1},
+                    "bounded": False,
+                }}
+            return {"status": "succeeded", "evidence": {
+                "items": [{"kbArticleId": "5123456", "installStatus": "NOT_APPROVED"}],
+                "exact_selector_match": not patch_ambiguous,
+                "ambiguous": patch_ambiguous,
+            }}
+        return read
+    with pytest.raises(VulscanPatchEvidenceError, match="incomplete"):
+        collect([target()], make_read(policies_truncated=True))
+    with pytest.raises(VulscanPatchEvidenceError, match="unambiguous"):
+        collect([target()], make_read(patch_ambiguous=True))
