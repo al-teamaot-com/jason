@@ -1289,6 +1289,7 @@ class OperationalAutonomyMaintenance:
         ticket_splitter=None,
         client_questions=None,
         contact_reads=None,
+        vulscan_v2_approval_supervisor=None,
     ) -> None:
         if not 1 <= int(max_active_work_items) <= 20:
             raise ValueError("max_active_work_items must be between 1 and 20")
@@ -1322,6 +1323,10 @@ class OperationalAutonomyMaintenance:
         self.ticket_splitter = ticket_splitter
         self.client_questions = client_questions
         self.contact_reads = contact_reads
+        # Disabled unless exact V2 owner-promotion and source-read readiness
+        # are established by trusted runtime composition. Never use an env
+        # flag alone to bypass the existing ten-day handoff.
+        self.vulscan_v2_approval_supervisor = vulscan_v2_approval_supervisor
         self._next_due = 0.0
         self._resource_automation_cache: dict[int, bool] = {}
         self._ticket_status_cache: dict[int, str] = {}
@@ -5928,7 +5933,15 @@ class OperationalAutonomyMaintenance:
             if first_seen is None:
                 first_seen = now
             age_seconds = max(0.0, (now - first_seen).total_seconds())
-            if age_seconds >= VULSCAN_APPROVAL_ESCALATION_SECONDS:
+            v2_supervised = False
+            if self.vulscan_v2_approval_supervisor is not None:
+                # Trusted callback must prove exact KBs, policy/owner promotion,
+                # current source evidence and the canonical Teams lane are
+                # ready for every NOT_APPROVED item. No bypass on uncertainty.
+                v2_supervised = self.vulscan_v2_approval_supervisor(
+                    work, tuple(rows)
+                ) is True
+            if age_seconds >= VULSCAN_APPROVAL_ESCALATION_SECONDS and not v2_supervised:
                 note = (
                     "STATUS: HUMAN REVIEW REQUIRED. "
                     "ACTION REQUIRED: Approve or intentionally defer the listed patch(es). "
@@ -5958,11 +5971,19 @@ class OperationalAutonomyMaintenance:
             note += (
                 "At least one reported KB is currently NOT_APPROVED. "
                 "STATUS: WAITING - PATCH NOT APPROVED. "
-                "NEXT STEP: No technician action is required yet; Jason will recheck the exact "
-                "KB approval state daily and keep this ticket in the Jason queue. "
-                "ESCALATION: If the same exact KB remains NOT_APPROVED for 10 calendar days, "
-                "Jason will move the ticket to Help Desk I / Human Review for an approve-or-defer "
-                "decision. The playbook will not approve patches autonomously."
+                "NEXT STEP: Jason will recheck exact KB approval states daily and retain "
+                "ticket ownership in the Jason queue. "
+                + (
+                    "Approval age is supervised by separately promoted VulScan V2 "
+                    "using authoritative Microsoft release dates; Day 16 is an "
+                    "owner Teams review and Day 21 a follow-up, not an automatic "
+                    "Help Desk ticket handoff. No patch is approved automatically."
+                    if v2_supervised else
+                    "ESCALATION: If the exact KB remains NOT_APPROVED for 10 "
+                    "calendar days under the existing V1 process, Jason moves "
+                    "the ticket to Help Desk I / Human Review for an approve-or-defer "
+                    "decision. The playbook will not approve patches autonomously."
+                )
             )
             reason = (
                 "VulScan waiting for patch approval; "
