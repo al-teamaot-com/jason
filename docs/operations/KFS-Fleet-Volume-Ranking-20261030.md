@@ -64,3 +64,22 @@ The report response carries `report_type=ranked_monthly_usage` and `schema_versi
 The actual read-only October data was projected through the same `OrchestrationResult` / `ConversationIntent` rendering path in an isolated checkout. The output contained five numerical ranked rows, clear `Provisional` status, 435 inventoried, 432 usable monthly deltas, 3 meter exceptions, mathematically verified zero-color annotations, and 304 missing customer assignments. Four top-five customer labels remain `Unknown (not mapped in KFS)`; this is authoritative source-data incompleteness, not a rendering failure. AOT must establish an approved canonical KFS device-to-customer mapping before those names can be supplied.
 
 This is source-level integration and provider-backed read evidence, **not** a live authenticated Teams end-to-end test, release eligibility, owner exact-SHA authorization, or production acceptance. Fail-closed status remains required.
+
+## Supplemental AOT source evidence for unmapped top-five customers (read-only)
+
+KFS currently has no populated canonical `kfs_autotask_mapping` rows, and its device/group customer identity is blank for four ranked machines. An internal AOT SharePoint search on the **exact serial numbers**, not on generic group names, found the following candidate owner records (all inspected read-only):
+
+| KFS serial number | Document-backed customer | AOT equipment ID in document | Supporting source |
+|---|---|---|---|
+| `RRG2301432` | St. Matthews Catholic School | 1207, 8003i Teacher Work Room | `ST MATTHEWS CATHOLIC SCHOOL Log (ID# 1202, 1203, 1206, 1207, 1212).xlsx`, modified 2026-10-20; 2025 Configuration List |
+| `1G55504297` | Atlantic View Operator | 1398, MZ6001i | `eCopiers (Virginia Health Services)14 machines (3 year CPC log).xlsx` modified 2026-10-23; AOT Delivery Receipt Equipment 2026, 2025 |
+| `1G55503749` | Marcella Operator LLC | 1403, MZ6001i | Same KFS CPC log and AOT delivery receipt |
+| `1G55503694` | Water Reed Operator | 1405, MZ6001i | Same KFS CPC log plus `Machine list.docx` |
+
+Source lookup links (AOT authentication required):
+- [St. Matthews log](https://absolnet.sharepoint.com/sites/AOTAdminDocuments/_layouts/15/Doc.aspx?sourcedoc=%7BDC8D82A6-8064-4EC6-8970-9E716D82D495%7D&file=ST+MATTHEWS+CATHOLIC+SCHOOL++Log+%28ID%23+1202%2C+1203%2C+1206%2C+1207%2C+1212%29.xlsx&action=default&mobileredirect=true&web=1)
+- [Virginia Health Services CPC log](https://graph.microsoft.com/v1.0/drives/b!-IVayFBqaUWID9Jhxl3yuySnt-Wb3GtArtgpYfH3EVNo8p5rPdImQ5Z7APH0M9tF/items/01NWNXUCVHM2NI67XF5RELUAVFHBOFGIGJ)
+- [AOT delivery receipts](https://graph.microsoft.com/v1.0/drives/b!-IVayFBqaUWID9Jhxl3yuySnt-Wb3GtArtgpYfH3EVNo8p5rPdImQ5Z7APH0M9tF/items/01NWNXUCSS7U666XAYMVAY77T7TRXUBGAQ)
+- [AOT machine list](https://absolnet.sharepoint.com/sites/AOTAdminDocuments/_layouts/15/Doc.aspx?sourcedoc=%7B5A4D7211-E5A3-4D48-A131-9E6B0C985BAB%7D&file=Machine+list.docx&action=default&mobileredirect=true&web=1)
+
+These are **candidate mappings supported by internal documents, not yet activated for Jason**, and they may represent different legal customer, site, equipment owner, and invoice/billing identities. To satisfy full reporting rather than hardcode the current top five, engineering needs an approved canonical device-serial to client identity source, conflict resolution precedence, owner audit and refresh policy, and a read-only governed mapping adapter. Neither empty `kfs_autotask_mapping` nor non-specific shared group ID `CNWZDCC` can act as affirmative customer evidence. Do not persist the four names into KFS, Autotask or production database without mapping authority and acceptance. Continue provider-backed usage report with conspicuous `Unknown (not mapped)` caveats in the meantime.
