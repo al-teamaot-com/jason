@@ -110,6 +110,29 @@ def _first_customer(rows: list[tuple[object, ...]]) -> str | None:
     return None
 
 
+def _customer_from_named_log(filename: str, rows: list[tuple[object, ...]]) -> str | None:
+    """Corroborate a customer-named meter log with a matching body heading.
+
+    A document title alone is not identity evidence. Require the same distinctive
+    first two name tokens in a top-of-sheet header and an exact serial elsewhere.
+    Generic multi-customer logs do not qualify.
+    """
+    match = re.fullmatch(r"(.+?)\s+Log\s*\([^)]*\)\.xlsx", filename, re.I)
+    if match is None:
+        return None
+    candidate = _text(match.group(1))
+    parts = _customer_key(candidate).split()
+    if len(parts) < 2 or len(parts[1]) < 4:
+        return None
+    witness = " ".join(parts[:2])
+    headings = " ".join(_customer_key(_text(value)) for row in rows[:5] for value in row[:16])
+    if not re.search(r"\b" + re.escape(witness) + r"\b", headings):
+        return None
+    if len(candidate) > 160 or "ecopier" in _customer_key(candidate):
+        return None
+    return candidate
+
+
 def _serials_on_sheet(rows: list[tuple[object, ...]]) -> tuple[str, ...]:
     matches: set[str] = set()
     for row in rows[:5000]:
@@ -119,7 +142,7 @@ def _serials_on_sheet(rows: list[tuple[object, ...]]) -> tuple[str, ...]:
             if label is None:
                 # A labeled machine row may contain "ID#... SN: SERIAL" inline.
                 inline = re.search(
-                    r"(?:\bserial\s*(?:#|no\.?|number)?|\bs\s*/?\s*n\s*#?)\s*:\s*([A-Z0-9-]{8,24})",
+                    r"(?:\bserial\s*(?:#|no\.?|number)?|\bs\s*/?\s*n\s*#?)\s*:?\s+([A-Z0-9-]{8,24})",
                     text, re.I,
                 )
                 if inline:
@@ -167,6 +190,8 @@ def _parse_workbook(doc: ApprovedSharePointWorkbook) -> tuple[CustomerClaim, ...
                     raise ValueError("worksheet column limit exceeded")
                 rows.append(tuple(row))
             customer = _first_customer(rows)
+            if customer is None:
+                customer = _customer_from_named_log(doc.filename, rows)
             if customer is None:
                 continue
             for serial in _serials_on_sheet(rows):
