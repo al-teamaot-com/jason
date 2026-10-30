@@ -470,6 +470,8 @@ class KfsMeterHistoryStore:
             and int(reported_count) == inventory_count == len(devices)
         )
         return {
+            "report_type": "ranked_monthly_usage",
+            "schema_version": "1.0",
             "period_start": start.isoformat(), "period_end": end.isoformat(),
             "inventory_run_id": str(snapshot_id) if snapshot_id is not None else None,
             "inventory_reading_at": snapshot_ended_at.isoformat() if snapshot_ended_at else None,
