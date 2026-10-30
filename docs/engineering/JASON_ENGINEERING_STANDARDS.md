@@ -31,7 +31,7 @@ Every development response that stops work must end with a visually distinct, co
 - **Completed:** only work actually verified.
 - **Still required:** remaining tasks or blockers.
 - **What I'm doing next:** exactly one next action; explicitly say when no work is currently executing or running in the background.
-- **What you need to do:** an explicit user action, or "Nothing right now."
+- **What you need to do:** either "Nothing right now" or direct, step-by-step instructions that the owner can personally execute. Specify the exact application/page, button, command, field, value, and expected confirmation where relevant. Never assign the owner an abstract engineering deliverable such as "validate a PR", "prepare implementation", or "fix CI" without concrete actionable steps. Separate owner actions from engineer-owned work. When owner authorization is required, state precisely what decision is requested and what will happen after approval. If no owner action is required, do not imply that the owner should initiate the next engineering step.
 Use a modest heading, bold field names, and a single status indicator where supported. Make **What happens next** the most visually prominent action line (e.g. a small heading with bold action text); do not rely solely on color. Use plain-English task names first, with PR/issue IDs or SHAs only as secondary linked references, never as the sole description. State whether the next action is actually underway or is only the next action when work resumes. The footer must remain clear without color or rich formatting. Avoid decorative complexity.
 Proceed with work that has already been authorized; do not demand redundant approval. Never imply a proposed change has been completed.
 
