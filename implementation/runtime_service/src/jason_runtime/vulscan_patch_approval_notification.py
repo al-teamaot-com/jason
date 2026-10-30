@@ -150,7 +150,7 @@ def prepare_patch_notifications(
             f"Patch: {kb} - {_bounded_plain(meta.title, 180)}\n"
             f"Microsoft release date: {meta.release_date.isoformat()}\n"
             f"Days since release: {age}\n"
-            f"Status: NOT_APPROVED in {len(policy_ids)} applicable policy/policies\n"
+            f"Effective endpoint status: NOT_APPROVED; assigned patch policy references: {len(policy_ids)}\n"
             f"Affected clients: {len(clients)}; devices: {len(devices)}\n"
             f"Description (Microsoft): {summary or 'Verified description unavailable'}\n"
             f"Known issues: {known or 'No verified known-issue summary available'}\n"
