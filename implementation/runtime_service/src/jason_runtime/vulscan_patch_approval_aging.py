@@ -23,6 +23,7 @@ class PatchApprovalObservation:
     intentional_deferral: bool = False
     superseded: bool = False
     actively_exploited: bool = False
+    exploitation_verified: bool = False
 
 
 @dataclass(frozen=True)
@@ -69,7 +70,7 @@ def evaluate_approval_aging(
                            and not x.intentional_deferral and not x.superseded]
                 if not pending:
                     stage, reason = "none", "No outstanding unapproved applicability"
-                elif any(x.actively_exploited for x in pending):
+                elif any(x.actively_exploited and x.exploitation_verified for x in pending):
                     stage, reason = "urgent_review", "Verified actively exploited vulnerability requires review"
                 elif age >= 21:
                     stage, reason = "day21_escalation", "Approval outstanding beyond 21 days"
