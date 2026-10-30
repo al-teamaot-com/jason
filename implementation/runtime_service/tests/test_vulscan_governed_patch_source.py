@@ -41,7 +41,7 @@ def reader(*, status="NOT_APPROVED", reported_kb="5123456",
         if capability == "endpoint.device.read":
             return {"status": "succeeded", "evidence": {
                 "record": {"resource_id": uid, "hostname": hostname}}}
-        if capability == "endpoint.patch_policy.search":
+        if capability == "endpoint.patch.policy.search":
             return {"status": "succeeded", "evidence": {"data": {"policies": [
                 {"policyUid": "weekly-workstations"},
             ]}}}
@@ -67,7 +67,7 @@ def test_reads_exact_endpoint_and_kb_via_governed_capabilities():
     assert result[0].release_date == date(2026, 10, 13)
     assert calls == [
         ("endpoint.device.read", {"resource_id": "rmm-10"}),
-        ("endpoint.patch_policy.search", {"resource_id": "rmm-10"}),
+        ("endpoint.patch.policy.search", {"resource_id": "rmm-10"}),
         ("endpoint.patch.search", {"resource_id": "rmm-10", "kb": "KB5123456"}),
     ]
 
@@ -135,7 +135,7 @@ def test_unassigned_policy_is_not_attributed_to_device():
 
 
 def test_denied_patch_policy_read_fails_without_patch_status_guess():
-    read, calls = reader(failures=("endpoint.patch_policy.search",))
+    read, calls = reader(failures=("endpoint.patch.policy.search",))
     with pytest.raises(VulscanPatchEvidenceError):
         collect([target()], read)
     assert all(cap != "endpoint.patch.search" for cap, _ in calls)
