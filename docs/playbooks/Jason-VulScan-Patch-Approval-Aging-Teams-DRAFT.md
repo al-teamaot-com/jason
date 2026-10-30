@@ -114,3 +114,23 @@ No new standing authority. Any future unattended notification requires exact own
 
 ## Implementation boundary
 A first deterministic implementation exists in `implementation/runtime_service/src/jason_runtime/vulscan_patch_approval_aging.py` with unit tests. It produces **notification intent only**. It does not gather authoritative release data, write scheduler state, invoke canonical Teams transport, handle acknowledgments or change Autotask. No rule is deployed or autonomously promoted. The remaining integration work and provider-backed acceptance are mandatory before this draft can be considered operational.
+
+
+## Preproduction implementation checkpoint — source branch only (2026-10-30)
+
+The V2 modules added on this isolated branch are:
+- vulscan_patch_approval_aging.py: deterministic per-policy and per-device decision evidence.
+- vulscan_microsoft_release_evidence.py: validates release-health/KB provenance, exact KB matching, original availability date versus later article revisions, and verified article details.
+- vulscan_patch_approval_notification.py: one owner message per KB/event; trusted Microsoft KB URLs, concise sourced summary and known issues, bounded presentation, fresh AOT-local snapshot gate; calls JasonTeamsCommunicationService instead of HTTP.
+- vulscan_patch_approval_outbox.py: bounded at-most-once sender drain with an independent authoritative state recheck, provider receipt retained as unverified until human evidence is available.
+- Existing SQLiteOperationalWorkStore outbox now accommodates patch-level events with a documented ticket_id=0 aggregation sentinel. The ordinary ticket notifier excludes them, preventing accidental legacy message delivery.
+- Tests cover the decision, metadata, sender, safety, durable store and negative cases.
+
+**Provider evidence contract:** Microsoft evidence must be read through an approved governed reader. The Windows release-history/release-health page can establish the exact KB's initial availability date and OS applicability; the exact Microsoft Support KB article provides description and known-issues status. The Microsoft Security Update Guide/API can contribute security context and independent exploitation evidence, but its monthly CVRF document date is not automatically a particular KB's original release date. Sources may be unavailable; never invent facts or link destinations. Do not use a search snippet alone as an authoritative governed provider record. Relevant official source families:
+- https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information
+- https://www.microsoft.com/en-us/msrc/faqs-security-update-guide
+- https://support.microsoft.com/ (exact verified KB article only)
+
+**Boundary still to implement before promotion:** Running governed release-health/article reads, current cross-client patch-policy collection, owner-promotion-based runtime composition registration, and verified migration superseding the legacy ten-day ticket-aging handoff. V1 remains unchanged until V2 passes end-to-end acceptance. No feature activation by environment flag alone.
+
+**Production preparation:** Protected CI, isolated preproduction source acceptance, existing Teams/invoice/PO regression tests, exact revision inventory and overlap reconciliation, proof of owner identity binding and canonical communication authority, no new credential or OAuth grant, release manager's LKG/rollback. Production pilot: stage disabled, then Owner explicitly approves exact SHA and one controlled provider-backed Teams test. Do not treat provider acceptance as human delivery.
