@@ -111,14 +111,25 @@ class ApprovedAotCopierEvidenceSnapshot:
     index: ApprovedCustomerEvidenceIndex
     refreshed_at: datetime
     max_age_hours: int = 24
+    authorization_expires_at: datetime | None = None
 
     def usable_at(self, now: datetime) -> ApprovedCustomerEvidenceIndex:
         if (
             now.tzinfo is None or self.refreshed_at.tzinfo is None
             or not 1 <= self.max_age_hours <= 168
+            or (
+                self.authorization_expires_at is not None
+                and self.authorization_expires_at.tzinfo is None
+            )
         ):
             raise ValueError("source snapshot timestamps and TTL must be valid")
-        age = now.astimezone(timezone.utc) - self.refreshed_at.astimezone(timezone.utc)
+        now_utc = now.astimezone(timezone.utc)
+        if (
+            self.authorization_expires_at is not None
+            and now_utc >= self.authorization_expires_at.astimezone(timezone.utc)
+        ):
+            raise PermissionError("AOT document authorization has expired")
+        age = now_utc - self.refreshed_at.astimezone(timezone.utc)
         from datetime import timedelta
         if not timedelta(0) <= age <= timedelta(hours=self.max_age_hours):
             raise PermissionError("AOT document evidence snapshot is absent or stale")
@@ -135,11 +146,15 @@ class GovernedAotCopierEvidenceCache:
 
     def __init__(
         self, *, loader: GovernedAotCopierSourceLoader, max_age_hours: int = 24,
+        authorization_expires_at: datetime | None = None,
     ) -> None:
         if not 1 <= max_age_hours <= 168:
             raise ValueError("copier evidence cache TTL must be between 1 and 168 hours")
+        if authorization_expires_at is not None and authorization_expires_at.tzinfo is None:
+            raise ValueError("copier document approval expiry must be timezone aware")
         self._loader = loader
         self._ttl = max_age_hours
+        self._authorization_expires_at = authorization_expires_at
         self._snapshot: ApprovedAotCopierEvidenceSnapshot | None = None
         self._lock = RLock()
 
@@ -147,6 +162,12 @@ class GovernedAotCopierEvidenceCache:
         if now.tzinfo is None:
             raise ValueError("authorized report time must be timezone aware")
         with self._lock:
+            if (
+                self._authorization_expires_at is not None
+                and now.astimezone(timezone.utc) >= self._authorization_expires_at.astimezone(timezone.utc)
+            ):
+                self._snapshot = None
+                raise PermissionError("AOT document authorization has expired")
             snapshot = self._snapshot
             if snapshot is not None:
                 try:
@@ -158,5 +179,6 @@ class GovernedAotCopierEvidenceCache:
             index = self._loader.refresh(now=now)
             self._snapshot = ApprovedAotCopierEvidenceSnapshot(
                 index=index, refreshed_at=now, max_age_hours=self._ttl,
+                authorization_expires_at=self._authorization_expires_at,
             )
             return index
