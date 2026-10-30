@@ -95,3 +95,40 @@ def test_future_month_fleet_ranking_rejected_before_db(monkeypatch):
     with pytest.raises(ValueError, match="must have started"):
         invoker.invoke(request=request, resolution=resolution)
     assert cursor.sql == ""
+
+
+def test_fleet_ranking_435_devices_does_not_silently_claim_complete(monkeypatch):
+    start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 10, 30, tzinfo=timezone.utc)
+    rows = []
+    for index in range(435):
+        device = f"dev-{index:03d}"
+        total = index + 1
+        for counter, delta in (("total", total), ("blackWhite", total), ("color", 0)):
+            rows.append((device, counter, 100, start, 100 + delta, end,
+                         "Client", device, device))
+    store, _ = store_with_rows(monkeypatch, rows)
+    result = store.fleet_rank(arguments={"limit": 5}, start=start, end=end)
+    assert result["fleet_devices_in_history"] == 435
+    assert result["eligible_devices"] == 435
+    assert result["exception_count"] == 0
+    assert [x["device_id"] for x in result["top_devices"]] == [
+        "dev-434", "dev-433", "dev-432", "dev-431", "dev-430",
+    ]
+    # Historical coverage alone cannot establish the current KFS dealer inventory.
+    assert result["coverage_verified"] is False
+    assert result["complete"] is False
+
+
+def test_fleet_ranking_rejects_identical_boundary_timestamps(monkeypatch):
+    start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 10, 30, tzinfo=timezone.utc)
+    rows = [
+        ("dev-1", counter, 100, start, 100 + delta, start, "Client", "ID1", "S1")
+        for counter, delta in (("total", 20), ("blackWhite", 10), ("color", 10))
+    ]
+    store, _ = store_with_rows(monkeypatch, rows)
+    result = store.fleet_rank(arguments={}, start=start, end=end)
+    assert result["eligible_devices"] == 0
+    assert result["exception_count"] == 1
+    assert result["top_devices"] == []
