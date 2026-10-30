@@ -1095,6 +1095,18 @@ class DattoRmmConnector(ConnectorBase):
         candidates before any evidence reasoner is allowed to interpret device facts.
         """
 
+        if capability == "datto_rmm.device.patch_policies.list":
+            if isinstance(payload, list):
+                return {"policies": payload}
+            if isinstance(payload, Mapping):
+                if isinstance(payload.get("policies"), list):
+                    return dict(payload)
+                if isinstance(payload.get("items"), list):
+                    return {
+                        "policies": payload["items"],
+                        **({"pageDetails": payload["pageDetails"]} if "pageDetails" in payload else {}),
+                    }
+            raise ValueError("Datto assigned patch-policy collection missing")
         if capability != "datto_rmm.device.search":
             return payload
         records = cls._device_records(payload)
