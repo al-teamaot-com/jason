@@ -54,21 +54,30 @@ def _canonical_record(value: Any, *, capability: str) -> Mapping[str, Any]:
         if not isinstance(result, Mapping):
             raise VulscanPatchEvidenceError("endpoint identity readback absent")
         return result
+    # Jason's live governed read service wraps collections as evidence.items.
+    # Earlier test fixtures used evidence.data.patches/policies; accept both
+    # but require one canonical, unambiguous exact-KB result.
     data = evidence.get("data")
-    if not isinstance(data, Mapping):
-        raise VulscanPatchEvidenceError("patch/policy read evidence absent")
+    if data is not None and not isinstance(data, Mapping):
+        raise VulscanPatchEvidenceError("provider data is malformed")
+    if data is None:
+        data = {}
     if capability == "endpoint.patch.policy.search":
-        policies = data.get("policies")
+        policies = evidence.get("items") if "items" in evidence else data.get("policies")
         if not isinstance(policies, list) or len(policies) > 200:
-            raise VulscanPatchEvidenceError("authoritative assigned patch policies not bounded")
-        details = data.get("pageDetails")
-        if isinstance(details, Mapping):
+            raise VulscanPatchEvidenceError("authoritative patch-policy collection unavailable")
+        details = evidence.get("pageDetails", data.get("pageDetails"))
+        if details is not None:
+            if not isinstance(details, Mapping):
+                raise VulscanPatchEvidenceError("policy page metadata malformed")
             try:
                 total = int(details.get("totalCount"))
             except (TypeError, ValueError) as exc:
                 raise VulscanPatchEvidenceError("patch policy total missing") from exc
-            if total != len(policies):
+            if total != len(policies) or details.get("nextPageUrl"):
                 raise VulscanPatchEvidenceError("patch policy pagination incomplete")
+        if evidence.get("bounded") is True:
+            raise VulscanPatchEvidenceError("truncated patch-policy read cannot prove completeness")
         uids = []
         for policy in policies:
             if not isinstance(policy, Mapping):
@@ -80,9 +89,13 @@ def _canonical_record(value: Any, *, capability: str) -> Mapping[str, Any]:
         if len(uids) != len(set(uids)):
             raise VulscanPatchEvidenceError("duplicate patch policy")
         return {"policy_ids": tuple(uids)}
-    results = data.get("patches")
-    if not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], Mapping):
-        raise VulscanPatchEvidenceError("exactly one matching KB is required")
+    results = evidence.get("items") if "items" in evidence else data.get("patches")
+    if (not isinstance(results, list) or len(results) != 1
+            or not isinstance(results[0], Mapping)
+            or evidence.get("ambiguous") is True
+            or evidence.get("exact_selector_match") is False
+            or evidence.get("bounded") is True):
+        raise VulscanPatchEvidenceError("exactly one unambiguous KB required")
     return results[0]
 
 
