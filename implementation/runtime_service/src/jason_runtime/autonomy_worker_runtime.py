@@ -2187,10 +2187,15 @@ class OperationalAutonomyMaintenance:
             raise OperationalAutonomyError(
                 "cleanup excluded: time entries exist or time-entry evidence is unavailable"
             )
-        if own_notes and self.store.last_note_fingerprint(
+        owned_note_fingerprint = self.store.last_note_fingerprint(
             ticket_id, NONACTIONABLE_CLEANUP_SCOPE.playbook_id, own_title
-        ) is None:
+        )
+        if own_notes and owned_note_fingerprint is None:
             raise OperationalAutonomyError("cleanup internal note exists without owned evidence fingerprint")
+        if owned_note_fingerprint is not None and len(own_notes) != 1:
+            raise OperationalAutonomyError(
+                "cleanup owned audit note is missing or duplicated in Autotask"
+            )
         return ticket
 
     def _cleanup_admit(self, candidate) -> OperationalWork:
@@ -2242,15 +2247,16 @@ class OperationalAutonomyMaintenance:
         if decision is None:
             raise OperationalAutonomyError("cleanup classification changed")
         body = (
-            "STATUS: Verified non-actionable administrative email.\n"
-            "NEXT STEP: None. Ticket completed; no service work requested.\n"
+            "STATUS: Non-actionable administrative email classified; completion pending.\n"
+            "NEXT STEP: Jason will set Complete and verify Autotask readback; "
+            "no service work requested.\n"
             "KEY EVIDENCE: Exact ticket/company/location and original source "
             "read back in Autotask; no technician or contact notes; "
             f"category={decision.category}; companyID={work.company_id}; "
             f"Autotask companyLocationID={ticket['companyLocationID']}.\n"
             "WHAT JASON DID: Verified original email classification and company/site; "
             "no links opened, no unsubscribe action taken.\n"
-            "CHANGES MADE: Administrative ticket status and queue only. "
+            "CHANGES MADE: Jason queue / In Progress claim only so far. "
             "No endpoint, client user, or service changed.\n"
             "JASON STATE: nonactionable_ticket_cleanup@1.0.0, verifying completion.\n"
         )
@@ -2271,6 +2277,9 @@ class OperationalAutonomyMaintenance:
             self.store.remember_note_fingerprint(
                 work.ticket_id, work.playbook_id, title, fingerprint,
             )
+        # The note and lack of human activity must still be visible in Autotask
+        # immediately before the terminal status mutation; fail closed on lag.
+        self._cleanup_verified_snapshot(candidate, in_progress=True)
         self._complete_verified_ticket(
             work, reason="Site-bound non-actionable email verified and completed.",
         )
