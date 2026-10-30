@@ -56,7 +56,30 @@ def _canonical_record(value: Any, *, capability: str) -> Mapping[str, Any]:
         return result
     data = evidence.get("data")
     if not isinstance(data, Mapping):
-        raise VulscanPatchEvidenceError("patch search evidence absent")
+        raise VulscanPatchEvidenceError("patch/policy read evidence absent")
+    if capability == "endpoint.patch_policy.search":
+        policies = data.get("policies")
+        if not isinstance(policies, list) or len(policies) > 200:
+            raise VulscanPatchEvidenceError("authoritative assigned patch policies not bounded")
+        details = data.get("pageDetails")
+        if isinstance(details, Mapping):
+            try:
+                total = int(details.get("totalCount"))
+            except (TypeError, ValueError) as exc:
+                raise VulscanPatchEvidenceError("patch policy total missing") from exc
+            if total != len(policies):
+                raise VulscanPatchEvidenceError("patch policy pagination incomplete")
+        uids = []
+        for policy in policies:
+            if not isinstance(policy, Mapping):
+                raise VulscanPatchEvidenceError("patch policy record malformed")
+            uid = str(policy.get("policyUid") or policy.get("uid") or "").strip()
+            if not re.fullmatch(r"[A-Za-z0-9-]{1,100}", uid):
+                raise VulscanPatchEvidenceError("patch policy durable UID missing")
+            uids.append(uid)
+        if len(uids) != len(set(uids)):
+            raise VulscanPatchEvidenceError("duplicate patch policy")
+        return {"policy_ids": tuple(uids)}
     results = data.get("patches")
     if not isinstance(results, list) or len(results) != 1 or not isinstance(results[0], Mapping):
         raise VulscanPatchEvidenceError("exactly one matching KB is required")
@@ -107,6 +130,13 @@ def collect_governed_patch_observations(
             if (str(endpoint.get("resource_id") or "") != target.device_uid
                     or str(endpoint.get("hostname") or "").casefold() != target.hostname.casefold()):
                 raise VulscanPatchEvidenceError("Datto endpoint UID/hostname differs from verified CI")
+            policies_result = read(
+                "endpoint.patch_policy.search",
+                {"resource_id": target.device_uid},
+            )
+            assigned = _canonical_record(policies_result, capability="endpoint.patch_policy.search")
+            if target.policy_id not in assigned["policy_ids"]:
+                raise VulscanPatchEvidenceError("exact device does not carry target patch policy")
             patches_result = read(
                 "endpoint.patch.search",
                 {"resource_id": target.device_uid, "kb": kb},
