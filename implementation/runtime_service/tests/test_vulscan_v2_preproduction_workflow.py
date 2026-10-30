@@ -8,6 +8,7 @@ from jason_runtime.vulscan_governed_patch_source import VerifiedPatchTarget, Vul
 from jason_runtime.vulscan_microsoft_release_evidence import GovernedMicrosoftReleaseRecord
 from jason_runtime.vulscan_v2_preproduction_workflow import (
     VerifiedVulscanTargetInventory, VulscanV2PreproductionWorkflow,
+    VulscanV2ShadowMaintenance,
 )
 
 NOW = datetime(2026, 10, 30, 16, tzinfo=timezone.utc)
@@ -160,3 +161,24 @@ def test_unverified_inventory_target_rejected(tmp_path):
     with pytest.raises(VulscanPatchEvidenceError, match="verified"):
         flow.evaluate_once(now=NOW)
     assert reads == []
+
+
+def test_auxiliary_shadow_cadence_is_read_only_and_non_spamming(tmp_path):
+    flow, reads = make_flow(tmp_path)
+    maintenance = VulscanV2ShadowMaintenance(
+        workflow=flow,
+        interval_seconds=86400,
+        monotonic=iter((0.0, 60.0, 86401.0)).__next__,
+        current_time=lambda: NOW,
+    )
+    assert maintenance.tick().candidate_count == 1
+    assert maintenance.tick() is None
+    assert maintenance.tick().candidate_count == 1
+    assert len(reads) == 4
+    assert flow.store.due_patch_approval_notifications(now=NOW) == ()
+
+
+def test_auxiliary_shadow_frequency_cannot_flood(tmp_path):
+    flow, _ = make_flow(tmp_path)
+    with pytest.raises(ValueError, match="hourly"):
+        VulscanV2ShadowMaintenance(workflow=flow, interval_seconds=5)
