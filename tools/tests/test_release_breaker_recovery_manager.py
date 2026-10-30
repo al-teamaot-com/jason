@@ -220,6 +220,7 @@ def test_main_persists_permit_before_authorized_root_call_and_checks_closeout(tm
         value["circuit_breaker"]={"state":"closed","revalidated_revision":sha}
         control_path.write_text(json.dumps(value))
         return value
+    monkeypatch.setattr(recovery,"native_revalidation_preflight",lambda *args: None)
     monkeypatch.setattr(recovery,"native_root_transition",native)
     monkeypatch.setattr(recovery,"transaction_busy",lambda path: False)
     monkeypatch.setattr(sys,"argv",["recovery","--repo",str(repo),
@@ -289,6 +290,7 @@ def test_root_rejection_does_not_replay_same_permit_or_claim_pass(tmp_path, monk
             "governed root release transition rejected: "
             "ValueError: immutable last-known-good mismatch: runtime_image_id; SECRET=DONT_STORE"
         )
+    monkeypatch.setattr(recovery,"native_revalidation_preflight",lambda *args: None)
     monkeypatch.setattr(recovery,"native_root_transition",reject)
     monkeypatch.setattr(recovery,"transaction_busy",lambda path: False)
     monkeypatch.setattr(sys,"argv",["recovery","--repo",str(repo),
@@ -415,3 +417,84 @@ def test_closed_breaker_preserves_recovery_attempt_receipt(tmp_path, monkeypatch
     data=json.loads((spool/"release-breaker-recovery-state.json").read_text())
     assert data["last_revalidation_attempt"]==receipt
     assert data["status"]=="already_closed"
+
+
+def test_preflight_failure_is_not_a_governed_root_attempt(tmp_path, monkeypatch):
+    """A local manifest failure must not exhaust root retry authority."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "config").mkdir()
+    source = Path(__file__).resolve().parents[2] / recovery.POLICY_PATH
+    (repo / recovery.POLICY_PATH).write_text(source.read_text())
+    def git(*args):
+        return subprocess.run(
+            ["git", *args], cwd=repo, capture_output=True, text=True, check=True
+        ).stdout.strip()
+    git("init", "-b", "main")
+    git("config", "user.name", "Fixture")
+    git("config", "user.email", "fixture@example.invalid")
+    git("add", ".")
+    git("commit", "-m", "fixture")
+    sha = git("rev-parse", "HEAD")
+    state_root = tmp_path / "release"
+    protected = state_root / "protected-readback"
+    protected.mkdir(parents=True)
+    control, drift = evidence(revision=sha)
+    (protected / "production-control-state.json").write_text(json.dumps(control))
+    drift_file = protected / "production-drift.json"
+    spool = tmp_path / "spool"
+    spool.mkdir()
+    tracker = spool / "release-breaker-recovery-state.json"
+    monkeypatch.setattr(recovery, "transaction_busy", lambda path: False)
+    monkeypatch.setattr(
+        recovery, "native_root_transition",
+        lambda *args: pytest.fail("preflight must not request root"))
+    def fail_preflight(*args):
+        raise recovery.NativePreflightError("production_manifest_precheck_failed")
+    monkeypatch.setattr(recovery, "native_revalidation_preflight", fail_preflight)
+    monkeypatch.setattr(sys, "argv", [
+        "recovery", "--repo", str(repo), "--spool", str(spool),
+        "--release-state", str(state_root),
+    ])
+    for seconds in (0, 20, 40, 60):
+        moment = NOW + timedelta(seconds=seconds)
+        drift_file.write_text(json.dumps({**drift, "observed_at": moment.isoformat()}))
+        monkeypatch.setattr(recovery, "utcnow", lambda moment=moment: moment)
+        assert recovery.main() == 0
+    state = json.loads(tracker.read_text())
+    assert state["attempts"] == []
+    assert state["status"] == "blocked"
+    assert state["next_action"] == "reconcile_read_only_preflight"
+    assert state["last_preflight_failure"]["failure_class"] == (
+        "production_manifest_precheck_failed"
+    )
+    assert tracker.stat().st_mode & 0o777 == 0o600
+
+
+def test_preflight_rejects_stale_root_snapshot_without_root_contact(tmp_path):
+    root = tmp_path / "release"
+    protected = root / "protected-readback"
+    protected.mkdir(parents=True)
+    payload, _ = evidence()
+    target = protected / "production-control-state.json"
+    target.write_text(json.dumps(payload))
+    os.utime(target, (1, 1))
+    with pytest.raises(recovery.NativePreflightError) as failure:
+        recovery.native_revalidation_preflight(root, SHA)
+    assert failure.value.code == "protected_readback_unavailable_or_stale"
+
+
+def test_original_attempt_budget_stays_exhausted_even_if_preflight_would_pass():
+    control, drift = evidence()
+    previous = ready(control, drift)
+    previous["attempts"] = [
+        {"requested_at": (NOW + timedelta(seconds=i * 300)).isoformat(),
+         "revision": SHA, "result": "root_revalidation_rejected"}
+        for i in range(2)
+    ]
+    drift["observed_at"] = (NOW + timedelta(seconds=900)).isoformat()
+    state = recovery.decision(
+        control, drift, previous, POLICY, NOW + timedelta(seconds=900))
+    assert state["status"] == "blocked"
+    assert state["next_action"] == "operator_review_recovery_attempt_budget_exhausted"
+    assert len(state["attempts"]) == 2
