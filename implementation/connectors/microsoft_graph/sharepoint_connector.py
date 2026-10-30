@@ -28,13 +28,21 @@ class TrustedIdentityBindings(Protocol):
     def find_active_by_jason_identity(self, *, jason_identity_id: str) -> object: ...
 
 
+class TrustedOrganizationServiceBindings(Protocol):
+    """Trusted registry of active, separately approved AOT workload identities."""
+
+    def find_active_by_jason_service_identity(
+        self, *, jason_identity_id: str, organization_id: str,
+    ) -> object: ...
+
+
 class SharePointDocumentAuthorizer(Protocol):
     def authorized(
         self,
         *,
         principal_id: str,
         organization_id: str,
-        client_id: str,
+        client_id: str | None,
         tenant_id: str,
         operation: str,
         site_id: str,
@@ -49,6 +57,8 @@ class GovernedSharePointConnector:
     bindings: TrustedIdentityBindings
     authorizer: SharePointDocumentAuthorizer
     audit: AuditSink
+    # An optional trusted AOT-only service identity; absent by default.
+    organization_bindings: TrustedOrganizationServiceBindings | None = None
 
     provider_name = "microsoft_graph"
     capabilities = frozenset({
@@ -66,17 +76,51 @@ class GovernedSharePointConnector:
     }
 
     def _tenant(self, context: ConnectorContext) -> str:
-        if not context.principal_id or not context.client_id or not context.organization_id:
-            raise ConnectorAuthorizationError("An authenticated Jason tenant/client boundary is required")
-        binding = self.bindings.find_active_by_jason_identity(
-            jason_identity_id=context.principal_id
+        if not context.principal_id or not context.organization_id:
+            raise ConnectorAuthorizationError("An authenticated Jason identity is required")
+        if context.client_id:
+            # Existing client/tenant isolation remains unchanged.
+            binding = self.bindings.find_active_by_jason_identity(
+                jason_identity_id=context.principal_id
+            )
+            if binding is None or getattr(binding, "status", None) != "active":
+                raise ConnectorAuthorizationError(
+                    "An active validated Microsoft identity binding is required"
+                )
+            tenant_id = str(getattr(binding, "microsoft_tenant_id", "") or "").strip()
+            client_id = str(getattr(binding, "client_id", "") or "").strip()
+            if not tenant_id or client_id != context.client_id:
+                raise ConnectorAuthorizationError("Microsoft identity/client binding mismatch")
+            return tenant_id
+
+        # Separate internal AOT workload identity; never infer a client ID or
+        # reuse delegated owner tokens. It may only read explicitly approved
+        # document IDs, not enumerate AOT's libraries or arbitrary files.
+        if context.organization_id != "aot" or self.organization_bindings is None:
+            raise ConnectorAuthorizationError(
+                "Organization-scoped SharePoint reads require an approved AOT service binding"
+            )
+        if context.capability not in {
+            "knowledge.document.metadata.read", "knowledge.document.content.read"
+        }:
+            raise ConnectorAuthorizationError(
+                "Organization-scoped reader may not enumerate document libraries"
+            )
+        binding = self.organization_bindings.find_active_by_jason_service_identity(
+            jason_identity_id=context.principal_id,
+            organization_id=context.organization_id,
         )
-        if binding is None or getattr(binding, "status", None) != "active":
-            raise ConnectorAuthorizationError("An active validated Microsoft identity binding is required")
+        if (
+            binding is None
+            or getattr(binding, "status", None) != "active"
+            or getattr(binding, "organization_id", None) != "aot"
+            or getattr(binding, "jason_identity_id", None) != context.principal_id
+            or getattr(binding, "profile", None) != "aot-approved-document-read"
+        ):
+            raise ConnectorAuthorizationError("AOT document service identity is not validated")
         tenant_id = str(getattr(binding, "microsoft_tenant_id", "") or "").strip()
-        client_id = str(getattr(binding, "client_id", "") or "").strip()
-        if not tenant_id or client_id != context.client_id:
-            raise ConnectorAuthorizationError("Microsoft identity/client binding mismatch")
+        if not tenant_id:
+            raise ConnectorAuthorizationError("AOT document tenant binding is missing")
         return tenant_id
 
     def execute(self, request: ConnectorRequest) -> ConnectorResult:
