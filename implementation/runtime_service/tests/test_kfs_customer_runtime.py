@@ -168,25 +168,15 @@ def test_exact_aot_document_manifest_template_requires_activation_review():
     assert all(source.site_id.startswith("absolnet.sharepoint.com,") for source in validated.sources)
 
 
-def test_sharepoint_source_flag_requires_governed_kfs_enabled():
-    from jason_runtime.composition import RuntimeSettings
-    base = {
-        "authority_db": Path("/tmp/test-authority.sqlite3"),
-        "bindings_db": Path("/tmp/test-bindings.sqlite3"),
-        "continuation_db": Path("/tmp/test-continuation.sqlite3"),
-        "replay_db": Path("/tmp/test-replay.sqlite3"),
-        "security_audit_db": Path("/tmp/test-security.sqlite3"),
-        "orchestration_events_db": Path("/tmp/test-orchestration.sqlite3"),
-        "trusted_keys_registry": Path("/tmp/test-keys.json"),
-        "openbao_url": "http://127.0.0.1:8200",
-        "openbao_role_id_path": Path("/tmp/nonexistent-role"),
-        "openbao_secret_id_path": Path("/tmp/nonexistent-secret"),
-        "ollama_url": "http://127.0.0.1:11434",
-        "ollama_model": "model",
-        "allowed_machine_identities": frozenset({"test"}),
-    }
-    configured = RuntimeSettings(
-        **base, kfs_enabled=False, kfs_copier_evidence_enabled=True,
-    )
-    with pytest.raises(ValueError, match="requires enabled governed KFS"):
-        configured.validate()
+def test_runtime_configuration_has_default_off_and_kfs_dependency_gate():
+    # Foundation CI deliberately avoids importing unrelated runtime adapters.
+    # Full Jason runtime CI imports composition and executes its integration tests.
+    source = (
+        Path(__file__).resolve().parents[1] /
+        "src/jason_runtime/composition.py"
+    ).read_text(encoding="utf-8")
+    assert "kfs_copier_evidence_enabled: bool = False" in source
+    assert "JASON_KFS_COPIER_EVIDENCE_ENABLED" in source
+    assert "if self.kfs_copier_evidence_enabled and not self.kfs_enabled:" in source
+    assert "build_governed_copier_evidence_cache" in source
+    assert "customer_evidence_resolver=copier_evidence_resolver" in source
