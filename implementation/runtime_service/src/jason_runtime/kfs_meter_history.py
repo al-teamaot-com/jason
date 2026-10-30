@@ -352,7 +352,9 @@ class KfsMeterHistoryStore:
             delta = None
             if before is not None and after is not None and before_at is not None and after_at is not None:
                 difference = int(after) - int(before)
-                if difference >= 0 and after_at >= before_at:
+                # A period-end sample selected before the requested boundary
+                # may be earlier than the start boundary during short periods.
+                if difference >= 0 and after_at > before_at:
                     delta = difference
                 else:
                     item["warnings"].append(f"{counter}: invalid/reset boundary")
