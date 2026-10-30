@@ -1,12 +1,36 @@
+from datetime import datetime, timedelta, timezone
+
 from jason_runtime.vulscan_governed_patch_source import VulscanPatchEvidenceError
+from jason_runtime.vulscan_policy_kb_attribution import VerifiedPolicyKBAttribution
 from jason_runtime.vulscan_v2_site_inventory import (
     ApprovedDattoSiteInventory, ApprovedDattoSiteScope,
-    collect_vulscan_v2_scoped_inventory,
+    collect_vulscan_v2_scoped_inventory as collect_qualified_inventory,
 )
 import pytest
 
 SITE = "17065ca1-dfdf-4c6b-95c7-8a8a5f5dc14a"
 DEV = "274a6584-9d54-3e41-654f-046670799281"
+NOW = datetime(2026, 10, 30, 16, tzinfo=timezone.utc)
+
+
+def verified_attribution(site, client, device, kb, *, decisions=None,
+                         full_scope=True, checked_at=NOW):
+    return VerifiedPolicyKBAttribution(
+        kb=kb, client_id=client, site_uid=site, device_uid=device,
+        policy_states=decisions if decisions is not None else
+        (("weekly-workstations", "NOT_APPROVED"),),
+        source_reference="authorized-complete-KB-policy-read",
+        full_scope_verified=full_scope, observed_at=checked_at,
+    )
+
+
+def collect_vulscan_v2_scoped_inventory(*, site_inventory, read,
+                                        attribution=None):
+    """Test-only injected authoritative policy fixture, never a live fallback."""
+    return collect_qualified_inventory(
+        site_inventory=site_inventory, read=read, now=NOW,
+        policy_attribution_read=attribution or verified_attribution,
+    )
 
 
 def inventory(**kw):
@@ -103,7 +127,7 @@ def test_unverified_client_site_mapping_is_never_promoted_to_evidence():
     assert calls == []
 
 
-def test_multiple_policy_assignments_are_retained_as_references_not_causation():
+def test_multiple_policy_assignments_do_not_claim_both_policies_disapproved():
     calls = []
     def read(capability, args):
         calls.append(capability)
@@ -122,6 +146,50 @@ def test_multiple_policy_assignments_are_retained_as_references_not_causation():
                 "pageDetails": {"totalCount": 2},
             }}
         raise AssertionError("unrecognized")
-    result = collect_vulscan_v2_scoped_inventory(site_inventory=inventory(), read=read)
-    assert {x.policy_id for x in result.targets} == {"policy-a", "policy-b"}
-    assert len(result.targets) == 2
+    def attribution(site, client, device, kb):
+        return verified_attribution(
+            site, client, device, kb,
+            decisions=(("policy-a", "NOT_APPROVED"),
+                       ("policy-b", "NOT_APPLICABLE")),
+        )
+    result = collect_vulscan_v2_scoped_inventory(
+        site_inventory=inventory(), read=read, attribution=attribution)
+    assert {x.policy_id for x in result.targets} == {"policy-a"}
+    assert len(result.targets) == 1
+
+    with pytest.raises(VulscanPatchEvidenceError, match="attribution"):
+        collect_vulscan_v2_scoped_inventory(
+            site_inventory=inventory(), read=read,
+            attribution=lambda site, client, device, kb:
+                verified_attribution(site, client, device, kb,
+                    decisions=(("policy-a", "NOT_APPROVED"),)),
+        )
+
+
+def test_missing_policy_attribution_denies_before_any_datto_read():
+    read, calls = reader()
+    with pytest.raises(VulscanPatchEvidenceError, match="attribution source"):
+        collect_qualified_inventory(
+            site_inventory=inventory(), read=read, now=NOW,
+            policy_attribution_read=None)
+    assert calls == []
+
+
+@pytest.mark.parametrize("variant", ["wrong_client", "stale", "partial", "no_disapproved"])
+def test_unverified_policy_causation_cannot_create_a_target(variant):
+    read, _ = reader()
+    def attribution(site, client, device, kb):
+        kwargs = {}
+        if variant == "wrong_client":
+            client = "another-client"
+        if variant == "stale":
+            kwargs["checked_at"] = NOW - timedelta(hours=2)
+        if variant == "partial":
+            kwargs["full_scope"] = False
+        if variant == "no_disapproved":
+            kwargs["decisions"] = (("weekly-workstations", "APPROVED_PENDING"),)
+        return verified_attribution(site, client, device, kb, **kwargs)
+    with pytest.raises(VulscanPatchEvidenceError, match="attribution"):
+        collect_vulscan_v2_scoped_inventory(
+            site_inventory=inventory(), read=read, attribution=attribution)
+
