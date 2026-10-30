@@ -114,6 +114,9 @@ def test_fixed_command_category_mapping():
     assert category_for("Service RocketAgent is stopped", "") == "rocketagent_service"
     assert category_for("Space Issue", "") == "disk_capacity"
     assert category_for("Linux logs cleared", "") == "security_review"
+    assert category_for("Forwarding Phishing that was sent to a coworker", "") == "security_review"
+    assert category_for("[Get Duo Security status AOT Ver 05302024] - : Not Installed (No variables) for HOST-A", "") == "security_review"
+    assert category_for("Thank You for Your Payment", "") == "general"
     assert category_for("General printer question", "") == "general"
     for script in (WINDOWS_LICENSING_READ, WINDOWS_SERVICE_READ, WINDOWS_DISK_READ):
         assert "ConvertTo-Json" in script
