@@ -772,6 +772,33 @@ def test_handoff_rechecks_live_ticket_and_never_overwrites_human_changes(
     store.close()
 
 
+@pytest.mark.parametrize("count", [0, 2])
+def test_handoff_rejects_missing_or_duplicate_exact_ticket_readback(tmp_path, count):
+    from datetime import datetime, timezone
+    from jason_runtime.unsupported_ticket_triage import render_triage_note
+
+    source = ticket(title="Unresolved issue", queue="Jason")
+    reads = NoteReadStub()
+    reads.current_ticket_result_override = [dict(reads.current_ticket) for _ in range(count)]
+    worker, store, _ = make_worker(tmp_path, [source], reads)
+    worker.promotion_store = PromotionForTriage(handoff=True)
+    actions = NoteActionStub(reads)
+    worker.actions = actions
+    evidence = {"ticket_id": 200001, "company_verified": True}
+    evidence["note_draft"] = render_triage_note(
+        ticket_number=source.context["ticketNumber"],
+        state="needs_diagnostic_evidence", category="user_device_settings",
+        evidence=evidence, next_step="Technician must review this unresolved issue.",
+    )
+    worker._maybe_publish_unsupported_triage_note(source, {
+        "state": "needs_diagnostic_evidence", "evidence": evidence,
+        "source_version": "v1", "ticket_number": source.context["ticketNumber"],
+    }, now=datetime.now(timezone.utc))
+    assert [cap for _, cap, _ in actions.calls] == ["service.ticket.note.create"]
+    assert store.unsupported_handoff_delivery(200001)["state"] == "retry_pending"
+    store.close()
+
+
 def test_helpdesk_ticket_never_requeued_even_with_handoff_promotion(tmp_path):
     from datetime import datetime, timezone
     from jason_runtime.unsupported_ticket_triage import render_triage_note
