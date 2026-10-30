@@ -515,6 +515,7 @@ class NoteReadStub(ReadStub):
             "id": 200001, "companyID": 777, "queueID": 29683489,
             "status": 1, "assignedResourceID": None,
         }
+        self.current_ticket_result_override = None
 
     def execute(self, capability, arguments):
         if capability == "service.ticket.notes.search":
@@ -523,7 +524,9 @@ class NoteReadStub(ReadStub):
         if capability == "service.ticket.search":
             self.calls.append((capability, dict(arguments)))
             assert arguments == {"resource_id": 200001, "page_size": 2}
-            return {"status": "succeeded", "evidence": {"data": {"items": [dict(self.current_ticket)]}}}
+            items = ([dict(self.current_ticket)] if self.current_ticket_result_override is None
+                     else self.current_ticket_result_override)
+            return {"status": "succeeded", "evidence": {"data": {"items": items}}}
         return super().execute(capability, arguments)
 
 
