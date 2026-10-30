@@ -177,6 +177,7 @@ def collect_vulscan_v2_scoped_inventory(
                         kb=kb, client_id=site.client_id, policy_id=policy_uid,
                         device_id=uid, device_uid=uid, hostname=hostname,
                         identity_verified=True,
+                        site_uid=site.site_uid,
                         policy_kb_attribution_verified=True,
                         policy_kb_attribution_reference=provenance.source_reference,
                         policy_kb_attribution_checked_at=provenance.observed_at,
