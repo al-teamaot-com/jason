@@ -363,12 +363,27 @@ def main() -> int:
         # A closed protected breaker requires no further authority requests.
         # This remains a successful no-op even before LKG commissioning.
         if (control.get("circuit_breaker") or {}).get("state") == "closed":
+            # Preserve the exact historical attempt ledger across closeout.
+            # Clearing the list would destroy evidence of denied/consumed
+            # permits and obscure an Owner-approved manual root recovery.
+            history = previous.get("attempts", [])
+            if (not isinstance(history, list) or len(history) > 3
+                    or not all(isinstance(item, dict)
+                               and isinstance(item.get("requested_at"), str)
+                               and isinstance(item.get("revision"), str)
+                               for item in history)):
+                raise ValueError("invalid closed-breaker recovery attempt history")
             result = {
                 "schema_version": "1.0", "observed_at": utcnow().isoformat(),
                 "breaker_state": "closed", "status": "already_closed",
                 "next_action": "none", "lkg_revision": expected_sha,
+                "breaker_id": previous.get("breaker_id"),
+                "clean_observations": previous.get("clean_observations", []),
+                "attempts": history,
                 "last_revalidation_attempt": previous.get("last_revalidation_attempt"),
             }
+            if isinstance(previous.get("last_preflight_failure"), dict):
+                result["last_preflight_failure"] = previous["last_preflight_failure"]
             atomic_json(track, result)
             print("RELEASE_BREAKER_RECOVERY=already_closed action=none", flush=True)
             return 0
