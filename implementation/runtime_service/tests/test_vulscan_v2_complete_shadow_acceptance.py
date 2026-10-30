@@ -94,6 +94,7 @@ def build(tmp_path, *, patch_state=None, gate=None, ms_grant=None):
         can_read_microsoft_public_docs=ms_grant or (lambda: True),
         authority_gate=gate,
         microsoft_transport=transport,
+        microsoft_source_clock=lambda: NOW,
     )
     return flow, store, reads, transport
 
