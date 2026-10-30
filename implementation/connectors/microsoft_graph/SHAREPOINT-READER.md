@@ -50,3 +50,9 @@ The inactive MicrosoftSharePointRuntime builder in implementation/runtime_servic
 ## Unregistered provider-neutral capability catalog
 
 The build_sharepoint_read_manifest factory declares the four reusable read-only library/document operations under the canonical Microsoft Graph provider. This manifest is deliberately **not registered into the active orchestrator or MCP catalog** while information-release and complete live provider acceptance remain outstanding.
+
+## October 30 integration-gate review: PRs #2125 and #2128
+
+## October 30 integration-gate review: PRs #2125 and #2128
+
+The required repository-hygiene gate found that #2125 and #2128 also modify `implementation/connectors/core/openbao_secrets.py`. Their inspected patches add distinct `it_glue.readwrite` and `microsoft_graph.user_create` secret paths and field allowlists; this SharePoint PR adds only `microsoft_graph.sharepoint_read` keys and a separately scoped certificate secret. The changes are additive and conceptually compatible, but both overlapping workstreams must survive later integration and receive full secret lifecycle regression tests. **Integration coordination: #2125, #2128** is declared in this PR body. No live secret provisioning, credential values or production approval is implied.
