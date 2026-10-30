@@ -45,7 +45,7 @@ Autotask ticket queue/status only, via Central Orchestrator and direct_provider_
 
 ## 4. Initial Identification
 
-Revalidate exact ticket number/ID/company, current queue Jason, owner, source version, diagnostic state and managed note readback before any update.
+Re-read the exact current ticket through governed `service.ticket.search` immediately before any queue/status update. Require a unique result and unchanged ticket ID, company, queue, status and assignment versus the current worker candidate. Revalidate source version, diagnostic state and managed note readback. A human change or read failure fails closed.
 
 ## 5. Expected State
 
@@ -57,7 +57,7 @@ States identified, needs_device_identity or needs_human_review or other review-r
 
 ## 7. Diagnostic Workflow
 
-Read governed queue snapshot, exact internal notes, prior diagnostic evidence and post-update provider verification; a note or queued action alone does not prove a handoff.
+Read governed queue snapshot, a fresh exact-ID Autotask ticket immediately before mutation, exact internal notes, prior diagnostic evidence and post-update provider verification; a note or queued action alone does not prove a handoff.
 
 ## 8. Decision Gates
 
@@ -113,7 +113,7 @@ Governed ticket search and notes search; exact separately promoted service.ticke
 
 ## 21. Acceptance Test
 
-Test a controlled simulated Jason-owned needs_human_review ticket, evidence-only read_only_assessed and needs_diagnostic_evidence cases, unpromoted denial, partial readback and retry, duplicate suppression, and human-owned exclusions. Live handoff only when a permitted pilot ticket naturally qualifies and the exact Owner promotion is present.
+Test a controlled simulated Jason-owned needs_human_review ticket, evidence-only read_only_assessed and needs_diagnostic_evidence cases, unpromoted denial, partial readback and retry, duplicate suppression, and human-owned exclusions. Inject changes in the fresh ticket's company, queue, status and assignee; require zero ticket updates and a durable bounded retry. Live handoff only when a permitted pilot ticket naturally qualifies and the exact Owner promotion is present.
 
 ## 22. Section Goal Closure
 
