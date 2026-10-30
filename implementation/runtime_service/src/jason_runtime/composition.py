@@ -1352,6 +1352,8 @@ def _deterministic_resource_contracts(
                 "fact_hints": fact_hints,
                 "canonical_facts": canonical_facts,
                 "collection_fact": collection_fact,
+                "query_shape": metadata.get("query_shape", ""),
+                "report_timezone": metadata.get("report_timezone", "America/New_York"),
                 "selector_required": selector_required,
             }
         )
