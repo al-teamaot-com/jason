@@ -9,6 +9,7 @@ from typing import Any, Callable, Mapping
 from datetime import datetime, timezone
 
 from .vulscan_governed_patch_source import VerifiedPatchTarget
+from .vulscan_owner_disposition_evidence import VerifiedPatchReviewDisposition
 from .vulscan_microsoft_public_source import (
     BoundedOfficialMicrosoftHTTP, GovernedMicrosoftKBReleaseReader,
 )
@@ -23,6 +24,7 @@ def build_vulscan_v2_shadow_workflow(
     authorized_site_inventory_read: Callable[[], ApprovedDattoSiteInventory],
     governed_read: Callable[[str, Mapping[str, Any]], Mapping[str, Any]],
     can_read_microsoft_public_docs: Callable[[], bool],
+    governed_review_disposition_read: Callable[[VerifiedPatchTarget], VerifiedPatchReviewDisposition] | None = None,
     authority_gate: Callable[[], bool] | None = None,
     microsoft_transport: BoundedOfficialMicrosoftHTTP | None = None,
     microsoft_source_clock: Callable[[], datetime] | None = None,
@@ -47,5 +49,6 @@ def build_vulscan_v2_shadow_workflow(
         ),
         patch_read=governed_read,
         microsoft_release_reader=reader,
+        review_disposition_read=governed_review_disposition_read,
         activation_verified=authority_gate,
     )
