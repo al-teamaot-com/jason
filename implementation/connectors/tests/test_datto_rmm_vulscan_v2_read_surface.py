@@ -64,3 +64,14 @@ def test_canonical_policy_and_site_reads_are_low_risk_observe_only():
     assert {ENDPOINT_PATCH_POLICY_SEARCH, MANAGEMENT_SITE_PATCH_SEARCH} <= provider.capabilities
     assert endpoint_patch_policy_search(now).capability_name == ENDPOINT_PATCH_POLICY_SEARCH
     assert management_site_patch_search(now).capability_name == MANAGEMENT_SITE_PATCH_SEARCH
+
+
+def test_assigned_policy_list_and_items_normalize_into_bounded_record():
+    raw = [{"policyUid": "weekly-workstations"}]
+    assert DattoRmmConnector._normalize_result(
+        "datto_rmm.device.patch_policies.list", raw) == {"policies": raw}
+    assert DattoRmmConnector._normalize_result(
+        "datto_rmm.device.patch_policies.list", {"items": raw, "pageDetails": {"totalCount": 1}}) == {
+            "policies": raw, "pageDetails": {"totalCount": 1}}
+    with pytest.raises(ValueError):
+        DattoRmmConnector._normalize_result("datto_rmm.device.patch_policies.list", {})
