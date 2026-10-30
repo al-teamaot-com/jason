@@ -3,6 +3,9 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
+from types import SimpleNamespace
+import base64
+import hashlib
 
 import pytest
 from openpyxl import Workbook
@@ -10,6 +13,7 @@ from openpyxl import Workbook
 from jason_runtime.kfs_customer_document_evidence import (
     ApprovedCustomerEvidenceIndex,
     ApprovedSharePointWorkbook,
+    document_from_governed_sharepoint_reads,
 )
 
 NOW = datetime(2026, 10, 30, tzinfo=timezone.utc)
@@ -251,3 +255,100 @@ def test_unrelated_workbook_class_is_rejected():
                 ("S/N:", "1G55503749"),
             ])],
         )
+
+
+def example_governed_reader_results():
+    workbook = workbook_bytes([("Client", [
+        ("CO. NAME:", "Marcella Operator LLC"),
+        ("S/N:", "1G55503749"),
+    ])])
+    metadata = {
+        "item": {
+            "id": "file-123", "site_id": SITE, "drive_id": DRIVE,
+            "name": "Copier Delivery Receipt.xlsx",
+            "eTag": '"version-17"',
+            "size": len(workbook),
+            "lastModifiedDateTime": "2026-10-29T14:15:00Z",
+            "webUrl": "https://aot.sharepoint.com/copiers/file-123",
+            "file": {
+                "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            },
+        }
+    }
+    content = {
+        "content_b64": base64.b64encode(workbook).decode("ascii"),
+        "sha256": hashlib.sha256(workbook).hexdigest(),
+        "byte_length": len(workbook),
+        "encoding": "base64",
+    }
+    def result(op, data):
+        return SimpleNamespace(provider="microsoft_graph", capability=op, data=data)
+    return (
+        result("knowledge.document.metadata.read", metadata),
+        result("knowledge.document.content.read", content),
+        result("knowledge.document.metadata.read", dict(metadata)),
+    )
+
+
+def read_governed_result(*, before=None, content=None, after=None, item="file-123"):
+    original = example_governed_reader_results()
+    return document_from_governed_sharepoint_reads(
+        tenant_id=TENANT, site_id=SITE, drive_id=DRIVE, item_id=item,
+        metadata_before=original[0] if before is None else before,
+        content_result=original[1] if content is None else content,
+        metadata_after=original[2] if after is None else after,
+    )
+
+
+def test_governed_sharepoint_reader_evidence_can_feed_serial_index():
+    doc = read_governed_result()
+    match = index(doc).match(serial_number="1G55503749")
+    assert match.status == "verified"
+    assert match.customer_name == "Marcella Operator LLC"
+    assert match.evidence[0].source_etag == '"version-17"'
+
+
+def test_rejects_source_version_change_across_three_governed_reads():
+    before, content, after = example_governed_reader_results()
+    changed = dict(after.data["item"], eTag='"version-18"')
+    after = SimpleNamespace(provider="microsoft_graph", capability=after.capability,
+                            data={"item": changed})
+    with pytest.raises(ValueError, match="changed during read"):
+        read_governed_result(before=before, content=content, after=after)
+
+
+def test_rejects_governed_content_digest_mismatch():
+    before, content, after = example_governed_reader_results()
+    invalid = SimpleNamespace(provider="microsoft_graph", capability=content.capability,
+                              data={**content.data, "sha256": "0" * 64})
+    with pytest.raises(ValueError, match="digest validation failed"):
+        read_governed_result(before=before, content=invalid, after=after)
+
+
+def test_rejects_governed_document_identity_mismatch():
+    with pytest.raises(PermissionError, match="authorized selectors"):
+        read_governed_result(item="different-file")
+
+
+def test_rejects_ungoverned_content_provider_substitution():
+    before, content, after = example_governed_reader_results()
+    forged = SimpleNamespace(provider="generic_graph", capability=content.capability, data=content.data)
+    with pytest.raises(PermissionError, match="governed Microsoft Graph"):
+        read_governed_result(before=before, content=forged, after=after)
+
+
+def test_rejects_incorrect_document_mime_even_with_xlsx_name():
+    before, content, after = example_governed_reader_results()
+    modified = dict(before.data["item"])
+    modified["file"] = {"mimeType": "application/octet-stream"}
+    result = SimpleNamespace(provider="microsoft_graph", capability=before.capability,
+                             data={"item": modified})
+    with pytest.raises(ValueError, match="media type"):
+        read_governed_result(before=result, content=content, after=result)
+
+
+def test_rejects_wrong_governed_operation():
+    before, content, after = example_governed_reader_results()
+    invalid = SimpleNamespace(provider="microsoft_graph", capability="knowledge.document.search", data=content.data)
+    with pytest.raises(PermissionError, match="unexpected governed"):
+        read_governed_result(before=before, content=invalid, after=after)
