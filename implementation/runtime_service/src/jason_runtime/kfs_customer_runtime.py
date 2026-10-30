@@ -176,8 +176,9 @@ def build_governed_copier_evidence_cache(
     # A root-managed source manifest alone does not establish Entra consent.
     # Verify the dedicated, validated SharePoint client/tenant boundary before
     # constructing the AOT service binding or making any provider request.
+    boundary_repository = SQLiteClientBoundaryRepository(runtime.store)
     require_validated_sharepoint_service_boundary(
-        boundaries=SQLiteClientBoundaryRepository(runtime.store),
+        boundaries=boundary_repository,
         tenant_id=manifest.tenant_id,
         expected_client_id="client-aot-internal",
         expected_domain="teamaot.com",
@@ -211,7 +212,21 @@ def build_governed_copier_evidence_cache(
         principal_id=manifest.principal_id,
         sources=manifest.sources,
     )
+    def verify_current_approval(checked_at: datetime) -> None:
+        # A revoked or replaced on-disk grant is effective on the next report,
+        # even if the cached document claims have not reached their TTL.
+        current = load_approved_manifest(manifest_path, now=checked_at)
+        if current != manifest:
+            raise PermissionError("approved AOT copier document source manifest changed")
+        require_validated_sharepoint_service_boundary(
+            boundaries=boundary_repository,
+            tenant_id=manifest.tenant_id,
+            expected_client_id="client-aot-internal",
+            expected_domain="teamaot.com",
+        )
+
     return GovernedAotCopierEvidenceCache(
         loader=loader, max_age_hours=24,
         authorization_expires_at=manifest.grant_expires_at,
+        authorization_check=verify_current_approval,
     )
