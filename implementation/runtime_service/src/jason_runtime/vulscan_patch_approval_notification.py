@@ -170,6 +170,30 @@ def prepare_patch_notifications(
     return tuple(notices)
 
 
+def verify_notification_against_fresh_evidence(
+    notification: PreparedPatchNotification,
+    observations: Iterable[PatchApprovalObservation],
+    metadata_by_kb: Mapping[str, MicrosoftKBMetadata],
+    *,
+    now: datetime,
+) -> bool:
+    """Fail closed if a governed re-read no longer supports this exact event.
+
+    Real integrations must obtain these facts through the authorized per-client
+    provider read and official Microsoft evidence source before calling here.
+    No direct source access or cross-client expansion is performed in this module.
+    """
+    latest = prepare_patch_notifications(observations, metadata_by_kb, now=now)
+    return any(
+        candidate.idempotency_key == notification.idempotency_key
+        and candidate.kb == notification.kb
+        and candidate.stage == notification.stage
+        and candidate.released == notification.released
+        and candidate.policy_ids == notification.policy_ids
+        for candidate in latest
+    )
+
+
 @dataclass
 class CanonicalPatchTeamsNotifier:
     """Authorized sender adapter; no second Teams implementation or approval.
