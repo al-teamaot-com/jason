@@ -45,6 +45,11 @@ class VerifiedPatchTarget:
     superseded: bool = False
     actively_exploited: bool = False
     exploitation_verified: bool = False
+    # Separate positive proof that this policy, not merely the effective
+    # device status or a second assigned policy, disapproved this exact KB.
+    policy_kb_attribution_verified: bool = False
+    policy_kb_attribution_reference: str = ""
+    policy_kb_attribution_checked_at: datetime | None = None
 
 
 def _canonical_record(value: Any, *, capability: str) -> Mapping[str, Any]:
@@ -124,6 +129,14 @@ def collect_governed_patch_observations(
     for target in requested:
         if not isinstance(target, VerifiedPatchTarget) or target.identity_verified is not True:
             raise VulscanPatchEvidenceError("missing verified CI/Datto association")
+        checked = target.policy_kb_attribution_checked_at
+        if (target.policy_kb_attribution_verified is not True
+                or not isinstance(target.policy_kb_attribution_reference, str)
+                or not 0 < len(target.policy_kb_attribution_reference.strip()) <= 250
+                or not isinstance(checked, datetime) or checked.tzinfo is None
+                or checked > now or (now - checked).total_seconds() > 900):
+            raise VulscanPatchEvidenceError(
+                "missing or stale exact KB-to-policy attribution proof")
         if (not _KB.fullmatch(target.kb.upper())
                 or any(not str(v).strip() or len(str(v)) > 200
                        for v in (target.client_id, target.policy_id, target.device_id,
