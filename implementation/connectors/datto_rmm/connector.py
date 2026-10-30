@@ -16,6 +16,7 @@ class DattoRmmConnector(ConnectorBase):
     adaptive_collection_keys = {
         "datto_rmm.site.search": "sites",
         "datto_rmm.device.patches.list": "patches",
+        "datto_rmm.site.patches.list": "patches",
     }
     provider_name = "datto_rmm"
     logical_secret = "datto_rmm.readonly"
@@ -29,6 +30,7 @@ class DattoRmmConnector(ConnectorBase):
             "datto_rmm.device.audit.get",
             "datto_rmm.device.software.list",
             "datto_rmm.device.patches.list",
+            "datto_rmm.device.patch_policies.list",
         }
     )
 
@@ -41,6 +43,8 @@ class DattoRmmConnector(ConnectorBase):
             "datto_rmm.device.audit.get",
             "datto_rmm.device.software.list",
             "datto_rmm.device.patches.list",
+            "datto_rmm.device.patch_policies.list",
+            "datto_rmm.site.patches.list",
             "datto_rmm.account.alerts.open",
             "datto_rmm.site.search",
             "datto_rmm.alerts.list",
@@ -1313,6 +1317,25 @@ class DattoRmmConnector(ConnectorBase):
             return f"/api/v2/audit/device/{device_uid}/software", {
                 "page": max(int(arguments.get("page", 1)), 1),
                 "max": max(1, min(int(arguments.get("max", 50)), 50)),
+            }
+
+        if capability == "datto_rmm.device.patch_policies.list":
+            device_uid = str(
+                arguments.get("device_uid") or arguments.get("resource_id") or ""
+            ).strip()
+            if not re.fullmatch(r"[A-Za-z0-9-]{1,80}", device_uid):
+                raise ValueError("device_uid or resource_id is required as exact safe UID")
+            return f"/api/v2/device/{device_uid}/policies/patch-management", None
+
+        if capability == "datto_rmm.site.patches.list":
+            site_uid = str(
+                arguments.get("site_uid") or arguments.get("resource_id") or ""
+            ).strip()
+            if not re.fullmatch(r"[A-Za-z0-9-]{1,80}", site_uid):
+                raise ValueError("site_uid or resource_id is required as exact safe UID")
+            return f"/api/v2/site/{site_uid}/patches", {
+                "page": max(0, min(int(arguments.get("page", 0)), 100000)),
+                "max": max(1, min(int(arguments.get("max", 250)), 250)),
             }
 
         if capability == "datto_rmm.device.patches.list":
