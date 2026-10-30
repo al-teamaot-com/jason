@@ -90,6 +90,9 @@ def ticket(*, ticket_id=200001, title="Windows License Status failed",
         source_version=version, context={
             "id": ticket_id, "ticketNumber": f"T20261029.{ticket_id}",
             "title": title, "companyID": company_id,
+            "queueID": 29683489 if queue == "Jason" else 29682833,
+            "status": 1 if status == "New" else 7,
+            "assignedResourceID": None,
             "configurationItemID": 1100,
             "_jason_source_status_label": status,
             "_jason_assigned_elsewhere": assigned,
@@ -114,6 +117,9 @@ def test_fixed_command_category_mapping():
     assert category_for("Service RocketAgent is stopped", "") == "rocketagent_service"
     assert category_for("Space Issue", "") == "disk_capacity"
     assert category_for("Linux logs cleared", "") == "security_review"
+    assert category_for("Forwarding Phishing that was sent to a coworker", "") == "security_review"
+    assert category_for("[Get Duo Security status AOT Ver 05302024] - : Not Installed (No variables) for HOST-A", "") == "security_review"
+    assert category_for("Thank You for Your Payment", "") == "general"
     assert category_for("General printer question", "") == "general"
     for script in (WINDOWS_LICENSING_READ, WINDOWS_SERVICE_READ, WINDOWS_DISK_READ):
         assert "ConvertTo-Json" in script
@@ -508,11 +514,22 @@ class NoteReadStub(ReadStub):
     def __init__(self):
         super().__init__()
         self.notes = [{"id": 8, "title": "Ticket arrived", "description": "Internal history"}]
+        self.current_ticket = {
+            "id": 200001, "companyID": 777, "queueID": 29683489,
+            "status": 1, "assignedResourceID": None,
+        }
+        self.current_ticket_result_override = None
 
     def execute(self, capability, arguments):
         if capability == "service.ticket.notes.search":
             self.calls.append((capability, dict(arguments)))
             return {"status": "succeeded", "evidence": {"data": {"items": list(self.notes)}}}
+        if capability == "service.ticket.search":
+            self.calls.append((capability, dict(arguments)))
+            assert arguments == {"resource_id": 200001, "page_size": 2}
+            items = ([dict(self.current_ticket)] if self.current_ticket_result_override is None
+                     else self.current_ticket_result_override)
+            return {"status": "succeeded", "evidence": {"data": {"items": items}}}
         return super().execute(capability, arguments)
 
 
@@ -673,6 +690,147 @@ def test_human_review_handoff_requires_separate_promotion_and_queue_status_readb
     assert store.unsupported_handoff_delivery(200001)["state"] == "verified"
     worker._maybe_publish_unsupported_triage_note(source, record, now=now)
     assert len(actions.calls) == 3
+    store.close()
+
+
+@pytest.mark.parametrize("state,category", [
+    ("read_only_assessed", "disk_capacity"),
+    ("needs_diagnostic_evidence", "user_device_settings"),
+])
+@pytest.mark.parametrize("handoff_promoted", [False, True])
+def test_unresolved_triage_outcomes_handoff_only_with_exact_promotion(
+    tmp_path, state, category, handoff_promoted,
+):
+    from datetime import datetime, timezone
+    from jason_runtime.unsupported_ticket_triage import render_triage_note
+
+    source = ticket(title="Ticket still requires technician", queue="Jason")
+    reads = NoteReadStub()
+    worker, store, _ = make_worker(tmp_path, [source], reads)
+    worker.promotion_store = PromotionForTriage(handoff=handoff_promoted)
+    actions = NoteActionStub(reads)
+    worker.actions = actions
+    evidence = {"company_verified": True, "ticket_id": 200001}
+    evidence["note_draft"] = render_triage_note(
+        ticket_number=source.context["ticketNumber"],
+        state=state, category=category, evidence=evidence,
+        next_step="Technician must verify outstanding issue before closing.",
+    )
+    record = {
+        "state": state, "evidence": evidence,
+        "source_version": source.source_version,
+        "ticket_number": source.context["ticketNumber"],
+    }
+    worker._maybe_publish_unsupported_triage_note(
+        source, record, now=datetime.now(timezone.utc),
+    )
+    expected = ["service.ticket.note.create"]
+    if handoff_promoted:
+        expected.append("service.ticket.update")
+    assert [cap for _, cap, _ in actions.calls] == expected
+    if handoff_promoted:
+        assert store.unsupported_handoff_delivery(200001)["state"] == "verified"
+    else:
+        assert store.unsupported_handoff_delivery(200001) is None
+    worker._maybe_publish_unsupported_triage_note(
+        source, record, now=datetime.now(timezone.utc),
+    )
+    assert [cap for _, cap, _ in actions.calls] == expected
+    store.close()
+
+
+@pytest.mark.parametrize("changed_field,new_value", [
+    ("companyID", 888),
+    ("queueID", 29682833),
+    ("status", 7),
+    ("assignedResourceID", 1234),
+])
+def test_handoff_rechecks_live_ticket_and_never_overwrites_human_changes(
+    tmp_path, changed_field, new_value,
+):
+    from datetime import datetime, timezone
+    from jason_runtime.unsupported_ticket_triage import render_triage_note
+
+    source = ticket(title="Unresolved issue", queue="Jason")
+    reads = NoteReadStub()
+    reads.current_ticket[changed_field] = new_value
+    worker, store, _ = make_worker(tmp_path, [source], reads)
+    worker.promotion_store = PromotionForTriage(handoff=True)
+    actions = NoteActionStub(reads)
+    worker.actions = actions
+    evidence = {"ticket_id": 200001, "company_verified": True}
+    evidence["note_draft"] = render_triage_note(
+        ticket_number=source.context["ticketNumber"],
+        state="needs_diagnostic_evidence", category="user_device_settings",
+        evidence=evidence, next_step="Human follow-up is required.",
+    )
+    worker._maybe_publish_unsupported_triage_note(source, {
+        "state": "needs_diagnostic_evidence", "evidence": evidence,
+        "source_version": "v1", "ticket_number": source.context["ticketNumber"],
+    }, now=datetime.now(timezone.utc))
+    assert [cap for _, cap, _ in actions.calls] == ["service.ticket.note.create"]
+    handoff = store.unsupported_handoff_delivery(200001)
+    assert handoff["state"] == "retry_pending"
+    assert handoff["last_error"] == "OperationalAutonomyError"
+    store.close()
+
+
+@pytest.mark.parametrize("count", [0, 2])
+def test_handoff_rejects_missing_or_duplicate_exact_ticket_readback(tmp_path, count):
+    from datetime import datetime, timezone
+    from jason_runtime.unsupported_ticket_triage import render_triage_note
+
+    source = ticket(title="Unresolved issue", queue="Jason")
+    reads = NoteReadStub()
+    reads.current_ticket_result_override = [dict(reads.current_ticket) for _ in range(count)]
+    worker, store, _ = make_worker(tmp_path, [source], reads)
+    worker.promotion_store = PromotionForTriage(handoff=True)
+    actions = NoteActionStub(reads)
+    worker.actions = actions
+    evidence = {"ticket_id": 200001, "company_verified": True}
+    evidence["note_draft"] = render_triage_note(
+        ticket_number=source.context["ticketNumber"],
+        state="needs_diagnostic_evidence", category="user_device_settings",
+        evidence=evidence, next_step="Technician must review this unresolved issue.",
+    )
+    worker._maybe_publish_unsupported_triage_note(source, {
+        "state": "needs_diagnostic_evidence", "evidence": evidence,
+        "source_version": "v1", "ticket_number": source.context["ticketNumber"],
+    }, now=datetime.now(timezone.utc))
+    assert [cap for _, cap, _ in actions.calls] == ["service.ticket.note.create"]
+    assert store.unsupported_handoff_delivery(200001)["state"] == "retry_pending"
+    store.close()
+
+
+@pytest.mark.parametrize("status_label", [
+    "Waiting Customer", "Waiting Device Access", "On Hold", "Complete", "",
+])
+def test_unresolved_triage_does_not_overwrite_waiting_or_unknown_status(
+    tmp_path, status_label,
+):
+    from datetime import datetime, timezone
+    from jason_runtime.unsupported_ticket_triage import render_triage_note
+
+    source = ticket(title="Unresolved but already waiting", queue="Jason",
+                    status=status_label)
+    reads = NoteReadStub()
+    worker, store, _ = make_worker(tmp_path, [source], reads)
+    worker.promotion_store = PromotionForTriage(handoff=True)
+    actions = NoteActionStub(reads)
+    worker.actions = actions
+    evidence = {"company_verified": True, "ticket_id": 200001}
+    evidence["note_draft"] = render_triage_note(
+        ticket_number=source.context["ticketNumber"],
+        state="needs_diagnostic_evidence", category="user_device_settings",
+        evidence=evidence, next_step="Preserve the ticket's waiting dependency.",
+    )
+    worker._maybe_publish_unsupported_triage_note(source, {
+        "state": "needs_diagnostic_evidence", "evidence": evidence,
+        "source_version": "v1", "ticket_number": source.context["ticketNumber"],
+    }, now=datetime.now(timezone.utc))
+    assert [cap for _, cap, _ in actions.calls] == ["service.ticket.note.create"]
+    assert store.unsupported_handoff_delivery(200001) is None
+    assert not any(name == "service.ticket.search" for name, _ in reads.calls)
     store.close()
 
 
