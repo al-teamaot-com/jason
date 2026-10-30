@@ -498,3 +498,62 @@ def test_original_attempt_budget_stays_exhausted_even_if_preflight_would_pass():
     assert state["status"] == "blocked"
     assert state["next_action"] == "operator_review_recovery_attempt_budget_exhausted"
     assert len(state["attempts"]) == 2
+
+
+
+def test_native_preflight_matches_all_ten_protected_lkg_fields(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    root = tmp_path / "release"
+    protected = root / "protected-readback"
+    protected.mkdir(parents=True)
+    recorded = {field: "same-value" for field in recovery.PROTECTED_LKG_FIELDS}
+    recorded["revision"] = SHA
+    recorded["scheduled_control_units"] = {"jason-release-control.timer": "active"}
+    recorded["complete"] = True
+    control = {"schema_version": "1.0",
+               "circuit_breaker": {"state": "open"},
+               "last_known_good": {"manifest": recorded}}
+    (protected / "production-control-state.json").write_text(json.dumps(control))
+    installed = tmp_path / ".local/lib/jason/release_manager_host_runner.py"
+    installed.parent.mkdir(parents=True)
+    installed.write_text("# fake module for sandbox test\n")
+    monkeypatch.setattr(recovery.Path, "home", classmethod(lambda cls: tmp_path))
+    observed = dict(recorded)
+    fake = SimpleNamespace(capture_production_manifest=lambda revision: observed)
+    monkeypatch.setitem(sys.modules, "release_manager_host_runner", fake)
+    recovery.native_revalidation_preflight(root, SHA)
+    for field in recovery.PROTECTED_LKG_FIELDS:
+        observed[field] = "different"
+        with pytest.raises(recovery.NativePreflightError) as failure:
+            recovery.native_revalidation_preflight(root, SHA)
+        assert failure.value.code == "protected_lkg_mismatch_" + field
+        observed[field] = recorded[field]
+
+
+def test_native_preflight_does_not_dump_capture_exception_secrets(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    root = tmp_path / "release"
+    protected = root / "protected-readback"
+    protected.mkdir(parents=True)
+    recorded = {field: "same-value" for field in recovery.PROTECTED_LKG_FIELDS}
+    recorded["revision"] = SHA
+    recorded["complete"] = True
+    (protected / "production-control-state.json").write_text(json.dumps({
+        "schema_version": "1.0",
+        "circuit_breaker": {"state": "open"},
+        "last_known_good": {"manifest": recorded},
+    }))
+    host = tmp_path / ".local/lib/jason/release_manager_host_runner.py"
+    host.parent.mkdir(parents=True)
+    host.write_text("# isolated test fake\n")
+    monkeypatch.setattr(recovery.Path, "home", classmethod(lambda cls: tmp_path))
+    def capture(_):
+        raise RuntimeError("SECRET=must-never-be-persisted")
+    monkeypatch.setitem(
+        sys.modules, "release_manager_host_runner",
+        SimpleNamespace(capture_production_manifest=capture),
+    )
+    with pytest.raises(recovery.NativePreflightError) as failure:
+        recovery.native_revalidation_preflight(root, SHA)
+    assert failure.value.code == "production_manifest_precheck_failed"
+    assert "SECRET" not in str(failure.value)
