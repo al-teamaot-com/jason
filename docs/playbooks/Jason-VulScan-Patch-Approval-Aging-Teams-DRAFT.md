@@ -102,3 +102,15 @@ No new standing authority. Any future unattended notification requires exact own
 - Decide whether day-21 escalation is a second Teams message only (recommended) or also changes ticket ownership (not authorized by this draft).
 - Check any active ten-day NOT_APPROVED waiter migration against the original patch workflow.
 - **Do not merge, promote, deploy, or activate** from this draft.
+
+
+## V2 refinement decisions (2026-10-30)
+1. **Vendor release versus revision:** use the authoritative security update release date; record later revisions separately and do not reset the waiting clock merely because KB metadata changes. A genuinely new superseding update receives its own policy decision and documented release-date basis.
+2. **Per-policy applicability:** group by exact patch + Datto patch policy, and resolve client/site/device applicability independently. Never infer that global approval implies every policy is approved.
+3. **Separate Teams reminder from ticket handoff:** Day 21 is an owner Teams escalation, **not** automatic reassignment of individual tickets. Reconcile the existing 10-day NOT_APPROVED ticket handoff before any runtime activation.
+4. **Actively exploited exception:** independently verified exploited-in-the-wild/high-priority emergency criteria can trigger immediate review; they grant no automatic approval or remediation authority.
+5. **Known issues / supersedence:** source all summaries, applicability and known issues from authoritative Microsoft documentation. Record article retrieval timestamp and source. Unknown must remain unknown.
+6. **Acknowledgment and deferral:** use existing governed, signed interaction/approval machinery *only after* separate exact workflow review. Until then accept read-only monitoring of decisions recorded through existing approved technician processes. A notification or card click alone never changes patch policy.
+
+## Implementation boundary
+A first deterministic implementation exists in `implementation/runtime_service/src/jason_runtime/vulscan_patch_approval_aging.py` with unit tests. It produces **notification intent only**. It does not gather authoritative release data, write scheduler state, invoke canonical Teams transport, handle acknowledgments or change Autotask. No rule is deployed or autonomously promoted. The remaining integration work and provider-backed acceptance are mandatory before this draft can be considered operational.
