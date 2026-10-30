@@ -246,3 +246,20 @@ def test_current_patch_scope_and_kb_text_cannot_drift_before_send():
     revised = {"KB5123456": meta(summary="Microsoft changed the documented findings")}
     assert not verify_notification_against_fresh_evidence(
         notice, [obs()], revised, now=NOW)
+
+
+def test_interrupted_send_is_reconciled_without_reposting(tmp_path):
+    store = SQLiteOperationalWorkStore(tmp_path / "interrupted.sqlite3")
+    key = store.queue_patch_approval_notification(
+        notification=plan([obs()])[0], now=NOW - timedelta(minutes=12))
+    assert store.claim_patch_approval_notification(
+        event_key=key, now=NOW - timedelta(minutes=10))
+    notifier = SimpleNamespace(send_prepared=Mock())
+    assert drain_patch_approval_notifications(
+        store=store, notifier=notifier,
+        verify_current=lambda _: True, now=NOW) == 0
+    notifier.send_prepared.assert_not_called()
+    row = store._connection.execute(
+        "SELECT state,last_error FROM autonomy_teams_notification_outbox"
+    ).fetchone()
+    assert tuple(row) == ("unverified", "send_interrupted_delivery_unknown")
