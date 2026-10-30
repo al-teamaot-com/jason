@@ -162,12 +162,25 @@ def build_governed_copier_evidence_cache(
         DOCUMENT_READ_OPERATIONS,
     )
     from connectors.microsoft_graph.sharepoint_connector import GovernedSharePointConnector
-    from .microsoft_sharepoint import build_microsoft_sharepoint_runtime
+    from kernel.client_boundaries import SQLiteClientBoundaryRepository
+    from .microsoft_sharepoint import (
+        build_microsoft_sharepoint_runtime,
+        require_validated_sharepoint_service_boundary,
+    )
 
     runtime = build_microsoft_sharepoint_runtime(
         boundary_db=boundary_db, openbao_url=openbao_url,
         role_id_path=role_id_path, secret_id_path=secret_id_path,
         transport=transport,
+    )
+    # A root-managed source manifest alone does not establish Entra consent.
+    # Verify the dedicated, validated SharePoint client/tenant boundary before
+    # constructing the AOT service binding or making any provider request.
+    require_validated_sharepoint_service_boundary(
+        boundaries=SQLiteClientBoundaryRepository(runtime.store),
+        tenant_id=manifest.tenant_id,
+        expected_client_id="client-aot-internal",
+        expected_domain="teamaot.com",
     )
     binding = AotServiceBinding(
         status="active", organization_id="aot",
