@@ -18,6 +18,9 @@ def target(**changes):
         kb="KB5123456", client_id="company-12", policy_id="weekly-workstations",
         device_id="ci-10", device_uid="rmm-10", hostname="PC-10",
         identity_verified=True,
+        policy_kb_attribution_verified=True,
+        policy_kb_attribution_reference="governed-fixture-per-policy-attribution",
+        policy_kb_attribution_checked_at=NOW,
     )
     values.update(changes)
     return VerifiedPatchTarget(**values)
