@@ -758,17 +758,38 @@ class SQLiteOperationalWorkStore:
         ).fetchall()
         return tuple(dict(row) for row in rows)
 
-    def claim_patch_approval_notification(self, *, event_key: str) -> bool:
+    def claim_patch_approval_notification(
+        self, *, event_key: str, now: datetime | None = None,
+    ) -> bool:
         """Claim before sending: uncertain sends require reconciliation, not replay."""
+        claimed_at = now or datetime.now(timezone.utc)
+        if claimed_at.tzinfo is None:
+            raise ValueError("patch send claim requires timezone-aware time")
         with self._connection:
             result = self._connection.execute(
                 "UPDATE autonomy_teams_notification_outbox "
-                "SET state='sending', attempts=attempts+1 "
+                "SET state='sending', attempts=attempts+1, next_due_at=? "
                 "WHERE event_key=? AND state='pending' "
                 "AND event_type='patch_approval_aging'",
-                (event_key,),
+                (claimed_at.isoformat(), event_key),
             )
         return result.rowcount == 1
+
+    def reconcile_inflight_patch_approval_notifications(
+        self, *, older_than: datetime,
+    ) -> int:
+        """Reconcile interrupted sends without ever replaying a Teams POST."""
+        if older_than.tzinfo is None:
+            raise ValueError("patch send recovery requires timezone-aware time")
+        with self._connection:
+            result = self._connection.execute(
+                "UPDATE autonomy_teams_notification_outbox "
+                "SET state='unverified', last_error='send_interrupted_delivery_unknown' "
+                "WHERE event_type='patch_approval_aging' AND state='sending' "
+                "AND next_due_at<=?",
+                (older_than.isoformat(),),
+            )
+        return result.rowcount
 
     def list_waiting_device_access(self) -> tuple[OperationalWork, ...]:
         rows = self._connection.execute(
