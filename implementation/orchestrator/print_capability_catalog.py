@@ -123,7 +123,7 @@ def print_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             purpose="Locate managed copier and MFP devices in AOT's internal dealer fleet.",
             resource_types="print_device",
             operation="search",
-            selector_keys="serial_number,device_id,name,hostname,ip_address",
+            selector_keys="serial_number,device_id,name,hostname,ip_address,limit,offset",
             fact_hints="copier printer MFP Kyocera serial model device customer location",
         ),
         _read_capability(
