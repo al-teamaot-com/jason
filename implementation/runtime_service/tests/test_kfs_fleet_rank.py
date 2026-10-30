@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -43,9 +42,21 @@ class FakeConnection:
         return self.cur
 
 
-def store_with_rows(monkeypatch, rows):
+def store_with_rows(monkeypatch, rows, *, expected_count=None, errors=0,
+                    snapshot_at=None, snapshot_id="run-1", inventory_count=None):
     store = KfsMeterHistoryStore("unused", 5432, "unused", "reader", Path("/unused"))
-    cur = FakeCursor(rows)
+    device_count = len({row[0] for row in rows})
+    if expected_count is None:
+        expected_count = device_count
+    if inventory_count is None:
+        inventory_count = device_count
+    if snapshot_at is None and rows:
+        snapshot_at = max(row[5] for row in rows if row[5] is not None)
+    expanded = [
+        (*row, snapshot_id, snapshot_at, expected_count, errors, inventory_count)
+        for row in rows
+    ]
+    cur = FakeCursor(expanded)
     monkeypatch.setattr(KfsMeterHistoryStore, "_connect", lambda self: FakeConnection(cur))
     return store, cur
 
@@ -71,7 +82,7 @@ def test_fleet_ranking_distinguishes_missing_boundary_and_sorts(monkeypatch):
     assert result["exception_count"] == 1
     assert result["complete"] is False
     assert result["fleet_devices_in_history"] == 3
-    assert len(cursor.params) == 14
+    assert len(cursor.params) == 11
 
 
 def test_fleet_ranking_rejects_unbounded_limit(monkeypatch):
@@ -97,7 +108,7 @@ def test_future_month_fleet_ranking_rejected_before_db(monkeypatch):
     assert cursor.sql == ""
 
 
-def test_fleet_ranking_435_devices_does_not_silently_claim_complete(monkeypatch):
+def test_fleet_ranking_435_devices_matches_authoritative_snapshot(monkeypatch):
     start = datetime(2026, 10, 1, tzinfo=timezone.utc)
     end = datetime(2026, 10, 30, tzinfo=timezone.utc)
     rows = []
@@ -115,9 +126,10 @@ def test_fleet_ranking_435_devices_does_not_silently_claim_complete(monkeypatch)
     assert [x["device_id"] for x in result["top_devices"]] == [
         "dev-434", "dev-433", "dev-432", "dev-431", "dev-430",
     ]
-    # Historical coverage alone cannot establish the current KFS dealer inventory.
-    assert result["coverage_verified"] is False
-    assert result["complete"] is False
+    assert result["fleet_devices_reported"] == 435
+    assert result["fleet_devices_in_inventory"] == 435
+    assert result["coverage_verified"] is True
+    assert result["complete"] is True
 
 
 def test_fleet_ranking_rejects_identical_boundary_timestamps(monkeypatch):
@@ -132,3 +144,47 @@ def test_fleet_ranking_rejects_identical_boundary_timestamps(monkeypatch):
     assert result["eligible_devices"] == 0
     assert result["exception_count"] == 1
     assert result["top_devices"] == []
+
+def test_fleet_ranking_fails_closed_on_inventory_count_mismatch(monkeypatch):
+    start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 10, 30, tzinfo=timezone.utc)
+    rows = [
+        ("a", counter, 10, start, 10 + value, end, "Client", "A", "A")
+        for counter, value in (("total", 7), ("blackWhite", 6), ("color", 1))
+    ]
+    store, _ = store_with_rows(monkeypatch, rows, expected_count=435)
+    result = store.fleet_rank(arguments={}, start=start, end=end)
+    assert result["fleet_devices_reported"] == 435
+    assert result["fleet_devices_in_inventory"] == 1
+    assert result["complete"] is False
+    assert any("differs" in warning for warning in result["warnings"])
+
+
+def test_fleet_ranking_fails_closed_on_stale_inventory(monkeypatch):
+    from datetime import timedelta
+    start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 10, 30, tzinfo=timezone.utc)
+    rows = [
+        ("a", counter, 10, start, 10 + value, end, "Client", "A", "A")
+        for counter, value in (("total", 7), ("blackWhite", 6), ("color", 1))
+    ]
+    store, _ = store_with_rows(
+        monkeypatch, rows, snapshot_at=end - timedelta(hours=40),
+    )
+    result = store.fleet_rank(arguments={}, start=start, end=end)
+    assert result["complete"] is False
+    assert result["coverage_verified"] is False
+    assert any("stale" in warning for warning in result["warnings"])
+
+
+def test_fleet_ranking_excludes_missing_inventory_devices_from_complete_claim(monkeypatch):
+    start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 10, 30, tzinfo=timezone.utc)
+    rows = [
+        ("a", counter, 10, start, 10 + value, end, "Client", "A", "A")
+        for counter, value in (("total", 7), ("blackWhite", 6), ("color", 1))
+    ]
+    store, _ = store_with_rows(monkeypatch, rows, inventory_count=2)
+    result = store.fleet_rank(arguments={}, start=start, end=end)
+    assert result["complete"] is False
+    assert any("missing" in warning for warning in result["warnings"])
