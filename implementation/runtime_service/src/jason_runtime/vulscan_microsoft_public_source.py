@@ -110,6 +110,7 @@ class GovernedMicrosoftKBReleaseReader:
 
     transport: BoundedOfficialMicrosoftHTTP
     can_read_official_public_docs: Callable[[], bool]
+    current_time: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
 
     def __call__(self, kb: str) -> GovernedMicrosoftReleaseRecord:
         if not _KB.fullmatch(kb):
@@ -119,7 +120,9 @@ class GovernedMicrosoftKBReleaseReader:
 
         # Sources are fixed and never constructed from ticket/client text.
         authoritative = []
-        checked_at = datetime.now(timezone.utc)
+        checked_at = self.current_time()
+        if checked_at.tzinfo is None:
+            raise MicrosoftPatchEvidenceUnavailable("source clock not timezone-aware")
         for source in WINDOWS_RELEASE_SOURCES:
             try:
                 document = self.transport.fetch(source)
