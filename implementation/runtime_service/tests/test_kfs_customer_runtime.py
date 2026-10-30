@@ -181,6 +181,12 @@ def test_enabled_builder_reuses_existing_governed_sharepoint_reader(tmp_path):
     assert connector.bindings.find_active_by_jason_identity(
         jason_identity_id="any-human"
     ) is None
+    cache._authorization_check(NOW)
+    amended = approved_manifest()
+    amended["approved_sources"][0]["item_id"] = "a-different-file"
+    manifest_path.write_text(json.dumps(amended), encoding="utf-8")
+    with pytest.raises(PermissionError, match="manifest changed"):
+        cache._authorization_check(NOW)
 
 
 
@@ -232,3 +238,49 @@ def test_sharepoint_builder_rejects_unvalidated_tenant_even_with_role_files(tmp_
             role_id_path=role, secret_id_path=secret,
             transport=object(), audit=object(), now=NOW,
         )
+
+
+
+def test_customer_cache_denies_revoked_sharepoint_boundary_without_graph_call(tmp_path):
+    """A profile revoked after startup invalidates cached customer evidence."""
+    pytest.importorskip("connectors.microsoft_graph.sharepoint_connector")
+    from dataclasses import replace
+    from kernel.client_boundaries import (
+        BoundaryStatus, SQLiteClientBoundaryRepository, SQLiteClientBoundaryStore,
+    )
+    from jason_runtime.kfs_customer_document_evidence import ApprovedCustomerEvidenceIndex
+    from jason_runtime.kfs_customer_document_source import ApprovedAotCopierEvidenceSnapshot
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(approved_manifest()), encoding="utf-8")
+    manifest_path.chmod(0o600)
+    role, secret = tmp_path / "role_id", tmp_path / "secret_id"
+    role.write_text("synthetic-role", encoding="utf-8")
+    secret.write_text("synthetic-secret", encoding="utf-8")
+    role.chmod(0o600)
+    secret.chmod(0o600)
+    boundary_path = tmp_path / "boundaries.sqlite3"
+    seed_approved_sharepoint_boundary(boundary_path)
+    cache = build_governed_copier_evidence_cache(
+        manifest_path=manifest_path,
+        boundary_db=boundary_path,
+        openbao_url="http://127.0.0.1:8200",
+        role_id_path=role, secret_id_path=secret,
+        transport=object(), audit=object(), now=NOW,
+    )
+    sample = ApprovedCustomerEvidenceIndex({})
+    cache._snapshot = ApprovedAotCopierEvidenceSnapshot(
+        index=sample, refreshed_at=NOW,
+        authorization_expires_at=NOW + timedelta(days=7),
+    )
+    assert cache.index_for_rank(NOW) is sample
+
+    store = SQLiteClientBoundaryStore(boundary_path)
+    try:
+        repository = SQLiteClientBoundaryRepository(store)
+        bound = repository.get("synthetic-aot-sharepoint-consent")
+        repository.replace(replace(bound, status=BoundaryStatus.REVOKED))
+    finally:
+        store.close()
+    with pytest.raises(PermissionError, match="Dedicated validated"):
+        cache.index_for_rank(NOW + timedelta(minutes=2))
+    assert cache._snapshot is None
