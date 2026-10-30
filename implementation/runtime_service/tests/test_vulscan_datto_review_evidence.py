@@ -35,6 +35,7 @@ def policy_review(t, **kwargs):
     defaults = dict(
         kb=t.kb, client_id=t.client_id, site_uid=t.site_uid,
         device_uid=t.device_uid, policy_uid=t.policy_id,
+        patch_id="patch-5127648",
         decision="no_manual_denial", manual_table_complete=True,
         assigned_policy_verified=True,
         checked_at=NOW, full_scope_verified=True,
@@ -48,7 +49,8 @@ def policy_review(t, **kwargs):
 def response(*, manual=False, state="NOT_APPROVED", **evidence_overrides):
     evidence = {
         "items": [{
-            "kbArticleId": KB[2:], "installStatus": state,
+            "kbArticleId": KB[2:], "patchId": "patch-5127648",
+            "installStatus": state,
             "manualOverride": manual,
         }],
         "collection_key": "patches",
@@ -113,6 +115,7 @@ def test_effective_not_approved_without_manual_table_is_unknown_not_pending():
     {"client_id": "another-client"}, {"site_uid": "another-site"},
     {"device_uid": "another-device"}, {"policy_uid": "another-policy"},
     {"kb": "KB5129999"}, {"provider": "unknown"},
+    {"patch_id": "another-patch-id"},
 ])
 def test_cross_tenant_policy_or_kb_disposition_is_not_reusable(field):
     reader, _ = make_reader(policy=lambda t: policy_review(t, **field))
@@ -155,9 +158,10 @@ def test_missing_or_malformed_device_override_is_not_negative_attestation(overri
     response(collection_key="wrong_collection"),
     response(exact_selector_match=False),
     response(ambiguous=True),
-    response(items=[{"kbArticleId": "5129999", "installStatus": "NOT_APPROVED", "manualOverride": False}]),
+    response(items=[{"kbArticleId": "5129999", "patchId": "patch-5127648", "installStatus": "NOT_APPROVED", "manualOverride": False}]),
+    response(items=[{"kbArticleId": KB[2:], "installStatus": "NOT_APPROVED", "manualOverride": False}]),
     response(items=[]),
-    response(items=[{"kbArticleId": KB[2:], "installStatus": "NOT_APPROVED", "manualOverride": False}] * 2),
+    response(items=[{"kbArticleId": KB[2:], "patchId": "patch-5127648", "installStatus": "NOT_APPROVED", "manualOverride": False}] * 2),
 ])
 def test_unverifiable_endpoint_patch_never_produces_review_disposition(bad_patch):
     reader, _ = make_reader(patch=bad_patch)
@@ -182,5 +186,6 @@ def test_competing_manual_evidence_sources_cannot_be_silently_combined():
     proof = policy_review(target())
     with pytest.raises(DattoManualReviewUnavailable, match="scope mismatch"):
         verify_datto_manual_policy_review(
-            replace(proof, site_uid="another-site"), target=target(), now=NOW,
+            replace(proof, site_uid="another-site"), target=target(),
+            patch_id="patch-5127648", now=NOW,
         )
