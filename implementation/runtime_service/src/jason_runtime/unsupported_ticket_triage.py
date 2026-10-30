@@ -50,6 +50,13 @@ def category_for(title: str, unsupported_reason: str, description: str = "") -> 
     This controls read-only investigation only, never authorization to execute.
     """
     context = (str(title or "") + " " + str(description or "")[:12000]).casefold()
+    # Route explicit phishing reports and Duo monitoring failures to security
+    # assessment. This changes triage only and confers no execution authority.
+    if any(term in context for term in (
+        "phishing", "phish attempt", "malicious email", "suspicious email",
+        "duo security status", "duo windows logon",
+    )):
+        return "security_review"
     if (
         any(term in context for term in ("licence", "license", "activation"))
         or unsupported_reason == "windows_licensing_diagnostics_candidate"
