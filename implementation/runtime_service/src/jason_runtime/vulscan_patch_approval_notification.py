@@ -9,9 +9,10 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Iterable, Mapping
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 from .vulscan_patch_approval_aging import ApprovalNoticeDecision, PatchApprovalObservation, evaluate_approval_aging
 
@@ -112,9 +113,14 @@ def prepare_patch_notifications(
             continue
         if (meta.source_checked_at.tzinfo is None
                 or meta.source_checked_at > now
-                or now - meta.source_checked_at > __import__("datetime").timedelta(days=7)):
+                or now - meta.source_checked_at > timedelta(days=7)):
             continue
         matching = [o for o in observations if o.kb.strip().upper() == kb]
+        # All patch-state evidence must have been observed on today's
+        # AOT-local evaluation date. Stale or future snapshots cannot trigger.
+        local_today = now.astimezone(ZoneInfo("America/New_York")).date()
+        if any(o.observed_date != local_today for o in matching):
+            continue
         release_dates = {o.release_date for o in matching}
         if release_dates != {meta.release_date}:
             continue
