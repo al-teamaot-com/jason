@@ -9,6 +9,7 @@ on:
       - 'implementation/connectors/tests/test_kyocera_kfs_connector.py'
       - 'implementation/orchestrator/print_capability_catalog.py'
       - 'implementation/orchestrator/tests/test_print_capability_catalog.py'
+      - 'implementation/orchestrator/tests/test_print_fleet_routing.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/src/jason_runtime/kfs_meter_history.py'
       - 'implementation/runtime_service/tests/test_kfs_meter_history.py'
@@ -27,6 +28,7 @@ on:
       - 'implementation/connectors/tests/test_kyocera_kfs_connector.py'
       - 'implementation/orchestrator/print_capability_catalog.py'
       - 'implementation/orchestrator/tests/test_print_capability_catalog.py'
+      - 'implementation/orchestrator/tests/test_print_fleet_routing.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/src/jason_runtime/kfs_meter_history.py'
       - 'implementation/runtime_service/tests/test_kfs_meter_history.py'
@@ -58,6 +60,7 @@ jobs:
         run: |
           python -m pytest implementation/connectors/tests/test_kyocera_kfs_connector.py -q
           python -m pytest implementation/orchestrator/tests/test_print_capability_catalog.py -q
+          python -m pytest implementation/orchestrator/tests/test_print_fleet_routing.py -q
           python -m pytest implementation/runtime_service/tests/test_kfs_meter_history.py -q
           python -m pytest implementation/runtime_service/tests/test_kfs_fleet_rank.py -q
           python -m pytest tools/tests/test_provider_secret_provision.py -q
