@@ -459,6 +459,18 @@ class RuntimeSettings:
     kfs_history_password_file: Path = Path(
         "/run/jason-secrets/kfs-history/password"
     )
+    # Requires a separately governed Microsoft SharePoint workload identity,
+    # approved exact-document manifest and dedicated AppRole. Defaults OFF.
+    kfs_copier_evidence_enabled: bool = False
+    kfs_copier_evidence_manifest: Path = Path(
+        "/etc/jason/aot-copier-document-sources.json"
+    )
+    sharepoint_openbao_role_id_path: Path = Path(
+        "/run/jason-secrets/openbao/microsoft-graph-sharepoint/role_id"
+    )
+    sharepoint_openbao_secret_id_path: Path = Path(
+        "/run/jason-secrets/openbao/microsoft-graph-sharepoint/secret_id"
+    )
     backup_net_enabled: bool = False
     backup_net_access_profile: str = "read_only"
     backup_net_openbao_role_id_path: Path = Path(
@@ -780,6 +792,27 @@ class RuntimeSettings:
                 os.getenv(
                     "JASON_KFS_HISTORY_PASSWORD_FILE",
                     "/run/jason-secrets/kfs-history/password",
+                )
+            ),
+            kfs_copier_evidence_enabled=os.getenv(
+                "JASON_KFS_COPIER_EVIDENCE_ENABLED", "false"
+            ).strip().lower() in {"1", "true", "yes", "on"},
+            kfs_copier_evidence_manifest=Path(
+                os.getenv(
+                    "JASON_KFS_COPIER_EVIDENCE_MANIFEST",
+                    "/etc/jason/aot-copier-document-sources.json",
+                )
+            ),
+            sharepoint_openbao_role_id_path=Path(
+                os.getenv(
+                    "JASON_SHAREPOINT_OPENBAO_ROLE_ID_PATH",
+                    "/run/jason-secrets/openbao/microsoft-graph-sharepoint/role_id",
+                )
+            ),
+            sharepoint_openbao_secret_id_path=Path(
+                os.getenv(
+                    "JASON_SHAREPOINT_OPENBAO_SECRET_ID_PATH",
+                    "/run/jason-secrets/openbao/microsoft-graph-sharepoint/secret_id",
                 )
             ),
             backup_net_enabled=os.getenv(
@@ -1111,6 +1144,8 @@ class RuntimeSettings:
         return settings
 
     def validate(self) -> None:
+        if self.kfs_copier_evidence_enabled and not self.kfs_enabled:
+            raise ValueError("AOT copier document evidence requires enabled governed KFS reads")
         if self.universal_approval_mode not in {"off", "enforced"}:
             raise ValueError("JASON_UNIVERSAL_APPROVAL_MODE must be off or enforced")
         if self.release_mobile_approval_mode not in {"off", "owner_only_pilot", "owner_reviewed"}:
@@ -1911,7 +1946,24 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         transport=http_transport,
         audit=ConnectorEventAudit(orchestration_events),
     )
+    # No SharePoint profile is initialized when this feature is disabled.
+    # When enabled, missing owner-approved sources or dedicated credentials
+    # block startup rather than fall back to a different Microsoft identity.
+    copier_evidence_resolver = None
+    if settings.kfs_copier_evidence_enabled:
+        from .kfs_customer_runtime import build_governed_copier_evidence_cache
+        evidence_cache = build_governed_copier_evidence_cache(
+            manifest_path=settings.kfs_copier_evidence_manifest,
+            boundary_db=microsoft_boundary_db,
+            openbao_url=settings.openbao_url,
+            role_id_path=settings.sharepoint_openbao_role_id_path,
+            secret_id_path=settings.sharepoint_openbao_secret_id_path,
+            transport=http_transport,
+            audit=ConnectorEventAudit(orchestration_events),
+        )
+        copier_evidence_resolver = evidence_cache.index_for_rank
     kfs_history_invoker = GovernedKfsMeterHistoryInvoker(
+        customer_evidence_resolver=copier_evidence_resolver,
         store=KfsMeterHistoryStore(
             host=settings.kfs_history_host,
             port=settings.kfs_history_port,
