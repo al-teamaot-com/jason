@@ -13,6 +13,7 @@ from orchestrator.print_capability_catalog import (
     KYOCERA_KFS_PROVIDER,
     PRINT_METER_HISTORY_SEARCH,
     PRINT_METER_USAGE_READ,
+    PRINT_FLEET_USAGE_RANK,
 )
 from orchestrator.service import InvocationResult
 
@@ -20,6 +21,7 @@ from orchestrator.service import InvocationResult
 METER_HISTORY_AUTHORITY_GRANTS = (
     ("production-kfs-read-print-meter-history-search", PRINT_METER_HISTORY_SEARCH),
     ("production-kfs-read-print-meter-usage-read", PRINT_METER_USAGE_READ),
+    ("production-kfs-read-print-fleet-usage-rank", PRINT_FLEET_USAGE_RANK),
 )
 
 
@@ -282,6 +284,113 @@ class KfsMeterHistoryStore:
             },
             "warnings": warnings,
         }
+
+    def fleet_rank(
+        self, *, arguments: Mapping[str, Any], start: datetime, end: datetime,
+    ) -> Mapping[str, Any]:
+        """One bounded read-only database query for fleet-wide month usage."""
+        limit = int(arguments.get("limit") or 5)
+        hours = int(arguments.get("boundary_hours") or 36)
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        if not 1 <= hours <= 168:
+            raise ValueError("boundary_hours must be between 1 and 168")
+        sql = """
+            WITH devices AS (
+                SELECT DISTINCT device_id
+                FROM kfs_meter_readings
+                WHERE device_id IS NOT NULL
+                  AND reading_at >= %s - (%s * interval '1 hour')
+                  AND reading_at <= %s + (%s * interval '1 hour')
+            ), boundaries AS (
+                SELECT d.device_id, counter.counter_name,
+                       b.counter_value AS start_value, b.reading_at AS start_at,
+                       e.counter_value AS end_value, e.reading_at AS end_at,
+                       COALESCE(e.customer_name,b.customer_name) AS customer_name,
+                       COALESCE(e.equipment_id,b.equipment_id) AS equipment_id,
+                       COALESCE(e.serial_number,b.serial_number) AS serial_number
+                FROM devices d
+                CROSS JOIN (VALUES ('total'),('blackWhite'),('color')) counter(counter_name)
+                LEFT JOIN LATERAL (
+                    SELECT counter_value, reading_at, customer_name, equipment_id, serial_number
+                    FROM kfs_meter_readings m
+                    WHERE m.device_id=d.device_id AND m.counter_name=counter.counter_name
+                      AND reading_at BETWEEN %s - (%s * interval '1 hour')
+                                         AND %s + (%s * interval '1 hour')
+                    ORDER BY ABS(EXTRACT(EPOCH FROM (reading_at-%s))), reading_at
+                    LIMIT 1
+                ) b ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT counter_value, reading_at, customer_name, equipment_id, serial_number
+                    FROM kfs_meter_readings m
+                    WHERE m.device_id=d.device_id AND m.counter_name=counter.counter_name
+                      AND reading_at BETWEEN %s - (%s * interval '1 hour')
+                                         AND %s + (%s * interval '1 hour')
+                    ORDER BY ABS(EXTRACT(EPOCH FROM (reading_at-%s))), reading_at
+                    LIMIT 1
+                ) e ON TRUE
+            )
+            SELECT device_id, counter_name, start_value, start_at, end_value, end_at,
+                   customer_name, equipment_id, serial_number
+            FROM boundaries
+            ORDER BY device_id, counter_name
+        """
+        params = (start, hours, end, hours,
+                  start, hours, start, hours, start,
+                  end, hours, end, hours, end)
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                rows = cur.fetchall()
+        devices: dict[str, dict[str, Any]] = {}
+        for device_id, counter, before, before_at, after, after_at, customer, equipment, serial in rows:
+            item = devices.setdefault(device_id, {
+                "device_id": device_id, "customer": customer or "",
+                "printer_id": equipment or serial or device_id,
+                "counts": {}, "latest_reading_at": None, "warnings": [],
+            })
+            delta = None
+            if before is not None and after is not None and before_at is not None and after_at is not None:
+                difference = int(after) - int(before)
+                if difference >= 0 and after_at >= before_at:
+                    delta = difference
+                else:
+                    item["warnings"].append(f"{counter}: invalid/reset boundary")
+            else:
+                item["warnings"].append(f"{counter}: missing boundary")
+            item["counts"][counter] = delta
+            if after_at is not None and (
+                item["latest_reading_at"] is None or after_at > item["latest_reading_at"]
+            ):
+                item["latest_reading_at"] = after_at
+        ranked = []
+        exceptions = []
+        for item in devices.values():
+            counts = item.pop("counts")
+            item["black_white_pages"] = counts.get("blackWhite")
+            item["color_pages"] = counts.get("color")
+            item["total_pages"] = counts.get("total")
+            if None in (item["black_white_pages"], item["color_pages"], item["total_pages"]):
+                exceptions.append(item)
+            elif item["black_white_pages"] + item["color_pages"] != item["total_pages"]:
+                item["warnings"].append("B&W plus color differs from total")
+                exceptions.append(item)
+            else:
+                ranked.append(item)
+        ranked.sort(key=lambda item: (-item["total_pages"], item["device_id"]))
+        for item in ranked + exceptions:
+            if item["latest_reading_at"] is not None:
+                item["latest_reading_at"] = item["latest_reading_at"].isoformat()
+        return {
+            "period_start": start.isoformat(), "period_end": end.isoformat(),
+            "fleet_devices_in_history": len(devices),
+            "eligible_devices": len(ranked), "exception_count": len(exceptions),
+            "top_devices": ranked[:limit], "exceptions": exceptions,
+            "complete": len(exceptions) == 0,
+            "warnings": (["Fleet coverage incomplete; ranking is provisional"]
+                         if exceptions else []),
+        }
+
 def resolve_period(arguments: Mapping[str, Any]) -> tuple[datetime, datetime]:
     month = str(arguments.get("month") or "").strip()
     timezone_name = str(arguments.get("timezone") or "America/New_York").strip()
@@ -342,6 +451,8 @@ class GovernedKfsMeterHistoryInvoker:
             data = self.store.search(arguments=request.arguments, start=start, end=end)
         elif resolution.capability_name == PRINT_METER_USAGE_READ:
             data = self.store.usage(arguments=request.arguments, start=start, end=end)
+        elif resolution.capability_name == PRINT_FLEET_USAGE_RANK:
+            data = self.store.fleet_rank(arguments=request.arguments, start=start, end=end)
         else:
             raise LookupError(
                 f"unsupported KFS meter history capability: {resolution.capability_name}"
