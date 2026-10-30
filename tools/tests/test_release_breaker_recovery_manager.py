@@ -407,8 +407,15 @@ def test_closed_breaker_preserves_recovery_attempt_receipt(tmp_path, monkeypatch
     spool=tmp_path/"spool";spool.mkdir()
     receipt={"revision":SHA,"requested_at":NOW.isoformat(),
              "result":"root_verified_closed"}
+    prior_attempts=[
+        {"revision":SHA,"requested_at":(NOW-timedelta(minutes=10)).isoformat(),
+         "result":"root_revalidation_rejected"},
+        {"revision":SHA,"requested_at":(NOW-timedelta(minutes=5)).isoformat(),
+         "result":"root_revalidation_rejected"},
+    ]
     (spool/"release-breaker-recovery-state.json").write_text(json.dumps({
         "schema_version":"1.0","last_revalidation_attempt":receipt,
+        "breaker_id":"historical-breaker-id","attempts":prior_attempts,
     }))
     monkeypatch.setattr(sys,"argv",["recovery","--repo",str(repo),
                                    "--spool",str(spool),"--release-state",str(root.parent)])
@@ -417,6 +424,9 @@ def test_closed_breaker_preserves_recovery_attempt_receipt(tmp_path, monkeypatch
     data=json.loads((spool/"release-breaker-recovery-state.json").read_text())
     assert data["last_revalidation_attempt"]==receipt
     assert data["status"]=="already_closed"
+    assert data["attempts"] == prior_attempts
+    assert data["breaker_id"] == "historical-breaker-id"
+    assert data["next_action"] == "none"
 
 
 def test_preflight_failure_is_not_a_governed_root_attempt(tmp_path, monkeypatch):
@@ -557,3 +567,28 @@ def test_native_preflight_does_not_dump_capture_exception_secrets(tmp_path, monk
         recovery.native_revalidation_preflight(root, SHA)
     assert failure.value.code == "production_manifest_precheck_failed"
     assert "SECRET" not in str(failure.value)
+
+
+
+def test_closed_breaker_rejects_corrupt_attempt_history_without_erasing(tmp_path, monkeypatch):
+    repo=tmp_path/"repo";repo.mkdir()
+    root=tmp_path/"release"/"protected-readback";root.mkdir(parents=True)
+    (root/"production-control-state.json").write_text(json.dumps({
+        "schema_version":"1.0","circuit_breaker":{"state":"closed"},
+        "last_known_good":{"manifest":{"revision":SHA,"complete":True}},
+    }))
+    (root/"production-drift.json").write_text(json.dumps({
+        "schema_version":"1.0","status":"pass","problems":[],
+        "observed_at":NOW.isoformat(),
+    }))
+    spool=tmp_path/"spool";spool.mkdir()
+    ledger=spool/"release-breaker-recovery-state.json"
+    corrupted={"schema_version":"1.0","attempts": "invalid-not-a-list"}
+    before=json.dumps(corrupted)
+    ledger.write_text(before)
+    monkeypatch.setattr(sys,"argv",[
+        "recovery","--repo",str(repo),"--spool",str(spool),
+        "--release-state",str(root.parent),
+    ])
+    assert recovery.main()==1
+    assert ledger.read_text() == before
