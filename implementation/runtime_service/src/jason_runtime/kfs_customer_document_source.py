@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from threading import RLock
 from typing import Protocol
 from uuid import uuid4
 
@@ -122,3 +123,40 @@ class ApprovedAotCopierEvidenceSnapshot:
         if not timedelta(0) <= age <= timedelta(hours=self.max_age_hours):
             raise PermissionError("AOT document evidence snapshot is absent or stale")
         return self.index
+
+
+class GovernedAotCopierEvidenceCache:
+    """Lazy, bounded evidence cache; a failed refresh never reuses stale identity.
+
+    The loader is a governed service with exact document grants. The cache keeps
+    parsed customer claims (not raw SharePoint bytes or access tokens) in
+    process memory, and refreshes only when absent or expired.
+    """
+
+    def __init__(
+        self, *, loader: GovernedAotCopierSourceLoader, max_age_hours: int = 24,
+    ) -> None:
+        if not 1 <= max_age_hours <= 168:
+            raise ValueError("copier evidence cache TTL must be between 1 and 168 hours")
+        self._loader = loader
+        self._ttl = max_age_hours
+        self._snapshot: ApprovedAotCopierEvidenceSnapshot | None = None
+        self._lock = RLock()
+
+    def index_for_rank(self, now: datetime) -> ApprovedCustomerEvidenceIndex:
+        if now.tzinfo is None:
+            raise ValueError("authorized report time must be timezone aware")
+        with self._lock:
+            snapshot = self._snapshot
+            if snapshot is not None:
+                try:
+                    return snapshot.usable_at(now)
+                except PermissionError:
+                    self._snapshot = None
+            # Do not return a stale previous index if any approved file cannot
+            # be read or fails the source-version/integrity checks.
+            index = self._loader.refresh(now=now)
+            self._snapshot = ApprovedAotCopierEvidenceSnapshot(
+                index=index, refreshed_at=now, max_age_hours=self._ttl,
+            )
+            return index
