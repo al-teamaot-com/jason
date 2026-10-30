@@ -8,6 +8,7 @@ filesystem scan, arbitrary URL fetch, API call, write, or customer-identity gues
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import io
@@ -113,7 +114,7 @@ def document_from_governed_sharepoint_reads(
         raise ValueError("governed document encoding is invalid")
     try:
         raw = base64.b64decode(b64, validate=True)
-    except (ValueError, Exception) as exc:
+    except (ValueError, binascii.Error) as exc:
         raise ValueError("invalid base64 document evidence") from exc
     if len(raw) != before["size"] or content.get("byte_length") != len(raw):
         raise ValueError("source byte size differs from authorized metadata")
