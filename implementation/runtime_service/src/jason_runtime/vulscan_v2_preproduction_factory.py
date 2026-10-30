@@ -29,6 +29,10 @@ def build_vulscan_v2_shadow_workflow(
     governed_read: Callable[[str, Mapping[str, Any]], Mapping[str, Any]],
     can_read_microsoft_public_docs: Callable[[], bool],
     governed_review_disposition_read: Callable[[VerifiedPatchTarget], VerifiedPatchReviewDisposition] | None = None,
+    # The approved AOT source for review decisions is Datto RMM, NOT a new
+    # Jason ledger. This source must attest the policy's complete Manual
+    # approval table for the exact client/site/device/policy/KB.
+    governed_datto_manual_policy_review_read: Callable[[VerifiedPatchTarget], VerifiedDattoPolicyManualReview] | None = None,
     governed_policy_attribution_read: Callable[[str, str, str, str], VerifiedPolicyKBAttribution] | None = None,
     authority_gate: Callable[[], bool] | None = None,
     microsoft_transport: BoundedOfficialMicrosoftHTTP | None = None,
@@ -42,6 +46,19 @@ def build_vulscan_v2_shadow_workflow(
     """
     transport = microsoft_transport or BoundedOfficialMicrosoftHTTP()
     evidence_clock = microsoft_source_clock or (lambda: datetime.now(timezone.utc))
+    if (governed_review_disposition_read is not None
+            and governed_datto_manual_policy_review_read is not None):
+        raise ValueError("competing review evidence sources cannot be mixed")
+    # Datto is the source of truth. When no complete governed Manual approval
+    # reader is available, leave the review port unset and fail before scans.
+    review_reader = (
+        DattoRmmPatchReviewReader(
+            governed_read=governed_read,
+            policy_manual_review_read=governed_datto_manual_policy_review_read,
+            now=evidence_clock,
+        ) if governed_datto_manual_policy_review_read is not None
+        else governed_review_disposition_read
+    )
     reader = GovernedMicrosoftKBReleaseReader(
         transport=transport,
         can_read_official_public_docs=can_read_microsoft_public_docs,
@@ -57,6 +74,6 @@ def build_vulscan_v2_shadow_workflow(
         ),
         patch_read=governed_read,
         microsoft_release_reader=reader,
-        review_disposition_read=governed_review_disposition_read,
+        review_disposition_read=review_reader,
         activation_verified=authority_gate,
     )
