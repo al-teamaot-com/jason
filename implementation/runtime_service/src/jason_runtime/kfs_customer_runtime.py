@@ -66,7 +66,7 @@ def parse_approved_manifest(payload: Mapping[str, Any], *, now: datetime) -> Val
         fields = [item["site_id"], item["drive_id"], item["item_id"]]
         if any(
             not isinstance(value, str)
-            or not value.strip() or value.strip() != value or len(value) > 512
+            or not value.strip() or value.strip() != value or value == "*" or len(value) > 512
             or any(char in value for char in ("/", "?", "#", "\\", "%", "\r", "\n"))
             for value in fields
         ):
