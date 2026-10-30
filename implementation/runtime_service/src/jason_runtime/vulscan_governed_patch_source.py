@@ -57,7 +57,7 @@ def _canonical_record(value: Any, *, capability: str) -> Mapping[str, Any]:
     data = evidence.get("data")
     if not isinstance(data, Mapping):
         raise VulscanPatchEvidenceError("patch/policy read evidence absent")
-    if capability == "endpoint.patch_policy.search":
+    if capability == "endpoint.patch.policy.search":
         policies = data.get("policies")
         if not isinstance(policies, list) or len(policies) > 200:
             raise VulscanPatchEvidenceError("authoritative assigned patch policies not bounded")
@@ -131,10 +131,10 @@ def collect_governed_patch_observations(
                     or str(endpoint.get("hostname") or "").casefold() != target.hostname.casefold()):
                 raise VulscanPatchEvidenceError("Datto endpoint UID/hostname differs from verified CI")
             policies_result = read(
-                "endpoint.patch_policy.search",
+                "endpoint.patch.policy.search",
                 {"resource_id": target.device_uid},
             )
-            assigned = _canonical_record(policies_result, capability="endpoint.patch_policy.search")
+            assigned = _canonical_record(policies_result, capability="endpoint.patch.policy.search")
             if target.policy_id not in assigned["policy_ids"]:
                 raise VulscanPatchEvidenceError("exact device does not carry target patch policy")
             patches_result = read(
