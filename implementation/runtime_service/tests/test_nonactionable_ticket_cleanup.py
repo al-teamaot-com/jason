@@ -190,6 +190,8 @@ def test_owner_promoted_administrative_cleanup_end_to_end(tmp_path):
     note = actions.calls[1][2]["payload"]
     assert note["publish"] == 2 and note["noteType"] == 3
     assert "companyLocationID=990" in note["description"]
+    assert "completion pending" in note["description"].casefold()
+    assert "ticket completed" not in note["description"].casefold()
     assert actions.calls[-1][2]["payload"] == {"id": 143268, "status": "Complete"}
     assert store.get(143268).phase == "complete"
     worker._next_due = 0
@@ -270,3 +272,51 @@ def test_existing_technician_time_entry_never_autocompletes(tmp_path):
     worker.tick()
     assert actions.calls == []
     assert store.get(143268) is None
+
+
+def test_client_reply_between_internal_note_and_completion_blocks_closure(tmp_path):
+    worker, actions, store = build_worker(tmp_path)
+    original_execute = actions.execute
+
+    def inject_client_reply(scope, capability, arguments):
+        response = original_execute(scope, capability, arguments)
+        if (capability == "service.ticket.note.create"
+                and arguments["payload"].get("title")
+                    == "Jason - Non-Actionable Ticket Cleanup - Resolution"):
+            actions.reads.notes.append({
+                "creatorResourceID": 9901, "noteType": 3,
+                "title": "Client asks for support", "createdByContactID": 53,
+            })
+        return response
+
+    actions.execute = inject_client_reply
+    worker.tick()
+    assert store.get(143268).phase != "complete"
+    assert not any(
+        cap == "service.ticket.update" and payload["payload"].get("status") == "Complete"
+        for _, cap, payload in actions.calls
+    )
+
+
+def test_missing_internal_note_readback_blocks_closure(tmp_path):
+    worker, actions, store = build_worker(tmp_path)
+    original_execute = actions.execute
+
+    def lose_note_visibility(scope, capability, arguments):
+        response = original_execute(scope, capability, arguments)
+        if (capability == "service.ticket.note.create"
+                and arguments["payload"].get("title")
+                    == "Jason - Non-Actionable Ticket Cleanup - Resolution"):
+            actions.reads.notes = [
+                n for n in actions.reads.notes
+                if n.get("title") != "Jason - Non-Actionable Ticket Cleanup - Resolution"
+            ]
+        return response
+
+    actions.execute = lose_note_visibility
+    worker.tick()
+    assert store.get(143268).phase != "complete"
+    assert not any(
+        cap == "service.ticket.update" and payload["payload"].get("status") == "Complete"
+        for _, cap, payload in actions.calls
+    )
