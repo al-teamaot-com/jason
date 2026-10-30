@@ -8,6 +8,7 @@ from jason_runtime.vulscan_governed_patch_source import (
     collect_governed_patch_observations,
 )
 from jason_runtime.vulscan_patch_approval_notification import MicrosoftKBMetadata
+from jason_runtime.vulscan_owner_disposition_evidence import VerifiedPatchReviewDisposition
 
 NOW = datetime(2026, 10, 30, 16, tzinfo=timezone.utc)
 
@@ -53,10 +54,21 @@ def reader(*, status="NOT_APPROVED", reported_kb="5123456",
     return read, calls
 
 
+def reviewed(item, *, state="review_pending"):
+    return VerifiedPatchReviewDisposition(
+        kb=item.kb, client_id=item.client_id, policy_id=item.policy_id,
+        device_uid=item.device_uid, disposition=state, checked_at=NOW,
+        source_reference="governed-owner-disposition-read",
+        full_scope_verified=True,
+    )
+
+
 def collect(ts, rd, **kw):
+    decision_read = kw.pop("review_disposition_read", reviewed)
     return collect_governed_patch_observations(
         targets=ts, metadata_by_kb={"KB5123456": release()},
-        read=rd, now=NOW, **kw)
+        read=rd, now=NOW,
+        review_disposition_read=decision_read, **kw)
 
 
 def test_reads_exact_endpoint_and_kb_via_governed_capabilities():
@@ -124,7 +136,8 @@ def test_metadata_must_be_present_and_verified():
     read, calls = reader()
     with pytest.raises(VulscanPatchEvidenceError, match="Microsoft"):
         collect_governed_patch_observations(
-            targets=[target()], metadata_by_kb={}, read=read, now=NOW)
+            targets=[target()], metadata_by_kb={}, read=read, now=NOW,
+            review_disposition_read=reviewed)
     assert calls == []
 
 
@@ -191,3 +204,50 @@ def test_truncated_or_ambiguous_governed_collection_is_rejected():
         collect([target()], make_read(policies_truncated=True))
     with pytest.raises(VulscanPatchEvidenceError, match="unambiguous"):
         collect([target()], make_read(patch_ambiguous=True))
+
+
+def test_missing_owner_disposition_source_blocks_without_provider_reads():
+    read, calls = reader()
+    with pytest.raises(VulscanPatchEvidenceError, match="owner disposition"):
+        collect([target()], read, review_disposition_read=None)
+    assert calls == []
+
+
+@pytest.mark.parametrize("state,expected", [
+    ("deferred", "intentional_deferral"),
+    ("declined", "intentional_deferral"),
+    ("superseded", "superseded"),
+])
+def test_documented_exception_is_retained_for_decision_suppression(state, expected):
+    read, calls = reader()
+    result = collect(
+        [target()], read,
+        review_disposition_read=lambda item: reviewed(item, state=state))
+    assert getattr(result[0], expected) is True
+    assert len(calls) == 3
+
+
+def test_cross_client_decision_cannot_clear_a_patch_or_send_a_notice():
+    read, calls = reader()
+    def wrong(item):
+        from dataclasses import replace
+        return replace(reviewed(item), client_id="other-client")
+    with pytest.raises(VulscanPatchEvidenceError, match="owner"):
+        collect([target()], read, review_disposition_read=wrong)
+    assert calls == []
+
+
+def test_old_unverified_target_flag_cannot_override_signed_owner_decision():
+    read, calls = reader()
+    with pytest.raises(VulscanPatchEvidenceError, match="contradictory"):
+        collect([target(intentional_deferral=True)], read)
+    assert calls == []
+
+
+def test_incomplete_owner_ledger_cannot_imply_absence_of_deferral():
+    read, calls = reader()
+    from dataclasses import replace
+    with pytest.raises(VulscanPatchEvidenceError, match="owner"):
+        collect([target()], read, review_disposition_read=lambda item:
+                replace(reviewed(item), full_scope_verified=False))
+    assert calls == []
