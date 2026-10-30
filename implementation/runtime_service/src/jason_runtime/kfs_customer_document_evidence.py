@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import io
 import re
+from zipfile import BadZipFile, ZipFile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, Mapping
@@ -47,6 +48,8 @@ class ApprovedSharePointWorkbook:
             raise ValueError("source modification time must include timezone")
         if not isinstance(self.content, bytes) or len(self.content) > 10 * 1024 * 1024:
             raise ValueError("document must be bounded binary evidence")
+        if not re.search(r"copier|meter|log|receipt", self.filename, re.I):
+            raise ValueError("document is not an approved copier-log or receipt class")
         if not self.content.startswith(b"PK"):
             raise ValueError("approved Excel document is not a ZIP container")
 
@@ -89,15 +92,22 @@ def _serial(value: object) -> str | None:
 
 
 def _first_customer(rows: list[tuple[object, ...]]) -> str | None:
-    """Accept explicit document labels, not sheet names or other customer guesses."""
-    for row_index, row in enumerate(rows[:30]):
+    """Accept only a single explicit sheet-wide customer.
+
+    Multi-customer tables or stacked receipts require a different bounded row
+    contract. Mapping every serial on such a sheet to its first company is
+    dangerous, so those sheets deliberately produce no customer assertions.
+    """
+    candidates: dict[str, str] = {}
+    for row_index, row in enumerate(rows[:5000]):
+        labels = [_text(v).casefold().strip(":") for v in row[:32]]
+        if "company name" in labels and "serial number" in labels:
+            return None  # Multi-customer row table; not a single-customer log.
         for col, raw in enumerate(row[:24]):
             if not RECEIPT_COMPANY_RE.fullmatch(_text(raw)):
                 continue
-            # "CO. NAME:" beside the customer on receipt sheets.
             adjacent = tuple(_text(x) for x in row[col + 1:col + 3])
             candidate = next((v for v in adjacent if v), "")
-            # "Company:" header above an explicit company name in copier log sheets.
             if not candidate and row_index + 1 < len(rows):
                 below = rows[row_index + 1]
                 if col < len(below):
@@ -106,8 +116,8 @@ def _first_customer(rows: list[tuple[object, ...]]) -> str | None:
                 "company", "customer", "unnamed", "e-copiers", "ecopiers solutions",
             }:
                 if len(candidate) <= 160 and not SERIAL_RE.fullmatch(candidate):
-                    return candidate
-    return None
+                    candidates[_customer_key(candidate)] = candidate
+    return next(iter(candidates.values())) if len(candidates) == 1 else None
 
 
 def _customer_from_named_log(filename: str, rows: list[tuple[object, ...]]) -> str | None:
@@ -169,6 +179,14 @@ def _parse_workbook(doc: ApprovedSharePointWorkbook) -> tuple[CustomerClaim, ...
     except ImportError as exc:
         raise RuntimeError("governed SharePoint workbook extraction requires openpyxl") from exc
 
+    try:
+        with ZipFile(io.BytesIO(doc.content)) as archive:
+            entries = archive.infolist()
+            if len(entries) > 2000 or sum(item.file_size for item in entries) > 60 * 1024 * 1024:
+                raise ValueError("compressed SharePoint workbook exceeds extraction bounds")
+    except BadZipFile as exc:
+        raise ValueError("invalid SharePoint workbook archive") from exc
+
     workbook = load_workbook(
         io.BytesIO(doc.content), read_only=True, data_only=True, keep_links=False,
     )
@@ -177,6 +195,7 @@ def _parse_workbook(doc: ApprovedSharePointWorkbook) -> tuple[CustomerClaim, ...
             raise ValueError("workbook has too many sheets")
         document_hash = hashlib.sha256(doc.content).hexdigest()
         claims: list[CustomerClaim] = []
+        inspected_rows = 0
         for sheet in workbook.worksheets:
             if not isinstance(sheet.title, str) or len(sheet.title) > 100:
                 raise ValueError("invalid source worksheet")
@@ -188,6 +207,9 @@ def _parse_workbook(doc: ApprovedSharePointWorkbook) -> tuple[CustomerClaim, ...
                     raise ValueError("worksheet row limit exceeded")
                 if len(row) > 64:
                     raise ValueError("worksheet column limit exceeded")
+                inspected_rows += 1
+                if inspected_rows > 25000:
+                    raise ValueError("total workbook row limit exceeded")
                 rows.append(tuple(row))
             customer = _first_customer(rows)
             if customer is None:
