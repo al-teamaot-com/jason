@@ -254,3 +254,15 @@ def test_incomplete_owner_ledger_cannot_imply_absence_of_deferral():
         collect([target()], read, review_disposition_read=lambda item:
                 replace(reviewed(item), full_scope_verified=False))
     assert calls == []
+
+
+@pytest.mark.parametrize("changes", [
+    {"policy_kb_attribution_verified": False},
+    {"policy_kb_attribution_reference": ""},
+    {"policy_kb_attribution_checked_at": NOW.replace(tzinfo=None)},
+])
+def test_unattributed_policy_target_cannot_trigger_governed_read(changes):
+    read, calls = reader()
+    with pytest.raises(VulscanPatchEvidenceError, match="attribution"):
+        collect([target(**changes)], read)
+    assert calls == []
