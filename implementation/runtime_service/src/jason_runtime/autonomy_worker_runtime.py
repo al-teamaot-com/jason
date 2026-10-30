@@ -3432,6 +3432,21 @@ class OperationalAutonomyMaintenance:
             else 1
         )
         try:
+            # The queue snapshot may predate a technician move or assignment.
+            # Re-read the exact ticket through existing governed read authority
+            # immediately before writing; do not overwrite newer human work.
+            current = self._read_data("service.ticket.search", {
+                "resource_id": ticket_id, "page_size": 2,
+            }).get("items")
+            if not isinstance(current, list) or len(current) != 1 or not isinstance(current[0], Mapping):
+                raise OperationalAutonomyError("handoff exact ticket pre-read unavailable")
+            live_ticket = current[0]
+            if live_ticket.get("id") != ticket_id or any(
+                field not in candidate.context or field not in live_ticket
+                or candidate.context[field] != live_ticket[field]
+                for field in ("companyID", "queueID", "status", "assignedResourceID")
+            ):
+                raise OperationalAutonomyError("handoff ticket scope/ownership/status changed")
             # Always verify the current Autotask note before any queue/status
             # write, even if the local fingerprint was previously persisted.
             notes = self._read_data("service.ticket.notes.search", {"ticket_id": ticket_id}).get("items")
