@@ -455,7 +455,15 @@ class GovernedKfsMeterHistoryInvoker:
         elif resolution.capability_name == PRINT_METER_USAGE_READ:
             data = self.store.usage(arguments=request.arguments, start=start, end=end)
         elif resolution.capability_name == PRINT_FLEET_USAGE_RANK:
-            data = self.store.fleet_rank(arguments=request.arguments, start=start, end=end)
+            # Month-to-date rankings must not request future month-end readings.
+            # Historical closed months retain their exact full-month boundary.
+            now = datetime.now(timezone.utc)
+            if start >= now:
+                raise ValueError("fleet usage ranking period must have started")
+            effective_end = min(end, now)
+            data = self.store.fleet_rank(
+                arguments=request.arguments, start=start, end=effective_end,
+            )
         else:
             raise LookupError(
                 f"unsupported KFS meter history capability: {resolution.capability_name}"
