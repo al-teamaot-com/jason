@@ -1,6 +1,7 @@
 """Actual state-machine regression for Teams-independent ticket completion."""
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -37,14 +38,17 @@ class ReadPSA:
             "completedDate": completed_date,
         }
         self.calls = []
+        self.items_override = None
 
     def execute(self, capability, arguments):
         self.calls.append((capability, dict(arguments)))
-        assert capability == "service.ticket.read"
-        assert arguments == {"resource_id": 143299}
+        assert capability == "service.ticket.search"
+        assert arguments == {"resource_id": 143299, "page_size": 2}
+        items = ([dict(self.ticket)] if self.items_override is None
+                 else self.items_override)
         return {
             "status": "succeeded",
-            "evidence": {"data": {"items": [dict(self.ticket)]}},
+            "evidence": {"data": {"items": items}},
         }
 
 
@@ -211,12 +215,65 @@ def test_historical_teams_failure_reconciles_true_completion_without_reremediati
     assert row.job_uid is None
     assert "readback verified" in row.last_reason
     assert len(reads.calls)==1
-    assert reads.calls[0][0]=="service.ticket.read"
+    assert reads.calls[0] == ("service.ticket.search", {
+        "resource_id": 143299, "page_size": 2,
+    })
     assert actions.calls==[]
     assert outbox(store)[0]["event_type"]=="work_completed"
     assert outbox(store)[0]["state"]=="pending"
     worker._reconcile_completed_notification_blocks()
     assert len(reads.calls)==1  # no longer blocked
+    store.close()
+
+
+@pytest.mark.parametrize("mode", ("missing", "ambiguous"))
+def test_historical_psa_reconciliation_rejects_missing_or_duplicate_records(tmp_path, mode):
+    reads = ReadPSA()
+    reads.items_override = [] if mode == "missing" else [
+        dict(reads.ticket), dict(reads.ticket),
+    ]
+    worker, store, actions = build(tmp_path, reads=reads)
+    store.put(vulscan_work(phase="blocked"))
+    worker._reconcile_completed_notification_blocks()
+    assert store.get(143299).phase == "blocked"
+    assert actions.calls == []
+    assert outbox(store) == []
+    store.close()
+
+
+def test_stale_waiting_recheck_completed_in_psa_retires_locally_only(tmp_path):
+    reads = ReadPSA()
+    worker, store, actions = build(tmp_path, reads=reads)
+    work = replace(
+        vulscan_work(phase="waiting_recheck:backupiq_verify_reinstall"),
+        playbook_id="backupiq_endpoint_backup",
+    )
+    store.put(work)
+    worker._reconcile_completed_notification_blocks()
+    row = store.get(work.ticket_id)
+    assert row.phase == "complete"
+    assert row.job_uid is None and row.component_uid is None
+    assert "Stale scheduled verification" in row.last_reason
+    assert reads.calls == [("service.ticket.search", {
+        "resource_id": 143299, "page_size": 2,
+    })]
+    assert actions.calls == []
+    assert outbox(store) == []  # no stale Teams completion messages
+    worker._reconcile_completed_notification_blocks()
+    assert len(reads.calls) == 1
+    store.close()
+
+
+def test_waiting_recheck_not_completed_in_psa_is_not_marked_complete(tmp_path):
+    reads = ReadPSA(status=7, completed_date=None)
+    worker, store, actions = build(tmp_path, reads=reads)
+    work = vulscan_work(phase="waiting_recheck:backupiq_verify_reinstall")
+    store.put(work)
+    worker._reconcile_completed_notification_blocks()
+    assert store.get(work.ticket_id).phase == work.phase
+    assert len(reads.calls) == 1
+    assert actions.calls == []
+    assert outbox(store) == []
     store.close()
 
 
