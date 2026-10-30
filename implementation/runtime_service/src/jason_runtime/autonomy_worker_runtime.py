@@ -291,6 +291,10 @@ UNSUPPORTED_TRIAGE_HANDOFF_STATES = frozenset({
     "needs_execution_authority",
     "needs_security_review",
     "needs_playbook_review",
+    # No further autonomous safe branch is available after an evidence-only
+    # assessment or an evidence gap; hand off, never claim ticket resolution.
+    "read_only_assessed",
+    "needs_diagnostic_evidence",
 })
 
 UNSUPPORTED_TRIAGE_HANDOFF_SCOPE = PlaybookScope(
