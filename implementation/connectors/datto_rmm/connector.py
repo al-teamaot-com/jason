@@ -499,7 +499,26 @@ class DattoRmmConnector(ConnectorBase):
         if not collection_key or not isinstance(initial_data, Mapping):
             return initial_data
 
-        adapter = BoundedCollectionReadAdapter(max_probes=5)
+        # The V2 site inventory caps a complete customer-scoped scan at
+        # 6,000 patch rows. The generic 1,000-record read adapter rejects a
+        # valid 1,001+ row site before the inventory can evaluate it.
+        # Widen only this read-only operation; every other collection keeps
+        # the existing 1,000-row and 20-page safeguards.
+        site_patch_read = request.context.capability == "datto_rmm.site.patches.list"
+        if site_patch_read:
+            details = initial_data.get("pageDetails")
+            if isinstance(details, Mapping) and "totalCount" in details:
+                try:
+                    declared = int(details["totalCount"])
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("Datto site patch declared total is invalid") from exc
+                if declared < 0 or declared > 6000:
+                    raise ValueError("Datto site patch collection exceeds 6000-row scan bound")
+        adapter = (
+            BoundedCollectionReadAdapter(max_probes=5, max_pages=24, max_items=6000)
+            if site_patch_read
+            else BoundedCollectionReadAdapter(max_probes=5)
+        )
 
         def probe(arguments: Mapping[str, Any]) -> Mapping[str, Any]:
             merged_arguments = dict(request.arguments)
@@ -575,6 +594,12 @@ class DattoRmmConnector(ConnectorBase):
             )
 
         payload = result.payload
+
+        # A contradictory provider page cannot bypass the scan limit by
+        # returning more rows than its declared total.
+        if site_patch_read and isinstance(payload.get("patches"), list):
+            if len(payload["patches"]) > 6000:
+                raise ValueError("Datto site patch result exceeds 6000-row scan bound")
 
         if (
             request.context.capability
