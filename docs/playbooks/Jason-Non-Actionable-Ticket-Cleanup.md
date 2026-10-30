@@ -126,9 +126,13 @@ authority. A failure means **no automatic completion**.
 
 One governed Autotask administrative sequence:
 1. Update queue `Jason` and status `In Progress`; verify queue/status readback.
-2. Create a **publish=2** internal note with classification, company/site,
-   evidence, changes, and required next action. Deduplicate by durable fingerprint.
-3. Update status `Complete`; require provider verified-fields readback.
+2. Create a **publish=2** internal **pre-completion** note describing the
+   classification, evidence, and pending terminal verification; do not claim
+   completion before the PSA readback. Deduplicate by durable fingerprint.
+3. Re-read Autotask note history, company/site and time entries immediately
+   before completion. Require exactly one visible Jason-owned audit note,
+   no intervening client/technician activity and no identity/status drift.
+4. Update status `Complete`; require provider verified-fields readback.
 No deletion or unsubscribe in v1. A follow-up verified unsubscribe branch
 would need independent safety review and separate Owner scope.
 
@@ -166,8 +170,10 @@ Internal note title: `Jason - Non-Actionable Ticket Cleanup - Resolution`.
 Use a technician-scannable summary: STATUS, NEXT STEP, KEY EVIDENCE,
 WHAT JASON DID, CHANGES MADE, JASON STATE. Include Autotask ticket,
 companyID, companyLocationID, classification, no unsubscribe action, and
-no endpoint remediation. Do not embed email tracking links, secrets, or
-unnecessary contact details.
+no endpoint remediation. The note is written before the terminal update,
+so its STATUS must explicitly say closure is pending verification; the
+authoritative ticket state records the later verified completion.
+Do not embed email tracking links, secrets, or unnecessary contact details.
 
 ## 15. Failure Handling
 
@@ -187,7 +193,9 @@ auto-close an ambiguous email just to reduce queue counts.
 
 The authoritative Autotask mutation response must confirm `status` was
 written and read back; the internal note is created through the same
-governed scope. The runtime completion record reflects PSA verification
+governed scope and must become visible in the ticket's read-only note history
+before completion is attempted. Re-read for intervening human activity.
+The runtime completion record reflects PSA verification
 and sends the existing completion notification if configured. Provider
 write acceptance alone is not closure.
 
@@ -221,6 +229,11 @@ notes or time entries block; unpromoted scope does zero writes; promoted scope c
 completes with exact readback; restart and unchanged-scan duplicate
 suppression; verification failure leaves the ticket open for review;
 no customer communication triggered by our note in the real test policy.
+Include adversarial tests for a client reply arriving after Jason's note,
+missing internal-note readback, duplicate notes, and terminal update failure.
+The ticket companyLocationID is preserved and checked for drift, but
+independent confirmation that the location belongs to the company requires
+provider-backed acceptance before production promotion.
 The final controlled production test needs a dedicated non-client-impact
 ticket and exact Owner authorization; no real cleanup without it.
 
