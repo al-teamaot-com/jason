@@ -107,6 +107,11 @@ jobs:
           python -m pytest implementation/connectors/tests/test_datto_rmm_auth.py -q
           python -m pytest implementation/connectors/tests/test_datto_rmm_connector.py -q
           python -m pytest implementation/connectors/tests/test_datto_rmm_vulscan_v2_read_surface.py -q
+          python -m pytest implementation/runtime_service/tests/test_vulscan_v2_site_inventory.py -q
+          python -m pytest implementation/runtime_service/tests/test_vulscan_governed_patch_source.py -q
+          python -m pytest implementation/runtime_service/tests/test_vulscan_policy_kb_attribution.py -q
+          python -m pytest implementation/runtime_service/tests/test_vulscan_owner_disposition_evidence.py -q
+          python -m pytest implementation/runtime_service/tests/test_vulscan_v2_complete_shadow_acceptance.py -q
           python -m pytest implementation/connectors/tests/test_datto_rmm_automation_reads.py -q
           python -m pytest implementation/connectors/tests/test_datto_rmm_automation_manifest.py -q
           python -m pytest implementation/connectors/tests/test_datto_rmm_component_execution.py -q
