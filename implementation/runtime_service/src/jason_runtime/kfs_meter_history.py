@@ -310,17 +310,21 @@ class KfsMeterHistoryStore:
                 ORDER BY ended_at DESC
                 LIMIT 1
             ), devices AS (
-                SELECT DISTINCT s.device_id
+                SELECT DISTINCT s.device_id,
+                       NULLIF(k.customer_name,'') AS inventory_customer,
+                       NULLIF(k.equipment_id,'') AS inventory_equipment,
+                       NULLIF(k.serial_number,'') AS inventory_serial
                 FROM kfs_device_status_readings s
                 JOIN latest_snapshot r ON s.run_id = r.id
+                LEFT JOIN kfs_devices k ON k.device_id = s.device_id
                 WHERE s.device_id IS NOT NULL AND s.device_id <> ''
             ), boundaries AS (
                 SELECT d.device_id, counter.counter_name,
                        b.counter_value AS start_value, b.reading_at AS start_at,
                        e.counter_value AS end_value, e.reading_at AS end_at,
-                       COALESCE(e.customer_name,b.customer_name) AS customer_name,
-                       COALESCE(e.equipment_id,b.equipment_id) AS equipment_id,
-                       COALESCE(e.serial_number,b.serial_number) AS serial_number
+                       COALESCE(NULLIF(e.customer_name,''), NULLIF(b.customer_name,''), d.inventory_customer) AS customer_name,
+                       COALESCE(NULLIF(e.equipment_id,''), NULLIF(b.equipment_id,''), d.inventory_equipment) AS equipment_id,
+                       COALESCE(NULLIF(e.serial_number,''), NULLIF(b.serial_number,''), d.inventory_serial) AS serial_number
                 FROM devices d
                 CROSS JOIN (VALUES ('total'),('blackWhite'),('color')) counter(counter_name)
                 LEFT JOIN LATERAL (
@@ -375,7 +379,9 @@ class KfsMeterHistoryStore:
             if not device_id:
                 continue
             item = devices.setdefault(device_id, {
-                "device_id": device_id, "customer": customer or "",
+                "device_id": device_id,
+                "customer": customer or "Unknown (not mapped in KFS)",
+                "customer_mapping_verified": bool(customer),
                 "printer_id": equipment or serial or device_id,
                 "counts": {}, "latest_reading_at": None, "warnings": [],
             })
@@ -400,8 +406,24 @@ class KfsMeterHistoryStore:
         for item in devices.values():
             counts = item.pop("counts")
             item["black_white_pages"] = counts.get("blackWhite")
-            item["color_pages"] = counts.get("color")
             item["total_pages"] = counts.get("total")
+            color = counts.get("color")
+            # Some monochrome printers do not expose a color counter. When
+            # independently measured total and B&W usage are identical, a zero
+            # color delta is mathematically determined, not estimated.
+            if (
+                color is None
+                and "color: missing meter boundary" in item["warnings"]
+                and item["total_pages"] is not None
+                and item["black_white_pages"] is not None
+                and item["total_pages"] == item["black_white_pages"]
+            ):
+                color = 0
+                item["color_counter_status"] = "zero_verified_from_total_and_bw"
+                item["warnings"].remove("color: missing meter boundary")
+            else:
+                item["color_counter_status"] = "measured" if color is not None else "unavailable"
+            item["color_pages"] = color
             if None in (item["black_white_pages"], item["color_pages"], item["total_pages"]):
                 exceptions.append(item)
             elif item["black_white_pages"] + item["color_pages"] != item["total_pages"]:
@@ -427,6 +449,8 @@ class KfsMeterHistoryStore:
             warnings.append("Inventoried devices are missing from the meter comparison")
         if exceptions:
             warnings.append("Missing, reset, or inconsistent monthly meters for some printers")
+        if any(not item["customer_mapping_verified"] for item in ranked[:limit]):
+            warnings.append("A ranked printer is missing its customer assignment in KFS")
 
         coverage_verified = (
             snapshot_id is not None and snapshot_ended_at is not None
@@ -444,7 +468,10 @@ class KfsMeterHistoryStore:
             "eligible_devices": len(ranked), "exception_count": len(exceptions),
             "top_devices": ranked[:limit], "exceptions": exceptions,
             "coverage_verified": coverage_verified,
-            "complete": coverage_verified and not exceptions,
+            "complete": (
+                coverage_verified and not exceptions
+                and all(item["customer_mapping_verified"] for item in ranked[:limit])
+            ),
             "warnings": warnings,
         }
 
