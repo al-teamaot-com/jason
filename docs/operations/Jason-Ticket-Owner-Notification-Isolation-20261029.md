@@ -101,3 +101,56 @@ existing shadow constructor inputs. This notification fix does not depend on,
 enable or change the JSON pilot. Protected main merge and Production Manager
 must preserve all unrelated changes; none is silently included in the
 bounded ticket-notification scope.
+
+
+## Production activation defect and correction: 2026-10-29
+
+The exact protected release 3d62c211bbc861636658e0d7b6cbb5363d12a47e
+passed native deployment and CCC, and the ticket worker resumed normal
+scans. It queued more than 100 owner Teams notification intents, but every
+one was still pending with zero attempts.
+
+The root cause is a cross-process settings mismatch, **not a lack of
+Autotask or Teams account permission**. In
+auxiliary_maintenance_runtime_settings(), the auxiliary process sets
+autonomy_worker_enabled to False to avoid duplicate ticket admission.
+The new TicketOwnerNotificationMaintenance constructor also required
+that flag to be True, so the sender was omitted from the auxiliary
+composition. The main HTTP process also has that flag disabled, and the
+ticket worker correctly does not send Teams, leaving no active sender.
+
+The correction binds owner-notification delivery to the **auxiliary
+maintenance profile**, independent of the ticket-admission flag, while
+retaining the previous single-process compatibility rule. Exactly one
+auxiliary sender is created; neither HTTP nor the ticket worker receives
+a duplicate sender. No new provider access, mutable control authority,
+client notification or permission has been added.
+
+Existing durable outbox state is preserved. A second fix prioritizes
+work_started, work_completed, and patch_completed events above existing
+work_blocked backlog notifications, preventing a new ticket-start update
+from waiting behind roughly 100 older blocker alerts. The bounded
+four-per-cycle delivery limit and recorded retries/receipts remain
+unchanged.
+
+### Mandatory regression and live acceptance
+
+- Test the *actual* auxiliary_maintenance_runtime_settings transformation:
+  it disables autonomous ticket admission, yet build_runtime_application
+  in auxiliary profile must create a TicketOwnerNotificationMaintenance.
+- Queue a synthetic ticket lifecycle intent in isolated SQLite and tick
+  that actual auxiliary maintenance instance; verify exactly one provider
+  receipt, one delivered marker and no duplicate send.
+- Verify ticket_worker and HTTP-only profiles create no second sender.
+- Queue 100 older blocked-owner intents plus new ticket-start/completion
+  events; verify lifecycle events are selected first, without changing
+  backlog retention or suppressing legitimate owner-action messages.
+- After separately approved controlled deployment, verify real Teams
+  provider receipts and owner arrival for actual pickup and release
+  notifications, a continuously advancing ticket-scan heartbeat and
+  no forbidden endpoint/Autotask mutations.
+
+The previous source merge and CCC PASS did **not** prove ticket notification
+delivery. This exact defect was discovered through live outbox evidence and
+requires a fresh exact-SHA release and owner authorization before production
+activation.
