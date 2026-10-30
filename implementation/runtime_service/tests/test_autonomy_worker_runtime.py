@@ -552,14 +552,17 @@ def test_orphaned_waiting_device_completed_ticket_retires_local_wait(tmp_path: P
 
     class TicketReads(Reads):
         def execute(self, capability, arguments):
-            if capability == "service.ticket.read":
+            if capability == "service.ticket.search":
+                assert arguments == {"resource_id": 140933, "page_size": 2}
                 return {
                     "status": "succeeded",
                     "evidence": {
                         "data": {
                             "items": [
                                 {
-                                    "id": 140933,
+                                    "id": 140933, "companyID": 507,
+                                    "ticketNumber": "T20260925.9999",
+                                    "status": 5,
                                     "completedDate": "2026-09-30T11:32:22.750Z",
                                 }
                             ]
@@ -607,7 +610,8 @@ def test_orphaned_waiting_device_read_failure_does_not_abort_scan_with_canonical
 
     class DeniedTicketReads(Reads):
         def execute(self, capability, arguments):
-            if capability == "service.ticket.read":
+            if capability == "service.ticket.search":
+                assert arguments == {"resource_id": 140933, "page_size": 2}
                 raise PermissionError("INFORMATION_RELEASE_DENIED")
             return super().execute(capability, arguments)
 
@@ -677,10 +681,13 @@ def test_orphaned_waiting_device_open_ticket_stops_without_psa_override(tmp_path
 
     class TicketReads(Reads):
         def execute(self, capability, arguments):
-            if capability == "service.ticket.read":
+            if capability == "service.ticket.search":
+                assert arguments == {"resource_id": 140933, "page_size": 2}
                 return {
                     "status": "succeeded",
-                    "evidence": {"data": {"items": [{"id": 140933, "completedDate": None}]}},
+                    "evidence": {"data": {"items": [{"id": 140933, "companyID": 507,
+                                                  "ticketNumber": "T20260925.9999",
+                                                  "status": 1, "completedDate": None}]}},
                 }
             return super().execute(capability, arguments)
 
@@ -711,6 +718,55 @@ def test_orphaned_waiting_device_open_ticket_stops_without_psa_override(tmp_path
     assert current is not None
     assert current.phase == "escalated"
     assert "preserve authoritative PSA/human state" in current.last_reason
+    assert actions.calls == []
+    store.close()
+
+
+@pytest.mark.parametrize("field,value", [
+    ("companyID", 999),
+    ("ticketNumber", "T20260925.0001"),
+    ("status", 7),
+])
+def test_orphaned_waiting_device_reconciliation_fails_closed_on_bad_identity_or_status(
+    tmp_path: Path, field: str, value: object,
+):
+    class EmptyQueueSource:
+        def reconcile_candidates(self):
+            return ()
+
+    class TicketReads(Reads):
+        def execute(self, capability, arguments):
+            if capability == "service.ticket.search":
+                assert arguments == {"resource_id": 140933, "page_size": 2}
+                ticket = {
+                    "id": 140933, "companyID": 507,
+                    "ticketNumber": "T20260925.9999",
+                    "status": 5, "completedDate": "2026-09-30T11:32:22.750Z",
+                }
+                ticket[field] = value
+                return {"status": "succeeded",
+                        "evidence": {"data": {"items": [ticket]}}}
+            return super().execute(capability, arguments)
+
+    store = SQLiteOperationalWorkStore(tmp_path / "worker.sqlite3")
+    store.put(OperationalWork(
+        ticket_id=140933, ticket_number="T20260925.9999",
+        title="Antivirus status issue",
+        playbook_id="datto_edr_av", source_queue="Jason",
+        company_id=507, configuration_item_id=1583,
+        device_uid="device-uid-1", hostname="PC-1",
+        phase="waiting_device_access:health_wait",
+        last_reason="endpoint offline",
+    ))
+    actions = Actions()
+    worker = OperationalAutonomyMaintenance(
+        queue_source=EmptyQueueSource(), reads=TicketReads(),
+        actions=actions, store=store,
+        promotion_store=PromotionStore(),
+        interval_seconds=30, monotonic=iter((0.0,)).__next__,
+    )
+    worker.tick()
+    assert store.get(140933).phase == "waiting_device_access:health_wait"
     assert actions.calls == []
     store.close()
 

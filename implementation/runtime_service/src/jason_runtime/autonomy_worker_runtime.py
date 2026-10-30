@@ -649,11 +649,14 @@ class SQLiteOperationalWorkStore:
         return tuple(self._row(row) for row in rows)
 
     def list_notification_blocked(self, *, limit: int = 8) -> tuple[OperationalWork, ...]:
-        # Historical verified VulScan completions may have been incorrectly
-        # marked blocked after an unrelated Teams transport exception.
+        # Reconcile verified Autotask completions stranded by prior Teams
+        # failures or waiting for a verification that PSA already completed.
+        # No endpoint or PSA mutations are permitted in this recovery.
         rows = self._connection.execute(
-            "SELECT * FROM autonomy_operational_work WHERE phase='blocked' "
-            "AND last_reason LIKE '%autonomous completion Teams notification failed%' "
+            "SELECT * FROM autonomy_operational_work WHERE "
+            "(phase='blocked' AND last_reason LIKE "
+            "'%autonomous completion Teams notification failed%') "
+            "OR phase LIKE 'waiting_recheck:%' "
             "ORDER BY updated_at,ticket_id LIMIT ?",
             (min(8, max(1, int(limit))),),
         ).fetchall()
@@ -1302,14 +1305,14 @@ class OperationalAutonomyMaintenance:
         )
 
     def _reconcile_completed_notification_blocks(self) -> None:
-        """Recover verified PSA completions stranded by historic Teams failures."""
+        """Recover PSA-complete work stranded by Teams or stale recheck state."""
         selector = getattr(self.store, "list_notification_blocked", None)
         if not callable(selector):
             return
         for work in selector(limit=4):
             try:
-                data = self._read_data("service.ticket.read", {
-                    "resource_id": work.ticket_id,
+                data = self._read_data("service.ticket.search", {
+                    "resource_id": work.ticket_id, "page_size": 2,
                 })
                 items = data.get("items")
                 if not isinstance(items, list) or len(items) != 1:
@@ -1332,18 +1335,29 @@ class OperationalAutonomyMaintenance:
                         "ticket_id": work.ticket_id,
                     })
                     continue
+                prior_teams_block = work.phase == "blocked"
                 self.store.put(self._replace(
                     work, phase="complete", job_uid=None, component_uid=None,
                     last_reason=(
                         "Autotask completion date, status, company and ticket "
-                        "readback verified. Prior Teams delivery failure was "
-                        "not a ticket remediation failure."
+                        "readback verified. "
+                        + (
+                            "Prior Teams delivery failure was not a ticket remediation failure."
+                            if prior_teams_block
+                            else "Stale scheduled verification retired without repeating remediation."
+                        )
                     ),
                 ))
-                self._notify_ticket_event(work, "status_change", "Complete")
-                self._audit_diagnostic("ticket_teams_block_completion_reconciled", {
-                    "ticket_id": work.ticket_id,
-                })
+                # Historical recheck completions are bookkeeping only; do not
+                # generate a delayed completion card for an old PSA ticket.
+                if prior_teams_block:
+                    self._notify_ticket_event(work, "status_change", "Complete")
+                self._audit_diagnostic(
+                    "ticket_teams_block_completion_reconciled"
+                    if prior_teams_block
+                    else "ticket_waiting_recheck_completion_reconciled",
+                    {"ticket_id": work.ticket_id},
+                )
             except Exception as exc:
                 self._audit_diagnostic("ticket_teams_block_reconcile_failed", {
                     "ticket_id": work.ticket_id,
@@ -1495,8 +1509,8 @@ class OperationalAutonomyMaintenance:
                 continue
             try:
                 data = self._read_data(
-                    "service.ticket.read",
-                    {"resource_id": work.ticket_id},
+                    "service.ticket.search",
+                    {"resource_id": work.ticket_id, "page_size": 2},
                 )
                 items = data.get("items")
                 if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], Mapping):
@@ -1504,11 +1518,18 @@ class OperationalAutonomyMaintenance:
                         "waiting-device reconciliation requires exactly one ticket readback"
                     )
                 ticket = dict(items[0])
-                if int(ticket.get("id") or 0) != work.ticket_id:
+                if (int(ticket.get("id") or 0) != work.ticket_id
+                        or "companyID" not in ticket
+                        or int(ticket["companyID"]) != work.company_id
+                        or str(ticket.get("ticketNumber") or "") != work.ticket_number):
                     raise OperationalAutonomyError(
-                        "waiting-device reconciliation ticket identity mismatch"
+                        "waiting-device reconciliation ticket/company identity mismatch"
                     )
                 if ticket.get("completedDate"):
+                    if str(ticket.get("status") or "").casefold() not in {"5", "complete"}:
+                        raise OperationalAutonomyError(
+                            "waiting-device completion status/date disagreement"
+                        )
                     self.store.put(
                         self._replace(
                             work,
