@@ -168,3 +168,76 @@ def test_client_scoped_access_stays_fail_closed_until_mapping_exists():
             ),
             resolution=resolution(PRINT_METER_USAGE_READ),
         )
+
+
+
+def test_authorized_rank_invokes_fresh_governed_customer_evidence(monkeypatch):
+    from pathlib import Path
+    from jason_runtime.kfs_customer_document_evidence import ApprovedCustomerEvidenceIndex
+    from jason_runtime.kfs_meter_history import KfsMeterHistoryStore
+    index = ApprovedCustomerEvidenceIndex({})
+    calls = []
+
+    def fake_rank(self, *, arguments, start, end):
+        calls.append(("rank", self.customer_evidence_index, arguments["month"]))
+        return {"top_devices": [], "warnings": ["provisional"]}
+
+    monkeypatch.setattr(KfsMeterHistoryStore, "fleet_rank", fake_rank)
+    store = KfsMeterHistoryStore(
+        host="unused", port=5432, database="unused",
+        user="readonly", password_file=Path("/unused"),
+    )
+    invoker = GovernedKfsMeterHistoryInvoker(
+        store=store,
+        customer_evidence_resolver=lambda now: calls.append(("refresh", now)) or index,
+    )
+    result = invoker.invoke(
+        request=request(PRINT_FLEET_USAGE_RANK, {"month": "2026-09"}),
+        resolution=resolution(PRINT_FLEET_USAGE_RANK),
+    )
+    assert calls[0][0] == "refresh"
+    assert calls[1] == ("rank", index, "2026-09")
+    assert store.customer_evidence_index is None
+    assert result.output["warnings"] == ("provisional",)
+
+
+def test_unauthorized_rank_never_tries_sharepoint_document_refresh():
+    from pathlib import Path
+    from jason_runtime.kfs_meter_history import KfsMeterHistoryStore
+    calls = []
+    store = KfsMeterHistoryStore(
+        host="unused", port=5432, database="unused",
+        user="readonly", password_file=Path("/unused"),
+    )
+    invoker = GovernedKfsMeterHistoryInvoker(
+        store=store,
+        customer_evidence_resolver=lambda now: calls.append(now),
+    )
+    with pytest.raises(PermissionError, match="AOT-internal"):
+        invoker.invoke(
+            request=request(
+                PRINT_FLEET_USAGE_RANK, {"month": "2026-09"},
+                client_id="some-client",
+            ),
+            resolution=resolution(PRINT_FLEET_USAGE_RANK),
+        )
+    assert calls == []
+
+
+def test_governed_sharepoint_failure_prevents_unverified_rank_output():
+    from pathlib import Path
+    from jason_runtime.kfs_meter_history import KfsMeterHistoryStore
+    store = KfsMeterHistoryStore(
+        host="unused", port=5432, database="unused",
+        user="readonly", password_file=Path("/unused"),
+    )
+    def denied(_now):
+        raise PermissionError("approved SharePoint document grant expired")
+    invoker = GovernedKfsMeterHistoryInvoker(
+        store=store, customer_evidence_resolver=denied,
+    )
+    with pytest.raises(PermissionError, match="grant expired"):
+        invoker.invoke(
+            request=request(PRINT_FLEET_USAGE_RANK, {"month": "2026-09"}),
+            resolution=resolution(PRINT_FLEET_USAGE_RANK),
+        )
