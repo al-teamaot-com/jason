@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0",
+  "enabled": true,
+  "owner_authority": "owner-2026-10-25-conditional-dual-drive-safe-maintenance",
+  "intervention_used_percent": 80,
+  "destination_max_used_percent": 80,
+  "minimum_age_days": 21,
+  "max_worktrees_per_cycle": 10,
+  "max_bytes_per_cycle": 536870912,
+  "max_bytes_per_worktree": 134217728,
+  "source_worktree_root": "/home/al/jason-worktrees",
+  "archive_worktree_root": "/srv/jason/archive/historical/retired-git-worktrees/auto",
+  "archive_mount": "/srv/jason/archive",
+  "protected_paths": [
+    "/var/lib/jason",
+    "/opt/jason",
+    "/var/lib/docker",
+    "/opt/jason/infrastructure/openbao/audit"
+  ],
+  "allow_actions": [
+    "archive_reconstructible_clean_detached_worktree",
+    "scoped_unused_buildx_cache_cleanup"
+  ],
+  "require_ancestor_of_protected_main": true,
+  "no_service_signals": true,
+  "no_live_data_mutations": true,
+  "builder": "default",
+  "minimum_unused_cache_age_hours": 24,
+  "maximum_cache_cleanup_seconds": 90
+}

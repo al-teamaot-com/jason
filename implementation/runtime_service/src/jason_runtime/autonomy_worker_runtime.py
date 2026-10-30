@@ -15,9 +15,10 @@ The first production executor is the health-only Datto EDR/AV path.  It may:
 * rerun the authoritative health component;
 * document and close only after Status=Healthy is observed.
 
-It never handles threat-triggered tickets, never schedules a reboot, never runs
-generic PowerShell, and never performs the clean-uninstall recovery branch.
-Those remain approval-gated by design.
+It never remediates threat-triggered tickets, schedules reboots, runs
+free-form PowerShell, or performs clean-uninstall recovery. Unsupported
+tickets may receive bounded read-only evidence collection using fixed
+commands only; changing anything remains approval-gated.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ import re
 import sqlite3
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 from uuid import uuid4
@@ -109,6 +110,14 @@ from .gpt_insights import (
     material_fingerprint as gpt_insights_fingerprint,
     render_insight as render_gpt_insight,
 )
+from .unsupported_ticket_triage import (
+    TRIAGE_NOTE_TITLE, gather as gather_unsupported_triage,
+    category_for as unsupported_triage_category, render_triage_note,
+)
+
+# Force a single safe re-evaluation of old read-policy-denied rows after an
+# implementation change, without editing production SQLite state manually.
+UNSUPPORTED_TRIAGE_LOGIC_VERSION = "read_only_admission_assurance_v5"
 from .managed_ticket_notes import (
     GPT_INSIGHTS_TITLE,
     exact_named_note,
@@ -211,6 +220,13 @@ VULSCAN_SPLIT_SCOPE = PlaybookScope(
         "service.ticket.update",
     ),
 )
+CLIENT_QUESTION_SCOPE = PlaybookScope(
+    playbook_id="client_information_request",
+    playbook_version="1.0.0",
+    policy_id="playbook-autonomy:client_information_request",
+    required_action_capabilities=("service.ticket.client.notification.create",),
+)
+
 VULSCAN_CLIENT_DISPOSITION_SCOPE = PlaybookScope(
     playbook_id="vulscan_missing_patch",
     playbook_version="1.1.0",
@@ -257,6 +273,36 @@ GPT_INSIGHTS_SCOPE = PlaybookScope(
         "service.ticket.note.update",
     ),
 )
+# Dedicated standing owner promotion is required before a generic
+# read-only diagnostic may write a technician-visible Autotask internal note.
+# This never inherits a remediation playbook's action scope.
+UNSUPPORTED_TRIAGE_NOTE_SCOPE = PlaybookScope(
+    playbook_id="unsupported_readonly_triage_note",
+    playbook_version="1.0.0",
+    policy_id="playbook-autonomy:unsupported_readonly_triage_note",
+    required_action_capabilities=(
+        "service.ticket.note.create",
+        "service.ticket.note.update",
+    ),
+)
+UNSUPPORTED_TRIAGE_HANDOFF_STATES = frozenset({
+    "needs_human_review",
+    "needs_device_identity",
+    "needs_execution_authority",
+    "needs_security_review",
+    "needs_playbook_review",
+    # No further autonomous safe branch is available after an evidence-only
+    # assessment or an evidence gap; hand off, never claim ticket resolution.
+    "read_only_assessed",
+    "needs_diagnostic_evidence",
+})
+
+UNSUPPORTED_TRIAGE_HANDOFF_SCOPE = PlaybookScope(
+    playbook_id="unsupported_triage_human_review",
+    playbook_version="1.0.0",
+    policy_id="playbook-autonomy:unsupported_triage_human_review",
+    required_action_capabilities=("service.ticket.update",),
+)
 JASON_ACTIVITY_SCOPE = PlaybookScope(
     playbook_id="jason_activity_log",
     playbook_version="1.0.0",
@@ -280,6 +326,8 @@ PLAYBOOK_SCOPES = {
     OFFLINE_AUGMENTATION_SCOPE.playbook_id: OFFLINE_AUGMENTATION_SCOPE,
     GPT_INSIGHTS_SCOPE.playbook_id: GPT_INSIGHTS_SCOPE,
     JASON_ACTIVITY_SCOPE.playbook_id: JASON_ACTIVITY_SCOPE,
+    UNSUPPORTED_TRIAGE_NOTE_SCOPE.playbook_id: UNSUPPORTED_TRIAGE_NOTE_SCOPE,
+    UNSUPPORTED_TRIAGE_HANDOFF_SCOPE.playbook_id: UNSUPPORTED_TRIAGE_HANDOFF_SCOPE,
 }
 
 HEALTH_COMPONENT_NAME = "Check Datto EDR/AV Status AOT Ver 12122025-1"
@@ -295,6 +343,8 @@ SECURITY_LOG_SELF_HEAL_UID = "cdd297b4-378f-4ffc-b272-56833e926c81"
 BACKUPIQ_INSTALLER_NAME = "Datto Endpoint Backup Agent v2 [WIN]"
 BACKUPIQ_INSTALLER_UID = "f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967"
 BACKUPIQ_REINSTALL_VERIFY_SECONDS = 3 * 60 * 60
+# Human review only; never cancel or re-execute a nonterminal Datto job.
+BACKUPIQ_REINSTALL_JOB_STALL_SECONDS = 2 * 60 * 60
 BACKUPIQ_INITIAL_BACKUP_MAX_SECONDS = 7 * 24 * 60 * 60
 BACKUPIQ_PROGRESS_STALL_SECONDS = 12 * 60 * 60
 LOW_DISK_SYSMON_CLEANUP_NAME = "Sysmon - Clear C:\\Sysmon Folder - AOT"
@@ -405,6 +455,55 @@ class SQLiteOperationalWorkStore:
         selected INTEGER NOT NULL,
         waiting_device INTEGER NOT NULL,
         human_review INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS autonomy_unsupported_handoff_delivery (
+        ticket_id INTEGER PRIMARY KEY,
+        note_fingerprint TEXT NOT NULL,
+        state TEXT NOT NULL,
+        attempts INTEGER NOT NULL,
+        next_due_at TEXT NOT NULL,
+        last_error TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS autonomy_teams_notification_outbox (
+        event_key TEXT PRIMARY KEY,
+        ticket_id INTEGER NOT NULL,
+        playbook_id TEXT NOT NULL,
+        note_title TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        arguments_json TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'pending',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_due_at TEXT NOT NULL,
+        last_error TEXT,
+        message_id TEXT,
+        recorded_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS ix_autonomy_teams_notification_due
+       ON autonomy_teams_notification_outbox(state, next_due_at);
+
+    CREATE TABLE IF NOT EXISTS autonomy_unsupported_note_delivery (
+        ticket_id INTEGER PRIMARY KEY,
+        fingerprint TEXT NOT NULL,
+        attempts INTEGER NOT NULL,
+        next_due_at TEXT NOT NULL,
+        last_error TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS autonomy_unsupported_triage (
+        ticket_id INTEGER PRIMARY KEY,
+        ticket_number TEXT NOT NULL,
+        source_version TEXT,
+        category TEXT NOT NULL,
+        state TEXT NOT NULL,
+        evidence_json TEXT NOT NULL,
+        next_step TEXT NOT NULL,
+        attempts INTEGER NOT NULL,
+        checked_at TEXT NOT NULL,
+        next_due_at TEXT NOT NULL,
+        last_error TEXT
     );
 
     CREATE TABLE IF NOT EXISTS autonomy_ticket_classification (
@@ -544,9 +643,76 @@ class SQLiteOperationalWorkStore:
             ") "
             "AND phase NOT LIKE 'waiting_device_access:%' "
             "AND phase NOT LIKE 'waiting_recheck:%' "
+            "AND phase NOT LIKE 'waiting_client_information:%' "
             "ORDER BY updated_at,ticket_id"
         ).fetchall()
         return tuple(self._row(row) for row in rows)
+
+    def list_notification_blocked(self, *, limit: int = 8) -> tuple[OperationalWork, ...]:
+        # Reconcile verified Autotask completions stranded by prior Teams
+        # failures or waiting for a verification that PSA already completed.
+        # No endpoint or PSA mutations are permitted in this recovery.
+        rows = self._connection.execute(
+            "SELECT * FROM autonomy_operational_work WHERE "
+            "(phase='blocked' AND last_reason LIKE "
+            "'%autonomous completion Teams notification failed%') "
+            "OR phase LIKE 'waiting_recheck:%' "
+            "ORDER BY updated_at,ticket_id LIMIT ?",
+            (min(8, max(1, int(limit))),),
+        ).fetchall()
+        return tuple(self._row(row) for row in rows)
+
+    def queue_teams_notification(
+        self, *, ticket_id: int, playbook_id: str, note_title: str,
+        fingerprint: str, event_type: str, arguments: Mapping[str, Any],
+        now: datetime,
+    ) -> str:
+        event_key = hashlib.sha256(
+            f"{ticket_id}|{playbook_id}|{note_title}|{fingerprint}".encode("utf-8")
+        ).hexdigest()
+        if event_type not in {"work_started", "work_completed", "patch_completed", "work_blocked"}:
+            raise ValueError("unsupported owner notification event")
+        serialized = json.dumps(dict(arguments), sort_keys=True)
+        if len(serialized) > 2400:
+            raise ValueError("owner notification exceeds bounded payload")
+        with self._connection:
+            self._connection.execute(
+                "INSERT OR IGNORE INTO autonomy_teams_notification_outbox("
+                "event_key,ticket_id,playbook_id,note_title,fingerprint,"
+                "event_type,arguments_json,state,next_due_at,recorded_at)"
+                " VALUES (?,?,?,?,?,?,?,'pending',?,?)",
+                (event_key, int(ticket_id), playbook_id, note_title, fingerprint,
+                 event_type, serialized, now.isoformat(), now.isoformat()),
+            )
+        return event_key
+
+    def due_teams_notifications(
+        self, *, now: datetime, limit: int = 4,
+    ) -> tuple[Mapping[str, Any], ...]:
+        rows = self._connection.execute(
+            "SELECT * FROM autonomy_teams_notification_outbox "
+            "WHERE state='pending' AND next_due_at<=? "
+            "ORDER BY CASE WHEN event_type IN (\'work_started\',\'work_completed\',\'patch_completed\') THEN 0 ELSE 1 END, "
+            "next_due_at,recorded_at LIMIT ?",
+            (now.isoformat(), min(4, max(1, int(limit)))),
+        ).fetchall()
+        return tuple(dict(r) for r in rows)
+
+    def record_teams_notification_result(
+        self, *, event_key: str, state: str, attempts: int,
+        next_due_at: datetime, last_error: str | None,
+        message_id: str | None = None,
+    ) -> None:
+        if state not in {"pending", "delivered", "unverified", "expired"}:
+            raise ValueError("invalid notification delivery state")
+        with self._connection:
+            self._connection.execute(
+                "UPDATE autonomy_teams_notification_outbox SET "
+                "state=?,attempts=?,next_due_at=?,last_error=?,message_id=? "
+                "WHERE event_key=?",
+                (state,int(attempts),next_due_at.isoformat(),
+                 last_error,message_id,event_key),
+            )
 
     def list_waiting_device_access(self) -> tuple[OperationalWork, ...]:
         rows = self._connection.execute(
@@ -710,6 +876,13 @@ class SQLiteOperationalWorkStore:
         ).fetchone()
         return None if row is None else str(row["state"])
 
+    def classification_disposition(self, ticket_id: int) -> tuple[str, str] | None:
+        row = self._connection.execute(
+            "SELECT state,reason_code FROM autonomy_ticket_classification WHERE ticket_id=?",
+            (int(ticket_id),),
+        ).fetchone()
+        return None if row is None else (str(row["state"]), str(row["reason_code"]))
+
     def ticket_activity(self, ticket_id: int) -> tuple[Mapping[str, Any], ...]:
         rows = self._connection.execute(
             "SELECT activity_id,phase,reason,occurred_at "
@@ -856,6 +1029,102 @@ class SQLiteOperationalWorkStore:
                 ),
             )
 
+    def unsupported_handoff_delivery(self, ticket_id: int) -> Mapping[str, Any] | None:
+        row = self._connection.execute(
+            "SELECT ticket_id,note_fingerprint,state,attempts,next_due_at,last_error "
+            "FROM autonomy_unsupported_handoff_delivery WHERE ticket_id=?",
+            (int(ticket_id),),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def record_unsupported_handoff_delivery(
+        self, *, ticket_id: int, note_fingerprint: str, state: str,
+        attempts: int, next_due_at: str, last_error: str | None,
+    ) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO autonomy_unsupported_handoff_delivery (
+                    ticket_id,note_fingerprint,state,attempts,next_due_at,last_error
+                ) VALUES (?,?,?,?,?,?)
+                ON CONFLICT(ticket_id) DO UPDATE SET
+                    note_fingerprint=excluded.note_fingerprint,
+                    state=excluded.state,
+                    attempts=excluded.attempts,
+                    next_due_at=excluded.next_due_at,
+                    last_error=excluded.last_error
+                """,
+                (ticket_id,note_fingerprint,state,attempts,next_due_at,last_error),
+            )
+
+    def unsupported_note_delivery(self, ticket_id: int) -> Mapping[str, Any] | None:
+        row = self._connection.execute(
+            "SELECT ticket_id,fingerprint,attempts,next_due_at,last_error "
+            "FROM autonomy_unsupported_note_delivery WHERE ticket_id=?",
+            (int(ticket_id),),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def record_unsupported_note_delivery(
+        self, *, ticket_id: int, fingerprint: str,
+        attempts: int, next_due_at: str, last_error: str | None,
+    ) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO autonomy_unsupported_note_delivery(
+                    ticket_id,fingerprint,attempts,next_due_at,last_error
+                ) VALUES (?,?,?,?,?)
+                ON CONFLICT(ticket_id) DO UPDATE SET
+                    fingerprint=excluded.fingerprint,
+                    attempts=excluded.attempts,
+                    next_due_at=excluded.next_due_at,
+                    last_error=excluded.last_error
+                """,
+                (int(ticket_id),fingerprint,int(attempts),next_due_at,last_error),
+            )
+
+    def unsupported_triage(self, ticket_id: int) -> Mapping[str, Any] | None:
+        row = self._connection.execute(
+            "SELECT * FROM autonomy_unsupported_triage WHERE ticket_id=?",
+            (int(ticket_id),),
+        ).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        result["evidence"] = json.loads(result.pop("evidence_json"))
+        return result
+
+    def record_unsupported_triage(
+        self, *, ticket_id: int, ticket_number: str, source_version: str | None,
+        category: str, state: str, evidence: Mapping[str, Any], next_step: str,
+        attempts: int, checked_at: str, next_due_at: str, last_error: str | None = None,
+    ) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO autonomy_unsupported_triage(
+                    ticket_id,ticket_number,source_version,category,state,
+                    evidence_json,next_step,attempts,checked_at,next_due_at,last_error
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(ticket_id) DO UPDATE SET
+                    ticket_number=excluded.ticket_number,
+                    source_version=excluded.source_version,
+                    category=excluded.category,
+                    state=excluded.state,
+                    evidence_json=excluded.evidence_json,
+                    next_step=excluded.next_step,
+                    attempts=excluded.attempts,
+                    checked_at=excluded.checked_at,
+                    next_due_at=excluded.next_due_at,
+                    last_error=excluded.last_error
+                """,
+                (int(ticket_id), str(ticket_number), source_version, str(category),
+                 str(state), json.dumps(dict(evidence), sort_keys=True),
+                 str(next_step), int(attempts), str(checked_at),
+                 str(next_due_at), last_error),
+            )
+
     def close(self) -> None:
         self._connection.close()
 
@@ -955,11 +1224,15 @@ class OperationalAutonomyMaintenance:
         max_active_work_items: int = 2,
         max_admission_attempts_per_scan: int = 4,
         max_candidate_evaluations_per_scan: int = 40,
+        max_unsupported_triage_per_scan: int = 4,
+        triage_note_pilot_ticket_ids: Iterable[int] = (),
         interval_seconds: int = 60,
         monotonic: Callable[[], float] = time.monotonic,
         audit=None,
         completion_notifier=None,
         ticket_splitter=None,
+        client_questions=None,
+        contact_reads=None,
     ) -> None:
         if not 1 <= int(max_active_work_items) <= 20:
             raise ValueError("max_active_work_items must be between 1 and 20")
@@ -967,6 +1240,8 @@ class OperationalAutonomyMaintenance:
             raise ValueError("max_admission_attempts_per_scan must be between 1 and 20")
         if not 1 <= int(max_candidate_evaluations_per_scan) <= 200:
             raise ValueError("max_candidate_evaluations_per_scan must be between 1 and 200")
+        if not 1 <= int(max_unsupported_triage_per_scan) <= 20:
+            raise ValueError("max_unsupported_triage_per_scan must be between 1 and 20")
         if int(interval_seconds) < 30:
             raise ValueError("operational autonomy interval must be at least 30 seconds")
         self.queue_source = queue_source
@@ -977,11 +1252,20 @@ class OperationalAutonomyMaintenance:
         self.max_active_work_items = int(max_active_work_items)
         self.max_admission_attempts_per_scan = int(max_admission_attempts_per_scan)
         self.max_candidate_evaluations_per_scan = int(max_candidate_evaluations_per_scan)
+        self.max_unsupported_triage_per_scan = int(max_unsupported_triage_per_scan)
+        pilot_ids = tuple(int(value) for value in triage_note_pilot_ticket_ids)
+        if len(pilot_ids) > 5 or any(value <= 0 for value in pilot_ids):
+            raise ValueError("triage note pilot must contain at most five positive ticket IDs")
+        if len(pilot_ids) != len(set(pilot_ids)):
+            raise ValueError("triage note pilot ticket IDs must be unique")
+        self.triage_note_pilot_ticket_ids = frozenset(pilot_ids)
         self.interval_seconds = int(interval_seconds)
         self.monotonic = monotonic
         self.audit = audit
         self.completion_notifier = completion_notifier
         self.ticket_splitter = ticket_splitter
+        self.client_questions = client_questions
+        self.contact_reads = contact_reads
         self._next_due = 0.0
         self._resource_automation_cache: dict[int, bool] = {}
         self._ticket_status_cache: dict[int, str] = {}
@@ -1008,6 +1292,77 @@ class OperationalAutonomyMaintenance:
         if value == "blocked":
             return "On Hold"
         return None
+
+    def _drain_teams_notifications(self) -> None:
+        """Kept for controlled tests; real delivery runs in the auxiliary lane."""
+        from .autonomy_teams_notification_maintenance import (
+            drain_owner_notification_outbox,
+        )
+        drain_owner_notification_outbox(
+            store=self.store,
+            notifier=self.completion_notifier,
+            audit=self._audit_diagnostic if self.audit is not None else None,
+        )
+
+    def _reconcile_completed_notification_blocks(self) -> None:
+        """Recover PSA-complete work stranded by Teams or stale recheck state."""
+        selector = getattr(self.store, "list_notification_blocked", None)
+        if not callable(selector):
+            return
+        for work in selector(limit=4):
+            try:
+                data = self._read_data("service.ticket.search", {
+                    "resource_id": work.ticket_id, "page_size": 2,
+                })
+                items = data.get("items")
+                if not isinstance(items, list) or len(items) != 1:
+                    raise OperationalAutonomyError(
+                        "completion reconciliation requires exactly one ticket"
+                    )
+                ticket = items[0]
+                if not isinstance(ticket, Mapping):
+                    raise OperationalAutonomyError("ticket readback malformed")
+                if (int(ticket.get("id") or 0) != work.ticket_id
+                        or int(ticket.get("companyID") or 0) != work.company_id
+                        or str(ticket.get("ticketNumber") or "") != work.ticket_number):
+                    raise OperationalAutonomyError(
+                        "completion reconciliation ticket/company mismatch"
+                    )
+                status = str(ticket.get("status") or "").casefold()
+                if not (ticket.get("completedDate") and status in {"5", "complete"}):
+                    # Never claim completion without authoritative PSA agreement.
+                    self._audit_diagnostic("ticket_teams_block_not_psa_complete", {
+                        "ticket_id": work.ticket_id,
+                    })
+                    continue
+                prior_teams_block = work.phase == "blocked"
+                self.store.put(self._replace(
+                    work, phase="complete", job_uid=None, component_uid=None,
+                    last_reason=(
+                        "Autotask completion date, status, company and ticket "
+                        "readback verified. "
+                        + (
+                            "Prior Teams delivery failure was not a ticket remediation failure."
+                            if prior_teams_block
+                            else "Stale scheduled verification retired without repeating remediation."
+                        )
+                    ),
+                ))
+                # Historical recheck completions are bookkeeping only; do not
+                # generate a delayed completion card for an old PSA ticket.
+                if prior_teams_block:
+                    self._notify_ticket_event(work, "status_change", "Complete")
+                self._audit_diagnostic(
+                    "ticket_teams_block_completion_reconciled"
+                    if prior_teams_block
+                    else "ticket_waiting_recheck_completion_reconciled",
+                    {"ticket_id": work.ticket_id},
+                )
+            except Exception as exc:
+                self._audit_diagnostic("ticket_teams_block_reconcile_failed", {
+                    "ticket_id": work.ticket_id,
+                    "error_type": type(exc).__name__,
+                })
 
     def _notify_ticket_event(self, work: OperationalWork, event: str, status: str) -> None:
         """Best-effort owner Teams card only after Autotask readback verification.
@@ -1042,6 +1397,29 @@ class OperationalAutonomyMaintenance:
             f"Ticket: {work.ticket_number} | Device: {work.hostname or 'Not linked'} | "
             f"Status: {status} | Action: {'Picked up by Jason' if category == 'pickup' else 'Completed by Jason'}"
         )
+        if callable(getattr(self.store, "queue_teams_notification", None)):
+            try:
+                self.store.queue_teams_notification(
+                    ticket_id=work.ticket_id,
+                    playbook_id=work.playbook_id,
+                    note_title=note_title,
+                    fingerprint=fingerprint,
+                    event_type=event_type,
+                    arguments={
+                        "work_id": work.ticket_number[:80],
+                        "work_title": work.title[:180],
+                        "summary": summary[:400],
+                    },
+                    now=datetime.now(timezone.utc),
+                )
+                # A separate supervised auxiliary process sends this event.
+                # Never wait for an external Teams provider inside a PSA scan.
+            except Exception:
+                # Even a disk-full outbox error must not undo PSA verification.
+                pass
+            return
+        # Backward-compatible lightweight unit test store: all real workers
+        # must provide the durable outbox methods above.
         try:
             self.completion_notifier.send(
                 event_type,
@@ -1131,8 +1509,8 @@ class OperationalAutonomyMaintenance:
                 continue
             try:
                 data = self._read_data(
-                    "service.ticket.read",
-                    {"resource_id": work.ticket_id},
+                    "service.ticket.search",
+                    {"resource_id": work.ticket_id, "page_size": 2},
                 )
                 items = data.get("items")
                 if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], Mapping):
@@ -1140,11 +1518,18 @@ class OperationalAutonomyMaintenance:
                         "waiting-device reconciliation requires exactly one ticket readback"
                     )
                 ticket = dict(items[0])
-                if int(ticket.get("id") or 0) != work.ticket_id:
+                if (int(ticket.get("id") or 0) != work.ticket_id
+                        or "companyID" not in ticket
+                        or int(ticket["companyID"]) != work.company_id
+                        or str(ticket.get("ticketNumber") or "") != work.ticket_number):
                     raise OperationalAutonomyError(
-                        "waiting-device reconciliation ticket identity mismatch"
+                        "waiting-device reconciliation ticket/company identity mismatch"
                     )
                 if ticket.get("completedDate"):
+                    if str(ticket.get("status") or "").casefold() not in {"5", "complete"}:
+                        raise OperationalAutonomyError(
+                            "waiting-device completion status/date disagreement"
+                        )
                     self.store.put(
                         self._replace(
                             work,
@@ -1646,12 +2031,129 @@ class OperationalAutonomyMaintenance:
                 evidence_fingerprint=evidence_fingerprint,
             )
 
+    def request_client_information_for_work(
+        self, work: OperationalWork, *, question_id: str,
+        missing_fact_code: str, evidence_hash: str,
+    ) -> str:
+        """Only a promoted diagnostic playbook may suspend for an exact question."""
+        if self.client_questions is None:
+            raise OperationalAutonomyError("client question workflow is disabled")
+        current = self.store.get(work.ticket_id)
+        if current is None or current != work:
+            raise OperationalAutonomyError("client question work state is stale")
+        if work.phase in TERMINAL_PHASES or work.phase.startswith("waiting_"):
+            raise OperationalAutonomyError("client question cannot suspend current phase")
+        if not self._scope_is_promoted(self._scope_for_work(work)):
+            raise OperationalAutonomyError("diagnostic playbook promotion is missing")
+        if not self._scope_is_promoted(CLIENT_QUESTION_SCOPE):
+            raise OperationalAutonomyError("client question promotion is missing")
+        result = self.client_questions.request(
+            ticket_id=work.ticket_id, question_id=question_id,
+            missing_fact_code=missing_fact_code,
+            evidence_hash=evidence_hash, corroborated=True,
+            resume_phase=work.phase,
+        )
+        if result in {"delivery_pending", "already_reserved"}:
+            self.store.put(self._replace(
+                work, phase=f"waiting_client_information:{work.phase}",
+                last_reason=f"Waiting for verified reply to approved {question_id}.",
+            ))
+        return result
+
+    def _resume_client_question_work(self, reply, candidates: Mapping[int, Any]) -> bool:
+        candidate = candidates.get(reply.ticket_id)
+        if candidate is None or str(candidate.source_queue).strip().casefold() != "jason":
+            return False
+        try:
+            if int(candidate.context.get("companyID") or 0) != reply.company_id:
+                return False
+        except (TypeError, ValueError):
+            return False
+        work = self.store.get(reply.ticket_id)
+        if work is None:
+            # The safe initial-intake branch has no previously claimed
+            # remediation phase. Its verified reply is re-evaluated by the
+            # ordinary ticket worker on the next/remaining scan cycle.
+            return (
+                reply.resume_phase == "queue_reassessment"
+                and str(candidate.context.get("ticketNumber") or "")
+                == reply.ticket_number
+            )
+        if work.company_id != reply.company_id:
+            return False
+        if work.ticket_number != reply.ticket_number:
+            return False
+        try:
+            if not self._scope_is_promoted(self._scope_for_work(work)):
+                return False
+        except (OperationalAutonomyError, TypeError, ValueError):
+            return False
+        if not reply.resume_phase:
+            return False
+        # Retrying after a successful work-store write is safe: the ledger
+        # transition may not yet have been committed during the first pass.
+        if work.phase == reply.resume_phase:
+            return True
+        if work.phase != f"waiting_client_information:{reply.resume_phase}":
+            return False
+        self.store.put(self._replace(
+            work, phase=reply.resume_phase,
+            last_reason=(
+                f"Client response to {reply.question_id} verified in Autotask "
+                f"note {reply.reply_note_id}; diagnostic work resuming."
+            ),
+        ))
+        return True
+
+    def _maybe_request_missing_client_description(self, candidate) -> None:
+        """Bounded autonomous example using authoritative missing-fact evidence.
+
+        Never solicit generic monitoring alerts, technician-created tickets,
+        non-Jason tickets or requests whose originating client is unverified.
+        """
+        if self.client_questions is None or not self._scope_is_promoted(CLIENT_QUESTION_SCOPE):
+            return
+        if str(candidate.source_queue).strip().casefold() != "jason":
+            return
+        ticket = candidate.context
+        if str(ticket.get("_jason_source_status_label") or "").strip().casefold() not in {
+            "new", "in progress",
+        }:
+            return
+        if str(ticket.get("description") or "").strip():
+            return
+        try:
+            ticket_id = int(candidate.resource_id)
+            company_id = int(ticket.get("companyID") or 0)
+            contact_id = int(ticket.get("contactID") or 0)
+            originating_contact_id = int(ticket.get("createdByContactID") or 0)
+        except (TypeError, ValueError):
+            return
+        if ticket_id <= 0 or company_id <= 0 or contact_id <= 0:
+            return
+        if originating_contact_id != contact_id:
+            return
+        if self.store.get(ticket_id) is not None:
+            return
+        if self.client_questions.ledger.has_question(ticket_id, "JQ-001"):
+            return
+        # Only the same objective absence in the authoritative ticket permits
+        # the engine to send. It will repeat the ticket/notes reads itself.
+        evidence_hash = hashlib.sha256(
+            f"{ticket_id}|{company_id}|{contact_id}|missing_description_v1".encode()
+        ).hexdigest()
+        self.client_questions.request(
+            ticket_id=ticket_id, question_id="JQ-001",
+            missing_fact_code="problem_description_missing",
+            evidence_hash=evidence_hash, corroborated=True,
+            resume_phase="queue_reassessment",
+        )
+
     def tick(self) -> None:
         now = self.monotonic()
         if now < self._next_due:
             return
         self._next_due = now + self.interval_seconds
-
         try:
             candidates = tuple(self.queue_source.reconcile_candidates())
         except Exception:
@@ -1660,6 +2162,23 @@ class OperationalAutonomyMaintenance:
             return
         by_id = {int(item.resource_id): item for item in candidates}
         self._reconcile_orphaned_waiting_device_rows(by_id)
+        self._reconcile_completed_notification_blocks()
+        if self.client_questions is not None and self._scope_is_promoted(CLIENT_QUESTION_SCOPE):
+            # Only a fresh client-created ticket with a truly missing
+            # description may trigger this initial question automatically.
+            for item in candidates[: self.max_candidate_evaluations_per_scan]:
+                try:
+                    self._maybe_request_missing_client_description(item)
+                except Exception as exc:
+                    self._audit_diagnostic(
+                        "client_question.initial_intake.failed",
+                        {"ticket_id": int(item.resource_id), "error_type": type(exc).__name__},
+                    )
+            # Read-only recovery of delivered questions and contact-authored
+            # replies, followed by a bounded existing-playbook state advance.
+            self.client_questions.reconcile(
+                on_verified_reply=lambda row: self._resume_client_question_work(row, by_id),
+            )
 
         # GPT Insights is a technician-assist augmentation for every eligible
         # Help Desk I / New ticket. It is independent of remediation matching and
@@ -1692,6 +2211,7 @@ class OperationalAutonomyMaintenance:
                             },
                         )
 
+        unsupported_triage_candidates: list[tuple[Any, str]] = []
         classifications: dict[
             int, tuple[str, str, str | None, bool]
         ] = {}
@@ -2184,11 +2704,17 @@ class OperationalAutonomyMaintenance:
             scope = self._match_scope(item.context)
             if scope is None:
                 unsupported += 1
+                unsupported_reason = self._unsupported_capability_reason(item.context)
                 classifications[ticket_id] = (
                     "unsupported_capability",
-                    self._unsupported_capability_reason(item.context),
+                    unsupported_reason,
                     item.source_version, False,
                 )
+                # Read-only investigation is separate from remediation admission:
+                # a technician-owned New ticket still benefits from durable
+                # evidence without being claimed, updated or requeued. The
+                # note publisher separately blocks writes to human-owned work.
+                unsupported_triage_candidates.append((item, unsupported_reason))
                 continue
             if not self._scope_is_promoted(scope):
                 governance_blocked += 1
@@ -2196,6 +2722,10 @@ class OperationalAutonomyMaintenance:
                     "governance_blocked", "playbook_not_promoted",
                     item.source_version, False,
                 )
+                # An unpromoted remediation scope is NOT a reason to skip
+                # governed read-only investigation. No playbook approval is
+                # inferred; persist what can be learned without executing it.
+                unsupported_triage_candidates.append((item, "playbook_not_promoted"))
                 continue
             if item.context.get("_jason_assigned_elsewhere") is True:
                 assigned_elsewhere += 1
@@ -2308,6 +2838,10 @@ class OperationalAutonomyMaintenance:
                 True,
             )
 
+        # Always run after established playbooks, so generic evidence reads
+        # cannot starve already-admitted or newly eligible remediation.
+        self._triage_unsupported(unsupported_triage_candidates)
+
         # Keep one readable Jason Activity work log per ticket. The durable
         # local activity ledger is authoritative; unchanged consecutive state is
         # suppressed and Autotask notes are updated only through the Jason-owned
@@ -2351,10 +2885,12 @@ class OperationalAutonomyMaintenance:
             1 for state, reason, _, _ in classifications.values()
             if state == "not_actionable" and reason == "existing_technician_activity"
         )
-        eligible_count = sum(
-            1 for state, _, _, _ in classifications.values()
-            if state == "eligible_now"
-        )
+        # Eligibility is an admission candidate count, not a count of
+        # tickets STILL marked eligible after _advance(). A ticket can be
+        # selected and immediately complete, block, or enter a waiting
+        # state during this very scan. Snapshot metrics must preserve the
+        # population that was eligible at scan decision time.
+        eligible_count = len(eligible)
 
         trace = getattr(self.queue_source, "last_trace", None)
         scanned_at = datetime.now(timezone.utc).isoformat()
@@ -2378,13 +2914,619 @@ class OperationalAutonomyMaintenance:
             unsupported=unsupported,
             governance_blocked=governance_blocked,
             assigned_elsewhere=assigned_elsewhere,
+            # Observed occupancy at scan end; not admission capacity at start.
+            # Some started work has already advanced into terminal/waiting.
             active_slots=len(self.store.list_open()),
             selected=started,
             waiting_device=waiting_device,
             human_review=human_review,
         )
         self.store.record_scan(snapshot)
+        # Owner escalation is durable and never sends Teams from this worker.
+        # Backlog gets one event per ticket/disposition without consuming a
+        # remediation slot or interfering with the verified scan heartbeat.
+        try:
+            self._enqueue_owner_attention(candidates, classifications)
+        except Exception as exc:
+            if self.audit is not None:
+                self._audit_diagnostic("ticket_owner_attention_enqueue_failed", {
+                    "error_type": type(exc).__name__,
+                })
         self._emit_scan_reflection(snapshot)
+
+    _OWNER_ATTENTION_STATES = frozenset({
+        "unsupported_capability", "governance_blocked", "waiting_human_review",
+        "waiting_device_access",
+    })
+    _OWNER_ATTENTION_DEPENDENCIES = frozenset({
+        "patch_approval_pending", "client_notification_authority_pending",
+        "active_capacity_full",
+    })
+    _OWNER_ACTION_BY_REASON = {
+        "no_applicable_promoted_playbook": (
+            "Technician: identify the issue and approve an applicable playbook "
+            "or take ownership of the investigation."
+        ),
+        "windows_licensing_diagnostics_candidate": (
+            "Technician: check Windows activation and licensing entitlement; "
+            "approve a governed diagnostic playbook before remediation."
+        ),
+        "playbook_not_promoted": (
+            "Owner: review and explicitly promote the exact applicable playbook "
+            "before autonomous remediation."
+        ),
+        "backupiq_queue_normalization_failed": (
+            "Technician: verify Autotask queue permissions and correct the "
+            "failed governed BackupIQ queue association."
+        ),
+        "worker_blocked": (
+            "Technician: review Jason's persisted block and resolve the exact "
+            "identity, evidence, provider, or permission failure."
+        ),
+        "human_review_handoff_failed": (
+            "Technician: verify the required Human Review ticket handoff "
+            "and Autotask update authority."
+        ),
+        "admission_identity_or_governance_failure": (
+            "Technician: verify the ticket/company/device identity and "
+            "governed execution permission."
+        ),
+        "technician_review_required": (
+            "Technician: review Jason's existing handoff and choose the next "
+            "safe action or request missing client information."
+        ),
+        "approval_required": (
+            "Owner: review the exact pending governed action and explicitly "
+            "approve or reject it."
+        ),
+        "endpoint_offline_corroborated_deb": (
+            "Technician: confirm endpoint availability or wait for reconnection; "
+            "Jason will retry the existing playbook after exact access returns."
+        ),
+        "endpoint_offline_deb_unconfirmed": (
+            "Technician: verify the device/backup reporting path and access; "
+            "no endpoint action was attempted."
+        ),
+        "drmm_access_unavailable_device_online_deb": (
+            "Technician: restore Datto RMM device access; backup evidence alone "
+            "does not grant remote action permission."
+        ),
+        "patch_approval_pending": (
+            "Owner: approve or defer the exact outstanding VulScan KBs; "
+            "no patch approval is granted by this message."
+        ),
+        "client_notification_authority_pending": (
+            "Owner: review the required client notification authority or "
+            "assign a technician for the customer communication."
+        ),
+        "active_capacity_full": (
+            "No new permission required: Jason must admit this work when an "
+            "active remediation slot opens. Technician may reprioritize."
+        ),
+    }
+
+    def _enqueue_owner_attention(
+        self,
+        candidates: Sequence[Any],
+        classifications: Mapping[int, tuple[str, str, str | None, bool]],
+    ) -> None:
+        if self.completion_notifier is None:
+            return
+        for candidate in candidates:
+            ticket_id = int(candidate.resource_id)
+            disposition = classifications.get(ticket_id)
+            if disposition is None:
+                continue
+            state, reason_code = disposition[0], disposition[1]
+            if (
+                state not in self._OWNER_ATTENTION_STATES
+                and not (
+                    state == "waiting_dependency"
+                    and reason_code in self._OWNER_ATTENTION_DEPENDENCIES
+                )
+            ):
+                continue
+            ticket = candidate.context
+            number = str(ticket.get("ticketNumber") or "").strip()
+            title = " ".join(str(ticket.get("title") or "").split())
+            if not number or not title:
+                # Unknown source identity is a scan defect, not permission to
+                # construct a misleading Teams card with invented ticket IDs.
+                continue
+            try:
+                company_id = int(ticket.get("companyID") or 0)
+            except (TypeError, ValueError):
+                company_id = 0
+            client_name = " ".join(str(
+                ticket.get("companyName") or ticket.get("_jason_company_name") or ""
+            ).split())
+            client = (
+                client_name[:75]
+                if client_name else
+                "Autotask company #" + str(company_id)
+                if company_id > 0 else "Not verified"
+            )
+            work = self.store.get(ticket_id)
+            try:
+                ci_id = int(ticket.get("configurationItemID") or 0)
+            except (TypeError, ValueError):
+                ci_id = 0
+            device = (
+                str(work.hostname)[:75]
+                if work is not None and work.hostname else
+                "CI #" + str(ci_id) if ci_id > 0 else "Unlinked"
+            )
+            triage = (
+                self.store.unsupported_triage(ticket_id)
+                if state == "unsupported_capability" else None
+            )
+            if (triage is not None and
+                    str(triage.get("source_version") or "") !=
+                    str(disposition[2] or "")):
+                triage = None  # never present previous-version triage as current
+            checked = (
+                "governed read-only triage: " +
+                str(triage.get("state") or "unverified")[:45]
+                if triage is not None else
+                "Autotask queue, status and promoted-playbook assessment"
+            )
+            summary = (
+                f"Ticket {number}; Client {client}; Device {device}; "
+                f"State {state}; Reason {reason_code}; Checked {checked}."
+            )
+            next_step = (
+                str(triage.get("next_step") or "").strip()
+                if triage is not None else ""
+            )
+            owner_action = (
+                next_step
+                or self._OWNER_ACTION_BY_REASON.get(
+                    reason_code,
+                    "Technician: review the exact ticket and Jason decision; "
+                    "supply missing evidence or authorized next action.",
+                )
+            )
+            note_title = f"Teams - Owner Action - {state} - {reason_code}"
+            fingerprint = hashlib.sha256(
+                f"owner-action-v1|{ticket_id}|{state}|{reason_code}".encode()
+            ).hexdigest()
+            try:
+                self.store.queue_teams_notification(
+                    ticket_id=ticket_id,
+                    playbook_id=(
+                        work.playbook_id if work is not None
+                        else "canonical_ticket_assessment"
+                    ),
+                    note_title=note_title, fingerprint=fingerprint,
+                    event_type="work_blocked",
+                    arguments={
+                        "work_id": number[:80],
+                        "work_title": title[:180],
+                        "summary": summary[:400],
+                        "owner_action": owner_action[:300],
+                    },
+                    now=datetime.now(timezone.utc),
+                )
+            except Exception as exc:
+                if self.audit is not None:
+                    self._audit_diagnostic(
+                        "ticket_owner_attention_enqueue_failed",
+                        {"ticket_id": ticket_id, "error_type": type(exc).__name__},
+                    )
+
+    def _triage_unsupported(self, candidates: Sequence[tuple[Any, str]]) -> None:
+        """Bounded diagnosis only; zero provider writes, claims or resolutions."""
+        now = datetime.now(timezone.utc)
+        order = sorted(
+            candidates,
+            key=lambda pair: (
+                -int(pair[0].urgent),
+                -int(pair[0].priority),
+                # Preserve fair intake service when a technician already owns
+                # a ticket: both are investigated, but unowned work is first
+                # at the same urgency/priority.
+                int(pair[0].context.get("_jason_assigned_elsewhere") is True),
+                int(pair[0].resource_id),
+            ),
+        )
+        attempted = 0
+        note_attempted = 0
+        # AOT's two-active-ticket limit controls mutations/remediation.
+        # Read-only evidence collection has its own bounded scan budget.
+        # Note publication remains separately capped at two per scan.
+        max_note_attempts = 2
+        for candidate, unsupported_reason in order:
+            if attempted >= self.max_unsupported_triage_per_scan:
+                break
+            ticket_id = int(candidate.resource_id)
+            version = str(candidate.source_version or "").strip() or None
+            previous = self.store.unsupported_triage(ticket_id)
+            if (
+                previous is not None
+                and previous.get("source_version") == version
+                and isinstance(previous.get("evidence"), Mapping)
+                and previous["evidence"].get("triage_logic_version")
+                == UNSUPPORTED_TRIAGE_LOGIC_VERSION
+            ):
+                try:
+                    due = datetime.fromisoformat(str(previous["next_due_at"]))
+                    if due.tzinfo is not None and due > now:
+                        if note_attempted < max_note_attempts:
+                            if self._maybe_publish_unsupported_triage_note(
+                                candidate, previous, now=now,
+                            ):
+                                note_attempted += 1
+                        continue
+                except (TypeError, ValueError):
+                    pass
+            attempted += 1
+            title = str(candidate.context.get("title") or "")
+            category = unsupported_triage_category(
+                title, unsupported_reason, str(candidate.context.get("description") or ""),
+            )
+            prior_attempts = int(previous.get("attempts") or 0) if previous else 0
+            attempts = prior_attempts + 1
+            error = None
+            try:
+                ci = candidate.context.get("configurationItemID")
+                result = gather_unsupported_triage(
+                    ticket_id=ticket_id,
+                    company_id=int(candidate.context.get("companyID") or 0),
+                    configuration_item_id=(int(ci) if ci not in (None, "", 0, "0") else None),
+                    ticket_snapshot=candidate.context,
+                    title=title,
+                    unsupported_reason=unsupported_reason,
+                    read=self._triage_read_data,
+                )
+                state = result.state
+                category = result.category
+                evidence = {
+                    "triage_logic_version": UNSUPPORTED_TRIAGE_LOGIC_VERSION,
+                    "read_only_investigation": True,
+                    "admission_reason": unsupported_reason,
+                    **result.evidence,
+                }
+                next_step = result.next_step
+                if unsupported_reason == "playbook_not_promoted":
+                    evidence["remediation_promotion_required"] = True
+                    if state in {"needs_playbook_review", "read_only_assessed"}:
+                        state = "needs_playbook_promotion"
+                    next_step = (
+                        "A matching remediation playbook exists but has not "
+                        "received exact governed promotion. Read-only evidence "
+                        "collection may continue; do not execute or claim work. "
+                        + next_step
+                    )
+                attempts = 0
+                hours = (24 if state == "read_only_assessed" else
+                         4 if state == "needs_playbook_promotion" else
+                         4 if state in {"needs_device_identity", "needs_company_identity"} else
+                         0.25 if state == "waiting_device_access" else 1)
+                next_due = now + timedelta(hours=hours)
+            except Exception as exc:
+                # Never retain untrusted provider exception messages or data.
+                # Persist a durable outcome and allow later tickets to proceed.
+                error = type(exc).__name__
+                code = str(exc).upper()
+                company_identity_codes = {
+                    "TICKET_READBACK_MISMATCH", "TICKET_COMPANY_MISMATCH",
+                    "CONTACT_IDENTITY_UNVERIFIED",
+                }
+                device_identity_codes = {
+                    "TICKET_CI_MISMATCH", "CONFIGURATION_IDENTITY_UNVERIFIED",
+                    "ENDPOINT_IDENTITY_MISMATCH", "ENDPOINT_HOSTNAME_MISMATCH",
+                }
+                if type(exc) is ValueError and code in company_identity_codes:
+                    state = "needs_company_identity"
+                    next_step = (
+                        "Conflicting ticket/customer/contact identity evidence; "
+                        "technician must verify company and contact before user-scoped reads."
+                    )
+                    next_due = now + timedelta(hours=4)
+                elif type(exc) is ValueError and code in device_identity_codes:
+                    state = "needs_device_identity"
+                    next_step = (
+                        "Conflicting authoritative CI/endpoint evidence; "
+                        "technician must verify identity before any device read."
+                    )
+                    next_due = now + timedelta(hours=4)
+                elif "INFORMATION_RELEASE_DENIED" in code or "AUTHORIZATION" in code:
+                    state = "governance_blocked"
+                    next_step = (
+                        "Owner must resolve governed read authorization; "
+                        "the worker did not bypass the denied capability."
+                    )
+                    next_due = now + timedelta(hours=24)
+                elif attempts >= 3:
+                    state = "needs_human_review"
+                    next_step = (
+                        "Three or more consecutive governed diagnostic attempts failed; "
+                        "a technician must review the provider evidence path."
+                    )
+                    next_due = now + timedelta(hours=4)
+                else:
+                    state = "read_failed_retry"
+                    next_step = (
+                        "Governed evidence read failed; bounded retry is scheduled."
+                    )
+                    next_due = now + timedelta(minutes=min(60, 5 * 2 ** min(attempts - 1, 4)))
+                evidence = {
+                    "ticket_id": ticket_id,
+                    "triage_logic_version": UNSUPPORTED_TRIAGE_LOGIC_VERSION,
+                }
+            # Always stage a bounded technician note draft in durable evidence,
+            # even before autonomous write permission is independently promoted.
+            # Never send raw ticket descriptions, RMM output or credentials.
+            evidence["note_draft"] = render_triage_note(
+                ticket_number=str(candidate.context.get("ticketNumber") or ""),
+                state=state, category=category, evidence=evidence,
+                next_step=next_step,
+            )
+            self.store.record_unsupported_triage(
+                ticket_id=ticket_id,
+                ticket_number=str(candidate.context.get("ticketNumber") or ticket_id),
+                source_version=version,
+                category=category,
+                state=state,
+                evidence=evidence,
+                next_step=next_step,
+                attempts=attempts,
+                checked_at=now.isoformat(),
+                next_due_at=next_due.isoformat(),
+                last_error=error,
+            )
+            stored = self.store.unsupported_triage(ticket_id)
+            if stored is not None and note_attempted < max_note_attempts:
+                if self._maybe_publish_unsupported_triage_note(
+                    candidate, stored, now=now,
+                ):
+                    note_attempted += 1
+            self._audit_diagnostic(
+                "autonomy.unsupported_ticket.readonly_triage",
+                {"ticket_id": ticket_id, "state": state, "category": category,
+                 "attempts": attempts, "last_error_type": error},
+            )
+
+    def _maybe_publish_unsupported_triage_note(
+        self, candidate, record: Mapping[str, Any], *, now: datetime,
+    ) -> bool:
+        """Internal note only after separate exact owner promotion and readback.
+
+        A failed write never changes the diagnostic state, never gets treated
+        as success, and is retried with a bounded durable backoff.
+        """
+        if not self._scope_is_promoted(UNSUPPORTED_TRIAGE_NOTE_SCOPE):
+            return False
+        if candidate.context.get("_jason_assigned_elsewhere") is True:
+            return False
+        ticket_id = int(candidate.resource_id)
+        if ticket_id not in self.triage_note_pilot_ticket_ids:
+            return False
+        # Source-version binding: do not publish a stale draft after a human
+        # or another worker has changed the Autotask ticket.
+        record_version = str(record.get("source_version") or "").strip()
+        current_version = str(candidate.source_version or "").strip()
+        if not current_version or record_version != current_version:
+            return False
+        if (
+            str(record.get("ticket_number") or "").strip()
+            != str(candidate.context.get("ticketNumber") or "").strip()
+        ):
+            return False
+        evidence = record.get("evidence")
+        if not isinstance(evidence, Mapping) or evidence.get("company_verified") is not True:
+            return False
+        # Do not publish transient read errors. Document them only after
+        # repeated failures have been classified for human review.
+        state = str(record.get("state") or "")
+        if state in {"read_failed_retry", "governance_blocked"}:
+            return False
+        body = evidence.get("note_draft")
+        if not isinstance(body, str) or not body.startswith("JASON READ-ONLY INVESTIGATION"):
+            return False
+        digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        if self.store.last_note_fingerprint(
+            ticket_id, UNSUPPORTED_TRIAGE_NOTE_SCOPE.playbook_id, TRIAGE_NOTE_TITLE,
+        ) == digest:
+            # A later separate handoff promotion must resume already-verified
+            # note work; do not require a new note mutation to trigger it.
+            return self._maybe_handoff_unsupported_ticket(
+                candidate, state=state, body=body, note_fingerprint=digest, now=now,
+            )
+        prior = self.store.unsupported_note_delivery(ticket_id)
+        if prior is not None and str(prior.get("fingerprint")) == digest:
+            try:
+                retry_at = datetime.fromisoformat(str(prior["next_due_at"]))
+                if retry_at.tzinfo is not None and retry_at > now:
+                    return False
+            except (TypeError, ValueError):
+                pass
+        attempts = (
+            int(prior["attempts"]) + 1
+            if prior is not None and str(prior.get("fingerprint")) == digest else 1
+        )
+        try:
+            notes = self._read_data(
+                "service.ticket.notes.search", {"ticket_id": ticket_id},
+            ).get("items")
+            if not isinstance(notes, list):
+                raise OperationalAutonomyError("triage notes readback missing")
+            existing = exact_named_note(notes, title=TRIAGE_NOTE_TITLE)
+            if existing is not None and str(existing.get("description") or "") != body:
+                # Reject same-title collisions and human edits. Never claim
+                # ownership of a note the worker did not previously verify.
+                known_fingerprint = self.store.last_note_fingerprint(
+                    ticket_id, UNSUPPORTED_TRIAGE_NOTE_SCOPE.playbook_id,
+                    TRIAGE_NOTE_TITLE,
+                )
+                if not known_fingerprint:
+                    raise OperationalAutonomyError("triage managed note ownership not proven")
+                current_body = str(existing.get("description") or "")
+                if hashlib.sha256(current_body.encode("utf-8")).hexdigest() != known_fingerprint:
+                    raise OperationalAutonomyError("triage managed note modified externally")
+            if existing is None or str(existing.get("description") or "") != body:
+                mutation = managed_note_mutation(
+                    ticket_id=ticket_id, title=TRIAGE_NOTE_TITLE,
+                    body=body, notes=notes,
+                )
+                self.actions.execute(
+                    UNSUPPORTED_TRIAGE_NOTE_SCOPE,
+                    mutation.capability, {"payload": dict(mutation.payload)},
+                )
+                # This is an actual provider mutation: never mark it complete
+                # on an action response alone.
+                after = self._read_data(
+                    "service.ticket.notes.search", {"ticket_id": ticket_id},
+                ).get("items")
+                if not isinstance(after, list):
+                    raise OperationalAutonomyError("triage note readback missing")
+                existing = exact_named_note(after, title=TRIAGE_NOTE_TITLE)
+                if existing is None or str(existing.get("description") or "") != body:
+                    raise OperationalAutonomyError("triage note readback not verified")
+            # The diagnostic note is independently complete once its provider
+            # readback matches; a later distinct handoff may retry without
+            # creating or updating the note again.
+            self.store.remember_note_fingerprint(
+                ticket_id, UNSUPPORTED_TRIAGE_NOTE_SCOPE.playbook_id,
+                TRIAGE_NOTE_TITLE, digest,
+            )
+            self.store.record_unsupported_note_delivery(
+                ticket_id=ticket_id, fingerprint=digest, attempts=0,
+                next_due_at=(now + timedelta(days=365)).isoformat(),
+                last_error=None,
+            )
+            self._audit_diagnostic(
+                "autonomy.unsupported_ticket.internal_note.verified",
+                {"ticket_id": ticket_id, "state": state},
+            )
+            self._maybe_handoff_unsupported_ticket(
+                candidate, state=state, body=body, note_fingerprint=digest, now=now,
+            )
+        except Exception as exc:
+            self.store.record_unsupported_note_delivery(
+                ticket_id=ticket_id, fingerprint=digest, attempts=attempts,
+                next_due_at=(now + timedelta(minutes=min(60, 5 * 2 ** min(attempts - 1, 4)))).isoformat(),
+                last_error=type(exc).__name__,
+            )
+            self._audit_diagnostic(
+                "autonomy.unsupported_ticket.internal_note.pending",
+                {"ticket_id": ticket_id, "attempts": attempts,
+                 "error_type": type(exc).__name__},
+            )
+        # This result counts against the bounded, per-scan mutation budget.
+        return True
+
+    def _maybe_handoff_unsupported_ticket(
+        self, candidate, *, state: str, body: str,
+        note_fingerprint: str, now: datetime,
+    ) -> bool:
+        """Independent, idempotent, owner-promoted ticket handoff.
+
+        Authorization or evidence failures are durable, never hidden under a
+        successful note publication. Provider status must be verified before
+        the handoff is counted.
+        """
+        if state not in UNSUPPORTED_TRIAGE_HANDOFF_STATES:
+            return False
+        ticket_id = int(candidate.resource_id)
+        if ticket_id not in self.triage_note_pilot_ticket_ids:
+            return False
+        if not candidate.owned_by_jason or str(candidate.source_queue).strip().casefold() != "jason":
+            return False
+        # A Waiting Customer / On Hold / Waiting Device Access ticket already
+        # has a dependency. Never overwrite that lifecycle just because an
+        # earlier read-only assessment has no autonomous resolution branch.
+        # Unknown source status must fail closed rather than infer readiness.
+        current_status = str(
+            candidate.context.get("_jason_source_status_label") or ""
+        ).strip().casefold()
+        if current_status not in {"new", "in progress"}:
+            return False
+        if not self._scope_is_promoted(UNSUPPORTED_TRIAGE_HANDOFF_SCOPE):
+            return False
+        previous = self.store.unsupported_handoff_delivery(ticket_id)
+        if previous is not None and previous.get("note_fingerprint") == note_fingerprint:
+            if previous.get("state") in {"verified", "needs_human_review"}:
+                # A terminal failed handoff needs technician intervention, not
+                # another unattended queue mutation attempt.
+                return False
+            try:
+                due = datetime.fromisoformat(str(previous["next_due_at"]))
+                if due.tzinfo is not None and due > now:
+                    return False
+            except (TypeError, ValueError):
+                pass
+        attempts = (
+            int(previous["attempts"]) + 1
+            if previous is not None and previous.get("note_fingerprint") == note_fingerprint
+            else 1
+        )
+        try:
+            # The queue snapshot may predate a technician move or assignment.
+            # Re-read the exact ticket through existing governed read authority
+            # immediately before writing; do not overwrite newer human work.
+            current = self._read_data("service.ticket.search", {
+                "resource_id": ticket_id, "page_size": 2,
+            }).get("items")
+            if not isinstance(current, list) or len(current) != 1 or not isinstance(current[0], Mapping):
+                raise OperationalAutonomyError("handoff exact ticket pre-read unavailable")
+            live_ticket = current[0]
+            if live_ticket.get("id") != ticket_id or any(
+                field not in candidate.context or field not in live_ticket
+                or candidate.context[field] != live_ticket[field]
+                for field in ("companyID", "queueID", "status", "assignedResourceID")
+            ):
+                raise OperationalAutonomyError("handoff ticket scope/ownership/status changed")
+            # Always verify the current Autotask note before any queue/status
+            # write, even if the local fingerprint was previously persisted.
+            notes = self._read_data("service.ticket.notes.search", {"ticket_id": ticket_id}).get("items")
+            if not isinstance(notes, list):
+                raise OperationalAutonomyError("handoff current notes readback missing")
+            managed = exact_named_note(notes, title=TRIAGE_NOTE_TITLE)
+            if managed is None or str(managed.get("description") or "") != body:
+                raise OperationalAutonomyError("handoff note no longer matches verified evidence")
+            result = self.actions.execute(
+                UNSUPPORTED_TRIAGE_HANDOFF_SCOPE,
+                "service.ticket.update",
+                {"payload": {
+                    "id": ticket_id, "queueID": "Help Desk I", "status": "Human Review",
+                }},
+            )
+            data = self._action_data(result)
+            verification = data.get("jasonVerification")
+            fields = verification.get("verifiedFields") if isinstance(verification, Mapping) else None
+            if not (
+                isinstance(verification, Mapping)
+                and verification.get("readbackVerified") is True
+                and isinstance(fields, Sequence)
+                and not isinstance(fields, (str, bytes))
+                and {"queueID", "status"}.issubset({str(field) for field in fields})
+            ):
+                raise OperationalAutonomyError("handoff queue/status readback not verified")
+            self.store.record_unsupported_handoff_delivery(
+                ticket_id=ticket_id, note_fingerprint=note_fingerprint,
+                state="verified", attempts=0,
+                next_due_at=(now + timedelta(days=365)).isoformat(),
+                last_error=None,
+            )
+            self._audit_diagnostic(
+                "autonomy.unsupported_ticket.human_review.verified",
+                {"ticket_id": ticket_id, "state": state},
+            )
+        except Exception as exc:
+            self.store.record_unsupported_handoff_delivery(
+                ticket_id=ticket_id, note_fingerprint=note_fingerprint,
+                state="retry_pending" if attempts < 3 else "needs_human_review",
+                attempts=attempts,
+                next_due_at=(now + timedelta(minutes=min(60, 5 * 2 ** min(attempts - 1, 4)))).isoformat(),
+                last_error=type(exc).__name__,
+            )
+            self._audit_diagnostic(
+                "autonomy.unsupported_ticket.human_review.pending",
+                {"ticket_id": ticket_id, "attempts": attempts,
+                 "error_type": type(exc).__name__},
+            )
+        return True
 
     def _emit_scan_reflection(self, snapshot: TicketScanSnapshot) -> None:
         if self.audit is None:
@@ -5878,6 +7020,43 @@ class OperationalAutonomyMaintenance:
         job = job_data.get("job") if isinstance(job_data.get("job"), Mapping) else job_data
         status = str(job.get("status") or "").strip().casefold()
         if status in {"active", "running", "queued", "pending", "scheduled"}:
+            started_at = self._backupiq_timestamp_from_reason(
+                work, "backupiq_reinstall_started_at"
+            )
+            if started_at is None:
+                self._persist_human_review_escalation(
+                    work, reason=(
+                        "BackupIQ reinstall job remains nonterminal, but the "
+                        "trusted dispatch timestamp is missing. Technician "
+                        "must verify the existing Datto job and ticket."
+                    ),
+                )
+                return
+            age_seconds = (datetime.now(timezone.utc) - started_at).total_seconds()
+            if age_seconds >= BACKUPIQ_REINSTALL_JOB_STALL_SECONDS:
+                # Provider active state does not prove failure. Persist
+                # observation; never redispatch, cancel, restart or close.
+                self._write_note(
+                    work,
+                    (
+                        "Single approved Endpoint Backup reinstall is still "
+                        f"nonterminal after {int(age_seconds / 60)} minutes. "
+                        f"Job={work.job_uid}; Component={work.component_uid}; "
+                        f"ProviderStatus={status}; Device={work.hostname}. "
+                        "No second reinstall, job cancellation, endpoint restart, "
+                        "or ticket completion attempted. Technician must verify "
+                        "the exact Datto job and new backup result."
+                    ),
+                    "Jason - BackupIQ - Job Progress Review",
+                )
+                self._persist_human_review_escalation(
+                    work, reason=(
+                        "BackupIQ reinstall job remains nonterminal for at least "
+                        f"{BACKUPIQ_REINSTALL_JOB_STALL_SECONDS // 60} minutes; "
+                        f"job={work.job_uid}; status={status}. "
+                        "Technician verify exact job; do not redispatch."
+                    ),
+                )
             return
         if status not in {"completed", "complete", "success", "succeeded", "finished"}:
             self._write_note(
@@ -6919,18 +8098,37 @@ class OperationalAutonomyMaintenance:
             == fingerprint
         ):
             return
-        self.completion_notifier.send(
-            "patch_completed",
-            ticket_number=work.ticket_number,
-            hostname=work.hostname,
-            patch_summary=patch_summary[:300],
-        )
-        self.store.remember_note_fingerprint(
-            work.ticket_id,
-            work.playbook_id,
-            note_title,
-            fingerprint,
-        )
+        arguments = {
+            "ticket_number": work.ticket_number[:80],
+            "hostname": work.hostname[:120],
+            "patch_summary": patch_summary[:300],
+        }
+        if callable(getattr(self.store, "queue_teams_notification", None)):
+            try:
+                self.store.queue_teams_notification(
+                    ticket_id=work.ticket_id,
+                    playbook_id=work.playbook_id,
+                    note_title=note_title,
+                    fingerprint=fingerprint,
+                    event_type="patch_completed",
+                    arguments=arguments,
+                    now=datetime.now(timezone.utc),
+                )
+                # The independent notification maintenance drains this outbox.
+            except Exception:
+                pass  # Verified PSA state is authoritative, not Teams transport.
+            return
+        try:
+            self.completion_notifier.send("patch_completed", **arguments)
+            self.store.remember_note_fingerprint(
+                work.ticket_id, work.playbook_id, note_title, fingerprint,
+            )
+        except Exception as exc:
+            self._audit_diagnostic("ticket_teams_notification_failed", {
+                "ticket_id": work.ticket_id,
+                "event_type": "patch_completed",
+                "error_type": type(exc).__name__,
+            })
 
     def _complete(self, work: OperationalWork, stdout: str) -> None:
         summary = self._bounded_health_summary(stdout)
@@ -7668,6 +8866,27 @@ class OperationalAutonomyMaintenance:
                 origin=origin,
             )
         return True
+
+    def _triage_read_data(self, capability: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        if capability == "service.contact.read":
+            if self.contact_reads is None:
+                raise OperationalAutonomyError("CONTACT_READ_PROFILE_NOT_ENABLED")
+            result = self.contact_reads.execute(capability, arguments)
+            return self._validated_read_data(result)
+        return self._read_data(capability, arguments)
+
+    @staticmethod
+    def _validated_read_data(result: Mapping[str, Any]) -> dict[str, Any]:
+        if str(result.get("status") or "") != "succeeded":
+            raise OperationalAutonomyError(
+                "governed read failed: "
+                + str(result.get("error_code") or result.get("reason_codes"))
+            )
+        evidence = result.get("evidence")
+        if not isinstance(evidence, Mapping):
+            raise OperationalAutonomyError("governed read returned no evidence mapping")
+        data = evidence.get("data")
+        return dict(data) if isinstance(data, Mapping) else dict(evidence)
 
     def _read_data(self, capability: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         result = self.reads.execute(capability, arguments)

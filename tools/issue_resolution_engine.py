@@ -28,6 +28,7 @@ FAMILY_TITLES = {
     "ticket_admission": "Ticket admission outcome degraded",
     "operational_outcome": "Operational outcome contract incomplete",
     "service_health": "Jason service health degraded",
+    "host_storage_capacity": "Jason host storage capacity degraded",
     "unknown": "Jason operational invariant degraded",
 }
 
@@ -47,6 +48,7 @@ ROOT_INVARIANTS = {
         "every promised operational outcome reaches verified, failed-with-evidence, or a real external blocker by its deadline"
     ),
     "service_health": "required Jason services and scheduled workers are not failed or silently stale",
+    "host_storage_capacity": "the system and archive filesystems remain mounted, readable, and have safe allocatable block and inode headroom",
     "unknown": "the affected already-approved Jason function is restored and independently re-verified",
 }
 
@@ -57,6 +59,7 @@ RELATED_FAMILIES = {
     "ticket_admission": ["ticket_admission"],
     "operational_outcome": ["operational_outcome"],
     "service_health": ["service_health", "production_convergence"],
+    "host_storage_capacity": ["host_storage_capacity"],
     "unknown": ["unknown"],
 }
 
@@ -95,6 +98,8 @@ def failure_family(failure: str) -> str:
         return "production_convergence"
     if value.startswith("health_metric:jason_provider_canary_health"):
         return "provider_health"
+    if value.startswith("host_storage_"):
+        return "host_storage_capacity"
     if value.startswith("autonomy_"):
         return "ticket_admission"
     if value.startswith("outcome_contract_") or value.startswith("workflow_outcome_stale:"):
@@ -155,6 +160,15 @@ def repair_level(family: str, failures: list[str]) -> dict[str, Any]:
             "automatic_execution": False,
             "requires_owner_action": True,
         }
+    if family == "host_storage_capacity":
+        # Capacity alert is a READ/REPORT condition; never authorize even
+        # seemingly disposable Docker pruning or rolling back a release.
+        return {
+            "level": 3,
+            "name": "review_required_host_storage_remediation",
+            "automatic_execution": False,
+            "requires_owner_action": True,
+        }
     if family == "runtime_health" and all(
         value.startswith(("container_down:", "mcp_status_")) for value in failures
     ):
@@ -201,6 +215,13 @@ def verification_contract(family: str, failures: list[str]) -> dict[str, Any]:
         "service_health": [
             "rerun service/unit health checks",
             "prove scheduled implementation matches the active production release",
+        ],
+        "host_storage_capacity": [
+            "rerun independent statvfs readback for root and archive",
+            "prove archive mount is present and not silently replaced by root",
+            "prove usage, allocatable free bytes and inode headroom meet configured limits",
+            "preserve Docker volumes, production backups, rollback images and approval records",
+            "obtain separate approval before any cleanup or file movement",
         ],
         "unknown": [
             "rerun the original detector",
@@ -297,7 +318,15 @@ def update_recurrence_memory(
         item["occurrence_count"] = occurrence_count
         item["recurring"] = occurrence_count >= 2
         item["architectural_correction_required"] = occurrence_count >= 2
-        item["priority"] = "P0" if occurrence_count >= 2 else "P1"
+        if family == "host_storage_capacity":
+            item["priority"] = (
+                "P0" if any(
+                    str(symptom).startswith(("host_storage_capacity_critical:", "host_storage_mount_missing:"))
+                    for symptom in item.get("symptoms", [])
+                ) else "P1"
+            )
+        else:
+            item["priority"] = "P0" if occurrence_count >= 2 else "P1"
         enriched.append(item)
 
     _atomic_json(

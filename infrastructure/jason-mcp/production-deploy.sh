@@ -14,6 +14,65 @@ else
   )"
 fi
 
+# Source-declared v13 and last-known-good v10 are both exact-SHA reviewed.
+# PM v10's non-mutating preflight does not inject profile variables; enforce
+# immutable source and verify the current container's known-good profile
+# independently instead of weakening the actual release activation contract.
+PROFILE_PAIR="$(
+  python3 - "$REPO_ROOT/config/autotask-entity-read-profile.json" <<'PY'
+import json, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+if p.is_symlink() or not p.is_file():
+    raise SystemExit("DENIED: immutable Autotask read/rollback profile absent")
+o = json.loads(p.read_text(encoding="utf-8"))
+allowed = {"itglue-autotask-entra-procurement-billing-reconciliation-catalog-v10",
+           "itglue-autotask-entra-comprehensive-entity-read-catalog-v11",
+           "itglue-autotask-entra-dynamic-schema-read-catalog-v13"}
+if (not isinstance(o, dict)
+        or set(o) != {"schema_version", "read_profile", "rollback_read_profile"}
+        or o.get("schema_version") != "1.0"
+        or o.get("read_profile") not in allowed
+        or o.get("rollback_read_profile") not in allowed):
+    raise SystemExit("DENIED: unapproved Autotask candidate/rollback profile pair")
+print(o["read_profile"] + "|" + o["rollback_read_profile"])
+PY
+)" || exit 2
+IFS='|' read -r SOURCE_READ_PROFILE DECLARED_ROLLBACK_PROFILE <<< "$PROFILE_PAIR"
+# Optional PM overrides never supersede the exact source contract.
+if [ -n "${JASON_PROVIDER_READ_ACTIVATION_PROFILE:-}" ] &&
+   [ "$JASON_PROVIDER_READ_ACTIVATION_PROFILE" != "$SOURCE_READ_PROFILE" ]; then
+  echo "DENIED: invoking candidate provider-read profile differs from reviewed source" >&2
+  exit 2
+fi
+if [ -n "${JASON_PROVIDER_READ_ROLLBACK_PROFILE:-}" ] &&
+   [ "$JASON_PROVIDER_READ_ROLLBACK_PROFILE" != "$DECLARED_ROLLBACK_PROFILE" ]; then
+  echo "DENIED: invoking rollback provider-read profile differs from reviewed source" >&2
+  exit 2
+fi
+case "$IMAGE" in
+  jason-mcp:rollback-current)
+    # Original v10 code/image may have no source declaration of its own.
+    # On exact native rollback use the current candidate's reviewed LKG pair.
+    AUTOTASK_READ_PROFILE="$DECLARED_ROLLBACK_PROFILE"
+    ;;
+  *)
+    # During runtime->MCP transition only verify this service's previous
+    # profile; the other service may legitimately be on the new revision.
+    LIVE_READ_PROFILE="$(docker inspect jason-mcp-pilot --format '{{range .Config.Env}}{{println .}}{{end}}' |
+      sed -n 's/^JASON_PROVIDER_READ_ACTIVATION_PROFILE=//p')"
+    # Permit an existing exact source-bound profile to be upgraded in place,
+    # while preserving the separately declared known-good rollback profile.
+    # Unknown or unrelated profiles remain denied before any deployment.
+    if [ "$LIVE_READ_PROFILE" != "$DECLARED_ROLLBACK_PROFILE" ] &&
+       [ "$LIVE_READ_PROFILE" != "$SOURCE_READ_PROFILE" ]; then
+      echo "DENIED: current service profile is neither approved source nor LKG" >&2
+      exit 2
+    fi
+    AUTOTASK_READ_PROFILE="$SOURCE_READ_PROFILE"
+    ;;
+esac
+
 if [ -z "$REVISION" ]; then
   REVISION="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
 fi
@@ -69,7 +128,9 @@ python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-mcp-pilot   -
   --set-env JASON_QUICKBOOKS_OPENBAO_ROLE_ID_PATH="$QBO_ACTIVE_ROLE_CONTAINER" \
   --set-env JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH="$QBO_ACTIVE_SECRET_CONTAINER" \
   --set-env JASON_QUICKBOOKS_OAUTH_DB="$QBO_ACTIVE_DB" \
+  --set-env "JASON_PROVIDER_READ_ACTIVATION_PROFILE=$AUTOTASK_READ_PROFILE" \
   --set-env "JASON_QUICKBOOKS_READ_PROFILE=$QUICKBOOKS_READ_PROFILE" \
+  --set-env "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID=${JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID:-}" \
   --add-readonly-bind "$QBO_DEV_ROLE_HOST:/run/jason-secrets/openbao/quickbooks-development/role_id" \
   --add-readonly-bind "$QBO_DEV_SECRET_HOST:/run/jason-secrets/openbao/quickbooks-development/secret_id" \
   "${QBO_PROD_ARGS[@]}" \

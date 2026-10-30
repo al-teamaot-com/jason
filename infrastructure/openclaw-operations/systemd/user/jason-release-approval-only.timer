@@ -1,0 +1,12 @@
+[Unit]
+Description=Check owner Teams release approval offers safely during promotion hold
+
+[Timer]
+OnCalendar=*-*-* *:00/5:00 America/New_York
+Persistent=true
+RandomizedDelaySec=0
+AccuracySec=15s
+Unit=jason-release-approval-only.service
+
+[Install]
+WantedBy=timers.target

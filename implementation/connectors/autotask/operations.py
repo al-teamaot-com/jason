@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Any, Mapping
+
+from .verified_read_extensions import v12_entity_read_enabled
+from .dynamic_schema_read import dynamic_generic_entity_eligible
 
 
 @dataclass(frozen=True)
@@ -29,15 +33,22 @@ APPROVED_AUTOTASK_ENTITIES = frozenset(
         "PurchaseOrderItems",
         "PurchaseOrderItemReceiving",
         "Products",
+        "InventoryItems",
         "ProductVendors",
         "Services",
         "ServiceBundles",
         "Projects",
+        "Tasks",
+        "ServiceCalls",
+        "ProjectNotes",
+        "ProjectAttachments",
+        "TicketAdditionalConfigurationItems",
         "Contracts",
         "Resources",
         "Opportunities",
         "NotificationHistory",
         "TicketNotes",
+        "TimeEntries",
         "TicketCharges",
         "TicketAttachments",
     }
@@ -53,6 +64,11 @@ AUTOTASK_OPERATIONS: Mapping[str, OperationDefinition] = {
     "autotask.entity.fields.describe": OperationDefinition(
         method="GET",
         path_template="/V1.0/{entity}/entityInformation/fields",
+        path_arguments=("entity",),
+    ),
+    "autotask.entity.udf.fields.describe": OperationDefinition(
+        method="GET",
+        path_template="/V1.0/{entity}/entityInformation/userDefinedFields",
         path_arguments=("entity",),
     ),
     "autotask.entity.get": OperationDefinition(
@@ -317,9 +333,46 @@ def _path_values(
         if argument_name == "entity":
             entity = value_source[argument_name]
 
-            if (
-                not isinstance(entity, str)
-                or entity not in APPROVED_AUTOTASK_ENTITIES
+            # The schema-only GET endpoints may inspect any syntactically valid
+            # vendor entity name; this exposes metadata, never entity records.
+            # Data GET/query remains limited to approved provider resource maps.
+            schema_only = (
+                definition.method == "GET"
+                and definition.path_template in {
+                    "/V1.0/{entity}/entityInformation",
+                    "/V1.0/{entity}/entityInformation/fields",
+                    "/V1.0/{entity}/entityInformation/userDefinedFields",
+                }
+            )
+            safe_name = (
+                isinstance(entity, str)
+                and re.fullmatch(r"[A-Z][A-Za-z0-9]{1,79}", entity) is not None
+            )
+            # Additional verified read entities are a distinct v12-only
+            # provider GET/query allowance. This MUST NOT expand the existing
+            # entity whitelist used by any mutation operation.
+            v12_data_read = (
+                definition.method == "GET"
+                and definition.path_template in {
+                    "/V1.0/{entity}/query",
+                    "/V1.0/{entity}/{entity_id}",
+                }
+                and v12_entity_read_enabled(entity)
+            )
+            # v13 is a single dynamically compiled GET/query route. The
+            # connected API schema is verified by the read connector *before*
+            # sending any data query. Never add v13 names to the shared
+            # mutation/POST/PATCH/DELETE entity set.
+            v13_candidate_query = (
+                definition.method == "GET"
+                and definition.path_template == "/V1.0/{entity}/query"
+                and dynamic_generic_entity_eligible(entity)
+            )
+            if not safe_name or (
+                not schema_only
+                and entity not in APPROVED_AUTOTASK_ENTITIES
+                and not v12_data_read
+                and not v13_candidate_query
             ):
                 raise ValueError(
                     f"Autotask entity is not approved: {entity!r}"

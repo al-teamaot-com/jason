@@ -14,6 +14,33 @@ Preserve Central Orchestrator authority, `direct_provider_access=false`, exact g
 ## 4. Initial Identification
 Resolve the exact support ID, GitHub issue, current status, acceptance criteria, related PRs/branches, production revision, and any overlapping active repair. Never create a duplicate repair workstream when one already exists.
 
+
+### 4A. GitHub Issue Identity and Admission Collision Policy
+
+The canonical SUPPORT identifier names an approved repair workstream; each GitHub issue number is a separate authoritative issue identity. Intake must retain **all** issue numbers that map to a support ID and report the real open-issue count. It must never silently overwrite one GitHub issue with another.
+
+- When unrelated manual GitHub issues share one SUPPORT ID, classify the ID as an **identity conflict**, record the exact issue numbers and block automated admission/closure of that ambiguous workstream. Assign distinct canonical IDs in a separately reviewed source-and-issue migration before resuming. Do not infer that one issue supersedes another.
+- When multiple SUPPORT-AUTO issues share the same fingerprinted ID, retain them as one logical diagnostic workstream and preserve **all** GitHub issue-number references. The existence of duplicate reports does not prove identical incident evidence or authorize automatic closure. Closure must remain fail-closed while more than one matching open issue exists.
+- The admission audit records logical-ID count, open issue count, duplicate issue numbers, and manual identity conflicts. P0 collisions are explicit admission blockers; repeated auto incidents are reported as one deduplicated operational alert, not silently discarded.
+
+**GitHub numeric issue-listing integrity (2026-10-20).** Live read-only `gh issue list` was observed to return an identical open issue number twice (#1344), followed by a fresh read containing the number once. This is different from two *distinct* issue numbers sharing one SUPPORT ID. The worker requests a creation-sorted GitHub issue listing, preserves the strict 1,000-record bound, rejects missing/invalid issue numbers, invalid titles, and two conflicting titles for one number. If an identical duplicate numeric issue record appears, it does **not** silently deduplicate and admit work: it logs bounded counts, re-fetches at most two independent full listings, and proceeds only when both are individually clean and contain the identical number/title inventory. Repeated duplicates, incomplete listings, inconsistent clean inventories, GitHub authorization errors, and all other malformed evidence fail closed. No ticket, SUPPORT item, admission decision, or production state may be changed from an unverified inventory.
+
+This policy does not add provider write authority, change the maximum active-repair count, or relax the existing production-verification and release gates.
+
+
+### 4B. Bounded read-only search request recovery
+
+A model-generated \`search_source\` request must not specify a source \`path\`; that argument is reserved for independently authorized \`read_source\` calls. A rejected search does **not** grant implicit authorization to search arbitrary files, expand the source scope, reset the evidence budget, or retry an editing request without proof.
+
+For an exact P0 \`EvidenceToolError: invalid source search\` blocker, the host worker may perform **one** new read-only evidence turn, only after a reviewed worker source upgrade and all of these preconditions:
+
+- The original model response, its parent request and preceding successful evidence turn match the canonical support ID and content-addressed ancestry.
+- The original branch remains clean and pinned to its recorded revision, the new recovery branch is independently clean and pinned to fetched authoritative \`origin/main\`, and the approved worker source blob has changed.
+- Every request has a bounded, non-command query and known tool schema. A legacy **advisory** path on \`search_source\` is recorded as discarded and is never used for file selection, path authorization, or an executable command. All source results still pass normal Git-tracked, scoped and J-CHANGE-002 authorization checks.
+- There is available native support-worker capacity, a remaining policy evidence-turn budget, no external-authority blocker, and no prior recovery marker. The original request and response remain immutable.
+
+The recovery creates a fresh content-addressed reasoning request with authenticated lineage and read-only tool receipts. The worker cannot self-approve edits, bypass CI, mutate providers, deploy production, or close a support item based on this recovery. If evidence or authority is incomplete, the original blocked state remains and the worker must report the actual reason.
+
 ## 5. Expected State
 Each approved support item is in exactly one durable state and progresses without owner prompting until verified complete or genuinely blocked.
 

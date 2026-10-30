@@ -17,6 +17,7 @@ from connectors.microsoft_graph.directory_connector import MicrosoftGraphDirecto
 from connectors.microsoft_graph.mailbox_connector import MicrosoftGraphMailboxConnector
 from connectors.microsoft_graph.security_posture import MicrosoftGraphSecurityPostureReader
 from connectors.microsoft_graph.security_posture_connector import MicrosoftGraphSecurityPostureConnector
+from kernel.client_boundaries import SQLiteClientBoundaryRepository
 from kernel.capabilities import CapabilityRegistryService
 from kernel.execution_providers import ExecutionProviderRegistryService
 from orchestrator.autotask_information_authorizer import (
@@ -77,12 +78,16 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_CONTACT_SEARCH,
     SERVICE_RESOURCE_READ,
     SERVICE_RESOURCE_SEARCH,
+    SERVICE_ENTITY_SEARCH,
+    SERVICE_ENTITY_READ,
     SERVICE_ENTITY_DESCRIBE,
     SERVICE_ENTITY_FIELDS_DESCRIBE,
+    SERVICE_ENTITY_UDF_FIELDS_DESCRIBE,
     SERVICE_NOTIFICATION_HISTORY_SEARCH,
     SERVICE_PRODUCT_SEARCH,
     SERVICE_PRODUCT_READ,
     SERVICE_PRODUCT_VENDOR_SEARCH,
+    SERVICE_INVENTORY_ITEM_SEARCH,
     SERVICE_SERVICE_SEARCH,
     SERVICE_SERVICE_READ,
     SERVICE_SERVICE_BUNDLE_SEARCH,
@@ -102,6 +107,7 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_OPPORTUNITY_READ,
     SERVICE_TICKET_COUNT,
     SERVICE_TICKET_NOTES_SEARCH,
+    SERVICE_TICKET_TIME_ENTRY_SEARCH,
     SERVICE_TICKET_ATTACHMENT_SEARCH,
     SERVICE_TICKET_ATTACHMENT_READ,
     SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
@@ -153,6 +159,7 @@ _PROVIDER_CAPABILITY_MAP = {
     (AUTOTASK_PROVIDER, SERVICE_TICKET_COUNT): "autotask.ticket.count",
     (AUTOTASK_PROVIDER, SERVICE_TICKET_READ): "autotask.ticket.get",
     (AUTOTASK_PROVIDER, SERVICE_TICKET_NOTES_SEARCH): "autotask.ticket.notes.list",
+    (AUTOTASK_PROVIDER, SERVICE_TICKET_TIME_ENTRY_SEARCH): "autotask.entity.query",
     (AUTOTASK_PROVIDER, SERVICE_TICKET_ATTACHMENT_SEARCH): "autotask.ticket.attachments.list",
     (AUTOTASK_PROVIDER, SERVICE_TICKET_ATTACHMENT_READ): "autotask.ticket.attachment.get",
     (AUTOTASK_PROVIDER, SERVICE_TICKET_ATTACHMENT_CONTENT_READ): "autotask.ticket.attachment.content.get",
@@ -160,12 +167,16 @@ _PROVIDER_CAPABILITY_MAP = {
     (AUTOTASK_PROVIDER, SERVICE_CONFIGURATION_READ): "autotask.configuration.get",
     (AUTOTASK_PROVIDER, SERVICE_CONTRACT_SEARCH): "autotask.entity.query",
     (AUTOTASK_PROVIDER, SERVICE_CONTRACT_READ): "autotask.entity.query",
+    (AUTOTASK_PROVIDER, SERVICE_ENTITY_SEARCH): "autotask.entity.query",
+    (AUTOTASK_PROVIDER, SERVICE_ENTITY_READ): "autotask.entity.query",
     (AUTOTASK_PROVIDER, SERVICE_ENTITY_DESCRIBE): "autotask.entity.describe",
     (AUTOTASK_PROVIDER, SERVICE_ENTITY_FIELDS_DESCRIBE): "autotask.entity.fields.describe",
+    (AUTOTASK_PROVIDER, SERVICE_ENTITY_UDF_FIELDS_DESCRIBE): "autotask.entity.udf.fields.describe",
     (AUTOTASK_PROVIDER, SERVICE_NOTIFICATION_HISTORY_SEARCH): "autotask.notification_history.search",
     (AUTOTASK_PROVIDER, SERVICE_PRODUCT_SEARCH): "autotask.entity.query",
     (AUTOTASK_PROVIDER, SERVICE_PRODUCT_READ): "autotask.entity.get",
     (AUTOTASK_PROVIDER, SERVICE_PRODUCT_VENDOR_SEARCH): "autotask.entity.query",
+    (AUTOTASK_PROVIDER, SERVICE_INVENTORY_ITEM_SEARCH): "autotask.entity.query",
     (AUTOTASK_PROVIDER, SERVICE_SERVICE_SEARCH): "autotask.entity.query",
     (AUTOTASK_PROVIDER, SERVICE_SERVICE_READ): "autotask.entity.get",
     (AUTOTASK_PROVIDER, SERVICE_SERVICE_BUNDLE_SEARCH): "autotask.entity.query",
@@ -451,6 +462,7 @@ def build_provider_read_invoker(
         microsoft_directory = runtime_microsoft_directory_from_env(transport=transport)
         directory_connector = MicrosoftGraphDirectoryConnector(
             directory=microsoft_directory.directory, bindings=raw_microsoft_bindings, audit=audit,
+            canary_boundaries=SQLiteClientBoundaryRepository(microsoft_directory.store),
         )
         posture_connector = MicrosoftGraphSecurityPostureConnector(
             reader=MicrosoftGraphSecurityPostureReader(tokens=microsoft_directory.directory.tokens, transport=transport),

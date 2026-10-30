@@ -11,6 +11,11 @@ from connectors.core.connector_base import PreparedRequest
 from connectors.core.contracts import ConnectorRequest
 
 from .connector import AutotaskConnector
+from .dynamic_schema_read import (
+    dynamic_generic_entity_eligible,
+    proven_queryable_fields,
+)
+from .operations import APPROVED_AUTOTASK_ENTITIES
 
 
 class TrustedPrincipalBindingResolver(Protocol):
@@ -531,6 +536,68 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
         if observed_ticket != ticket_id or observed_company != expected_company:
             raise PermissionError("AUTOTASK_ATTACHMENT_TICKET_COMPANY_MISMATCH")
 
+    def _verify_time_entry_ticket_company(self, request: ConnectorRequest) -> None:
+        """Prove exact ticket/company before a privileged labor query.
+
+        A matching caller-supplied company_id is not evidence that ticket_id
+        belongs to that company. The provider ticket record must corroborate it.
+        The result is never released or cached as a labor entry.
+        """
+        if request.context.capability != "autotask.entity.query" or (
+            request.arguments.get("entity") != "TimeEntries"
+        ):
+            return
+        ticket_id = request.arguments.get("ticket_id")
+        company_id = request.arguments.get("company_id")
+        if type(ticket_id) is not int or ticket_id < 1 or (
+            type(company_id) is not int or company_id < 1
+        ):
+            raise PermissionError("AUTOTASK_TIME_ENTRY_SCOPE_INVALID")
+        if str(request.context.client_id or "") != str(company_id):
+            raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_CLIENT_SCOPE_MISMATCH")
+        credentials = self._secrets.resolve(self.logical_secret, request.context)
+        ticket_request = ConnectorRequest(
+            context=replace(request.context, capability="autotask.ticket.get"),
+            arguments={"ticket_id": ticket_id},
+        )
+        prepared = self._prepare_ticket_read_as_query(
+            request=ticket_request, credentials=credentials
+        )
+        observed = self._transport.request(
+            method=prepared.method, url=prepared.url, headers=prepared.headers,
+            params=prepared.params, json=prepared.json,
+            timeout_seconds=prepared.timeout_seconds,
+        )
+        rows = observed.get("items") if isinstance(observed, Mapping) else None
+        if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], Mapping):
+            raise PermissionError("AUTOTASK_TIME_ENTRY_TICKET_NOT_UNIQUE")
+        record = rows[0]
+        try:
+            verified_id = int(record.get("id"))
+            verified_company = int(record.get("companyID"))
+        except (ValueError, TypeError) as exc:
+            raise PermissionError("AUTOTASK_TIME_ENTRY_SCOPE_INVALID") from exc
+        if verified_id != ticket_id or verified_company != company_id:
+            raise PermissionError("AUTOTASK_TIME_ENTRY_COMPANY_MISMATCH")
+
+    @staticmethod
+    def _verify_time_entry_result_scope(request: ConnectorRequest, result):
+        if request.context.capability != "autotask.entity.query" or (
+            request.arguments.get("entity") != "TimeEntries"
+        ):
+            return result
+        data = result.data
+        items = data.get("items") if isinstance(data, Mapping) else None
+        if not isinstance(items, list):
+            raise PermissionError("AUTOTASK_TIME_ENTRY_RESPONSE_INVALID")
+        ticket_id = request.arguments["ticket_id"]
+        for item in items:
+            if not isinstance(item, Mapping) or (
+                type(item.get("ticketID")) is not int or item["ticketID"] != ticket_id
+            ):
+                raise PermissionError("AUTOTASK_TIME_ENTRY_RESPONSE_SCOPE_MISMATCH")
+        return result
+
     @staticmethod
     def _sanitize_attachment_metadata(payload: Any) -> Any:
         if isinstance(payload, Mapping):
@@ -543,9 +610,140 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
             return [AutotaskImpersonatingConnector._sanitize_attachment_metadata(value) for value in payload]
         return payload
 
+    def _verify_dynamic_schema_query(
+        self,
+        *,
+        request: ConnectorRequest,
+        prepared: PreparedRequest,
+    ) -> None:
+        """Require actual provider query rights and field schema on EVERY read.
+
+        The v13 dynamic route may never trust a public entity name, a cached
+        schema result, an injected path or a client-supplied query string.
+        Source authorization and JKD-001 still happen in the orchestrator.
+        """
+        entity = request.arguments.get("entity")
+        if not dynamic_generic_entity_eligible(entity):
+            raise PermissionError("AUTOTASK_DYNAMIC_ENTITY_NOT_ELIGIBLE")
+        context = request.context
+        if (request.arguments.get("jason_dynamic_schema_read") is not True
+                or context.mode != "observe"
+                or context.organization_id != "aot"
+                or context.client_id is not None
+                or not context.principal_id.startswith("person-")
+                or autotask_requester_authorization_mode()
+                    != AUTOTASK_AUTH_MODE_JASON_MANAGED
+                or request.context.capability != "autotask.entity.query"
+                or prepared.method != "GET"
+                or not prepared.url.endswith("/V1.0/" + entity + "/query")):
+            raise PermissionError("AUTOTASK_DYNAMIC_INTERNAL_READ_AUTHORITY_REQUIRED")
+        params = prepared.params
+        raw = params.get("search") if isinstance(params, Mapping) else None
+        if not isinstance(raw, str):
+            raise PermissionError("AUTOTASK_DYNAMIC_QUERY_REQUIRED")
+        try:
+            search = json.loads(raw)
+        except ValueError as exc:
+            raise PermissionError("AUTOTASK_DYNAMIC_QUERY_INVALID") from exc
+        if not isinstance(search, Mapping):
+            raise PermissionError("AUTOTASK_DYNAMIC_QUERY_INVALID")
+        root = self._api_root(prepared)
+        kwargs = {
+            "method": "GET",
+            "headers": prepared.headers,
+            "params": None,
+            "timeout_seconds": prepared.timeout_seconds,
+        }
+        info = self._transport.request(
+            url=f"{root}/V1.0/{entity}/entityInformation", **kwargs
+        )
+        if not isinstance(info, Mapping):
+            raise PermissionError("AUTOTASK_DYNAMIC_SCHEMA_UNVERIFIED")
+        # An API account may legitimately have no query access even if its
+        # entity is publicly documented; stop before GET /query in that case.
+        actual = info.get("info", info)
+        # The live schema `name` is singular (ActionType, Appointment)
+        # although this entity's canonical REST URL uses plural spelling.
+        # The GET URL is source-bound above, and schema capability/access
+        # proof is authoritative for that exact endpoint.
+        metadata_name = actual.get("name") if isinstance(actual, Mapping) else None
+        if (not isinstance(metadata_name, str)
+                or not metadata_name
+                or len(metadata_name) > 80
+                or not metadata_name[0].isalpha()
+                or not metadata_name.isalnum()
+                or actual.get("canQuery") is not True
+                or actual.get("userAccessForQuery") != "All"):
+            raise PermissionError("AUTOTASK_DYNAMIC_PROVIDER_QUERY_NOT_AUTHORIZED")
+        fields = self._transport.request(
+            url=f"{root}/V1.0/{entity}/entityInformation/fields", **kwargs
+        )
+        if not isinstance(fields, Mapping):
+            raise PermissionError("AUTOTASK_DYNAMIC_FIELD_SCHEMA_UNVERIFIED")
+        proven_queryable_fields(
+            entity=entity, entity_metadata=info,
+            field_metadata=fields, query=search,
+        )
+
+    @staticmethod
+    def _project_dynamic_selection(request: ConnectorRequest, result):
+        """Do not release unexpected full fields if API ignored IncludeFields."""
+        if request.arguments.get("jason_dynamic_schema_read") is not True:
+            return result
+        search = json.loads(request.arguments["search"])
+        names = search.get("IncludeFields")
+        if names is None:
+            return result
+        data = result.data
+        items = data.get("items") if isinstance(data, Mapping) else None
+        if not isinstance(items, list) or len(items) > 500:
+            raise PermissionError("AUTOTASK_DYNAMIC_SELECTED_RESPONSE_INVALID")
+        if any(not isinstance(i, Mapping) or "id" not in i for i in items):
+            raise PermissionError("AUTOTASK_DYNAMIC_SELECTED_RESPONSE_INVALID")
+        keep = frozenset(names)
+        projected = [{k: v for k, v in item.items() if k in keep} for item in items]
+        return type(result)(
+            capability=result.capability, provider=result.provider,
+            data={**data, "items": projected},
+            evidence_ids=result.evidence_ids, warnings=result.warnings,
+        )
+
+    @staticmethod
+    def _verify_generic_exact_entity_result(request: ConnectorRequest, result):
+        """Prevent a provider query fallback from returning a different record."""
+        expected = request.arguments.get("jason_exact_entity_read_id")
+        if expected is None:
+            return result
+        if request.context.capability != "autotask.entity.query":
+            raise PermissionError("AUTOTASK_EXACT_ENTITY_CAPABILITY_INVALID")
+        if type(expected) is not int or expected < 1:
+            raise PermissionError("AUTOTASK_EXACT_ENTITY_ID_INVALID")
+        payload = result.data
+        items = payload.get("items") if isinstance(payload, Mapping) else None
+        if not isinstance(items, list) or len(items) != 1 or not isinstance(items[0], Mapping):
+            raise PermissionError("AUTOTASK_EXACT_ENTITY_NOT_UNIQUE")
+        found = items[0].get("id")
+        if isinstance(found, bool) or not isinstance(found, (int, str)):
+            raise PermissionError("AUTOTASK_EXACT_ENTITY_ID_MISMATCH")
+        try:
+            same = int(found) == expected
+        except (TypeError, ValueError):
+            same = False
+        if not same:
+            raise PermissionError("AUTOTASK_EXACT_ENTITY_ID_MISMATCH")
+        return result
+
     def execute(self, request: ConnectorRequest):
+        if request.context.capability == "autotask.entity.query" and (
+            request.arguments.get("entity") == "TimeEntries"
+        ):
+            self._verify_time_entry_ticket_company(request)
+            return self._verify_time_entry_result_scope(
+                request, super().execute(request)
+            )
         if request.context.capability not in self._ATTACHMENT_READ_OPERATIONS:
-            return super().execute(request)
+            result = self._project_dynamic_selection(request, super().execute(request))
+            return self._verify_generic_exact_entity_result(request, result)
         self._verify_attachment_ticket_company(request)
         result = super().execute(request)
         if request.context.capability != "autotask.ticket.attachment.content.get":
@@ -591,16 +789,39 @@ class AutotaskImpersonatingConnector(AutotaskConnector):
         else:
             prepared = super().prepare_request(request, credentials)
 
+        if request.context.capability == "autotask.entity.query":
+            entity = request.arguments.get("entity")
+            if request.arguments.get("jason_dynamic_schema_read") is True:
+                self._verify_dynamic_schema_query(
+                    request=request, prepared=prepared,
+                )
+            elif (isinstance(entity, str)
+                  and dynamic_generic_entity_eligible(entity)
+                  and entity not in APPROVED_AUTOTASK_ENTITIES):
+                # Do not permit lower-level connector callers to skip the
+                # canonical schema-governed query adapter with raw JSON.
+                raise PermissionError("AUTOTASK_DYNAMIC_CANONICAL_SELECTOR_REQUIRED")
+
         if request.context.capability in {
             "autotask.ticket.search",
             "autotask.ticket.count",
         }:
             prepared = self._resolve_ticket_search_status(prepared=prepared)
 
+        if (request.context.capability == "autotask.entity.query"
+                and request.arguments.get("entity") == "TimeEntries"):
+            # Provider-native impersonation on GET is NOT proof of read security.
+            # The operator may enable only after observed positive/negative
+            # authorization tests against the exact production entity.
+            if (mode != AUTOTASK_AUTH_MODE_IMPERSONATED
+                    or os.getenv("JASON_AUTOTASK_TIME_ENTRY_NATIVE_READ_PROVEN", "") != "verified"):
+                raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_PERMISSION_NOT_PROVEN")
         if mode == AUTOTASK_AUTH_MODE_JASON_MANAGED:
             return prepared
 
-        if request.context.capability not in _IMPERSONATED_READ_OPERATIONS:
+        is_native_labor_read = (request.context.capability == "autotask.entity.query"
+            and request.arguments.get("entity") == "TimeEntries")
+        if request.context.capability not in _IMPERSONATED_READ_OPERATIONS and not is_native_labor_read:
             return prepared
 
         email = self._trusted_email(request)

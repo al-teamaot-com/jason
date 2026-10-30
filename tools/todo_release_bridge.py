@@ -75,11 +75,15 @@ def load_state(path: Path) -> dict[str, Any]:
 def todo_issues(repo: Path) -> list[dict[str, Any]]:
     issues = gh_json(
         [
-            "issue", "list", "--state", "open", "--limit", "200",
+            "issue", "list", "--state", "open", "--limit", "5000",
             "--json", "number,title,body,url,updatedAt",
         ],
         cwd=repo,
     ) or []
+    # GitHub CLI returns only the requested leading window. Silent truncation
+    # strands older owner-approved TODO issues with stale release states.
+    if len(issues) >= 5000:
+        raise TodoReleaseBridgeError("open issue inventory reached safe discovery limit")
     result = []
     for issue in issues:
         body = str(issue.get("body") or "")
@@ -186,8 +190,40 @@ def upstream_commitment_state(record: Mapping[str, Any] | None) -> tuple[str, st
             reason or 'Development worker says complete but no merged PR was found.',
         )
     if phase in {'pr_ready', 'pr_validating', 'ci_repair_needed', 'ci_repairing'}:
+        # A worker readiness claim without an actual durable PR identity is
+        # not evidence that a merge is pending. Never hide the missing PR
+        # under a green-looking release-board phase.
+        number = record.get('pr_number')
+        if type(number) is not int or number < 1:
+            return (
+                'development_blocked',
+                'Authoritative development record has no valid PR identity; '
+                'cannot claim that a development merge is pending.',
+            )
         return 'waiting_development_merge', reason
     return 'development_in_progress', reason
+
+
+
+def verified_open_development_pr(
+    repo: Path, issue_number: int, worker_record: Mapping[str, Any],
+) -> int | None:
+    """Require actual open, same-issue GitHub PR before claiming merge wait."""
+    number = worker_record.get('pr_number')
+    if type(number) is not int or number < 1:
+        return None
+    pr = gh_json([
+        'pr', 'view', str(number), '--json', 'number,state,body,mergedAt',
+    ], cwd=repo) or {}
+    if not isinstance(pr, Mapping):
+        return None
+    marker = DEV_META.search(str(pr.get('body') or ''))
+    if (type(pr.get('number')) is not int or pr['number'] != number
+            or pr.get('state') != 'OPEN' or pr.get('mergedAt')
+            or marker is None or int(marker.group(1)) != issue_number):
+        return None
+    return number
+
 
 
 def next_work_gate(phase: str, reason: str) -> dict[str, str]:
@@ -335,6 +371,101 @@ def commitment_summary(items: Mapping[str, Any]) -> dict[str, Any]:
         'release_queue_empty_but_upstream_pending': release_pending == 0 and upstream > 0,
         'phases': dict(sorted(phases.items())),
     }
+
+
+def update_commitment(record: dict[str, Any], fields: Mapping[str, Any]) -> bool:
+    """Update only changed fields: a no-op bridge pass is truly idempotent."""
+    if 'updated_at' in fields:
+        raise TodoReleaseBridgeError('record timestamps may not be supplied as data')
+    changes = {key: value for key, value in fields.items()
+               if key not in record or record[key] != value}
+    if not changes:
+        return False
+    record.update(changes)
+    record['updated_at'] = now()
+    return True
+
+
+def require_consistent_commitment_summary(
+    items: Mapping[str, Any],
+    summary: Mapping[str, Any],
+    unmerged_authority: Mapping[str, str],
+) -> None:
+    """Fail closed before publication on false merge gates or stale counters."""
+    if not isinstance(items, Mapping) or not isinstance(summary, Mapping):
+        raise TodoReleaseBridgeError('TODO control board has invalid item/summary schema')
+    for todo_id, expected_phase in unmerged_authority.items():
+        item = items.get(todo_id)
+        if not isinstance(item, Mapping) or item.get('phase') != expected_phase:
+            raise TodoReleaseBridgeError(
+                'TODO authoritative phase conflict for ' + todo_id + ' (support issue #1099)'
+            )
+    for todo_id, item in items.items():
+        if not isinstance(item, Mapping):
+            raise TodoReleaseBridgeError('TODO record is not an object for ' + str(todo_id)[:80])
+        if item.get('phase') == 'waiting_development_merge':
+            n = item.get('development_pr')
+            if type(n) is not int or n < 1:
+                raise TodoReleaseBridgeError(
+                    'TODO merge gate lacks durable development PR for ' + str(todo_id)[:80]
+                    + ' (support issue #1099)'
+                )
+    expected = commitment_summary(items)
+    if dict(summary) != expected:
+        raise TodoReleaseBridgeError(
+            'TODO summary does not match final item phases (support issue #1099)'
+        )
+
+
+
+
+
+def report_commitment_integrity_defect(
+    repo: Path, spool: Path, failure: TodoReleaseBridgeError,
+) -> Path:
+    """Durably self-report a phase/summary violation to existing Support #1099.
+
+    This never edits the TODO commitment ledger or creates release authority.
+    The stable fingerprint and private receipt suppress duplicate issue spam.
+    A failed GitHub notification remains pending for a later bounded retry.
+    """
+    detail = str(failure)[:400]
+    fingerprint = hashlib.sha256(detail.encode('utf-8')).hexdigest()[:20]
+    path = spool / 'todo-release-defects' / ('support-ops-059-' + fingerprint + '.json')
+    if path.exists():
+        stored = json.loads(path.read_text(encoding='utf-8'))
+        if (stored.get('support_issue') != 1099
+                or stored.get('failure') != detail
+                or stored.get('schema_version') != '1.0'):
+            raise TodoReleaseBridgeError('TODO bridge support defect receipt conflict')
+        if stored.get('notified') is True:
+            return path
+    else:
+        stored = {
+            'schema_version': '1.0', 'support_issue': 1099,
+            'support_id': 'SUPPORT-OPS-059',
+            'failure': detail, 'fingerprint': fingerprint,
+            'detected_at': now(), 'notified': False,
+        }
+        atomic_json(path, stored)
+    body = (
+        'Automatic TODO bridge fail-closed integrity alert for SUPPORT-OPS-059. '
+        'No TODO commitment state was accepted from this inconsistent pass. '
+        'Violation: ' + detail
+        + '. Durable local receipt: ' + str(path)
+        + '. Investigate authoritative development/PR phases and summary before retry.'
+    )
+    try:
+        run(['gh', 'issue', 'comment', '1099', '--body', body], cwd=repo)
+    except (OSError, TodoReleaseBridgeError) as exc:
+        print('TODO_BRIDGE_DEFECT_PENDING_SUPPORT_1099='
+              + type(exc).__name__, flush=True)
+    else:
+        stored['notified'] = True
+        stored['notified_at'] = now()
+        atomic_json(path, stored)
+    return path
+
 
 
 def merged_prs_by_issue(repo: Path) -> dict[int, dict[str, Any]]:
@@ -623,6 +754,76 @@ def close_issue(repo: Path, issue_number: int, release: Mapping[str, Any]) -> No
     )
 
 
+
+def reconcile_verified_closed_issues(
+    repo: Path, release_root: Path, items: dict[str, Any]
+) -> None:
+    """Finalize a prior closure only from original-issue and release proof.
+
+    Open-issue discovery omits already-closed TODOs. Keep their persisted
+    commitments reconciled without allowing a duplicate intake issue's stale
+    development result to reverse a verified production closure.
+    """
+    for todo_id, record in items.items():
+        if not isinstance(record, dict) or record.get('phase') == 'complete':
+            continue
+        issue_number = record.get('issue_number')
+        closure_number = record.get('closure_pr')
+        rid = record.get('release_id')
+        if (not isinstance(issue_number, int) or not isinstance(closure_number, int)
+                or not isinstance(rid, str)
+                or not re.fullmatch(r'release-[0-9a-f]{16}', rid)):
+            continue
+        path = release_root / 'records' / f'{rid}.json'
+        if not path.is_file():
+            continue
+        release = json.loads(path.read_text(encoding='utf-8'))
+        production = release.get('production') or {}
+        candidate = release.get('release_candidate') or {}
+        sha = str(production.get('live_sha') or '')
+        if (release.get('release_id') != rid or release.get('state') != 'closed'
+                or not isinstance(production, dict)
+                or production.get('alignment_verified') is not True
+                or not production.get('verified_at')
+                or candidate.get('candidate_sha') != sha
+                or not re.fullmatch(r'[0-9a-f]{40}', sha)):
+            continue
+        merge_sha = record.get('merge_sha')
+        if (not isinstance(merge_sha, str) or not re.fullmatch(r'[0-9a-f]{40}', merge_sha)
+                or (merge_sha != sha and not commit_is_ancestor(repo, merge_sha, sha))):
+            continue
+        closure = gh_json([
+            'pr', 'view', str(closure_number), '--json', 'number,body,mergedAt'
+        ], cwd=repo) or {}
+        text = str(closure.get('body') or '')
+        required = (
+            f'- TODO closure: {todo_id}',
+            f'- Development issue: #{issue_number}',
+            f'- Release ID: {rid}',
+            f'- Production SHA: {sha}',
+        )
+        if (closure.get('number') != closure_number
+                or not closure.get('mergedAt')
+                or not all(line in text.splitlines() for line in required)):
+            continue
+        issue = gh_json([
+            'issue', 'view', str(issue_number), '--json', 'number,state,body'
+        ], cwd=repo) or {}
+        marker = TODO_META.search(str(issue.get('body') or ''))
+        if (issue.get('number') != issue_number or issue.get('state') != 'CLOSED'
+                or marker is None or marker.group(1).upper() != todo_id):
+            continue
+        record.update({
+            'phase': 'complete', 'reason': '', 'blocker_category': 'none',
+            'next_action': 'none', 'retry_eligible': False,
+            'verified_operational_evidence': {
+                'release_id': rid, 'production_sha': sha,
+                'closure_pr': closure_number, 'canonical_issue': issue_number,
+            },
+            'updated_at': now(),
+        })
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", type=Path, default=DEFAULT_REPO)
@@ -636,7 +837,12 @@ def main() -> int:
     spool = args.spool.resolve()
     state_path = spool / "todo-release-state.json"
     state = load_state(state_path)
+    if not isinstance(state.get('items', {}), dict):
+        raise TodoReleaseBridgeError('TODO items state is not an object')
     state.setdefault("items", {})
+    original = json.dumps(state, sort_keys=True)
+    unmerged_authority: dict[str, str] = {}
+    identity_holds: dict[str, dict[str, Any]] = {}
 
     run(["git", "fetch", "--no-tags", "origin", "main"], cwd=repo)
     prs = merged_prs_by_issue(repo)
@@ -647,11 +853,32 @@ def main() -> int:
         record = state["items"].setdefault(
             todo_id,
             {
-                "phase": "waiting_development_merge",
+                "phase": "waiting_development_start",
                 "issue_number": issue["issue_number"],
                 "updated_at": now(),
             },
         )
+        if not isinstance(record, dict) or type(record.get("issue_number")) is not int:
+            raise TodoReleaseBridgeError(
+                "invalid persisted TODO identity for " + todo_id + " (support issue #1099)"
+            )
+        if record["issue_number"] != issue["issue_number"]:
+            # This TODO may have been admitted twice or re-scoped after a
+            # different earlier issue was closed. Never auto-rebind or copy
+            # release/approval evidence from the old issue to the new one.
+            # Quarantine *only this item* while continuing unrelated P0 work.
+            identity_holds[todo_id] = {
+                "state": "requires_governed_identity_reconciliation",
+                "persisted_issue_number": record["issue_number"],
+                "observed_issue_number": issue["issue_number"],
+                "next_action": "verify_canonical_issue_closure_and_new_approved_scope",
+                "release_eligible": False,
+            }
+            print(
+                "TODO_RELEASE_BRIDGE_IDENTITY_HELD id="
+                + todo_id + " support_issue=1099", flush=True,
+            )
+            continue
         # Only declared exact release IDs can change the governing dependency
         # set. A changed declaration invalidates the old eligibility result.
         declared = issue["governing_dependencies"]
@@ -680,25 +907,32 @@ def main() -> int:
             record["source_fingerprint"] = fingerprint
         merged = prs.get(issue["issue_number"])
         if not merged:
-            phase, reason = upstream_commitment_state(
-                development.get(issue["issue_number"])
-            )
-            record.update({
-                "phase": phase,
-                "reason": reason,
-                "updated_at": now(),
-            })
+            authoritative = development.get(issue["issue_number"])
+            phase, reason = upstream_commitment_state(authoritative)
+            changes: dict[str, Any] = {"phase": phase, "reason": reason}
+            if phase == 'waiting_development_merge':
+                verified_pr = verified_open_development_pr(
+                    repo, issue['issue_number'], authoritative,
+                )
+                if verified_pr is None:
+                    phase = 'development_blocked'
+                    reason = (
+                        'Development PR is not verified open and bound to this '
+                        'exact issue; cannot claim an awaiting-merge state.'
+                    )
+                    changes = {'phase': phase, 'reason': reason}
+                else:
+                    changes['development_pr'] = verified_pr
+            update_commitment(record, changes)
+            unmerged_authority[todo_id] = phase
             continue
 
         merge_sha = merged["merge_sha"]
-        record.update(
-            {
-                "development_pr": merged["pr_number"],
-                "merge_sha": merge_sha,
-                "release_id": release_id(merge_sha),
-                "updated_at": now(),
-            }
-        )
+        update_commitment(record, {
+            "development_pr": merged["pr_number"],
+            "merge_sha": merge_sha,
+            "release_id": release_id(merge_sha),
+        })
 
         release = effective_release_record(
             repo,
@@ -715,13 +949,10 @@ def main() -> int:
                     release_state=args.release_state.resolve(),
                 )
             except Exception as exc:
-                record.update(
-                    {
-                        "phase": "release_prepare_blocked",
-                        "reason": f"{type(exc).__name__}: {str(exc)[:900]}",
-                        "updated_at": now(),
-                    }
-                )
+                update_commitment(record, {
+                    "phase": "release_prepare_blocked",
+                    "reason": f"{type(exc).__name__}: {str(exc)[:900]}",
+                })
                 continue
 
         selected_release_id = str(release.get("release_id") or record["release_id"])
@@ -737,14 +968,11 @@ def main() -> int:
             closure = find_closure_pr(repo, todo_id)
             if closure and closure.get("mergedAt"):
                 close_issue(repo, issue["issue_number"], release)
-                record.update(
-                    {
-                        "phase": "complete",
-                        "closure_pr": int(closure["number"]),
-                        "reason": "",
-                        "updated_at": now(),
-                    }
-                )
+                update_commitment(record, {
+                    "phase": "complete",
+                    "closure_pr": int(closure["number"]),
+                    "reason": "",
+                })
                 continue
             try:
                 number = create_closure_pr(
@@ -753,47 +981,46 @@ def main() -> int:
                     issue_number=issue["issue_number"],
                     release=release,
                 )
-                record.update(
-                    {
-                        "phase": "closure_validating",
-                        "closure_pr": number,
-                        "reason": "",
-                        "updated_at": now(),
-                    }
-                )
+                update_commitment(record, {
+                    "phase": "closure_validating",
+                    "closure_pr": number,
+                    "reason": "",
+                })
             except Exception as exc:
-                record.update(
-                    {
-                        "phase": "closure_blocked",
-                        "reason": f"{type(exc).__name__}: {str(exc)[:900]}",
-                        "updated_at": now(),
-                    }
-                )
+                update_commitment(record, {
+                    "phase": "closure_blocked",
+                    "reason": f"{type(exc).__name__}: {str(exc)[:900]}",
+                })
             continue
 
         if release_state in {"failed", "rolled_back", "blocked"}:
-            record.update(
-                {
-                    "phase": "release_blocked",
-                    "reason": f"Release Manager state is {release_state}",
-                    "updated_at": now(),
-                }
-            )
+            update_commitment(record, {
+                "phase": "release_blocked",
+                "reason": f"Release Manager state is {release_state}",
+            })
         else:
-            record.update(
-                {
-                    "phase": "waiting_release",
-                    "reason": "",
-                    "updated_at": now(),
-                }
-            )
+            update_commitment(record, {
+                "phase": "waiting_release",
+                "reason": "",
+            })
 
-    for item in state["items"].values():
+    # Never retrospectively close/complete a mismatched issue from a
+    # previous release receipt. Pass references only for the safe subset.
+    reconcilable = {
+        key: item for key, item in state["items"].items()
+        if key not in identity_holds
+    }
+    reconcile_verified_closed_issues(repo, args.release_state.resolve(), reconcilable)
+    for key, item in state["items"].items():
+        if key in identity_holds:
+            continue
         if isinstance(item, dict):
             item.update(next_work_gate(str(item.get("phase") or ""), str(item.get("reason") or "")))
     # Read authoritative protected release records, without changing a worker
     # admission decision, modifying dependencies, or granting new authority.
-    for item in state["items"].values():
+    for key, item in state["items"].items():
+        if key in identity_holds:
+            continue
         if isinstance(item, dict):
             item.update(dependency_state_for_item(item, args.release_state.resolve()))
     for item in state["items"].values():
@@ -804,9 +1031,35 @@ def main() -> int:
             item["retry_eligible"] = False
             item["source_decision_stale"] = True
             item["next_action"] = "request_governed_development_re_evaluation"
+    # Bounded durable exception log. No approval or identity rebind occurs.
+    # The release bridge can complete for independent items, while the
+    # operator/supervisor sees exact work that still requires reconciliation.
+    if identity_holds:
+        state["identity_holds"] = identity_holds
+    else:
+        state.pop("identity_holds", None)
     state["summary"] = commitment_summary(state["items"])
-    state["updated_at"] = now()
-    atomic_json(state_path, state)
+    try:
+        require_consistent_commitment_summary(
+            state["items"], state["summary"], unmerged_authority,
+        )
+    except TodoReleaseBridgeError as exc:
+        report_commitment_integrity_defect(repo, spool, exc)
+        raise
+    # Preserve the prior file bytes (including timestamps) on a no-op pass.
+    # The summary must be derived only from final item phases in this same
+    # atomic publication; stale in-memory counters are never written.
+    if json.dumps(state, sort_keys=True) != original:
+        state["updated_at"] = now()
+        atomic_json(state_path, state)
+        saved = load_state(state_path)
+        try:
+            require_consistent_commitment_summary(
+                saved.get("items", {}), saved.get("summary", {}), unmerged_authority,
+            )
+        except TodoReleaseBridgeError as exc:
+            report_commitment_integrity_defect(repo, spool, exc)
+            raise
     return 0
 
 

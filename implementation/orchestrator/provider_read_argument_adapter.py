@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from connectors.autotask.verified_read_extensions import v12_entity_read_enabled
+from connectors.autotask.dynamic_schema_read import dynamic_generic_entity_eligible
+
 import json
 import re
 from dataclasses import dataclass, replace
@@ -49,12 +52,16 @@ from .provider_read_capability_catalog import (
     SERVICE_CONTACT_SEARCH,
     SERVICE_RESOURCE_READ,
     SERVICE_RESOURCE_SEARCH,
+    SERVICE_ENTITY_SEARCH,
+    SERVICE_ENTITY_READ,
     SERVICE_ENTITY_DESCRIBE,
     SERVICE_ENTITY_FIELDS_DESCRIBE,
+    SERVICE_ENTITY_UDF_FIELDS_DESCRIBE,
     SERVICE_NOTIFICATION_HISTORY_SEARCH,
     SERVICE_PRODUCT_SEARCH,
     SERVICE_PRODUCT_READ,
     SERVICE_PRODUCT_VENDOR_SEARCH,
+    SERVICE_INVENTORY_ITEM_SEARCH,
     SERVICE_SERVICE_SEARCH,
     SERVICE_SERVICE_READ,
     SERVICE_SERVICE_BUNDLE_SEARCH,
@@ -74,6 +81,7 @@ from .provider_read_capability_catalog import (
     SERVICE_OPPORTUNITY_READ,
     SERVICE_TICKET_COUNT,
     SERVICE_TICKET_NOTES_SEARCH,
+    SERVICE_TICKET_TIME_ENTRY_SEARCH,
     SERVICE_TICKET_ATTACHMENT_SEARCH,
     SERVICE_TICKET_ATTACHMENT_READ,
     SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
@@ -193,6 +201,10 @@ _AUTOTASK_SEARCH_FIELDS: Mapping[str, Mapping[str, str]] = {
         "name": "name",
         "sku": "sku",
     },
+    SERVICE_INVENTORY_ITEM_SEARCH: {
+        'product_id':'productID',
+        'inventory_location_id':'inventoryLocationID',
+    },
     SERVICE_PRODUCT_VENDOR_SEARCH: {
         "resource_id": "id",
         "product_id": "productID",
@@ -216,6 +228,9 @@ _AUTOTASK_SEARCH_FIELDS: Mapping[str, Mapping[str, str]] = {
         "resource_id": "id",
         "purchase_order_id": "orderID",
         "product_id": "productID",
+    },
+    SERVICE_TICKET_TIME_ENTRY_SEARCH: {
+        "ticket_id": "ticketID",
     },
     SERVICE_TICKET_CHARGE_SEARCH: {
         "resource_id": "id",
@@ -585,7 +600,10 @@ def _autotask_search(
                 {"op": "jason_open", "field": provider_field, "value": "open"}
             )
             continue
-        clauses.append({"op": "eq", "field": provider_field, "value": value})
+        # Autotask company discovery accepts partial names, while exact company IDs
+        # remain equality-bound. Never broaden arbitrary filter fields.
+        operator = "contains" if capability_name == SERVICE_COMPANY_SEARCH and selector == "name" else "eq"
+        clauses.append({"op": operator, "field": provider_field, "value": value})
 
     if not clauses:
         clauses.append({"op": "exist", "field": "id"})
@@ -614,10 +632,127 @@ def _autotask_count(
     return json.dumps(payload, separators=(",", ":"), sort_keys=True)
 
 
+# These generic read families are confirmed provider-queryable and do not have
+# specialized attachment, labor or company-boundary release contracts. Those
+# sensitive families remain on their existing individually governed paths.
+_AUTOTASK_GENERIC_READ_ENTITIES = frozenset({
+    "Projects",
+    "Tasks",
+    "ServiceCalls",
+    "ProjectNotes",
+    "TicketAdditionalConfigurationItems",
+})
+_AUTOTASK_GENERIC_FIELD_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
+
+
+def _autotask_generic_entity_query(
+    capability_name: str, arguments: Mapping[str, Any],
+) -> dict[str, Any]:
+    entity = arguments.get("entity")
+    dynamic = dynamic_generic_entity_eligible(entity)
+    if not isinstance(entity, str) or not (
+        entity in _AUTOTASK_GENERIC_READ_ENTITIES or v12_entity_read_enabled(entity)
+        or dynamic
+    ):
+        raise ValueError("generic read entity is not yet API-accepted for governed query")
+    unsupported = set(arguments) - {
+        "entity", "resource_id", "filters", "page_size", "after_resource_id",
+        "requested_facts", "result_intent", "completeness_requirement",
+        *(("select",) if dynamic else ()),
+    }
+    if unsupported:
+        raise ValueError("unsupported generic Autotask selector")
+    if "search" in arguments:
+        raise ValueError("provider-specific raw Autotask search is prohibited")
+    if capability_name == SERVICE_ENTITY_READ:
+        if arguments.get("filters") not in (None, {}):
+            raise ValueError("exact entity read does not accept additional filters")
+        if arguments.get("after_resource_id") is not None:
+            raise ValueError("exact entity read cannot continue a collection query")
+    filters = arguments.get("filters") or {}
+    if not isinstance(filters, Mapping) or len(filters) > 12:
+        raise ValueError("generic Autotask filters must be at most 12 equality fields")
+    clauses = []
+    for field, value in filters.items():
+        if not isinstance(field, str) or not _AUTOTASK_GENERIC_FIELD_NAME.fullmatch(field):
+            raise ValueError("Autotask filter has invalid canonical field name")
+        op = "eq"
+        if dynamic and isinstance(value, Mapping):
+            if set(value) - {"op", "value"} or "op" not in value:
+                raise ValueError("unsupported Autotask structured filter")
+            op = value["op"]
+            value = value.get("value")
+        if dynamic and op in {"exist", "notExist"}:
+            if value is not None:
+                raise ValueError("existence filter does not accept a value")
+            clauses.append({"op": op, "field": field})
+            continue
+        if dynamic and op in {"in", "notIn"}:
+            if (not isinstance(value, list) or not 1 <= len(value) <= 30
+                    or any(type(item) not in (str, int, float, bool)
+                           or (isinstance(item, str) and (not item.strip() or len(item) > 512))
+                           for item in value)):
+                raise ValueError("Autotask list filter is not bounded")
+        elif (type(value) not in (str, int, float, bool)
+              or (isinstance(value, str) and (not value.strip() or len(value) > 512))):
+            raise ValueError("Autotask filter value must be a bounded scalar")
+        if dynamic and op not in {
+            "eq", "noteq", "gt", "gte", "lt", "lte",
+            "contains", "beginsWith", "endsWith", "in", "notIn",
+        }:
+            raise ValueError("Autotask filter operator not supported")
+        clauses.append({"op": op, "field": field, "value": value})
+    raw_id = arguments.get("resource_id")
+    exact_id = None
+    if raw_id is not None:
+        if isinstance(raw_id, bool):
+            raise ValueError("entity resource_id must be a positive integer")
+        try:
+            exact_id = int(raw_id)
+        except (ValueError, TypeError) as exc:
+            raise ValueError("entity resource_id must be a positive integer") from exc
+        if exact_id < 1:
+            raise ValueError("entity resource_id must be a positive integer")
+        if any(clause["field"] == "id" for clause in clauses):
+            raise ValueError("duplicate exact id selector")
+        clauses.append({"op": "eq", "field": "id", "value": exact_id})
+    elif capability_name == SERVICE_ENTITY_READ:
+        raise ValueError("exact entity read requires resource_id")
+    after_id = _autotask_after_resource_id(arguments)
+    if after_id is not None:
+        if exact_id is not None or any(c["field"] == "id" for c in clauses):
+            raise ValueError("cannot continue an exact-id entity query")
+        clauses.append({"op": "gt", "field": "id", "value": after_id})
+    if not clauses:
+        clauses.append({"op": "exist", "field": "id"})
+    max_records = 2 if capability_name == SERVICE_ENTITY_READ else _autotask_max_records(arguments)
+    search = {"MaxRecords": max_records, "filter": clauses}
+    result = {"entity": entity}
+    if dynamic:
+        selected = arguments.get("select")
+        if selected is not None:
+            if (not isinstance(selected, list) or not 1 <= len(selected) <= 31
+                    or any(not isinstance(name, str)
+                           or not _AUTOTASK_GENERIC_FIELD_NAME.fullmatch(name)
+                           for name in selected)
+                    or len(set(selected)) != len(selected)):
+                raise ValueError("select must contain 1-31 unique canonical field names")
+            # Datto's IncludeFields is the actual provider-native projection.
+            # Always include id so exact readback and cursor paging are safe.
+            search["IncludeFields"] = ["id", *[x for x in selected if x != "id"]]
+        result["jason_dynamic_schema_read"] = True
+    result["search"] = json.dumps(search, separators=(",", ":"), sort_keys=True)
+    if capability_name == SERVICE_ENTITY_READ:
+        result["jason_exact_entity_read_id"] = exact_id
+    return result
+
+
 def adapt_autotask_arguments(
     capability_name: str,
     arguments: Mapping[str, Any],
 ) -> dict[str, Any]:
+    if capability_name in {SERVICE_ENTITY_SEARCH, SERVICE_ENTITY_READ}:
+        return _autotask_generic_entity_query(capability_name, arguments)
     if capability_name == SERVICE_COMPANY_READ:
         return {"company_id": _resource_id(arguments)}
     if capability_name == SERVICE_CONTACT_READ:
@@ -626,6 +761,18 @@ def adapt_autotask_arguments(
         return {"ticket_id": _ticket_read_selector(arguments)}
     if capability_name == SERVICE_CONFIGURATION_READ:
         return {"configuration_item_id": _resource_id(arguments)}
+    if capability_name == SERVICE_TICKET_TIME_ENTRY_SEARCH:
+        # No broad time-entry query: one verified ticket and client only.
+        ticket_id = arguments.get("ticket_id")
+        if isinstance(ticket_id, bool) or not isinstance(ticket_id, int) or ticket_id < 1:
+            raise ValueError("a positive numeric ticket_id is required")
+        if any(k in arguments for k in ("search", "filters", "resource_id")):
+            raise ValueError("unbounded or raw labor filters are prohibited")
+        company_id = arguments.get("company_id")
+        if isinstance(company_id, bool) or not isinstance(company_id, int) or company_id < 1:
+            raise ValueError("a positive numeric company_id is required")
+        return {"entity": "TimeEntries", "search": _autotask_search(capability_name, arguments),
+                "company_id": company_id, "ticket_id": ticket_id}
     if capability_name == SERVICE_TICKET_NOTES_SEARCH:
         return {
             "ticket_id": arguments.get("ticket_id") or _resource_id(arguments)
@@ -687,6 +834,17 @@ def adapt_autotask_arguments(
         if company_id is None or not str(company_id).strip():
             raise ValueError("company_id is required for contract search")
         return {"entity": "Contracts", "search": _autotask_search(capability_name, arguments)}
+    if capability_name == SERVICE_INVENTORY_ITEM_SEARCH:
+        if (set(arguments)!={'product_id','inventory_location_id'}
+                or any(type(arguments[k]) is not int or arguments[k]<1
+                       for k in ('product_id','inventory_location_id'))):
+            raise ValueError('inventory query requires only exact positive product/location IDs')
+        return {'entity':'InventoryItems','search':json.dumps({
+            'MaxRecords':2,
+            'filter':[
+                {'op':'eq','field':'productID','value':arguments['product_id']},
+                {'op':'eq','field':'inventoryLocationID','value':arguments['inventory_location_id']},
+            ]},sort_keys=True,separators=(',',':'))}
     if capability_name == SERVICE_RESOURCE_READ:
         return {"entity": "Resources", "entity_id": _resource_id(arguments)}
     if capability_name == SERVICE_PRODUCT_READ:
@@ -723,7 +881,7 @@ def adapt_autotask_arguments(
     }
     if capability_name in entity_searches:
         return {"entity": entity_searches[capability_name], "search": _autotask_search(capability_name, arguments)}
-    if capability_name in {SERVICE_ENTITY_DESCRIBE, SERVICE_ENTITY_FIELDS_DESCRIBE}:
+    if capability_name in {SERVICE_ENTITY_DESCRIBE, SERVICE_ENTITY_FIELDS_DESCRIBE, SERVICE_ENTITY_UDF_FIELDS_DESCRIBE}:
         entity = arguments.get("entity")
         if not isinstance(entity, str) or not entity.strip():
             raise ValueError("entity is required for schema description")
@@ -1074,6 +1232,7 @@ class GovernedProviderReadConnectorInvoker:
     def _enforce_client_selector_binding(request: OrchestrationRequest, capability_name: str) -> None:
         scoped = {
             SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ,
+            SERVICE_TICKET_TIME_ENTRY_SEARCH,
             SERVICE_TICKET_ATTACHMENT_SEARCH, SERVICE_TICKET_ATTACHMENT_READ,
             SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
         }

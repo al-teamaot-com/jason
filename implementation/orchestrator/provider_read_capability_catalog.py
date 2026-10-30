@@ -57,6 +57,7 @@ SERVICE_TICKET_SEARCH = "service.ticket.search"
 SERVICE_TICKET_COUNT = "service.ticket.count"
 SERVICE_TICKET_READ = "service.ticket.read"
 SERVICE_TICKET_NOTES_SEARCH = "service.ticket.notes.search"
+SERVICE_TICKET_TIME_ENTRY_SEARCH = "service.ticket.time.entry.search"
 SERVICE_TICKET_ATTACHMENT_SEARCH = "service.ticket.attachment.search"
 SERVICE_TICKET_ATTACHMENT_READ = "service.ticket.attachment.read"
 SERVICE_TICKET_ATTACHMENT_CONTENT_READ = "service.ticket.attachment.content.read"
@@ -64,12 +65,16 @@ SERVICE_CONFIGURATION_SEARCH = "service.configuration.search"
 SERVICE_CONFIGURATION_READ = "service.configuration.read"
 SERVICE_CONTRACT_SEARCH = "service.contract.search"
 SERVICE_CONTRACT_READ = "service.contract.read"
+SERVICE_ENTITY_SEARCH = "service.entity.search"
+SERVICE_ENTITY_READ = "service.entity.read"
 SERVICE_ENTITY_DESCRIBE = "service.entity.describe"
 SERVICE_ENTITY_FIELDS_DESCRIBE = "service.entity.fields.describe"
+SERVICE_ENTITY_UDF_FIELDS_DESCRIBE = "service.entity.udf.fields.describe"
 SERVICE_NOTIFICATION_HISTORY_SEARCH = "service.notification.history.search"
 SERVICE_PRODUCT_SEARCH = "service.product.search"
 SERVICE_PRODUCT_READ = "service.product.read"
 SERVICE_PRODUCT_VENDOR_SEARCH = "service.product.vendor.search"
+SERVICE_INVENTORY_ITEM_SEARCH = "service.inventory.item.search"
 SERVICE_SERVICE_SEARCH = "service.service.search"
 SERVICE_SERVICE_READ = "service.service.read"
 SERVICE_SERVICE_BUNDLE_SEARCH = "service.service.bundle.search"
@@ -133,6 +138,7 @@ AUTOTASK_CAPABILITIES = frozenset(
         SERVICE_TICKET_COUNT,
         SERVICE_TICKET_READ,
         SERVICE_TICKET_NOTES_SEARCH,
+        SERVICE_TICKET_TIME_ENTRY_SEARCH,
         SERVICE_TICKET_ATTACHMENT_SEARCH,
         SERVICE_TICKET_ATTACHMENT_READ,
         SERVICE_TICKET_ATTACHMENT_CONTENT_READ,
@@ -140,12 +146,16 @@ AUTOTASK_CAPABILITIES = frozenset(
         SERVICE_CONFIGURATION_READ,
         SERVICE_CONTRACT_SEARCH,
         SERVICE_CONTRACT_READ,
+        SERVICE_ENTITY_SEARCH,
+        SERVICE_ENTITY_READ,
         SERVICE_ENTITY_DESCRIBE,
         SERVICE_ENTITY_FIELDS_DESCRIBE,
+        SERVICE_ENTITY_UDF_FIELDS_DESCRIBE,
         SERVICE_NOTIFICATION_HISTORY_SEARCH,
         SERVICE_PRODUCT_SEARCH,
         SERVICE_PRODUCT_READ,
         SERVICE_PRODUCT_VENDOR_SEARCH,
+        SERVICE_INVENTORY_ITEM_SEARCH,
         SERVICE_SERVICE_SEARCH,
         SERVICE_SERVICE_READ,
         SERVICE_SERVICE_BUNDLE_SEARCH,
@@ -689,6 +699,18 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
         ),
         _read_capability(
             now=now,
+            capability_name=SERVICE_TICKET_TIME_ENTRY_SEARCH,
+            display_name="Search Service Ticket Labor Entries",
+            business_purpose="Read actual technician labor entries for one exact authorized Autotask ticket.",
+            resource_types="service_ticket_time_entry,ticket_time_entry,technician_labor",
+            operation="search",
+            selector_keys="company_id,ticket_id,page_size,after_resource_id",
+            fact_hints="time entries,technician time,labor,work hours,worked on ticket,work performed",
+            authoritative_change_sources=at,
+            collection_fact="ticket labor time entries",
+        ),
+        _read_capability(
+            now=now,
             capability_name=SERVICE_NOTIFICATION_HISTORY_SEARCH,
             display_name="Search Service Notification History",
             business_purpose="Search bounded Autotask notification history for one authorized company or ticket.",
@@ -789,6 +811,19 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             selector_keys="resource_id",
             fact_hints="product,catalog item,sku,part number,unit cost,unit price,inventory",
             authoritative_change_sources=at,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_INVENTORY_ITEM_SEARCH,
+            display_name='Read Exact Autotask Inventory by Product and Location',
+            business_purpose=('Read-only product/location quantity-on-hand, picked and reserved evidence; '
+                              'no stock mutation or reservation implied.'),
+            resource_types='service_inventory_item,autotask_inventory_item',
+            operation='search',
+            selector_keys='product_id,inventory_location_id',
+            fact_hints='Autotask InventoryItems quantityOnHand, quantityPicked, quantityReserved, stock location',
+            authoritative_change_sources=at,
+            collection_fact='inventory items',
         ),
         _read_capability(
             now=now,
@@ -1000,6 +1035,32 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
         ),
         _read_capability(
             now=now,
+            capability_name=SERVICE_ENTITY_SEARCH,
+            display_name="Search Additional Autotask PSA Entities",
+            business_purpose=(
+                "Read bounded projects, tasks, service calls and related records "
+                "through the existing authenticated Autotask provider query path."
+            ),
+            resource_types="service_entity,project,project_task,service_call,project_note,ticket_configuration_relation,contract,inventory_item,purchase_order,invoice",
+            operation="search",
+            selector_keys="entity,resource_id,filters,page_size,after_resource_id",
+            fact_hints="Autotask projects, project tasks, service calls, project notes, ticket associations, other Autotask PSA records",
+            authoritative_change_sources=at,
+            collection_fact="Autotask service-management records",
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_ENTITY_READ,
+            display_name="Read Exact Additional Autotask PSA Entity",
+            business_purpose="Read an exact authorized Autotask project, task, service call or related entity record.",
+            resource_types="service_entity,project,project_task,service_call,project_note,ticket_configuration_relation,contract,inventory_item,purchase_order,invoice",
+            operation="read",
+            selector_keys="entity,resource_id",
+            fact_hints="Autotask project detail, task detail, service call detail, project notes, related record",
+            authoritative_change_sources=at,
+        ),
+        _read_capability(
+            now=now,
             capability_name=SERVICE_ENTITY_DESCRIBE,
             display_name="Describe Service Entity Schema",
             business_purpose=(
@@ -1024,6 +1085,17 @@ def _capability_definitions(now: datetime) -> tuple[CapabilityDefinition, ...]:
             operation="describe_fields",
             selector_keys="entity",
             fact_hints="fields,field names,picklist,picklist values,field metadata,schema",
+            authoritative_change_sources=at,
+        ),
+        _read_capability(
+            now=now,
+            capability_name=SERVICE_ENTITY_UDF_FIELDS_DESCRIBE,
+            display_name="Describe Service Entity Custom Fields",
+            business_purpose="Read provider UDF field metadata, not custom-field values.",
+            resource_types="service_schema,service_field_schema",
+            operation="describe_udf_fields",
+            selector_keys="entity",
+            fact_hints="custom fields,udf,user defined fields,field schema,Autotask UDF",
             authoritative_change_sources=at,
         ),
         _read_capability(

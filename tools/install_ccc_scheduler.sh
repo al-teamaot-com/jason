@@ -7,7 +7,9 @@ if [ "$#" -lt 1 ] || [ "$#" -gt 2 ]; then
 fi
 SOURCE_REVISION="$1"
 MATERIAL_REVIEW_FILE="${2:-}"
-REPO_ROOT="/home/al/projects/jason"
+REPO_ROOT="/home/al/.local/lib/jason/engineering-worker-source"
+# The operator checkout may be old or dirty; load approval-validation code
+# from the exact immutable source revision being installed, not from HEAD.
 RELEASE_ROOT="/opt/jason/ccc-releases"
 RELEASE_DIR="$RELEASE_ROOT/$SOURCE_REVISION"
 CURRENT_LINK="/opt/jason/ccc-current"
@@ -25,6 +27,13 @@ if ! git -C "$REPO_ROOT" cat-file -e "$SOURCE_REVISION^{commit}" 2>/dev/null; th
   git -C "$REPO_ROOT" fetch origin "$SOURCE_REVISION"
 fi
 git -C "$REPO_ROOT" cat-file -e "$SOURCE_REVISION^{commit}"
+# Verify protected owner review BEFORE touching release directories, links, units,
+# backups, or live material-review evidence. Reinstalling the same SHA is safe
+# without a new review; changing the checker revision is always material.
+REVIEW_ARGS=()
+if [ -n "$MATERIAL_REVIEW_FILE" ]; then REVIEW_ARGS=(--review-file "$MATERIAL_REVIEW_FILE"); fi
+git -C "$REPO_ROOT" show "$SOURCE_REVISION:tools/ccc_install_preflight.py" | \
+  python3 - --revision "$SOURCE_REVISION" --current-link "$CURRENT_LINK" "${REVIEW_ARGS[@]}"
 mkdir -p "$RELEASE_ROOT" "$CONFIG_DIR" "$BACKUP_DIR" /home/al/Jason-Evidence/CCC /home/al/Jason-Recovery/CCC
 
 if [ ! -d "$RELEASE_DIR" ]; then
@@ -50,6 +59,10 @@ install -o root -g root -m 0644 "$RELEASE_DIR/infrastructure/ccc/systemd/jason-c
 install -o root -g root -m 0644 "$RELEASE_DIR/infrastructure/ccc/systemd/jason-ccc.timer" /etc/systemd/system/jason-ccc.timer
 if [ ! -f "$CONFIG_PATH" ]; then
   install -o al -g al -m 0600 "$RELEASE_DIR/config/ccc/default.json" "$CONFIG_PATH"
+else
+  # After exact-source owner review and config backup, migrate ONLY the
+  # historical developer-checkout default. Custom roots remain untouched.
+  python3 "$RELEASE_DIR/tools/ccc_config_source_migration.py" --config "$CONFIG_PATH"
 fi
 chown al:al /var/lib/jason/ccc /home/al/Jason-Evidence/CCC /home/al/Jason-Recovery/CCC
 chmod 0700 /var/lib/jason/ccc
@@ -58,15 +71,7 @@ chown al:al /var/lib/jason/ccc/docker
 chmod 0700 /var/lib/jason/ccc/docker
 
 if [ -n "$MATERIAL_REVIEW_FILE" ]; then
-  test -f "$MATERIAL_REVIEW_FILE" || { echo "ERROR: material review file not found: $MATERIAL_REVIEW_FILE" >&2; exit 5; }
-  python3 - "$MATERIAL_REVIEW_FILE" "$SOURCE_REVISION" <<'PYREVIEW'
-import json,sys
-from pathlib import Path
-path=Path(sys.argv[1]); revision=sys.argv[2]
-value=json.loads(path.read_text(encoding='utf-8'))
-if value.get('status')!='approved' or value.get('source_revision')!=revision:
-    raise SystemExit('material review must be approved and bound to the exact source revision')
-PYREVIEW
+  # Already validated before the first production mutation.
   install -o al -g al -m 0600 "$MATERIAL_REVIEW_FILE" /var/lib/jason/ccc/material-review.json
 fi
 

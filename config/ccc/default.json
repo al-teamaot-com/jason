@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "enabled": true,
   "cadence_days": 30,
-  "repository_root": "/home/al/projects/jason",
+  "repository_root": "/home/al/.local/lib/jason/engineering-worker-source",
   "evidence_root": "/home/al/Jason-Evidence/CCC",
   "recovery_root": "/home/al/Jason-Recovery/CCC",
   "state_root": "/var/lib/jason/ccc",

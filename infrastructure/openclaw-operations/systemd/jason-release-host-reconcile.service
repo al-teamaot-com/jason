@@ -11,4 +11,7 @@ ExecStart=/usr/bin/python3 /usr/local/lib/jason/release_host_reconcile_worker.py
 NoNewPrivileges=true
 PrivateTmp=true
 UMask=0027
-TimeoutStartSec=300
+# Must exceed the root worker's bounded 360s candidate-script timeout plus
+# Git validation/result publication overhead; otherwise systemd terminates the
+# worker before it can emit the fail-closed result or remove the request.
+TimeoutStartSec=480

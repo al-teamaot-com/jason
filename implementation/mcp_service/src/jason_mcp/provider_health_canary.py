@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 import time
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -22,9 +21,6 @@ from orchestrator.provider_health_canary_policy import (
 )
 
 from . import server
-
-
-_ERROR_TOKEN = re.compile(r"[^a-z0-9_]+")
 
 
 def _error_class(
@@ -50,8 +46,11 @@ def _error_class(
         return "provider_unavailable"
     if "provider" in text:
         return "provider_error"
-    normalized = _ERROR_TOKEN.sub("_", str(error_code or status).casefold()).strip("_")
-    return normalized[:48] or "execution_failed"
+    # Never expose provider-supplied or unrecognized error codes as a canary
+    # class. The host verifier uses a strict allowlist, and may run this check
+    # during production promotion. An unknown failure must stay a bounded,
+    # opaque failure rather than crashing the verifier or leaking details.
+    return "execution_failed"
 
 
 def _run_one(spec: Mapping[str, Any]) -> dict[str, Any]:

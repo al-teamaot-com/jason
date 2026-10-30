@@ -57,6 +57,9 @@ from autonomous_remediation.autonomous_principal import (
     AutonomousPrincipal,
     AutonomousRequestFactory,
 )
+from autonomous_remediation.least_disruptive_policy import (
+    assess_remediation, applies_to_remediation,
+)
 from autonomous_remediation.playbook_autonomy_approval import (
     SQLitePlaybookAutonomyApprovalStore,
 )
@@ -96,6 +99,7 @@ from connectors.datto_edr.threat_correlation import (
 )
 from pydantic import AnyHttpUrl
 from jason_mcp.release_approval_request import queue_release_approval_request
+from jason_mcp.production_read_acceptance import record_authenticated_owner_read
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import JSONResponse
 
@@ -134,8 +138,11 @@ from jason_runtime.resolution_memory_runtime import (
 from jason_runtime.datto_component_scope import (
     DATTO_AD_HOC_POWERSHELL_NAME,
     DATTO_AD_HOC_POWERSHELL_UID,
+    DATTO_AD_HOC_LINUX_SHELL_NAME,
+    DATTO_AD_HOC_LINUX_SHELL_UID,
     DATTO_EXECUTION_COMPONENTS_JSON_ENV,
     DATTO_APPROVAL_MODE_PER_RUN,
+    DattoApprovedComponent,
     configured_datto_components,
     effective_datto_component_approval_mode,
     resolve_datto_component,
@@ -1018,6 +1025,37 @@ def _project_endpoint_collection(
     result["items"] = _safe(provider_data)
     return result
 
+def _exact_company_evidence_matches(
+    result: Mapping[str, Any],
+    *,
+    requested_company_id: int,
+) -> bool:
+    """Require a real provider record for the exact selected company.
+
+    A successful HTTP/query response can legitimately carry data.item=None
+    for an unknown ID; a successful status alone is not company-existence
+    evidence and cannot authorize deriving a client-specific context.
+    """
+    if result.get("status") != "succeeded":
+        return False
+    evidence = result.get("evidence")
+    if not isinstance(evidence, Mapping):
+        return False
+    data = evidence.get("data")
+    if not isinstance(data, Mapping):
+        return False
+    item = data.get("item")
+    if not isinstance(item, Mapping):
+        return False
+    actual = item.get("id")
+    if isinstance(actual, bool) or not isinstance(actual, (str, int)):
+        return False
+    try:
+        return int(actual) == requested_company_id
+    except (TypeError, ValueError):
+        return False
+
+
 def _contract_client_context_for_identity(
     *,
     principal: str,
@@ -1045,14 +1083,32 @@ def _contract_client_context_for_identity(
         company_id = str(int(raw_company_id))
     except (TypeError, ValueError):
         return bound_client_id, None
-    if int(company_id) < 0:
+    if int(company_id) <= 0:
         return bound_client_id, None
     if bound_client_id is not None:
         return bound_client_id, None
 
-    # Organization-scoped client selection is owner-only. Reuse Jason's existing
-    # authenticated owner allowlist rather than inventing a second owner concept.
-    if principal not in approval_owner_identities():
+    # Contract reads can be selected by a trusted AOT staff identity with an
+    # existing exact observe grant; other sensitive client-scoped read families
+    # retain their Owner-only selection rule.
+    if (
+        capability_name in {SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ}
+        and principal not in approval_owner_identities()
+    ):
+        app = _runtime()
+        bindings = getattr(app, "microsoft_identity_bindings", None)
+        trusted = (
+            bindings.find_active_by_jason_identity(jason_identity_id=principal)
+            if bindings is not None else None
+        )
+        if (
+            organization != "aot"
+            or trusted is None
+            or getattr(trusted, "status", None) != "active"
+            or getattr(trusted, "client_id", None) is not None
+        ):
+            return None, None
+    elif principal not in approval_owner_identities():
         return None, None
 
     # Prove the selected Autotask company exists through the ordinary governed
@@ -1065,7 +1121,9 @@ def _contract_client_context_for_identity(
         capability_name=SERVICE_COMPANY_READ,
         arguments={"resource_id": int(company_id)},
     )
-    if company.get("status") != "succeeded":
+    if not _exact_company_evidence_matches(
+        company, requested_company_id=int(company_id),
+    ):
         return None, None
 
     app = _runtime()
@@ -1137,6 +1195,24 @@ def _governed_read(
         assurance,
         client_id,
     ) = _authenticated_identity()
+    # Reject an explicit cross-client selector before issuing a governed read.
+    # A pre-bound client identity must never use a different company_id,
+    # including when the provider happens to return matching-looking rows.
+    selected_company = arguments.get("company_id")
+    if (
+        client_id is not None
+        and capability_name in {SERVICE_CONTRACT_SEARCH, SERVICE_CONTRACT_READ}
+        and selected_company is not None
+        and (
+            isinstance(selected_company, bool)
+            or str(selected_company).strip() != str(client_id)
+        )
+    ):
+        return {
+            "status": "denied",
+            "capability": capability_name,
+            "reason_codes": ["CLIENT_SCOPE_MISMATCH"],
+        }
     client_id, derived_context = _contract_client_context_for_identity(
         principal=principal,
         organization=organization,
@@ -3212,6 +3288,30 @@ def _direct_ticket_update_arguments(raw: Mapping[str, Any]) -> dict[str, Any]:
     return {"payload": {"id": ticket_id, **payload}}
 
 
+def _active_datto_execution_components():
+    """Combine the existing catalog with one separately enrolled per-run worker.
+
+    The worker enrollment is operator-managed; callers cannot supply it.
+    This does not change the existing Desktop pilot or standing-safe catalog.
+    """
+    components = configured_datto_components()
+    worker_uid = os.environ.get(
+        "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
+    ).strip()
+    if worker_uid and not any(
+        component.uid == DATTO_AD_HOC_LINUX_SHELL_UID
+        or component.name.casefold() == DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
+        for component in components
+    ):
+        components = (*components, DattoApprovedComponent(
+            uid=DATTO_AD_HOC_LINUX_SHELL_UID,
+            name=DATTO_AD_HOC_LINUX_SHELL_NAME,
+            approval_mode=DATTO_APPROVAL_MODE_PER_RUN,
+            approval_source="separate_worker_enrollment",
+        ))
+    return components
+
+
 def _canonicalize_governed_action_arguments(
     capability_name: str,
     arguments: Mapping[str, Any] | None,
@@ -3473,9 +3573,12 @@ def _canonicalize_governed_action_arguments(
         ).strip(),
     }
 
-    components = configured_datto_components()
+    components = _active_datto_execution_components()
+    worker_uid = os.environ.get(
+        "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
+    ).strip()
 
-    if not all(expected.values()) or not components:
+    if (not all(expected.values()) or not components) and not worker_uid:
         raise ValueError(
             "DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INCOMPLETE"
         )
@@ -3500,18 +3603,9 @@ def _canonicalize_governed_action_arguments(
         raw.get("allowlist_name") or ""
     ).strip()
 
-    if (
-        supplied_allowlist
-        and supplied_allowlist != expected["allowlist_name"]
-    ):
-        raise ValueError(
-            "DATTO_COMPONENT_ALLOWLIST_MISMATCH"
-        )
-
-    # device_class is server-controlled policy metadata. Caller/model-provided
-    # class labels are deliberately ignored. Exact endpoint identity and active
-    # managed state are independently verified above.
-    supplied_class = expected["device_class"]
+    # The effective allowlist and target class are derived below from the
+    # exact live component and server-managed worker enrollment, never from
+    # caller-supplied policy labels.
 
     supplied_component_uid = str(
         raw.get("component_uid")
@@ -3591,12 +3685,42 @@ def _canonicalize_governed_action_arguments(
             "DATTO_COMPONENT_VARIABLES_INVALID"
         )
 
+    # Arbitrary Linux shell execution is a separately enrolled worker
+    # capability, not a general permission on every managed endpoint.
+    # The configured allowlist is operator-controlled, never caller-supplied.
+    if (
+        selected_component.uid == DATTO_AD_HOC_LINUX_SHELL_UID
+        or selected_component.name.casefold()
+        == DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
+    ):
+        if (
+            selected_component.uid != DATTO_AD_HOC_LINUX_SHELL_UID
+            or selected_component.name.casefold()
+            != DATTO_AD_HOC_LINUX_SHELL_NAME.casefold()
+        ):
+            raise ValueError("DATTO_LINUX_SHELL_COMPONENT_IDENTITY_MISMATCH")
+        approved_worker = os.environ.get(
+            "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID", ""
+        ).strip()
+        if not approved_worker or requested_device != approved_worker:
+            raise ValueError("DATTO_LINUX_SHELL_WORKER_TARGET_NOT_APPROVED")
+        effective_allowlist = "aot-approved-linux-worker"
+        effective_class = "Server"
+    else:
+        if not all(expected.values()) or not configured_datto_components():
+            raise ValueError("DATTO_COMPONENT_EXECUTION_SERVER_SCOPE_INCOMPLETE")
+        effective_allowlist = expected["allowlist_name"]
+        effective_class = expected["device_class"]
+
+    if supplied_allowlist and supplied_allowlist != effective_allowlist:
+        raise ValueError("DATTO_COMPONENT_ALLOWLIST_MISMATCH")
+
     # Only exact server-resolved component identity and provider-neutral values
     # required by the runtime are forwarded. The model cannot widen the set.
     return {
-        "allowlist_name": expected["allowlist_name"],
+        "allowlist_name": effective_allowlist,
         "device_uid": requested_device,
-        "device_class": expected["device_class"],
+        "device_class": effective_class,
         "component_uid": selected_component.uid,
         "component_name": selected_component.name,
         "variables": dict(variables),
@@ -3643,11 +3767,16 @@ def _governed_execute(
             "error_code": "capability_not_mcp_action_enabled",
         }
 
+    # Justification is control-plane material, never a provider argument. The
+    # assessment supplies Jason's affirmative benefit judgment and comparison
+    # to narrower fixes; it is NOT approval or source evidence verification.
+    supplied = dict(arguments)
+    remediation_review = supplied.pop("jason_remediation_review", None)
     try:
         canonical_arguments = (
             _canonicalize_governed_action_arguments(
                 capability_name,
-                arguments,
+                supplied,
             )
         )
     except ValueError as exc:
@@ -3664,7 +3793,7 @@ def _governed_execute(
     if capability_name == "automation.component.execute":
         try:
             selected_component = resolve_datto_component(
-                configured_datto_components(),
+                _active_datto_execution_components(),
                 component_uid=canonical_arguments.get("component_uid"),
                 component_name=canonical_arguments.get("component_name"),
                 catalog_verified=True,
@@ -3713,6 +3842,50 @@ def _governed_execute(
                 datto_approval_reason_code = (
                     "DATTO_COMPONENT_STANDING_APPROVAL_STALE"
                 )
+
+    remediation_policy_id: str | None = None
+    if applies_to_remediation(capability_name):
+        # The current Datto PowerShell classifier is a bounded passive read;
+        # it retains its existing standing authorization path. All actual
+        # state-changing management commands require an affirmative assessment.
+        passive_diagnostic = (
+            capability_name == "automation.component.execute"
+            and (
+                datto_approval_reason_code == "DATTO_POWERSHELL_READ_ONLY_COMMAND"
+                or (datto_approval_mode == "standing_safe"
+                    and selected_component.name.casefold().startswith((
+                        "check ", "get-", "get status ", "query status ",
+                    )))
+            )
+        )
+        if not passive_diagnostic:
+            component = (selected_component.name if capability_name
+                         == "automation.component.execute" else "")
+            try:
+                judgment = assess_remediation(
+                    capability=capability_name,
+                    arguments=canonical_arguments,
+                    review=remediation_review,
+                    component_name=component,
+                    explicit_technician_approval=explicit_approval,
+                )
+            except (TypeError, ValueError) as exc:
+                return {
+                    "status": "rejected", "capability": capability_name,
+                    "error_code": "REMEDIATION_ASSESSMENT_INVALID",
+                    "reason_codes": [type(exc).__name__],
+                }
+            if not judgment.may_proceed_to_authority:
+                return {
+                    "status": "rejected", "capability": capability_name,
+                    "error_code": "REMEDIATION_ACTION_NOT_JUSTIFIED",
+                    "reason_codes": list(judgment.reasons),
+                    "impact": judgment.impact.value,
+                    "action_fingerprint": judgment.action_fingerprint,
+                }
+            remediation_policy_id = (
+                "least-disruptive-remediation-v1:" + judgment.action_fingerprint
+            )
 
     execution_id = f"exec_mcp_action_{uuid4().hex}"
     correlation_id = f"corr_mcp_action_{uuid4().hex}"
@@ -3943,7 +4116,8 @@ def _governed_execute(
         arguments=canonical_arguments,
         requester_kind="human",
         permission_mode="execute",
-        policy_ids=("mcp-governed-execution-v1",),
+        policy_ids=(("mcp-governed-execution-v1", remediation_policy_id)
+                    if remediation_policy_id else ("mcp-governed-execution-v1",)),
         authority_context_id=context.context_id,
         idempotency_key=idempotency_key,
         approval_id=approval_id,
@@ -6332,6 +6506,31 @@ def _filter_discoverable_capabilities(
     if matches:
         if resource_filter:
             result["resource_capability_available"] = True
+            # A named read may require narrower selectors than a generic
+            # schema-proven read. Advertise the alternative for deliberate
+            # selection, never automatic execution or authorization bypass.
+            generic = [
+                item for item in available
+                if item["capability"] in {
+                    "service.entity.search", "service.entity.read"
+                }
+                and resource_filter in {
+                    v.casefold() for v in item["resource_types"]
+                }
+                and item["capability"] not in {
+                    candidate["capability"] for candidate in matches
+                }
+            ]
+            if generic:
+                result["alternatives"] = generic
+                result["alternative_count"] = len(generic)
+                result["selection_guidance"] = (
+                    "Schema-proven generic Autotask reads are candidate "
+                    "alternatives when a named route lacks appropriate "
+                    "selectors. Select explicitly and independently check "
+                    "provider and requester authorization; never retry "
+                    "a denied read as a generic query."
+                )
         return result
 
     if not resource_filter:
@@ -6597,6 +6796,23 @@ def execute_read_capability(
     )
 
     if result.get("status") != "succeeded":
+        # These are classifications, not authorization shortcuts. Never
+        # automatically retry a denied read through a different capability.
+        reason_codes = result.get("reason_codes") or []
+        if "client_context_required" in reason_codes:
+            result["failure_domain"] = "requester_authorization"
+            result["fallback_permitted"] = False
+        elif result.get("error_code") == "INVALID_CAPABILITY_ARGUMENTS":
+            result["failure_domain"] = "request_construction"
+            result["fallback_permitted"] = False
+            result["operator_message"] = (
+                "Correct the selectors against the discovered capability "
+                "schema before retrying. This is not a provider permission "
+                "failure."
+            )
+        elif str(result.get("error_code") or "").startswith("PROVIDER_HTTP_STATUS_"):
+            result["failure_domain"] = "provider_response"
+            result["fallback_permitted"] = False
         return result
 
     evidence = result.get("evidence")
@@ -6673,7 +6889,223 @@ def execute_read_capability(
                     evidence
                 )
 
+    # The native Production Manager cannot accept a read-surface release
+    # based on HTTP 200 alone. Only a real Entra-authenticated owner request
+    # that passed ordinary requester release authorization may furnish
+    # non-sensitive external functional acceptance evidence. Never mint
+    # evidence from service-only canaries or from failed/denied calls.
+    if capability_name in {
+        "service.ticket.count", "service.ticket.search",
+        "service.ticket.read", "service.entity.search",
+    }:
+        try:
+            owner_principal, owner_org, _, owner_client = _authenticated_identity()
+            record_authenticated_owner_read(
+                capability=capability_name, arguments=read_arguments,
+                result=result, principal_id=owner_principal,
+                organization_id=owner_org, client_id=owner_client,
+                live_profile=os.getenv("JASON_PROVIDER_READ_ACTIVATION_PROFILE", ""),
+            )
+        except (PermissionError, OSError, ValueError):
+            # A missing optional canary must never disrupt the authorized
+            # requester read. It fails the separate deployment gate instead.
+            pass
+
     return result
+
+
+@mcp.tool()
+def verify_release_ticket_read_canary(
+    release_candidate_sha: str,
+    phase: str,
+    created_after: str,
+    created_before: str,
+    page_size: int = 50,
+) -> dict[str, Any]:
+    """Verify complete live Autotask reads under this MCP requester's own identity.
+
+    This is a read-only functional probe, NOT a provider-access exception or
+    an authorization to deploy. Every individual count, search and exact read
+    goes through the existing execute_read_capability -> _governed_read path,
+    which independently enforces the connected Microsoft identity, trusted
+    Jason binding, JKD-001 grants and requester information-release rules.
+    No ticket content or raw provider responses are ever returned.
+    """
+    from orchestrator.foundational_ticket_read_acceptance import (
+        TicketReadCanaryError,
+        run_ticket_read_canary,
+    )
+
+    try:
+        # Fail before any provider call for an unbound/non-human requester.
+        _authenticated_identity()
+    except (PermissionError, ValueError, RuntimeError):
+        return {
+            "status": "denied",
+            "error_code": "MCP_AUTHENTICATED_REQUESTER_REQUIRED",
+            "customer_data_included": False,
+        }
+
+    # This revision is injected by the immutable native Docker release path.
+    # Never trust a caller-supplied running revision for after-release proof.
+    running_revision = str(os.environ.get("JASON_SOURCE_REVISION") or "").strip()
+    profile = str(os.environ.get("JASON_PROVIDER_READ_ACTIVATION_PROFILE") or "").strip()
+    v11_post_release = (
+        phase == "after"
+        and profile == "itglue-autotask-entra-comprehensive-entity-read-catalog-v11"
+    )
+    v13_post_release = (
+        phase == "after"
+        and profile == "itglue-autotask-entra-dynamic-schema-read-catalog-v13"
+    )
+    expanded_post_release = v11_post_release or v13_post_release
+    if expanded_post_release and page_size != 50:
+        # The independent PM gate requires proof of the actual first 50-page
+        # plus the exact cursor continuation, rather than a synthetic or
+        # separately-shaped paging smoke.
+        return {
+            "status": "failed",
+            "error_code": (
+                "v13_post_release_requires_page_size_50"
+                if v13_post_release else "v11_post_release_requires_page_size_50"
+            ),
+            "provider": "autotask", "customer_data_included": False,
+        }
+    try:
+        summary = run_ticket_read_canary(
+            lambda capability, arguments: execute_read_capability(
+                capability=capability,
+                arguments=dict(arguments),
+            ),
+            release_candidate_sha=release_candidate_sha,
+            running_revision=running_revision,
+            phase=phase,
+            created_after=created_after,
+            created_before=created_before,
+            page_size=page_size,
+            now=datetime.now(timezone.utc),
+        )
+    except TicketReadCanaryError as exc:
+        return {
+            "status": "failed",
+            "error_code": str(exc),
+            "provider": "autotask",
+            "customer_data_included": False,
+        }
+
+    if expanded_post_release:
+        # The new generic read path is also mandatory. It must succeed for
+        # the same already-authenticated requester; no service-level fallback
+        # is permitted. This query emits its independent metadata-only receipt
+        # through the normal execute_read_capability read path.
+        try:
+            project_result = execute_read_capability(
+                capability="service.entity.search",
+                arguments={"entity": "Projects", "page_size": 1},
+            )
+        except Exception:
+            return {
+                "status": "failed",
+                "error_code": "governed_generic_project_read_exception",
+                "provider": "autotask", "customer_data_included": False,
+            }
+        if (
+            not isinstance(project_result, dict)
+            or project_result.get("status") != "succeeded"
+            or project_result.get("provider") != "autotask"
+            or project_result.get("error_code") is not None
+        ):
+            return {
+                "status": "failed",
+                "error_code": "governed_generic_project_read_not_successful",
+                "provider": "autotask", "customer_data_included": False,
+            }
+        project_evidence = project_result.get("evidence")
+        project_data = (
+            project_evidence.get("data")
+            if isinstance(project_evidence, dict) else None
+        )
+        items = project_data.get("items") if isinstance(project_data, dict) else None
+        if (
+            not isinstance(items, list)
+            or len(items) > 1
+            or any(
+                not isinstance(item, dict)
+                or type(item.get("id")) is not int
+                or item["id"] <= 0
+                for item in items
+            )
+        ):
+            return {
+                "status": "failed",
+                "error_code": "governed_generic_project_read_malformed",
+                "provider": "autotask", "customer_data_included": False,
+            }
+        summary = {**summary, "generic_project_read_verified": True}
+
+    if v13_post_release:
+        # The v13 activation cannot be declared successful based solely on
+        # v11 tickets/Projects. Use the SAME authenticated human and one
+        # arbitrary ordinary entity outside the former fixed whitelist.
+        # Any source, field permission or connector denial fails the release.
+        try:
+            dynamic_result = execute_read_capability(
+                capability="service.entity.search",
+                arguments={
+                    "entity": "ActionTypes", "page_size": 1,
+                    "select": ["id", "name"],
+                },
+            )
+        except Exception:
+            return {
+                "status": "failed",
+                "error_code": "governed_dynamic_schema_read_exception",
+                "provider": "autotask", "customer_data_included": False,
+            }
+        if (
+            not isinstance(dynamic_result, dict)
+            or dynamic_result.get("status") != "succeeded"
+            or dynamic_result.get("provider") != "autotask"
+            or dynamic_result.get("error_code") is not None
+        ):
+            return {
+                "status": "failed",
+                "error_code": "governed_dynamic_schema_read_not_successful",
+                "provider": "autotask", "customer_data_included": False,
+            }
+        evidence = dynamic_result.get("evidence")
+        data = evidence.get("data") if isinstance(evidence, dict) else None
+        items = data.get("items") if isinstance(data, dict) else None
+        if (
+            not isinstance(items, list)
+            or len(items) > 1
+            or any(
+                not isinstance(item, dict)
+                or type(item.get("id")) is not int
+                # Autotask ActionTypes ID=0 is a genuine provider row.
+                # This exception does NOT apply to ticket or project IDs.
+                or item["id"] < 0
+                or set(item) != {"id", "name"}
+                or not isinstance(item.get("name"), str)
+                or not item["name"].strip()
+                for item in items
+            )
+        ):
+            return {
+                "status": "failed",
+                "error_code": "governed_dynamic_schema_read_malformed",
+                "provider": "autotask", "customer_data_included": False,
+            }
+        summary = {**summary, "dynamic_schema_read_verified": True}
+
+    return {
+        "status": "succeeded",
+        "acceptance_status": "PASS",
+        "summary": summary,
+        "customer_data_included": False,
+        "production_release_approval": False,
+        "needs_independent_receipt_binding": True,
+    }
 
 
 @mcp.tool()
@@ -7052,7 +7484,11 @@ def execute_governed_capability(
     approval; callers must carry that same-turn instruction as
     arguments.explicit_approval=true. Autonomous selection of a per-run
     component must not set that flag and must stop for technician instruction.
-    Classification is never accepted from action arguments.
+    Classification is never accepted from action arguments. For a modifying
+    device/client management action, include `jason_remediation_review` with
+    Jason's evidence references, expected improvement, verification and review
+    of less disruptive alternatives. The server classifies impact itself.
+    Missing or negative justification is not overridden by technician approval.
     """
 
     capability_name = str(capability).strip()

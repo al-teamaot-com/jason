@@ -1,0 +1,5 @@
+{
+  "schema_version": "1.0",
+  "read_profile": "itglue-autotask-entra-dynamic-schema-read-catalog-v13",
+  "rollback_read_profile": "itglue-autotask-entra-dynamic-schema-read-catalog-v13"
+}

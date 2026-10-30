@@ -366,3 +366,47 @@ def test_disconnect_revokes_refresh_token_then_clears_local_state(tmp_path, monk
     assert status.connected is False
     assert status.has_refresh_token is False
     assert store.get_token() is None
+
+
+def test_wrong_environment_is_rejected_before_refresh_or_token_mutation(tmp_path, monkeypatch):
+    store = QuickBooksOAuthStore(tmp_path / "oauth.sqlite3")
+    store.set_token(
+        {"access_token": "stale-access", "refresh_token": "stale-refresh", "expires_in": 1},
+        realm_id="1234567890123456", environment="sandbox",
+    )
+    calls = []
+    monkeypatch.setattr(oauth, "_token_request", lambda **kwargs: calls.append(kwargs))
+    with pytest.raises(QuickBooksOAuthError, match="environment does not match"):
+        quickbooks_access_context(
+            store,
+            credentials={"client_id": "public-id", "client_secret": "secret"},
+            expected_environment="production",
+        )
+    assert calls == []
+    assert store.get_token()["refresh_token"] == "stale-refresh"
+
+
+def test_correct_environment_still_refreshes_as_before(tmp_path, monkeypatch):
+    store = QuickBooksOAuthStore(tmp_path / "oauth.sqlite3")
+    store.set_token(
+        {"access_token": "old", "refresh_token": "old-refresh", "expires_in": 1},
+        realm_id="1234567890123456", environment="production",
+    )
+    requests = []
+    def token_request(**kwargs):
+        requests.append(kwargs["environment"])
+        return {
+            "access_token": "new-production", "refresh_token": "new-refresh",
+            "expires_in": 3600,
+        }
+    monkeypatch.setattr(oauth, "_token_request", token_request)
+    access, realm, environment = quickbooks_access_context(
+        store,
+        credentials={"client_id": "public-id", "client_secret": "secret"},
+        expected_environment="production",
+    )
+    assert (access, realm, environment) == (
+        "new-production", "1234567890123456", "production"
+    )
+    assert requests == ["production"]
+    assert store.get_token()["refresh_token"] == "new-refresh"

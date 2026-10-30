@@ -113,6 +113,13 @@ class AutoEnrollingMicrosoftIdentityBindingStore:
             jason_identity_id=jason_identity_id,
         )
 
+    def find_active_by_email(
+        self, *, email_address: str,
+    ) -> MicrosoftIdentityBinding | None:
+        # Delegate exclusively to the persisted, unambiguous active binding.
+        # Do not auto-enroll or trust a caller-supplied Teams address here.
+        return self.bindings.find_active_by_email(email_address=email_address)
+
     def put(self, binding: MicrosoftIdentityBinding) -> None:
         self.bindings.put(binding)
 

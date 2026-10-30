@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
@@ -21,10 +22,60 @@ def copy_mode(source: Path, destination: Path, mode: int) -> None:
     os.chmod(destination, mode)
 
 
+def install_approval_only_units(*, activate: bool = False) -> bool:
+    """Install only the reviewed offer units, never update a running controller.
+
+    Native host reconciliation calls this after root policy staging and before
+    required-unit verification. Full Release Manager installation reuses it.
+    """
+    # Two-phase protected root-policy bootstrap (#1993): stage the reviewed
+    # migrator without installing any new user unit before the root worker can
+    # independently recognize that exact owner/CCC reviewed unit delta.
+    desired = json.loads((ROOT / "config/production-desired-state.json").read_text())
+    approval_timer_declared = (
+        "jason-release-approval-only.timer" in desired["required_user_units"])
+    approval_service_declared = (
+        "jason-release-approval-only.service" in desired["allowed_user_units"])
+    if approval_timer_declared != approval_service_declared:
+        raise RuntimeError("held-only Teams approval systemd policy is incomplete")
+    if approval_timer_declared:
+        for unit_name in ("jason-release-approval-only.service",
+                          "jason-release-approval-only.timer"):
+            copy_mode(
+                ROOT / "infrastructure" / "openclaw-operations" / "systemd"
+                / "user" / unit_name, UNIT_DIR / unit_name, 0o644,
+            )
+
+    if not approval_timer_declared:
+        return False
+    uid = os.getuid()
+    env = os.environ.copy()
+    env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+    env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{uid}/bus")
+    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True, env=env)
+    if activate:
+        subprocess.run(
+            ["systemctl", "--user", "enable", "--now", "jason-release-approval-only.timer"],
+            check=True, env=env,
+        )
+        subprocess.run(
+            ["systemctl", "--user", "is-active", "--quiet", "jason-release-approval-only.timer"],
+            check=True, env=env,
+        )
+    return True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--activate", action="store_true")
+    parser.add_argument("--approval-units-only", action="store_true")
     args = parser.parse_args()
+    if args.approval_units_only:
+        if os.geteuid() == 0:
+            raise RuntimeError("approval user units must be installed as their existing owner")
+        installed = install_approval_only_units(activate=args.activate)
+        print("JASON_APPROVAL_UNITS_INSTALL=" + ("PASS" if installed else "NOT_DECLARED"))
+        return 0
 
     LIB.mkdir(parents=True, exist_ok=True)
     UNIT_DIR.mkdir(parents=True, exist_ok=True)
@@ -38,6 +89,12 @@ def main() -> int:
 
     copy_mode(ROOT / "tools" / "release_manager_host_runner.py", LIB / "release_manager_host_runner.py", 0o755)
     copy_mode(ROOT / "tools" / "release_manager_gate.py", LIB / "release_manager_gate.py", 0o644)
+    # The installed PM invokes the genuine authenticated MCP read acceptance
+    # gate before release close. Its source-bound helper must be installed
+    # atomically with the entrypoint on all future native N -> N+1 upgrades.
+    copy_mode(ROOT / "tools" / "production_read_canary_gate.py",
+              LIB / "production_read_canary_gate.py", 0o644)
+    copy_mode(ROOT / "tools" / "worker_execution_enrollment.py", LIB / "worker_execution_enrollment.py", 0o644)
     copy_mode(
         ROOT / "infrastructure" / "openclaw-operations" / "systemd" / "user" / "jason-release-manager.service",
         UNIT_DIR / "jason-release-manager.service",
@@ -48,6 +105,8 @@ def main() -> int:
         UNIT_DIR / "jason-release-manager.timer",
         0o644,
     )
+
+    approval_timer_declared = install_approval_only_units()
 
     uid = os.getuid()
     systemd_env = os.environ.copy()
@@ -62,11 +121,16 @@ def main() -> int:
         env=systemd_env,
     )
     if args.activate:
-        subprocess.run(
-            ["systemctl", "--user", "enable", "--now", "jason-release-manager.timer"],
-            check=True,
-            env=systemd_env,
-        )
+        # The new timer is not activated by the helper-bootstrap release:
+        # it must be both declared and root-migration-approved first.
+        timers = ["jason-release-manager.timer"]
+        if approval_timer_declared:
+            timers.append("jason-release-approval-only.timer")
+        for timer_name in timers:
+            subprocess.run(
+                ["systemctl", "--user", "enable", "--now", timer_name],
+                check=True, env=systemd_env,
+            )
     print("JASON_RELEASE_MANAGER_INSTALL=PASS")
     print("STATE_ROOT=" + str(STATE))
     print("TIMER_ACTIVATED=" + ("YES" if args.activate else "NO"))

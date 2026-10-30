@@ -108,6 +108,24 @@ def test_general_read_only_pipeline_runs_through_exact_component(monkeypatch):
     ]
 
 
+def test_windows_powershell_event_channel_runs_through_governed_read(monkeypatch):
+    c = connector(monkeypatch)
+    command = (
+        "Get-WinEvent -LogName 'Microsoft-Windows-PowerShell/Operational' "
+        "-MaxEvents 10"
+    )
+
+    result = c.execute(request(command))
+
+    assert result.data["status"] == "succeeded"
+    assert result.data["component_uid"] == DATTO_AD_HOC_POWERSHELL_UID
+    puts = [call for call in c._transport.calls if call[0] == "PUT"]
+    assert len(puts) == 1
+    assert puts[0][2]["jobComponent"]["variables"] == [
+        {"name": "usrInput", "value": command}
+    ]
+
+
 @pytest.mark.parametrize(
     "command",
     [
