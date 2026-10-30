@@ -166,6 +166,10 @@ jobs:
           python-version: "3.12"
       - name: Install documentation tools
         run: python -m pip install "mkdocs-material>=9.5,<10"
+      - name: Enforce Jason engineering standards and negative acceptance
+        run: |
+          python3 tools/engineering_standards_gate.py
+          python3 -m unittest tools.tests.test_engineering_standards_gate
       - name: Validate documentation impact declaration
         if: github.event_name == 'pull_request'
         run: python3 tools/documentation_impact_gate.py --event "$GITHUB_EVENT_PATH"
