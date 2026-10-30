@@ -233,3 +233,16 @@ def test_live_recheck_proof_suppresses_approved_or_deferred_status():
     assert not verify_notification_against_fresh_evidence(
         notice, [obs(observed_date=RELEASE + timedelta(days=15))],
         source, now=NOW)
+
+
+def test_current_patch_scope_and_kb_text_cannot_drift_before_send():
+    notice = plan([obs()])[0]
+    reference = {"KB5123456": meta()}
+    assert verify_notification_against_fresh_evidence(
+        notice, [obs()], reference, now=NOW)
+    assert not verify_notification_against_fresh_evidence(
+        notice, [obs(), obs(client_id="second", device_id="pc2")],
+        reference, now=NOW)
+    revised = {"KB5123456": meta(summary="Microsoft changed the documented findings")}
+    assert not verify_notification_against_fresh_evidence(
+        notice, [obs()], revised, now=NOW)
