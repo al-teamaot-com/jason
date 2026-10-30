@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -27,6 +28,67 @@ OPEN_SOURCE = "production_drift_watchdog"
 OPEN_REASON = "continuous_production_drift_detected"
 SHA = re.compile(r"^[a-f0-9]{40}$")
 MAX_TRACKER_BYTES = 80000
+
+# The root worker independently verifies all fields again. A preflight
+# observation is diagnostic only and can never grant root release authority.
+PROTECTED_LKG_FIELDS = (
+    "revision", "runtime_revision", "runtime_image_id", "mcp_revision",
+    "mcp_image_id", "host_revision", "host_release",
+    "release_manager_source_revision", "desired_state_policy_digest",
+    "scheduled_control_units",
+)
+
+
+class NativePreflightError(ValueError):
+    """Fixed public reason code; never contains raw host/provider data."""
+
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
+
+
+def native_revalidation_preflight(state_root: Path, expected_revision: str) -> None:
+    """Inspect installed LKG health BEFORE consuming a governed root attempt.
+
+    No request files, protected state, services, attempts, or image tags change.
+    The immutable root release worker will independently redo every check.
+    """
+    snapshot = state_root / "protected-readback" / "production-control-state.json"
+    try:
+        if (snapshot.is_symlink() or not snapshot.is_file()
+                or snapshot.stat().st_mtime > time.time() + 10
+                or time.time() - snapshot.stat().st_mtime > 90):
+            raise NativePreflightError("protected_readback_unavailable_or_stale")
+        control = read_json(snapshot)
+        if (control.get("circuit_breaker") or {}).get("state") != "open":
+            raise NativePreflightError("protected_breaker_state_changed")
+        recorded = ((control.get("last_known_good") or {}).get("manifest") or {})
+        if (recorded.get("revision") != expected_revision
+                or recorded.get("complete") is not True):
+            raise NativePreflightError("protected_lkg_revision_changed")
+    except NativePreflightError:
+        raise
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        raise NativePreflightError("protected_readback_unavailable_or_invalid") from exc
+
+    host = Path.home() / ".local/lib/jason/release_manager_host_runner.py"
+    if not host.is_file() or host.is_symlink():
+        raise NativePreflightError("installed_release_manager_missing")
+    sys.path.insert(0, str(host.parent))
+    try:
+        import release_manager_host_runner as release
+        observed = release.capture_production_manifest(expected_revision)
+    except Exception as exc:
+        # Keep raw exception data out of the unprivileged recovery ledger:
+        # it might include paths, secrets or provider fields.
+        raise NativePreflightError("production_manifest_precheck_failed") from exc
+    if not isinstance(observed, Mapping) or observed.get("complete") is not True:
+        raise NativePreflightError("production_manifest_incomplete")
+    for field in PROTECTED_LKG_FIELDS:
+        if (recorded.get(field) is None or observed.get(field) is None
+                or recorded[field] != observed[field]):
+            raise NativePreflightError("protected_lkg_mismatch_" + field)
+
 
 
 def utcnow() -> datetime:
@@ -145,6 +207,8 @@ def decision(
     # Keep the last permitted attempt across breaker closeout/readback cycles.
     if isinstance(previous.get("last_revalidation_attempt"), dict):
         state["last_revalidation_attempt"] = previous["last_revalidation_attempt"]
+    if isinstance(previous.get("last_preflight_failure"), dict):
+        state["last_preflight_failure"] = previous["last_preflight_failure"]
     if breaker.get("state") == "closed":
         state["status"] = "already_closed"
         state["next_action"] = "none"
@@ -316,6 +380,24 @@ def main() -> int:
             result["status"] = "blocked"
             result["next_action"] = "wait_for_existing_production_transaction"
         if result["status"] == "ready_for_governed_request":
+            # A local health failure is not a root revalidation attempt.
+            # Do not consume the protected root-attempt budget when no
+            # governed request can yet be made. Existing used attempts are
+            # never removed or refunded.
+            try:
+                native_revalidation_preflight(root, expected_sha)
+            except NativePreflightError as exc:
+                result["status"] = "blocked"
+                result["next_action"] = "reconcile_read_only_preflight"
+                result["last_preflight_failure"] = {
+                    "checked_at": result["observed_at"],
+                    "failure_class": exc.code,
+                }
+                atomic_json(track, result)
+                print("RELEASE_BREAKER_RECOVERY=blocked action=reconcile_read_only_preflight"
+                      " reason=" + exc.code, flush=True)
+                return 0
+            result.pop("last_preflight_failure", None)
             # Persist request authorization consumption before any worker
             # action. A failed/crashed tool cannot silently replay the permit.
             attempt = {"requested_at": result["observed_at"],
