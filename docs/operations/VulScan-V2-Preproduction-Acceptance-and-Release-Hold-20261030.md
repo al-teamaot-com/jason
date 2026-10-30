@@ -59,3 +59,14 @@ Required controlled provider acceptance is **not complete**: exact route/paging/
 - **Full runtime suite: 7 Datto component scope/classification failures**, all reproduced against protected-main baseline `b9ded6e242183a18f3299e05e5b517a0d8375ad9` in the same isolated environment. Thus these failures are pre-existing at the feature's base and not demonstrated V2 regressions. They still require independent reconciliation to fully satisfy all-repository CI; do not silently waive them.
 - **Protected GitHub CI:** Latest available exact-head workflows were queued; no GitHub Actions success recorded yet. Remote hosted-runner availability is an external CI gate.
 - **Owner production freeze and automatic promotion incident hold still active**; no new capabilities activated, no Teams owner notification sent, no merge or deployment performed.
+
+
+## Exact GitHub change-integration reconciliation — October 30, 2026
+
+The last CI result for SHA `c082a27a83bb1842cd09003bec52a15ab5fa6ba9` had eight successful workflows and one `Validate Jason` repository-hygiene failure. The failure was an explicit change-integration acknowledgment gate, **not** a failed VulScan feature test. Concurrent PR #2175 touches the same Datto RMM validation workflow as this PR #2178.
+
+I reviewed the exact baseline-to-head workflow diffs for both PRs against protected main `b9ded6e242183a18f3299e05e5b517a0d8375ad9`. PR #2175 adds a component-input-contract test path, a component-scope test path, a component-contract compile step, and the matching component-contract test invocation. PR #2178 adds its separate VulScan V2 read-only test path and six focused read-only validation test invocations. These are additive changes in distinct places; neither PR requires removing or overriding the other's tests. Final integration must preserve **both** sets and rerun the normal Datto and runtime suites.
+
+The required `Integration coordination:` line in PR #2178 now names `#2175`. Re-running a failed job against the **old GitHub pull_request event** still fails because `tools/change_integration_gate.py` reads `pull_request.body` from the saved original `GITHUB_EVENT_PATH` payload rather than refetching live PR metadata. This documentation commit intentionally triggers a new `pull_request.synchronize` CI event, with the newly acknowledged PR body, so that the normal gate can verify it. It does not weaken or bypass the gate.
+
+Still **NOT cleared for production**: successful protected CI on the newly committed SHA; active governed patch-policy and site-patch reads; owner review negative-evidence/deferral source; independent exact KB-to-policy attribution; complete provider-backed shadow and Teams acceptance; exact-source Production Manager eligibility and explicit freeze exception.
