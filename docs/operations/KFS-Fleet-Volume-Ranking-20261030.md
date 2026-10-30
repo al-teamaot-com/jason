@@ -110,3 +110,18 @@ The KFS application must never read arbitrary site URLs, accept user-specified s
 An isolated development checkout passed a focused 31-test parser+fleet-ranking suite including explicit label extraction, same-sheet boundaries, two-source conflicts, source scope rejection, old source exclusion, a 435-device ranking fixture, and a corroborated single-customer log layout. Source eCopier workbook structure was examined through AOT's delegated SharePoint connector: separate worksheets have \`Company:\` and \`Serial #:\` labels, with serials \`1G55503749\`, \`1G55504297\`, \`1G55503694\`. One worksheet spells its customer \`Atlantic View Operato\`, whereas the AOT delivery receipt shows \`Atlantic View Operator\`; these are not automatically canonicalized without an approved alias decision.
 
 These passing tests **do not** prove that Jason can authenticate to AOT SharePoint, ingest source documents unattended, or deliver a fully verified top-five report today. The latest GitHub CI must be checked against its exact head before release. Preserve the production freeze and separate exact-SHA approval.
+
+
+### Version-consistent SharePoint connector adaptation
+
+The approved evidence module now also accepts the **existing draft PR #1330** governed connector results, not raw arbitrary URLs. The adapter takes three separately authorized reads for the same exact document selector:
+
+1. \`knowledge.document.metadata.read\` — site, drive, item, size, MIME type, last-modified time, and version/eTag.
+2. \`knowledge.document.content.read\` — bounded base64 document bytes and source SHA-256 from the approved reader.
+3. \`knowledge.document.metadata.read\` again — same exact source identity and unchanged eTag/version to detect a source change across the read.
+
+It verifies source provider and operation, selector identity, MIME type, size, SHA-256 digest, and consistent before/after version before creating an approved workbook object. Tests cover wrong provider, wrong operation, source ID mismatch, content SHA mismatch, MIME mismatch, version changes, and the positive reader-to-serial-index path. It does not authorize any read by itself.
+
+**Identity boundary still requires integration:** PR #1330's current \`GovernedSharePointConnector._tenant\` requires a non-empty \`ConnectorContext.client_id\` matching the validated Microsoft tenant binding. KFS \`print.fleet.usage.rank\` is an AOT organization-only report with \`client_id=None\`. An approved AOT-owned organization-scoped document-service identity/binding and document-release policy must be designed, tested and authorized within #1117 without loosening client isolation for other tenants. The code **must not** fake a client ID, borrow an end-user ChatGPT delegated token or bypass the connector to obtain document bytes. This requirement is not yet implemented or production-verified.
+
+**What is implemented and tested now:** optional, disabled-by-default parser/index and report enrichment, plus the verified output-shape adapter. **What is not:** unattended Jason authenticated SharePoint collection, automatic refresh, full AOT document mapping, the three KFS meter exceptions, authenticated user acceptance, or production deployment.
