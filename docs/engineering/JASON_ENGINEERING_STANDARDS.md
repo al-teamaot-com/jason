@@ -25,12 +25,14 @@ When the owner establishes a standard, record its scope, rationale, examples, ap
 - Passing unit tests alone does not demonstrate provider-backed functionality.
 - Enforcement: documented; automated process gate pending.
 
-## JES-003 — Mandatory explicit next step
-Every work stoppage must report:
-- Status: evidence-backed completion percentage, distinguishing planned, written, tested, merged, deployed and operational.
-- Next step: one clear, executable action.
-- Responsibility: assistant, Jason, or user.
-- Approval: state whether new owner authorization is needed.
+## JES-003 — Mandatory explicit next step and status footer
+Every development response that stops work must end with a visually distinct, consistently ordered status footer:
+- **Status:** COMPLETE, INCOMPLETE, or BLOCKED; include evidence-based completion percentage, distinguishing documented, tested, merged, deployed, and operational states.
+- **Completed:** only work actually verified.
+- **Still required:** remaining tasks or blockers.
+- **What I'm doing next:** exactly one next action; explicitly say when no work is currently executing or running in the background.
+- **What you need to do:** an explicit user action, or "Nothing right now."
+Use a modest heading, bold field names, and a single status indicator where supported. The footer must remain clear without color or rich formatting. Avoid decorative complexity.
 Proceed with work that has already been authorized; do not demand redundant approval. Never imply a proposed change has been completed.
 
 ## JES-004 — Independent, evidence-based technical challenge
