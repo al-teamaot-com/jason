@@ -57,6 +57,8 @@ def _read_capability(
     operation: str,
     selector_keys: str,
     fact_hints: str,
+    query_shape: str = "",
+    canonical_facts: str = "",
 ) -> CapabilityDefinition:
     return CapabilityDefinition(
         capability_name=name,
@@ -110,6 +112,8 @@ def _read_capability(
             "operation": operation,
             "selector_keys": selector_keys,
             "fact_hints": fact_hints,
+            "query_shape": query_shape,
+            "canonical_facts": canonical_facts,
             "scope_model": "aot_internal_dealer_fleet",
             "client_scope_status": "not_exposed_until_explicit_kfs_autotask_mapping",
         },
@@ -176,7 +180,9 @@ def print_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             resource_types="print_meter,print_device",
             operation="read",
             selector_keys="month,start,end,timezone,limit,boundary_hours",
-            fact_hints="top five printers highest volume monthly fleet usage ranking black white color impressions",
+            fact_hints="monthly print volume ranking,top printers by volume,highest volume printers,most pages printed",
+            query_shape="ranked_monthly_usage",
+            canonical_facts="monthly print volume ranking",
         ),
         _read_capability(
             now=now,
