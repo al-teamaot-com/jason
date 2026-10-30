@@ -190,6 +190,9 @@ def verify_notification_against_fresh_evidence(
         and candidate.stage == notification.stage
         and candidate.released == notification.released
         and candidate.policy_ids == notification.policy_ids
+        and candidate.affected_clients == notification.affected_clients
+        and candidate.affected_devices == notification.affected_devices
+        and candidate.text == notification.text
         for candidate in latest
     )
 
