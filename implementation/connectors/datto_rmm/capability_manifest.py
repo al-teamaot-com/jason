@@ -135,9 +135,9 @@ def build_datto_rmm_manifest() -> IntegrationManifest:
                 collection_supported=True,
             ),
             IntegrationOperation(
-                operation_id="endpoint.patch_policy.search",
+                operation_id="endpoint.patch.policy.search",
                 kind=OperationKind.SEARCH,
-                capability_name="endpoint.patch_policy.search",
+                capability_name="endpoint.patch.policy.search",
                 description=(
                     "Read the Patch Management policies assigned to an exact "
                     "managed endpoint, without changing policy or approvals."
