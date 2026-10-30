@@ -404,3 +404,43 @@ Datto versions; 0/10 standing-safe certifications**. No scripts were run, no
 component execution approval was modified, and no production release occurred.
 Next is exact Datto script-body export and verified UID/name/version/source-hash
 correlation, then branch-level source review and provider-backed testing.
+## Owner-supplied CPT script-body review (2026-10-30, preproduction)
+
+**Provenance:** Eight Datto RMM `.cpt` packages uploaded by the owner. Each ZIP
+contains `command.bat` (PowerShell) and `resource.xml`, and all eight embedded
+UID/name pairs match issue #2174's exact live catalog identifiers. Embedded
+XML `<hash/>` fields are EMPTY; the locally computed SHA-256 values below
+are review evidence, **not** proof that the currently running Datto component
+script equals the export. No script was executed, no quick job was dispatched,
+and no standing-safe permission was changed.
+
+| Reviewed component (short title) | CPT version | command.bat SHA-256 | Preliminary source assessment |
+| --- | ---: | --- | --- |
+| RDP Status | 1 | `2dff23402bcfd8be43fea352e902e1c69eb744bd81fd148eb1e522c0860af3d9` | Low disruption: registry/service/firewall reads, no configuration change seen |
+| Boot Time | 13 | `4b32b77cf521bed8544388eb9a8842e02751e3f3599e04dc147faa77edcdf5c9` | Low disruption: event log reads; site/global thresholds unbounded; description promises process inventory not collected |
+| Shadow Copy Health | 2 | `b86f2008945333f7fa167ff92595ca5ed8dde48b1519837d0421f6cc348954d0` | Low disruption: WMI/CIM and only `vssadmin list` invocations; subprocess has no explicit timeout |
+| OneDrive Comprehensive | 9 | `885d66174efa8d9845e6b51de152d9188e7ad25da93307b925bba006a6e2f012` | Conditional: reads profiles, registry, logs, and remote Microsoft TCP/TLS probes; report includes SID, paths, display names |
+| Comprehensive Disk & Storage | 1 | `61ccc2b1f34eb77804804a52598ea9e9ba7a4c26de89e937326236d494473ee8` | Conditional: no repair/reboot branch found, but `Repair-Volume -Scan` and read-only `chkdsk` enabled by default on eligible volumes; potential noticeable I/O |
+| Proactive Event Log Health | 7 | `a0fd9e8c33c6fb9aed13deb67224d81d0ea0893955f7a1fe5f99aa033e4d8d13` | HOLD: `ExportJson` and `IncludeMessageText` default true; unredacted event snippets and JSON written to disk (lines 258-273, 217-229, 560-567, 610, 645) |
+| Unexpected Shutdown Collector | 4 | `72b96db1bb6eef3fa240297f2818581812534d593a10c5360f6de6be8e6e586f` | HOLD: writes/append raw diagnostics to `C:\Temp\AOT_UnexpectedShutdownDiag.log` (lines 389-397), with no proven redaction or retention |
+| AOT Event Log Search | 4 | `b2ec7130ec7a0c7aa40c029aafbd255dbdc2eeec735bbe2a8a13c43fe0d8627d` | HOLD: `Export-Csv` writes full event descriptions to `C:\Temp\EventLogSearchResults.csv` (line 47), unbounded collection and no retention control |
+
+**Specific follow-up:** No-input source contracts already cover the six
+no-input components in this batch; the event-search contract remains bounded
+by explicit `SearchTerm`/`DaysBack` values. Inputs do **not** neutralize
+script-side effects or unmanaged inherited environment variables. Never mark a
+component standing-safe based on a display description, title, metadata-only
+fingerprint, or this offline inspection. A valid standing-safe promotion requires
+the reviewed source to be bound to a verified live Datto revision or repeatable
+export, plus tested user-disruption/privacy controls and owner-governed approval.
+
+The owner separately identified `Get-VulScan Discovery Agent Service Status
+AOT` as an existing monitor and `Datto Endpoint Backup: Retrieve Errors and
+Warnings from Logs [WIN]` as read-only; their CPTs were not provided and no
+independent source-body review is claimed for those two.
+
+**Accurate progress:** 8/10 approved diagnostic script bodies recovered and
+statically reviewed (80%); 3 source-low-risk, 2 conditional, 3 held in the
+eight-file batch. **0/10 live-revision-bound standing-safe certifications;
+0/13 provider-backed acceptance; 0/13 production activations.** These figures
+are distinct: script inspection is not production functionality.
