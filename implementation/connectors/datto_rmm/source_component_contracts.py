@@ -24,8 +24,10 @@ class SourceComponentContract:
         if not self.uid.strip() or not self.name.strip():
             raise ValueError("source component contract identity required")
         field_names = [str(item.get("name", "")).casefold() for item in self.variables]
-        if not field_names or any(not field for field in field_names):
-            raise ValueError("source component contract fields required")
+        # An empty tuple deliberately locks a component to ZERO inputs.
+        # This is not evidence that its underlying script is read-only.
+        if any(not field for field in field_names):
+            raise ValueError("source component contract fields must be named")
         if len(set(field_names)) != len(field_names):
             raise ValueError("source component contract fields must be unique")
 
@@ -63,6 +65,50 @@ SOURCE_COMPONENT_CONTRACTS: tuple[SourceComponentContract, ...] = (
             {"name": "DaysBack", "variable_type": "selection",
              "required": True, "allowed_values": ("1", "3", "7", "14")},
         ),
+    ),
+    # Eight owner-approved diagnostic identities with NO provider inputs.
+    # Source/script bodies are NOT safety-certified. These contracts prevent a
+    # runtime allowlist from silently supplying variables while audits remain
+    # pending; they grant neither standing-safe status nor execution authority.
+    SourceComponentContract(
+        uid="c97df7f4-ae3d-4b8c-aae3-68accc68144f",
+        name="Comprehensive Disk & Storage Diagnostic [WIN] AOT Ver 07232026",
+        variables=(),
+    ),
+    SourceComponentContract(
+        uid="44f11fd8-2d3c-4afb-8f7d-571afb9c602e",
+        name="Proactive Event Log Health Diagnostic [WIN] AOT Ver 05082026-1",
+        variables=(),
+    ),
+    SourceComponentContract(
+        uid="197aeab0-4baa-4b69-aa86-adf98e99f5c9",
+        name="Check Shadow Copy Health & Configuration AOT Ver 12112025-1",
+        variables=(),
+    ),
+    SourceComponentContract(
+        uid="426b9194-16c4-47a1-87f7-14035a097e3b",
+        name="Check Unexpected Shutdown Automated Diagnostic Collector AOT Ver 12122025-1",
+        variables=(),
+    ),
+    SourceComponentContract(
+        uid="d118f181-5234-444a-b3fb-823a76660352",
+        name="Check RDP Status [WIN] AOT Ver 05062026-1",
+        variables=(),
+    ),
+    SourceComponentContract(
+        uid="98051f7d-b8e8-41ca-8fa1-5cc64a199375",
+        name="Check Boot Time [WIN] AOT Ver 11152025-1",
+        variables=(),
+    ),
+    SourceComponentContract(
+        uid="e68e5a4c-1b7d-4e20-9d72-4090d5f10244",
+        name="OneDrive Comprehensive Diagnostic [WIN] AOT Ver 10082026-1",
+        variables=(),
+    ),
+    SourceComponentContract(
+        uid="f866e3b9-57af-4a94-b9cc-53811a08e1e1",
+        name="Get-VulScan Discovery Agent Service Status AOT",
+        variables=(),
     ),
 )
 

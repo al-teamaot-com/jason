@@ -310,7 +310,13 @@ To add one *reviewed* component with sensitive input parameters:
 Initial contracts from owner-authorized issue
 [`#2174`](https://github.com/al-teamaot-com/jason/issues/2174)
 include non-reboot Windows hostname staging, bounded Endpoint Backup
-error-log retrieval and bounded Windows event-log search. The no-reboot
+error-log retrieval and bounded Windows event-log search. Eight additional
+owner-listed diagnostic identities have **zero-variable source contracts**:
+they reject any supplied component variable, even when a runtime policy would
+permit it. Zero-variable contracts prevent parameter expansion only. Their
+actual Datto script bodies have **not** been reviewed or safety-certified;
+standing-safe approval, provider-backed acceptance and deployment remain
+separate, pending gates. The no-reboot
 contract allows `usrReboot=false` **only**. It never approves a subsequent
 reboot, a security-service restart, or BackupIQ asset deletion. Any future
 reboot must use a different action and obtain its own exact authorization.

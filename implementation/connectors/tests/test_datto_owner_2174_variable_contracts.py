@@ -228,6 +228,80 @@ def test_source_locked_contract_pattern_is_reusable_for_unrelated_component():
         DattoRmmComponentExecutionPolicy._normalize_variable_value(field, True)
 
 
+
+
+ZERO_INPUT_DIAGNOSTICS = (
+    ("c97df7f4-ae3d-4b8c-aae3-68accc68144f",
+     "Comprehensive Disk & Storage Diagnostic [WIN] AOT Ver 07232026"),
+    ("44f11fd8-2d3c-4afb-8f7d-571afb9c602e",
+     "Proactive Event Log Health Diagnostic [WIN] AOT Ver 05082026-1"),
+    ("197aeab0-4baa-4b69-aa86-adf98e99f5c9",
+     "Check Shadow Copy Health & Configuration AOT Ver 12112025-1"),
+    ("426b9194-16c4-47a1-87f7-14035a097e3b",
+     "Check Unexpected Shutdown Automated Diagnostic Collector AOT Ver 12122025-1"),
+    ("d118f181-5234-444a-b3fb-823a76660352",
+     "Check RDP Status [WIN] AOT Ver 05062026-1"),
+    ("98051f7d-b8e8-41ca-8fa1-5cc64a199375",
+     "Check Boot Time [WIN] AOT Ver 11152025-1"),
+    ("e68e5a4c-1b7d-4e20-9d72-4090d5f10244",
+     "OneDrive Comprehensive Diagnostic [WIN] AOT Ver 10082026-1"),
+    ("f866e3b9-57af-4a94-b9cc-53811a08e1e1",
+     "Get-VulScan Discovery Agent Service Status AOT"),
+)
+
+
+@pytest.mark.parametrize("identity", ZERO_INPUT_DIAGNOSTICS)
+def test_zero_input_diagnostics_accept_empty_variables_only(identity):
+    prepared = prepare(identity, {})
+    assert prepared.normalized_variables == {}
+    assert prepared.provider_request.body["jobComponent"]["variables"] == []
+    with pytest.raises(PermissionError, match="component variable is not approved"):
+        prepare(identity, {"UnexpectedInput": "yes"})
+
+
+@pytest.mark.parametrize("identity", ZERO_INPUT_DIAGNOSTICS)
+def test_zero_input_diagnostics_reject_identity_drift(identity):
+    with pytest.raises(PermissionError, match="source-locked component identity mismatch"):
+        prepare(("unapproved-uid", identity[1]), {})
+    with pytest.raises(PermissionError, match="source-locked component identity mismatch"):
+        prepare((identity[0], "Renamed component"), {})
+
+
+@pytest.mark.parametrize("identity", ZERO_INPUT_DIAGNOSTICS)
+def test_zero_input_diagnostics_ignore_runtime_variable_expansion(identity):
+    from connectors.datto_rmm.component_execution import ComponentVariablePolicy
+
+    entry = ComponentAllowlistEntry(
+        allowlist_name="reviewed-per-run",
+        canonical_component_id="reviewed-per-run",
+        provider_component_uid=identity[0],
+        display_name=identity[1],
+        allowed_target_classes=frozenset({"workstation"}),
+        variable_policies=(ComponentVariablePolicy(name="Dangerous", required=True),),
+        requires_per_run_approval=True,
+    )
+    policy = DattoRmmComponentExecutionPolicy(
+        allowlist=StaticComponentAllowlist(entries=(entry,))
+    )
+    with pytest.raises(PermissionError, match="component variable is not approved"):
+        policy.prepare(
+            allowlist_name="reviewed-per-run",
+            device_uid="device-123",
+            device_class="workstation",
+            component_uid=identity[0],
+            variables={"Dangerous": "true"},
+            observed_component_name=identity[1],
+        )
+    planned = policy.prepare(
+        allowlist_name="reviewed-per-run",
+        device_uid="device-123",
+        device_class="workstation",
+        component_uid=identity[0],
+        variables={},
+        observed_component_name=identity[1],
+    )
+    assert planned.normalized_variables == {}
+
 def test_source_locked_contract_registry_is_unambiguous():
     from connectors.datto_rmm.source_component_contracts import SOURCE_COMPONENT_CONTRACTS
 
