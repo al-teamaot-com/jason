@@ -6,6 +6,7 @@ import pytest
 from jason_runtime.autonomy_worker_runtime import SQLiteOperationalWorkStore
 from jason_runtime.vulscan_governed_patch_source import VerifiedPatchTarget, VulscanPatchEvidenceError
 from jason_runtime.vulscan_microsoft_release_evidence import GovernedMicrosoftReleaseRecord
+from jason_runtime.vulscan_owner_disposition_evidence import VerifiedPatchReviewDisposition
 from jason_runtime.vulscan_v2_preproduction_workflow import (
     VerifiedVulscanTargetInventory, VulscanV2PreproductionWorkflow,
     VulscanV2ShadowMaintenance,
@@ -42,10 +43,20 @@ def release(kb):
 
 
 def make_flow(tmp_path, *, state=None, targets=None, coverage=True,
-              promoted=None, readings=None, release_reader=release):
+              promoted=None, readings=None, release_reader=release,
+              review_state=None, owner_decisions_available=True):
     state = state if state is not None else {"installStatus": "NOT_APPROVED"}
     readings = readings if readings is not None else []
     targets = targets if targets is not None else (target(),)
+    review_state = review_state if review_state is not None else {"disposition": "review_pending"}
+    def review_read(item):
+        return VerifiedPatchReviewDisposition(
+            kb=item.kb, client_id=item.client_id, policy_id=item.policy_id,
+            device_uid=item.device_uid,
+            disposition=review_state["disposition"],
+            checked_at=NOW, full_scope_verified=True,
+            source_reference="preproduction-governed-owner-review",
+        )
     store = SQLiteOperationalWorkStore(tmp_path / "state.db")
     def read(capability, arguments):
         readings.append((capability, dict(arguments)))
@@ -69,6 +80,7 @@ def make_flow(tmp_path, *, state=None, targets=None, coverage=True,
             targets=tuple(targets), full_scope_verified=coverage,
             source_reference="preproduction-governed-policy-snapshot"),
         patch_read=read, microsoft_release_reader=release_reader,
+        review_disposition_read=review_read if owner_decisions_available else None,
         activation_verified=promoted,
     ), readings
 
@@ -186,3 +198,36 @@ def test_auxiliary_shadow_frequency_cannot_flood(tmp_path):
     flow, _ = make_flow(tmp_path)
     with pytest.raises(ValueError, match="hourly"):
         VulscanV2ShadowMaintenance(workflow=flow, interval_seconds=5)
+
+
+def test_without_authoritative_owner_disposition_no_shadow_notification(tmp_path):
+    flow, reads = make_flow(tmp_path, owner_decisions_available=False)
+    with pytest.raises(VulscanPatchEvidenceError, match="owner disposition"):
+        flow.evaluate_once(now=NOW)
+    assert reads == []
+
+
+def test_owner_deferral_stops_new_notifications_and_stale_prepared_sends(tmp_path):
+    from jason_runtime.vulscan_patch_approval_notification import PreparedPatchNotification
+    review_state = {"disposition": "review_pending"}
+    flow, reads = make_flow(tmp_path, promoted=lambda: True, review_state=review_state)
+    flow.evaluate_once(now=NOW, enqueue=True)
+    assert flow.store.due_patch_approval_notifications(now=NOW)
+    review_state["disposition"] = "deferred"
+    assert flow.evaluate_once(now=NOW).candidate_count == 0
+    assert flow.store.due_patch_approval_notifications(now=NOW)
+    # A pending message in the outbox must fail the authoritative readback
+    # before send, even if it was eligible at the initial snapshot.
+    from datetime import date
+    import json
+    data=json.loads(flow.store.due_patch_approval_notifications(now=NOW)[0]["arguments_json"])
+    prepared=PreparedPatchNotification(
+        kb=data["kb"], stage=data["stage"],
+        released=date.fromisoformat(data["released"]),
+        age_days=data["age_days"],
+        policy_ids=tuple(data["policy_ids"]),
+        affected_clients=data["affected_clients"],
+        affected_devices=data["affected_devices"],
+        idempotency_key=data["idempotency_key"], text=data["text"],
+    )
+    assert flow.verify_current(prepared, now=NOW) is False
