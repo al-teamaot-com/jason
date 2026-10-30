@@ -6,7 +6,8 @@ must be supplied by the caller; environment flags never grant send authority.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
+import time
 from typing import Any, Callable, Mapping
 
 from .vulscan_governed_patch_source import (
@@ -105,3 +106,28 @@ class VulscanV2PreproductionWorkflow:
         observations, metadata = self.snapshot(now=now)
         return verify_notification_against_fresh_evidence(
             notification, observations, metadata, now=now)
+
+
+@dataclass
+class VulscanV2ShadowMaintenance:
+    """Opt-in auxiliary cadence; not registered by default in runtime composition.
+
+    The default execution path is always read-only shadow. Activation and
+    persistent Teams send authority belong to separately promoted composition.
+    """
+    workflow: VulscanV2PreproductionWorkflow
+    interval_seconds: int = 24 * 60 * 60
+    monotonic: Callable[[], float] = time.monotonic
+    current_time: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
+    _next_due: float = 0.0
+
+    def __post_init__(self) -> None:
+        if int(self.interval_seconds) < 60 * 60:
+            raise ValueError("VulScan V2 evaluation frequency cannot exceed hourly")
+
+    def tick(self) -> VulscanV2BatchResult | None:
+        now_monotonic = self.monotonic()
+        if now_monotonic < self._next_due:
+            return None
+        self._next_due = now_monotonic + self.interval_seconds
+        return self.workflow.evaluate_once(now=self.current_time(), enqueue=False)
