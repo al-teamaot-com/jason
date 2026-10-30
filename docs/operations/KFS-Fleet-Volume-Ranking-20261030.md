@@ -28,3 +28,19 @@ An authorized AOT staff member can ask "Jason, what are our top 5 highest-volume
 
 ## Production readiness
 Implementation and synthetic tests alone do **not** establish live KFS readiness. Until provider-backed acceptance succeeds, mark the capability NOT VERIFIED for production.
+
+## Latest non-disruptive collector evidence (2026-10-30)
+
+Observed on the authorized Jason host via **read-only** inspection of collector result summaries (not a preproduction execution of this PR):
+
+| Completed UTC collector run | Result | Managed devices | Errors | Meter-reading rows |
+|---|---|---:|---:|---:|
+| 2026-10-30 16:00:01 | ok | 435 | 0 | 7,330 |
+| 2026-10-30 10:00:02 | ok | 435 | 0 | 7,330 |
+| 2026-10-30 04:00:00 | ok | 435 | 0 | 7,330 |
+
+The 16:00Z collector run ID is `11ad789b-73eb-4762-8fa7-44f8124a70b4`. A successful collector summary supports inventory freshness, **not** the accuracy of October per-device deltas, the ranking, live AOT user routing, or the full database join. Those remain provider-backed acceptance requirements.
+
+### Exact source scope caution
+
+At this inspection, the running production runtime and `/opt/jason/current` both identify `cb76e14f9f42ec4f914b10967db1d408c271c1aa`. Protected main is ahead of that running release by one separate engineering-standards commit (five files, including `AGENTS.md` and the JES registry). A future merged KFS release must disclose that separate commit in the complete release scope and verify the root-pinned last-known-good release; the running SHA alone is not sufficient to claim rollback readiness. No merge or production deployment is implied here.
