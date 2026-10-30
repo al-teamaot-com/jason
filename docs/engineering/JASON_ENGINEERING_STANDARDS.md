@@ -32,7 +32,7 @@ Every development response that stops work must end with a visually distinct, co
 - **Still required:** remaining tasks or blockers.
 - **What I'm doing next:** exactly one next action; explicitly say when no work is currently executing or running in the background.
 - **What you need to do:** an explicit user action, or "Nothing right now."
-Use a modest heading, bold field names, and a single status indicator where supported. The footer must remain clear without color or rich formatting. Avoid decorative complexity.
+Use a modest heading, bold field names, and a single status indicator where supported. Make **What happens next** the most visually prominent action line (e.g. a small heading with bold action text); do not rely solely on color. Use plain-English task names first, with PR/issue IDs or SHAs only as secondary linked references, never as the sole description. State whether the next action is actually underway or is only the next action when work resumes. The footer must remain clear without color or rich formatting. Avoid decorative complexity.
 Proceed with work that has already been authorized; do not demand redundant approval. Never imply a proposed change has been completed.
 
 ## JES-004 — Independent, evidence-based technical challenge
