@@ -151,3 +151,42 @@ def test_enabled_builder_reuses_existing_governed_sharepoint_reader(tmp_path):
     assert connector.bindings.find_active_by_jason_identity(
         jason_identity_id="any-human"
     ) is None
+
+
+
+def test_exact_aot_document_manifest_template_requires_activation_review():
+    import json
+    root = Path(__file__).resolve().parents[3]
+    template = root / "config/preproduction/aot-kfs-copier-documents.example.json"
+    payload = json.loads(template.read_text(encoding="utf-8"))
+    with pytest.raises(ValueError, match="valid bounded"):
+        parse_approved_manifest(payload, now=NOW)
+    payload["grant_expires_at"] = (NOW + timedelta(days=7)).isoformat()
+    validated = parse_approved_manifest(payload, now=NOW)
+    assert validated.tenant_id == TENANT
+    assert len(validated.sources) == 3
+    assert all(source.site_id.startswith("absolnet.sharepoint.com,") for source in validated.sources)
+
+
+def test_sharepoint_source_flag_requires_governed_kfs_enabled():
+    from jason_runtime.composition import RuntimeSettings
+    base = {
+        "authority_db": Path("/tmp/test-authority.sqlite3"),
+        "bindings_db": Path("/tmp/test-bindings.sqlite3"),
+        "continuation_db": Path("/tmp/test-continuation.sqlite3"),
+        "replay_db": Path("/tmp/test-replay.sqlite3"),
+        "security_audit_db": Path("/tmp/test-security.sqlite3"),
+        "orchestration_events_db": Path("/tmp/test-orchestration.sqlite3"),
+        "trusted_keys_registry": Path("/tmp/test-keys.json"),
+        "openbao_url": "http://127.0.0.1:8200",
+        "openbao_role_id_path": Path("/tmp/nonexistent-role"),
+        "openbao_secret_id_path": Path("/tmp/nonexistent-secret"),
+        "ollama_url": "http://127.0.0.1:11434",
+        "ollama_model": "model",
+        "allowed_machine_identities": frozenset({"test"}),
+    }
+    configured = RuntimeSettings(
+        **base, kfs_enabled=False, kfs_copier_evidence_enabled=True,
+    )
+    with pytest.raises(ValueError, match="requires enabled governed KFS"):
+        configured.validate()
