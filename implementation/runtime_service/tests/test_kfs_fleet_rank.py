@@ -188,3 +188,59 @@ def test_fleet_ranking_excludes_missing_inventory_devices_from_complete_claim(mo
     result = store.fleet_rank(arguments={}, start=start, end=end)
     assert result["complete"] is False
     assert any("missing" in warning for warning in result["warnings"])
+
+
+def test_monochrome_device_without_color_counter_uses_exact_zero(monkeypatch):
+    start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 10, 30, tzinfo=timezone.utc)
+    rows = [
+        ("mono-1", "total", 100, start, 145, end, "Mono Client", "M-1", "S1"),
+        ("mono-1", "blackWhite", 100, start, 145, end, "Mono Client", "M-1", "S1"),
+        ("mono-1", "color", None, None, None, None, "Mono Client", "M-1", "S1"),
+    ]
+    store, cur = store_with_rows(monkeypatch, rows)
+    report = store.fleet_rank(arguments={"limit": 5}, start=start, end=end)
+    assert report["fleet_devices_reported"] == 1
+    assert report["eligible_devices"] == 1
+    assert report["exception_count"] == 0
+    assert report["coverage_verified"] is True
+    assert report["complete"] is True
+    assert report["top_devices"][0]["total_pages"] == 45
+    assert report["top_devices"][0]["black_white_pages"] == 45
+    assert report["top_devices"][0]["color_pages"] == 0
+    assert report["top_devices"][0]["color_counter_status"] == "zero_verified_from_total_and_bw"
+    assert "color: missing meter boundary" not in report["top_devices"][0]["warnings"]
+    assert "LEFT JOIN kfs_devices" in cur.sql
+
+
+def test_missing_color_counter_must_not_invent_nonzero_delta(monkeypatch):
+    start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 10, 30, tzinfo=timezone.utc)
+    rows = [
+        ("color-1", "total", 100, start, 150, end, "Client", "C-1", "S1"),
+        ("color-1", "blackWhite", 100, start, 120, end, "Client", "C-1", "S1"),
+        ("color-1", "color", None, None, None, None, "Client", "C-1", "S1"),
+    ]
+    store, _ = store_with_rows(monkeypatch, rows)
+    report = store.fleet_rank(arguments={}, start=start, end=end)
+    assert report["eligible_devices"] == 0
+    assert report["exception_count"] == 1
+    assert report["complete"] is False
+
+
+def test_missing_customer_is_explicit_and_prevents_complete_claim(monkeypatch):
+    start = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    end = datetime(2026, 10, 30, tzinfo=timezone.utc)
+    rows = [
+        ("unmapped-1", name, 10, start, 10 + value, end, "", "E-1", "S1")
+        for name, value in (("total", 7), ("blackWhite", 7), ("color", 0))
+    ]
+    store, _ = store_with_rows(monkeypatch, rows)
+    report = store.fleet_rank(arguments={}, start=start, end=end)
+    assert report["eligible_devices"] == 1
+    assert report["exception_count"] == 0
+    assert report["coverage_verified"] is True
+    assert report["complete"] is False
+    assert report["top_devices"][0]["customer"] == "Unknown (not mapped in KFS)"
+    assert report["top_devices"][0]["customer_mapping_verified"] is False
+    assert any("customer assignment" in message for message in report["warnings"])
