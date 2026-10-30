@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import RLock
-from typing import Protocol
+from typing import Callable, Protocol
 from uuid import uuid4
 
 from connectors.core.contracts import ConnectorContext, ConnectorRequest, ConnectorResult
@@ -147,6 +147,7 @@ class GovernedAotCopierEvidenceCache:
     def __init__(
         self, *, loader: GovernedAotCopierSourceLoader, max_age_hours: int = 24,
         authorization_expires_at: datetime | None = None,
+        authorization_check: Callable[[datetime], None] | None = None,
     ) -> None:
         if not 1 <= max_age_hours <= 168:
             raise ValueError("copier evidence cache TTL must be between 1 and 168 hours")
@@ -155,6 +156,7 @@ class GovernedAotCopierEvidenceCache:
         self._loader = loader
         self._ttl = max_age_hours
         self._authorization_expires_at = authorization_expires_at
+        self._authorization_check = authorization_check
         self._snapshot: ApprovedAotCopierEvidenceSnapshot | None = None
         self._lock = RLock()
 
@@ -162,6 +164,15 @@ class GovernedAotCopierEvidenceCache:
         if now.tzinfo is None:
             raise ValueError("authorized report time must be timezone aware")
         with self._lock:
+            # Reconfirm the dedicated identity and exact approved-source
+            # manifest before returning cached evidence. A revoked boundary or
+            # replaced approval must not remain authorized until cache expiry.
+            if self._authorization_check is not None:
+                try:
+                    self._authorization_check(now)
+                except Exception:
+                    self._snapshot = None
+                    raise
             if (
                 self._authorization_expires_at is not None
                 and now.astimezone(timezone.utc) >= self._authorization_expires_at.astimezone(timezone.utc)
