@@ -131,3 +131,21 @@ It verifies source provider and operation, selector identity, MIME type, size, S
 ## October 30 integration-gate review: PR #2178
 
 The required repository-hygiene job identified PR #2178 as an overlapping active change to `implementation/runtime_service/src/jason_runtime/composition.py`. Its three added blocks register **Datto RMM patch-policy and site-patch read operations** at the endpoint imports, invocation mapping, and invoker registry. This KFS PR modifies separate print capability imports and mappings, a KFS meter-history invoker, and reporting metadata. The inspected hunks do not replace any #2178 functionality, and neither PR was merged. **Integration coordination: #2178** is declared in this PR body. Preserve both patch-read registrations during later protected-main reconciliation, and retest all concerned provider-read paths. This update repairs documentation of an identified overlap; it does not bypass the repository gate or attest live production acceptance.
+
+## October 30 — Runtime integration staged, default OFF
+
+## October 30 — Runtime integration staged, default OFF
+
+The normal KFS runtime composition now includes a **disabled-by-default** governed SharePoint copier-document evidence path; no direct provider bypass and no normal user-selectable document URL.
+
+- \`JASON_KFS_COPIER_EVIDENCE_ENABLED=false\` is the default. It requires \`JASON_KFS_ENABLED=true\` and an approved root-managed \`JASON_KFS_COPIER_EVIDENCE_MANIFEST\` if explicitly enabled.
+- The exact AOT source selectors and reference are in \`config/preproduction/aot-kfs-copier-documents.example.json\`, which deliberately contains a non-date approval-expiration placeholder and **cannot be activated as committed**. Only an approved, fresh expiring (≤30-day) manifest installed to a trusted path can be used; symlinks, writable/unowned manifests, unbounded documents and wrong tenant/organization/service identities are rejected.
+- The dedicated SharePoint OpenBao role/secret files must exist at the configured separate paths; missing files fail startup before Graph initialization. No fallback to existing directory/mail credentials.
+- When enabled, the runtime composes the standard \`GovernedSharePointConnector\` from PR #1330 with AOT-only service identity binding and exact, expiring per-document grants, then creates a \`GovernedAotCopierSourceLoader\` and bounded 24-hour claim cache.
+- Only a normal authorized AOT \`print.fleet.usage.rank\` operation invokes that cache, after the existing organization/permission gate. It reads the exact approved documents via metadata→content→metadata, verifies same-version SHA-256 and size, then passes an immutable customer-evidence index to a copy of the read-only KFS history store. A failed/expired document refresh does not reuse stale customer evidence.
+- No SharePoint documents, secrets, or bearer tokens are written to KFS meter tables, Autotask, or public logs. Default-off KFS remains usable, but missing names are still flagged.
+- The isolated KFS development branch tests validate strict manifest parsing, nonactivation of the placeholder, unsafe selector rejection, missing dedicated credential gating, disabled composition path, unauthorized request handling, and snapshot expiry. In a temporary combined KFS + SharePoint checkout, the enabled constructor path and governed connector compatibility have passed. **No production feature activation or live Graph read occurred**.
+
+Source selection has been verified by the AOT delegated SharePoint connector: AOT Admin Documents site ID \`absolnet.sharepoint.com,c85a85f8-6a50-4569-880f-d261c65df2bb,e5b7a724-dc9b-406b-aed8-2961f1f71153\` and its Documents drive; three reviewed source IDs are in the inactive manifest. This discovery does not establish Jason workload access.
+
+**Outstanding external actions:** dedicate/provision the SharePoint read AppRole, validate the AOT \`microsoft_graph_sharepoint\` tenant/client boundary and release grants, test authorized and forbidden Graph calls with service identity, then complete authentic user-question acceptance, scope, rollback and owner exact-SHA deployment approval. The three offline/unreadable monthly KFS printer meters remain explicitly flagged, not estimated.
