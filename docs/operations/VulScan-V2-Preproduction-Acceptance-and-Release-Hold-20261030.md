@@ -33,3 +33,11 @@
 
 ## Completion estimate
 Source and fixture acceptance are substantially complete; genuine provider-backed acceptance and release authority are still outstanding. Do not report 100% until the complete authoritative workflow is proven.
+
+
+## Additional read-only development acceptance — 2026-10-30
+- Verified source contract corrected: missing/not-up-to-date owner defer/decline evidence now blocks V2 before reading the managed fleet; it cannot be interpreted as `review_pending`. This guard also rejects wrong KB, tenant/client, policy, device UID, partial coverage and decision clock without provenance.
+- Authoritative `review_pending` must attest that the separately approved, complete scoped decision source contains **no** current exception; `deferred`, `declined` and `superseded` are each explicit suppressions. Existing queued notifications reread this exact evidence immediately before any send.
+- The dormant workflow still has **no configured live signed owner-decision provider**. This is an additional explicit acceptance dependency, not proof of live operational coverage.
+- The currently coded Datto device-policy and site-patch URL variants disagree with parts of Datto's own public English/German API references and 15.1 release notes. The public Swagger/OpenAPI document returned HTTP 500. Do not claim a tested live path or switch to guessing a URL. Accept each route and page schema via the approved governed provider in controlled staging before any promotion.
+- Targeted negative tests added for missing reader, absent/old/mismatched disposition, no full-scope proof, deferral suppression and queued-event recheck. Production feature activation remains disabled.
