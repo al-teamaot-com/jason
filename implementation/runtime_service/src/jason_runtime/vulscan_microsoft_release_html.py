@@ -20,7 +20,8 @@ _KB = re.compile(r"^KB[0-9]{5,9}$")
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _ALLOWED_RELEASE = {
     "https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information",
-    "https://learn.microsoft.com/en-us/windows/release-health/windows10-release-information",
+    "https://learn.microsoft.com/en-us/windows/release-health/release-information",
+    "https://learn.microsoft.com/en-us/windows/release-health/windows-server-release-info",
 }
 _MAX_HTML = 4_000_000
 
