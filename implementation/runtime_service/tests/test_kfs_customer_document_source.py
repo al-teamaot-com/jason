@@ -245,3 +245,34 @@ def test_cache_rejects_naive_document_authorization_expiration():
             loader=loader(reader),
             authorization_expires_at=NOW.replace(tzinfo=None),
         )
+
+
+
+def test_revoked_workload_grant_immediately_clears_fresh_customer_cache():
+    reader = FakeGovernedReader()
+    state = {"authorized": True, "checks": 0}
+
+    def verify(_now):
+        state["checks"] += 1
+        if not state["authorized"]:
+            raise PermissionError("AOT document grant was revoked")
+
+    cache = GovernedAotCopierEvidenceCache(
+        loader=loader(reader),
+        authorization_check=verify,
+        authorization_expires_at=NOW + timedelta(hours=12),
+    )
+    first = cache.index_for_rank(NOW)
+    assert first.match(serial_number="1G55503749").status == "verified"
+    assert len(reader.events) == 3
+
+    # A cached response still performs the authorization check.
+    assert cache.index_for_rank(NOW + timedelta(minutes=3)) is first
+    assert state["checks"] == 2
+    assert len(reader.events) == 3
+
+    state["authorized"] = False
+    with pytest.raises(PermissionError, match="revoked"):
+        cache.index_for_rank(NOW + timedelta(minutes=4))
+    assert cache._snapshot is None
+    assert len(reader.events) == 3
