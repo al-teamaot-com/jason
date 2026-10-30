@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -16,6 +16,8 @@ from orchestrator.print_capability_catalog import (
     PRINT_FLEET_USAGE_RANK,
 )
 from orchestrator.service import InvocationResult
+
+from .kfs_customer_document_evidence import ApprovedCustomerEvidenceIndex
 
 
 METER_HISTORY_AUTHORITY_GRANTS = (
@@ -79,6 +81,9 @@ class KfsMeterHistoryStore:
     user: str
     password_file: Path
     connect_timeout_seconds: int = 5
+    customer_evidence_index: ApprovedCustomerEvidenceIndex | None = field(
+        default=None, repr=False, compare=False,
+    )
 
     def _connect(self):
         try:
@@ -382,6 +387,8 @@ class KfsMeterHistoryStore:
                 "device_id": device_id,
                 "customer": customer or "Unknown (not mapped in KFS)",
                 "customer_mapping_verified": bool(customer),
+                "customer_mapping_source": "kfs" if customer else "none",
+                "serial_number": serial or "",
                 "printer_id": equipment or serial or device_id,
                 "counts": {}, "latest_reading_at": None, "warnings": [],
             })
@@ -404,6 +411,47 @@ class KfsMeterHistoryStore:
         ranked: list[dict[str, Any]] = []
         exceptions: list[dict[str, Any]] = []
         for item in devices.values():
+            # Enrichment consumes only a separately-authorized, immutable source
+            # snapshot. No Graph credentials, HTTP calls or document retrieval
+            # occur inside the KFS database read.
+            if self.customer_evidence_index is not None and item["serial_number"]:
+                match = self.customer_evidence_index.match(
+                    serial_number=item["serial_number"],
+                    kfs_customer=(
+                        item["customer"] if item["customer_mapping_verified"] else None
+                    ),
+                )
+                if match.status == "verified":
+                    item["customer"] = match.customer_name
+                    item["customer_mapping_verified"] = True
+                    item["customer_mapping_source"] = "aot_sharepoint"
+                    item["customer_evidence"] = [
+                        {
+                            "drive_id": claim.source_drive_id,
+                            "item_id": claim.source_item_id,
+                            "etag": claim.source_etag,
+                            "sha256": claim.source_sha256,
+                            "sheet": claim.source_sheet,
+                        }
+                        for claim in match.evidence
+                    ]
+                elif match.status == "conflict":
+                    item["customer"] = "Conflict (requires customer review)"
+                    item["customer_mapping_verified"] = False
+                    item["customer_mapping_source"] = "conflict"
+                    item["warnings"].append(
+                        "Conflicting source customer assignments for this serial"
+                    )
+                    item["customer_evidence"] = [
+                        {
+                            "drive_id": claim.source_drive_id,
+                            "item_id": claim.source_item_id,
+                            "etag": claim.source_etag,
+                            "sha256": claim.source_sha256,
+                            "sheet": claim.source_sheet,
+                        }
+                        for claim in match.evidence
+                    ]
             counts = item.pop("counts")
             item["black_white_pages"] = counts.get("blackWhite")
             item["total_pages"] = counts.get("total")
@@ -452,10 +500,26 @@ class KfsMeterHistoryStore:
         customer_mapping_missing_count = sum(
             not item["customer_mapping_verified"] for item in ranked + exceptions
         )
+        supplemental_mapping_count = sum(
+            item["customer_mapping_source"] == "aot_sharepoint"
+            for item in ranked + exceptions
+        )
+        customer_mapping_conflict_count = sum(
+            item["customer_mapping_source"] == "conflict"
+            for item in ranked + exceptions
+        )
         color_zero_verified_count = sum(
             item["color_counter_status"] == "zero_verified_from_total_and_bw"
             for item in ranked + exceptions
         )
+        if supplemental_mapping_count:
+            warnings.append(
+                f"Supplemental AOT SharePoint evidence matched {supplemental_mapping_count} device serials"
+            )
+        if customer_mapping_conflict_count:
+            warnings.append(
+                f"Conflicting customer evidence for {customer_mapping_conflict_count} devices requires review"
+            )
         if customer_mapping_missing_count:
             warnings.append(
                 f"KFS customer assignments missing for {customer_mapping_missing_count} managed printers"
@@ -480,6 +544,8 @@ class KfsMeterHistoryStore:
             "fleet_devices_in_history": len(devices),
             "eligible_devices": len(ranked), "exception_count": len(exceptions),
             "customer_mapping_missing_count": customer_mapping_missing_count,
+            "supplemental_mapping_count": supplemental_mapping_count,
+            "customer_mapping_conflict_count": customer_mapping_conflict_count,
             "color_zero_verified_count": color_zero_verified_count,
             "top_devices": ranked[:limit], "exceptions": exceptions,
             "coverage_verified": coverage_verified,
