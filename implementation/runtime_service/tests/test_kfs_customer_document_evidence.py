@@ -211,3 +211,43 @@ def test_generic_multi_customer_log_filename_is_not_customer_evidence():
         ])],
     )
     assert index(doc).match(serial_number="RRG2301432").status == "not_found"
+
+
+def test_multicustomer_table_is_not_mapped_to_first_customer():
+    doc = source(
+        name="Copier master log.xlsx",
+        sheet=[("All Customers", [
+            ("Company Name", "Serial Number", "ID Number"),
+            ("Marcella Operator LLC", "1G55503749", "1403"),
+            ("Atlantic View Operator", "1G55504297", "1398"),
+        ])],
+    )
+    mapped = index(doc)
+    assert mapped.match(serial_number="1G55503749").status == "not_found"
+    assert mapped.match(serial_number="1G55504297").status == "not_found"
+
+
+def test_stacked_receipts_for_different_customers_do_not_cross_assign():
+    doc = source(
+        name="AOT Copier Delivery Receipts.xlsx",
+        sheet=[("Stacked Receipts", [
+            ("CO. NAME:", "Marcella Operator LLC"),
+            ("S/N:", "1G55503749"),
+            ("CO. NAME:", "Atlantic View Operator"),
+            ("S/N:", "1G55504297"),
+        ])],
+    )
+    mapped = index(doc)
+    assert mapped.match(serial_number="1G55503749").status == "not_found"
+    assert mapped.match(serial_number="1G55504297").status == "not_found"
+
+
+def test_unrelated_workbook_class_is_rejected():
+    with pytest.raises(ValueError, match="approved copier-log or receipt class"):
+        source(
+            name="Sales Forecast.xlsx",
+            sheet=[("Customers", [
+                ("CO. NAME:", "Marcella Operator LLC"),
+                ("S/N:", "1G55503749"),
+            ])],
+        )
