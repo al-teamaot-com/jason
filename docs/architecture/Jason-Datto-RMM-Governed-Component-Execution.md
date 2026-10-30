@@ -363,3 +363,44 @@ secret access, and reboot/logoff paths. A description is not safety proof.
 **Release hold:** The ten diagnostic components remain per-run until their
 script-body reviews and provider-backed acceptance succeed. The source-locked
 zero-input contracts constrain arguments but do not authorize execution.
+## OneDrive PowerShell source-library audit (2026-10-30; candidates only)
+
+The AOT OneDrive folder `Documents/Scripts/Powershell` was reached through
+the delegated Microsoft SharePoint connector and reported **831 immediate
+children**. Its `.git/config` identifies the companion private repository
+`al-teamaot-com/Powershell`. The GitHub `main` tree inspected at
+`9bb7135a44042e473e985b993fbab19cc466bf99` contains 1,951 entries
+(778 root entries). Six individually downloaded OneDrive source files matched
+their GitHub blob IDs after normalizing CRLF to LF where necessary:
+`EventLogSearch.ps1`, `ShadowCopyFunction.ps1`,
+`Monitor_RDP_Port_Availability.ps1`, `IsOneDriveHappy.ps1`,
+`Restart-FailedShadowCopyServices.ps1`, and
+`AOT-OneDrive-Discovery.ps1`. This supports using that Git tree as an index
+for **verified matching files**, not as a blanket assertion that all
+OneDrive files or current Datto components are identical.
+
+**Important distinction:** No script in this reviewed Git tree has an exact
+file name corresponding to the ten Datto UID/name/version catalog identities
+approved under #2174. Generic or older scripts are not substitute evidence of
+current Datto runtime behavior. The OneDrive directory also has more root
+items than this Git tree; connector folder listing is paginated, so the full
+OneDrive-only remainder has not been checked.
+
+| Retrieved candidate (not an exact Datto match) | Actual code behavior / review conclusion |
+| --- | --- |
+| `EventLogSearch.ps1` | Reads Windows logs but exports matching full event text to `C:\Temp\EventLogSearchResults.csv`; uses hard-coded search term and day count, unlike live `SearchTerm`/`DaysBack` variables. Output privacy and file retention require review. |
+| `Monitor_RDP_Port_Availability.ps1` | Active bottom-of-file call repeats TCP checks against hard-coded targets indefinitely; not the approved local RDP listener/configuration status diagnostic. Unsuitable as a standing-safe substitute. |
+| `ShadowCopyFunction.ps1` / `ShadowCopyTool.ps1` | The same reviewed Git blob exports functions that create, remove, mount and unmount snapshots; an invocation could modify state. Not the approved shadow-copy health-only component. |
+| `Restart-FailedShadowCopyServices.ps1` | Has an explicit restart-service operation commented out in inspected source; its name and repair purpose cannot establish the approved VSS diagnostic is safe. |
+| `IsOneDriveHappy.ps1` | Downloads a DLL into ProgramData and writes OneDrive status logs. Not sufficient to certify the approved OneDrive comprehensive diagnostic. |
+| `AOT-OneDrive-Discovery.ps1` | Uses a Microsoft Graph discovery/authentication workflow; not proof of the approved endpoint OneDrive diagnostic logic. |
+| `VulScanDiscoveryAgentInstall.ps1` and `VulScanDiscoveryAgentInstallerForDRMM_AOT Ver 08262024.ps1` | Download/install agent software, including an `msiexec` path. These are operational installers, **not** the approved VulScan service-status-only diagnostic. |
+| `MonitoringDiskSpeed.ps1` | Downloads DiskSpd and performs a disk-write performance test; not a safe source substitute for the approved read-only disk-health diagnostic. |
+| `Rename-PC-WithLoggingForAutomation.ps1` | Contains a `Rename-Computer` call with `-WhatIf` plus email/credential-related handling. It is not authoritative code for Datto `Change Hostname [WIN]`; no-reboot enforcement and actual rename behavior remain unproven. |
+
+**Progress/evidence:** Relevant candidate files inspected and safety hazards
+identified; **0/10 approved diagnostic script bodies matched to immutable live
+Datto versions; 0/10 standing-safe certifications**. No scripts were run, no
+component execution approval was modified, and no production release occurred.
+Next is exact Datto script-body export and verified UID/name/version/source-hash
+correlation, then branch-level source review and provider-backed testing.
