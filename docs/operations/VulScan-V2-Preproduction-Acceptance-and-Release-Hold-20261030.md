@@ -41,3 +41,12 @@ Source and fixture acceptance are substantially complete; genuine provider-backe
 - The dormant workflow still has **no configured live signed owner-decision provider**. This is an additional explicit acceptance dependency, not proof of live operational coverage.
 - The currently coded Datto device-policy and site-patch URL variants disagree with parts of Datto's own public English/German API references and 15.1 release notes. The public Swagger/OpenAPI document returned HTTP 500. Do not claim a tested live path or switch to guessing a URL. Accept each route and page schema via the approved governed provider in controlled staging before any promotion.
 - Targeted negative tests added for missing reader, absent/old/mismatched disposition, no full-scope proof, deferral suppression and queued-event recheck. Production feature activation remains disabled.
+
+
+## Current additional acceptance gap — policy causation (2026-10-30)
+
+The Datto endpoint's `installStatus=NOT_APPROVED` is an **effective device state**, not a statement that each assigned patch policy disapproved that KB. Global/site policy decisions and device-level overrides may differ. The earlier draft created an incorrect KB x all-assigned-policy cross product. It now requires a second injected, governed, current **per-KB per-policy attribution** source and rejects missing/incomplete/stale/mismatched or unattributable policy evidence before creating a reminder. Exact client, site, device, policy, KB and source provenance are retained to the downstream collector. Existing owner defer/decline attestation remains separately required.
+
+Current official Datto English API v15.2 lists `/v2/device/{deviceUid}/policies/patch-management` and `/v2/site/{siteUid}/patches`. The connector is aligned with those documented paths, but not yet verified against authorized provider responses. Release notes and search-cache variations are NOT proof of a compatible provider response. No Datto credentials or private provider APIs were accessed outside Jason governance.
+
+Required controlled provider acceptance is **not complete**: exact route/paging/auth; device UID in site inventory (or a revised verified enumeration approach); effective status vs KB-specific policy evidence; source of signed Owner exceptions; no cross-client counts; V1 ten-day migration; canonical Teams delivery and independent receipt; exact SHA release eligibility. All must pass before disabled-first deployment. Owner global production freeze and automatic promotion incident hold remain in place.
