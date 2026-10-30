@@ -386,9 +386,12 @@ class KfsMeterHistoryStore:
             "fleet_devices_in_history": len(devices),
             "eligible_devices": len(ranked), "exception_count": len(exceptions),
             "top_devices": ranked[:limit], "exceptions": exceptions,
-            "complete": len(exceptions) == 0,
-            "warnings": (["Fleet coverage incomplete; ranking is provisional"]
-                         if exceptions else []),
+            "complete": False,
+            "coverage_verified": False,
+            "warnings": [
+                "Fleet inventory count has not been reconciled against KFS device inventory; ranking is provisional",
+                * (["Missing or invalid meter boundaries for some devices"] if exceptions else []),
+            ],
         }
 
 def resolve_period(arguments: Mapping[str, Any]) -> tuple[datetime, datetime]:
