@@ -32,7 +32,7 @@ def test_approved_deferred_and_superseded_do_not_notify():
 
 
 def test_urgent_review_bypasses_grace_not_authority():
-    assert evaluate_approval_aging([obs(1, actively_exploited=True)])[0].stage == "urgent_review"
+    assert evaluate_approval_aging([obs(1, actively_exploited=True, exploitation_verified=True)])[0].stage == "urgent_review"
 
 
 def test_same_policy_aggregates_and_dedupes_devices():
