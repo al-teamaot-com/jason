@@ -14,6 +14,7 @@ from .vulscan_governed_patch_source import (
     VerifiedPatchTarget, collect_governed_patch_observations,
     VulscanPatchEvidenceError,
 )
+from .vulscan_owner_disposition_evidence import VerifiedPatchReviewDisposition
 from .vulscan_microsoft_release_evidence import (
     GovernedMicrosoftReleaseRecord, normalize_governed_microsoft_release,
 )
@@ -51,6 +52,10 @@ class VulscanV2PreproductionWorkflow:
     inventory_reader: Callable[[], VerifiedVulscanTargetInventory]
     patch_read: Callable[[str, Mapping[str, Any]], Mapping[str, Any]]
     microsoft_release_reader: Callable[[str], GovernedMicrosoftReleaseRecord]
+    # A separately governed, full-scope review-decision reader is mandatory
+    # before patch-status evidence can become an owner reminder. Never assume
+    # that missing approval notes mean "not deferred".
+    review_disposition_read: Callable[[VerifiedPatchTarget], VerifiedPatchReviewDisposition] | None = None
     # Checked against exact durable playbook promotion + recipient/send grant.
     activation_verified: Callable[[], bool] | None = None
 
@@ -67,6 +72,9 @@ class VulscanV2PreproductionWorkflow:
         targets = inventory.targets
         if not targets:
             return (), {}
+        if self.review_disposition_read is None:
+            raise VulscanPatchEvidenceError(
+                "complete governed owner disposition source unavailable")
         requested_kbs = {item.kb.strip().upper() for item in targets}
         metadata = {}
         for kb in sorted(requested_kbs):
@@ -75,7 +83,8 @@ class VulscanV2PreproductionWorkflow:
                 record, expected_kb=kb)
         observations = collect_governed_patch_observations(
             targets=targets, metadata_by_kb=metadata,
-            read=self.patch_read, now=now)
+            read=self.patch_read, now=now,
+            review_disposition_read=self.review_disposition_read)
         return observations, metadata
 
     def evaluate_once(self, *, now: datetime, enqueue: bool = False) -> VulscanV2BatchResult:
