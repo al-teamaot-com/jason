@@ -676,6 +676,52 @@ def test_human_review_handoff_requires_separate_promotion_and_queue_status_readb
     store.close()
 
 
+@pytest.mark.parametrize("state,category", [
+    ("read_only_assessed", "disk_capacity"),
+    ("needs_diagnostic_evidence", "user_device_settings"),
+])
+@pytest.mark.parametrize("handoff_promoted", [False, True])
+def test_unresolved_triage_outcomes_handoff_only_with_exact_promotion(
+    tmp_path, state, category, handoff_promoted,
+):
+    from datetime import datetime, timezone
+    from jason_runtime.unsupported_ticket_triage import render_triage_note
+
+    source = ticket(title="Ticket still requires technician", queue="Jason")
+    reads = NoteReadStub()
+    worker, store, _ = make_worker(tmp_path, [source], reads)
+    worker.promotion_store = PromotionForTriage(handoff=handoff_promoted)
+    actions = NoteActionStub(reads)
+    worker.actions = actions
+    evidence = {"company_verified": True, "ticket_id": 200001}
+    evidence["note_draft"] = render_triage_note(
+        ticket_number=source.context["ticketNumber"],
+        state=state, category=category, evidence=evidence,
+        next_step="Technician must verify outstanding issue before closing.",
+    )
+    record = {
+        "state": state, "evidence": evidence,
+        "source_version": source.source_version,
+        "ticket_number": source.context["ticketNumber"],
+    }
+    worker._maybe_publish_unsupported_triage_note(
+        source, record, now=datetime.now(timezone.utc),
+    )
+    expected = ["service.ticket.note.create"]
+    if handoff_promoted:
+        expected.append("service.ticket.update")
+    assert [cap for _, cap, _ in actions.calls] == expected
+    if handoff_promoted:
+        assert store.unsupported_handoff_delivery(200001)["state"] == "verified"
+    else:
+        assert store.unsupported_handoff_delivery(200001) is None
+    worker._maybe_publish_unsupported_triage_note(
+        source, record, now=datetime.now(timezone.utc),
+    )
+    assert [cap for _, cap, _ in actions.calls] == expected
+    store.close()
+
+
 def test_helpdesk_ticket_never_requeued_even_with_handoff_promotion(tmp_path):
     from datetime import datetime, timezone
     from jason_runtime.unsupported_ticket_triage import render_triage_note
