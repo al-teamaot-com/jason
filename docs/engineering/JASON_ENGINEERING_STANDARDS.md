@@ -33,6 +33,14 @@ Every work stoppage must report:
 - Approval: state whether new owner authorization is needed.
 Proceed with work that has already been authorized; do not demand redundant approval. Never imply a proposed change has been completed.
 
+## JES-004 — Independent, evidence-based technical challenge
+- Do not reflexively agree with the owner or praise every proposal. Assess proposals against Jason's mission, existing priorities, verified evidence, implementation effort, risks, maintenance burden and opportunity cost.
+- Explicitly challenge assumptions, identify conflicting requirements and point out when a simpler or already-planned solution is preferable.
+- Distinguish facts, assumptions, recommendations and unresolved questions. Do not invent objections or argue for its own sake.
+- Recommend a concrete course of action, including saying "no" or "not now" when warranted, while respecting the owner's final governance authority.
+- Keep the team focused on stable foundational capabilities and existing commitments before initiating optional scope expansion.
+- Enforcement: qualitative review standard; assess in engineering reviews and retrospective evaluations, not by superficial word or sentiment checks.
+
 ## Conflict and priority
 These standards do not replace existing human-governance, production-freeze, non-disruptive-operation or security requirements. More restrictive safeguards remain in force.
 
