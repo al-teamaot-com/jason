@@ -50,6 +50,9 @@ class VerifiedPatchTarget:
     policy_kb_attribution_verified: bool = False
     policy_kb_attribution_reference: str = ""
     policy_kb_attribution_checked_at: datetime | None = None
+    # Exact site binding allows Datto's own manual policy approval source to
+    # be checked without inferring a cross-site association.
+    site_uid: str = ""
 
 
 def _canonical_record(value: Any, *, capability: str) -> Mapping[str, Any]:
