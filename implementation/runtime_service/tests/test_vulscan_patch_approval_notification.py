@@ -50,8 +50,15 @@ def meta(**changes):
 
 
 def plan(items, *, metadata=None):
+    items = tuple(items)
+    evaluation_time = datetime.combine(
+        items[0].observed_date, datetime.min.time(), timezone.utc
+    ) + timedelta(hours=12)
     return prepare_patch_notifications(
-        items, {"KB5123456": metadata or meta()}, now=NOW,
+        items,
+        {"KB5123456": metadata or meta(
+            source_checked_at=evaluation_time - timedelta(hours=1))},
+        now=evaluation_time,
     )
 
 
@@ -82,8 +89,9 @@ def test_one_kb_message_across_policies_clients_devices_and_duplicate_tickets():
 
 
 def test_urgent_review_is_review_only_and_no_approval_action():
-    notice = plan([obs(age=1, actively_exploited=True)])[0]
+    notice = plan([obs(age=1, actively_exploited=True, exploitation_verified=True)])[0]
     assert notice.stage == "urgent_review"
+    assert plan([obs(age=1, actively_exploited=True)]) == ()
     assert "does not approve or install" in notice.text
 
 
