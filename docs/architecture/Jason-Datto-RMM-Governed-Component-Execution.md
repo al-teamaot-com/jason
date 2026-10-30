@@ -328,3 +328,38 @@ activation of the corresponding component on Jason or in Datto's API Component
 Level. No production grant, Datto job, or endpoint change is authorized
 merely by merging this source code. Documentation must distinguish intended
 state from observed production evidence.
+
+## Diagnostic script-source retrieval checkpoint (2026-10-30)
+
+**Source provenance:** Live governed `automation.component.search`, not script-body export.
+All ten approved diagnostic UID/name pairs were independently returned from the
+complete Datto component catalog. The catalog exposed variables and some descriptions,
+**not executable script source**. The repository contains no matching tracked `.ps1`
+files. As a result, **zero of ten diagnostic scripts can be certified** as
+standing-safe on the evidence reviewed here. No component was executed.
+
+| Diagnostic category | Live catalog inputs | Safety concern to inspect in actual script |
+| --- | --- | --- |
+| Comprehensive Disk & Storage | None | Verify diagnostic commands are non-modifying; no repair or CHKDSK fix mode |
+| Proactive Event Log Health | None | Verify event-log access remains read-only, outputs redact sensitive entries, optional JSON export is bounded |
+| Shadow Copy Health & Configuration | None | Verify `vssadmin`/WMI operations inspect only, never create/delete/change shadows |
+| Unexpected Shutdown Collector | None | Catalog explicitly says it writes diagnostic history under `C:\Temp`; verify file scope, cleanup behavior, permissions, log retention and confidentiality before classifying |
+| RDP Status | None | Verify no RDP registry, firewall, listener or service modification |
+| Boot Time | None | Catalog says it outputs a full running-process inventory; verify no process termination and redact command lines or sensitive process metadata |
+| OneDrive Comprehensive Diagnostic | None | Description does not provide behavior detail; inspect user-context logic, tokens, files and sync settings |
+| Endpoint Backup Log Retrieval | `usrMaxResults`, `usrAdditionalInfo` | Verify redaction and file handling; source contract restricts max results to 25/50/100 and additional info to false |
+| Windows Event Log Search | `SearchTerm`, `DaysBack` | Verify literal string handling, bounded log reads, escaping and output redaction |
+| VulScan Discovery Agent Status | None | Catalog classifies as monitor; ensure service state is only queried, not restarted or installed |
+
+**Authorized retrieval path required:** Obtain exact component script bodies using
+Datto RMM's administrator-authorized Components View/export functionality, or
+introduce a separately reviewed governed read capability if the vendor supports
+a source-retrieval API. Do not use direct provider/API/shell credential bypasses.
+For each export record UID, exact name, source file hash, observed revision,
+export timestamp and reviewer; inspect execution branches including SYSTEM/user
+context, service/process operations, file changes, logging, outbound traffic,
+secret access, and reboot/logoff paths. A description is not safety proof.
+
+**Release hold:** The ten diagnostic components remain per-run until their
+script-body reviews and provider-backed acceptance succeed. The source-locked
+zero-input contracts constrain arguments but do not authorize execution.
