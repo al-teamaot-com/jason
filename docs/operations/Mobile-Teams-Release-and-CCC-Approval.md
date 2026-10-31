@@ -552,3 +552,14 @@ source, rotated, or granted additional scope.
 Regression coverage requires the RuntimeSettings default, governed Teams send,
 and autonomous completion sender to share the same active gateway token path and
 reject reintroduction of the legacy default.
+
+
+#### Concurrent composition workstreams
+
+The token-path alignment touches only the `RuntimeSettings` Teams proactive
+credential default. Current open branches #2177, #2178, #2125, #2128 and #2126
+also modify `composition.py` for KFS reporting, VulScan V2, routine governed
+read/write registration and Windows Time JSON shadow respectively. Those
+settings, registrations, provider/authority gates and default-off controls are
+independent and must be preserved when later integrated. The PMV3 token-path
+correction does not absorb or supersede them.
