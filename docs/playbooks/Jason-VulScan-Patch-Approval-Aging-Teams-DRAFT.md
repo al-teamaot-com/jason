@@ -198,3 +198,21 @@ The V2 modules added on this isolated branch are:
 **Current documented routes (Datto RMM API English v15.2, viewed 2026-10-30):** `GET /v2/device/{deviceUid}/policies/patch-management` and `GET /v2/site/{siteUid}/patches`. Current official English documentation supersedes an older search excerpt that temporarily showed `/device/{deviceUid}/site/patch-management`; 15.1 release notes separately contain a plural `/sites/{siteUid}/patches` spelling. The implementation uses the current English v15.2 paths in the read-only connector. Actual authorized API response shape and pagination **remain unverified** pending governed staging. Never attempt alternate paths behind the connector's permission checks.
 
 **Acceptance still required:** Provider-backed assigned-policy and site-patch reads; complete page and client/device scope; causal per-KB policy rules or device override; signed current Owner deferral/decline/negative-exception source; stale queued-message recheck; Teams recipient and delivery; parallel V1 ten-day handoff reconciliation. No readiness claim from fixtures alone.
+
+
+### Preproduction-only site inventory compatibility — 2026-10-31
+
+Where the newly documented Datto site-level patch API is not yet deployed,
+V2 can **explicitly** use the existing governed device discovery and
+per-device patch reads to build a complete, bounded site patch inventory.
+Every endpoint must be proven to belong to the exact authorized site; each
+device patch collection and the account device discovery must be complete.
+The 400-device / 6,000-patch global batch limits fail closed rather than
+reporting a partial fleet scan as complete. No direct API or credential
+fallback, patch mutation, client note or Teams send is introduced.
+
+The site aggregation does **not** provide the assigned patch policy Manual
+approval table or prove which assigned policy caused a KB to be unapproved.
+Those separate independent Datto source requirements remain mandatory for
+owner reminders. The existing ten-day ticket playbook stays operational until
+V2's full source/recipient/release acceptance and approved migration.

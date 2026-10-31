@@ -93,3 +93,45 @@ Vendor evidence: https://rmm.datto.com/help/en/Content/3NEWUI/Policies/Policies.
 - Full release still requires Datto provider-backed assigned-policy/site-patch reads, complete authenticated manual policy approval evidence, KB-specific causation, client isolation, actual owner Teams routing and receipt verification, V1/V2 coexistence and protected CI on the final merged candidate. The official API documentation is a design input, **not** production acceptance.
 
 Sources: https://rmm.datto.com/help/en/Content/0HOME/ReleaseNotes/2026/ReleaseNotesDattoRMMv15.2.0.htm ; https://rmm.datto.com/help/en/Content/2SETUP/APIv2.htm ; https://rmm.datto.com/help/en/Content/3NEWUI/Policies/Policies.htm
+
+
+## 2026-10-31: Bounded governed-device site inventory — preproduction option
+
+The new vulscan_v2_device_patch_inventory.py can construct a **read-only**
+site patch inventory from the already-active Jason governed endpoint.device.search
+and endpoint.patch.search capabilities, without invoking the newly documented
+management.site.patch.search Datto API endpoint. It explicitly requires:
+
+- an independently verified Datto site UID, client ID and site name;
+- completed Datto account discovery (discovery_complete=true,
+  match_output_bounded=false, match count and provider page/total checks),
+  with every returned device bound to that exact site UID and name;
+- complete paginated, unbounded datto_rmm.device.patches.list evidence for
+  every discovered endpoint, no mismatched device record, and no skipped pages;
+- a maximum of 400 site devices and 6,000 scanned patches per batch, with the
+  same global caps enforced across an explicitly scoped multi-site batch;
+- no omitted read failures; no extrapolated patch, client, policy or KB identity.
+  The resulting application-level proof has its own distinct type rather than
+  pretending to be the Datto management.site.patch.search provider response.
+
+Only actual NOT_APPROVED numeric Windows KB patch observations are included
+in the evidence returned to the existing V2 collector. The source is an
+**explicitly injected preproduction alternative**, never an automatic fallback.
+The existing endpoint device and policy readbacks and the independent exact
+KB-to-policy attribution/Datto Manual approval evidence remain mandatory.
+
+The existing governed Riggins site-scoped device search returned 91 matching
+device identities, discovery_complete=true, five account pages examined,
+752 account devices and no output truncation. This proves the **discovery
+shape** on one authorized site; it is NOT a full live 91-device patch scan,
+does not establish manual approval evidence, and cannot authorize a Teams send.
+
+A new source-only regression suite validates the complete-read path,
+cross-client/site rejection, count and pagination contradictions, per-device
+identity, positive/negative patch state isolation, and denial on any partial
+source. The V2 feature remains dormant.
+
+**Remaining blocker after this alternative:** The 15.2 assigned-policy
+endpoint, complete per-policy manual approval state, causal KB attribution,
+the V1 10-day ticket transition, Teams receipt, and production governance.
+The delayed Datto rollout may still block those independent requirements.

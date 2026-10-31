@@ -19,7 +19,8 @@ from .vulscan_microsoft_public_source import (
 )
 from .vulscan_v2_preproduction_workflow import VulscanV2PreproductionWorkflow
 from .vulscan_v2_site_inventory import (
-    ApprovedDattoSiteInventory, collect_vulscan_v2_scoped_inventory,
+    ApprovedDattoSiteInventory, ApprovedDattoSiteScope,
+    VerifiedDattoSitePatchCollection, collect_vulscan_v2_scoped_inventory,
 )
 
 
@@ -34,6 +35,9 @@ def build_vulscan_v2_shadow_workflow(
     # approval table for the exact client/site/device/policy/KB.
     governed_datto_manual_policy_review_read: Callable[[VerifiedPatchTarget], VerifiedDattoPolicyManualReview] | None = None,
     governed_policy_attribution_read: Callable[[str, str, str, str], VerifiedPolicyKBAttribution] | None = None,
+    # Explicit preproduction alternative using complete governed device and
+    # patch reads; no implicit fallback on missing site patch capability.
+    governed_device_site_patch_read: Callable[[ApprovedDattoSiteScope], VerifiedDattoSitePatchCollection] | None = None,
     authority_gate: Callable[[], bool] | None = None,
     microsoft_transport: BoundedOfficialMicrosoftHTTP | None = None,
     microsoft_source_clock: Callable[[], datetime] | None = None,
@@ -70,6 +74,7 @@ def build_vulscan_v2_shadow_workflow(
             site_inventory=authorized_site_inventory_read(),
             read=governed_read,
             policy_attribution_read=governed_policy_attribution_read,
+            verified_device_site_patch_read=governed_device_site_patch_read,
             now=evidence_clock(),
         ),
         patch_read=governed_read,

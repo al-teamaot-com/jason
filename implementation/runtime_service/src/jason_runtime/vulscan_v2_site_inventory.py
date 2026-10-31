@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Callable, Mapping
 
 from .vulscan_governed_patch_source import (
@@ -43,6 +43,23 @@ class ApprovedDattoSiteInventory:
     source_reference: str
 
 
+@dataclass(frozen=True, slots=True)
+class VerifiedDattoSitePatchCollection:
+    """App-level proof composed only from complete governed Datto device reads.
+
+    Not a forged management.site.patch.search provider response: callers
+    explicitly opt into this alternate read-only inventory source.
+    """
+    site_uid: str
+    client_id: str
+    patch_records: tuple[Mapping[str, Any], ...]
+    scanned_devices: int
+    scanned_patches: int
+    full_scope_verified: bool
+    observed_at: datetime
+    source_reference: str
+
+
 def _records(response: Any, *, capability: str, collection_key: str) -> tuple[Mapping[str, Any], ...]:
     if not isinstance(response, Mapping) or response.get("status") != "succeeded":
         raise VulscanPatchEvidenceError(f"governed {capability} unavailable")
@@ -74,6 +91,7 @@ def collect_vulscan_v2_scoped_inventory(
     read: Callable[[str, Mapping[str, Any]], Mapping[str, Any]],
     policy_attribution_read: Callable[[str, str, str, str], VerifiedPolicyKBAttribution] | None = None,
     now: datetime | None = None,
+    verified_device_site_patch_read: Callable[[ApprovedDattoSiteScope], VerifiedDattoSitePatchCollection] | None = None,
 ) -> VerifiedVulscanTargetInventory:
     """Only read, prove, and return exact targets. No Teams or ticket actions."""
     if (not isinstance(site_inventory, ApprovedDattoSiteInventory)
@@ -101,17 +119,44 @@ def collect_vulscan_v2_scoped_inventory(
 
     targets: dict[tuple[str, str, str, str], VerifiedPatchTarget] = {}
     processed_patches = 0
+    scanned_devices = 0
     processed_devices: set[str] = set()
 
     for site in sorted(site_inventory.sites, key=lambda s: s.site_uid):
-        site_result = read("management.site.patch.search", {
-            "resource_id": site.site_uid,
-            "completeness_requirement": "complete",
-        })
-        records = _records(
-            site_result, capability="management.site.patch.search",
-            collection_key="patches")
-        processed_patches += len(records)
+        if verified_device_site_patch_read is None:
+            site_result = read("management.site.patch.search", {
+                "resource_id": site.site_uid,
+                "completeness_requirement": "complete",
+            })
+            records = _records(
+                site_result, capability="management.site.patch.search",
+                collection_key="patches")
+            processed_patches += len(records)
+        else:
+            # Explicit opt-in only. The composed source has a distinct typed
+            # provenance contract; never masquerade it as a Datto API reply.
+            site_proof = verified_device_site_patch_read(site)
+            if (not isinstance(site_proof, VerifiedDattoSitePatchCollection)
+                    or site_proof.full_scope_verified is not True
+                    or site_proof.site_uid != site.site_uid
+                    or site_proof.client_id != site.client_id
+                    or not isinstance(site_proof.observed_at, datetime)
+                    or site_proof.observed_at.tzinfo is None
+                    or site_proof.observed_at > now
+                    or now - site_proof.observed_at > timedelta(minutes=15)
+                    or not isinstance(site_proof.source_reference, str)
+                    or not 0 < len(site_proof.source_reference.strip()) <= 250
+                    or not isinstance(site_proof.patch_records, tuple)
+                    or not 0 < site_proof.scanned_devices <= _MAX_DEVICES
+                    or not 0 <= len(site_proof.patch_records) <= site_proof.scanned_patches):
+                raise VulscanPatchEvidenceError(
+                    "complete governed device-composed site patch proof unavailable")
+            records = site_proof.patch_records
+            scanned_devices += site_proof.scanned_devices
+            processed_patches += site_proof.scanned_patches
+            if scanned_devices > _MAX_DEVICES:
+                raise VulscanPatchEvidenceError(
+                    "device-composed site scans exceed global device bound")
         if processed_patches > _MAX_PATCHES:
             raise VulscanPatchEvidenceError("site patch inventory exceeds bounded run")
 
