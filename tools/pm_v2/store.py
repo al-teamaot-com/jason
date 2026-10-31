@@ -78,6 +78,7 @@ class PMV2Store:
                     metadata_json TEXT NOT NULL,
                     lease_owner TEXT,
                     lease_until TEXT,
+                    next_eligible_at TEXT,
                     attempt_count INTEGER NOT NULL DEFAULT 0,
                     completion_percent INTEGER NOT NULL DEFAULT 0
                         CHECK (completion_percent BETWEEN 0 AND 100),
@@ -114,8 +115,29 @@ class PMV2Store:
                     checked_at TEXT NOT NULL,
                     details_json TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS validation_checks (
+                    assignment_id TEXT NOT NULL,
+                    check_name TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    evidence_json TEXT NOT NULL,
+                    checked_at TEXT NOT NULL,
+                    PRIMARY KEY(assignment_id, check_name),
+                    FOREIGN KEY(assignment_id) REFERENCES assignments(assignment_id)
+                );
+                CREATE TABLE IF NOT EXISTS nodes (
+                    node_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    capabilities_json TEXT NOT NULL,
+                    capacity_json TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL
+                );
                 """
             )
+            columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(assignments)").fetchall()
+            }
+            if "next_eligible_at" not in columns:
+                conn.execute("ALTER TABLE assignments ADD COLUMN next_eligible_at TEXT")
 
     @staticmethod
     def _row(row: sqlite3.Row) -> Assignment:
@@ -247,7 +269,7 @@ class PMV2Store:
         now = stamp.isoformat(timespec="seconds")
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            params: list[Any] = []
+            params: list[Any] = [now]
             extra = ""
             if work_type:
                 extra = " AND work_type=?"
@@ -255,7 +277,8 @@ class PMV2Store:
             row = conn.execute(
                 f"""
                 SELECT * FROM assignments
-                WHERE runnable=1 AND state IN ('queued','retry_ready') {extra}
+                WHERE runnable=1 AND state IN ('queued','retry_ready')
+                  AND (next_eligible_at IS NULL OR next_eligible_at <= ?) {extra}
                 ORDER BY priority ASC, created_at ASC LIMIT 1
                 """,
                 params,
@@ -266,7 +289,7 @@ class PMV2Store:
             conn.execute(
                 """
                 UPDATE assignments
-                SET state='running',lease_owner=?,lease_until=?,
+                SET state='running',lease_owner=?,lease_until=?,next_eligible_at=NULL,
                     attempt_count=attempt_count+1,blocked_reason=NULL,updated_at=?
                 WHERE assignment_id=? AND state=?
                 """,
@@ -285,7 +308,8 @@ class PMV2Store:
 
     def update_state(self, assignment_id: str, *, state: str, runnable: bool,
                      completion_percent: int, reason: str | None = None,
-                     payload: dict[str, Any] | None = None) -> None:
+                     payload: dict[str, Any] | None = None,
+                     next_eligible_at: str | None = None) -> None:
         if not 0 <= completion_percent <= 100:
             raise ValueError("completion_percent must be between 0 and 100")
         if state == "complete" and completion_percent != 100:
@@ -297,10 +321,11 @@ class PMV2Store:
                 """
                 UPDATE assignments
                 SET state=?,runnable=?,completion_percent=?,blocked_reason=?,
-                    lease_owner=NULL,lease_until=NULL,updated_at=?
+                    lease_owner=NULL,lease_until=NULL,next_eligible_at=?,updated_at=?
                 WHERE assignment_id=?
                 """,
-                (state, int(runnable), completion_percent, reason, stamp, assignment_id),
+                (state, int(runnable), completion_percent, reason,
+                 next_eligible_at, stamp, assignment_id),
             )
             self._event_conn(conn, assignment_id, "state_changed", {
                 "state": state, "runnable": runnable,
@@ -308,6 +333,23 @@ class PMV2Store:
                 **(payload or {}),
             })
             conn.execute("COMMIT")
+
+    def schedule_retry(self, assignment_id: str, *, completion_percent: int,
+                       reason: str, delay_seconds: int) -> None:
+        if delay_seconds < 1:
+            raise ValueError("delay_seconds must be positive")
+        due = (
+            datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)
+        ).isoformat(timespec="seconds")
+        self.update_state(
+            assignment_id,
+            state="retry_ready",
+            runnable=True,
+            completion_percent=completion_percent,
+            reason=reason,
+            next_eligible_at=due,
+            payload={"retry_due_at": due},
+        )
 
     def begin_idempotent_action(self, *, key: str, assignment_id: str, action: str) -> bool:
         stamp = utcnow()
@@ -354,6 +396,78 @@ class PMV2Store:
                 """,
                 (component, instance_id, status, utcnow(), canonical_json(details)),
             )
+
+
+    def record_validation(self, *, assignment_id: str, check_name: str,
+                          status: str, evidence: dict[str, Any]) -> None:
+        if status not in {"pass", "fail", "unknown", "pending", "not_applicable"}:
+            raise ValueError("unsupported validation status")
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO validation_checks(
+                  assignment_id,check_name,status,evidence_json,checked_at
+                ) VALUES(?,?,?,?,?)
+                ON CONFLICT(assignment_id,check_name) DO UPDATE SET
+                  status=excluded.status,evidence_json=excluded.evidence_json,
+                  checked_at=excluded.checked_at
+                """,
+                (assignment_id, check_name, status, canonical_json(evidence), utcnow()),
+            )
+
+    def validation_checks(self, assignment_id: str) -> dict[str, dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT check_name,status,evidence_json,checked_at "
+                "FROM validation_checks WHERE assignment_id=? ORDER BY check_name",
+                (assignment_id,),
+            ).fetchall()
+        return {
+            row["check_name"]: {
+                "status": row["status"],
+                "evidence": json.loads(row["evidence_json"]),
+                "checked_at": row["checked_at"],
+            }
+            for row in rows
+        }
+
+    def heartbeat_node(self, *, node_id: str, status: str,
+                       capabilities: dict[str, Any], capacity: dict[str, Any]) -> None:
+        if not node_id.strip():
+            raise ValueError("node_id must be non-empty")
+        if status not in {"healthy", "degraded", "offline", "draining"}:
+            raise ValueError("invalid node status")
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO nodes(node_id,status,capabilities_json,capacity_json,last_seen_at)
+                VALUES(?,?,?,?,?)
+                ON CONFLICT(node_id) DO UPDATE SET
+                  status=excluded.status,
+                  capabilities_json=excluded.capabilities_json,
+                  capacity_json=excluded.capacity_json,
+                  last_seen_at=excluded.last_seen_at
+                """,
+                (node_id, status, canonical_json(capabilities),
+                 canonical_json(capacity), utcnow()),
+            )
+
+    def node_snapshot(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT node_id,status,capabilities_json,capacity_json,last_seen_at "
+                "FROM nodes ORDER BY node_id"
+            ).fetchall()
+        return [
+            {
+                "node_id": row["node_id"],
+                "status": row["status"],
+                "capabilities": json.loads(row["capabilities_json"]),
+                "capacity": json.loads(row["capacity_json"]),
+                "last_seen_at": row["last_seen_at"],
+            }
+            for row in rows
+        ]
 
     def event(self, assignment_id: str | None, kind: str, payload: dict[str, Any]) -> None:
         with self.connect() as conn:

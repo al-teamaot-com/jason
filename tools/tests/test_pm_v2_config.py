@@ -20,10 +20,17 @@ class PMV2ConfigTests(unittest.TestCase):
                 "development": {
                     "enabled": True,
                     "max_concurrency": 1,
+                    "max_attempts": 2,
+                    "retry_delay_seconds": 1,
                     "command": ["true"]
                 }
             },
             "paths": {"legacy_spool": "/tmp/legacy", "release_state": "/tmp/release"},
+            "recovery": {
+                "snapshot_directory": str(root / "snapshot"),
+                "snapshot_interval_seconds": 300
+            },
+            "ownership": {"owned_todo_ids": []},
             "communications": {
                 "required_status_fields": [
                     "Status","Completed","Still required",

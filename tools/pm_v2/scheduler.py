@@ -84,9 +84,26 @@ class Scheduler:
             "release_state": str(self.config.release_state),
             "assignment_id": assignment.assignment_id,
             "source_ref": assignment.source_ref,
+            "issue_number": assignment.metadata.get("development_issue_number", ""),
         }
+        if "{issue_number}" in worker.command and (
+            type(values["issue_number"]) is not int or values["issue_number"] <= 0
+        ):
+            self.store.update_state(
+                assignment.assignment_id,
+                state="blocked",
+                runnable=False,
+                completion_percent=assignment.completion_percent,
+                reason="missing_exact_development_issue",
+            )
+            return WorkResult(
+                assignment.assignment_id, worker.name, 2, "blocked"
+            )
         command = [part.format(**values) for part in worker.command]
-        idem_key = f"pmv2:{assignment.assignment_id}:{worker.name}:{assignment.scope_hash}"
+        idem_key = (
+            f"pmv2:{assignment.assignment_id}:{worker.name}:"
+            f"{assignment.scope_hash}:attempt:{assignment.attempt_count}"
+        )
         if not self.store.begin_idempotent_action(
             key=idem_key,
             assignment_id=assignment.assignment_id,
@@ -128,20 +145,39 @@ class Scheduler:
             percent = max(assignment.completion_percent, 50)
             reason = None
         else:
-            state = "retry_ready"
-            runnable = True
             percent = assignment.completion_percent
             reason = f"worker_return_code:{code}"
+            if assignment.attempt_count >= worker.max_attempts:
+                state = "blocked"
+                runnable = False
+            else:
+                state = "retry_ready"
+                runnable = True
 
-        self.store.finish_idempotent_action(key=idem_key, result={"return_code": code, "state": state})
-        self.store.update_state(
-            assignment.assignment_id,
-            state=state,
-            runnable=runnable,
-            completion_percent=percent,
-            reason=reason,
-            payload={"worker": worker.name, "return_code": code},
+        self.store.finish_idempotent_action(
+            key=idem_key, result={"return_code": code, "state": state}
         )
+        if state == "retry_ready":
+            self.store.schedule_retry(
+                assignment.assignment_id,
+                completion_percent=percent,
+                reason=reason,
+                delay_seconds=worker.retry_delay_seconds,
+            )
+        else:
+            self.store.update_state(
+                assignment.assignment_id,
+                state=state,
+                runnable=runnable,
+                completion_percent=percent,
+                reason=reason,
+                payload={
+                    "worker": worker.name,
+                    "return_code": code,
+                    "attempt_count": assignment.attempt_count,
+                    "max_attempts": worker.max_attempts,
+                },
+            )
         return WorkResult(assignment.assignment_id, worker.name, code, state)
 
     def shutdown(self) -> None:

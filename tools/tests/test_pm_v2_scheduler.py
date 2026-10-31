@@ -25,10 +25,17 @@ class PMV2SchedulerTests(unittest.TestCase):
                 "development": {
                     "enabled": True,
                     "max_concurrency": 2,
+                    "max_attempts": 2,
+                    "retry_delay_seconds": 1,
                     "command": command or ["python3", "-c", "import time; time.sleep(0.1)"]
                 }
             },
             "paths": {"legacy_spool": "/tmp/legacy", "release_state": "/tmp/release"},
+            "recovery": {
+                "snapshot_directory": str(root / "snapshot"),
+                "snapshot_interval_seconds": 300
+            },
+            "ownership": {"owned_todo_ids": []},
             "communications": {
                 "required_status_fields": [
                     "Status","Completed","Still required",
@@ -85,5 +92,69 @@ class PMV2SchedulerTests(unittest.TestCase):
                 row = store.list_assignments()[0]
                 self.assertEqual(row.state, "validation_ready")
                 self.assertEqual(row.completion_percent, 50)
+            finally:
+                scheduler.shutdown()
+
+
+class PMV2BoundedRetryTests(unittest.TestCase):
+    def test_repeated_worker_failure_blocks_only_that_assignment(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "roadmap.md").write_text("", encoding="utf-8")
+            (root / "SUPPORT.md").write_text("", encoding="utf-8")
+            cfg = {
+                "schema_version": "1.0",
+                "instance_id": "test",
+                "poll_interval_seconds": 1,
+                "lease_seconds": 10,
+                "max_concurrent_jobs": 2,
+                "state": {"database_path": str(root / "state.sqlite3")},
+                "sources": {"roadmap_path": "roadmap.md", "support_path": "SUPPORT.md"},
+                "workers": {
+                    "development": {
+                        "enabled": True, "max_concurrency": 2,
+                        "max_attempts": 2, "retry_delay_seconds": 1,
+                        "command": ["python3", "-c", "raise SystemExit(7)"]
+                    }
+                },
+                "paths": {"legacy_spool": "/tmp/legacy", "release_state": "/tmp/release"},
+                "recovery": {
+                    "snapshot_directory": str(root / "snapshot"),
+                    "snapshot_interval_seconds": 300
+                },
+                "ownership": {"owned_todo_ids": []},
+                "communications": {
+                    "required_status_fields": [
+                        "Status","Completed","Still required",
+                        "What I'm doing next","What you need to do"
+                    ],
+                    "approval_channel": "microsoft_teams"
+                }
+            }
+            path = root / "config.json"
+            path.write_text(json.dumps(cfg), encoding="utf-8")
+            config = load_config(path, repo=root)
+            store = PMV2Store(config.database_path)
+            store.initialize()
+            for n in (1, 2):
+                store.upsert_assignment(
+                    assignment_id=f"a{n}", source="test", source_ref=str(n),
+                    title=f"job {n}", priority=n, work_type="development",
+                    runnable=True, scope_hash=f"sha256:{n}", metadata={},
+                )
+            scheduler = Scheduler(config=config, store=store, repo=root)
+            try:
+                self.assertEqual(scheduler.dispatch_available(), 2)
+                time.sleep(0.1)
+                scheduler.reap()
+                self.assertEqual({r.state for r in store.list_assignments()},
+                                 {"retry_ready"})
+                time.sleep(1.1)
+                self.assertEqual(scheduler.dispatch_available(), 2)
+                time.sleep(0.1)
+                scheduler.reap()
+                rows = store.list_assignments()
+                self.assertTrue(all(r.state == "blocked" for r in rows))
+                self.assertTrue(all(r.attempt_count == 2 for r in rows))
             finally:
                 scheduler.shutdown()

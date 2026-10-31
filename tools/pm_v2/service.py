@@ -9,8 +9,26 @@ from pathlib import Path
 from .backlog import reconcile_roadmap
 from .config import load_config
 from .health import self_test
+from .recovery import create_snapshot, verify_snapshot
+from .release_sync import reconcile_release_bridge
 from .scheduler import Scheduler
 from .store import PMV2Store
+
+
+def _existing_todo_issue_numbers(spool: Path) -> dict[str, int]:
+    path = spool / "todo-intake-state.json"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return {}
+    raw = value.get("existing_todo_issues") if isinstance(value, dict) else None
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        str(todo_id): int(number)
+        for todo_id, number in raw.items()
+        if str(number).isdigit() and int(number) > 0
+    }
 
 
 def run_service(*, repo: Path, config_path: Path, once: bool = False) -> int:
@@ -24,6 +42,7 @@ def run_service(*, repo: Path, config_path: Path, once: bool = False) -> int:
 
     scheduler = Scheduler(config=config, store=store, repo=repo)
     stopping = False
+    next_snapshot_at = 0.0
 
     def stop(*_args):
         nonlocal stopping
@@ -34,18 +53,64 @@ def run_service(*, repo: Path, config_path: Path, once: bool = False) -> int:
 
     try:
         while not stopping:
-            intake = reconcile_roadmap(store, config.roadmap_path)
+            intake = reconcile_roadmap(
+                store,
+                config.roadmap_path,
+                owned_todo_ids=config.owned_todo_ids,
+                existing_issue_numbers=_existing_todo_issue_numbers(
+                    config.legacy_spool
+                ),
+            )
+            downstream = reconcile_release_bridge(
+                store=store,
+                spool=config.legacy_spool,
+                state_root=config.release_state,
+            )
             reaped = scheduler.reap()
             dispatched = scheduler.dispatch_available()
+
+            store.heartbeat_node(
+                node_id=config.instance_id,
+                status="healthy",
+                capabilities={
+                    "scheduler": True,
+                    "durable_state": True,
+                    "release_reconciliation": True,
+                    "snapshot_recovery": True,
+                    "teams_approval_required": config.approval_channel == "microsoft_teams",
+                },
+                capacity={
+                    "max_concurrent_jobs": config.max_concurrent_jobs,
+                    "configured_workers": {
+                        worker.name: worker.max_concurrency
+                        for worker in config.workers if worker.enabled
+                    },
+                },
+            )
+
+            snapshot_status = "not_due"
+            monotonic = time.monotonic()
+            if monotonic >= next_snapshot_at:
+                manifest = create_snapshot(
+                    store=store,
+                    destination=config.snapshot_directory,
+                    config_path=config_path,
+                )
+                verify_snapshot(config.snapshot_directory)
+                next_snapshot_at = monotonic + config.snapshot_interval_seconds
+                snapshot_status = manifest["database"]["sha256"]
+
             print(json.dumps({
                 "event": "pm_v2_cycle",
                 "intake": intake,
+                "downstream": downstream,
                 "reaped": [
                     {"assignment_id": r.assignment_id, "worker": r.worker,
                      "return_code": r.return_code, "outcome": r.outcome}
                     for r in reaped
                 ],
                 "dispatched": dispatched,
+                "snapshot": snapshot_status,
             }, sort_keys=True), flush=True)
             if once:
                 break

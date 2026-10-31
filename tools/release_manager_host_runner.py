@@ -307,11 +307,17 @@ def write_owner_notification_event(
     event_type: str,
     *,
     owner_action: str = "",
+    result_status: str = "",
+    result_summary: str = "",
+    completion_percent: int | None = None,
+    rollback_verified: bool | None = None,
 ) -> None:
     allowed = {
         "production_queue_entered",
         "production_owner_action_required",
         "production_queue_completed",
+        "production_push_started",
+        "production_push_result",
     }
     if event_type not in allowed:
         raise ReleaseManagerError("unsupported owner notification event")
@@ -333,6 +339,10 @@ def write_owner_notification_event(
         "description": str(record.get("description") or "")[:300],
         "change_class": str(record.get("change_class") or ""),
         "owner_action": str(owner_action or "")[:400],
+        "result_status": str(result_status or "")[:80],
+        "result_summary": str(result_summary or "")[:500],
+        "completion_percent": completion_percent,
+        "rollback_verified": rollback_verified,
         "created_at": now(),
     }
     temp = path.with_suffix(path.suffix + ".tmp")
@@ -3261,6 +3271,13 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     require_owner_production_deployment_unfrozen(state_root)
     gate_transition(repo, state_root, record, "production")
     save_record(state_root, record)
+    # The production push START notification is a durable lifecycle event, not
+    # approval authority. Persist it before the first deployment helper runs so
+    # Teams delivery can retry independently without repeating deployment.
+    write_owner_notification_event(
+        state_root, record, "production_push_started",
+        completion_percent=0,
+    )
 
     env = deployment_env
 
@@ -3410,6 +3427,25 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         gate_transition(repo, state_root, record, "production_verified")
         gate_transition(repo, state_root, record, "closed")
         save_record(state_root, record)
+        # Production verification is now complete. Notification publication is
+        # administrative work and must never roll back a healthy release.
+        try:
+            write_owner_notification_event(
+                state_root,
+                record,
+                "production_push_result",
+                result_status="verified_success",
+                result_summary=(
+                    "Production push completed and operational verification passed."
+                ),
+                completion_percent=100,
+                rollback_verified=False,
+            )
+        except Exception:
+            record.setdefault("administrative_closeout", {}).setdefault(
+                "owner_notification", {}
+            )["pm_v2_result_event_pending"] = True
+            save_record(state_root, record)
     except Exception as error:
         rollback_env = quickbooks_rollback_environment(
             os.environ, rollback_sha=rollback_sha, prior_profile=prior_quickbooks_profile
@@ -3539,6 +3575,24 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
                     "release failure and rollback evidence before further promotion."
                 ),
             )
+        # Failure/result notification is status only. It carries no approval
+        # authority and cannot alter rollback or release state.
+        try:
+            write_owner_notification_event(
+                state_root,
+                record,
+                "production_push_result",
+                result_status=("rolled_back" if rollback_ok else "failed"),
+                result_summary=(
+                    "Production push failed; rollback was verified."
+                    if rollback_ok else
+                    "Production push failed and recovery could not be fully verified."
+                ),
+                completion_percent=100 if rollback_ok else 0,
+                rollback_verified=rollback_ok,
+            )
+        except Exception:
+            record.setdefault("failure", {})["owner_result_notification_event_pending"] = True
         save_record(state_root, record)
         raise
     else:

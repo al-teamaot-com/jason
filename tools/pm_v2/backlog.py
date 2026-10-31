@@ -52,14 +52,31 @@ def parse_roadmap(text: str) -> list[RoadmapItem]:
     return result
 
 
-def reconcile_roadmap(store: PMV2Store, path: Path) -> dict[str, int]:
+def reconcile_roadmap(
+    store: PMV2Store,
+    path: Path,
+    *,
+    owned_todo_ids: tuple[str, ...] = (),
+    existing_issue_numbers: dict[str, int] | None = None,
+) -> dict[str, int]:
     items = parse_roadmap(path.read_text(encoding="utf-8"))
+    issue_numbers = existing_issue_numbers or {}
     runnable = proposals = 0
     for item in items:
-        allowed = item.autonomous_authority
+        authorized = item.autonomous_authority
+        owned = item.item_id in owned_todo_ids
+        issue_number = issue_numbers.get(item.item_id)
+        allowed = authorized and owned and type(issue_number) is int and issue_number > 0
         runnable += int(allowed)
-        proposals += int(not allowed)
+        proposals += int(not authorized)
         scope_hash = "sha256:" + hashlib.sha256(item.section.encode("utf-8")).hexdigest()
+        reason = None
+        if not authorized:
+            reason = "not_approved_for_autonomous_engineering"
+        elif not owned:
+            reason = "owned_by_other_controller"
+        elif not issue_number:
+            reason = "awaiting_existing_governed_development_issue"
         store.upsert_assignment(
             assignment_id=f"roadmap:{item.item_id}",
             source="roadmap",
@@ -73,8 +90,10 @@ def reconcile_roadmap(store: PMV2Store, path: Path) -> dict[str, int]:
                 "priority": item.priority,
                 "status": item.status,
                 "readiness": item.readiness,
-                "authority": "owner_approved_todo" if allowed else "idea_only",
+                "authority": "owner_approved_todo" if authorized else "idea_only",
+                "controller_owner": "pm_v2" if owned else "other",
+                "development_issue_number": issue_number,
             },
-            blocked_reason=None if allowed else "not_approved_for_autonomous_engineering",
+            blocked_reason=reason,
         )
     return {"items": len(items), "runnable": runnable, "proposal_only": proposals}

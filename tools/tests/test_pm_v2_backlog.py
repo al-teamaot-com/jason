@@ -34,7 +34,12 @@ class PMV2BacklogTests(unittest.TestCase):
             roadmap.write_text(TEXT, encoding="utf-8")
             store = PMV2Store(root / "state.sqlite3")
             store.initialize()
-            summary = reconcile_roadmap(store, roadmap)
+            summary = reconcile_roadmap(
+                store,
+                roadmap,
+                owned_todo_ids=("TODO-OPS-001",),
+                existing_issue_numbers={"TODO-OPS-001": 101},
+            )
             self.assertEqual(summary["runnable"], 1)
             self.assertEqual(summary["proposal_only"], 1)
             rows = {r.source_ref: r for r in store.list_assignments()}

@@ -62,6 +62,8 @@ _ALLOWED_EVENTS = frozenset(
         "production_queue_entered",
         "production_owner_action_required",
         "production_queue_completed",
+        "production_push_started",
+        "production_push_result",
         "patch_completed",
         "deployment_completed",
         "support_item_resolved",
@@ -330,6 +332,10 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str, dict[str, Any]]:
         "evidence_summary",
         "attempt_summary",
         "owner_action",
+        "result_status",
+        "result_summary",
+        "completion_percent",
+        "rollback_verified",
     }
     unknown = set(arguments) - allowed
     if unknown:
@@ -421,12 +427,89 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str, dict[str, Any]]:
         "production_queue_entered",
         "production_owner_action_required",
         "production_queue_completed",
+        "production_push_started",
+        "production_push_result",
     }:
         work_id = _bounded(arguments.get("work_id"), "work_id", 80)
         description = _bounded(arguments.get("summary"), "summary", 400)
         candidate = _bounded(arguments.get("candidate_sha"), "candidate_sha", 40)
         if len(candidate) != 40:
             raise ValueError("candidate_sha must be exact")
+        if event == "production_push_started":
+            percent = arguments.get("completion_percent")
+            percent = 0 if type(percent) is not int else max(0, min(100, percent))
+            text = (
+                f"Jason production push started for {work_id}: {description} "
+                f"Candidate {candidate[:12]}."
+            )
+            card = _adaptive_card(
+                title="Jason production push started",
+                summary=description,
+                color="Accent",
+                facts=(
+                    ("Status", "Production push started"),
+                    ("Completed", "Preproduction and exact Teams approval are complete."),
+                    ("Still required", "Production deployment and live verification."),
+                    ("What I'm doing next", "Deploy the exact candidate and verify production."),
+                    ("What you need to do", "Nothing unless Jason reports a genuine blocker."),
+                    ("Build", work_id),
+                    ("Candidate", candidate),
+                    ("Completion", f"{percent}%"),
+                ),
+            )
+            return event, text, card
+        if event == "production_push_result":
+            status = _bounded(arguments.get("result_status"), "result_status", 80)
+            result_summary = _bounded(
+                arguments.get("result_summary") or description,
+                "result_summary", 500,
+            )
+            percent = arguments.get("completion_percent")
+            if type(percent) is not int or not 0 <= percent <= 100:
+                raise ValueError("completion_percent must be an integer from 0 to 100")
+            rollback = arguments.get("rollback_verified")
+            if rollback not in (True, False, None):
+                raise ValueError("rollback_verified must be boolean or null")
+            good = status == "verified_success"
+            text = (
+                f"Jason production push result for {work_id}: {status}. "
+                f"{result_summary} Candidate {candidate[:12]}."
+            )
+            if good:
+                completed = "Production deployment and live verification passed."
+                still_required = (
+                    "Administrative documentation/control-board closeout remains independently tracked."
+                )
+                next_action = "Continue administrative closeout and unrelated eligible work."
+                owner_need = "Nothing."
+            elif status == "rolled_back" and rollback:
+                completed = "Failed production change was rolled back and rollback was verified."
+                still_required = "Repair and revalidate the failed release before another promotion."
+                next_action = "Preserve failure evidence and continue unrelated eligible work."
+                owner_need = "Nothing unless Jason sends a specific repair request."
+            else:
+                completed = "Production failure evidence was recorded."
+                still_required = "Production recovery or verification remains unresolved."
+                next_action = "Protect healthy production and preserve the blocked release."
+                owner_need = "Assist only if Jason sends a specific recovery request."
+            card = _adaptive_card(
+                title=("Jason production verified" if good else "Jason production push result"),
+                summary=result_summary,
+                color=("Good" if good else "Attention"),
+                facts=(
+                    ("Status", status),
+                    ("Completed", completed),
+                    ("Still required", still_required),
+                    ("What I'm doing next", next_action),
+                    ("What you need to do", owner_need),
+                    ("Build", work_id),
+                    ("Candidate", candidate),
+                    ("Result", status),
+                    ("Completion", f"{percent}%"),
+                    ("Rollback verified", "Yes" if rollback else "No"),
+                ),
+            )
+            return event, text, card
         if event == "production_queue_entered":
             text = (
                 f"Jason queued {work_id} for Production: {description} "
@@ -929,6 +1012,8 @@ class ReleaseManagerOwnerNotificationMaintenance:
             "production_queue_entered",
             "production_owner_action_required",
             "production_queue_completed",
+            "production_push_started",
+            "production_push_result",
         }
         for path in sorted(events.glob("*.json"), key=lambda item: item.stat().st_mtime):
             marker = notified / path.name
@@ -988,6 +1073,13 @@ class ReleaseManagerOwnerNotificationMaintenance:
                 if not owner_action:
                     continue
                 arguments["owner_action"] = owner_action
+            if event_type == "production_push_started":
+                arguments["completion_percent"] = int(payload.get("completion_percent") or 0)
+            if event_type == "production_push_result":
+                arguments["result_status"] = str(payload.get("result_status") or "")
+                arguments["result_summary"] = str(payload.get("result_summary") or "")
+                arguments["completion_percent"] = payload.get("completion_percent")
+                arguments["rollback_verified"] = payload.get("rollback_verified")
             send_attempts += 1
             try:
                 result = self.notifier.send(event_type, **arguments)

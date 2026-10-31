@@ -15,6 +15,8 @@ class WorkerConfig:
     name: str
     enabled: bool
     max_concurrency: int
+    max_attempts: int
+    retry_delay_seconds: int
     command: tuple[str, ...]
 
 
@@ -33,6 +35,9 @@ class PMV2Config:
     workers: tuple[WorkerConfig, ...]
     required_status_fields: tuple[str, ...]
     approval_channel: str
+    snapshot_directory: Path
+    snapshot_interval_seconds: int
+    owned_todo_ids: tuple[str, ...]
 
 
 def _positive_int(value: Any, field: str, maximum: int | None = None) -> int:
@@ -62,8 +67,10 @@ def load_config(path: Path, repo: Path) -> PMV2Config:
     paths = raw.get("paths")
     comms = raw.get("communications")
     worker_map = raw.get("workers")
-    if not all(isinstance(x, dict) for x in (state, sources, paths, comms, worker_map)):
-        raise ConfigError("state, sources, paths, communications and workers must be objects")
+    recovery = raw.get("recovery")
+    ownership = raw.get("ownership")
+    if not all(isinstance(x, dict) for x in (state, sources, paths, comms, worker_map, recovery, ownership)):
+        raise ConfigError("state, sources, paths, communications, workers, recovery and ownership must be objects")
 
     db = Path(str(state.get("database_path") or ""))
     if not db.is_absolute():
@@ -86,6 +93,8 @@ def load_config(path: Path, repo: Path) -> PMV2Config:
             name=str(name),
             enabled=bool(item.get("enabled")),
             max_concurrency=_positive_int(item.get("max_concurrency"), f"workers.{name}.max_concurrency", 32),
+            max_attempts=_positive_int(item.get("max_attempts"), f"workers.{name}.max_attempts", 10),
+            retry_delay_seconds=_positive_int(item.get("retry_delay_seconds"), f"workers.{name}.retry_delay_seconds", 86400),
             command=tuple(command),
         ))
 
@@ -95,6 +104,20 @@ def load_config(path: Path, repo: Path) -> PMV2Config:
     approval_channel = str(comms.get("approval_channel") or "")
     if approval_channel != "microsoft_teams":
         raise ConfigError("PM V2 approval_channel must be microsoft_teams")
+    snapshot_directory = Path(str(recovery.get("snapshot_directory") or ""))
+    if not snapshot_directory.is_absolute():
+        raise ConfigError("recovery.snapshot_directory must be absolute")
+    snapshot_interval_seconds = _positive_int(
+        recovery.get("snapshot_interval_seconds"),
+        "recovery.snapshot_interval_seconds",
+        86400,
+    )
+    owned = ownership.get("owned_todo_ids")
+    if not isinstance(owned, list) or any(
+        not isinstance(value, str) or not value.startswith("TODO-") or not value.strip()
+        for value in owned
+    ) or len(set(owned)) != len(owned):
+        raise ConfigError("ownership.owned_todo_ids must be a unique TODO ID list")
 
     return PMV2Config(
         schema_version="1.0",
@@ -110,4 +133,7 @@ def load_config(path: Path, repo: Path) -> PMV2Config:
         workers=tuple(workers),
         required_status_fields=tuple(fields),
         approval_channel=approval_channel,
+        snapshot_directory=snapshot_directory,
+        snapshot_interval_seconds=snapshot_interval_seconds,
+        owned_todo_ids=tuple(owned),
     )
