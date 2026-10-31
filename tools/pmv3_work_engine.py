@@ -124,6 +124,8 @@ def make_item(
     priority: int = 100,
     approved: bool = True,
     dependency: str = "",
+    approval_required: bool = False,
+    approval_request_id: str = "",
 ) -> dict[str, Any]:
     now = iso(utcnow())
     return {
@@ -131,6 +133,9 @@ def make_item(
         "action": action,
         "priority": int(priority),
         "approved": bool(approved),
+        "approval_required": bool(approval_required),
+        "approval_request_id": approval_request_id,
+        "approval": None,
         "phase": "waiting" if dependency else "runnable",
         "reason": "dependency_wait" if dependency else "",
         "dependency": dependency,
@@ -264,7 +269,7 @@ def runnable_items(state: Mapping[str, Any], *, capacity: int) -> list[dict[str,
     candidates = [
         dict(item)
         for item in state["items"].values()
-        if item.get("phase") == "runnable" and bool(item.get("approved"))
+        if item.get("phase") == "runnable" and bool(item.get("approved")) and approval_satisfied(item)
     ]
     candidates.sort(key=lambda x: (int(x.get("priority") or 100), str(x.get("updated_at") or ""), str(x.get("id") or "")))
     return candidates[:slots]
