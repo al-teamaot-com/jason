@@ -5,12 +5,12 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-# Give the bounded 15-minute per-stage timeout room to log/advance all four stages.
-TimeoutStartSec=65min
+# PMV3 permits up to three bounded governed pipeline passes; each pass retains the existing 65-minute process envelope.
+TimeoutStartSec=200min
 WorkingDirectory=/home/al/.local/lib/jason/engineering-worker-source
 Environment=HOME=/home/al
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/pmv3_engineering_controller.py --repo /home/al/.local/lib/jason/engineering-worker-source --spool /var/lib/jason/openclaw/support-repair --release-state /var/lib/jason/openclaw/release-manager --max-passes 4 --unchanged-limit 2 --retry-delay 5
+ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/pmv3_engineering_controller.py --repo /home/al/.local/lib/jason/engineering-worker-source --spool /var/lib/jason/openclaw/support-repair --release-state /var/lib/jason/openclaw/release-manager --max-passes 3 --unchanged-limit 2 --retry-delay 5 --pipeline-timeout 3900
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
