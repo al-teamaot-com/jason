@@ -1,5 +1,6 @@
 """Owner-only mobile release pilot: policy, immutable intent and signed decision."""
 import json
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -329,6 +330,60 @@ def test_reviewed_v2_owner_click_records_one_receipt_without_execution(tmp_path)
     assert record.read_bytes() == before
     with pytest.raises(PermissionError):
         click(flow, req)
+
+
+def _entra_alias_case(flow, object_id, *, email="al@teamaot.com", client_id=None,
+                      binding_identity=None):
+    expected = "person-entra-" + uuid.UUID(object_id).hex
+    bound_identity = binding_identity or expected
+    binding = SimpleNamespace(
+        status="active",
+        jason_identity_id=bound_identity,
+        email_address=email,
+        microsoft_object_id=object_id,
+        client_id=client_id,
+    )
+    flow.bindings.find = lambda **kw: binding
+    flow.identities.get = lambda key: SimpleNamespace(
+        status="active", identity_id=key, organization_id="aot"
+    )
+    flow.owner_identity_email_fallbacks = {"person-al": "al@teamaot.com"}
+    flow.signed_verifier.parsed.microsoft_object_id = object_id
+    flow.signed_verifier.verify = lambda token: SimpleNamespace(
+        tenant_id="tenant-a",
+        object_id=object_id,
+        authentication_evidence_hash="f" * 64,
+    )
+    return expected
+
+
+def test_reviewed_v2_owner_alias_accepts_verified_entra_binding(tmp_path):
+    flow, req, repo, record = flow_fixture(tmp_path, reviewed=True)
+    object_id = "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
+    _entra_alias_case(flow, object_id)
+    result = click(flow, req, microsoft_object_id=object_id)
+    assert result["approval_status"] == "approved"
+    receipt = repo.accepted_decision(req.approval_id)
+    assert receipt.decided_by == "person-al"
+    assert receipt.authentication_evidence_hash == "f" * 64
+
+
+@pytest.mark.parametrize("case", ["wrong_email", "client_scoped", "wrong_derived_identity"])
+def test_reviewed_v2_owner_alias_fails_closed_on_binding_mismatch(tmp_path, case):
+    flow, req, repo, record = flow_fixture(tmp_path, reviewed=True)
+    object_id = "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
+    kwargs = {}
+    if case == "wrong_email":
+        kwargs["email"] = "someone@example.com"
+    elif case == "client_scoped":
+        kwargs["client_id"] = "client-1"
+    else:
+        kwargs["binding_identity"] = "person-entra-00000000000000000000000000000000"
+    _entra_alias_case(flow, object_id, **kwargs)
+    with pytest.raises(PermissionError, match="authorized owner"):
+        click(flow, req, microsoft_object_id=object_id)
+    assert repo.get(req.approval_id).status == ApprovalRequestStatus.PENDING
+    assert repo.accepted_decision(req.approval_id) is None
 
 
 def test_reviewed_v2_changed_policy_cannot_consume_pending_click(tmp_path):
