@@ -97,6 +97,11 @@ def run_acceptance(root: Path) -> dict[str, object]:
             status_path=paths["status"], capacity=3,
         )
         state = engine.load_state(paths["state"])
+        validation = state["items"]["VALIDATION"]
+        if validation["phase"] == "retry_wait":
+            validation_due = engine.parse_time(validation["next_attempt_at"])
+            validation["next_attempt_at"] = engine.iso(validation_due - timedelta(seconds=121))
+            engine.atomic_write(paths["state"], state)
         if engine.progress_percent(state) == 100:
             break
 
