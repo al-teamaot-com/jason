@@ -1,0 +1,167 @@
+{
+  "communications": {
+    "approval_channel": "microsoft_teams",
+    "required_status_fields": [
+      "Status",
+      "Completed",
+      "Still required",
+      "What I'm doing next",
+      "What you need to do"
+    ]
+  },
+  "components": {
+    "engineering_supervisor": {
+      "blocked_recheck_seconds": 900,
+      "command": [
+        "python3",
+        "tools/engineering_supervisor.py",
+        "--repo",
+        "{repo}",
+        "--spool",
+        "{legacy_spool}"
+      ],
+      "interval_seconds": 300,
+      "max_attempts": 2,
+      "owner": "v1",
+      "retry_delay_seconds": 60,
+      "timeout_seconds": 900
+    },
+    "release_breaker_recovery": {
+      "blocked_recheck_seconds": 900,
+      "command": [
+        "python3",
+        "tools/release_breaker_recovery_manager.py",
+        "--repo",
+        "{repo}",
+        "--spool",
+        "{legacy_spool}",
+        "--release-state",
+        "{release_state}"
+      ],
+      "interval_seconds": 300,
+      "max_attempts": 2,
+      "owner": "v1",
+      "retry_delay_seconds": 60,
+      "timeout_seconds": 900
+    },
+    "release_bridge": {
+      "blocked_recheck_seconds": 900,
+      "command": [
+        "python3",
+        "tools/todo_release_bridge.py",
+        "--repo",
+        "{repo}",
+        "--spool",
+        "{legacy_spool}",
+        "--release-state",
+        "{release_state}"
+      ],
+      "interval_seconds": 300,
+      "max_attempts": 2,
+      "owner": "v1",
+      "retry_delay_seconds": 60,
+      "timeout_seconds": 900
+    },
+    "support_repair": {
+      "blocked_recheck_seconds": 900,
+      "command": [
+        "python3",
+        "tools/support_repair_host_worker.py",
+        "--repo",
+        "{repo}",
+        "--spool",
+        "{legacy_spool}",
+        "--max-active",
+        "2"
+      ],
+      "interval_seconds": 300,
+      "max_attempts": 2,
+      "owner": "v1",
+      "retry_delay_seconds": 60,
+      "timeout_seconds": 900
+    },
+    "todo_intake": {
+      "blocked_recheck_seconds": 900,
+      "command": [
+        "python3",
+        "tools/todo_engineering_intake.py",
+        "--repo",
+        "{repo}",
+        "--spool",
+        "{legacy_spool}",
+        "--max-support-repairs",
+        "2"
+      ],
+      "interval_seconds": 300,
+      "max_attempts": 2,
+      "owner": "v1",
+      "retry_delay_seconds": 60,
+      "timeout_seconds": 900
+    }
+  },
+  "control": {
+    "request_inbox": "/var/lib/jason/openclaw/pm-v2/control-requests",
+    "result_directory": "/var/lib/jason/openclaw/pm-v2/control-results",
+    "status_snapshot_path": "/var/lib/jason/openclaw/pm-v2/status.json"
+  },
+  "instance_id": "pm-v2-local",
+  "lease_seconds": 300,
+  "max_concurrent_components": 3,
+  "max_concurrent_jobs": 3,
+  "ownership": {
+    "owned_todo_ids": []
+  },
+  "paths": {
+    "legacy_spool": "/var/lib/jason/openclaw/support-repair",
+    "release_state": "/var/lib/jason/openclaw/release-manager"
+  },
+  "poll_interval_seconds": 15,
+  "recovery": {
+    "replica_directories": [],
+    "snapshot_directory": "/var/lib/jason/pm-v2/snapshots/latest",
+    "snapshot_interval_seconds": 300
+  },
+  "resources": {
+    "cloud_spend_policy": "teams_approval_required",
+    "provider_authority_policy": "existing_governed_authority_only",
+    "subprocess_cpu_seconds": 900,
+    "subprocess_memory_mb": 8192,
+    "subprocess_open_files": 4096
+  },
+  "schema_version": "1.0",
+  "scope": {
+    "canonical_agreement_path": "docs/operations/Production-Manager-V2-Goal-Scope-and-Success-Agreement.md",
+    "canonical_agreement_sha256": "4debf8d43ce200b2f61abad8bf281bbfd6ccf313f78b8534a0e96b77098a1f0c"
+  },
+  "self_improvement": {
+    "minimum_recurrences": 2
+  },
+  "sources": {
+    "roadmap_path": "docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md",
+    "support_path": "SUPPORT.md"
+  },
+  "state": {
+    "database_path": "/var/lib/jason/pm-v2/pm-v2.sqlite3"
+  },
+  "workers": {
+    "development": {
+      "command": [
+        "python3",
+        "tools/owner_approved_development_worker.py",
+        "--repo",
+        "{repo}",
+        "--spool",
+        "{legacy_spool}",
+        "--max-active",
+        "3",
+        "--issue-number",
+        "{issue_number}"
+      ],
+      "enabled": true,
+      "max_attempts": 2,
+      "max_concurrency": 2,
+      "retry_delay_seconds": 60,
+      "timeout_seconds": 900
+    }
+  }
+}

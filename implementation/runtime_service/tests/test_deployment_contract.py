@@ -74,3 +74,25 @@ def test_runtime_compose_enables_owner_autonomous_completion_teams_notifications
 
     assert 'COMPLETION_TEAMS_PROFILE="${JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE:-person-al-v1}"' in deploy
     assert '--set-env "JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE=$COMPLETION_TEAMS_PROFILE"' in deploy
+
+
+def test_runtime_compose_keeps_pm_v2_control_dormant_by_default():
+    compose = (_repo_root() / "infrastructure/jason-runtime/compose.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "JASON_PM_V2_CONTROL_PROFILE: ${JASON_PM_V2_CONTROL_PROFILE:-}" in compose
+    assert (
+        "JASON_PM_V2_SHARED_ROOT: "
+        "${JASON_PM_V2_SHARED_ROOT:-/var/lib/jason/openclaw/pm-v2}"
+    ) in compose
+    assert "JASON_PM_V2_CONTROL_PROFILE:-owner-teams-v1" not in compose
+
+
+def test_production_deploy_preserves_pm_v2_profile_without_activating_it():
+    deploy = (
+        _repo_root() / "infrastructure/jason-runtime/production-deploy.sh"
+    ).read_text(encoding="utf-8")
+    assert 'if [ "${JASON_PM_V2_CONTROL_PROFILE+x}" = "x" ]; then' in deploy
+    assert "sed -n 's/^JASON_PM_V2_CONTROL_PROFILE=//p'" in deploy
+    assert '--set-env "JASON_PM_V2_CONTROL_PROFILE=$PM_V2_CONTROL_PROFILE"' in deploy
+    assert '--set-env "JASON_PM_V2_SHARED_ROOT=$PM_V2_SHARED_ROOT"' in deploy

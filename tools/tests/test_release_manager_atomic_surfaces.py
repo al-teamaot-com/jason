@@ -242,9 +242,17 @@ def test_atomic_deploy_updates_runtime_mcp_host_and_release_manager_before_close
         assert result["state"] == "closed"
         assert "failure" not in result
         breaker.assert_not_called()
-        # Administrative integrations do not execute within live promotion.
+        # Administrative publication still does not execute within live
+        # promotion. Production lifecycle notifications are durable status
+        # events and are intentionally emitted independently of publication.
         published.assert_not_called()
-        notified.assert_not_called()
+        assert [
+            call.args[2] for call in notified.call_args_list
+        ] == ["production_push_started", "production_push_result"]
+        assert (
+            notified.call_args_list[-1].kwargs["result_status"]
+            == "verified_success"
+        )
         assert result["administrative_closeout"]["needs_retry"] is True
         assert result["administrative_closeout"]["documentation_control_board"]["status"] == "pending"
         assert result["administrative_closeout"]["owner_notification"]["status"] == "pending"

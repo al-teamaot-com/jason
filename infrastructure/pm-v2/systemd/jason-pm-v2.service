@@ -1,0 +1,22 @@
+[Unit]
+Description=Project Jason Production Manager V2
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=al
+WorkingDirectory=/opt/jason/pm-v2/current
+Environment=PYTHONPATH=/opt/jason/pm-v2/current/tools
+ExecStart=/usr/bin/python3 -m pm_v2.service --repo /opt/jason/pm-v2/current --config /etc/jason/pm-v2.json
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/jason/pm-v2 /var/lib/jason/openclaw
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

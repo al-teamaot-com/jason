@@ -295,6 +295,12 @@ from .teams_message_send import (
     build_invoker as build_teams_message_send_invoker,
     register_foundation as register_teams_message_send_foundation,
 )
+from .pm_v2_runtime import (
+    PM_V2_CONTROL,
+    PM_V2_STATUS,
+    build_pm_v2_runtime_invoker,
+    register_pm_v2_runtime_foundation,
+)
 from .procurement_web_read import (
     CAPABILITY as PROCUREMENT_WEB_PRODUCT_READ,
     PROFILE as PROCUREMENT_WEB_READ_PROFILE,
@@ -1539,6 +1545,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     register_teams_message_send_foundation(
         capabilities=capabilities, providers=providers, now=now,
     )
+    register_pm_v2_runtime_foundation(
+        capabilities=capabilities, providers=providers, now=now,
+    )
     register_procurement_web_read_foundation(
         capabilities=capabilities, providers=providers, now=now,
     )
@@ -2126,6 +2135,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         invoker=datto_powershell_read_invoker,
     )
     invokers.register(TEAMS_MESSAGE_SEND, build_teams_message_send_invoker())
+    pm_v2_invoker = build_pm_v2_runtime_invoker()
+    invokers.register(PM_V2_STATUS, pm_v2_invoker)
+    invokers.register(PM_V2_CONTROL, pm_v2_invoker)
     invokers.register(
         PROCUREMENT_WEB_PRODUCT_READ,
         build_procurement_web_read_invoker(),

@@ -709,3 +709,45 @@ def test_owner_notification_failure_has_durable_backoff_and_eventual_success(tmp
     now[0] = datetime(2026, 10, 29, 16, 9, tzinfo=timezone.utc)
     assert maint.tick() is False
     assert len(notifier.calls) == 2
+
+
+def test_pm_v2_production_push_start_and_result_render_exact_lifecycle():
+    sha = "c" * 40
+    event, text, card = _render({
+        "event_type": "production_push_started",
+        "work_id": "release-" + sha[:16],
+        "summary": "Deploy governed PM V2 candidate",
+        "candidate_sha": sha,
+        "completion_percent": 0,
+    })
+    assert event == "production_push_started"
+    assert "started" in text.casefold()
+    facts = {x["title"]: x["value"] for x in card["body"][-1]["facts"]}
+    assert facts["Candidate"] == sha
+    assert facts["Completion"] == "0%"
+    for required in (
+        "Status", "Completed", "Still required",
+        "What I'm doing next", "What you need to do",
+    ):
+        assert required in facts
+
+    event, text, card = _render({
+        "event_type": "production_push_result",
+        "work_id": "release-" + sha[:16],
+        "summary": "Deploy governed PM V2 candidate",
+        "candidate_sha": sha,
+        "result_status": "verified_success",
+        "result_summary": "Production verification passed.",
+        "completion_percent": 100,
+        "rollback_verified": False,
+    })
+    assert event == "production_push_result"
+    assert "verified_success" in text
+    facts = {x["title"]: x["value"] for x in card["body"][-1]["facts"]}
+    assert facts["Result"] == "verified_success"
+    assert facts["Completion"] == "100%"
+    for required in (
+        "Status", "Completed", "Still required",
+        "What I'm doing next", "What you need to do",
+    ):
+        assert required in facts
