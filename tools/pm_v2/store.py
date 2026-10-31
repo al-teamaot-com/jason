@@ -79,6 +79,8 @@ class PMV2Store:
                     lease_owner TEXT,
                     lease_until TEXT,
                     next_eligible_at TEXT,
+                    paused_from_state TEXT,
+                    paused_from_runnable INTEGER,
                     attempt_count INTEGER NOT NULL DEFAULT 0,
                     completion_percent INTEGER NOT NULL DEFAULT 0
                         CHECK (completion_percent BETWEEN 0 AND 100),
@@ -131,6 +133,19 @@ class PMV2Store:
                     capacity_json TEXT NOT NULL,
                     last_seen_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS component_runs (
+                    component TEXT PRIMARY KEY,
+                    owner TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    next_due_at TEXT,
+                    lease_owner TEXT,
+                    lease_until TEXT,
+                    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+                    last_return_code INTEGER,
+                    last_started_at TEXT,
+                    last_finished_at TEXT,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             columns = {
@@ -138,6 +153,10 @@ class PMV2Store:
             }
             if "next_eligible_at" not in columns:
                 conn.execute("ALTER TABLE assignments ADD COLUMN next_eligible_at TEXT")
+            if "paused_from_state" not in columns:
+                conn.execute("ALTER TABLE assignments ADD COLUMN paused_from_state TEXT")
+            if "paused_from_runnable" not in columns:
+                conn.execute("ALTER TABLE assignments ADD COLUMN paused_from_runnable INTEGER")
 
     @staticmethod
     def _row(row: sqlite3.Row) -> Assignment:
@@ -222,6 +241,143 @@ class PMV2Store:
             conn.execute("COMMIT")
         assert row is not None
         return self._row(row)
+
+    def get_assignment(self, assignment_id: str) -> Assignment | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM assignments WHERE assignment_id=?",
+                (assignment_id,),
+            ).fetchone()
+        return self._row(row) if row is not None else None
+
+    def apply_owner_control(
+        self,
+        *,
+        assignment_id: str,
+        action: str,
+        principal_id: str,
+        request_id: str,
+        priority: int | None = None,
+    ) -> dict[str, Any]:
+        action = action.strip().casefold()
+        if action not in {"priority", "pause", "resume", "cancel"}:
+            raise ValueError("unsupported PM V2 control action")
+        if not principal_id.strip() or not request_id.strip():
+            raise ValueError("control principal and request ID are required")
+        stamp = utcnow()
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM assignments WHERE assignment_id=?",
+                (assignment_id,),
+            ).fetchone()
+            if row is None:
+                conn.execute("ROLLBACK")
+                raise LookupError("PM_V2_ASSIGNMENT_NOT_FOUND")
+            current = str(row["state"])
+            if action == "priority":
+                if type(priority) is not int or not 0 <= priority <= 99:
+                    conn.execute("ROLLBACK")
+                    raise ValueError("priority must be an integer from 0 to 99")
+                if current in TERMINAL_STATES:
+                    conn.execute("ROLLBACK")
+                    raise ValueError("terminal assignment priority cannot change")
+                conn.execute(
+                    "UPDATE assignments SET priority=?,updated_at=? WHERE assignment_id=?",
+                    (priority, stamp, assignment_id),
+                )
+                result_state = current
+            elif action == "pause":
+                if current in TERMINAL_STATES or current == "cancel_requested":
+                    conn.execute("ROLLBACK")
+                    raise ValueError("assignment cannot be paused in current state")
+                if current in {"paused", "pause_requested"}:
+                    result_state = current
+                elif current == "running":
+                    conn.execute(
+                        """
+                        UPDATE assignments
+                        SET state='pause_requested',runnable=0,
+                            paused_from_state='running',paused_from_runnable=0,
+                            blocked_reason='owner_pause_requested',updated_at=?
+                        WHERE assignment_id=?
+                        """,
+                        (stamp, assignment_id),
+                    )
+                    result_state = "pause_requested"
+                else:
+                    conn.execute(
+                        """
+                        UPDATE assignments
+                        SET state='paused',runnable=0,paused_from_state=?,
+                            paused_from_runnable=?,blocked_reason='paused_by_owner',
+                            lease_owner=NULL,lease_until=NULL,updated_at=?
+                        WHERE assignment_id=?
+                        """,
+                        (current, int(row["runnable"]), stamp, assignment_id),
+                    )
+                    result_state = "paused"
+            elif action == "resume":
+                if current != "paused":
+                    conn.execute("ROLLBACK")
+                    raise ValueError("only a paused assignment can be resumed")
+                previous = str(row["paused_from_state"] or "queued")
+                if previous in {"running", "pause_requested", "cancel_requested"}:
+                    previous = "retry_ready"
+                runnable = bool(row["paused_from_runnable"])
+                if previous in {"queued", "retry_ready"}:
+                    runnable = True
+                conn.execute(
+                    """
+                    UPDATE assignments
+                    SET state=?,runnable=?,paused_from_state=NULL,
+                        paused_from_runnable=NULL,blocked_reason=NULL,
+                        next_eligible_at=NULL,updated_at=?
+                    WHERE assignment_id=?
+                    """,
+                    (previous, int(runnable), stamp, assignment_id),
+                )
+                result_state = previous
+            else:
+                if current in TERMINAL_STATES:
+                    result_state = current
+                elif current in {"running", "pause_requested"}:
+                    conn.execute(
+                        """
+                        UPDATE assignments
+                        SET state='cancel_requested',runnable=0,
+                            blocked_reason='owner_cancel_requested',updated_at=?
+                        WHERE assignment_id=?
+                        """,
+                        (stamp, assignment_id),
+                    )
+                    result_state = "cancel_requested"
+                else:
+                    conn.execute(
+                        """
+                        UPDATE assignments
+                        SET state='cancelled',runnable=0,
+                            lease_owner=NULL,lease_until=NULL,next_eligible_at=NULL,
+                            blocked_reason='cancelled_by_owner',updated_at=?
+                        WHERE assignment_id=?
+                        """,
+                        (stamp, assignment_id),
+                    )
+                    result_state = "cancelled"
+            self._event_conn(conn, assignment_id, "owner_control_applied", {
+                "action": action,
+                "principal_id": principal_id,
+                "request_id": request_id,
+                "priority": priority,
+                "result_state": result_state,
+            })
+            conn.execute("COMMIT")
+        return {
+            "assignment_id": assignment_id,
+            "action": action,
+            "state": result_state,
+            "priority": priority,
+        }
 
     def list_assignments(self, states: tuple[str, ...] | None = None) -> list[Assignment]:
         with self.connect() as conn:
@@ -397,6 +553,93 @@ class PMV2Store:
                 (component, instance_id, status, utcnow(), canonical_json(details)),
             )
 
+
+    def register_component(self, *, component: str, owner: str) -> None:
+        stamp = utcnow()
+        initial = "external_v1" if owner == "v1" else "ready"
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT owner,state FROM component_runs WHERE component=?",
+                (component,),
+            ).fetchone()
+            if row is None:
+                conn.execute(
+                    """
+                    INSERT INTO component_runs(
+                      component,owner,state,next_due_at,updated_at
+                    ) VALUES(?,?,?,?,?)
+                    """,
+                    (component, owner, initial, stamp if owner == "pm_v2" else None, stamp),
+                )
+            elif row["owner"] != owner:
+                conn.execute(
+                    """
+                    UPDATE component_runs
+                    SET owner=?,state=?,next_due_at=?,lease_owner=NULL,
+                        lease_until=NULL,consecutive_failures=0,updated_at=?
+                    WHERE component=?
+                    """,
+                    (owner, initial, stamp if owner == "pm_v2" else None, stamp, component),
+                )
+                self._event_conn(conn, None, "component_owner_changed", {
+                    "component": component, "owner": owner,
+                })
+
+    def claim_due_component(self, *, component: str, instance_id: str,
+                            lease_seconds: int) -> bool:
+        now_dt = datetime.now(timezone.utc)
+        stamp = now_dt.isoformat(timespec="seconds")
+        lease_until = (now_dt + timedelta(seconds=lease_seconds)).isoformat(timespec="seconds")
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM component_runs WHERE component=?",
+                (component,),
+            ).fetchone()
+            if row is None or row["owner"] != "pm_v2":
+                conn.execute("COMMIT")
+                return False
+            if row["state"] == "running" and row["lease_until"] and row["lease_until"] >= stamp:
+                conn.execute("COMMIT")
+                return False
+            if row["next_due_at"] and row["next_due_at"] > stamp:
+                conn.execute("COMMIT")
+                return False
+            conn.execute(
+                """
+                UPDATE component_runs
+                SET state='running',lease_owner=?,lease_until=?,last_started_at=?,
+                    updated_at=?
+                WHERE component=?
+                """,
+                (instance_id, lease_until, stamp, stamp, component),
+            )
+            conn.execute("COMMIT")
+            return True
+
+    def finish_component(self, *, component: str, return_code: int,
+                         next_due_at: str, state: str,
+                         consecutive_failures: int) -> None:
+        stamp = utcnow()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                UPDATE component_runs
+                SET state=?,next_due_at=?,lease_owner=NULL,lease_until=NULL,
+                    consecutive_failures=?,last_return_code=?,
+                    last_finished_at=?,updated_at=?
+                WHERE component=?
+                """,
+                (state, next_due_at, consecutive_failures, return_code,
+                 stamp, stamp, component),
+            )
+
+    def component_snapshot(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM component_runs ORDER BY component"
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def record_validation(self, *, assignment_id: str, check_name: str,
                           status: str, evidence: dict[str, Any]) -> None:

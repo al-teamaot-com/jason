@@ -14,6 +14,8 @@ class PMV2ConfigTests(unittest.TestCase):
             "poll_interval_seconds": 15,
             "lease_seconds": 300,
             "max_concurrent_jobs": 1,
+            "max_concurrent_components": 1,
+            "components": {},
             "state": {"database_path": str(root / "x.sqlite3")},
             "sources": {"roadmap_path": "roadmap.md", "support_path": "SUPPORT.md"},
             "workers": {
@@ -31,6 +33,11 @@ class PMV2ConfigTests(unittest.TestCase):
                 "snapshot_interval_seconds": 300
             },
             "ownership": {"owned_todo_ids": []},
+            "control": {
+                "status_snapshot_path": str(root / "control" / "status.json"),
+                "request_inbox": str(root / "control" / "requests"),
+                "result_directory": str(root / "control" / "results")
+            },
             "communications": {
                 "required_status_fields": [
                     "Status","Completed","Still required",

@@ -139,6 +139,35 @@ class Scheduler:
         except OSError:
             code = 126
 
+        current = self.store.get_assignment(assignment.assignment_id)
+        requested_state = current.state if current is not None else ""
+        if requested_state == "cancel_requested":
+            self.store.finish_idempotent_action(
+                key=idem_key, result={"return_code": code, "state": "cancelled"}
+            )
+            self.store.update_state(
+                assignment.assignment_id,
+                state="cancelled",
+                runnable=False,
+                completion_percent=assignment.completion_percent,
+                reason="cancelled_by_owner_after_bounded_worker_return",
+                payload={"worker": worker.name, "return_code": code},
+            )
+            return WorkResult(assignment.assignment_id, worker.name, code, "cancelled")
+        if requested_state == "pause_requested":
+            self.store.finish_idempotent_action(
+                key=idem_key, result={"return_code": code, "state": "paused"}
+            )
+            self.store.update_state(
+                assignment.assignment_id,
+                state="paused",
+                runnable=False,
+                completion_percent=assignment.completion_percent,
+                reason="paused_by_owner_after_bounded_worker_return",
+                payload={"worker": worker.name, "return_code": code},
+            )
+            return WorkResult(assignment.assignment_id, worker.name, code, "paused")
+
         if code == 0:
             state = "validation_ready"
             runnable = False

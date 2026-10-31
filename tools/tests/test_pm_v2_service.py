@@ -38,6 +38,8 @@ class PMV2ServiceTests(unittest.TestCase):
                 "poll_interval_seconds": 1,
                 "lease_seconds": 10,
                 "max_concurrent_jobs": 1,
+            "max_concurrent_components": 1,
+            "components": {},
                 "state": {"database_path": str(root / "state.sqlite3")},
                 "sources": {
                     "roadmap_path": "docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md",
@@ -53,6 +55,11 @@ class PMV2ServiceTests(unittest.TestCase):
                     "snapshot_interval_seconds": 60
                 },
                 "ownership": {"owned_todo_ids": []},
+                "control": {
+                    "status_snapshot_path": str(root / "control" / "status.json"),
+                    "request_inbox": str(root / "control" / "requests"),
+                    "result_directory": str(root / "control" / "results")
+                },
                 "communications": {
                     "required_status_fields": [
                         "Status", "Completed", "Still required",

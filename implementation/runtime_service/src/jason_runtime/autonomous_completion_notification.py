@@ -357,7 +357,15 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str, dict[str, Any]]:
                 title="Jason work started",
                 summary=summary,
                 color="Accent",
-                facts=(("Work item", work_id), ("Scope", title)),
+                facts=(
+                    ("Status", "Work started"),
+                    ("Completed", "Approved work was accepted and execution started."),
+                    ("Still required", summary),
+                    ("What I'm doing next", "Continue the approved work until verified or genuinely blocked."),
+                    ("What you need to do", "Nothing unless Jason sends a specific action request."),
+                    ("Work item", work_id),
+                    ("Scope", title),
+                ),
             )
             return event, text, card
         if event == "ticket_status_updated":
@@ -375,7 +383,15 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str, dict[str, Any]]:
                 title="Jason work verified",
                 summary=summary,
                 color="Good",
-                facts=(("Work item", work_id), ("Scope", title)),
+                facts=(
+                    ("Status", "Work milestone verified"),
+                    ("Completed", summary),
+                    ("Still required", "Any separately governed downstream release or acceptance remains independently tracked."),
+                    ("What I'm doing next", "Continue the next eligible approved work."),
+                    ("What you need to do", "Nothing unless Jason sends a specific action request."),
+                    ("Work item", work_id),
+                    ("Scope", title),
+                ),
             )
             return event, text, card
         owner_action = str(arguments.get("owner_action") or "").strip()
@@ -384,7 +400,15 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str, dict[str, Any]]:
         text = f"Jason blocked on {work_id}: {title}. {summary}"
         if owner_action:
             text += f" Owner action: {owner_action}."
-        facts = [("Work item", work_id), ("Scope", title)]
+        facts = [
+            ("Status", "Blocked"),
+            ("Completed", "Progress and blocker evidence were preserved."),
+            ("Still required", summary),
+            ("What I'm doing next", "Recheck this blocker while unrelated eligible work continues."),
+            ("What you need to do", owner_action or "Nothing unless Jason sends a specific action request."),
+            ("Work item", work_id),
+            ("Scope", title),
+        ]
         if owner_action:
             facts.append(("Owner action", owner_action))
         card = _adaptive_card(

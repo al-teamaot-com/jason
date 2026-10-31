@@ -9,8 +9,104 @@
       "What you need to do"
     ]
   },
+  "components": {
+    "engineering_supervisor": {
+      "blocked_recheck_seconds": 900,
+      "command": [
+        "python3",
+        "tools/engineering_supervisor.py",
+        "--repo",
+        "{repo}",
+        "--spool",
+        "{legacy_spool}"
+      ],
+      "interval_seconds": 300,
+      "max_attempts": 2,
+      "owner": "v1",
+      "retry_delay_seconds": 60,
+      "timeout_seconds": 900
+    },
+    "release_breaker_recovery": {
+      "blocked_recheck_seconds": 900,
+      "command": [
+        "python3",
+        "tools/release_breaker_recovery_manager.py",
+        "--repo",
+        "{repo}",
+        "--spool",
+        "{legacy_spool}",
+        "--release-state",
+        "{release_state}"
+      ],
+      "interval_seconds": 300,
+      "max_attempts": 2,
+      "owner": "v1",
+      "retry_delay_seconds": 60,
+      "timeout_seconds": 900
+    },
+    "release_bridge": {
+      "blocked_recheck_seconds": 900,
+      "command": [
+        "python3",
+        "tools/todo_release_bridge.py",
+        "--repo",
+        "{repo}",
+        "--spool",
+        "{legacy_spool}",
+        "--release-state",
+        "{release_state}"
+      ],
+      "interval_seconds": 300,
+      "max_attempts": 2,
+      "owner": "v1",
+      "retry_delay_seconds": 60,
+      "timeout_seconds": 900
+    },
+    "support_repair": {
+      "blocked_recheck_seconds": 900,
+      "command": [
+        "python3",
+        "tools/support_repair_host_worker.py",
+        "--repo",
+        "{repo}",
+        "--spool",
+        "{legacy_spool}",
+        "--max-active",
+        "2"
+      ],
+      "interval_seconds": 300,
+      "max_attempts": 2,
+      "owner": "v1",
+      "retry_delay_seconds": 60,
+      "timeout_seconds": 900
+    },
+    "todo_intake": {
+      "blocked_recheck_seconds": 900,
+      "command": [
+        "python3",
+        "tools/todo_engineering_intake.py",
+        "--repo",
+        "{repo}",
+        "--spool",
+        "{legacy_spool}",
+        "--max-support-repairs",
+        "2"
+      ],
+      "interval_seconds": 300,
+      "max_attempts": 2,
+      "owner": "v1",
+      "retry_delay_seconds": 60,
+      "timeout_seconds": 900
+    }
+  },
+  "control": {
+    "request_inbox": "/var/lib/jason/openclaw/pm-v2/control-requests",
+    "result_directory": "/var/lib/jason/openclaw/pm-v2/control-results",
+    "status_snapshot_path": "/var/lib/jason/openclaw/pm-v2/status.json"
+  },
   "instance_id": "pm-v2-local",
   "lease_seconds": 300,
+  "max_concurrent_components": 3,
   "max_concurrent_jobs": 3,
   "ownership": {
     "owned_todo_ids": []
@@ -49,38 +145,6 @@
       "enabled": true,
       "max_attempts": 2,
       "max_concurrency": 2,
-      "retry_delay_seconds": 60
-    },
-    "release_bridge": {
-      "command": [
-        "python3",
-        "tools/todo_release_bridge.py",
-        "--repo",
-        "{repo}",
-        "--spool",
-        "{legacy_spool}",
-        "--release-state",
-        "{release_state}"
-      ],
-      "enabled": false,
-      "max_attempts": 2,
-      "max_concurrency": 1,
-      "retry_delay_seconds": 60
-    },
-    "support_repair": {
-      "command": [
-        "python3",
-        "tools/support_repair_host_worker.py",
-        "--repo",
-        "{repo}",
-        "--spool",
-        "{legacy_spool}",
-        "--max-active",
-        "2"
-      ],
-      "enabled": false,
-      "max_attempts": 2,
-      "max_concurrency": 1,
       "retry_delay_seconds": 60
     }
   }

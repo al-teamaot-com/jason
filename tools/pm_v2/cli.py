@@ -21,6 +21,7 @@ def main() -> int:
     sub.add_parser("sync")
     sub.add_parser("snapshot")
     sub.add_parser("verify-snapshot")
+    sub.add_parser("component-status")
     restore = sub.add_parser("restore-snapshot")
     restore.add_argument("--destination-config", type=Path, required=True)
     status = sub.add_parser("status")
@@ -64,6 +65,9 @@ def main() -> int:
             indent=2,
             sort_keys=True,
         ))
+        return 0
+    if args.command == "component-status":
+        print(json.dumps(store.component_snapshot(), indent=2, sort_keys=True))
         return 0
     if args.command == "restore-snapshot":
         result = restore_snapshot(

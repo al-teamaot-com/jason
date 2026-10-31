@@ -7,7 +7,9 @@ import time
 from pathlib import Path
 
 from .backlog import reconcile_roadmap
+from .components import ComponentRunner
 from .config import load_config
+from .control import consume_control_requests, publish_status_snapshot
 from .health import self_test
 from .recovery import create_snapshot, verify_snapshot
 from .release_sync import reconcile_release_bridge
@@ -41,6 +43,7 @@ def run_service(*, repo: Path, config_path: Path, once: bool = False) -> int:
         return 2
 
     scheduler = Scheduler(config=config, store=store, repo=repo)
+    components = ComponentRunner(config=config, store=store, repo=repo)
     stopping = False
     next_snapshot_at = 0.0
 
@@ -53,6 +56,11 @@ def run_service(*, repo: Path, config_path: Path, once: bool = False) -> int:
 
     try:
         while not stopping:
+            controls = consume_control_requests(
+                store=store,
+                inbox=config.control_request_inbox,
+                results=config.control_result_directory,
+            )
             intake = reconcile_roadmap(
                 store,
                 config.roadmap_path,
@@ -67,7 +75,9 @@ def run_service(*, repo: Path, config_path: Path, once: bool = False) -> int:
                 state_root=config.release_state,
             )
             reaped = scheduler.reap()
+            component_reaped = components.reap()
             dispatched = scheduler.dispatch_available()
+            component_dispatched = components.dispatch_due()
 
             store.heartbeat_node(
                 node_id=config.instance_id,
@@ -77,6 +87,7 @@ def run_service(*, repo: Path, config_path: Path, once: bool = False) -> int:
                     "durable_state": True,
                     "release_reconciliation": True,
                     "snapshot_recovery": True,
+                    "parallel_components": True,
                     "teams_approval_required": config.approval_channel == "microsoft_teams",
                 },
                 capacity={
@@ -85,9 +96,18 @@ def run_service(*, repo: Path, config_path: Path, once: bool = False) -> int:
                         worker.name: worker.max_concurrency
                         for worker in config.workers if worker.enabled
                     },
+                    "max_concurrent_components": config.max_concurrent_components,
+                    "component_owners": {
+                        component.name: component.owner
+                        for component in config.components
+                    },
                 },
             )
 
+            status_snapshot = publish_status_snapshot(
+                store=store,
+                path=config.status_snapshot_path,
+            )
             snapshot_status = "not_due"
             monotonic = time.monotonic()
             if monotonic >= next_snapshot_at:
@@ -102,6 +122,7 @@ def run_service(*, repo: Path, config_path: Path, once: bool = False) -> int:
 
             print(json.dumps({
                 "event": "pm_v2_cycle",
+                "controls": controls,
                 "intake": intake,
                 "downstream": downstream,
                 "reaped": [
@@ -110,13 +131,21 @@ def run_service(*, repo: Path, config_path: Path, once: bool = False) -> int:
                     for r in reaped
                 ],
                 "dispatched": dispatched,
+                "component_reaped": [
+                    {"component": r.component, "return_code": r.return_code,
+                     "state": r.state}
+                    for r in component_reaped
+                ],
+                "component_dispatched": component_dispatched,
                 "snapshot": snapshot_status,
+                "status_snapshot_generated_at": status_snapshot["generated_at"],
             }, sort_keys=True), flush=True)
             if once:
                 break
             time.sleep(config.poll_interval_seconds)
     finally:
         scheduler.shutdown()
+        components.shutdown()
     return 0
 
 

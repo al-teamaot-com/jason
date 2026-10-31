@@ -5,6 +5,16 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMAGE="${JASON_RUNTIME_PRODUCTION_IMAGE:-jason-runtime:production}"
 REVISION="${JASON_SOURCE_REVISION_OVERRIDE:-}"
 COMPLETION_TEAMS_PROFILE="${JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE:-person-al-v1}"
+if [ "${JASON_PM_V2_CONTROL_PROFILE+x}" = "x" ]; then
+  PM_V2_CONTROL_PROFILE="$JASON_PM_V2_CONTROL_PROFILE"
+else
+  PM_V2_CONTROL_PROFILE="$(
+    docker inspect jason-runtime --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null |
+      sed -n 's/^JASON_PM_V2_CONTROL_PROFILE=//p' |
+      tail -n 1
+  )"
+fi
+PM_V2_SHARED_ROOT="${JASON_PM_V2_SHARED_ROOT:-/var/lib/jason/openclaw/pm-v2}"
 if [ "${JASON_QUICKBOOKS_READ_PROFILE+x}" = "x" ]; then
   QUICKBOOKS_READ_PROFILE="$JASON_QUICKBOOKS_READ_PROFILE"
 else
@@ -142,7 +152,7 @@ exec python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-runtime 
   --set-env "JASON_OWNER_UAT_MODE=$OWNER_UAT_MODE" \
   --set-env "JASON_OWNER_UAT_WORKER_ENABLED=$OWNER_UAT_WORKER" \
   --set-env "JASON_OWNER_UAT_SESSION_ID=$OWNER_UAT_SESSION" \
-  --set-env "JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE=$COMPLETION_TEAMS_PROFILE" \
+  --set-env "JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE=$COMPLETION_TEAMS_PROFILE"   --set-env "JASON_PM_V2_CONTROL_PROFILE=$PM_V2_CONTROL_PROFILE"   --set-env "JASON_PM_V2_SHARED_ROOT=$PM_V2_SHARED_ROOT" \
   --set-env "JASON_QUICKBOOKS_OPENBAO_ROLE_ID_PATH=$QBO_MOUNT_BASE/role_id" \
   --set-env "JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH=$QBO_MOUNT_BASE/secret_id" \
   --set-env "JASON_QUICKBOOKS_OAUTH_DB=$QBO_DB" \
