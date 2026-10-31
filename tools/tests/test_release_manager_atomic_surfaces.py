@@ -128,6 +128,21 @@ def atomic_release_sandbox(monkeypatch, tmp_path):
     }) + "\n", encoding="utf-8")
     live_policy.chmod(0o600)
     monkeypatch.setattr(runner, "MOBILE_APPROVAL_POLICY", live_policy)
+    # Atomic transaction tests must never depend on a host Docker daemon.
+    # Individual tests can still override this baseline read when simulating
+    # candidate/rollback transitions.
+    monkeypatch.setattr(
+        runner, "live_runtime",
+        lambda: {
+            "revision": SHA_B,
+            "image_id": BASELINE_RUNTIME_IMAGE,
+            "inspect": {
+                "Config": {
+                    "Env": ["JASON_RELEASE_MOBILE_APPROVAL_MODE=owner_only_pilot"]
+                }
+            },
+        },
+    )
     monkeypatch.setattr(
         runner, "live_release_mobile_approval_mode",
         lambda runtime: (
