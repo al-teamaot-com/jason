@@ -66,6 +66,8 @@ class PMV2Config:
     subprocess_open_files: int
     cloud_spend_policy: str
     provider_authority_policy: str
+    production_drift_readback_path: Path | None
+    production_drift_maximum_age_seconds: int
 
 
 def _positive_int(value: Any, field: str, maximum: int | None = None) -> int:
@@ -224,6 +226,19 @@ def load_config(path: Path, repo: Path) -> PMV2Config:
             raise ConfigError("canonical PM V2 agreement hash mismatch")
         canonical_agreement_sha256 = expected
 
+    production_safety = raw.get("production_safety") or {}
+    if not isinstance(production_safety, dict):
+        raise ConfigError("production_safety must be an object")
+    drift_value = str(production_safety.get("drift_readback_path") or "").strip()
+    production_drift_readback_path = Path(drift_value) if drift_value else None
+    if production_drift_readback_path is not None and not production_drift_readback_path.is_absolute():
+        raise ConfigError("production_safety.drift_readback_path must be absolute")
+    production_drift_maximum_age_seconds = _positive_int(
+        production_safety.get("maximum_readback_age_seconds", 90),
+        "production_safety.maximum_readback_age_seconds",
+        3600,
+    )
+
     resources = raw.get("resources") or {}
     if not isinstance(resources, dict):
         raise ConfigError("resources must be an object")
@@ -292,4 +307,6 @@ def load_config(path: Path, repo: Path) -> PMV2Config:
         subprocess_open_files=open_files,
         cloud_spend_policy=cloud_spend_policy,
         provider_authority_policy=provider_authority_policy,
+        production_drift_readback_path=production_drift_readback_path,
+        production_drift_maximum_age_seconds=production_drift_maximum_age_seconds,
     )

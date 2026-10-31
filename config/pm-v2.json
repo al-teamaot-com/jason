@@ -116,6 +116,10 @@
     "release_state": "/var/lib/jason/openclaw/release-manager"
   },
   "poll_interval_seconds": 15,
+  "production_safety": {
+    "drift_readback_path": "/var/lib/jason/openclaw/release-manager/protected-readback/production-drift.json",
+    "maximum_readback_age_seconds": 90
+  },
   "recovery": {
     "replica_directories": [],
     "snapshot_directory": "/var/lib/jason/pm-v2/snapshots/latest",

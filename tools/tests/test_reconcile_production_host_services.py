@@ -472,3 +472,20 @@ def test_authority_health_is_lightweight_and_full_proof_deferred_out_of_reconcil
     assert "jason-openclaw-authority-full-integrity.service" in text
     assert "jason-openclaw-authority-full-integrity.timer" in text
     assert '120s systemctl start "$unit"' in text
+
+
+def test_pm_v2_shadow_is_installed_only_inside_governed_host_reconciliation() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    assert 'step_start pm_v2_shadow_user_unit_install' in text
+    assert 'PM_V2_SHADOW_UNIT="jason-pm-v2-shadow.service"' in text
+    assert 'infrastructure/openclaw-operations/systemd/user/$PM_V2_SHADOW_UNIT' in text
+    assert 'install -d -o al -g al -m 0700 /var/lib/jason/pm-v2 /var/lib/jason/openclaw/pm-v2' in text
+    assert 'install -o al -g al -m 0644 "$PM_V2_SHADOW_SOURCE"' in text
+    assert 'systemctl --user enable --now "$PM_V2_SHADOW_UNIT"' in text
+    assert 'JASON_PM_V2_SHADOW_RECONCILIATION=PASS' in text
+    assert text.index('step_start protected_root_policy_stage') < text.index(
+        'step_start pm_v2_shadow_user_unit_install'
+    )
+    assert text.index('step_start pm_v2_shadow_user_unit_install') < text.index(
+        'step_start root_release_transition_install'
+    )

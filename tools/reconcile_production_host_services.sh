@@ -624,6 +624,25 @@ run_as_al /usr/bin/python3 "$RELEASE_DIR/tools/install_release_manager.py" \
   --approval-units-only --activate
 step_pass held_approval_user_unit_install
 
+# PM V2 shadow is a release-owned, optional user service. The protected root
+# policy has already staged the candidate unit as ALLOWED before this point.
+# Never install it out-of-band: rollback unit-delta reconciliation removes it
+# automatically when returning to a release that does not declare it.
+step_start pm_v2_shadow_user_unit_install
+PM_V2_SHADOW_UNIT="jason-pm-v2-shadow.service"
+PM_V2_SHADOW_SOURCE="$RELEASE_DIR/infrastructure/openclaw-operations/systemd/user/$PM_V2_SHADOW_UNIT"
+test -f "$PM_V2_SHADOW_SOURCE" || { echo "ERROR: PM V2 shadow unit is missing" >&2; exit 9; }
+install -d -o al -g al -m 0700 /var/lib/jason/pm-v2 /var/lib/jason/openclaw/pm-v2
+install -o al -g al -m 0644 "$PM_V2_SHADOW_SOURCE" "/home/al/.config/systemd/user/$PM_V2_SHADOW_UNIT"
+run_as_al systemctl --user daemon-reload
+run_as_al systemctl --user enable --now "$PM_V2_SHADOW_UNIT"
+if [ "$(run_as_al systemctl --user is-active "$PM_V2_SHADOW_UNIT" 2>/dev/null || true)" != "active" ]; then
+  echo "ERROR: PM V2 shadow service is not active after governed install" >&2
+  exit 9
+fi
+step_pass pm_v2_shadow_user_unit_install
+echo "JASON_PM_V2_SHADOW_RECONCILIATION=PASS"
+
 step_start root_release_transition_install
 /usr/bin/python3 "$RELEASE_DIR/tools/install_release_control_transition.py"
 cmp -s "$RELEASE_DIR/tools/release_control_transition_worker.py" /usr/local/lib/jason/release_control_transition_worker.py || {
