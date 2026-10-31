@@ -101,3 +101,16 @@ Open PR #2158 also edits the repository-hygiene portion of
 reconciliation tests. PMV3's CI change is additive: it adds a distinct PMV3
 scheduler/controller acceptance step and does not replace or weaken #2158's
 tests. Any later integration must preserve both sets of checks.
+
+
+## Concurrent MCP server overlaps
+
+Open PRs #2125 and #2128 also modify
+`implementation/mcp_service/src/jason_mcp/server.py`, but in the routine
+governed-write and onboarding-attestation paths. PMV3's server change is
+status-only: it adds `_pmv3_engineering_snapshot()` and exposes that snapshot
+through `jason_mcp_status()`.
+
+PMV3 must not import, replace, broaden, or weaken the routine-write client scope,
+onboarding attestation, provider credential, or approval semantics from those
+branches. Later integration must preserve both workstreams.
