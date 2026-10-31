@@ -2595,6 +2595,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
                     token_file=settings.teams_proactive_token_file,
                     bindings=durable_bindings,
                     owner_identity_ids=owner_policy.owner_identity_ids,
+                    owner_identity_email_fallbacks={
+                        "person-al": "al@teamaot.com",
+                    },
                 ),
                 interval_seconds=settings.release_mobile_interval_seconds,
                 required_policy_version=expected_version,

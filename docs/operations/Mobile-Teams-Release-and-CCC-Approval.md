@@ -504,3 +504,24 @@ provider requests should be blindly retried while the provider reports
 exhaustion. The developer lane will then independently readmit as capacity
 allows. These development recovery checks are not end-to-end certification of
 Teams, all-staff invoicing, or QuickBooks reconciliation.
+
+### Legacy owner alias and Entra-authenticated binding compatibility — 2026-10-31
+
+The reviewed release policy intentionally continues to name the canonical owner
+as `person-al`, while authenticated Teams auto-enrollment persists Microsoft
+bindings as `person-entra-<object-id>`. A literal binding lookup therefore cannot
+be assumed to exist for the symbolic owner alias.
+
+For the **release approval sender only**, direct `person-al` lookup remains first.
+If absent, composition explicitly permits the exact fallback
+`person-al -> al@teamaot.com`. The sender may use that fallback only when the
+persisted active binding has the exact email, no client scope, and a Jason
+identity equal to `person-entra-` plus the normalized Microsoft object-ID UUID.
+Wrong email, inactive status, client scope, malformed object ID, or identity
+mismatch fail closed before any Teams send. Other approval workflows receive no
+fallback unless separately configured.
+
+This compatibility rule does not grant approval, change policy membership, edit
+the binding database, or substitute email possession for Microsoft identity.
+The signed Teams callback and the existing exact-release consumer remain the
+only path from a human decision to release/CCC evidence.

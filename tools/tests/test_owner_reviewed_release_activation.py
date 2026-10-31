@@ -124,9 +124,9 @@ def test_rollback_restores_policy_before_baseline_runtime():
     assert "policy_restored_before_runtime" in failure_block
 
 
-def test_post_bootstrap_shadow_release_uses_only_reviewed_pm_v2_unit_delta():
+def test_teams_delivery_repair_defers_shadow_but_keeps_reviewed_pm_v2_plan():
     policy = json.loads((ROOT / "config/production-desired-state.json").read_text())
-    assert "jason-pm-v2-shadow.service" in policy["allowed_user_units"]
+    assert "jason-pm-v2-shadow.service" not in policy["allowed_user_units"]
     assert "jason-pm-v2-shadow.service" not in policy["required_user_units"]
     migration = (ROOT / "tools/protected_root_policy_migration.py").read_text()
     assert "APPROVED_PM_V2_SHADOW_DELTA" in migration

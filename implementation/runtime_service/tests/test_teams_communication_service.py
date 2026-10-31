@@ -461,3 +461,85 @@ def test_canonical_adaptive_card_reports_synthetic_receipt_as_unverified(tmp_pat
     assert receipt.message_id_synthetic is True
     assert receipt.delivery_evidence_type == "provider_call_completed_without_message_id"
     assert len(calls) == 1  # unknown outcome cannot trigger a blind resend
+
+
+def _entra_owner_binding(*, email="al@teamaot.com", client_id=None,
+                         identity_id=None, status="active"):
+    import uuid
+    if identity_id is None:
+        identity_id = "person-entra-" + uuid.UUID(ACTOR).hex
+    return SimpleNamespace(
+        jason_identity_id=identity_id,
+        microsoft_tenant_id=TENANT,
+        microsoft_object_id=ACTOR,
+        email_address=email,
+        client_id=client_id,
+        status=status,
+    )
+
+
+class _OwnerAliasBindings:
+    def __init__(self, binding):
+        self.binding = binding
+        self.identity_reads = []
+        self.email_reads = []
+
+    def find_active_by_jason_identity(self, *, jason_identity_id):
+        self.identity_reads.append(jason_identity_id)
+        return None
+
+    def find_active_by_email(self, *, email_address):
+        self.email_reads.append(email_address)
+        return self.binding
+
+
+def test_release_sender_resolves_legacy_owner_alias_through_exact_verified_email(tmp_path, monkeypatch):
+    trans, calls = transport(tmp_path, monkeypatch)
+    bindings = _OwnerAliasBindings(_entra_owner_binding())
+    sender = TeamsGatewayPlaybookApprovalSender(
+        gateway_url=trans.gateway_url,
+        token_file=trans.token_file,
+        bindings=bindings,
+        owner_identity_ids=("person-al",),
+        owner_identity_email_fallbacks={"person-al": "al@teamaot.com"},
+    )
+    assert sender.send_status(text="Exact release review required") == ("provider-accepted-234",)
+    assert bindings.identity_reads == ["person-al"]
+    assert bindings.email_reads == ["al@teamaot.com"]
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("binding_value", [
+    _entra_owner_binding(email="wrong@teamaot.com"),
+    _entra_owner_binding(identity_id="person-entra-00000000000040008000000000000000"),
+    _entra_owner_binding(client_id="client-123"),
+    _entra_owner_binding(status="disabled"),
+])
+def test_release_sender_owner_alias_fallback_fails_closed_on_binding_mismatch(
+        tmp_path, monkeypatch, binding_value):
+    trans, calls = transport(tmp_path, monkeypatch)
+    sender = TeamsGatewayPlaybookApprovalSender(
+        gateway_url=trans.gateway_url,
+        token_file=trans.token_file,
+        bindings=_OwnerAliasBindings(binding_value),
+        owner_identity_ids=("person-al",),
+        owner_identity_email_fallbacks={"person-al": "al@teamaot.com"},
+    )
+    with pytest.raises(PermissionError, match="fallback binding identity"):
+        sender.send_status(text="Exact release review required")
+    assert calls == []
+
+
+def test_release_sender_without_alias_fallback_keeps_direct_binding_requirement(tmp_path, monkeypatch):
+    trans, calls = transport(tmp_path, monkeypatch)
+    bindings = _OwnerAliasBindings(_entra_owner_binding())
+    sender = TeamsGatewayPlaybookApprovalSender(
+        gateway_url=trans.gateway_url,
+        token_file=trans.token_file,
+        bindings=bindings,
+        owner_identity_ids=("person-al",),
+    )
+    with pytest.raises(PermissionError, match="binding unavailable"):
+        sender.send_status(text="Exact release review required")
+    assert bindings.email_reads == []
+    assert calls == []

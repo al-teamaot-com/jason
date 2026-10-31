@@ -17,12 +17,13 @@ UNIT = "jason-pm-v2-shadow.service"
 
 
 class PMV2ProductionSafetyTests(unittest.TestCase):
-    def test_shadow_unit_is_optional_declared_source_controlled_and_preapproved(self):
+    def test_shadow_unit_is_temporarily_deferred_for_teams_delivery_repair(self):
         policy = json.loads((ROOT / "config/production-desired-state.json").read_text())
-        # The protected-core bootstrap is now live. This follow-up release adds
-        # only the previously reviewed optional PM V2 shadow unit through the
-        # trusted migration helper installed by that bootstrap.
-        self.assertIn(UNIT, policy["allowed_user_units"])
+        # The protected-core bootstrap is live, but the first normal Teams
+        # approval request exposed a legacy-owner binding delivery defect. The
+        # repair release must not activate PM V2 shadow at the same time; after
+        # delivery is repaired, a fresh exact release re-adds this optional unit.
+        self.assertNotIn(UNIT, policy["allowed_user_units"])
         self.assertNotIn(UNIT, policy["required_user_units"])
         unit = ROOT / "infrastructure/openclaw-operations/systemd/user" / UNIT
         text = unit.read_text()
