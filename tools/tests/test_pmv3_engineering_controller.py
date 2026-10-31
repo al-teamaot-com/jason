@@ -122,7 +122,11 @@ def test_control_failure_is_hard_failure(tmp_path):
     assert module.service_exit_code(state) == 1
 
 
-def test_controller_cannot_create_approval():
+def test_controller_cannot_create_or_import_approval():
     source = (ROOT / "tools/pmv3_engineering_controller.py").read_text(encoding="utf-8")
-    assert "approve" not in source.casefold() or "approval" in source.casefold()
+    lowered = source.casefold()
+    assert "record_teams_approval" not in source
+    assert "approval_request_id" not in source
+    assert "decision=" not in lowered
+    assert "channel=" not in lowered
     assert "teams_only_approval" in source
