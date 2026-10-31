@@ -222,6 +222,10 @@ jobs:
         env:
           PYTHONPATH: tools
         run: PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tools/tests/test_owner_approved_development_worker.py
+      - name: Test PMV3 durable work engine and scheduler
+        env:
+          PYTHONPATH: tools
+        run: PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -q tools/tests/test_pmv3_work_engine.py tools/tests/test_pmv3_scheduler.py
       - name: Test TODO Release Manager bridge
         run: python3 -B -m unittest tools.tests.test_todo_release_bridge
       - name: Test TODO engineering host wiring
