@@ -45,7 +45,43 @@ class ChangeIntegrationGateTests(unittest.TestCase):
         with patch.object(gate.urllib.request, "urlopen", side_effect=[limited, Response()]) as send,              patch.object(gate.time, "sleep") as wait:
             self.assertEqual(gate.api_json("https://api.github.com/repos/example/repo/pulls", "test-token"), [])
         self.assertEqual(send.call_count, 2)
-        wait.assert_called_once_with(5)
+        wait.assert_called_once_with(5.0)
+
+    def test_rate_limit_reset_header_is_honored_with_bounded_delay(self):
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self): return b"[]"
+        limited = urllib.error.HTTPError(
+            "https://api.github.com/repos/example/repo/pulls",
+            403, "Forbidden",
+            {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1060"},
+            io.BytesIO(b'{"message":"API rate limit exceeded"}')
+        )
+        with patch.object(gate.time, "time", return_value=1000), \
+             patch.object(gate.urllib.request, "urlopen", side_effect=[limited, Response()]) as send, \
+             patch.object(gate.time, "sleep") as wait:
+            self.assertEqual(
+                gate.api_json("https://api.github.com/repos/example/repo/pulls", "test-token"),
+                [],
+            )
+        self.assertEqual(send.call_count, 2)
+        wait.assert_called_once_with(62.0)
+
+    def test_rate_limit_reset_beyond_bound_fails_closed(self):
+        limited = urllib.error.HTTPError(
+            "https://api.github.com/repos/example/repo/pulls",
+            403, "Forbidden",
+            {"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "5000"},
+            io.BytesIO(b'{"message":"API rate limit exceeded"}')
+        )
+        with patch.object(gate.time, "time", return_value=1000), \
+             patch.object(gate.urllib.request, "urlopen", side_effect=[limited]) as send, \
+             patch.object(gate.time, "sleep") as wait:
+            with self.assertRaisesRegex(RuntimeError, "bounded recovery window"):
+                gate.api_json("https://api.github.com/repos/example/repo/pulls", "test-token")
+        self.assertEqual(send.call_count, 1)
+        wait.assert_not_called()
 
     def test_ordinary_403_fails_closed_without_retry(self):
         denied = urllib.error.HTTPError(
