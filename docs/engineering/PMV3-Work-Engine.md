@@ -92,3 +92,12 @@ is held for reconciliation instead of being blindly executed again.
 
 Production adapters must preserve the same stable action identity and reconcile
 indeterminate provider outcomes before retrying.
+
+
+## Concurrent release-safety overlap
+
+Open PR #2158 also edits the repository-hygiene portion of
+`.github/workflows/validate.yml` to add historical rollback and managed-unit
+reconciliation tests. PMV3's CI change is additive: it adds a distinct PMV3
+scheduler/controller acceptance step and does not replace or weaken #2158's
+tests. Any later integration must preserve both sets of checks.
