@@ -110,7 +110,7 @@ def test_crash_recovery_does_not_duplicate_completed_action():
 
 def test_interrupted_action_without_receipt_is_readmitted():
     state = module.empty_state()
-    module.admit(state, module.make_item("PMV3-7", "recover"))
+    module.admit(state, module.make_item("PMV3-7", "recover", idempotent=True))
     state["items"]["PMV3-7"]["phase"] = "running"
 
     def handler(item, key):
@@ -239,3 +239,42 @@ def test_mismatched_teams_request_cannot_approve():
         assert "mismatch" in str(exc)
     else:
         raise AssertionError("mismatched Teams request must be rejected")
+
+
+
+def test_interrupted_non_idempotent_action_waits_for_reconciliation():
+    state = module.empty_state()
+    module.admit(state, module.make_item("PMV3-16", "non-idempotent", idempotent=False))
+    state["items"]["PMV3-16"]["phase"] = "running"
+    called = False
+
+    def handler(item, key):
+        nonlocal called
+        called = True
+        return module.Outcome("complete", receipt="must-not-run")
+
+    module.execute_cycle(state, facts={}, handler=handler, now=NOW)
+    item = state["items"]["PMV3-16"]
+    assert called is False
+    assert item["phase"] == "waiting"
+    assert item["dependency"] == "reconciliation_required"
+    assert item["reason"] == "indeterminate_execution_requires_reconciliation"
+
+
+def test_validation_failure_is_bounded_retryable():
+    state = module.empty_state()
+    module.admit(state, module.make_item("PMV3-17", "validate"))
+    calls = []
+
+    def handler(item, key):
+        calls.append(item["attempts"])
+        if len(calls) == 1:
+            return module.Outcome("retry", reason="regression test failed")
+        return module.Outcome("complete", receipt="validation-ok")
+
+    module.execute_cycle(state, facts={}, handler=handler, now=NOW)
+    due = module.parse_time(state["items"]["PMV3-17"]["next_attempt_at"])
+    assert state["items"]["PMV3-17"]["phase"] == "retry_wait"
+    module.execute_cycle(state, facts={}, handler=handler, now=due)
+    assert state["items"]["PMV3-17"]["phase"] == "complete"
+    assert len(calls) == 2
