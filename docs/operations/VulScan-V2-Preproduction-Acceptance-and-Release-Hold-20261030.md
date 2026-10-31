@@ -135,3 +135,46 @@ source. The V2 feature remains dormant.
 endpoint, complete per-policy manual approval state, causal KB attribution,
 the V1 10-day ticket transition, Teams receipt, and production governance.
 The delayed Datto rollout may still block those independent requirements.
+
+
+## 2026-10-31 full Riggins governed patch-read evidence and V1 fallback
+
+**Controlled governed read-only acceptance:** Jason's existing
+endpoint.device.search returned a scope-complete Riggins discovery of 91
+device identities, all matching the authorized Datto site UID, with 5
+account pages examined and 752 account devices reported. Every one of the
+91 device positions was queried through endpoint.patch.search with an exact
+resource ID and completeness_requirement=complete; each returned succeeded,
+with expected Datto provider/operation, bounded=false, a completed page
+with totalCount == len(items), exact returned count, and no conflicting
+device UID. The observations totaled **1,867 patch records** and **135
+per-device NOT_APPROVED numeric-Windows-KB observations**. The latter is
+not the number of unique KBs, policy denials, security vulnerabilities,
+or technician decisions. Read sampling was performed in successive
+batches, each preceded by a fresh complete same-site device discovery;
+this is not an atomic point-in-time fleet snapshot and does not prove
+wider tenant coverage.
+
+The source-only vulscan_v2_device_patch_inventory.py now performs a
+**single** complete site discovery and reads all matching device patches
+inside one bounded invocation; it fails the batch on any missing read,
+incomplete paging, wrong device/site, invalid record, or exceeded limit.
+No direct Datto credentials, endpoint changes, ticket modifications,
+manual policy decisions, or Teams delivery were involved.
+
+**V1/V2 safety:** The existing vulscan_missing_patch ten-day ticket handoff
+retains control until a separately owner-approved and provider-backed V2
+supervision callback explicitly verifies readiness. The V1 worker previously
+propagated a thrown callback exception, potentially interrupting this
+fallback. It now treats any supervisor exception as *not supervised* and
+continues the existing ten-day Help Desk I / Human Review handoff. Tests
+exercise both the successful V2-supervised case (no V1 handoff) and
+supervision failure (V1 handoff); no additional production permissions
+or runtime registration are granted.
+
+**Independent blocking gates remain:** Datto policy manual table and
+per-KB causal attribution, tenant-specific v15.2 availability, exact policy
+read registration and provider acceptance, canonical owner Teams receipt
+evidence, V1/V2 live handoff acceptance, and Production Manager breaker
+recovery/production-freeze exact-SHA authorization. Public Datto API docs
+only establish device policy metadata, not a complete manual-decision ledger.

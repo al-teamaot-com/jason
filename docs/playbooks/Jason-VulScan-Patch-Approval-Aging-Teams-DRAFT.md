@@ -216,3 +216,16 @@ approval table or prove which assigned policy caused a KB to be unapproved.
 Those separate independent Datto source requirements remain mandatory for
 owner reminders. The existing ten-day ticket playbook stays operational until
 V2's full source/recipient/release acceptance and approved migration.
+
+
+### Fail-closed V1 / V2 coexistence regression — 2026-10-31
+
+V2 supervision is only an optional, separately promotion-bound callback.
+If that callback is missing, returns anything other than True, or fails
+while validating the policy, manual approval table, source freshness, or
+Teams authority, the V1 ten-day ticket review remains authoritative.
+The worker does not strand the ticket on the exception or silently
+suppress the Help Desk I / Human Review handoff. A full-scope and current
+V2 callback may replace V1 aging only for its verified exact workload scope.
+The additional regression tests preserve both behaviors; a live enablement
+or change to existing ticket state remains prohibited pending final acceptance.

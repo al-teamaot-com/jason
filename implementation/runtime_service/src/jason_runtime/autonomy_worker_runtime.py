@@ -5959,9 +5959,16 @@ class OperationalAutonomyMaintenance:
                 # Trusted callback must prove exact KBs, policy/owner promotion,
                 # current source evidence and the canonical Teams lane are
                 # ready for every NOT_APPROVED item. No bypass on uncertainty.
-                v2_supervised = self.vulscan_v2_approval_supervisor(
-                    work, tuple(rows)
-                ) is True
+                try:
+                    v2_supervised = self.vulscan_v2_approval_supervisor(
+                        work, tuple(rows)
+                    ) is True
+                except Exception:
+                    # A stale/unavailable authorization, Datto or Teams read
+                    # must NOT strand the ticket or silently bypass the
+                    # existing ten-day human-review handoff. V2 remains
+                    # advisory until separately verified and promoted.
+                    v2_supervised = False
             if age_seconds >= VULSCAN_APPROVAL_ESCALATION_SECONDS and not v2_supervised:
                 note = (
                     "STATUS: HUMAN REVIEW REQUIRED. "
