@@ -4260,3 +4260,219 @@ def test_release_manager_timer_runs_post_deploy_retry_when_auto_promotion_disabl
     timer = (ROOT / 'infrastructure/openclaw-operations/systemd/user/jason-release-manager.timer').read_text()
     assert 'promote-eligible' in service
     assert 'OnCalendar=*-*-* *:00/5:00' in timer
+
+
+def _exact_owner_material_review_waiver(candidate=SHA_A, scope="d" * 64):
+    return {
+        "schema_version": "1.0",
+        "status": "waived_by_owner",
+        "one_time": True,
+        "candidate_sha": candidate,
+        "scope_sha256": scope,
+        "recorded_by": "person-al",
+        "source": "explicit_owner_instruction",
+        "reason": "one-time bootstrap owner override",
+        "recorded_at": "2026-10-31T12:00:00+00:00",
+    }
+
+
+def test_owner_material_review_waiver_accepts_only_missing_human_review_predeploy():
+    report = _ccc_exact_missing_owner_review_report()
+    waiver = _exact_owner_material_review_waiver()
+    evidence = runner.verify_release_ccc_report(
+        report,
+        candidate_sha=SHA_A,
+        runtime_sha=SHA_B,
+        before_mutation=True,
+        owner_material_review_waiver=waiver,
+    )
+    assert evidence["status"] == "NOT_PROVEN"
+    assert evidence["mode"] == "candidate_transition_owner_material_review_waiver"
+    assert evidence["technical_checks_passed"] is True
+    assert evidence["owner_material_review_waiver"] == waiver
+
+
+def test_owner_material_review_waiver_allows_postdeploy_only_when_all_technical_checks_pass():
+    import copy
+    import pytest
+
+    report = _ccc_exact_missing_owner_review_report()
+    report["runtime_revision"] = SHA_A
+    for check in report["checks"]:
+        if check["check_id"] == "runtime-source-alignment":
+            check["status"] = "PASS"
+    waiver = _exact_owner_material_review_waiver()
+    evidence = runner.verify_release_ccc_report(
+        report,
+        candidate_sha=SHA_A,
+        runtime_sha=SHA_A,
+        before_mutation=False,
+        owner_material_review_waiver=waiver,
+    )
+    assert evidence["status"] == "NOT_PROVEN"
+    assert evidence["mode"] == "live_certified_owner_material_review_waiver"
+    assert evidence["technical_checks_passed"] is True
+
+    extra_failure = copy.deepcopy(report)
+    next(x for x in extra_failure["checks"]
+         if x["check_id"] == "systemd-failed-units")["status"] = "FAIL"
+    extra_failure["status"] = "FAIL"
+    with pytest.raises(runner.ReleaseManagerError, match="post-mutation CCC"):
+        runner.verify_release_ccc_report(
+            extra_failure,
+            candidate_sha=SHA_A,
+            runtime_sha=SHA_A,
+            before_mutation=False,
+            owner_material_review_waiver=waiver,
+        )
+
+
+def test_owner_material_review_waiver_never_matches_other_candidate():
+    import pytest
+    report = _ccc_exact_missing_owner_review_report()
+    with pytest.raises(runner.ReleaseManagerError, match="does not match CCC candidate"):
+        runner.verify_release_ccc_report(
+            report,
+            candidate_sha=SHA_A,
+            runtime_sha=SHA_B,
+            before_mutation=True,
+            owner_material_review_waiver=_exact_owner_material_review_waiver(SHA_B),
+        )
+
+
+def test_verified_owner_material_review_waiver_binds_owner_risk_and_scope():
+    import copy
+    import pytest
+    waiver = _exact_owner_material_review_waiver()
+    record = {
+        "risk_profile": "production_control_core",
+        "owner_approval": {"approved": True, "candidate_sha": SHA_A},
+        "manual_scope_review": {
+            "schema_version": "1.0", "candidate_sha": SHA_A,
+            "scope_sha256": "d" * 64,
+        },
+        "owner_material_review_waiver": waiver,
+    }
+    assert runner.verified_owner_material_review_waiver(record, SHA_A) == waiver
+
+    mutations = []
+    bad = copy.deepcopy(record); bad["risk_profile"] = "normal"; mutations.append(bad)
+    bad = copy.deepcopy(record); bad["owner_approval"]["candidate_sha"] = SHA_B; mutations.append(bad)
+    bad = copy.deepcopy(record); bad["manual_scope_review"]["scope_sha256"] = "e" * 64; mutations.append(bad)
+    bad = copy.deepcopy(record); bad["owner_material_review_waiver"]["recorded_by"] = "person-other"; mutations.append(bad)
+    bad = copy.deepcopy(record); bad["owner_material_review_waiver"]["one_time"] = False; mutations.append(bad)
+    for candidate in mutations:
+        with pytest.raises(runner.ReleaseManagerError):
+            runner.verified_owner_material_review_waiver(candidate, SHA_A)
+
+
+def test_explicit_owner_approve_can_record_one_time_material_review_waiver():
+    record = {
+        "release_id": runner.record_id(SHA_A),
+        "state": "production_eligible",
+        "risk_profile": "production_control_core",
+        "release_candidate": {
+            "candidate_sha": SHA_A,
+            "image": "jason-runtime:test",
+            "artifact_digest": "sha256:" + "a" * 64,
+            "mcp_image": "jason-mcp:test",
+            "mcp_artifact_digest": "sha256:" + "b" * 64,
+        },
+        "manual_scope_review": {
+            "schema_version": "1.0",
+            "candidate_sha": SHA_A,
+            "scope_sha256": "d" * 64,
+        },
+        "history": [],
+    }
+    with (
+        patch.object(runner, "load_record", return_value=record),
+        patch.object(runner, "verify_candidate_on_main"),
+        patch.object(runner, "image_id", side_effect=[
+            "sha256:" + "a" * 64, "sha256:" + "b" * 64,
+        ]),
+        patch.object(runner, "require_current_manual_scope_review"),
+        patch.object(runner, "save_record") as save,
+    ):
+        result = runner.approve_release(
+            ROOT,
+            Path("/tmp"),
+            release_id=record["release_id"],
+            candidate_sha=SHA_A,
+            source="explicit_owner_instruction",
+            waive_ccc_material_review=True,
+            waiver_reason="one-time bootstrap override",
+        )
+    assert result["owner_approval"]["approved"] is True
+    waiver = result["owner_material_review_waiver"]
+    assert waiver["status"] == "waived_by_owner"
+    assert waiver["candidate_sha"] == SHA_A
+    assert waiver["scope_sha256"] == "d" * 64
+    assert waiver["recorded_by"] == "person-al"
+    assert waiver["one_time"] is True
+    save.assert_called_once()
+
+
+def test_owner_material_review_waiver_requires_protected_core_exact_scope_and_reason():
+    import copy
+    import pytest
+    base = {
+        "release_id": runner.record_id(SHA_A),
+        "state": "production_eligible",
+        "risk_profile": "production_control_core",
+        "release_candidate": {
+            "candidate_sha": SHA_A,
+            "image": "jason-runtime:test",
+            "artifact_digest": "sha256:" + "a" * 64,
+            "mcp_image": "jason-mcp:test",
+            "mcp_artifact_digest": "sha256:" + "b" * 64,
+        },
+        "manual_scope_review": {
+            "schema_version": "1.0", "candidate_sha": SHA_A,
+            "scope_sha256": "d" * 64,
+        },
+        "history": [],
+    }
+    cases = []
+    bad = copy.deepcopy(base); bad["risk_profile"] = "normal"; cases.append((bad, "reason"))
+    bad = copy.deepcopy(base); bad.pop("manual_scope_review"); cases.append((bad, "reason"))
+    cases.append((copy.deepcopy(base), ""))
+    for record, reason in cases:
+        with (
+            patch.object(runner, "load_record", return_value=record),
+            patch.object(runner, "verify_candidate_on_main"),
+            patch.object(runner, "image_id", side_effect=[
+                "sha256:" + "a" * 64, "sha256:" + "b" * 64,
+            ]),
+            patch.object(runner, "require_current_manual_scope_review"),
+            patch.object(runner, "save_record"),
+        ):
+            with pytest.raises(runner.ReleaseManagerError):
+                runner.approve_release(
+                    ROOT,
+                    Path("/tmp"),
+                    release_id=record["release_id"],
+                    candidate_sha=SHA_A,
+                    source="explicit_owner_instruction",
+                    waive_ccc_material_review=True,
+                    waiver_reason=reason,
+                )
+
+
+def test_run_release_ccc_gate_accepts_nonzero_only_for_exact_owner_waiver(tmp_path):
+    import json
+    from types import SimpleNamespace
+    ccc = tmp_path / "run_ccc.py"; ccc.write_text("")
+    config = tmp_path / "ccc.json"; config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    report = _ccc_exact_missing_owner_review_report()
+    report["finished_at"] = datetime.now(timezone.utc).isoformat()
+    latest.write_text(json.dumps(report))
+    with patch.object(runner.subprocess, "run", return_value=SimpleNamespace(returncode=1)):
+        evidence = runner.run_release_ccc_gate(
+            SHA_A, SHA_B, before_mutation=True,
+            owner_material_review_waiver=_exact_owner_material_review_waiver(),
+            ccc_runner=ccc, ccc_config=config, latest=latest,
+        )
+    assert evidence["mode"] == "candidate_transition_owner_material_review_waiver"
+    assert evidence["technical_checks_passed"] is True

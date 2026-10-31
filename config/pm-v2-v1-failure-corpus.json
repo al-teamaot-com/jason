@@ -118,6 +118,13 @@
       "symptom": "The V2 release approval request was created correctly but no Teams delivery receipt was recorded because policy identity person-al had no literal Microsoft binding; authenticated auto-enrollment stores the owner as person-entra-<object-id>.",
       "test_file": "implementation/runtime_service/tests/test_teams_communication_service.py",
       "test_symbol": "test_release_sender_resolves_legacy_owner_alias_through_exact_verified_email"
+    },
+    {
+      "correction": "Permit only an explicit exact-SHA/exact-scope one-release Owner waiver of the separate human material-review artifact. Continue running independent CCC and accept no other non-PASS technical check; never relabel the raw waived CCC report as an ordinary PASS.",
+      "id": "PMV2-BOOTSTRAP-MATERIAL-REVIEW-CIRCULARITY",
+      "symptom": "The first protected-core bootstrap can be owner-approved but cannot obtain the separate CCC material-review artifact because the V2 Teams CCC-only review lane is itself part of the release being bootstrapped.",
+      "test_file": "tools/tests/test_release_manager_host_runner.py",
+      "test_symbol": "test_owner_material_review_waiver_allows_postdeploy_only_when_all_technical_checks_pass"
     }
   ],
   "schema_version": "1.0"

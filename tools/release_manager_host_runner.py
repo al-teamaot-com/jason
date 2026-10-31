@@ -2569,6 +2569,8 @@ def approve_release(
     release_id: str,
     candidate_sha: str,
     source: str = "explicit_owner_instruction",
+    waive_ccc_material_review: bool = False,
+    waiver_reason: str = "",
 ) -> dict[str, Any]:
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
     record = load_record(state_root, release_id)
@@ -2591,16 +2593,70 @@ def approve_release(
     if isinstance(approval, dict) and approval.get("approved") is True:
         if str(approval.get("candidate_sha") or "") != candidate_sha:
             raise ReleaseManagerError("existing owner approval is bound to a different SHA")
-        return record
-    record["owner_approval"] = {
-        "approved": True,
-        "candidate_sha": candidate_sha,
-        "source": str(source or "explicit_owner_instruction"),
-        "recorded_at": now(),
-    }
-    record.setdefault("history", []).append(
-        {"at": now(), "state": "production_eligible", "gate": "owner_approval_recorded"}
-    )
+        if not waive_ccc_material_review:
+            return record
+    else:
+        record["owner_approval"] = {
+            "approved": True,
+            "candidate_sha": candidate_sha,
+            "source": str(source or "explicit_owner_instruction"),
+            "recorded_at": now(),
+        }
+        record.setdefault("history", []).append(
+            {"at": now(), "state": "production_eligible", "gate": "owner_approval_recorded"}
+        )
+
+    if waive_ccc_material_review:
+        # This is a one-release Owner constitutional exception to the separate
+        # human material-review artifact ONLY. It never waives CCC technical
+        # checks, scope review, rollback, freeze, drift or post-deploy evidence.
+        if str(record.get("risk_profile") or "") != "production_control_core":
+            raise ReleaseManagerError(
+                "owner CCC material-review waiver is limited to production_control_core"
+            )
+        if str(source or "") != "explicit_owner_instruction":
+            raise ReleaseManagerError(
+                "owner CCC material-review waiver requires explicit owner instruction"
+            )
+        if not str(waiver_reason or "").strip():
+            raise ReleaseManagerError("owner CCC material-review waiver requires a reason")
+        scope = record.get("manual_scope_review")
+        if (not isinstance(scope, dict) or scope.get("schema_version") != "1.0"
+                or scope.get("candidate_sha") != candidate_sha
+                or not re.fullmatch(r"[0-9a-f]{64}", str(scope.get("scope_sha256") or ""))):
+            raise ReleaseManagerError(
+                "owner CCC material-review waiver requires exact recorded scope review"
+            )
+        # Re-evaluate the recorded scope against current protected source and
+        # parallel work before minting the waiver. A stale scope cannot inherit it.
+        require_current_manual_scope_review(repo, state_root, record)
+        expected = {
+            "schema_version": "1.0",
+            "status": "waived_by_owner",
+            "one_time": True,
+            "candidate_sha": candidate_sha,
+            "scope_sha256": str(scope["scope_sha256"]),
+            "recorded_by": "person-al",
+            "source": "explicit_owner_instruction",
+        }
+        existing = record.get("owner_material_review_waiver")
+        if existing is not None:
+            if (not isinstance(existing, dict)
+                    or any(existing.get(k) != v for k, v in expected.items())):
+                raise ReleaseManagerError(
+                    "existing owner CCC material-review waiver conflicts with exact release"
+                )
+        else:
+            record["owner_material_review_waiver"] = {
+                **expected,
+                "reason": str(waiver_reason).strip()[:500],
+                "recorded_at": now(),
+            }
+            record.setdefault("history", []).append({
+                "at": now(), "state": "production_eligible",
+                "gate": "owner_ccc_material_review_waiver_recorded",
+                "scope_sha256": str(scope["scope_sha256"]),
+            })
     save_record(state_root, record)
     return record
 
@@ -2992,6 +3048,56 @@ def validate_release_record_contract(record: dict[str, Any]) -> None:
         raise ReleaseManagerError('release manifest risk classification differs from release record')
 
 
+def verified_owner_material_review_waiver(
+    record: Mapping[str, Any], candidate_sha: str,
+) -> dict[str, Any] | None:
+    """Return one exact Owner waiver or fail closed on malformed evidence.
+
+    The waiver is release-scoped governance evidence, never a CCC PASS.
+    """
+    waiver = record.get("owner_material_review_waiver")
+    if waiver is None:
+        return None
+    if not isinstance(waiver, Mapping):
+        raise ReleaseManagerError("owner CCC material-review waiver is malformed")
+    sha = exact_sha(candidate_sha, "candidate_sha")
+    owner = record.get("owner_approval")
+    scope = record.get("manual_scope_review")
+    required = {
+        "schema_version": "1.0",
+        "status": "waived_by_owner",
+        "one_time": True,
+        "candidate_sha": sha,
+        "recorded_by": "person-al",
+        "source": "explicit_owner_instruction",
+    }
+    if any(waiver.get(k) != v for k, v in required.items()):
+        raise ReleaseManagerError("owner CCC material-review waiver identity is invalid")
+    if str(record.get("risk_profile") or "") != "production_control_core":
+        raise ReleaseManagerError("owner CCC material-review waiver risk class is invalid")
+    if (not isinstance(owner, Mapping) or owner.get("approved") is not True
+            or owner.get("candidate_sha") != sha):
+        raise ReleaseManagerError("owner CCC material-review waiver lacks exact owner approval")
+    if (not isinstance(scope, Mapping) or scope.get("schema_version") != "1.0"
+            or scope.get("candidate_sha") != sha
+            or waiver.get("scope_sha256") != scope.get("scope_sha256")
+            or not re.fullmatch(r"[0-9a-f]{64}", str(scope.get("scope_sha256") or ""))):
+        raise ReleaseManagerError("owner CCC material-review waiver scope binding is invalid")
+    if not str(waiver.get("reason") or "").strip() or not str(waiver.get("recorded_at") or "").strip():
+        raise ReleaseManagerError("owner CCC material-review waiver rationale is incomplete")
+    return {
+        "schema_version": "1.0",
+        "status": "waived_by_owner",
+        "one_time": True,
+        "candidate_sha": sha,
+        "scope_sha256": str(scope["scope_sha256"]),
+        "recorded_by": "person-al",
+        "source": "explicit_owner_instruction",
+        "reason": str(waiver["reason"]),
+        "recorded_at": str(waiver["recorded_at"]),
+    }
+
+
 CCC_REQUIRED_CHECKS = frozenset({
     "checker-currentness", "runtime-source-alignment", "j002-article-matrix",
     "system-registry", "j900-release-validation",
@@ -3003,7 +3109,7 @@ CCC_REQUIRED_CHECKS = frozenset({
 
 def verify_release_ccc_report(
     report: dict[str, Any], *, candidate_sha: str, runtime_sha: str,
-    before_mutation: bool,
+    before_mutation: bool, owner_material_review_waiver: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Fail closed on any CCC exception other than expected predeploy alignment.
 
@@ -3039,6 +3145,24 @@ def verify_release_ccc_report(
     if missing:
         raise ReleaseManagerError("CCC mandatory checks are missing: " + ", ".join(sorted(missing)))
     exceptional = {key: status for key, status in indexed.items() if status != "PASS"}
+    review_entry = next((
+        entry for entry in checks
+        if entry.get("check_id") == "material-change-owner-review"
+    ), {})
+    material_paths = report.get("material_changes")
+    review_evidence = review_entry.get("evidence")
+    review_pending = (
+        isinstance(material_paths, list) and bool(material_paths)
+        and all(isinstance(path, str) and path for path in material_paths)
+        and review_entry.get("status") == "NOT_PROVEN"
+        and review_entry.get("detail")
+            == "Material change requires an exact owner review record for this source revision."
+        and isinstance(review_evidence, dict)
+        and review_evidence.get("paths") == material_paths
+    )
+    waiver = dict(owner_material_review_waiver) if owner_material_review_waiver else None
+    if waiver is not None and waiver.get("candidate_sha") != candidate_sha:
+        raise ReleaseManagerError("owner CCC material-review waiver does not match CCC candidate")
     if before_mutation:
         expected = {"runtime-source-alignment": "NOT_PROVEN"}
         if not (report.get("status") == "PASS" and not exceptional or
@@ -3066,12 +3190,6 @@ def verify_release_ccc_report(
             # Only the canonical missing-review detail and exact path evidence
             # constitute a deferrable human dependency. Neither the owner
             # release approval nor an arbitrary NOT_PROVEN check is sufficient.
-            review_entry = next((
-                entry for entry in checks
-                if entry.get("check_id") == "material-change-owner-review"
-            ), {})
-            material_paths = report.get("material_changes")
-            review_evidence = review_entry.get("evidence")
             expected_review_status = {
                 "material-change-owner-review": "NOT_PROVEN",
             }
@@ -3079,30 +3197,46 @@ def verify_release_ccc_report(
                 **expected_review_status,
                 "runtime-source-alignment": "NOT_PROVEN",
             }
-            review_pending = (
+            review_exception = (
                 report.get("status") == "NOT_PROVEN"
-                and exceptional in (
-                    expected_review_status, expected_review_and_alignment,
-                )
-                and isinstance(material_paths, list) and bool(material_paths)
-                and all(isinstance(path, str) and path for path in material_paths)
-                and review_entry.get("detail")
-                    == "Material change requires an exact owner review record for this source revision."
-                and isinstance(review_evidence, dict)
-                and review_evidence.get("paths") == material_paths
+                and review_pending
+                and exceptional in (expected_review_status, expected_review_and_alignment)
             )
-            if review_pending:
+            if review_exception and waiver is not None:
+                mode = (
+                    "candidate_transition_owner_material_review_waiver"
+                    if "runtime-source-alignment" in exceptional
+                    else "owner_material_review_waiver"
+                )
+            elif review_exception:
                 raise CCCMaterialReviewRequired(
                     "pre-mutation CCC requires independently recorded exact-owner material review"
                 )
-            raise ReleaseManagerError("pre-mutation CCC denied: " + str(exceptional)[:300])
-        mode = "candidate_transition" if exceptional else "aligned"
+            else:
+                raise ReleaseManagerError("pre-mutation CCC denied: " + str(exceptional)[:300])
+        else:
+            mode = "candidate_transition" if exceptional else "aligned"
     else:
-        if report.get("status") != "PASS" or exceptional:
+        waiver_only = (
+            waiver is not None
+            and report.get("status") == "NOT_PROVEN"
+            and review_pending
+            and exceptional == {"material-change-owner-review": "NOT_PROVEN"}
+        )
+        if report.get("status") == "PASS" and not exceptional:
+            mode = "live_certified"
+        elif waiver_only:
+            mode = "live_certified_owner_material_review_waiver"
+        else:
             raise ReleaseManagerError("post-mutation CCC did not certify exact live candidate")
-        mode = "live_certified"
     return {
         "status": report["status"], "mode": mode,
+        "owner_material_review_waiver": waiver,
+        "technical_checks_passed": all(
+            status == "PASS" for key, status in indexed.items()
+            if key != "material-change-owner-review"
+            and not (before_mutation and key == "runtime-source-alignment")
+        ),
         "source_revision": candidate_sha, "runtime_revision": runtime_sha,
         "run_id": str(report.get("run_id") or ""),
         "finished_at": str(report.get("finished_at") or ""),
@@ -3185,6 +3319,7 @@ def retryable_ccc_provider_exceptions(report: Mapping[str, Any]) -> bool:
 
 def run_release_ccc_gate(
     candidate_sha: str, runtime_sha: str, *, before_mutation: bool,
+    owner_material_review_waiver: Mapping[str, Any] | None = None,
     ccc_runner: Path = Path("/opt/jason/ccc-current/tools/run_ccc.py"),
     ccc_config: Path = Path("/var/lib/jason/ccc/ccc.json"),
     latest: Path = Path("/var/lib/jason/ccc/latest.json"),
@@ -3232,6 +3367,7 @@ def run_release_ccc_gate(
             evidence = verify_release_ccc_report(
                 report, candidate_sha=candidate_sha, runtime_sha=runtime_sha,
                 before_mutation=before_mutation,
+                owner_material_review_waiver=owner_material_review_waiver,
             )
         except ReleaseManagerError as exc:
             # verify_release_ccc_report checked exact candidate and runtime SHA,
@@ -3281,8 +3417,21 @@ def run_release_ccc_gate(
                 time.sleep(CCC_POSTFLIGHT_PROVIDER_EXCEPTION_RETRY_DELAYS[retry_index])
                 continue
             raise
-        if completed.returncode != 0 and evidence["status"] == "PASS":
-            raise ReleaseManagerError("independent CCC process failed despite PASS report")
+        if completed.returncode != 0:
+            accepted_waiver_report = (
+                evidence.get("status") == "NOT_PROVEN"
+                and evidence.get("owner_material_review_waiver") is not None
+                and evidence.get("technical_checks_passed") is True
+                and evidence.get("mode") in {
+                    "owner_material_review_waiver",
+                    "candidate_transition_owner_material_review_waiver",
+                    "live_certified_owner_material_review_waiver",
+                }
+            )
+            if not accepted_waiver_report and evidence["status"] == "PASS":
+                raise ReleaseManagerError("independent CCC process failed despite PASS report")
+            if not accepted_waiver_report and evidence["status"] != "PASS":
+                raise ReleaseManagerError("independent CCC process failed without accepted waiver")
         if failed_monitoring_runs or failed_provider_runs:
             if str(evidence["run_id"]) in (*failed_monitoring_runs, *failed_provider_runs):
                 raise ReleaseManagerError("CCC reused an earlier failed report identifier")
@@ -3423,8 +3572,12 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     # The existing live runtime can differ from a valid new candidate. This
     # narrowly scoped preflight is NOT a CCC PASS and requires full post CCC.
     verify_candidate_on_main(repo, candidate_sha)
+    owner_material_review_waiver = verified_owner_material_review_waiver(
+        record, candidate_sha
+    )
     ccc_preflight = run_release_ccc_gate(
         candidate_sha, rollback_sha, before_mutation=True,
+        owner_material_review_waiver=owner_material_review_waiver,
     )
     record["ccc_pre_mutation_gate"] = ccc_preflight
 
@@ -3564,6 +3717,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         # non-PASS or stale/wrong-SHA report raises inside the rollback block.
         ccc_postflight = run_release_ccc_gate(
             candidate_sha, candidate_sha, before_mutation=False,
+            owner_material_review_waiver=owner_material_review_waiver,
         )
         record["ccc_post_mutation_gate"] = ccc_postflight
         drift_evidence = production_drift_evidence(state_root)
@@ -3581,6 +3735,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "mobile_release_approval": approval_policy_activation,
             "ccc_pre_mutation": ccc_preflight,
             "ccc_post_mutation": ccc_postflight,
+            "owner_material_review_waiver": owner_material_review_waiver,
             "functional_smoke_tests_passed": bool(smoke.get("passed")),
             "functional_smoke_tests": smoke,
             "authenticated_owner_read_canary": verified_owner_read_canary,
@@ -3620,6 +3775,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "release_manifest": record["release_manifest"],
             "risk_profile": record["risk_profile"],
             "owner_approval": record.get("owner_approval"),
+            "owner_material_review_waiver": owner_material_review_waiver,
             "ccc_pre_mutation": ccc_preflight,
             "ccc_post_mutation": ccc_postflight,
             "preproduction": record.get("preproduction"),
@@ -4824,6 +4980,8 @@ def main() -> int:
     approve.add_argument("--release-id", required=True)
     approve.add_argument("--candidate-sha", required=True)
     approve.add_argument("--source", default="explicit_owner_instruction")
+    approve.add_argument("--waive-ccc-material-review", action="store_true")
+    approve.add_argument("--waiver-reason", default="")
 
     promote = sub.add_parser("promote")
     promote.add_argument("--release-id", required=True)
@@ -4909,6 +5067,8 @@ def main() -> int:
             release_id=args.release_id,
             candidate_sha=args.candidate_sha,
             source=args.source,
+            waive_ccc_material_review=args.waive_ccc_material_review,
+            waiver_reason=args.waiver_reason,
         )
         print(json.dumps(record, indent=2))
         return 0

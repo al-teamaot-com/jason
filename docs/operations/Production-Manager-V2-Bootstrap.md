@@ -123,3 +123,38 @@ fails after staging policy V2, restore the prior V1 approval policy **before**
 starting the baseline `owner_only_pilot` runtime. After baseline health is
 verified, confirm runtime mode and restored policy agree. Never boot V1 against
 V2 policy during rollback.
+
+## One-time Owner material-review waiver — 2026-10-31
+
+The AOT Owner may explicitly make a **one-release constitutional exception** to
+the separate CCC human material-review artifact when a bootstrap dependency
+would otherwise make the first protected-core activation circular. This is not
+a waiver of CCC technical certification and is not standing authority.
+
+The exception is valid only when all of the following are true:
+
+- the release is `production_control_core` and already `production_eligible`;
+- the Owner approval is exact-SHA bound to the same candidate;
+- the complete manual scope review is current and the waiver is bound to its
+  exact `scope_sha256`;
+- the waiver records `person-al`, `explicit_owner_instruction`, a rationale,
+  `one_time=true`, and the exact candidate SHA;
+- the independent CCC checker still runs normally. The only non-PASS check the
+  waiver may satisfy is the canonical
+  `material-change-owner-review=NOT_PROVEN` caused by absence of the separate
+  human review artifact;
+- before deployment, the normal live-runtime alignment gap may coexist with
+  that one waived human-review check. No checker-currentness, security,
+  provider, host, monitoring, constitutional, release-validation or other CCC
+  failure is waived;
+- after deployment, every technical CCC check and runtime/source alignment must
+  pass. The release record must state that the raw CCC report remained
+  `NOT_PROVEN` only because the human review was Owner-waived; it must never be
+  relabeled as an ordinary CCC PASS;
+- rollback, drift, scope, exact-source, production-freeze and transaction-lock
+  requirements remain unchanged.
+
+A rolled-back, reissued, superseded or different release receives no waiver by
+inheritance. A new SHA or scope digest requires a new explicit Owner decision.
+Once the normal V2 Teams owner-review path is live, routine releases should use
+that path rather than this bootstrap exception.
