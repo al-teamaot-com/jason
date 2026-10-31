@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pwd
 import re
 from pathlib import Path
 
@@ -32,6 +33,29 @@ class UnitDeltaError(ValueError):
 
 def declared_units(release: Path, scope: str) -> set[str]:
     path = release / "config/production-desired-state.json"
+    if path.is_symlink():
+        raise UnitDeltaError("immutable release unit policy is a symlink")
+    if not path.exists():
+        # Historical immutable baselines (e.g. 72bf...) predate the
+        # desired-state manifest. Only unit definitions actually present in
+        # the exact rollback release count as declared; unknown files/symlinks
+        # must never become a blanket permission to remove installed units.
+        roots = RELATIVE_SYSTEM_SOURCES if scope == "system" else RELATIVE_USER_SOURCES
+        names: set[str] = set()
+        for relative in roots:
+            folder = release / relative
+            if folder.is_symlink():
+                raise UnitDeltaError("legacy unit source directory is a symlink")
+            if not folder.exists():
+                continue
+            for candidate in folder.glob("jason-*"):
+                if candidate.is_symlink():
+                    raise UnitDeltaError("legacy release unit source is a symlink")
+                if candidate.is_file() and UNIT.fullmatch(candidate.name):
+                    names.add(candidate.name)
+        if not names:
+            raise UnitDeltaError("historical release contains no trusted unit definitions")
+        return names
     data = json.loads(path.read_text(encoding="utf-8"))
     if data.get("schema_version") != "1.0":
         raise UnitDeltaError("unsupported production desired-state schema")
@@ -76,6 +100,12 @@ def plan_unit_removals(
     if len(delta) > MAX_AUTO_REMOVALS:
         raise UnitDeltaError("too many candidate-only units for automatic removal")
     removable = []
+    expected_owner = None
+    if enforce_owner:
+        try:
+            expected_owner = 0 if scope == "system" else pwd.getpwnam("al").pw_uid
+        except KeyError as exc:
+            raise UnitDeltaError("canonical host operator identity unavailable") from exc
     # Stop triggering timers/path units before dependent service units.
     for unit in sorted(delta, key=lambda name: (name.endswith(".service"), name)):
         installed = installed_dir / unit
@@ -85,7 +115,7 @@ def plan_unit_removals(
             continue
         if not installed.is_file():
             raise UnitDeltaError(f"installed unit is not a regular file: {unit}")
-        if enforce_owner and installed.stat().st_uid != (0 if scope == "system" else 1000):
+        if enforce_owner and installed.stat().st_uid != expected_owner:
             raise UnitDeltaError(f"unexpected owner of installed unit: {unit}")
         source = candidate_unit_file(candidate, unit, scope)
         if installed.read_bytes() != source.read_bytes():

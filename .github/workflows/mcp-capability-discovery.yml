@@ -8,6 +8,7 @@ on:
       - 'implementation/mcp_service/tests/test_governed_read_failure_contract.py'
       - 'implementation/mcp_service/tests/test_endpoint_device_search_contract.py'
       - 'implementation/mcp_service/tests/test_ticket_work_lifecycle_contract.py'
+      - 'implementation/mcp_service/tests/test_release_ticket_read_canary_mcp.py'
       - 'implementation/orchestrator/contracts.py'
       - '.github/workflows/mcp-capability-discovery.yml'
   push:
@@ -17,6 +18,7 @@ on:
       - 'implementation/mcp_service/tests/test_governed_read_failure_contract.py'
       - 'implementation/mcp_service/tests/test_endpoint_device_search_contract.py'
       - 'implementation/mcp_service/tests/test_ticket_work_lifecycle_contract.py'
+      - 'implementation/mcp_service/tests/test_release_ticket_read_canary_mcp.py'
       - 'implementation/orchestrator/contracts.py'
       - '.github/workflows/mcp-capability-discovery.yml'
 
@@ -53,6 +55,7 @@ jobs:
             implementation/mcp_service/tests/test_governed_read_failure_contract.py \
             implementation/mcp_service/tests/test_endpoint_device_search_contract.py \
             implementation/mcp_service/tests/test_ticket_work_lifecycle_contract.py \
+            implementation/mcp_service/tests/test_release_ticket_read_canary_mcp.py \
             implementation/orchestrator/contracts.py
 
       - name: Test capability discovery and governed-read failure boundary
@@ -61,4 +64,5 @@ jobs:
             implementation/mcp_service/tests/test_capability_discovery.py \
             implementation/mcp_service/tests/test_governed_read_failure_contract.py \
             implementation/mcp_service/tests/test_endpoint_device_search_contract.py \
-            implementation/mcp_service/tests/test_ticket_work_lifecycle_contract.py
+            implementation/mcp_service/tests/test_ticket_work_lifecycle_contract.py \
+            implementation/mcp_service/tests/test_release_ticket_read_canary_mcp.py

@@ -146,11 +146,27 @@ def atomic_release_sandbox(monkeypatch):
     monkeypatch.setattr(runner, "declared_quickbooks_read_profile", lambda *a: None)
     monkeypatch.setattr(runner, "live_quickbooks_read_profile",
                         lambda *a: sorted(runner.QUICKBOOKS_READ_PROFILES)[0])
+    monkeypatch.setattr(runner, "live_autotask_read_profile",
+                        lambda *a: "itglue-autotask-entra-dynamic-schema-read-catalog-v13")
+    monkeypatch.setattr(runner.owner_read_canary, "begin_authenticated_read_canary",
+                        lambda root, *, candidate_sha, profile, phase,
+                               replacing_verified_session=None: {
+                            "candidate_sha": candidate_sha, "profile": profile,
+                            "phase": phase, "nonce": phase,
+                        })
+    monkeypatch.setattr(runner.owner_read_canary, "require_authenticated_read_canary",
+                        lambda root, session: {
+                            "status": "PASS", "phase": session["phase"],
+                            "source_revision": session["candidate_sha"],
+                            "ticket_window_digest": "verified-fixed-window",
+                            "authenticated_principal_digest": "same-authorized-human",
+                        })
     monkeypatch.setattr(runner.worker_enrollment, "approved_diagnostic_uid", lambda *a: "")
     monkeypatch.setattr(runner.worker_enrollment, "live_diagnostic_uid", lambda *a: "")
 
 
-def test_atomic_deploy_updates_runtime_mcp_host_and_release_manager_before_close():
+@pytest.mark.parametrize("preflight_failure", [False, True])
+def test_atomic_deploy_updates_runtime_mcp_host_and_release_manager_before_close(preflight_failure):
     with tempfile.TemporaryDirectory() as td:
         state_root = Path(td)
         candidate_tree = state_root / "candidate"
@@ -184,6 +200,13 @@ def test_atomic_deploy_updates_runtime_mcp_host_and_release_manager_before_close
                 "timer_active": True,
                 "source_link": f"/opt/jason/releases/{sha}",
             }
+
+        def canary(_root, session):
+            if preflight_failure and session["phase"] == "before":
+                raise runner.ReleaseManagerError("missing authenticated preflight read")
+            return {"status": "PASS", "phase": session["phase"],
+                    "ticket_window_digest": "same-window",
+                    "authenticated_principal_digest": "same-operator"}
 
         with (
             patch.object(runner, "image_id", side_effect=image_id),
@@ -236,7 +259,18 @@ def test_atomic_deploy_updates_runtime_mcp_host_and_release_manager_before_close
             patch.object(runner, "publish_production_closeout") as published,
             patch.object(runner, "write_owner_notification_event") as notified,
             patch.object(runner, "open_circuit_breaker") as breaker,
+            patch.object(runner.owner_read_canary, "require_authenticated_read_canary",
+                         side_effect=canary),
         ):
+            if preflight_failure:
+                release = record()
+                with pytest.raises(runner.ReleaseManagerError,
+                                   match="missing authenticated preflight read"):
+                    runner.deploy_production(ROOT, state_root, release)
+                assert release["state"] == "production_eligible"
+                assert events == []
+                breaker.assert_not_called()
+                return
             result = runner.deploy_production(ROOT, state_root, record())
 
         assert result["state"] == "closed"
@@ -261,11 +295,15 @@ def test_atomic_deploy_updates_runtime_mcp_host_and_release_manager_before_close
         assert production["runtime_revision"] == SHA_A
         assert production["mcp_revision"] == SHA_A
         assert production["host_revision"] == SHA_A
+        assert result["pre_mutation_authenticated_read_canary"]["phase"] == "before"
+        assert production["pre_mutation_authenticated_read_canary"]["phase"] == "before"
+        assert production["authenticated_owner_read_canary"]["phase"] == "after"
 
 
 @pytest.mark.parametrize("host_rollback_succeeds", [True, False])
+@pytest.mark.parametrize("failure_stage", ["alignment", "post_canary", "post_scope_mismatch", "post_actor_mismatch"])
 def test_failed_final_alignment_rolls_back_mcp_host_manager_and_runtime(
-    host_rollback_succeeds,
+    host_rollback_succeeds, failure_stage,
 ):
     with tempfile.TemporaryDirectory() as td:
         state_root = Path(td)
@@ -278,6 +316,8 @@ def test_failed_final_alignment_rolls_back_mcp_host_manager_and_runtime(
             return {
                 "jason-runtime:test-a": "sha256:runtime-a",
                 "jason-mcp:test-a": "sha256:mcp-a",
+                "jason-runtime:production": "sha256:runtime-a",
+                "jason-mcp:production": "sha256:mcp-a",
             }.get(name, "sha256:unused")
 
         def run_command(args, *, cwd=None, env=None):
@@ -291,9 +331,24 @@ def test_failed_final_alignment_rolls_back_mcp_host_manager_and_runtime(
 
         def align(sha):
             align_calls.append(sha)
-            if sha == SHA_A:
+            if sha == SHA_A and failure_stage == "alignment":
                 raise runner.ReleaseManagerError("forced final alignment failure")
             return alignment(sha)
+
+        def canary(_root, session):
+            if failure_stage == "post_canary" and session["phase"] == "after":
+                raise runner.ReleaseManagerError("forced postdeployment Autotask read failure")
+            return {
+                "status": "PASS", "phase": session["phase"],
+                "ticket_window_digest": (
+                    "changed-window" if (failure_stage == "post_scope_mismatch"
+                                         and session["phase"] == "after") else "same-window"
+                ),
+                "authenticated_principal_digest": (
+                    "changed-actor" if (failure_stage == "post_actor_mismatch"
+                                        and session["phase"] == "after") else "same-operator"
+                ),
+            }
 
         def host(_state_root, sha, **_kwargs):
             events.append("host:" + sha)
@@ -340,10 +395,11 @@ def test_failed_final_alignment_rolls_back_mcp_host_manager_and_runtime(
             patch.object(
                 runner,
                 "wait_live_runtime",
-                side_effect=[
-                    {"revision": SHA_A},
-                    {"revision": SHA_B},
-                ],
+                side_effect=(
+                    [{"revision": SHA_A}, {"revision": SHA_A}, {"revision": SHA_B}]
+                    if failure_stage != "alignment"
+                    else [{"revision": SHA_A}, {"revision": SHA_B}]
+                ),
             ),
             patch.object(
                 runner,
@@ -367,15 +423,20 @@ def test_failed_final_alignment_rolls_back_mcp_host_manager_and_runtime(
             patch.object(runner, "rollback_surface_is_verified",
                          side_effect=[False, True, False, True]),
             patch.object(runner, "pin_exact_rollback_image"),
+            patch.object(runner.owner_read_canary, "require_authenticated_read_canary",
+                         side_effect=canary),
         ):
             release = record()
             with pytest.raises(
                 runner.ReleaseManagerError,
-                match="forced final alignment failure",
+                match=("forced final alignment failure" if failure_stage == "alignment"
+                       else "forced postdeployment Autotask read failure"
+                       if failure_stage == "post_canary"
+                       else "foundational pre/post canary window or authenticated principal changed"),
             ):
                 runner.deploy_production(ROOT, state_root, release)
 
-        assert release["state"] == ("rolled_back" if host_rollback_succeeds else "failed")
+        assert release["state"] == ("rolled_back" if host_rollback_succeeds else "failed"), release["failure"]["rollback_errors"]
         assert release["failure"]["rollback_verified"] is host_rollback_succeeds
         assert release["failure"]["rollback_actions"]["host"] == (
             "reconciled_baseline" if host_rollback_succeeds else "unverified"
