@@ -114,6 +114,17 @@ if [ -f "$QBO_PROD_ROLE_HOST" ] && [ -f "$QBO_PROD_SECRET_HOST" ]; then
   )
 fi
 
+# Explicit human-only routine Autotask profile; no provider-wide RW policy.
+case "${JASON_AOT_ROUTINE_RW_PROFILE:-}" in
+  ""|autotask-ticket-v1) ;;
+  *) echo "DENIED: unknown AOT routine Autotask ticket profile" >&2; exit 2 ;;
+esac
+AOT_ROUTINE_RW_PROFILE="${JASON_AOT_ROUTINE_RW_PROFILE:-}"
+# Enforce the original OFF authority state during last-known-good rollback.
+if [ "$IMAGE" = "jason-mcp:rollback-current" ]; then
+  AOT_ROUTINE_RW_PROFILE=""
+fi
+
 PREFLIGHT=false
 for arg in "$@"; do
   if [ "$arg" = "--preflight" ]; then
@@ -129,6 +140,7 @@ python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-mcp-pilot   -
   --set-env JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH="$QBO_ACTIVE_SECRET_CONTAINER" \
   --set-env JASON_QUICKBOOKS_OAUTH_DB="$QBO_ACTIVE_DB" \
   --set-env "JASON_PROVIDER_READ_ACTIVATION_PROFILE=$AUTOTASK_READ_PROFILE" \
+  --set-env "JASON_AOT_ROUTINE_RW_PROFILE=$AOT_ROUTINE_RW_PROFILE" \
   --set-env "JASON_QUICKBOOKS_READ_PROFILE=$QUICKBOOKS_READ_PROFILE" \
   --set-env "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID=${JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID:-}" \
   --add-readonly-bind "$QBO_DEV_ROLE_HOST:/run/jason-secrets/openbao/quickbooks-development/role_id" \

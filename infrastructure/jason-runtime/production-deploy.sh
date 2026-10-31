@@ -138,6 +138,18 @@ case "$OWNER_UAT_MODE:$OWNER_UAT_WORKER" in
   *) echo "DENIED: UAT manifest activation returned unsupported mode" >&2; exit 2 ;;
 esac
 
+# Opt-in AOT human-only routine ticket authority. Reject unknown profiles before
+# any deployment mutation; an unset value is always propagated as OFF.
+case "${JASON_AOT_ROUTINE_RW_PROFILE:-}" in
+  ""|autotask-ticket-v1) ;;
+  *) echo "DENIED: unknown AOT routine Autotask ticket profile" >&2; exit 2 ;;
+esac
+AOT_ROUTINE_RW_PROFILE="${JASON_AOT_ROUTINE_RW_PROFILE:-}"
+# A rollback to the verified disabled baseline must never inherit a new grant.
+if [ "$IMAGE" = "jason-runtime:rollback-current" ]; then
+  AOT_ROUTINE_RW_PROFILE=""
+fi
+
 exec python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-runtime   --image "$IMAGE"   --rollback "$ROLLBACK"   --source-revision "$REVISION"   --harden \
   --set-env "JASON_OWNER_UAT_MODE=$OWNER_UAT_MODE" \
   --set-env "JASON_OWNER_UAT_WORKER_ENABLED=$OWNER_UAT_WORKER" \
@@ -147,6 +159,7 @@ exec python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-runtime 
   --set-env "JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH=$QBO_MOUNT_BASE/secret_id" \
   --set-env "JASON_QUICKBOOKS_OAUTH_DB=$QBO_DB" \
   --set-env "JASON_PROVIDER_READ_ACTIVATION_PROFILE=$AUTOTASK_READ_PROFILE" \
+  --set-env "JASON_AOT_ROUTINE_RW_PROFILE=$AOT_ROUTINE_RW_PROFILE" \
   --set-env "JASON_QUICKBOOKS_READ_PROFILE=$QUICKBOOKS_READ_PROFILE" \
   --set-env "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID=${JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID:-}" \
   --add-readonly-bind "$QBO_ROLE_HOST:$QBO_MOUNT_BASE/role_id" \
