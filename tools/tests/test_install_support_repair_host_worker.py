@@ -37,7 +37,7 @@ class InstallSupportRepairHostWorkerTests(unittest.TestCase):
             / "infrastructure/openclaw-operations/systemd/user/jason-support-repair-worker.service"
         ).read_text(encoding="utf-8")
         self.assertEqual(service.count("ExecStart="), 1)
-        self.assertIn("TimeoutStartSec=65min", service)
+        self.assertIn("TimeoutStartSec=200min", service)
         self.assertIn("pmv3_engineering_controller.py", service)
         self.assertNotIn("ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/engineering_pipeline.py", service)
         self.assertIn("/home/al/jason-worktrees/owner-approved-development", service)
