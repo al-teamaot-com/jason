@@ -792,7 +792,7 @@ def build_invoker(*, bindings) -> AutonomousCompletionTeamsInvoker:
         token_file=Path(
             os.getenv(
                 "JASON_TEAMS_PROACTIVE_TOKEN_FILE",
-                "/run/jason-secrets/teams-proactive/token",
+                "/run/jason-secrets/teams-proactive-gateway/token",
             )
         ),
         bindings=bindings,
