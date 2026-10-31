@@ -110,6 +110,11 @@ from .gpt_insights import (
     material_fingerprint as gpt_insights_fingerprint,
     render_insight as render_gpt_insight,
 )
+from .nonactionable_ticket_cleanup import (
+    classify as classify_nonactionable_ticket,
+    identity_ready as cleanup_identity_ready,
+    only_system_notes as cleanup_only_system_notes,
+)
 from .unsupported_ticket_triage import (
     TRIAGE_NOTE_TITLE, gather as gather_unsupported_triage,
     category_for as unsupported_triage_category, render_triage_note,
@@ -276,6 +281,16 @@ GPT_INSIGHTS_SCOPE = PlaybookScope(
 # Dedicated standing owner promotion is required before a generic
 # read-only diagnostic may write a technician-visible Autotask internal note.
 # This never inherits a remediation playbook's action scope.
+NONACTIONABLE_CLEANUP_SCOPE = PlaybookScope(
+    playbook_id="nonactionable_ticket_cleanup",
+    playbook_version="1.0.0",
+    policy_id="playbook-autonomy:nonactionable_ticket_cleanup",
+    required_action_capabilities=(
+        "service.ticket.note.create",
+        "service.ticket.update",
+    ),
+)
+
 UNSUPPORTED_TRIAGE_NOTE_SCOPE = PlaybookScope(
     playbook_id="unsupported_readonly_triage_note",
     playbook_version="1.0.0",
@@ -327,6 +342,7 @@ PLAYBOOK_SCOPES = {
     GPT_INSIGHTS_SCOPE.playbook_id: GPT_INSIGHTS_SCOPE,
     JASON_ACTIVITY_SCOPE.playbook_id: JASON_ACTIVITY_SCOPE,
     UNSUPPORTED_TRIAGE_NOTE_SCOPE.playbook_id: UNSUPPORTED_TRIAGE_NOTE_SCOPE,
+    NONACTIONABLE_CLEANUP_SCOPE.playbook_id: NONACTIONABLE_CLEANUP_SCOPE,
     UNSUPPORTED_TRIAGE_HANDOFF_SCOPE.playbook_id: UNSUPPORTED_TRIAGE_HANDOFF_SCOPE,
 }
 
@@ -2149,6 +2165,150 @@ class OperationalAutonomyMaintenance:
             resume_phase="queue_reassessment",
         )
 
+    def _cleanup_verified_snapshot(self, candidate, *, in_progress: bool = False):
+        """Re-read ticket, site, company and notes at each mutation boundary."""
+        ticket_id = int(candidate.resource_id)
+        data = self._read_data("service.ticket.read", {"resource_id": ticket_id})
+        tickets = data.get("items")
+        if not isinstance(tickets, list) or len(tickets) != 1 or not isinstance(tickets[0], Mapping):
+            raise OperationalAutonomyError("cleanup requires exactly one authoritative Autotask ticket")
+        ticket = tickets[0]
+        if (
+            int(ticket.get("id") or 0) != ticket_id
+            or str(ticket.get("ticketNumber") or "") != str(candidate.context.get("ticketNumber") or "")
+            or int(ticket.get("companyID") or 0) != int(candidate.context.get("companyID") or 0)
+            or int(ticket.get("companyLocationID") or 0) != int(candidate.context.get("companyLocationID") or 0)
+            or not cleanup_identity_ready(ticket)
+            or classify_nonactionable_ticket(ticket) is None
+        ):
+            raise OperationalAutonomyError("cleanup ticket/company/site/classification changed")
+        if in_progress:
+            if int(ticket.get("status") or 0) != 8:
+                raise OperationalAutonomyError("cleanup ticket unexpectedly changed status")
+        elif int(ticket.get("status") or 0) != 1:
+            raise OperationalAutonomyError("cleanup only claims New tickets")
+        company = self._read_data("service.company.read", {
+            "resource_id": int(ticket["companyID"]),
+        }).get("item")
+        if (not isinstance(company, Mapping)
+                or int(company.get("id") or 0) != int(ticket["companyID"])
+                or company.get("isActive") is not True
+                or not str(company.get("companyName") or "").strip()):
+            raise OperationalAutonomyError("cleanup company identity not authoritative/active")
+        notes_data = self._read_data("service.ticket.notes.search", {"ticket_id": ticket_id})
+        notes = notes_data.get("items")
+        if not isinstance(notes, list):
+            raise OperationalAutonomyError("cleanup ticket note history unavailable")
+        own_title = "Jason - Non-Actionable Ticket Cleanup - Resolution"
+        own_notes = [n for n in notes if isinstance(n, Mapping) and n.get("title") == own_title]
+        other_notes = [n for n in notes if n not in own_notes]
+        if not cleanup_only_system_notes(other_notes):
+            raise OperationalAutonomyError("cleanup excluded: technician/client activity on ticket")
+        time_data = self._read_data("service.ticket.time.entry.search", {
+            "ticket_id": ticket_id, "page_size": 100,
+        })
+        time_entries = time_data.get("items")
+        if not isinstance(time_entries, list) or time_entries:
+            raise OperationalAutonomyError(
+                "cleanup excluded: time entries exist or time-entry evidence is unavailable"
+            )
+        owned_note_fingerprint = self.store.last_note_fingerprint(
+            ticket_id, NONACTIONABLE_CLEANUP_SCOPE.playbook_id, own_title
+        )
+        if own_notes and owned_note_fingerprint is None:
+            raise OperationalAutonomyError("cleanup internal note exists without owned evidence fingerprint")
+        if owned_note_fingerprint is not None and len(own_notes) != 1:
+            raise OperationalAutonomyError(
+                "cleanup owned audit note is missing or duplicated in Autotask"
+            )
+        return ticket
+
+    def _cleanup_admit(self, candidate) -> OperationalWork:
+        """Administrative tickets have a site, not a device; preserve bounded slots."""
+        if not cleanup_identity_ready(candidate.context):
+            raise OperationalAutonomyError("cleanup company/site identity missing")
+        self._cleanup_verified_snapshot(candidate)
+        ticket = candidate.context
+        work = OperationalWork(
+            ticket_id=int(candidate.resource_id),
+            ticket_number=str(ticket["ticketNumber"]),
+            title=str(ticket["title"]),
+            playbook_id=NONACTIONABLE_CLEANUP_SCOPE.playbook_id,
+            source_queue=str(candidate.source_queue),
+            company_id=int(ticket["companyID"]),
+            configuration_item_id=0,
+            device_uid="",
+            hostname="Autotask site " + str(ticket["companyLocationID"]),
+            phase="claim",
+            source_version=(str(candidate.source_version or "").strip() or None),
+            updated_at=datetime.now(timezone.utc).isoformat(),
+        )
+        self.store.put(work)
+        return work
+
+    def _cleanup_finish(self, work: OperationalWork) -> None:
+        """Close only when the same site-bound ticket still has no human activity."""
+        snapshot = self._read_data("service.ticket.read", {"resource_id": work.ticket_id})
+        rows = snapshot.get("items")
+        if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], Mapping):
+            raise OperationalAutonomyError("cleanup completion ticket readback unavailable")
+        ticket = rows[0]
+        candidate = type("TicketRef", (), {
+            "resource_id": str(work.ticket_id),
+            "context": dict(ticket),
+        })()
+        self._cleanup_verified_snapshot(candidate, in_progress=True)
+        if (
+            int(ticket.get("status") or 0) != 8
+            or int(ticket.get("companyID") or 0) != work.company_id
+            or str(ticket.get("ticketNumber") or "") != work.ticket_number
+            or work.hostname != "Autotask site " + str(ticket.get("companyLocationID") or "")
+            or int(ticket.get("queueID") or 0)
+                != self.queue_source._required_queue_id("Jason")
+        ):
+            raise OperationalAutonomyError("cleanup ticket/site/queue drift after claim")
+        title = "Jason - Non-Actionable Ticket Cleanup - Resolution"
+        decision = classify_nonactionable_ticket(ticket)
+        if decision is None:
+            raise OperationalAutonomyError("cleanup classification changed")
+        body = (
+            "STATUS: Non-actionable administrative email classified; completion pending.\n"
+            "NEXT STEP: Jason will set Complete and verify Autotask readback; "
+            "no service work requested.\n"
+            "KEY EVIDENCE: Exact ticket/company/location and original source "
+            "read back in Autotask; no technician or contact notes; "
+            f"category={decision.category}; companyID={work.company_id}; "
+            f"Autotask companyLocationID={ticket['companyLocationID']}.\n"
+            "WHAT JASON DID: Verified original email classification and company/site; "
+            "no links opened, no unsubscribe action taken.\n"
+            "CHANGES MADE: Jason queue / In Progress claim only so far. "
+            "No endpoint, client user, or service changed.\n"
+            "JASON STATE: nonactionable_ticket_cleanup@1.0.0, verifying completion.\n"
+        )
+        fingerprint = hashlib.sha256(
+            f"{work.ticket_id}|{work.company_id}|{ticket['companyLocationID']}|"
+            f"{decision.category}|{body}".encode("utf-8")
+        ).hexdigest()
+        if self.store.last_note_fingerprint(
+            work.ticket_id, work.playbook_id, title
+        ) != fingerprint:
+            self.actions.execute(
+                NONACTIONABLE_CLEANUP_SCOPE, "service.ticket.note.create",
+                {"payload": {
+                    "ticketID": work.ticket_id, "title": title,
+                    "description": body, "noteType": 3, "publish": 2,
+                }},
+            )
+            self.store.remember_note_fingerprint(
+                work.ticket_id, work.playbook_id, title, fingerprint,
+            )
+        # The note and lack of human activity must still be visible in Autotask
+        # immediately before the terminal status mutation; fail closed on lag.
+        self._cleanup_verified_snapshot(candidate, in_progress=True)
+        self._complete_verified_ticket(
+            work, reason="Site-bound non-actionable email verified and completed.",
+        )
+
     def tick(self) -> None:
         now = self.monotonic()
         if now < self._next_due:
@@ -2212,6 +2372,7 @@ class OperationalAutonomyMaintenance:
                         )
 
         unsupported_triage_candidates: list[tuple[Any, str]] = []
+        cleanup_started = 0
         classifications: dict[
             int, tuple[str, str, str | None, bool]
         ] = {}
@@ -2702,6 +2863,48 @@ class OperationalAutonomyMaintenance:
                 )
                 continue
             scope = self._match_scope(item.context)
+            cleanup_decision = (
+                classify_nonactionable_ticket(item.context) if scope is None else None
+            )
+            if (
+                scope is None and cleanup_decision is not None
+                and self._scope_is_promoted(NONACTIONABLE_CLEANUP_SCOPE)
+                and str(item.context.get("_jason_source_status_label") or "").strip().casefold() == "new"
+            ):
+                if (
+                    len(self.store.list_open()) >= self.max_active_work_items
+                    or cleanup_started >= 2
+                ):
+                    classifications[ticket_id] = (
+                        "waiting_dependency", "cleanup_admission_capacity",
+                        item.source_version, False,
+                    )
+                else:
+                    try:
+                        work = self._cleanup_admit(item)
+                        cleanup_started += 1
+                        self._advance(work, item.context)
+                        state, reason_code = self._classify_persisted_work(ticket_id)
+                        classifications[ticket_id] = (
+                            state, reason_code, item.source_version, True,
+                        )
+                    except Exception as exc:
+                        existing_cleanup = self.store.get(ticket_id)
+                        if (existing_cleanup is not None and
+                                existing_cleanup.playbook_id == NONACTIONABLE_CLEANUP_SCOPE.playbook_id):
+                            self._block(
+                                existing_cleanup,
+                                "Administrative cleanup failed closed: "
+                                f"{type(exc).__name__}: {str(exc)[:350]}",
+                            )
+                        classifications[ticket_id] = (
+                            "governance_blocked", "cleanup_identity_or_authority_failure",
+                            item.source_version, False,
+                        )
+                        self._audit_diagnostic("ticket_cleanup.failed", {
+                            "ticket_id": ticket_id, "error_type": type(exc).__name__,
+                        })
+                continue
             if scope is None:
                 unsupported += 1
                 unsupported_reason = self._unsupported_capability_reason(item.context)
@@ -4661,17 +4864,15 @@ class OperationalAutonomyMaintenance:
             return
 
         if work.phase == "claim":
+            claim_payload = {
+                "id": work.ticket_id,
+                "queueID": "Jason",
+                "status": "In Progress",
+            }
+            if work.playbook_id != NONACTIONABLE_CLEANUP_SCOPE.playbook_id:
+                claim_payload["billingCodeID"] = "Remote Support"
             claim_output = self.actions.execute(
-                scope,
-                "service.ticket.update",
-                {
-                    "payload": {
-                        "id": work.ticket_id,
-                        "queueID": "Jason",
-                        "status": "In Progress",
-                        "billingCodeID": "Remote Support",
-                    }
-                },
+                scope, "service.ticket.update", {"payload": claim_payload},
             )
             claim_data = self._action_data(claim_output)
             verification = claim_data.get("jasonVerification")
@@ -4714,6 +4915,8 @@ class OperationalAutonomyMaintenance:
                 next_phase = "disk_bad_block_investigate"
             elif work.playbook_id == IDLE_LOG_OFF_SCOPE.playbook_id:
                 next_phase = "idle_log_off_investigate"
+            elif work.playbook_id == NONACTIONABLE_CLEANUP_SCOPE.playbook_id:
+                next_phase = "cleanup_finish"
             else:
                 raise OperationalAutonomyError(
                     f"unsupported autonomous playbook: {work.playbook_id}"
@@ -4843,6 +5046,11 @@ class OperationalAutonomyMaintenance:
             }:
                 self._poll_security_log(work)
                 return
+
+        if (work.playbook_id == NONACTIONABLE_CLEANUP_SCOPE.playbook_id
+                and work.phase == "cleanup_finish"):
+            self._cleanup_finish(work)
+            return
 
         if work.phase == "health_dispatch":
             self._dispatch_component(work, HEALTH_COMPONENT_NAME, "health_wait")
