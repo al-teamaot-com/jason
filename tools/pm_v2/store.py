@@ -400,7 +400,7 @@ class PMV2Store:
             rows = conn.execute(
                 """
                 SELECT assignment_id FROM assignments
-                WHERE state='running' AND lease_until IS NOT NULL AND lease_until < ?
+                WHERE state='running' AND lease_until IS NOT NULL AND lease_until <= ?
                 """,
                 (now,),
             ).fetchall()

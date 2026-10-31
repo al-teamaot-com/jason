@@ -1,96 +1,96 @@
 {
-  "schema_version": "1.0",
   "failures": [
     {
+      "correction": "Persistent service loop dispatches eligible work without chat dependency.",
       "id": "V1-STOPPED-WORK",
       "symptom": "Approved runnable work waits for another proceed/continue prompt.",
-      "correction": "Persistent service loop dispatches eligible work without chat dependency.",
       "test_file": "tools/tests/test_pm_v2_service.py",
       "test_symbol": "test_one_cycle_is_persistent_healthy_and_nonexecuting_without_owned_work"
     },
     {
+      "correction": "Retries are bounded and transition to slow blocked recheck.",
       "id": "V1-ENDLESS-RETRY",
       "symptom": "Unchanged failures are retried repeatedly without changing approach.",
-      "correction": "Retries are bounded and transition to slow blocked recheck.",
       "test_file": "tools/tests/test_pm_v2_scheduler.py",
       "test_symbol": "test_repeated_worker_failure_blocks_only_that_assignment"
     },
     {
+      "correction": "Periodic components dispatch independently with separate leases.",
       "id": "V1-SERIAL-COMPONENTS",
       "symptom": "Independent maintenance stages wait behind unrelated stages.",
-      "correction": "Periodic components dispatch independently with separate leases.",
       "test_file": "tools/tests/test_pm_v2_components.py",
       "test_symbol": "test_two_pm_v2_components_run_independently_in_parallel"
     },
     {
+      "correction": "Failures are assignment/component local; unrelated capacity remains dispatchable.",
       "id": "V1-BLOCKER-STOPS-QUEUE",
       "symptom": "One failed or blocked task prevents unrelated work from progressing.",
-      "correction": "Failures are assignment/component local; unrelated capacity remains dispatchable.",
-      "test_file": "tools/tests/test_pm_v2_components.py",
-      "test_symbol": "test_repeated_component_failure_enters_slow_recheck_not_tight_loop"
+      "test_file": "tools/tests/test_pm_v2_fault_injection.py",
+      "test_symbol": "test_failure_blocker_and_expired_lease_do_not_stop_other_work"
     },
     {
+      "correction": "PM V2 independently requires full release and operational evidence before 100 percent.",
       "id": "V1-FALSE-COMPLETION",
       "symptom": "Worker, CI, merge, or deployment success is mistaken for completed functionality.",
-      "correction": "PM V2 independently requires full release and operational evidence before 100 percent.",
       "test_file": "tools/tests/test_pm_v2_release_sync.py",
       "test_symbol": "test_bridge_complete_is_not_pm_complete_without_full_evidence"
     },
     {
+      "correction": "Functional smoke and exact live production evidence are mandatory completion checks.",
       "id": "V1-UNVERIFIED-FUNCTION",
       "symptom": "Automated tests pass while the intended operational path remains unverified.",
-      "correction": "Functional smoke and exact live production evidence are mandatory completion checks.",
       "test_file": "tools/tests/test_pm_v2_release_sync.py",
       "test_symbol": "test_verified_release_requires_teams_approval_start_and_result"
     },
     {
+      "correction": "Durable SQLite state plus integrity-verified snapshot and restore.",
       "id": "V1-LOST-CONTINUITY",
       "symptom": "Restart or host loss loses work state or requires manual reconstruction.",
-      "correction": "Durable SQLite state plus integrity-verified snapshot and restore.",
       "test_file": "tools/tests/test_pm_v2_recovery.py",
       "test_symbol": "test_snapshot_verifies_and_restores_state_and_config"
     },
     {
+      "correction": "Atomic leases, idempotency records, and explicit V1/V2 ownership.",
       "id": "V1-DUPLICATE-WORK",
       "symptom": "Retries or parallel controllers can duplicate a work claim.",
-      "correction": "Atomic leases, idempotency records, and explicit V1/V2 ownership.",
       "test_file": "tools/tests/test_pm_v2_store.py",
       "test_symbol": "test_claim_is_atomic_and_single_owner"
     },
     {
+      "correction": "Exact PM V2 issue selector and legacy global-scan exclusion marker.",
       "id": "V1-CONTROLLER-COLLISION",
       "symptom": "V1 and V2 can select the same approved development issue.",
-      "correction": "Exact PM V2 issue selector and legacy global-scan exclusion marker.",
       "test_file": "tools/tests/test_pm_v2_worker_selection.py",
       "test_symbol": "test_v1_global_scan_skips_pm_v2_owned_issue"
     },
     {
+      "correction": "PM V2 completion requires authenticated exact-SHA Teams approval evidence.",
       "id": "V1-APPROVAL-FRICTION",
       "symptom": "Normal production approval requires a command outside Teams.",
-      "correction": "PM V2 completion requires authenticated exact-SHA Teams approval evidence.",
       "test_file": "tools/tests/test_pm_v2_release_sync.py",
       "test_symbol": "test_verified_release_requires_teams_approval_start_and_result"
     },
     {
+      "correction": "PM V2 production lifecycle cards contain all five required status fields.",
       "id": "V1-COMMUNICATION-DRIFT",
       "symptom": "Lifecycle messages omit the agreed communication standard.",
-      "correction": "PM V2 production lifecycle cards contain all five required status fields.",
       "test_file": "implementation/runtime_service/tests/test_autonomous_completion_notification.py",
       "test_symbol": "test_pm_v2_production_push_start_and_result_render_exact_lifecycle"
     },
     {
+      "correction": "Scope hash changes block the assignment for explicit reconciliation.",
       "id": "V1-SCOPE-DRIFT",
       "symptom": "An in-flight assignment can silently change scope.",
-      "correction": "Scope hash changes block the assignment for explicit reconciliation.",
       "test_file": "tools/tests/test_pm_v2_store.py",
       "test_symbol": "test_scope_change_blocks_inflight_work"
     },
     {
+      "correction": "PM V2 extends existing Teams, Release Manager, and owner-approved worker interfaces.",
       "id": "V1-REBUILD-SHARED-CAPABILITY",
       "symptom": "Similar workflows rebuild separate approval, notification, or worker behavior.",
-      "correction": "PM V2 extends existing Teams, Release Manager, and owner-approved worker interfaces.",
       "test_file": "tools/tests/test_pm_v2_worker_selection.py",
       "test_symbol": "test_exact_selector_can_claim_pm_v2_owned_issue"
     }
-  ]
+  ],
+  "schema_version": "1.0"
 }
