@@ -117,10 +117,18 @@
   },
   "poll_interval_seconds": 15,
   "recovery": {
+    "replica_directories": [],
     "snapshot_directory": "/var/lib/jason/pm-v2/snapshots/latest",
     "snapshot_interval_seconds": 300
   },
   "schema_version": "1.0",
+  "scope": {
+    "canonical_agreement_path": "docs/operations/Production-Manager-V2-Goal-Scope-and-Success-Agreement.md",
+    "canonical_agreement_sha256": "4debf8d43ce200b2f61abad8bf281bbfd6ccf313f78b8534a0e96b77098a1f0c"
+  },
+  "self_improvement": {
+    "minimum_recurrences": 2
+  },
   "sources": {
     "roadmap_path": "docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md",
     "support_path": "SUPPORT.md"

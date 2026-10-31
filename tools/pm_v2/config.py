@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -51,10 +52,14 @@ class PMV2Config:
     approval_channel: str
     snapshot_directory: Path
     snapshot_interval_seconds: int
+    snapshot_replica_directories: tuple[Path, ...]
     owned_todo_ids: tuple[str, ...]
     status_snapshot_path: Path
     control_request_inbox: Path
     control_result_directory: Path
+    canonical_agreement_path: Path | None
+    canonical_agreement_sha256: str | None
+    self_improvement_minimum_recurrences: int
 
 
 def _positive_int(value: Any, field: str, maximum: int | None = None) -> int:
@@ -176,12 +181,46 @@ def load_config(path: Path, repo: Path) -> PMV2Config:
         "recovery.snapshot_interval_seconds",
         86400,
     )
+    replicas = recovery.get("replica_directories", [])
+    if not isinstance(replicas, list) or any(
+        not isinstance(value, str) or not Path(value).is_absolute()
+        for value in replicas
+    ):
+        raise ConfigError("recovery.replica_directories must be absolute paths")
+    snapshot_replica_directories = tuple(Path(value) for value in replicas)
     owned = ownership.get("owned_todo_ids")
     if not isinstance(owned, list) or any(
         not isinstance(value, str) or not value.startswith("TODO-") or not value.strip()
         for value in owned
     ) or len(set(owned)) != len(owned):
         raise ConfigError("ownership.owned_todo_ids must be a unique TODO ID list")
+
+    scope = raw.get("scope")
+    canonical_agreement_path = None
+    canonical_agreement_sha256 = None
+    if scope is not None:
+        if not isinstance(scope, dict):
+            raise ConfigError("scope must be an object")
+        relative = str(scope.get("canonical_agreement_path") or "").strip()
+        expected = str(scope.get("canonical_agreement_sha256") or "").strip().casefold()
+        if not relative or len(expected) != 64 or any(ch not in "0123456789abcdef" for ch in expected):
+            raise ConfigError("scope canonical agreement path/hash are invalid")
+        canonical_agreement_path = repo / relative
+        if not canonical_agreement_path.is_file():
+            raise ConfigError("canonical PM V2 agreement is missing")
+        observed = hashlib.sha256(canonical_agreement_path.read_bytes()).hexdigest()
+        if observed != expected:
+            raise ConfigError("canonical PM V2 agreement hash mismatch")
+        canonical_agreement_sha256 = expected
+
+    improvement = raw.get("self_improvement") or {"minimum_recurrences": 2}
+    if not isinstance(improvement, dict):
+        raise ConfigError("self_improvement must be an object")
+    improvement_min = _positive_int(
+        improvement.get("minimum_recurrences"),
+        "self_improvement.minimum_recurrences",
+        100,
+    )
 
     status_snapshot_path = Path(str(control.get("status_snapshot_path") or ""))
     control_request_inbox = Path(str(control.get("request_inbox") or ""))
@@ -209,8 +248,12 @@ def load_config(path: Path, repo: Path) -> PMV2Config:
         approval_channel=approval_channel,
         snapshot_directory=snapshot_directory,
         snapshot_interval_seconds=snapshot_interval_seconds,
+        snapshot_replica_directories=snapshot_replica_directories,
         owned_todo_ids=tuple(owned),
         status_snapshot_path=status_snapshot_path,
         control_request_inbox=control_request_inbox,
         control_result_directory=control_result_directory,
+        canonical_agreement_path=canonical_agreement_path,
+        canonical_agreement_sha256=canonical_agreement_sha256,
+        self_improvement_minimum_recurrences=improvement_min,
     )

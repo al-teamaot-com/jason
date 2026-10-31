@@ -53,3 +53,40 @@ class PMV2RecoveryTests(unittest.TestCase):
                 handle.write(b"tamper")
             with self.assertRaises(ValueError):
                 verify_snapshot(snapshot)
+
+    def test_snapshot_replicates_and_verifies_to_configured_destination(self):
+        from pm_v2.recovery import replicate_snapshot
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            store = PMV2Store(root / "live" / "pm-v2.sqlite3")
+            store.initialize()
+            config = root / "pm-v2.json"
+            config.write_text('{"schema_version":"1.0"}\n', encoding="utf-8")
+            snapshot = root / "snapshot"
+            create_snapshot(store=store, destination=snapshot, config_path=config)
+            replica = root / "other-host-mount" / "latest"
+            result = replicate_snapshot(
+                snapshot_dir=snapshot,
+                replica_directories=(replica,),
+            )
+            self.assertEqual(result["replica_count"], 1)
+            self.assertEqual(
+                verify_snapshot(replica)["database"]["sha256"],
+                verify_snapshot(snapshot)["database"]["sha256"],
+            )
+
+    def test_empty_replica_set_is_explicitly_not_a_host_loss_proof(self):
+        from pm_v2.recovery import replicate_snapshot
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            store = PMV2Store(root / "state.sqlite3")
+            store.initialize()
+            config = root / "config.json"
+            config.write_text("{}\n", encoding="utf-8")
+            snapshot = root / "snapshot"
+            create_snapshot(store=store, destination=snapshot, config_path=config)
+            result = replicate_snapshot(
+                snapshot_dir=snapshot,
+                replica_directories=(),
+            )
+            self.assertEqual(result["replica_count"], 0)

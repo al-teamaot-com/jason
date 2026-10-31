@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
 import tempfile
 from datetime import datetime, timezone
@@ -108,3 +109,46 @@ def restore_snapshot(*, snapshot_dir: Path, database_path: Path,
             if os.path.exists(name):
                 os.unlink(name)
     return manifest
+
+
+def replicate_snapshot(
+    *,
+    snapshot_dir: Path,
+    replica_directories: tuple[Path, ...],
+) -> dict[str, Any]:
+    manifest = verify_snapshot(snapshot_dir)
+    source = snapshot_dir.resolve()
+    results = []
+    for replica in replica_directories:
+        target = replica.resolve()
+        if target == source:
+            raise ValueError("snapshot replica cannot equal the source directory")
+        target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        staging = target.parent / (target.name + ".staging")
+        if staging.exists():
+            shutil.rmtree(staging)
+        staging.mkdir(mode=0o700)
+        for name in ("pm-v2.sqlite3", "pm-v2-config.json", "manifest.json"):
+            shutil.copy2(source / name, staging / name)
+            os.chmod(staging / name, 0o600)
+        verify_snapshot(staging)
+        if target.exists():
+            backup = target.parent / (target.name + ".previous")
+            if backup.exists():
+                shutil.rmtree(backup)
+            os.replace(target, backup)
+            os.replace(staging, target)
+            shutil.rmtree(backup)
+        else:
+            os.replace(staging, target)
+        verified = verify_snapshot(target)
+        results.append({
+            "path": str(target),
+            "database_sha256": verified["database"]["sha256"],
+            "status": "verified",
+        })
+    return {
+        "source_database_sha256": manifest["database"]["sha256"],
+        "replica_count": len(results),
+        "replicas": results,
+    }

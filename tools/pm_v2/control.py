@@ -32,6 +32,7 @@ def publish_status_snapshot(*, store: PMV2Store, path: Path) -> dict[str, Any]:
     assignments = store.list_assignments()
     components = store.component_snapshot()
     nodes = store.node_snapshot()
+    health = store.health_snapshot()
     payload = {
         "schema_version": "1.0",
         "generated_at": utcnow(),
@@ -56,6 +57,7 @@ def publish_status_snapshot(*, store: PMV2Store, path: Path) -> dict[str, Any]:
             for row in assignments[:100]
         ],
         "components": components,
+        "health": health,
         "nodes": nodes,
     }
     _atomic_json(path, payload)

@@ -539,6 +539,23 @@ class PMV2Store:
                 (digest_json(result), utcnow(), key),
             )
 
+    def health_snapshot(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT component,instance_id,status,checked_at,details_json "
+                "FROM component_health ORDER BY component"
+            ).fetchall()
+        return [
+            {
+                "component": row["component"],
+                "instance_id": row["instance_id"],
+                "status": row["status"],
+                "checked_at": row["checked_at"],
+                "details": json.loads(row["details_json"]),
+            }
+            for row in rows
+        ]
+
     def record_health(self, *, component: str, instance_id: str,
                       status: str, details: dict[str, Any]) -> None:
         with self.connect() as conn:
