@@ -155,6 +155,63 @@ def admit(state: dict[str, Any], item: Mapping[str, Any]) -> bool:
     return True
 
 
+def record_teams_approval(
+    state: dict[str, Any],
+    item_id: str,
+    *,
+    request_id: str,
+    decision: str,
+    actor_id: str,
+    tenant_id: str,
+    receipt_id: str,
+    verified: bool,
+    channel: str = "teams",
+) -> None:
+    """Record only authenticated Teams approval evidence.
+
+    PMV3 has no SSH/shell/local-file/GitHub/chat-text approval path.
+    """
+    if channel != "teams":
+        raise ValueError("PMV3 approvals must come from Teams")
+    if not verified:
+        raise ValueError("unverified Teams approval")
+    item = state["items"].get(item_id)
+    if not isinstance(item, dict):
+        raise KeyError(item_id)
+    expected = str(item.get("approval_request_id") or "")
+    if not expected or request_id != expected:
+        raise ValueError("approval request mismatch")
+    normalized = decision.casefold().strip()
+    if normalized not in {"approve", "deny"}:
+        raise ValueError("invalid Teams approval decision")
+    item["approval"] = {
+        "channel": "teams",
+        "request_id": request_id,
+        "decision": normalized,
+        "actor_id": actor_id,
+        "tenant_id": tenant_id,
+        "receipt_id": receipt_id,
+        "verified": True,
+    }
+
+
+def approval_satisfied(item: Mapping[str, Any]) -> bool:
+    if not bool(item.get("approval_required")):
+        return True
+    approval = item.get("approval")
+    if not isinstance(approval, Mapping):
+        return False
+    return (
+        approval.get("channel") == "teams"
+        and approval.get("verified") is True
+        and approval.get("decision") == "approve"
+        and approval.get("request_id") == item.get("approval_request_id")
+        and bool(approval.get("actor_id"))
+        and bool(approval.get("tenant_id"))
+        and bool(approval.get("receipt_id"))
+    )
+
+
 def classify_reason(reason: str) -> str:
     text = reason.casefold()
     if any(term in text for term in ("http transport", "connectortransporterror", "provider timeout", "connection reset")):
@@ -337,7 +394,7 @@ def refresh_metrics(state: dict[str, Any]) -> None:
         "waiting": sum(1 for i in items if i.get("phase") == "waiting"),
         "blocked": sum(1 for i in items if i.get("phase") in {"blocked", "failed_external"}),
         "retrying": sum(1 for i in items if i.get("phase") == "retry_wait"),
-        "runnable": sum(1 for i in items if i.get("phase") == "runnable" and i.get("approved")),
+        "runnable": sum(1 for i in items if i.get("phase") == "runnable" and i.get("approved") and approval_satisfied(i)),
     }
 
 
