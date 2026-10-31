@@ -97,6 +97,20 @@
       "symptom": "PM V2 persistent shadow can be locally healthy while its undeclared user service causes protected production drift and opens the breaker.",
       "test_file": "tools/tests/test_pm_v2_production_safety.py",
       "test_symbol": "test_pm_v2_health_fails_closed_on_protected_production_drift"
+    },
+    {
+      "correction": "Use a two-release bootstrap: first upgrade the trusted root helper/worker with no PM V2 unit delta, then add the PM V2 shadow unit in a second exact reviewed release.",
+      "id": "PMV2-ROOT-MIGRATION-BOOTSTRAP-LOOP",
+      "symptom": "The installed root host worker preflights a new desired-state unit with its currently trusted migration helper before the candidate helper can be staged, so a first release that adds the new unit is rejected.",
+      "test_file": "tools/tests/test_pm_v2_production_safety.py",
+      "test_symbol": "test_shadow_unit_is_bootstrap_deferred_but_source_controlled_and_preapproved"
+    },
+    {
+      "correction": "Restore and verify the prior approval policy before starting the baseline runtime, then verify runtime mode matches the restored policy after health recovery.",
+      "id": "PMV2-ROLLBACK-AUTHORITY-ORDER",
+      "symptom": "Rollback started the V1 owner_only_pilot runtime while the live approval policy was still V2 owner_reviewed, causing a temporary restart loop.",
+      "test_file": "tools/tests/test_owner_reviewed_release_activation.py",
+      "test_symbol": "test_rollback_restores_policy_before_baseline_runtime"
     }
   ],
   "schema_version": "1.0"

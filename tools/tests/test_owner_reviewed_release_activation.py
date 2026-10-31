@@ -113,3 +113,20 @@ def test_deployment_script_preprod_and_rollback_are_fail_closed():
 def test_root_lkg_fingerprint_protects_release_approval_authority():
     assert "mobile_release_approval_policy_digest" in root_worker.PROTECTED_LKG_FIELDS
     assert "mobile_release_approval_mode" in root_worker.PROTECTED_LKG_FIELDS
+
+
+def test_rollback_restores_policy_before_baseline_runtime():
+    text = (ROOT / "tools/release_manager_host_runner.py").read_text()
+    failure_block = text.split("except Exception as error:", 1)[1]
+    restore_at = failure_block.index("restore_mobile_release_approval_policy(state_root, record)")
+    runtime_at = failure_block.index("if runtime_attempted:")
+    assert restore_at < runtime_at
+    assert "policy_restored_before_runtime" in failure_block
+
+
+def test_bootstrap_release_has_no_pm_v2_unit_delta_but_keeps_reviewed_plan():
+    policy = json.loads((ROOT / "config/production-desired-state.json").read_text())
+    assert "jason-pm-v2-shadow.service" not in policy["allowed_user_units"]
+    migration = (ROOT / "tools/protected_root_policy_migration.py").read_text()
+    assert "APPROVED_PM_V2_SHADOW_DELTA" in migration
+    assert 'jason-pm-v2-shadow.service' in migration
