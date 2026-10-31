@@ -78,6 +78,7 @@
     "jason-kfs-collector.service",
     "jason-openclaw-recovery-source-bridge.service",
     "jason-openclaw-recovery-source-bridge.timer",
+    "jason-pm-v2-shadow.service",
     "jason-release-approval-only.service",
     "jason-release-manager.service",
     "jason-self-heal-watchdog.service",

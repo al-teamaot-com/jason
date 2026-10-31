@@ -103,7 +103,7 @@
       "id": "PMV2-ROOT-MIGRATION-BOOTSTRAP-LOOP",
       "symptom": "The installed root host worker preflights a new desired-state unit with its currently trusted migration helper before the candidate helper can be staged, so a first release that adds the new unit is rejected.",
       "test_file": "tools/tests/test_pm_v2_production_safety.py",
-      "test_symbol": "test_shadow_unit_is_bootstrap_deferred_but_source_controlled_and_preapproved"
+      "test_symbol": "test_shadow_unit_is_optional_declared_source_controlled_and_preapproved"
     },
     {
       "correction": "Restore and verify the prior approval policy before starting the baseline runtime, then verify runtime mode matches the restored policy after health recovery.",
