@@ -513,6 +513,7 @@ for worker in \
   support_repair_host_worker.py \
   owner_approved_development_worker.py \
   engineering_pipeline.py \
+  pmv3_engineering_controller.py \
   release_breaker_recovery_manager.py \
   engineering_supervisor.py \
   engineering_evidence_tools.py \
