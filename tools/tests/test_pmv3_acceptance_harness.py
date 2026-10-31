@@ -22,6 +22,6 @@ def test_end_to_end_acceptance(tmp_path):
     result = harness.run_acceptance(tmp_path)
     assert result["status"] == "pass"
     assert result["progress_percent"] == 100
-    assert result["receipts"] == 5
+    assert result["receipts"] == 6
     assert result["transient_attempts"] == 2
-    assert result["approval_channel"] == "teams"
+    assert result["approval_channel"] == "teams"\n    assert result["validation_attempts"] == 2
