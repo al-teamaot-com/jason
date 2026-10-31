@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "instance_id": "pm-v2-local",
+  "poll_interval_seconds": 15,
+  "lease_seconds": 300,
+  "max_concurrent_jobs": 3,
+  "state": {"database_path": "/var/lib/jason/pm-v2/pm-v2.sqlite3"},
+  "sources": {
+    "roadmap_path": "docs/roadmaps/Project-Jason-TODO-and-Future-Ideas.md",
+    "support_path": "SUPPORT.md"
+  },
+  "workers": {
+    "development": {
+      "enabled": true,
+      "max_concurrency": 2,
+      "command": ["python3","tools/owner_approved_development_worker.py","--repo","{repo}","--spool","{legacy_spool}","--max-active","3"]
+    },
+    "support_repair": {
+      "enabled": true,
+      "max_concurrency": 1,
+      "command": ["python3","tools/support_repair_host_worker.py","--repo","{repo}","--spool","{legacy_spool}","--max-active","2"]
+    },
+    "release_bridge": {
+      "enabled": true,
+      "max_concurrency": 1,
+      "command": ["python3","tools/todo_release_bridge.py","--repo","{repo}","--spool","{legacy_spool}","--release-state","{release_state}"]
+    }
+  },
+  "paths": {
+    "legacy_spool": "/var/lib/jason/openclaw/support-repair",
+    "release_state": "/var/lib/jason/openclaw/release-manager"
+  },
+  "communications": {
+    "required_status_fields": ["Status","Completed","Still required","What I'm doing next","What you need to do"],
+    "approval_channel": "microsoft_teams"
+  }
+}
