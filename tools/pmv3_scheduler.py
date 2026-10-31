@@ -44,6 +44,7 @@ def ingest_work(state: dict[str, Any], path: Path) -> int:
             dependency=str(raw.get("dependency") or ""),
             approval_required=bool(raw.get("approval_required", False)),
             approval_request_id=str(raw.get("approval_request_id") or ""),
+            idempotent=bool(raw.get("idempotent", False)),
         )
         if not item["action"]:
             raise SchedulerInputError("work item action required")
@@ -148,6 +149,7 @@ def run_once(
         facts=facts,
         handler=simulation_handler(outcomes),
         capacity=capacity,
+        checkpoint=lambda current: engine.atomic_write(state_path, current),
     )
     engine.atomic_write(state_path, state)
     result = snapshot(state, admitted=admitted, approvals=approvals)
