@@ -1,0 +1,125 @@
+{
+  "schema_version": "1.0",
+  "requirements": [
+    {
+      "id": "PMV2-001",
+      "name": "Continuous eligible work",
+      "source_evidence": ["tools/tests/test_pm_v2_service.py:test_one_cycle_is_persistent_healthy_and_nonexecuting_without_owned_work"],
+      "external_acceptance": "24_hour_continuity_run"
+    },
+    {
+      "id": "PMV2-002",
+      "name": "Parallel work without interference",
+      "source_evidence": ["tools/tests/test_pm_v2_scheduler.py:test_independent_work_dispatches_in_parallel", "tools/tests/test_pm_v2_components.py:test_two_pm_v2_components_run_independently_in_parallel"],
+      "external_acceptance": "representative_parallel_pilot"
+    },
+    {
+      "id": "PMV2-003",
+      "name": "Blocker isolation and continued queue progress",
+      "source_evidence": ["tools/tests/test_pm_v2_fault_injection.py:test_failure_blocker_and_expired_lease_do_not_stop_other_work"],
+      "external_acceptance": "24_hour_continuity_run"
+    },
+    {
+      "id": "PMV2-004",
+      "name": "Worker/process restart recovery",
+      "source_evidence": ["tools/tests/test_pm_v2_fault_injection.py:test_failure_blocker_and_expired_lease_do_not_stop_other_work", "tools/tests/test_pm_v2_recovery.py:test_snapshot_verifies_and_restores_state_and_config"],
+      "external_acceptance": "persistent_shadow_restart_test"
+    },
+    {
+      "id": "PMV2-005",
+      "name": "Complete host-loss recovery",
+      "source_evidence": ["tools/tests/test_pm_v2_recovery.py:test_snapshot_replicates_and_verifies_to_configured_destination"],
+      "external_acceptance": "second_host_restore"
+    },
+    {
+      "id": "PMV2-006",
+      "name": "Modular portable components",
+      "source_evidence": ["tools/tests/test_pm_v2_components.py:test_v1_owned_component_is_observed_not_executed", "tools/tests/test_pm_v2_config.py:test_config_is_portable_by_path_and_worker_definition"],
+      "external_acceptance": "move_component_between_hosts"
+    },
+    {
+      "id": "PMV2-007",
+      "name": "Reuse shared resources before rebuilding",
+      "source_evidence": ["tools/tests/test_pm_v2_worker_selection.py:test_exact_selector_can_claim_pm_v2_owned_issue", "implementation/runtime_service/tests/test_autonomous_completion_notification.py:test_pm_v2_production_push_start_and_result_render_exact_lifecycle"],
+      "external_acceptance": "representative_shared_resource_pilot"
+    },
+    {
+      "id": "PMV2-008",
+      "name": "Configuration before code",
+      "source_evidence": ["tools/tests/test_pm_v2_config.py:test_config_is_portable_by_path_and_worker_definition"],
+      "external_acceptance": "configuration_only_relocation_change"
+    },
+    {
+      "id": "PMV2-009",
+      "name": "Canonical scope cannot silently drift",
+      "source_evidence": ["tools/tests/test_pm_v2_canonical_agreement.py:test_canonical_agreement_matches_approved_hash_and_config", "tools/tests/test_pm_v2_store.py:test_scope_change_blocks_inflight_work"],
+      "external_acceptance": "canonical_agreement_review"
+    },
+    {
+      "id": "PMV2-010",
+      "name": "Functional proof before completion",
+      "source_evidence": ["tools/tests/test_pm_v2_release_sync.py:test_bridge_complete_is_not_pm_complete_without_full_evidence"],
+      "external_acceptance": "vulscan_representative_pilot"
+    },
+    {
+      "id": "PMV2-011",
+      "name": "Security compliance governance and no new authority",
+      "source_evidence": ["implementation/runtime_service/tests/test_pm_v2_runtime.py:test_capability_metadata_is_provider_neutral_and_self_describing", "implementation/runtime_service/tests/test_deployment_contract.py:test_runtime_compose_keeps_pm_v2_control_dormant_by_default"],
+      "external_acceptance": "preproduction_security_compliance_review"
+    },
+    {
+      "id": "PMV2-012",
+      "name": "Documentation and communication standard",
+      "source_evidence": ["implementation/runtime_service/tests/test_autonomous_completion_notification.py:test_pm_v2_production_push_start_and_result_render_exact_lifecycle"],
+      "external_acceptance": "live_teams_lifecycle_review"
+    },
+    {
+      "id": "PMV2-013",
+      "name": "Teams-only normal approval",
+      "source_evidence": ["tools/tests/test_pm_v2_release_sync.py:test_verified_release_requires_teams_approval_start_and_result"],
+      "external_acceptance": "live_teams_exact_release_approval"
+    },
+    {
+      "id": "PMV2-014",
+      "name": "Teams production start and verified result",
+      "source_evidence": ["implementation/runtime_service/tests/test_autonomous_completion_notification.py:test_pm_v2_production_push_start_and_result_render_exact_lifecycle"],
+      "external_acceptance": "live_teams_production_lifecycle"
+    },
+    {
+      "id": "PMV2-015",
+      "name": "TODO ideas and self-improvement governance",
+      "source_evidence": ["tools/tests/test_pm_v2_backlog.py:test_ideas_do_not_become_execution_authority", "tools/tests/test_pm_v2_improvements.py:test_repeated_failure_creates_proposal_only_not_authority"],
+      "external_acceptance": "real_backlog_continuity"
+    },
+    {
+      "id": "PMV2-016",
+      "name": "Health self-test and resource controls",
+      "source_evidence": ["tools/tests/test_pm_v2_resources.py:test_configured_subprocess_limits_wrap_execution", "tools/tests/test_pm_v2_service.py:test_one_cycle_is_persistent_healthy_and_nonexecuting_without_owned_work"],
+      "external_acceptance": "persistent_shadow_health"
+    },
+    {
+      "id": "PMV2-017",
+      "name": "V1/V2 coexistence without duplicate ownership",
+      "source_evidence": ["tools/tests/test_pm_v2_worker_selection.py:test_v1_global_scan_skips_pm_v2_owned_issue", "tools/tests/test_pm_v2_components.py:test_v1_owned_component_is_observed_not_executed"],
+      "external_acceptance": "parallel_v1_v2_shadow_run"
+    },
+    {
+      "id": "PMV2-018",
+      "name": "Persistent bootstrap independent of chat",
+      "source_evidence": ["tools/tests/test_pm_v2_service.py:test_one_cycle_is_persistent_healthy_and_nonexecuting_without_owned_work"],
+      "external_acceptance": "persistent_shadow_service"
+    },
+    {
+      "id": "PMV2-019",
+      "name": "Operational Teams status priority pause resume cancel",
+      "source_evidence": ["tools/tests/test_pm_v2_control.py:test_pause_resume_and_priority_are_audited_state_changes", "implementation/runtime_service/tests/test_pm_v2_runtime.py:test_control_queues_exact_idempotent_request"],
+      "external_acceptance": "live_teams_pm_v2_controls"
+    },
+    {
+      "id": "PMV2-020",
+      "name": "Measurable speed improvement",
+      "source_evidence": ["tools/tests/test_pm_v2_fault_injection.py:test_failure_blocker_and_expired_lease_do_not_stop_other_work"],
+      "external_acceptance": "v1_v2_elapsed_time_comparison"
+    }
+  ]
+}
