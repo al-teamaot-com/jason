@@ -143,3 +143,99 @@ def test_progress_percentage_measures_whole_inventory():
     module.admit(state, module.make_item("PMV3-10", "b"))
     state["items"]["PMV3-9"]["phase"] = "complete"
     assert module.progress_percent(state) == 50
+
+
+def test_approval_required_work_does_not_run_without_teams():
+    state = module.empty_state()
+    module.admit(state, module.make_item(
+        "PMV3-11", "release", approval_required=True, approval_request_id="REQ-11"
+    ))
+    called = False
+
+    def handler(item, key):
+        nonlocal called
+        called = True
+        return module.Outcome("complete", receipt="should-not-run")
+
+    module.execute_cycle(state, facts={}, handler=handler, now=NOW)
+    assert called is False
+    assert state["items"]["PMV3-11"]["phase"] == "runnable"
+    assert state["metrics"]["runnable"] == 0
+
+
+def test_non_teams_approval_is_rejected():
+    state = module.empty_state()
+    module.admit(state, module.make_item(
+        "PMV3-12", "release", approval_required=True, approval_request_id="REQ-12"
+    ))
+    try:
+        module.record_teams_approval(
+            state, "PMV3-12",
+            request_id="REQ-12", decision="approve",
+            actor_id="person-al", tenant_id="tenant-aot", receipt_id="receipt-12",
+            verified=True, channel="ssh",
+        )
+    except ValueError as exc:
+        assert "Teams" in str(exc)
+    else:
+        raise AssertionError("SSH approval must be rejected")
+
+
+def test_verified_exact_teams_approval_allows_exact_work():
+    state = module.empty_state()
+    module.admit(state, module.make_item(
+        "PMV3-13", "release", approval_required=True, approval_request_id="REQ-13"
+    ))
+    module.record_teams_approval(
+        state, "PMV3-13",
+        request_id="REQ-13", decision="approve",
+        actor_id="person-al", tenant_id="tenant-aot", receipt_id="receipt-13",
+        verified=True,
+    )
+
+    def handler(item, key):
+        return module.Outcome("complete", receipt="done-13")
+
+    module.execute_cycle(state, facts={}, handler=handler, now=NOW)
+    assert state["items"]["PMV3-13"]["phase"] == "complete"
+
+
+def test_teams_deny_never_allows_execution():
+    state = module.empty_state()
+    module.admit(state, module.make_item(
+        "PMV3-14", "release", approval_required=True, approval_request_id="REQ-14"
+    ))
+    module.record_teams_approval(
+        state, "PMV3-14",
+        request_id="REQ-14", decision="deny",
+        actor_id="person-al", tenant_id="tenant-aot", receipt_id="receipt-14",
+        verified=True,
+    )
+    called = False
+
+    def handler(item, key):
+        nonlocal called
+        called = True
+        return module.Outcome("complete", receipt="should-not-run")
+
+    module.execute_cycle(state, facts={}, handler=handler, now=NOW)
+    assert called is False
+    assert state["items"]["PMV3-14"]["phase"] == "runnable"
+
+
+def test_mismatched_teams_request_cannot_approve():
+    state = module.empty_state()
+    module.admit(state, module.make_item(
+        "PMV3-15", "release", approval_required=True, approval_request_id="REQ-15"
+    ))
+    try:
+        module.record_teams_approval(
+            state, "PMV3-15",
+            request_id="REQ-WRONG", decision="approve",
+            actor_id="person-al", tenant_id="tenant-aot", receipt_id="receipt-15",
+            verified=True,
+        )
+    except ValueError as exc:
+        assert "mismatch" in str(exc)
+    else:
+        raise AssertionError("mismatched Teams request must be rejected")
