@@ -10,7 +10,7 @@ TimeoutStartSec=65min
 WorkingDirectory=/home/al/.local/lib/jason/engineering-worker-source
 Environment=HOME=/home/al
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
-ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/engineering_pipeline.py --repo /home/al/.local/lib/jason/engineering-worker-source --spool /var/lib/jason/openclaw/support-repair --release-state /var/lib/jason/openclaw/release-manager
+ExecStart=/usr/bin/python3 /home/al/.local/lib/jason/pmv3_engineering_controller.py --repo /home/al/.local/lib/jason/engineering-worker-source --spool /var/lib/jason/openclaw/support-repair --release-state /var/lib/jason/openclaw/release-manager --max-passes 4 --unchanged-limit 2 --retry-delay 5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
