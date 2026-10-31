@@ -62,3 +62,22 @@ PM V2 does not create a competing remote shell or worker authority. Until a
 remote worker role is independently accepted, PM V2 components remain portable
 and can be relocated as services, while local worker execution is used only on
 the host that owns the configured component.
+
+## Production desired-state boundary
+
+Persistent PM V2 execution is release-owned infrastructure. Do not install or
+enable `jason-pm-v2-shadow.service` manually, from chat, or from an unreviewed
+host bootstrap. The service may exist only after the exact candidate desired
+state declares it and the existing root-governed host reconciliation stages the
+reviewed policy delta, installs the source-controlled unit, aligns managed
+engineering source, and activates it inside the release transaction.
+
+The PM V2 shadow service remains **allowed, not required** while V1 is the
+production authority. A rollback to a release that does not declare the service
+must remove it through the existing managed-unit delta mechanism.
+
+PM V2 health includes the fresh protected production-drift readback. A locally
+healthy database/process is not sufficient: stale, unavailable, or non-PASS
+production drift evidence makes PM V2 health degraded. This rule was added after
+acceptance testing caught an out-of-band PM V2 user service opening the protected
+production circuit breaker even though its local self-test was green.

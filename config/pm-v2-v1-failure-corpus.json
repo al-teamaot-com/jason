@@ -90,6 +90,13 @@
       "symptom": "Similar workflows rebuild separate approval, notification, or worker behavior.",
       "test_file": "tools/tests/test_pm_v2_worker_selection.py",
       "test_symbol": "test_exact_selector_can_claim_pm_v2_owned_issue"
+    },
+    {
+      "correction": "Persistent PM V2 is installed only by governed host reconciliation after exact desired-state staging; the service is release-owned/rollback-removable, and PM V2 health fails closed on protected drift readback.",
+      "id": "PMV2-UNDECLARED-PERSISTENCE-DRIFT",
+      "symptom": "PM V2 persistent shadow can be locally healthy while its undeclared user service causes protected production drift and opens the breaker.",
+      "test_file": "tools/tests/test_pm_v2_production_safety.py",
+      "test_symbol": "test_pm_v2_health_fails_closed_on_protected_production_drift"
     }
   ],
   "schema_version": "1.0"

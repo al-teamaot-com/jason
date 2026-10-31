@@ -74,14 +74,15 @@
     "jason-release-approval-only.timer"
   ],
   "allowed_user_units": [
-    "jason-release-manager.service",
-    "jason-support-repair-worker.service",
-    "jason-self-heal-watchdog.service",
     "jason-dnsfilter-boundary-reconcile.service",
     "jason-kfs-collector.service",
-    "jason-release-approval-only.service",
     "jason-openclaw-recovery-source-bridge.service",
-    "jason-openclaw-recovery-source-bridge.timer"
+    "jason-openclaw-recovery-source-bridge.timer",
+    "jason-pm-v2-shadow.service",
+    "jason-release-approval-only.service",
+    "jason-release-manager.service",
+    "jason-self-heal-watchdog.service",
+    "jason-support-repair-worker.service"
   ],
   "rollback_container_prefixes": [
     "jason-runtime-rollback-",

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import shutil
+import time
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +40,39 @@ def self_test(*, config: PMV2Config, store: PMV2Store, repo: Path) -> dict[str, 
         "cloud_spend_policy": config.cloud_spend_policy,
         "provider_authority_policy": config.provider_authority_policy,
     }
+    if config.production_drift_readback_path is not None:
+        drift_path = config.production_drift_readback_path
+        try:
+            metadata = drift_path.stat()
+            age = max(0.0, time.time() - metadata.st_mtime)
+            payload = json.loads(drift_path.read_text(encoding="utf-8"))
+            problems = payload.get("problems") if isinstance(payload, dict) else None
+            valid_problems = problems if isinstance(problems, list) else []
+            problem_kinds = sorted({
+                str(item.get("kind") or "unknown")
+                for item in valid_problems if isinstance(item, dict)
+            })
+            drift_ok = (
+                isinstance(payload, dict)
+                and payload.get("schema_version") == "1.0"
+                and payload.get("status") == "pass"
+                and not valid_problems
+                and age <= config.production_drift_maximum_age_seconds
+            )
+            checks["production_drift"] = {
+                "ok": drift_ok,
+                "status": payload.get("status") if isinstance(payload, dict) else "invalid",
+                "problem_kinds": problem_kinds,
+                "age_seconds": round(age, 3),
+                "maximum_age_seconds": config.production_drift_maximum_age_seconds,
+            }
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            checks["production_drift"] = {
+                "ok": False,
+                "status": "unavailable",
+                "error_type": type(exc).__name__,
+            }
+
     checks["configuration"] = {
         "ok": config.approval_channel == "microsoft_teams" and len(config.required_status_fields) == 5,
         "approval_channel": config.approval_channel,
