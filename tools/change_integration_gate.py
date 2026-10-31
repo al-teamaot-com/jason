@@ -54,6 +54,33 @@ def sensitive(path: str) -> bool:
     return path in SENSITIVE_ROOTS or path.startswith(SENSITIVE_PREFIXES)
 
 
+MAX_RATE_LIMIT_WAIT_SECONDS = 900
+
+
+def _rate_limit_delay(headers, attempt: int) -> float | None:
+    """Return a bounded GitHub rate-limit recovery delay.
+
+    Honor provider reset evidence when available instead of blindly retrying a
+    quota that cannot recover in 5-10 seconds. Delays beyond the bounded
+    15-minute gate budget fail closed.
+    """
+    base = float(5 * (attempt + 1))
+    retry_after = headers.get("Retry-After") if headers is not None else None
+    reset_at = headers.get("X-RateLimit-Reset") if headers is not None else None
+    requested = base
+    try:
+        if retry_after is not None:
+            requested = max(requested, float(retry_after))
+        elif reset_at is not None:
+            requested = max(requested, float(reset_at) - time.time() + 2.0)
+    except (TypeError, ValueError):
+        requested = base
+    requested = max(base, requested)
+    if requested > MAX_RATE_LIMIT_WAIT_SECONDS:
+        return None
+    return requested
+
+
 def api_json(url: str, token: str) -> object:
     request = urllib.request.Request(
         url,
@@ -83,7 +110,13 @@ def api_json(url: str, token: str) -> object:
                     f"GitHub integration validation HTTP {exc.code}: "
                     f"{error[:240]}"
                 ) from exc
-            time.sleep(5 * (attempt + 1))
+            delay = _rate_limit_delay(exc.headers, attempt)
+            if delay is None:
+                raise RuntimeError(
+                    "GitHub integration validation rate-limit reset exceeds "
+                    "bounded recovery window"
+                ) from exc
+            time.sleep(delay)
     raise RuntimeError("GitHub integration validation retry exhausted")
 
 
