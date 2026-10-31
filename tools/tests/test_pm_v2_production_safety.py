@@ -17,12 +17,12 @@ UNIT = "jason-pm-v2-shadow.service"
 
 
 class PMV2ProductionSafetyTests(unittest.TestCase):
-    def test_shadow_unit_is_bootstrap_deferred_but_source_controlled_and_preapproved(self):
+    def test_shadow_unit_is_optional_declared_source_controlled_and_preapproved(self):
         policy = json.loads((ROOT / "config/production-desired-state.json").read_text())
-        # First protected-core bootstrap release must not declare/install the
-        # shadow unit. It upgrades the trusted root helper first. A later exact
-        # release re-adds this one reviewed optional unit through that helper.
-        self.assertNotIn(UNIT, policy["allowed_user_units"])
+        # The protected-core bootstrap is now live. This follow-up release adds
+        # only the previously reviewed optional PM V2 shadow unit through the
+        # trusted migration helper installed by that bootstrap.
+        self.assertIn(UNIT, policy["allowed_user_units"])
         self.assertNotIn(UNIT, policy["required_user_units"])
         unit = ROOT / "infrastructure/openclaw-operations/systemd/user" / UNIT
         text = unit.read_text()
@@ -33,8 +33,8 @@ class PMV2ProductionSafetyTests(unittest.TestCase):
         self.assertIn('APPROVED_PM_V2_SHADOW_DELTA', migration)
         self.assertIn('frozenset({"jason-pm-v2-shadow.service"})', migration)
         reconcile = (ROOT / "tools/reconcile_production_host_services.sh").read_text()
-        self.assertIn('JASON_PM_V2_SHADOW_RECONCILIATION=DEFERRED_BOOTSTRAP', reconcile)
         self.assertIn('PM_V2_SHADOW_DECLARED=', reconcile)
+        self.assertIn('JASON_PM_V2_SHADOW_RECONCILIATION=PASS', reconcile)
 
     def test_declared_shadow_unit_does_not_trigger_undeclared_drift(self):
         policy = json.loads((ROOT / "config/production-desired-state.json").read_text())

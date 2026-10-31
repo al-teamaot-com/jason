@@ -98,10 +98,24 @@ class PMV2FaultInjectionTests(unittest.TestCase):
             )
 
             scheduler = Scheduler(config=config, store=store, repo=root)
+
+            def reap_until(identifier, expected_state, timeout=3.0):
+                deadline = time.monotonic() + timeout
+                while time.monotonic() < deadline:
+                    scheduler.reap()
+                    state = store.get_assignment(identifier).state
+                    if state == expected_state:
+                        return
+                    time.sleep(0.02)
+                self.fail(
+                    f"{identifier} did not reach {expected_state}; "
+                    f"final state={store.get_assignment(identifier).state}"
+                )
+
             try:
                 self.assertEqual(scheduler.dispatch_available(), 2)
-                time.sleep(0.15)
-                scheduler.reap()
+                reap_until("good-1", "validation_ready")
+                reap_until("bad-1", "retry_ready")
                 states = {row.assignment_id: row.state for row in store.list_assignments()}
                 self.assertEqual(states["good-1"], "validation_ready")
                 self.assertEqual(states["bad-1"], "retry_ready")
@@ -110,15 +124,12 @@ class PMV2FaultInjectionTests(unittest.TestCase):
                 # Second identical failure blocks only the failed assignment.
                 time.sleep(1.05)
                 self.assertEqual(scheduler.dispatch_available(), 1)
-                time.sleep(0.15)
-                scheduler.reap()
-                self.assertEqual(store.get_assignment("bad-1").state, "blocked")
+                reap_until("bad-1", "blocked")
 
                 # New healthy work still starts and finishes after the failure.
                 add("good-2", "success")
                 self.assertEqual(scheduler.dispatch_available(), 1)
-                time.sleep(0.15)
-                scheduler.reap()
+                reap_until("good-2", "validation_ready")
                 self.assertEqual(
                     store.get_assignment("good-2").state,
                     "validation_ready",
@@ -139,8 +150,7 @@ class PMV2FaultInjectionTests(unittest.TestCase):
                     "retry_ready",
                 )
                 self.assertEqual(scheduler.dispatch_available(), 1)
-                time.sleep(0.15)
-                scheduler.reap()
+                reap_until("recovered-1", "validation_ready")
                 self.assertEqual(
                     store.get_assignment("recovered-1").state,
                     "validation_ready",
