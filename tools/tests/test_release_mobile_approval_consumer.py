@@ -30,7 +30,7 @@ RID = "release-" + SHA[:16]
 
 
 def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=None,
-            review_only=False, renewed=False):
+            review_only=False, renewed=False, canonical_owner=False):
     from implementation.runtime_service.tests.test_mobile_release_approval import (
         policy_file, reviewed_policy_file, mark_release_high_impact, release_record,
     )
@@ -111,14 +111,28 @@ def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=N
     )
     bindings_db = tmp_path / "bindings.sqlite3"
     bindings = SQLiteMicrosoftIdentityBindingStore(bindings_db)
-    bindings.put(MicrosoftIdentityBinding("tenant-a", "object-al", "person-al"))
+    microsoft_object_id = (
+        "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
+        if canonical_owner else "object-al"
+    )
+    bound_identity = (
+        "person-entra-bee80bdcffb04c50b453c09d4d411f5f"
+        if canonical_owner else "person-al"
+    )
+    bindings.put(MicrosoftIdentityBinding(
+        "tenant-a", microsoft_object_id, bound_identity,
+        email_address=("al@teamaot.com" if canonical_owner else None),
+    ))
     authority_db = tmp_path / "authority.sqlite3"
     identities = SQLiteIdentityRepository(SQLiteIdentityAuthorityStore(authority_db))
-    identities.put(IdentityRecord("person-al", "human", "aot"))
+    identities.put(IdentityRecord(bound_identity, "human", "aot"))
     store = MobileReleaseSignedEvidenceStore(path)
     flow = MobileReleaseApprovalFlow(
         svc, repo, policy_path, root, bindings, identities, verifier, store,
         required_policy_version="2.0" if reviewed else "1.0",
+        owner_identity_email_fallbacks=(
+            {"person-al": "al@teamaot.com"} if canonical_owner else None
+        ),
     )
     decision = "approve" if approve else "deny"
     envelope = {
@@ -131,7 +145,7 @@ def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=N
         "channel": "msteams",
         "text": "Mobile production release review",
         "transport_identity": {
-            "microsoft_tenant_id": "tenant-a", "microsoft_object_id": "object-al",
+            "microsoft_tenant_id": "tenant-a", "microsoft_object_id": microsoft_object_id,
             "authentication_assurance": "botframework-authenticated",
         },
         "conversation_id": "teams-owner-chat",
@@ -151,7 +165,7 @@ def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=N
     envelope["signature"] = base64.b64encode(private.sign(canonical_signed_payload(envelope))).decode()
     args = {
         "approval_id": request.approval_id, "decision": decision,
-        "microsoft_tenant_id": "tenant-a", "microsoft_object_id": "object-al",
+        "microsoft_tenant_id": "tenant-a", "microsoft_object_id": microsoft_object_id,
         "conversation_id": "teams-owner-chat", "channel_response_id": "teams-response-1",
         "decided_at": NOW, "signed_envelope": envelope,
         "selections": envelope["interaction"]["selections"],
@@ -161,6 +175,56 @@ def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=N
         bindings_db=bindings_db, authority_db=authority_db, trusted_keys=registry,
     )
     return flow, repo, release_path, request, args, opts, identities, bindings
+
+
+def test_canonical_entra_owner_alias_consumes_as_symbolic_policy_owner(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, canonical_owner=True,
+    )
+    accepted = flow.handle(**args)
+    assert accepted["approval_status"] == "approved"
+    calls = []
+    opts["approve_release"] = lambda _repo, _root, *, release_id, candidate_sha, source: (
+        calls.append((release_id, candidate_sha, source))
+    )
+    assert consume_mobile_release_decisions(**opts) == 1
+    assert calls == [(
+        RID, SHA, "authenticated_mobile_teams_owner:" + request.approval_id,
+    )]
+    review = json.loads((opts["ccc_root"] / "material-review.json").read_text())
+    assert review["recorded_by"] == "person-al"
+
+
+@pytest.mark.parametrize("mismatch", ["wrong_email", "client_scoped"])
+def test_canonical_entra_owner_alias_host_consumer_fails_closed_on_binding_mismatch(
+    tmp_path, mismatch,
+):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True, canonical_owner=True,
+    )
+    assert flow.handle(**args)["approval_status"] == "approved"
+    binding = bindings.find(
+        microsoft_tenant_id="tenant-a",
+        microsoft_object_id="bee80bdc-ffb0-4c50-b453-c09d4d411f5f",
+    )
+    assert binding is not None
+    bindings.put(MicrosoftIdentityBinding(
+        binding.microsoft_tenant_id,
+        binding.microsoft_object_id,
+        binding.jason_identity_id,
+        client_id=("client-a" if mismatch == "client_scoped" else None),
+        email_address=(
+            "someone@example.com" if mismatch == "wrong_email"
+            else "al@teamaot.com"
+        ),
+        status="active",
+    ))
+    opts["approve_release"] = lambda *_args, **_kwargs: pytest.fail(
+        "mismatched binding cannot transfer release authority"
+    )
+    with pytest.raises(PermissionError, match="active independent Jason owner identity"):
+        consume_mobile_release_decisions(**opts)
+    assert not (opts["ccc_root"] / "material-review.json").exists()
 
 
 def test_signed_owner_decision_issues_exact_ccc_and_release_then_idempotent(tmp_path):
