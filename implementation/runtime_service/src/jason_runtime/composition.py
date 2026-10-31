@@ -186,6 +186,8 @@ from .aot_routine_write_authority import (
     configured_aot_routine_autotask_write,
     ensure_aot_routine_autotask_write_authority,
 )
+from .routine_rw_registration import register_routine_rw_foundation
+from .routine_rw_runtime import bootstrap_present, build_routine_rw_invokers
 from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
 from orchestrator.service import CentralOrchestrator
 from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
@@ -1516,6 +1518,12 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         providers=providers,
         now=now,
     )
+    routine_rw_activation = register_routine_rw_foundation(
+        capabilities=capabilities,
+        providers=providers,
+        now=now,
+        bootstrap_present=bootstrap_present,
+    )
     register_autotask_procurement_runtime_foundation(
         capabilities=capabilities,
         providers=providers,
@@ -1930,6 +1938,16 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
 
     provider_boundary_store = SQLiteClientBoundaryStore(microsoft_boundary_db)
     provider_boundaries = SQLiteClientBoundaryRepository(provider_boundary_store)
+    routine_rw_invokers = build_routine_rw_invokers(
+        enabled_capabilities=routine_rw_activation.enabled_capabilities,
+        openbao_url=settings.openbao_url,
+        boundaries=provider_boundaries,
+        identities=identity_repository,
+        approvals=approval_repository,
+        directory=microsoft_directory.directory,
+        transport=http_transport,
+        audit=ConnectorEventAudit(orchestration_events),
+    )
     if settings.backup_net_access_profile == "full_access":
         backup_net_role_id_path = (
             settings.backup_net_full_access_openbao_role_id_path
@@ -2109,6 +2127,8 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
         invokers=invokers,
         invoker=ticket_update_invoker,
     )
+    for capability_name, routine_invoker in routine_rw_invokers.items():
+        invokers.register(capability_name, routine_invoker)
     register_autotask_procurement_invoker(
         invokers=invokers,
         invoker=procurement_invoker,
