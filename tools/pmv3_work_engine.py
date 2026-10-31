@@ -34,6 +34,7 @@ RETRYABLE = {
     "connection_reset",
     "temporary_unavailable",
     "rate_limited",
+    "validation_failed",
 }
 EXTERNAL = {
     "credentials_required",
@@ -126,6 +127,7 @@ def make_item(
     dependency: str = "",
     approval_required: bool = False,
     approval_request_id: str = "",
+    idempotent: bool = False,
 ) -> dict[str, Any]:
     now = iso(utcnow())
     return {
@@ -136,6 +138,7 @@ def make_item(
         "approval_required": bool(approval_required),
         "approval_request_id": approval_request_id,
         "approval": None,
+        "idempotent": bool(idempotent),
         "phase": "waiting" if dependency else "runnable",
         "reason": "dependency_wait" if dependency else "",
         "dependency": dependency,
@@ -227,6 +230,8 @@ def classify_reason(reason: str) -> str:
         return "rate_limited"
     if any(term in text for term in ("credential", "api details", "tenant permission", "license required")):
         return "credentials_required"
+    if any(term in text for term in ("regression test", "ci failure", "test failed", "validation failed")):
+        return "validation_failed"
     if any(term in text for term in ("owner approval", "explicit approval", "authorization required")):
         return "owner_approval_required"
     return "unknown"
@@ -342,6 +347,7 @@ def execute_cycle(
     handler: Callable[[Mapping[str, Any], str], Outcome],
     capacity: int = 3,
     now: datetime | None = None,
+    checkpoint: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     now = now or utcnow()
     state["cycle"] = int(state.get("cycle") or 0) + 1
@@ -355,9 +361,13 @@ def execute_cycle(
             if key in state["receipts"]:
                 item["phase"] = "complete"
                 item["reason"] = ""
-            else:
+            elif item.get("idempotent") is True:
                 item["phase"] = "runnable"
-                item["reason"] = "recovered_after_interrupted_execution"
+                item["reason"] = "recovered_after_interrupted_idempotent_execution"
+            else:
+                item["phase"] = "waiting"
+                item["reason"] = "indeterminate_execution_requires_reconciliation"
+                item["dependency"] = "reconciliation_required"
             item["claimed_at"] = None
             item["updated_at"] = iso(now)
 
@@ -376,6 +386,8 @@ def execute_cycle(
         stored["attempts"] = int(stored.get("attempts") or 0) + 1
         stored["claimed_at"] = iso(now)
         stored["updated_at"] = iso(now)
+        if checkpoint is not None:
+            checkpoint(state)
 
         outcome = handler(dict(stored), key)
         if outcome.receipt:
@@ -385,6 +397,8 @@ def execute_cycle(
                 "recorded_at": iso(now),
             }
         apply_outcome(state, item, outcome, now=now)
+        if checkpoint is not None:
+            checkpoint(state)
 
     refresh_metrics(state)
     state["updated_at"] = iso(now)
