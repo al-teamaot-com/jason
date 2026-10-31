@@ -133,6 +133,40 @@ def detect_candidate_drafts(
             )
         )
 
+    # Warning codes are normalized by the trusted event collector. The detector
+    # deliberately does not ingest arbitrary exception text or secret-bearing logs.
+    if "engineering_worker_stalled" in warnings:
+        candidates.append(
+            ImprovementCandidateDraft(
+                signal_kind=ReflectionSignalKind.ENGINEERING_STALLED,
+                capability_name=record.capability_name,
+                provider_id=record.provider_id,
+                title="Engineering work stopped progressing",
+                proposal=(
+                    "Review worker heartbeat, durable next action, dependency and retry "
+                    "eligibility; improve existing TODO reconciliation instead of creating "
+                    "a second scheduler. Preserve authorization and bounded retries."
+                ),
+                rationale="Trusted telemetry reported a stalled engineering work item.",
+            )
+        )
+
+    if "engineering_ci_repeat_failure" in warnings:
+        candidates.append(
+            ImprovementCandidateDraft(
+                signal_kind=ReflectionSignalKind.ENGINEERING_CI_REPEAT_FAILURE,
+                capability_name=record.capability_name,
+                provider_id=record.provider_id,
+                title="Repeated engineering validation failure",
+                proposal=(
+                    "Investigate the recurring CI failure class and propose reusable "
+                    "regression coverage or bounded worker correction without bypassing "
+                    "protected checks, approval or release requirements."
+                ),
+                rationale="Trusted telemetry classified repeated engineering CI failure.",
+            )
+        )
+
     if record.user_correction_category:
         candidates.append(
             ImprovementCandidateDraft(
