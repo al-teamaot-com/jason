@@ -33,7 +33,8 @@ def run_acceptance(root: Path) -> dict[str, object]:
          "dependency": "dependency_ready"},
         {"id": "APPROVAL", "action": "teams-approval", "priority": 4,
          "approval_required": True, "approval_request_id": "PMV3-UAT-APPROVAL"},
-        {"id": "RESTART", "action": "restart-recovery", "priority": 5},
+        {"id": "RESTART", "action": "restart-recovery", "priority": 5, "idempotent": True},
+        {"id": "VALIDATION", "action": "failed-test-recovery", "priority": 6},
     ]})
     write(paths["facts"], {"dependency_ready": False})
     write(paths["approvals"], {"approvals": []})
@@ -46,6 +47,10 @@ def run_acceptance(root: Path) -> dict[str, object]:
         "DEPENDENCY": [{"status": "complete", "receipt": "dependency-ok"}],
         "APPROVAL": [{"status": "complete", "receipt": "approval-ok"}],
         "RESTART": [{"status": "complete", "receipt": "restart-ok"}],
+        "VALIDATION": [
+            {"status": "retry", "reason": "regression test failed"},
+            {"status": "complete", "receipt": "validation-ok"},
+        ],
     })
 
     # Cycle 1: normal completes, transient enters bounded retry. The other
@@ -101,7 +106,8 @@ def run_acceptance(root: Path) -> dict[str, object]:
     assert state["items"]["TRANSIENT"]["attempts"] == 2
     assert state["items"]["APPROVAL"]["approval"]["channel"] == "teams"
     assert state["items"]["RESTART"]["attempts"] == 1
-    assert len(state["receipts"]) == 5
+    assert state["items"]["VALIDATION"]["attempts"] == 2
+    assert len(state["receipts"]) == 6
 
     return {
         "status": "pass",
@@ -109,6 +115,7 @@ def run_acceptance(root: Path) -> dict[str, object]:
         "cycles": state["cycle"],
         "phases": phases,
         "receipts": len(state["receipts"]),
+        "validation_attempts": state["items"]["VALIDATION"]["attempts"],
         "transient_attempts": state["items"]["TRANSIENT"]["attempts"],
         "approval_channel": state["items"]["APPROVAL"]["approval"]["channel"],
     }
