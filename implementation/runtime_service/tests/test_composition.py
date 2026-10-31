@@ -812,6 +812,15 @@ def test_owner_reviewed_teams_release_mode_requires_exact_v2_policy(tmp_path):
     assert app is not None
     assert cfg.universal_approval_mode == "off"
     assert release_root.joinpath("mobile-release-offers").is_dir() is False
+    from jason_runtime.mobile_release_approval import MobileReleaseApprovalMaintenance
+    release_workers = [
+        service for service in app.maintenance.services
+        if isinstance(service, MobileReleaseApprovalMaintenance)
+    ]
+    assert len(release_workers) == 1
+    assert release_workers[0].sender.owner_identity_email_fallbacks == {
+        "person-al": "al@teamaot.com",
+    }
 
 
 def test_legacy_owner_pilot_refuses_silent_v2_risk_policy_upgrade(tmp_path):

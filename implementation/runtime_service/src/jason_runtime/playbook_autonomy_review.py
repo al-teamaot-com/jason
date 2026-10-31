@@ -16,6 +16,7 @@ from pathlib import Path
 import os
 import re
 import stat
+import uuid
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Protocol
 from .teams_communication_service import ExistingTeamsGatewayTransport
@@ -179,11 +180,44 @@ class TeamsGatewayPlaybookApprovalSender:
         token_file: str | Path,
         bindings: ActiveMicrosoftIdentityBindingReader,
         owner_identity_ids,
+        owner_identity_email_fallbacks: Mapping[str, str] | None = None,
     ) -> None:
         self.gateway_url = str(gateway_url).rstrip("/")
         self.token_file = Path(token_file)
         self.bindings = bindings
         self.owner_identity_ids = tuple(sorted(str(x).strip() for x in owner_identity_ids if str(x).strip()))
+        self.owner_identity_email_fallbacks = {
+            str(identity).strip(): str(email).strip().casefold()
+            for identity, email in dict(owner_identity_email_fallbacks or {}).items()
+            if str(identity).strip() and str(email).strip()
+        }
+
+    def _binding_for_identity(self, identity: str):
+        binding = self.bindings.find_active_by_jason_identity(
+            jason_identity_id=identity)
+        if binding is not None:
+            return binding
+        email = self.owner_identity_email_fallbacks.get(identity)
+        lookup = getattr(self.bindings, "find_active_by_email", None)
+        if email is None or not callable(lookup):
+            return None
+        binding = lookup(email_address=email)
+        if binding is None:
+            return None
+        try:
+            expected_identity = (
+                "person-entra-" + uuid.UUID(str(binding.microsoft_object_id)).hex
+            )
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise PermissionError("owner Teams fallback binding identity is invalid") from exc
+        if (
+            str(getattr(binding, "email_address", "") or "").strip().casefold() != email
+            or str(getattr(binding, "jason_identity_id", "")) != expected_identity
+            or getattr(binding, "client_id", None) is not None
+            or getattr(binding, "status", None) != "active"
+        ):
+            raise PermissionError("owner Teams fallback binding identity mismatch")
+        return binding
 
     def _existing_transport(self) -> ExistingTeamsGatewayTransport:
         # Single canonical adapter to the already-approved Teams gateway.
@@ -206,8 +240,7 @@ class TeamsGatewayPlaybookApprovalSender:
         # Fail before sending *any* card if one authorized recipient lacks a
         # trusted Microsoft binding, preventing partial fan-out on bad policy.
         for identity in requested:
-            binding = self.bindings.find_active_by_jason_identity(
-                jason_identity_id=identity)
+            binding = self._binding_for_identity(identity)
             if binding is None or getattr(binding, "status", None) != "active":
                 raise PermissionError(
                     f"authorized Microsoft identity binding unavailable: {identity}")
@@ -224,8 +257,7 @@ class TeamsGatewayPlaybookApprovalSender:
         transport = self._existing_transport()
         receipts: list[str] = []
         for identity_id in self.owner_identity_ids:
-            binding = self.bindings.find_active_by_jason_identity(
-                jason_identity_id=identity_id)
+            binding = self._binding_for_identity(identity_id)
             if binding is None or getattr(binding, "status", None) != "active":
                 raise PermissionError("Teams status recipient binding unavailable")
             receipts.append(transport.send(binding=binding, text=text).message_id)

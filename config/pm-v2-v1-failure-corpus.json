@@ -103,7 +103,7 @@
       "id": "PMV2-ROOT-MIGRATION-BOOTSTRAP-LOOP",
       "symptom": "The installed root host worker preflights a new desired-state unit with its currently trusted migration helper before the candidate helper can be staged, so a first release that adds the new unit is rejected.",
       "test_file": "tools/tests/test_pm_v2_production_safety.py",
-      "test_symbol": "test_shadow_unit_is_optional_declared_source_controlled_and_preapproved"
+      "test_symbol": "test_shadow_unit_is_temporarily_deferred_for_teams_delivery_repair"
     },
     {
       "correction": "Restore and verify the prior approval policy before starting the baseline runtime, then verify runtime mode matches the restored policy after health recovery.",
@@ -111,6 +111,13 @@
       "symptom": "Rollback started the V1 owner_only_pilot runtime while the live approval policy was still V2 owner_reviewed, causing a temporary restart loop.",
       "test_file": "tools/tests/test_owner_reviewed_release_activation.py",
       "test_symbol": "test_rollback_restores_policy_before_baseline_runtime"
+    },
+    {
+      "correction": "For the release approval sender only, resolve an explicitly configured legacy owner alias through the exact verified owner email when direct identity lookup is absent, then require the Entra object-derived Jason identity, active status, exact email, and no client scope before delivery.",
+      "id": "PMV2-TEAMS-OWNER-ALIAS-BINDING",
+      "symptom": "The V2 release approval request was created correctly but no Teams delivery receipt was recorded because policy identity person-al had no literal Microsoft binding; authenticated auto-enrollment stores the owner as person-entra-<object-id>.",
+      "test_file": "implementation/runtime_service/tests/test_teams_communication_service.py",
+      "test_symbol": "test_release_sender_resolves_legacy_owner_alias_through_exact_verified_email"
     }
   ],
   "schema_version": "1.0"
