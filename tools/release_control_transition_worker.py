@@ -29,6 +29,7 @@ PROTECTED_LKG_FIELDS=(
     'revision', 'runtime_revision', 'runtime_image_id',
     'mcp_revision', 'mcp_image_id', 'host_revision', 'host_release',
     'release_manager_source_revision', 'desired_state_policy_digest',
+    'mobile_release_approval_policy_digest', 'mobile_release_approval_mode',
     'scheduled_control_units',
 )
 

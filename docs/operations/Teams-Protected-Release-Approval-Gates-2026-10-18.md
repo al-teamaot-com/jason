@@ -133,3 +133,39 @@ be activated for protected release authority until signed real-card
 testing plus Owner witnessed approval and security acceptance succeed.
 
 Unit/isolated tests are NOT that live proof.
+
+## Owner-approved PM V2 activation contract — 2026-10-31
+
+The AOT Owner explicitly approved extending the **existing** Teams release
+approval lane so `production_control_core` releases can use the reviewed
+owner channel. This is not authorization for a second approval system,
+generic Universal Approver activation, production deployment, provider or
+endpoint changes, or lifting a production freeze.
+
+The approved implementation keeps the existing release path and adds only
+these source-bound controls:
+
+- a versioned V2 `owner_reviewed` policy limited to `normal` and
+  `production_control_core`, sole owner `person-al`, exact-SHA signed Teams
+  identity, independent CCC, and unchanged protected release gates;
+- the exact policy digest and runtime approval mode are included in the
+  immutable release evidence and protected LKG fingerprint;
+- isolated preproduction always forces release approval `off` and cannot issue
+  or consume a real owner approval;
+- production activation stages the exact source-reviewed 0600 policy inside
+  the existing serialized Release Manager transaction immediately before the
+  runtime switches to `owner_reviewed`;
+- any failed deployment restores both the prior policy bytes and prior runtime
+  approval mode, and rollback is not considered verified until both match the
+  prior baseline;
+- each protected release still requires a fresh exact-SHA owner decision. A
+  policy activation is channel authority only, never standing release consent;
+- owner approval remains independent of the production deployment freeze. A
+  signed approval cannot remove or bypass that freeze.
+
+The first release containing this activation still has the documented
+bootstrap dependency: the currently deployed V1 normal-risk lane cannot sign
+the high-impact release that enables V2. That bootstrap must use a separately
+agreed exact-revision owner authorization and the normal CCC, preproduction,
+rollback, source, scope, breaker, and freeze controls. Do not reinterpret this
+section as that deployment authorization.

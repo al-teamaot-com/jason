@@ -148,10 +148,50 @@ case "$OWNER_UAT_MODE:$OWNER_UAT_WORKER" in
   *) echo "DENIED: UAT manifest activation returned unsupported mode" >&2; exit 2 ;;
 esac
 
+# Owner-reviewed release approval is source-bound. Preproduction can validate
+# the exact candidate declaration but always runs the approval lane OFF.
+SOURCE_RELEASE_APPROVAL_MODE="$(python3 - "$REPO_ROOT/config/mobile-release-approval-policy.json" <<'PY2'
+import json, sys
+from pathlib import Path
+p=Path(sys.argv[1])
+if p.is_symlink() or not p.is_file():
+    raise SystemExit("DENIED: immutable mobile release approval policy absent")
+d=json.loads(p.read_text(encoding="utf-8"))
+if (d.get("schema_version") != "2.0"
+        or d.get("organization_id") != "aot"
+        or d.get("policy_mode") != "owner_reviewed"
+        or d.get("owner_identity_ids") != ["person-al"]
+        or set(d.get("allowed_risk_profiles") or []) != {"normal", "production_control_core"}
+        or d.get("ttl_seconds") not in range(300, 901)
+        or d.get("capability") != "release.production.approve"
+        or d.get("high_impact_review") != {
+            "owner_exact_sha_required": True,
+            "signed_teams_identity_required": True,
+            "independent_ccc_required": True,
+            "protected_release_gates_unchanged": True,
+        }):
+    raise SystemExit("DENIED: source mobile release approval policy is not the reviewed owner V2 contract")
+print("owner_reviewed")
+PY2
+)" || exit 2
+if [ ${#UAT_PREFLIGHT[@]} -gt 0 ]; then
+  RELEASE_APPROVAL_MODE="off"
+elif [ "$IMAGE" = "jason-runtime:rollback-current" ]; then
+  RELEASE_APPROVAL_MODE="${JASON_RELEASE_MOBILE_APPROVAL_ROLLBACK_MODE:-off}"
+  case "$RELEASE_APPROVAL_MODE" in owner_only_pilot|owner_reviewed|off) ;; *) echo "DENIED: invalid rollback release approval mode" >&2; exit 2;; esac
+else
+  if [ "${JASON_RELEASE_MOBILE_APPROVAL_MODE:-}" != "$SOURCE_RELEASE_APPROVAL_MODE" ]; then
+    echo "DENIED: invoking release approval mode differs from reviewed source" >&2
+    exit 2
+  fi
+  RELEASE_APPROVAL_MODE="$SOURCE_RELEASE_APPROVAL_MODE"
+fi
+
 exec python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-runtime   --image "$IMAGE"   --rollback "$ROLLBACK"   --source-revision "$REVISION"   --harden \
   --set-env "JASON_OWNER_UAT_MODE=$OWNER_UAT_MODE" \
   --set-env "JASON_OWNER_UAT_WORKER_ENABLED=$OWNER_UAT_WORKER" \
   --set-env "JASON_OWNER_UAT_SESSION_ID=$OWNER_UAT_SESSION" \
+  --set-env "JASON_RELEASE_MOBILE_APPROVAL_MODE=$RELEASE_APPROVAL_MODE" \
   --set-env "JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE=$COMPLETION_TEAMS_PROFILE"   --set-env "JASON_PM_V2_CONTROL_PROFILE=$PM_V2_CONTROL_PROFILE"   --set-env "JASON_PM_V2_SHARED_ROOT=$PM_V2_SHARED_ROOT" \
   --set-env "JASON_QUICKBOOKS_OPENBAO_ROLE_ID_PATH=$QBO_MOUNT_BASE/role_id" \
   --set-env "JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH=$QBO_MOUNT_BASE/secret_id" \

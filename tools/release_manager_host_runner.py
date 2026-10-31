@@ -38,6 +38,7 @@ import worker_execution_enrollment as worker_enrollment
 DEFAULT_REPO = Path("/home/al/.local/lib/jason/engineering-worker-source")
 DEFAULT_STATE = Path("/var/lib/jason/openclaw/release-manager")
 MOBILE_APPROVAL_POLICY = Path("/var/lib/jason/authority/mobile-release-approval-policy.json")
+SOURCE_MOBILE_APPROVAL_POLICY = Path("config/mobile-release-approval-policy.json")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 MUTATION_ENV_OVERRIDES = {
     "JASON_AUTOTASK_MUTATION_ENABLED": "false",
@@ -421,6 +422,190 @@ def file_digest(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _validated_mobile_release_policy(path: Path, *, source_v2_required: bool = False) -> dict[str, Any]:
+    """Validate the exact owner release policy without granting authority."""
+    p = Path(path)
+    try:
+        info = p.lstat()
+    except OSError as exc:
+        raise ReleaseManagerError("mobile release approval policy is unavailable") from exc
+    if p.is_symlink() or not stat.S_ISREG(info.st_mode):
+        raise ReleaseManagerError("mobile release approval policy must be a regular non-symlink file")
+    if p == MOBILE_APPROVAL_POLICY and (stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_uid not in {0, os.geteuid()}):
+        raise ReleaseManagerError("live mobile release approval policy ownership or mode is unsafe")
+    raw = p.read_bytes()
+    if len(raw) > 8192:
+        raise ReleaseManagerError("mobile release approval policy is too large")
+    try:
+        doc = json.loads(raw)
+    except (ValueError, TypeError) as exc:
+        raise ReleaseManagerError("mobile release approval policy JSON is invalid") from exc
+    shared = {"schema_version", "organization_id", "policy_mode", "owner_identity_ids",
+              "allowed_risk_profiles", "ttl_seconds", "capability"}
+    version = doc.get("schema_version") if isinstance(doc, dict) else None
+    if version == "1.0":
+        expected = shared
+        mode = "owner_only_pilot"
+    elif version == "2.0":
+        expected = shared | {"high_impact_review"}
+        mode = "owner_reviewed"
+    else:
+        raise ReleaseManagerError("mobile release approval policy version is unsupported")
+    if source_v2_required and version != "2.0":
+        raise ReleaseManagerError("candidate source must declare owner-reviewed release policy V2")
+    risks = doc.get("allowed_risk_profiles")
+    ttl = doc.get("ttl_seconds")
+    if (set(doc) != expected or doc.get("organization_id") != "aot"
+            or doc.get("policy_mode") != mode
+            or doc.get("owner_identity_ids") != ["person-al"]
+            or doc.get("capability") != "release.production.approve"
+            or not isinstance(risks, list) or len(risks) != len(set(risks))
+            or type(ttl) is not int):
+        raise ReleaseManagerError("mobile release approval policy identity or schema is invalid")
+    if version == "1.0":
+        if set(risks) != {"normal"} or not 300 <= ttl <= 1800:
+            raise ReleaseManagerError("V1 release approval policy must remain normal-risk only")
+    else:
+        if (set(risks) != {"normal", "production_control_core"}
+                or not 300 <= ttl <= 900
+                or doc.get("high_impact_review") != {
+                    "owner_exact_sha_required": True,
+                    "signed_teams_identity_required": True,
+                    "independent_ccc_required": True,
+                    "protected_release_gates_unchanged": True,
+                }):
+            raise ReleaseManagerError("V2 high-impact release approval policy is not the reviewed contract")
+    return {
+        "schema_version": version, "mode": mode, "risks": sorted(risks),
+        "ttl_seconds": ttl, "raw": raw,
+        "digest": "sha256:" + hashlib.sha256(raw).hexdigest(),
+    }
+
+
+def declared_mobile_release_approval_policy(candidate_tree: Path) -> dict[str, Any]:
+    return _validated_mobile_release_policy(
+        Path(candidate_tree) / SOURCE_MOBILE_APPROVAL_POLICY, source_v2_required=True
+    )
+
+
+def _atomic_private_bytes(path: Path, raw: bytes) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd, temporary = tempfile.mkstemp(prefix=".release-approval-policy-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(raw)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+
+def stage_mobile_release_approval_policy(
+    candidate_tree: Path, state_root: Path, record: dict[str, Any]
+) -> dict[str, Any]:
+    """Atomically stage exact source policy with a durable rollback copy."""
+    candidate = declared_mobile_release_approval_policy(candidate_tree)
+    prior = _validated_mobile_release_policy(MOBILE_APPROVAL_POLICY)
+    transition_root = Path(state_root) / "mobile-release-policy-transitions"
+    transition_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    backup = transition_root / (str(record["release_id"]) + ".prior-policy.json")
+    if backup.exists():
+        existing = _validated_mobile_release_policy(backup)
+        if prior["digest"] not in {existing["digest"], candidate["digest"]}:
+            raise ReleaseManagerError("existing release approval policy backup conflicts with live baseline")
+        baseline = existing
+    else:
+        fd = os.open(backup, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(prior["raw"])
+            handle.flush()
+            os.fsync(handle.fileno())
+        baseline = prior
+    record["mobile_release_policy_transition"] = {
+        "schema_version": "1.0", "status": "prepared",
+        "prior_digest": baseline["digest"], "prior_mode": baseline["mode"],
+        "prior_schema_version": baseline["schema_version"],
+        "candidate_digest": candidate["digest"], "candidate_mode": candidate["mode"],
+        "candidate_schema_version": candidate["schema_version"],
+        "backup_path": str(backup), "prepared_at": now(),
+    }
+    if prior["digest"] == candidate["digest"]:
+        record["mobile_release_policy_transition"]["status"] = "staged_recovered"
+        record["mobile_release_policy_transition"]["staged_at"] = now()
+        save_record(state_root, record)
+        return dict(record["mobile_release_policy_transition"])
+    save_record(state_root, record)
+    try:
+        _atomic_private_bytes(MOBILE_APPROVAL_POLICY, candidate["raw"])
+        applied = _validated_mobile_release_policy(MOBILE_APPROVAL_POLICY)
+        if applied["digest"] != candidate["digest"] or applied["mode"] != candidate["mode"]:
+            raise ReleaseManagerError("staged release approval policy does not match exact source")
+    except Exception:
+        _atomic_private_bytes(MOBILE_APPROVAL_POLICY, prior["raw"])
+        record["mobile_release_policy_transition"]["status"] = "stage_failed_restored"
+        save_record(state_root, record)
+        raise
+    record["mobile_release_policy_transition"]["status"] = "staged"
+    record["mobile_release_policy_transition"]["staged_at"] = now()
+    save_record(state_root, record)
+    return dict(record["mobile_release_policy_transition"])
+
+
+def restore_mobile_release_approval_policy(
+    state_root: Path, record: dict[str, Any]
+) -> dict[str, Any]:
+    transition = record.get("mobile_release_policy_transition")
+    if not isinstance(transition, dict):
+        return {"status": "not_staged"}
+    expected = Path(state_root) / "mobile-release-policy-transitions" / (
+        str(record["release_id"]) + ".prior-policy.json"
+    )
+    if transition.get("backup_path") != str(expected) or not expected.is_file() or expected.is_symlink():
+        raise ReleaseManagerError("release approval policy rollback backup is unavailable")
+    prior = _validated_mobile_release_policy(expected)
+    if prior["digest"] != transition.get("prior_digest") or prior["mode"] != transition.get("prior_mode"):
+        raise ReleaseManagerError("release approval policy rollback backup identity changed")
+    _atomic_private_bytes(MOBILE_APPROVAL_POLICY, prior["raw"])
+    restored = _validated_mobile_release_policy(MOBILE_APPROVAL_POLICY)
+    if restored["digest"] != prior["digest"] or restored["mode"] != prior["mode"]:
+        raise ReleaseManagerError("release approval policy rollback verification failed")
+    transition["status"] = "restored"
+    transition["restored_at"] = now()
+    save_record(state_root, record)
+    return {"status": "restored", "digest": restored["digest"], "mode": restored["mode"]}
+
+
+def verify_live_mobile_release_approval_activation(
+    candidate_tree: Path, runtime: dict[str, Any]
+) -> dict[str, Any]:
+    declared = declared_mobile_release_approval_policy(candidate_tree)
+    live_policy = _validated_mobile_release_policy(MOBILE_APPROVAL_POLICY)
+    live_mode = live_release_mobile_approval_mode(runtime)
+    if live_policy["digest"] != declared["digest"]:
+        raise ReleaseManagerError("live release approval policy differs from exact candidate")
+    if live_mode != declared["mode"]:
+        raise ReleaseManagerError("live release approval runtime mode differs from exact candidate")
+    return {
+        "policy_digest": live_policy["digest"],
+        "policy_schema_version": live_policy["schema_version"],
+        "runtime_mode": live_mode,
+        "allowed_risk_profiles": live_policy["risks"],
+        "verified_at": now(),
+    }
+
+
 def control_state_path(state_root: Path) -> Path:
     return state_root / "production-control-state.json"
 
@@ -711,6 +896,7 @@ def classify_change_risk(change_class: str, files: list[str]) -> str:
         or path in {
             "config/release-manager-policy.json",
             "config/production-desired-state.json",
+            "config/mobile-release-approval-policy.json",
             "tools/install_release_host_reconciler.py",
             "tools/install_release_control_transition.py",
             "tools/protected_root_policy_migration.py",
@@ -763,6 +949,9 @@ def capture_production_manifest(expected_sha: str) -> dict[str, Any]:
         "desired_state_policy_digest": file_digest(
             Path("/opt/jason/current/config/production-desired-state.json")
         ) if Path("/opt/jason/current/config/production-desired-state.json").is_file() else None,
+        "mobile_release_approval_policy_digest": file_digest(MOBILE_APPROVAL_POLICY)
+        if MOBILE_APPROVAL_POLICY.is_file() else None,
+        "mobile_release_approval_mode": live_release_mobile_approval_mode(runtime),
         "drift_evidence_path": "/var/lib/jason/openclaw/release-manager/production-drift.json",
         "complete": True,
         "observed_at": now(),
@@ -1989,6 +2178,10 @@ def native_deploy_environment(
         if os.environ.get("JASON_QUICKBOOKS_READ_PROFILE") not in (None, quickbooks):
             raise ReleaseManagerError("invoking QuickBooks profile override conflicts with immutable candidate")
         env["JASON_QUICKBOOKS_READ_PROFILE"] = quickbooks
+    mobile_policy = declared_mobile_release_approval_policy(candidate_tree)
+    if os.environ.get("JASON_RELEASE_MOBILE_APPROVAL_MODE") not in (None, mobile_policy["mode"]):
+        raise ReleaseManagerError("invoking release approval mode conflicts with immutable candidate")
+    env["JASON_RELEASE_MOBILE_APPROVAL_MODE"] = str(mobile_policy["mode"])
     return env
 
 
@@ -1999,6 +2192,7 @@ _NATIVE_DEPLOY_CONTRACT_KEYS = (
     "JASON_PROVIDER_READ_ACTIVATION_PROFILE",
     "JASON_PROVIDER_READ_ROLLBACK_PROFILE",
     "JASON_QUICKBOOKS_READ_PROFILE",
+    "JASON_RELEASE_MOBILE_APPROVAL_MODE",
 )
 
 
@@ -2330,6 +2524,9 @@ def create_record(
             "desired_state_policy_digest": file_digest(
                 repo / "config" / "production-desired-state.json"
             ),
+            "mobile_release_approval_policy_digest": file_digest(
+                repo / SOURCE_MOBILE_APPROVAL_POLICY
+            ),
         },
     }
     record["release_manifest"] = {
@@ -2354,6 +2551,10 @@ def create_record(
         "desired_state_policy_digest": file_digest(
             repo / "config" / "production-desired-state.json"
         ),
+        "mobile_release_approval_policy_digest": file_digest(
+            repo / SOURCE_MOBILE_APPROVAL_POLICY
+        ),
+        "mobile_release_approval_mode": declared_mobile_release_approval_policy(repo)["mode"],
     }
     gate_transition(repo, state_root, record, "release_candidate")
     save_record(state_root, record)
@@ -3194,6 +3395,9 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     candidate_worker_uid = worker_enrollment.approved_diagnostic_uid(deploy_worktree)
     previous_worker_uid = worker_enrollment.live_diagnostic_uid(output)
     prior_quickbooks_profile = live_quickbooks_read_profile()
+    prior_release_approval_mode = live_release_mobile_approval_mode(live_runtime())
+    if prior_release_approval_mode not in {"off", "owner_only_pilot", "owner_reviewed"}:
+        raise ReleaseManagerError("live release approval mode is not a supported rollback baseline")
     candidate_autotask_profile = declared_autotask_read_profile(deploy_worktree)
     prior_autotask_profile = (
         live_autotask_read_profile() if candidate_autotask_profile is not None else None
@@ -3285,8 +3489,15 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     mcp_attempted = False
     host_attempted = False
     release_manager_installed = False
+    approval_policy_staged = False
+    approval_policy_activation: dict[str, Any] | None = None
 
     try:
+        # Policy staging is the first production mutation. It is source-bound,
+        # backed up durably, and cannot authorize high-impact releases while the
+        # running runtime still advertises the V1 owner_only_pilot mode.
+        stage_mobile_release_approval_policy(deploy_worktree, state_root, record)
+        approval_policy_staged = True
         # Mark *attempt* BEFORE executing the helper. A failed helper may have
         # already stopped/renamed/replaced live state before returning nonzero.
         runtime_attempted = True
@@ -3295,7 +3506,10 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             cwd=deploy_worktree,
             env=env,
         )
-        wait_live_runtime()
+        live_after_runtime = wait_live_runtime()
+        approval_policy_activation = verify_live_mobile_release_approval_activation(
+            deploy_worktree, live_after_runtime
+        )
 
         mcp_attempted = True
         mcp_output = run(
@@ -3355,11 +3569,16 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         drift_evidence = production_drift_evidence(state_root)
         production_manifest = capture_production_manifest(candidate_sha)
 
+        if isinstance(record.get("mobile_release_policy_transition"), dict):
+            record["mobile_release_policy_transition"]["status"] = "verified_active"
+            record["mobile_release_policy_transition"]["verified_at"] = now()
+
         record["production"] = {
             "live_sha": live["revision"],
             "artifact_digest": live_digest,
             "mcp_artifact_digest": live_mcp_digest,
             "health_passed": True,
+            "mobile_release_approval": approval_policy_activation,
             "ccc_pre_mutation": ccc_preflight,
             "ccc_post_mutation": ccc_postflight,
             "functional_smoke_tests_passed": bool(smoke.get("passed")),
@@ -3407,6 +3626,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
             "pre_mutation_health": record.get("pre_mutation_health"),
             "functional_smoke_tests": smoke,
             "authenticated_owner_read_canary": verified_owner_read_canary,
+            "mobile_release_approval": approval_policy_activation,
             "production_manifest": production_manifest,
             "desired_state_drift_evidence": drift_evidence,
             "rollback_target": baseline_manifest,
@@ -3461,10 +3681,12 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
                 rollback_env, prior_autotask_profile=prior_autotask_profile
             )
         rollback_env[worker_enrollment.ENV_NAME] = previous_worker_uid
+        rollback_env["JASON_RELEASE_MOBILE_APPROVAL_ROLLBACK_MODE"] = prior_release_approval_mode
 
         rollback_errors: list[str] = []
         recovery_steps = {"mcp": "not_attempted", "host": "not_attempted",
-                          "manager": "not_attempted", "runtime": "not_attempted"}
+                          "manager": "not_attempted", "runtime": "not_attempted",
+                          "approval_policy": "not_attempted"}
 
         # Reverse the forward transaction in dependency order. A script can
         # return nonzero AFTER mutating production; do not trust its exit code
@@ -3524,6 +3746,25 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
                 recovery_steps["runtime"] = "unverified"
                 rollback_errors.append(
                     "runtime=" + type(exc).__name__ + ":" + str(exc)[:200]
+                )
+
+        if approval_policy_staged:
+            try:
+                recovery_steps["approval_policy"] = "restoration_attempted"
+                restored_policy = restore_mobile_release_approval_policy(state_root, record)
+                # Runtime rollback already completed its health/identity proof above.
+                # This final read is authority-mode verification only; do not add a
+                # second health wait that can obscure an otherwise verified rollback.
+                current_mode = live_release_mobile_approval_mode(live_runtime())
+                if current_mode != prior_release_approval_mode:
+                    raise ReleaseManagerError("rollback release approval runtime mode differs from baseline")
+                if restored_policy.get("mode") != prior_release_approval_mode:
+                    raise ReleaseManagerError("rollback release approval policy mode differs from baseline")
+                recovery_steps["approval_policy"] = "restored_and_verified"
+            except Exception as exc:
+                recovery_steps["approval_policy"] = "unverified"
+                rollback_errors.append(
+                    "approval_policy=" + type(exc).__name__ + ":" + str(exc)[:200]
                 )
 
         rollback_ok = False

@@ -81,3 +81,18 @@ healthy database/process is not sufficient: stale, unavailable, or non-PASS
 production drift evidence makes PM V2 health degraded. This rule was added after
 acceptance testing caught an out-of-band PM V2 user service opening the protected
 production circuit breaker even though its local self-test was green.
+
+## Existing Teams release lane: protected-core activation
+
+Per explicit Owner agreement on 2026-10-31, PM V2 reuses the existing Teams
+release approval system for `production_control_core`; it does not create a
+second approval engine. The reviewed activation is source-bound, rollback-safe,
+and fail-closed as described in
+`Teams-Protected-Release-Approval-Gates-2026-10-18.md`.
+
+The approval policy and running mode must move together inside the governed
+Release Manager transaction. Preproduction keeps the lane off. A successful
+runtime transition must prove the exact policy digest and `owner_reviewed`
+mode; rollback must restore the prior policy and mode. Approval never lifts the
+separate production deployment freeze and never expands provider or endpoint
+authority.

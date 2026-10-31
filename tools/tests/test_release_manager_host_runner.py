@@ -906,6 +906,9 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             mcp_script.parent.mkdir(parents=True)
             runtime_script.write_text("#!/bin/sh\n", encoding="utf-8")
             mcp_script.write_text("#!/bin/sh\n", encoding="utf-8")
+            policy = candidate_tree / "config/mobile-release-approval-policy.json"
+            policy.parent.mkdir(parents=True, exist_ok=True)
+            policy.write_bytes((ROOT / "config/mobile-release-approval-policy.json").read_bytes())
             with (
                 patch.object(runner, "require_host_reconciler_ready") as host_ready,
                 patch.object(runner, "worktree", return_value=candidate_tree) as make_tree,
@@ -3855,7 +3858,9 @@ def test_native_preflight_rejects_lkg_declaration_mismatch(tmp_path):
     with (patch.object(runner, "declared_autotask_read_profiles",
                        return_value=("v13", "v10")),
           patch.object(runner, "live_autotask_read_profile", return_value="v13"),
-          patch.object(runner, "declared_quickbooks_read_profile", return_value=None)):
+          patch.object(runner, "declared_quickbooks_read_profile", return_value=None),
+          patch.object(runner, "declared_mobile_release_approval_policy",
+                       return_value={"mode": "owner_reviewed"})):
         with __import__("pytest").raises(runner.ReleaseManagerError,
                                         match="rollback profile disagrees"):
             runner.native_deploy_environment(tmp_path, "runtime", "mcp", SHA_A)
@@ -3866,7 +3871,9 @@ def test_native_preflight_passes_same_bound_env_to_both_scripts(tmp_path):
     with (patch.object(runner, "declared_autotask_read_profiles",
                        return_value=("v13", "v13")),
           patch.object(runner, "live_autotask_read_profile", return_value="v13"),
-          patch.object(runner, "declared_quickbooks_read_profile", return_value=None)):
+          patch.object(runner, "declared_quickbooks_read_profile", return_value=None),
+          patch.object(runner, "declared_mobile_release_approval_policy",
+                       return_value={"mode": "owner_reviewed"})):
         env = runner.native_deploy_environment(tmp_path, "runtime", "mcp", SHA_A)
     assert env["JASON_PROVIDER_READ_ACTIVATION_PROFILE"] == "v13"
     assert env["JASON_PROVIDER_READ_ROLLBACK_PROFILE"] == "v13"
