@@ -52,6 +52,7 @@ class TrustedCloudUserScope:
     tenant_id: str
     managed_domains: frozenset[str]
     source_authority: str
+    approved_user_principal_name: str | None = None
 
 
 class TrustedOnboardingAuthority(Protocol):
@@ -198,6 +199,9 @@ class MicrosoftGraphStandardUserCreateConnector:
             raise ConnectorAuthorizationError("ENTRA_UPN_DOMAIN_NOT_APPROVED")
         if local in {"admin", "administrator", "globaladmin", "breakglass"}:
             raise ConnectorAuthorizationError("ENTRA_PRIVILEGED_NAME_NOT_STANDARD")
+        if (not scope.approved_user_principal_name
+                or scope.approved_user_principal_name.casefold() != upn):
+            raise ConnectorAuthorizationError("ENTRA_APPROVED_USER_UPN_MISMATCH")
         alias = _text(args["mail_nickname"], "MAIL_NICKNAME").casefold()
         if not _MAIL_NICKNAME.fullmatch(alias) or alias.endswith("."):
             raise ValueError("ENTRA_MAIL_NICKNAME_INVALID")

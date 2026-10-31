@@ -57,6 +57,9 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     "it_glue.readonly": (
         "secret/data/connectors/it-glue/production/read-only"
     ),
+    "it_glue.readwrite": (
+        "secret/data/connectors/it-glue/production/configuration-notes-write"
+    ),
     "datto_rmm.readonly": (
         "secret/data/connectors/datto-rmm/production/read-only"
     ),
@@ -77,6 +80,9 @@ DEFAULT_MAPPINGS: Mapping[str, str] = {
     ),
     "microsoft_graph.mail_read": (
         "secret/data/connectors/microsoft-graph/production/mail-read"
+    ),
+    "microsoft_graph.user_create": (
+        "secret/data/connectors/microsoft-graph/production/user-create"
     ),
     "kyocera_kfs.readonly": (
         "secret/data/connectors/kyocera-kfs/production/read-only"
@@ -112,6 +118,7 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
     "autotask.readonly": frozenset({"username", "secret", "integration_code"}),
     "autotask.write": frozenset({"username", "secret", "integration_code"}),
     "it_glue.readonly": frozenset({"api_key"}),
+    "it_glue.readwrite": frozenset({"api_key"}),
     "datto_rmm.readonly": frozenset({"api_url", "api_key", "api_secret"}),
     "datto_rmm.execution": frozenset({"api_url", "api_key", "api_secret"}),
     "datto_edr.readonly": frozenset({"api_url", "api_token"}),
@@ -126,6 +133,14 @@ DEFAULT_FIELDS: Mapping[str, frozenset[str]] = {
         }
     ),
     "microsoft_graph.mail_read": frozenset(
+        {
+            "private_key_pem",
+            "certificate_pem",
+            "certificate_thumbprint",
+            "generation",
+        }
+    ),
+    "microsoft_graph.user_create": frozenset(
         {
             "private_key_pem",
             "certificate_pem",
