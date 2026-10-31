@@ -602,3 +602,39 @@ tenant/object, unsigned callback, or policy mismatch remain fail-closed.
 The rejected live click is not converted into approval and must not be replayed.
 A fresh exact-SHA card is required after the corrected callback code completes
 the normal protected release process.
+
+
+### Host release consumer symbolic-owner compatibility — 2026-10-31
+
+A fresh signed Teams Approve for the PMV3 Owner UAT release was accepted by
+the deployed callback and recorded in the gateway decision store. The
+independent host-side release consumer then rejected that already-authenticated
+decision with:
+
+`PermissionError: mobile release approval has no active independent Jason owner identity`.
+
+The consumer was the final approval layer still requiring the active Jason
+identity itself to literally equal the symbolic release-policy owner
+`person-al`. Production intentionally stores the verified Microsoft account
+under its canonical Entra-derived Jason identity instead.
+
+The host consumer now applies the same bounded symbolic-owner compatibility
+rule already used by delivery and callback processing. It resolves the signed
+Microsoft tenant/object to the active binding, loads the bound Jason identity,
+and permits the policy identity `person-al` only when:
+
+- the durable approval receipt already names an owner listed in the exact
+  release policy;
+- the binding and Jason identity are active and in AOT;
+- the binding email is exactly `al@teamaot.com` (case-insensitive);
+- the binding has no client scope;
+- the binding Jason identity and active authority identity are exactly
+  `person-entra-<hex UUID>` derived from the authenticated Microsoft object;
+- the signed approval evidence, request, policy digest, manifest digest,
+  expiry, replay protections and release eligibility all still pass.
+
+The resulting CCC material-review record continues to use the reviewed symbolic
+policy identity `person-al`; the signed evidence retains the actual Microsoft
+actor and authentication evidence. Wrong email, client-scoped binding,
+mismatched derived identity, revoked identity, wrong tenant/object, replay,
+tampering, stale release/policy or unsigned evidence remain fail-closed.
