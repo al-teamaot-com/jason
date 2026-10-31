@@ -215,3 +215,62 @@ def test_durable_registry_can_promote_and_revoke_component(monkeypatch, tmp_path
     downgraded = configured_datto_components()[0]
     assert downgraded.approval_mode == "per_run"
     assert downgraded.approval_source == "durable_registry_revocation"
+
+
+
+@pytest.mark.parametrize(
+    "uid,name",
+    [
+        ("479d1a75-8f98-42b7-b6fb-408242bcc17e", "Change Hostname [WIN]"),
+        ("f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967", "Datto Endpoint Backup Agent v2 [WIN]"),
+        ("9c30dab8-b76c-417d-a264-b3ca91995179",
+         "Datto EDR Force Reinstall and Upgrade [WIN] AOT 09162024"),
+    ],
+)
+def test_owner_2174_approved_actions_remain_per_run_under_standing_config(
+    monkeypatch, uid, name
+):
+    clear_component_env(monkeypatch)
+    monkeypatch.setenv(
+        DATTO_EXECUTION_COMPONENTS_JSON_ENV,
+        __import__("json").dumps(
+            [{"uid": uid, "name": name, "approval_mode": "standing_safe"}]
+        ),
+    )
+    observed = configured_datto_components()
+    selected = resolve_datto_component(
+        observed, component_uid=uid, component_name=name,
+    )
+    assert selected.approval_mode == "per_run"
+    assert selected.requires_explicit_approval is True
+
+
+@pytest.mark.parametrize(
+    "uid,name",
+    [
+        ("479d1a75-8f98-42b7-b6fb-408242bcc17e", "Change Hostname [WIN]"),
+        ("f39412b2-bfdc-4ac6-b4be-f2fa8bc5f967", "Datto Endpoint Backup Agent v2 [WIN]"),
+        ("9c30dab8-b76c-417d-a264-b3ca91995179",
+         "Datto EDR Force Reinstall and Upgrade [WIN] AOT 09162024"),
+    ],
+)
+def test_owner_2174_action_classification_fails_open_to_no_one(
+    monkeypatch, uid, name
+):
+    from jason_runtime.datto_component_scope import DattoComponentScopeError
+    clear_component_env(monkeypatch)
+    monkeypatch.setenv(
+        DATTO_EXECUTION_COMPONENTS_JSON_ENV,
+        __import__("json").dumps(
+            [{"uid": uid, "name": name, "approval_mode": "standing_safe"}]
+        ),
+    )
+    configured = configured_datto_components()
+    with pytest.raises(DattoComponentScopeError):
+        resolve_datto_component(
+            configured, component_uid="unrelated-uid", component_name=name,
+        )
+    with pytest.raises(DattoComponentScopeError):
+        resolve_datto_component(
+            configured, component_uid=uid, component_name="Unrelated Action",
+        )

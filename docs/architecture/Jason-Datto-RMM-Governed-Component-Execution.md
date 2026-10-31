@@ -237,3 +237,210 @@ The first milestone is complete when Jason can, in source/tests only:
 5. construct the correct Datto quick-job request without sending it to production.
 
 Production remains read-only until a later explicitly approved activation step.
+
+
+
+## Failure-class correction evidence (2026-10-30, preproduction)
+
+- **Observed symptom:** a correctly identified, owner-approved `Change Hostname [WIN]`
+  quick-job request on an eligible workstation was rejected **before Datto was
+  contacted**: `component variable is not approved by the allowlist`.
+- **Failure class:** catalog-visible and owner-approved component actions can
+  lack a consistent reviewed variable contract at execution-plan preparation;
+  runtime policy and provider component semantics may drift independently.
+- **Violated invariant:** authority and component discovery do not by
+  themselves authorize unspecified variables or a different concrete plan.
+  The safe request must have a reproducible, exact, bounded parameter contract.
+- **General correction:** reusable source-declared `SourceComponentContract`
+  registry and one shared validator, independent of endpoint, ticket or
+  conversation text; exact provider UID/name binding; fail-closed input and
+  identity checks; retain separate human and provider authority.
+- **Regression diversity:** unrelated hostname, backup-log and event-log
+  inputs exercise boolean restrictions, validated Windows names, literal
+  searches, length/range limits and an unrelated synthetic future component.
+  Both UID and name mismatches must fail even for a previously accepted field.
+- **Operational state:** draft source only. There has been no provider job, no
+  staged rename, no reboot and no production approval expansion under this
+  correction. Additional script safety and provider-backed acceptance are
+  still required.
+
+## Source-controlled component input validation (preproduction engineering pattern)
+
+**Status:** Implemented in draft source only, pending safety review, provider-backed
+acceptance, protected integration and exact-SHA release authorization. This
+section does not claim a production activation or standing-safe classification.
+
+The canonical `automation.component.execute` capability continues to use the
+Central Orchestrator's per-action identity, approval, client and device scoping,
+execution-plan binding, idempotency, and output readback. The Datto adapter's
+input validator is a separate **conservative safety contract**, not a source of
+human authority. It must not grant a new capability or imply that a component
+is certified read-only.
+
+To add one *reviewed* component with sensitive input parameters:
+
+1. Resolve its current UID, name, category, variables and script behavior
+   through governed Datto discovery. Do not infer execution safety from a
+   component title, description or a previous approval record.
+2. Record the selected canonical capability, expected result, risk, target
+   classes, per-run/standing-safe classification and owner decision in the
+   existing workstream or approval record.
+3. Define the reviewed, **provider-specific** variable constraints as a
+   declarative `SourceComponentContract` in
+   `implementation/connectors/datto_rmm/source_component_contracts.py`.
+   Bind the contract to the exact Datto UID **and** display name. No per-client,
+   device, ticket or user identifiers belong in this source registry.
+4. Use the shared `ComponentVariablePolicy` validator, which supports bounded
+   scalars, selection enumerations, booleans (including permitted literal
+   values), safe Windows hostnames, and bounded literal search terms. Do not
+   introduce a new conditional per component or special-case error message
+   into the provider transport.
+5. Fail closed for any partial UID/name collision, missing/unknown variables,
+   unsupported values, runtime variable-policy override, or metadata drift.
+   The source-owned contract takes precedence over generic runtime field
+   policy for an exact reviewed identity.
+6. Add deterministic tests demonstrating the normal request shape, invalid
+   inputs, arbitrary-variable injection, cross-identity drift, and at least one
+   unrelated synthetic component using the same general validation mechanism.
+7. Separately verify runtime execution scope, dedicated provider execution
+   identity, Datto API Component Level, explicit approval where required,
+   exact plan fingerprint and job result/readback. Prepare source against
+   current protected `main`; use the normal Production Manager release lane.
+
+Initial contracts from owner-authorized issue
+[`#2174`](https://github.com/al-teamaot-com/jason/issues/2174)
+include non-reboot Windows hostname staging, bounded Endpoint Backup
+error-log retrieval and bounded Windows event-log search. Eight additional
+owner-listed diagnostic identities have **zero-variable source contracts**:
+they reject any supplied component variable, even when a runtime policy would
+permit it. Zero-variable contracts prevent parameter expansion only. Their
+actual Datto script bodies have **not** been reviewed or safety-certified;
+standing-safe approval, provider-backed acceptance and deployment remain
+separate, pending gates. The no-reboot
+contract allows `usrReboot=false` **only**. It never approves a subsequent
+reboot, a security-service restart, or BackupIQ asset deletion. Any future
+reboot must use a different action and obtain its own exact authorization.
+
+**Construction example:** `source_component_contracts.py` and
+`implementation/connectors/tests/test_datto_owner_2174_variable_contracts.py`.
+**Release boundary:** component variable contracts are not equivalent to
+activation of the corresponding component on Jason or in Datto's API Component
+Level. No production grant, Datto job, or endpoint change is authorized
+merely by merging this source code. Documentation must distinguish intended
+state from observed production evidence.
+
+## Diagnostic script-source retrieval checkpoint (2026-10-30)
+
+**Source provenance:** Live governed `automation.component.search`, not script-body export.
+All ten approved diagnostic UID/name pairs were independently returned from the
+complete Datto component catalog. The catalog exposed variables and some descriptions,
+**not executable script source**. The repository contains no matching tracked `.ps1`
+files. As a result, **zero of ten diagnostic scripts can be certified** as
+standing-safe on the evidence reviewed here. No component was executed.
+
+| Diagnostic category | Live catalog inputs | Safety concern to inspect in actual script |
+| --- | --- | --- |
+| Comprehensive Disk & Storage | None | Verify diagnostic commands are non-modifying; no repair or CHKDSK fix mode |
+| Proactive Event Log Health | None | Verify event-log access remains read-only, outputs redact sensitive entries, optional JSON export is bounded |
+| Shadow Copy Health & Configuration | None | Verify `vssadmin`/WMI operations inspect only, never create/delete/change shadows |
+| Unexpected Shutdown Collector | None | Catalog explicitly says it writes diagnostic history under `C:\Temp`; verify file scope, cleanup behavior, permissions, log retention and confidentiality before classifying |
+| RDP Status | None | Verify no RDP registry, firewall, listener or service modification |
+| Boot Time | None | Catalog says it outputs a full running-process inventory; verify no process termination and redact command lines or sensitive process metadata |
+| OneDrive Comprehensive Diagnostic | None | Description does not provide behavior detail; inspect user-context logic, tokens, files and sync settings |
+| Endpoint Backup Log Retrieval | `usrMaxResults`, `usrAdditionalInfo` | Verify redaction and file handling; source contract restricts max results to 25/50/100 and additional info to false |
+| Windows Event Log Search | `SearchTerm`, `DaysBack` | Verify literal string handling, bounded log reads, escaping and output redaction |
+| VulScan Discovery Agent Status | None | Catalog classifies as monitor; ensure service state is only queried, not restarted or installed |
+
+**Authorized retrieval path required:** Obtain exact component script bodies using
+Datto RMM's administrator-authorized Components View/export functionality, or
+introduce a separately reviewed governed read capability if the vendor supports
+a source-retrieval API. Do not use direct provider/API/shell credential bypasses.
+For each export record UID, exact name, source file hash, observed revision,
+export timestamp and reviewer; inspect execution branches including SYSTEM/user
+context, service/process operations, file changes, logging, outbound traffic,
+secret access, and reboot/logoff paths. A description is not safety proof.
+
+**Release hold:** The ten diagnostic components remain per-run until their
+script-body reviews and provider-backed acceptance succeed. The source-locked
+zero-input contracts constrain arguments but do not authorize execution.
+## OneDrive PowerShell source-library audit (2026-10-30; candidates only)
+
+The AOT OneDrive folder `Documents/Scripts/Powershell` was reached through
+the delegated Microsoft SharePoint connector and reported **831 immediate
+children**. Its `.git/config` identifies the companion private repository
+`al-teamaot-com/Powershell`. The GitHub `main` tree inspected at
+`9bb7135a44042e473e985b993fbab19cc466bf99` contains 1,951 entries
+(778 root entries). Six individually downloaded OneDrive source files matched
+their GitHub blob IDs after normalizing CRLF to LF where necessary:
+`EventLogSearch.ps1`, `ShadowCopyFunction.ps1`,
+`Monitor_RDP_Port_Availability.ps1`, `IsOneDriveHappy.ps1`,
+`Restart-FailedShadowCopyServices.ps1`, and
+`AOT-OneDrive-Discovery.ps1`. This supports using that Git tree as an index
+for **verified matching files**, not as a blanket assertion that all
+OneDrive files or current Datto components are identical.
+
+**Important distinction:** No script in this reviewed Git tree has an exact
+file name corresponding to the ten Datto UID/name/version catalog identities
+approved under #2174. Generic or older scripts are not substitute evidence of
+current Datto runtime behavior. The OneDrive directory also has more root
+items than this Git tree; connector folder listing is paginated, so the full
+OneDrive-only remainder has not been checked.
+
+| Retrieved candidate (not an exact Datto match) | Actual code behavior / review conclusion |
+| --- | --- |
+| `EventLogSearch.ps1` | Reads Windows logs but exports matching full event text to `C:\Temp\EventLogSearchResults.csv`; uses hard-coded search term and day count, unlike live `SearchTerm`/`DaysBack` variables. Output privacy and file retention require review. |
+| `Monitor_RDP_Port_Availability.ps1` | Active bottom-of-file call repeats TCP checks against hard-coded targets indefinitely; not the approved local RDP listener/configuration status diagnostic. Unsuitable as a standing-safe substitute. |
+| `ShadowCopyFunction.ps1` / `ShadowCopyTool.ps1` | The same reviewed Git blob exports functions that create, remove, mount and unmount snapshots; an invocation could modify state. Not the approved shadow-copy health-only component. |
+| `Restart-FailedShadowCopyServices.ps1` | Has an explicit restart-service operation commented out in inspected source; its name and repair purpose cannot establish the approved VSS diagnostic is safe. |
+| `IsOneDriveHappy.ps1` | Downloads a DLL into ProgramData and writes OneDrive status logs. Not sufficient to certify the approved OneDrive comprehensive diagnostic. |
+| `AOT-OneDrive-Discovery.ps1` | Uses a Microsoft Graph discovery/authentication workflow; not proof of the approved endpoint OneDrive diagnostic logic. |
+| `VulScanDiscoveryAgentInstall.ps1` and `VulScanDiscoveryAgentInstallerForDRMM_AOT Ver 08262024.ps1` | Download/install agent software, including an `msiexec` path. These are operational installers, **not** the approved VulScan service-status-only diagnostic. |
+| `MonitoringDiskSpeed.ps1` | Downloads DiskSpd and performs a disk-write performance test; not a safe source substitute for the approved read-only disk-health diagnostic. |
+| `Rename-PC-WithLoggingForAutomation.ps1` | Contains a `Rename-Computer` call with `-WhatIf` plus email/credential-related handling. It is not authoritative code for Datto `Change Hostname [WIN]`; no-reboot enforcement and actual rename behavior remain unproven. |
+
+**Progress/evidence:** Relevant candidate files inspected and safety hazards
+identified; **0/10 approved diagnostic script bodies matched to immutable live
+Datto versions; 0/10 standing-safe certifications**. No scripts were run, no
+component execution approval was modified, and no production release occurred.
+Next is exact Datto script-body export and verified UID/name/version/source-hash
+correlation, then branch-level source review and provider-backed testing.
+## Owner-supplied CPT script-body review (2026-10-30, preproduction)
+
+**Provenance:** Eight Datto RMM `.cpt` packages uploaded by the owner. Each ZIP
+contains `command.bat` (PowerShell) and `resource.xml`, and all eight embedded
+UID/name pairs match issue #2174's exact live catalog identifiers. Embedded
+XML `<hash/>` fields are EMPTY; the locally computed SHA-256 values below
+are review evidence, **not** proof that the currently running Datto component
+script equals the export. No script was executed, no quick job was dispatched,
+and no standing-safe permission was changed.
+
+| Reviewed component (short title) | CPT version | command.bat SHA-256 | Preliminary source assessment |
+| --- | ---: | --- | --- |
+| RDP Status | 1 | `2dff23402bcfd8be43fea352e902e1c69eb744bd81fd148eb1e522c0860af3d9` | Low disruption: registry/service/firewall reads, no configuration change seen |
+| Boot Time | 13 | `4b32b77cf521bed8544388eb9a8842e02751e3f3599e04dc147faa77edcdf5c9` | Low disruption: event log reads; site/global thresholds unbounded; description promises process inventory not collected |
+| Shadow Copy Health | 2 | `b86f2008945333f7fa167ff92595ca5ed8dde48b1519837d0421f6cc348954d0` | Low disruption: WMI/CIM and only `vssadmin list` invocations; subprocess has no explicit timeout |
+| OneDrive Comprehensive | 9 | `885d66174efa8d9845e6b51de152d9188e7ad25da93307b925bba006a6e2f012` | Conditional: reads profiles, registry, logs, and remote Microsoft TCP/TLS probes; report includes SID, paths, display names |
+| Comprehensive Disk & Storage | 1 | `61ccc2b1f34eb77804804a52598ea9e9ba7a4c26de89e937326236d494473ee8` | Conditional: no repair/reboot branch found, but `Repair-Volume -Scan` and read-only `chkdsk` enabled by default on eligible volumes; potential noticeable I/O |
+| Proactive Event Log Health | 7 | `a0fd9e8c33c6fb9aed13deb67224d81d0ea0893955f7a1fe5f99aa033e4d8d13` | HOLD: `ExportJson` and `IncludeMessageText` default true; unredacted event snippets and JSON written to disk (lines 258-273, 217-229, 560-567, 610, 645) |
+| Unexpected Shutdown Collector | 4 | `72b96db1bb6eef3fa240297f2818581812534d593a10c5360f6de6be8e6e586f` | HOLD: writes/append raw diagnostics to `C:\Temp\AOT_UnexpectedShutdownDiag.log` (lines 389-397), with no proven redaction or retention |
+| AOT Event Log Search | 4 | `b2ec7130ec7a0c7aa40c029aafbd255dbdc2eeec735bbe2a8a13c43fe0d8627d` | HOLD: `Export-Csv` writes full event descriptions to `C:\Temp\EventLogSearchResults.csv` (line 47), unbounded collection and no retention control |
+
+**Specific follow-up:** No-input source contracts already cover the six
+no-input components in this batch; the event-search contract remains bounded
+by explicit `SearchTerm`/`DaysBack` values. Inputs do **not** neutralize
+script-side effects or unmanaged inherited environment variables. Never mark a
+component standing-safe based on a display description, title, metadata-only
+fingerprint, or this offline inspection. A valid standing-safe promotion requires
+the reviewed source to be bound to a verified live Datto revision or repeatable
+export, plus tested user-disruption/privacy controls and owner-governed approval.
+
+The owner separately identified `Get-VulScan Discovery Agent Service Status
+AOT` as an existing monitor and `Datto Endpoint Backup: Retrieve Errors and
+Warnings from Logs [WIN]` as read-only; their CPTs were not provided and no
+independent source-body review is claimed for those two.
+
+**Accurate progress:** 8/10 approved diagnostic script bodies recovered and
+statically reviewed (80%); 3 source-low-risk, 2 conditional, 3 held in the
+eight-file batch. **0/10 live-revision-bound standing-safe certifications;
+0/13 provider-backed acceptance; 0/13 production activations.** These figures
+are distinct: script inspection is not production functionality.
