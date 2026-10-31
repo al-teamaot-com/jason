@@ -9,6 +9,7 @@ LEGACY = "/run/jason-secrets/teams-proactive/token"
 
 
 def test_runtime_settings_default_to_active_gateway_token_mount(monkeypatch):
+    monkeypatch.setenv("JASON_OLLAMA_MODEL", "synthetic-test-model")
     monkeypatch.delenv("JASON_TEAMS_PROACTIVE_TOKEN_FILE", raising=False)
     settings = RuntimeSettings.from_env()
     assert settings.teams_proactive_token_file == EXPECTED
@@ -31,6 +32,7 @@ def test_all_runtime_teams_sender_defaults_use_same_gateway_token_mount():
 
 
 def test_environment_override_remains_supported(monkeypatch, tmp_path):
+    monkeypatch.setenv("JASON_OLLAMA_MODEL", "synthetic-test-model")
     override = tmp_path / "alternate-token"
     monkeypatch.setenv("JASON_TEAMS_PROACTIVE_TOKEN_FILE", str(override))
     settings = RuntimeSettings.from_env()
