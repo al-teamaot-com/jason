@@ -563,3 +563,42 @@ read/write registration and Windows Time JSON shadow respectively. Those
 settings, registrations, provider/authority gates and default-off controls are
 independent and must be preserved when later integrated. The PMV3 token-path
 correction does not absorb or supersede them.
+
+
+### Release callback symbolic-owner compatibility — 2026-10-31
+
+A live PMV3 release card was delivered to the verified Owner Teams account and
+the Owner pressed Approve. Bot Framework authentication and gateway ingress
+succeeded, but the deployed rollback runtime rejected the interaction with
+HTTP 403 `approval_interaction_denied` and the precise security-audit reason
+`mobile release actor is not the authorized owner`.
+
+Evidence showed the active Microsoft binding is correctly persisted as the
+canonical Entra-derived Jason identity while the reviewed release policy
+intentionally retains the symbolic Owner identity `person-al`. Outbound
+delivery already had a bounded symbolic-owner fallback, but the inbound release
+decision flow still required literal identity equality.
+
+The inbound flow now applies the same narrowly bounded compatibility rule. It
+maps the authenticated Entra-derived actor to `person-al` only when all of
+the following are true:
+
+- the signed callback Microsoft object matches the active binding;
+- the binding email is exactly `al@teamaot.com` (case-insensitive);
+- the binding Jason identity is exactly `person-entra-<hex UUID>` derived
+  from that Microsoft object ID;
+- the active Jason identity record is the same derived identity in AOT;
+- the binding has no client scope;
+- the reviewed release policy already names `person-al`; and
+- the configured release-only fallback explicitly maps `person-al` to the
+  verified Owner email.
+
+The durable ApprovalResponse is still recorded as the reviewed policy identity
+`person-al`; the signed gateway evidence and authentication evidence hash
+retain the actual Microsoft/Entra actor proof. Wrong email, malformed or
+mismatched derived identity, client-scoped binding, inactive binding, wrong
+tenant/object, unsigned callback, or policy mismatch remain fail-closed.
+
+The rejected live click is not converted into approval and must not be replayed.
+A fresh exact-SHA card is required after the corrected callback code completes
+the normal protected release process.

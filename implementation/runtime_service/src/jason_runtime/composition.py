@@ -2582,6 +2582,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
             ),
             signed_evidence=MobileReleaseSignedEvidenceStore(settings.release_mobile_approval_db),
             required_policy_version=expected_version,
+            owner_identity_email_fallbacks={
+                "person-al": "al@teamaot.com",
+            },
         )
         if settings.release_mobile_approval_worker_enabled:
             release_mobile_maintenance = MobileReleaseApprovalMaintenance(

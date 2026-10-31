@@ -19,6 +19,7 @@ import re
 import secrets
 import sqlite3
 import stat
+import uuid
 from typing import Any, Mapping
 
 from connectors.src.jason_connectors.approval_requests import (
@@ -421,6 +422,39 @@ class MobileReleaseApprovalFlow:
     signed_verifier: Any
     signed_evidence: MobileReleaseSignedEvidenceStore
     required_policy_version: str = "1.0"
+    owner_identity_email_fallbacks: Mapping[str, str] | None = None
+
+    def _authorized_owner_identity(self, *, binding, identity, policy: MobileReleasePolicy) -> str:
+        if identity.identity_id in policy.owner_identity_ids:
+            return identity.identity_id
+        fallbacks = {
+            str(owner).strip(): str(email).strip().casefold()
+            for owner, email in dict(self.owner_identity_email_fallbacks or {}).items()
+            if str(owner).strip() and str(email).strip()
+        }
+        for owner_identity in policy.owner_identity_ids:
+            email = fallbacks.get(owner_identity)
+            if email is None:
+                continue
+            try:
+                expected_identity = (
+                    "person-entra-" + uuid.UUID(str(binding.microsoft_object_id)).hex
+                )
+            except (ValueError, AttributeError, TypeError) as exc:
+                raise PermissionError(
+                    "mobile release owner fallback binding identity is invalid"
+                ) from exc
+            if (
+                str(getattr(binding, "email_address", "") or "").strip().casefold() == email
+                and str(getattr(binding, "jason_identity_id", "")) == expected_identity
+                and str(getattr(identity, "identity_id", "")) == expected_identity
+                and getattr(binding, "client_id", None) is None
+                and getattr(binding, "status", None) == "active"
+                and getattr(identity, "status", None) == "active"
+                and getattr(identity, "organization_id", None) == policy.organization_id
+            ):
+                return owner_identity
+        raise PermissionError("mobile release actor is not the authorized owner")
 
     def handle(self, *, approval_id: str, decision: str, microsoft_tenant_id: str,
                microsoft_object_id: str, conversation_id: str, channel_response_id: str,
@@ -453,8 +487,9 @@ class MobileReleaseApprovalFlow:
         policy = read_mobile_release_policy(self.policy_path)
         if policy.schema_version != self.required_policy_version:
             raise PermissionError("Teams owner release policy changed without the reviewed runtime mode")
-        if identity.identity_id not in policy.owner_identity_ids:
-            raise PermissionError("mobile release actor is not the authorized owner")
+        authorized_owner_identity = self._authorized_owner_identity(
+            binding=binding, identity=identity, policy=policy,
+        )
         request = self.requests.get(approval_id)
         if request is None or request.status is not ApprovalRequestStatus.PENDING:
             raise PermissionError("mobile release decision is missing or already terminal")
@@ -536,7 +571,7 @@ class MobileReleaseApprovalFlow:
         )
         accepted = self.approvals.accept_response(
             ApprovalResponse(approval_id=approval_id, organization_id=policy.organization_id,
-                approver_identity_id=identity.identity_id, decision=ApprovalDecision(decision),
+                approver_identity_id=authorized_owner_identity, decision=ApprovalDecision(decision),
                 decided_at=decided_at, channel="microsoft_teams",
                 channel_response_id=channel_response_id,
                 authentication_evidence_hash=principal.authentication_evidence_hash))
