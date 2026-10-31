@@ -96,6 +96,24 @@ def test_complete_manual_policy_denial_suppresses_notification():
     assert len(calls) == 2
 
 
+def test_governed_exact_kb_filter_preserves_full_provider_paging_metadata():
+    """A complete 30-patch provider response is filtered to one verified KB.
+
+    Actual Datto governed reads keep prefilter pageDetails.count/totalCount,
+    even though evidence.items contains only the exact selected patch. This
+    is a valid, untruncated scoped read, not a 30-row ambiguity.
+    """
+    data = response(pageDetails={
+        "count": 30, "totalCount": 30,
+        "prevPageUrl": None, "nextPageUrl": None,
+    })
+    reader, calls = make_reader(patch=data)
+    result = reader(target())
+    assert result.disposition == "review_pending"
+    assert len(calls) == 2
+    assert calls[0][0] == "endpoint.patch.search"
+
+
 def test_only_complete_manual_table_can_attest_no_explicit_datto_denial():
     reader, calls = make_reader()
     proof = reader(target())
