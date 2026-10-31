@@ -3727,6 +3727,24 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
                     "release_manager=" + type(exc).__name__ + ":" + str(exc)[:200]
                 )
 
+        # Restore authority policy BEFORE starting the baseline runtime. The
+        # baseline runtime advertises owner_only_pilot and must never be asked to
+        # boot against the candidate owner_reviewed policy; that mismatch causes
+        # a restart loop and delays rollback health recovery.
+        restored_policy: dict[str, Any] | None = None
+        if approval_policy_staged:
+            try:
+                recovery_steps["approval_policy"] = "restoration_attempted"
+                restored_policy = restore_mobile_release_approval_policy(state_root, record)
+                if restored_policy.get("mode") != prior_release_approval_mode:
+                    raise ReleaseManagerError("rollback release approval policy mode differs from baseline")
+                recovery_steps["approval_policy"] = "policy_restored_before_runtime"
+            except Exception as exc:
+                recovery_steps["approval_policy"] = "unverified"
+                rollback_errors.append(
+                    "approval_policy=" + type(exc).__name__ + ":" + str(exc)[:200]
+                )
+
         if runtime_attempted:
             try:
                 if rollback_surface_is_verified("runtime", rollback_sha, baseline_manifest):
@@ -3748,18 +3766,13 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
                     "runtime=" + type(exc).__name__ + ":" + str(exc)[:200]
                 )
 
-        if approval_policy_staged:
+        if approval_policy_staged and restored_policy is not None:
             try:
-                recovery_steps["approval_policy"] = "restoration_attempted"
-                restored_policy = restore_mobile_release_approval_policy(state_root, record)
-                # Runtime rollback already completed its health/identity proof above.
-                # This final read is authority-mode verification only; do not add a
-                # second health wait that can obscure an otherwise verified rollback.
+                # Baseline runtime health has now been verified. Confirm its
+                # advertised mode agrees with the already-restored policy.
                 current_mode = live_release_mobile_approval_mode(live_runtime())
                 if current_mode != prior_release_approval_mode:
                     raise ReleaseManagerError("rollback release approval runtime mode differs from baseline")
-                if restored_policy.get("mode") != prior_release_approval_mode:
-                    raise ReleaseManagerError("rollback release approval policy mode differs from baseline")
                 recovery_steps["approval_policy"] = "restored_and_verified"
             except Exception as exc:
                 recovery_steps["approval_policy"] = "unverified"

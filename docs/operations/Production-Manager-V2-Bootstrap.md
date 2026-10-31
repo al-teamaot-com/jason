@@ -96,3 +96,30 @@ runtime transition must prove the exact policy digest and `owner_reviewed`
 mode; rollback must restore the prior policy and mode. Approval never lifts the
 separate production deployment freeze and never expands provider or endpoint
 authority.
+
+## Root migration bootstrap sequencing — 2026-10-31
+
+Production acceptance exposed a protected-root bootstrap loop: the currently
+installed root host worker verifies any new desired-state unit with its
+currently trusted migration helper **before** candidate staging can replace
+that helper. Therefore the first release that both teaches the helper a new PM
+V2 unit plan and declares that unit cannot pass the old helper's preflight.
+
+The governed sequence is now two releases:
+
+1. **Bootstrap release:** deploy the reviewed owner-reviewed Teams lane and the
+   updated trusted root helper/worker, but do **not** declare or install
+   `jason-pm-v2-shadow.service` yet.
+2. **PM V2 shadow release:** after the new root helper is live, add exactly the
+   previously reviewed optional PM V2 shadow unit to desired state. That second
+   release must use the normal exact-SHA Teams approval lane and all existing
+   CCC, scope, rollback, drift, and freeze controls.
+
+This is sequencing only. It does not remove the PM V2 persistence requirement
+and it does not weaken root desired-state validation.
+
+Rollback authority ordering is also explicit: if an owner-reviewed candidate
+fails after staging policy V2, restore the prior V1 approval policy **before**
+starting the baseline `owner_only_pilot` runtime. After baseline health is
+verified, confirm runtime mode and restored policy agree. Never boot V1 against
+V2 policy during rollback.
