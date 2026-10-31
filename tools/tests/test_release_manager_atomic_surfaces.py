@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -70,6 +71,7 @@ def record():
                 "JASON_RUNTIME_PRODUCTION_IMAGE": "jason-runtime:test-a",
                 "JASON_MCP_PRODUCTION_IMAGE": "jason-mcp:test-a",
                 "JASON_SOURCE_REVISION_OVERRIDE": SHA_A,
+                "JASON_RELEASE_MOBILE_APPROVAL_MODE": "owner_reviewed",
             }),
         },
         "history": [],
@@ -93,6 +95,9 @@ def create_candidate_scripts(candidate_tree: Path) -> None:
         path = candidate_tree / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("#!/bin/sh\n", encoding="utf-8")
+    policy = candidate_tree / "config/mobile-release-approval-policy.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_bytes((ROOT / "config/mobile-release-approval-policy.json").read_bytes())
 
 
 def fake_gate(_repo, _state_root, release, target):
@@ -103,7 +108,7 @@ def fake_gate(_repo, _state_root, release, target):
 
 
 @pytest.fixture(autouse=True)
-def atomic_release_sandbox(monkeypatch):
+def atomic_release_sandbox(monkeypatch, tmp_path):
     """Exercise the transaction under real gates, with NO host/Docker access.
 
     The original legacy fixture predated mandatory release manifest and CCC
@@ -111,6 +116,40 @@ def atomic_release_sandbox(monkeypatch):
     unit harness aligned with the validated source contract while stubbing
     only the external effects, not the rollback execution path itself.
     """
+    live_policy = tmp_path / "live-mobile-release-approval-policy.json"
+    live_policy.write_text(json.dumps({
+        "schema_version": "1.0",
+        "organization_id": "aot",
+        "policy_mode": "owner_only_pilot",
+        "owner_identity_ids": ["person-al"],
+        "allowed_risk_profiles": ["normal"],
+        "ttl_seconds": 900,
+        "capability": "release.production.approve",
+    }) + "\n", encoding="utf-8")
+    live_policy.chmod(0o600)
+    monkeypatch.setattr(runner, "MOBILE_APPROVAL_POLICY", live_policy)
+    # Atomic transaction tests must never depend on a host Docker daemon.
+    # Individual tests can still override this baseline read when simulating
+    # candidate/rollback transitions.
+    monkeypatch.setattr(
+        runner, "live_runtime",
+        lambda: {
+            "revision": SHA_B,
+            "image_id": BASELINE_RUNTIME_IMAGE,
+            "inspect": {
+                "Config": {
+                    "Env": ["JASON_RELEASE_MOBILE_APPROVAL_MODE=owner_only_pilot"]
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(
+        runner, "live_release_mobile_approval_mode",
+        lambda runtime: (
+            "owner_reviewed" if str((runtime or {}).get("revision") or "") == SHA_A
+            else "owner_only_pilot"
+        ),
+    )
     monkeypatch.setattr(runner, "verify_candidate_on_main", lambda *a: None)
     monkeypatch.setattr(runner, "require_current_protected_release_source", lambda *a: None)
     monkeypatch.setattr(runner, "require_current_manual_scope_review", lambda *a: None)

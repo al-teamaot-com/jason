@@ -18,6 +18,8 @@ def verified_lkg():
         'host_revision':REV, 'host_release':'/opt/jason/releases/' + REV,
         'release_manager_source_revision':REV,
         'desired_state_policy_digest':'sha256:' + 'd'*64,
+        'mobile_release_approval_policy_digest':'sha256:' + 'e'*64,
+        'mobile_release_approval_mode':'owner_only_pilot',
         'scheduled_control_units':{'jason-release-manager.timer':'active'},
     }
 
@@ -33,9 +35,14 @@ def test_revalidation_requires_exact_root_evidence():
 
 def test_revalidation_rejects_changed_lkg_image_id_or_policy_or_unit():
     baseline=verified_lkg()
-    for key in ('runtime_image_id','mcp_image_id','desired_state_policy_digest','scheduled_control_units'):
+    for key in ('runtime_image_id','mcp_image_id','desired_state_policy_digest','mobile_release_approval_policy_digest','mobile_release_approval_mode','scheduled_control_units'):
         other=baseline.copy()
-        other[key] = {'jason-release-manager.timer':'inactive'} if key == 'scheduled_control_units' else 'sha256:' + 'f'*64
+        if key == 'scheduled_control_units':
+            other[key] = {'jason-release-manager.timer':'inactive'}
+        elif key == 'mobile_release_approval_mode':
+            other[key] = 'owner_reviewed'
+        else:
+            other[key] = 'sha256:' + 'f'*64
         state={'schema_version':'1.0','last_known_good':{'manifest':baseline.copy()},'circuit_breaker':{'state':'open'}}
         with patch.object(m,'verify_drift'),patch.object(m,'verify_health',return_value=other):
             with pytest.raises(ValueError,match='immutable last-known-good mismatch'):
