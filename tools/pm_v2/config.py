@@ -18,6 +18,7 @@ class WorkerConfig:
     max_concurrency: int
     max_attempts: int
     retry_delay_seconds: int
+    timeout_seconds: int
     command: tuple[str, ...]
 
 
@@ -60,6 +61,11 @@ class PMV2Config:
     canonical_agreement_path: Path | None
     canonical_agreement_sha256: str | None
     self_improvement_minimum_recurrences: int
+    subprocess_memory_mb: int
+    subprocess_cpu_seconds: int
+    subprocess_open_files: int
+    cloud_spend_policy: str
+    provider_authority_policy: str
 
 
 def _positive_int(value: Any, field: str, maximum: int | None = None) -> int:
@@ -124,6 +130,11 @@ def load_config(path: Path, repo: Path) -> PMV2Config:
             max_concurrency=_positive_int(item.get("max_concurrency"), f"workers.{name}.max_concurrency", 32),
             max_attempts=_positive_int(item.get("max_attempts"), f"workers.{name}.max_attempts", 10),
             retry_delay_seconds=_positive_int(item.get("retry_delay_seconds"), f"workers.{name}.retry_delay_seconds", 86400),
+            timeout_seconds=_positive_int(
+                item.get("timeout_seconds", lease),
+                f"workers.{name}.timeout_seconds",
+                86400,
+            ),
             command=tuple(command),
         ))
 
@@ -213,6 +224,26 @@ def load_config(path: Path, repo: Path) -> PMV2Config:
             raise ConfigError("canonical PM V2 agreement hash mismatch")
         canonical_agreement_sha256 = expected
 
+    resources = raw.get("resources") or {}
+    if not isinstance(resources, dict):
+        raise ConfigError("resources must be an object")
+    memory_mb = int(resources.get("subprocess_memory_mb") or 0)
+    cpu_seconds = int(resources.get("subprocess_cpu_seconds") or 0)
+    open_files = int(resources.get("subprocess_open_files") or 0)
+    if any(value < 0 for value in (memory_mb, cpu_seconds, open_files)):
+        raise ConfigError("resource limits cannot be negative")
+    cloud_spend_policy = str(
+        resources.get("cloud_spend_policy") or "teams_approval_required"
+    )
+    provider_authority_policy = str(
+        resources.get("provider_authority_policy")
+        or "existing_governed_authority_only"
+    )
+    if cloud_spend_policy != "teams_approval_required":
+        raise ConfigError("PM V2 cloud spending must require Teams approval")
+    if provider_authority_policy != "existing_governed_authority_only":
+        raise ConfigError("PM V2 cannot create provider authority")
+
     improvement = raw.get("self_improvement") or {"minimum_recurrences": 2}
     if not isinstance(improvement, dict):
         raise ConfigError("self_improvement must be an object")
@@ -256,4 +287,9 @@ def load_config(path: Path, repo: Path) -> PMV2Config:
         canonical_agreement_path=canonical_agreement_path,
         canonical_agreement_sha256=canonical_agreement_sha256,
         self_improvement_minimum_recurrences=improvement_min,
+        subprocess_memory_mb=memory_mb,
+        subprocess_cpu_seconds=cpu_seconds,
+        subprocess_open_files=open_files,
+        cloud_spend_policy=cloud_spend_policy,
+        provider_authority_policy=provider_authority_policy,
     )

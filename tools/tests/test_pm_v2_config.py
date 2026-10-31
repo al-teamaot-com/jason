@@ -24,6 +24,7 @@ class PMV2ConfigTests(unittest.TestCase):
                     "max_concurrency": 1,
                     "max_attempts": 2,
                     "retry_delay_seconds": 1,
+                    "timeout_seconds": 5,
                     "command": ["true"]
                 }
             },

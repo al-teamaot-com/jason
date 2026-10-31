@@ -9,6 +9,7 @@ from threading import Lock
 
 from .config import PMV2Config, WorkerConfig
 from .store import Assignment, PMV2Store
+from .resources import wrap_subprocess_command
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +66,10 @@ class Scheduler:
                 while available_global > 0 and worker_slots > 0:
                     assignment = self.store.claim_next(
                         instance_id=self.config.instance_id,
-                        lease_seconds=self.config.lease_seconds,
+                        lease_seconds=max(
+                            self.config.lease_seconds,
+                            worker.timeout_seconds + 30,
+                        ),
                         work_type=worker.name,
                     )
                     if assignment is None:
@@ -100,6 +104,7 @@ class Scheduler:
                 assignment.assignment_id, worker.name, 2, "blocked"
             )
         command = [part.format(**values) for part in worker.command]
+        command = wrap_subprocess_command(self.config, command)
         idem_key = (
             f"pmv2:{assignment.assignment_id}:{worker.name}:"
             f"{assignment.scope_hash}:attempt:{assignment.attempt_count}"
@@ -129,7 +134,7 @@ class Scheduler:
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                timeout=max(self.config.lease_seconds - 5, 1),
+                timeout=worker.timeout_seconds,
                 check=False,
                 env={**os.environ, "JASON_PM_V2_ASSIGNMENT_ID": assignment.assignment_id},
             )

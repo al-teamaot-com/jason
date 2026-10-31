@@ -29,6 +29,7 @@ class PMV2SchedulerTests(unittest.TestCase):
                     "max_concurrency": 2,
                     "max_attempts": 2,
                     "retry_delay_seconds": 1,
+                    "timeout_seconds": 5,
                     "command": command or ["python3", "-c", "import time; time.sleep(0.1)"]
                 }
             },

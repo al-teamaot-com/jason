@@ -121,6 +121,13 @@
     "snapshot_directory": "/var/lib/jason/pm-v2/snapshots/latest",
     "snapshot_interval_seconds": 300
   },
+  "resources": {
+    "cloud_spend_policy": "teams_approval_required",
+    "provider_authority_policy": "existing_governed_authority_only",
+    "subprocess_cpu_seconds": 900,
+    "subprocess_memory_mb": 8192,
+    "subprocess_open_files": 4096
+  },
   "schema_version": "1.0",
   "scope": {
     "canonical_agreement_path": "docs/operations/Production-Manager-V2-Goal-Scope-and-Success-Agreement.md",
@@ -153,7 +160,8 @@
       "enabled": true,
       "max_attempts": 2,
       "max_concurrency": 2,
-      "retry_delay_seconds": 60
+      "retry_delay_seconds": 60,
+      "timeout_seconds": 900
     }
   }
 }

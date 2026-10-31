@@ -10,6 +10,7 @@ from threading import Lock
 
 from .config import ComponentConfig, PMV2Config
 from .store import PMV2Store
+from .resources import wrap_subprocess_command
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +124,7 @@ class ComponentRunner:
             "release_state": str(self.config.release_state),
         }
         command = [part.format(**values) for part in component.command]
+        command = wrap_subprocess_command(self.config, command)
         try:
             result = subprocess.run(
                 command,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,20 @@ def self_test(*, config: PMV2Config, store: PMV2Store, repo: Path) -> dict[str, 
         db_ok = False
         db_error = type(exc).__name__
     checks["database"] = {"ok": db_ok, "path": str(store.path), "error": db_error}
+    limits_enabled = any((
+        config.subprocess_memory_mb,
+        config.subprocess_cpu_seconds,
+        config.subprocess_open_files,
+    ))
+    checks["resource_control"] = {
+        "ok": (not limits_enabled) or shutil.which("prlimit") is not None,
+        "prlimit": shutil.which("prlimit"),
+        "memory_mb": config.subprocess_memory_mb,
+        "cpu_seconds": config.subprocess_cpu_seconds,
+        "open_files": config.subprocess_open_files,
+        "cloud_spend_policy": config.cloud_spend_policy,
+        "provider_authority_policy": config.provider_authority_policy,
+    }
     checks["configuration"] = {
         "ok": config.approval_channel == "microsoft_teams" and len(config.required_status_fields) == 5,
         "approval_channel": config.approval_channel,
