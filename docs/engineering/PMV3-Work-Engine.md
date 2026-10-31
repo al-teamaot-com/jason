@@ -46,3 +46,49 @@ The following are never approval:
 
 Teams Deny leaves the work non-runnable. PMV3 must never instruct the Owner to
 SSH to Jason to approve work.
+
+
+## Governed engineering continuation controller
+
+`tools/pmv3_engineering_controller.py` is the PMV3 production-candidate entry
+point for Jason's existing engineering workers. It does not replace their
+provider, source, test, merge, or Release Manager gates.
+
+Each activation runs the existing `engineering_pipeline.py`, reads the durable
+pipeline and supervisor evidence, and immediately performs another bounded pass
+only while the state is classified as internally recoverable and progress is
+still changing.
+
+It stops on:
+- healthy completion;
+- a genuine external/governed dependency;
+- control-plane failure;
+- two unchanged recoverable passes;
+- the configured maximum of three passes.
+
+This fixes the V2 behavior where one pipeline pass could truthfully report
+`approved_work_stalled` and then simply wait for another timer/manual prompt.
+
+The installed user service invokes PMV3 directly. The legacy governed pipeline
+remains the worker executor under PMV3, preserving existing recovery helpers,
+support priority, release bridge, supervisor, and Release Manager safeguards.
+
+## Runtime and status
+
+The engineering timer remains 24x7. A single PMV3 service activation is bounded
+to three pipeline passes. The systemd service timeout is sized for those bounded
+passes and does not grant additional work or release authority.
+
+`jason_mcp_status` exposes `pmv3_engineering` from the durable controller
+state so current continuation status can be verified through governed surfaces
+without SSH.
+
+## Crash and duplicate-action handling
+
+The generic PMV3 work engine checkpoints an execution claim before invoking a
+handler and supplies a stable action key. An interrupted item is automatically
+replayed only when explicitly marked idempotent. Interrupted non-idempotent work
+is held for reconciliation instead of being blindly executed again.
+
+Production adapters must preserve the same stable action identity and reconcile
+indeterminate provider outcomes before retrying.
