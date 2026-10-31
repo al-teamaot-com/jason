@@ -525,3 +525,41 @@ This compatibility rule does not grant approval, change policy membership, edit
 the binding database, or substitute email possession for Microsoft identity.
 The signed Teams callback and the existing exact-release consumer remain the
 only path from a human decision to release/CCC evidence.
+
+
+### Canonical proactive token mount alignment — PMV3 release preparation
+
+Live PMV3 release preparation on 2026-10-31 exposed a second delivery-layer
+configuration defect before any owner approval or production deployment. The
+runtime container had two read-only proactive-token mounts:
+
+- legacy runtime secret: `/run/jason-secrets/teams-proactive/token`;
+- active Teams gateway credential:
+  `/run/jason-secrets/teams-proactive-gateway/token`.
+
+The active Teams gateway used the latter credential source while runtime sender
+defaults still selected the legacy mount. Fingerprint comparison proved the
+credentials differed; the canonical gateway therefore returned HTTP 401 before
+provider delivery. No approval card was delivered and no owner authority was
+created.
+
+All runtime Teams senders now default to the already-mounted active gateway
+credential at `/run/jason-secrets/teams-proactive-gateway/token`. The
+`JASON_TEAMS_PROACTIVE_TOKEN_FILE` override remains supported. This is
+credential-path alignment only: no secret value is committed, copied into
+source, rotated, or granted additional scope.
+
+Regression coverage requires the RuntimeSettings default, governed Teams send,
+and autonomous completion sender to share the same active gateway token path and
+reject reintroduction of the legacy default.
+
+
+#### Concurrent composition workstreams
+
+The token-path alignment touches only the `RuntimeSettings` Teams proactive
+credential default. Current open branches #2177, #2178, #2125, #2128 and #2126
+also modify `composition.py` for KFS reporting, VulScan V2, routine governed
+read/write registration and Windows Time JSON shadow respectively. Those
+settings, registrations, provider/authority gates and default-off controls are
+independent and must be preserved when later integrated. The PMV3 token-path
+correction does not absorb or supersede them.

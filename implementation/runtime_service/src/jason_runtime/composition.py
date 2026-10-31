@@ -583,7 +583,7 @@ class RuntimeSettings:
     )
     teams_gateway_internal_url: str = "http://jason-teams-gateway:3979"
     teams_proactive_token_file: Path = Path(
-        "/run/jason-secrets/teams-proactive/token"
+        "/run/jason-secrets/teams-proactive-gateway/token"
     )
     procurement_submissions_db: Path = Path(
         "/var/lib/jason/openclaw/procurement/submissions.sqlite3"
@@ -1047,7 +1047,7 @@ class RuntimeSettings:
             teams_proactive_token_file=Path(
                 os.getenv(
                     "JASON_TEAMS_PROACTIVE_TOKEN_FILE",
-                    "/run/jason-secrets/teams-proactive/token",
+                    "/run/jason-secrets/teams-proactive-gateway/token",
                 )
             ),
             procurement_submissions_db=Path(

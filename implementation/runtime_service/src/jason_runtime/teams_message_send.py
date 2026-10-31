@@ -186,4 +186,4 @@ def register_foundation(*,capabilities,providers,now:datetime):
         providers.set_approval(provider_id=PROVIDER,approval_status=ProviderApproval.APPROVED); providers.set_health(provider_id=PROVIDER,health_status=ProviderHealth.HEALTHY); providers.set_lifecycle(provider_id=PROVIDER,lifecycle_status=ProviderLifecycle.AVAILABLE)
 
 def build_invoker():
-    return TeamsMessageSendInvoker(gateway_url=os.getenv("JASON_TEAMS_GATEWAY_INTERNAL_URL","http://jason-teams-gateway:3979"),token_file=os.getenv("JASON_TEAMS_PROACTIVE_TOKEN_FILE","/run/jason-secrets/teams-proactive/token"))
+    return TeamsMessageSendInvoker(gateway_url=os.getenv("JASON_TEAMS_GATEWAY_INTERNAL_URL","http://jason-teams-gateway:3979"),token_file=os.getenv("JASON_TEAMS_PROACTIVE_TOKEN_FILE","/run/jason-secrets/teams-proactive-gateway/token"))
