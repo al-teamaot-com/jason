@@ -5986,6 +5986,52 @@ def _production_commitment_snapshot() -> dict[str, object]:
     }
 
 
+def _pmv3_engineering_snapshot() -> dict[str, object]:
+    path = Path(
+        os.environ.get(
+            "JASON_PMV3_ENGINEERING_STATE",
+            "/var/lib/jason/openclaw/support-repair/pmv3-engineering-controller-state.json",
+        )
+    )
+    if not path.exists():
+        return {
+            "status": "unavailable",
+            "reason": "pmv3_controller_state_missing",
+            "pass_count": 0,
+            "teams_only_approval": True,
+        }
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return {
+            "status": "unavailable",
+            "reason": f"pmv3_controller_state_invalid:{type(exc).__name__}",
+            "pass_count": 0,
+            "teams_only_approval": True,
+        }
+    if not isinstance(payload, Mapping):
+        return {
+            "status": "unavailable",
+            "reason": "pmv3_controller_state_invalid_shape",
+            "pass_count": 0,
+            "teams_only_approval": True,
+        }
+    passes = payload.get("passes")
+    passes = passes if isinstance(passes, list) else []
+    last_pass = passes[-1] if passes and isinstance(passes[-1], Mapping) else {}
+    return {
+        "status": str(payload.get("status") or "unknown"),
+        "reason": str(payload.get("reason") or ""),
+        "started_at": str(payload.get("started_at") or ""),
+        "finished_at": str(payload.get("finished_at") or ""),
+        "pass_count": int(payload.get("pass_count") or len(passes)),
+        "last_disposition": str(last_pass.get("disposition") or ""),
+        "last_progress_sha256": str(last_pass.get("progress_sha256") or ""),
+        "unchanged_passes": int(last_pass.get("unchanged_passes") or 0),
+        "teams_only_approval": payload.get("teams_only_approval") is True,
+    }
+
+
 @mcp.tool()
 def jason_mcp_status() -> dict[str, object]:
     """Return Jason MCP governed capability state."""
@@ -6023,6 +6069,7 @@ def jason_mcp_status() -> dict[str, object]:
         ),
         "autonomy_work": _autonomous_ticket_work_snapshot(),
         "production_commitments": _production_commitment_snapshot(),
+        "pmv3_engineering": _pmv3_engineering_snapshot(),
     }
 
 
