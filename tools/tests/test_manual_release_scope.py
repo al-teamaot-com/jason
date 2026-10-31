@@ -27,6 +27,10 @@ def repo(tmp_path):
     git(root, "config", "user.name", "Isolated Reviewer")
     git(root, "config", "user.email", "reviewer@example.invalid")
     (root / "shared.py").write_text("baseline\n")
+    (root / "config").mkdir()
+    (root / "config" / "release-manager-policy.json").write_text(
+        '{"protected_core_globs":["tools/release_manager*.py","config/release-manager-policy.json"]}'
+    )
     git(root, "add", ".")
     git(root, "commit", "-m", "baseline")
     git(root, "push", "-u", "origin", "main")
@@ -91,13 +95,60 @@ def test_open_pull_request_overlap_requires_explicit_acknowledgement(repo):
     assert approved["status"] == "SCOPE_REVIEWED_NOT_DEPLOYMENT_APPROVED"
 
 
-def test_superseded_candidate_is_not_releaseable(repo):
+def test_unrelated_newer_commit_preserves_exact_pinned_scope_digest(repo):
     root, base, candidate, _ = repo
-    (root / "another.py").write_text("not approved\n")
+    before = m.review(root, "test/repo", base, candidate,
+                      allowed_prs=[101], pr_reader=reader([]))
+    (root / "another.py").write_text("unrelated\n")
     git(root, "add", ".")
-    git(root, "commit", "-m", "Another change (#102)")
+    git(root, "commit", "-m", "Unrelated fix (#102)")
     git(root, "push", "origin", "main")
-    with pytest.raises(m.ScopeBlocked, match="protected main"):
+    after = m.review(root, "test/repo", base, candidate,
+                     allowed_prs=[101], pr_reader=reader([]))
+    assert after["status"] == "SCOPE_REVIEWED_NOT_DEPLOYMENT_APPROVED"
+    assert after["scope_sha256"] == before["scope_sha256"]
+    assert after["changed_files"] == ["shared.py"]
+
+
+def test_newer_overlap_blocks_pinned_candidate_even_if_reverted(repo):
+    root, base, candidate, _ = repo
+    (root / "shared.py").write_text("newer edit\n")
+    git(root, "commit", "-am", "Conflicting edit (#102)")
+    (root / "shared.py").write_text("approved change\n")
+    git(root, "commit", "-am", "Revert edit (#103)")
+    git(root, "push", "origin", "main")
+    with pytest.raises(m.ScopeBlocked, match="pinned release scope"):
+        m.review(root, "test/repo", base, candidate, allowed_prs=[101],
+                 pr_reader=reader([]))
+
+
+def test_newer_protected_control_change_blocks_even_without_file_overlap(repo):
+    root, base, candidate, _ = repo
+    policy = root / "config" / "release-manager-policy.json"
+    policy.parent.mkdir(exist_ok=True)
+    policy.write_text('{"protected_core_globs":["tools/release_manager*.py"]}')
+    git(root, "add", ".")
+    git(root, "commit", "-m", "Change release policy (#102)")
+    git(root, "push", "origin", "main")
+    with pytest.raises(m.ScopeBlocked, match="release scope or controls"):
+        m.review(root, "test/repo", base, candidate, allowed_prs=[101],
+                 pr_reader=reader([]))
+
+
+def test_newer_core_change_blocks_pinned_candidate(repo):
+    root, base, candidate, _ = repo
+    policy = root / "config" / "release-manager-policy.json"
+    policy.parent.mkdir(exist_ok=True)
+    policy.write_text('{"protected_core_globs":["tools/release_manager*.py"]}')
+    git(root, "add", ".")
+    git(root, "commit", "-m", "Policy baseline (#102)")
+    git(root, "push", "origin", "main")
+    (root / "tools").mkdir()
+    (root / "tools" / "release_manager_helper.py").write_text("newer\n")
+    git(root, "add", ".")
+    git(root, "commit", "-m", "Control change (#103)")
+    git(root, "push", "origin", "main")
+    with pytest.raises(m.ScopeBlocked, match="release scope or controls"):
         m.review(root, "test/repo", base, candidate, allowed_prs=[101],
                  pr_reader=reader([]))
 
