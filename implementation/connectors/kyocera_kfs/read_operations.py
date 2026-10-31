@@ -162,8 +162,15 @@ def device_search(
 
     matched = [device for device in devices if matches(device, arguments)]
     limit = max(1, min(int(arguments.get("limit") or 100), 1000))
+    offset = max(0, int(arguments.get("offset") or 0))
+    page = matched[offset:offset + limit]
+    next_offset = offset + len(page) if offset + len(page) < len(matched) else None
     return {
-        "devices": matched[:limit],
+        "devices": page,
+        "offset": offset,
+        "limit": limit,
+        "next_offset": next_offset,
+        "complete": next_offset is None,
         "matched_count": len(matched),
         "searched_count": len(devices),
         "status": {

@@ -3,6 +3,8 @@ from __future__ import annotations
 import ipaddress
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Mapping, Protocol, Sequence
 
 from .contracts import OrchestrationResult, OrchestrationStatus
@@ -606,6 +608,10 @@ class GovernedTeamsResourceResponseRenderer:
         source = result.provider_id or "governed provider"
         subject = _resource_subject(intent.arguments)
 
+        data = result.output.get("data")
+        if isinstance(data, Mapping) and data.get("report_type") == "ranked_monthly_usage":
+            return _render_governed_ranked_monthly_usage(result, intent)
+
         if intent.capability_name == "endpoint.device.search":
             matches = _canonical_resource_matches(result)
             if not matches:
@@ -716,6 +722,145 @@ class GovernedTeamsResourceResponseRenderer:
             for fact in facts
         )
         return f"{subject} — {rendered}. Source: {source}."
+
+
+def _render_governed_ranked_monthly_usage(
+    result: OrchestrationResult,
+    intent: ConversationIntent,
+) -> str:
+    """Format a schema-tagged governed report without inventing provider facts.
+
+    This is a provider-neutral ranked monthly usage presentation contract.
+    The capability and provider still require normal orchestration authorization,
+    and all displayed values are taken from validated, sanitized read evidence.
+    """
+    if result.status is not OrchestrationStatus.SUCCEEDED:
+        raise LookupError("ranked usage result did not complete")
+    if intent.permission_mode != "observe" or intent.capability_name != result.capability_name:
+        raise PermissionError("ranked usage intent is not an authorized read result")
+    if not result.provider_id or result.output.get("provider") != result.provider_id:
+        raise RuntimeError("ranked usage provider provenance is inconsistent")
+
+    data = sanitize_evidence_tree(result.output.get("data"))
+    if not isinstance(data, Mapping):
+        raise RuntimeError("ranked usage report must be a mapping")
+    if data.get("report_type") != "ranked_monthly_usage" or data.get("schema_version") != "1.0":
+        raise ValueError("unrecognized ranked usage report schema")
+
+    rows = data.get("top_devices")
+    if not isinstance(rows, (list, tuple)):
+        raise ValueError("ranked usage results must contain a bounded top_devices list")
+    requested_limit = int(intent.arguments.get("limit") or 5)
+    if not 1 <= requested_limit <= 100 or len(rows) > requested_limit:
+        raise ValueError("ranked usage result exceeded requested limit")
+
+    reported = data.get("fleet_devices_reported")
+    inventoried = data.get("fleet_devices_in_inventory")
+    eligible = data.get("eligible_devices")
+    exceptions = data.get("exception_count")
+    for name, value in (
+        ("reported", reported), ("inventoried", inventoried),
+        ("eligible", eligible), ("exceptions", exceptions),
+    ):
+        if type(value) is not int or value < 0:
+            raise ValueError(f"ranked usage {name} count must be nonnegative integer")
+    if eligible + exceptions != inventoried or len(rows) > eligible:
+        raise ValueError("ranked usage inventory and result counts are inconsistent")
+
+    complete = data.get("complete")
+    coverage = data.get("coverage_verified")
+    if type(complete) is not bool or type(coverage) is not bool:
+        raise ValueError("ranked usage coverage flags must be boolean")
+    if complete and (not coverage or exceptions or reported != inventoried):
+        raise ValueError("incomplete ranked usage cannot claim complete coverage")
+
+    period_start = datetime.fromisoformat(str(data["period_start"]).replace("Z", "+00:00"))
+    period_end = datetime.fromisoformat(str(data["period_end"]).replace("Z", "+00:00"))
+    if period_start.tzinfo is None or period_end.tzinfo is None or period_end <= period_start:
+        raise ValueError("ranked usage period must have valid ordered timestamps")
+    zone = ZoneInfo(str(intent.arguments.get("timezone") or "America/New_York"))
+    month = period_start.astimezone(zone).strftime("%Y-%m")
+    expected_month = str(intent.arguments.get("month") or "").strip()
+    if expected_month and month != expected_month:
+        raise ValueError("ranked usage report period does not match the requested month")
+
+    label = period_start.astimezone(zone).strftime("%B %Y")
+    status = "Verified" if complete else "Provisional"
+    heading = f"{status} top {len(rows)} printer volumes — {label} month-to-date"
+    table = [
+        "| Rank | Customer | Printer ID | B&W pages | Color pages | Total pages | Latest reading (UTC) |",
+        "|---:|---|---|---:|---:|---:|---|",
+    ]
+    previous_total = None
+    has_computed_zero = False
+    unknown_in_top = False
+    for rank, item in enumerate(rows, 1):
+        if not isinstance(item, Mapping):
+            raise ValueError("ranked usage row must be a mapping")
+        total = item.get("total_pages")
+        bw = item.get("black_white_pages")
+        color = item.get("color_pages")
+        if any(type(v) is not int or v < 0 for v in (total, bw, color)):
+            raise ValueError("ranked usage counts must be measured nonnegative integers")
+        if bw + color != total:
+            raise ValueError("ranked usage counters do not reconcile")
+        if previous_total is not None and total > previous_total:
+            raise ValueError("ranked usage rows are not sorted descending")
+        previous_total = total
+        customer = _report_cell(item.get("customer"), fallback="Unknown (not mapped)")
+        if not bool(item.get("customer_mapping_verified", True)):
+            unknown_in_top = True
+        equipment = _report_cell(item.get("printer_id"), fallback="Unknown device")
+        latest = item.get("latest_reading_at")
+        if latest:
+            at = datetime.fromisoformat(str(latest).replace("Z", "+00:00"))
+            if at.tzinfo is None:
+                raise ValueError("ranked usage reading timestamps must be timezone aware")
+            timestamp = at.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
+        else:
+            timestamp = "Not reported"
+
+        zero_verified = item.get("color_counter_status") == "zero_verified_from_total_and_bw"
+        has_computed_zero = has_computed_zero or zero_verified
+        color_text = f"{color:,}" + ("*" if zero_verified else "")
+        table.append(
+            f"| {rank} | {customer} | {equipment} | {bw:,} | {color_text} | {total:,} | {timestamp} |"
+        )
+
+    if complete and unknown_in_top:
+        raise ValueError("unmapped ranked device cannot be called complete")
+
+    lines = [heading, *table]
+    lines.append(
+        f"Fleet coverage: {inventoried:,} inventoried / {reported:,} reported; "
+        f"{eligible:,} with valid meter totals; {exceptions:,} meter exceptions."
+    )
+    if has_computed_zero:
+        lines.append(
+            "* Zero color impressions verified from matching total and B&W readings; "
+            "no separate color counter was reported."
+        )
+    if not complete:
+        lines.append(
+            "Provisional: this ranks devices with verified usage only. "
+            "Missing device readings or customer mappings prevent claiming a complete fleet result."
+        )
+    raw_warnings = data.get("warnings", ())
+    if isinstance(raw_warnings, (list, tuple)):
+        for warning in raw_warnings[:5]:
+            value = _report_cell(warning, fallback="")
+            if value:
+                lines.append("Note: " + value)
+    lines.append(f"Source: {result.provider_id} (governed read-only).")
+    return "\n".join(lines)
+
+
+def _report_cell(value: Any, *, fallback: str) -> str:
+    """Prevent provider strings from changing Markdown table structure."""
+    if value is None:
+        return fallback
+    result = " ".join(str(value).replace("|", "/").split()).strip()
+    return result[:120] or fallback
 
 
 def _render_collection_response(

@@ -365,3 +365,36 @@ def test_active_kfs_session_connector_uses_patched_session_client_by_default():
     from connectors.kyocera_kfs.client import KyoceraKfsSessionClient
     assert KyoceraKfsConnector is KyoceraKfsSessionConnector
     assert KyoceraKfsSessionConnector.__init__.__kwdefaults__["client_factory"] is KyoceraKfsSessionClient
+
+
+def test_device_search_exposes_bounded_continuation_without_silent_truncation():
+    from connectors.kyocera_kfs.read_operations import device_search
+
+    class FleetClient(FakeSessionClient):
+        def call(self, path, body):
+            if path == "/KFS/GroupList":
+                return {"grpTree": {"topGroups": ["root-1"]}}
+            if path == "/KFS/DeviceList":
+                return {"devices": [
+                    {"deviceId": f"dev-{index:03d}", "attributes": {"serialNumber": f"S{index:03d}"}}
+                    for index in range(435)
+                ]}
+            raise AssertionError(path)
+
+    client = FleetClient(credentials())
+    all_ids = []
+    offset = 0
+    while True:
+        result = device_search(client, {"limit": 100, "offset": offset})
+        assert result["matched_count"] == 435
+        assert result["searched_count"] == 435
+        assert len(result["devices"]) <= 100
+        all_ids.extend(item["deviceId"] for item in result["devices"])
+        if result["complete"]:
+            assert result["next_offset"] is None
+            break
+        assert result["next_offset"] > offset
+        offset = result["next_offset"]
+    assert len(all_ids) == len(set(all_ids)) == 435
+    assert all_ids[0] == "dev-000"
+    assert all_ids[-1] == "dev-434"

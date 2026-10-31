@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
+from dataclasses import dataclass, field, replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 from zoneinfo import ZoneInfo
 
 from kernel.identity_authority import AuthorityGrant, PermissionMode
@@ -13,13 +13,17 @@ from orchestrator.print_capability_catalog import (
     KYOCERA_KFS_PROVIDER,
     PRINT_METER_HISTORY_SEARCH,
     PRINT_METER_USAGE_READ,
+    PRINT_FLEET_USAGE_RANK,
 )
 from orchestrator.service import InvocationResult
+
+from .kfs_customer_document_evidence import ApprovedCustomerEvidenceIndex
 
 
 METER_HISTORY_AUTHORITY_GRANTS = (
     ("production-kfs-read-print-meter-history-search", PRINT_METER_HISTORY_SEARCH),
     ("production-kfs-read-print-meter-usage-read", PRINT_METER_USAGE_READ),
+    ("production-kfs-read-print-fleet-usage-rank", PRINT_FLEET_USAGE_RANK),
 )
 
 
@@ -77,6 +81,9 @@ class KfsMeterHistoryStore:
     user: str
     password_file: Path
     connect_timeout_seconds: int = 5
+    customer_evidence_index: ApprovedCustomerEvidenceIndex | None = field(
+        default=None, repr=False, compare=False,
+    )
 
     def _connect(self):
         try:
@@ -282,6 +289,273 @@ class KfsMeterHistoryStore:
             },
             "warnings": warnings,
         }
+
+    def fleet_rank(
+        self, *, arguments: Mapping[str, Any], start: datetime, end: datetime,
+    ) -> Mapping[str, Any]:
+        """Rank observed print impressions against the last completed KFS inventory.
+
+        KFS keeps historical devices indefinitely, so using all meter history as the
+        inventory produces false top-five results. A complete report requires an
+        inventory from one successful recent collector run, every inventoried
+        device accounted for, and valid deltas for all those devices.
+        """
+        limit = int(arguments.get("limit") or 5)
+        hours = int(arguments.get("boundary_hours") or 36)
+        if not 1 <= limit <= 100:
+            raise ValueError("limit must be between 1 and 100")
+        if not 1 <= hours <= 168:
+            raise ValueError("boundary_hours must be between 1 and 168")
+
+        sql = """
+            WITH latest_snapshot AS (
+                SELECT id, ended_at, device_count, error_count
+                FROM kfs_runs
+                WHERE status = 'ok' AND ended_at IS NOT NULL AND ended_at <= %s
+                ORDER BY ended_at DESC
+                LIMIT 1
+            ), devices AS (
+                SELECT DISTINCT s.device_id,
+                       NULLIF(k.customer_name,'') AS inventory_customer,
+                       NULLIF(k.equipment_id,'') AS inventory_equipment,
+                       NULLIF(k.serial_number,'') AS inventory_serial
+                FROM kfs_device_status_readings s
+                JOIN latest_snapshot r ON s.run_id = r.id
+                LEFT JOIN kfs_devices k ON k.device_id = s.device_id
+                WHERE s.device_id IS NOT NULL AND s.device_id <> ''
+            ), boundaries AS (
+                SELECT d.device_id, counter.counter_name,
+                       b.counter_value AS start_value, b.reading_at AS start_at,
+                       e.counter_value AS end_value, e.reading_at AS end_at,
+                       COALESCE(NULLIF(e.customer_name,''), NULLIF(b.customer_name,''), d.inventory_customer) AS customer_name,
+                       COALESCE(NULLIF(e.equipment_id,''), NULLIF(b.equipment_id,''), d.inventory_equipment) AS equipment_id,
+                       COALESCE(NULLIF(e.serial_number,''), NULLIF(b.serial_number,''), d.inventory_serial) AS serial_number
+                FROM devices d
+                CROSS JOIN (VALUES ('total'),('blackWhite'),('color')) counter(counter_name)
+                LEFT JOIN LATERAL (
+                    SELECT counter_value, reading_at, customer_name, equipment_id, serial_number
+                    FROM kfs_meter_readings m
+                    WHERE m.device_id=d.device_id AND m.counter_name=counter.counter_name
+                      AND reading_at BETWEEN %s - (%s * interval '1 hour')
+                                         AND %s + (%s * interval '1 hour')
+                    ORDER BY ABS(EXTRACT(EPOCH FROM (reading_at-%s))), reading_at
+                    LIMIT 1
+                ) b ON TRUE
+                LEFT JOIN LATERAL (
+                    SELECT counter_value, reading_at, customer_name, equipment_id, serial_number
+                    FROM kfs_meter_readings m
+                    WHERE m.device_id=d.device_id AND m.counter_name=counter.counter_name
+                      AND reading_at BETWEEN %s - (%s * interval '1 hour')
+                                         AND %s + (%s * interval '1 hour')
+                    ORDER BY ABS(EXTRACT(EPOCH FROM (reading_at-%s))), reading_at
+                    LIMIT 1
+                ) e ON TRUE
+            )
+            SELECT b.device_id, b.counter_name, b.start_value, b.start_at,
+                   b.end_value, b.end_at, b.customer_name, b.equipment_id, b.serial_number,
+                   r.id, r.ended_at, r.device_count, r.error_count,
+                   (SELECT COUNT(*) FROM devices)
+            FROM latest_snapshot r
+            LEFT JOIN boundaries b ON TRUE
+            ORDER BY b.device_id, b.counter_name
+        """
+        params = (
+            end, start, hours, start, hours, start,
+            end, hours, end, hours, end,
+        )
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                rows = cur.fetchall()
+
+        devices: dict[str, dict[str, Any]] = {}
+        snapshot_id = None
+        snapshot_ended_at = None
+        reported_count = None
+        snapshot_errors = None
+        inventory_count = 0
+        for row in rows:
+            device_id, counter, before, before_at, after, after_at, customer, equipment, serial = row[:9]
+            run_id, run_ended_at, run_count, run_errors, inventory_count = row[9:]
+            snapshot_id = run_id
+            snapshot_ended_at = run_ended_at
+            reported_count = run_count
+            snapshot_errors = run_errors
+            if not device_id:
+                continue
+            item = devices.setdefault(device_id, {
+                "device_id": device_id,
+                "customer": customer or "Unknown (not mapped in KFS)",
+                "customer_mapping_verified": bool(customer),
+                "customer_mapping_source": "kfs" if customer else "none",
+                "serial_number": serial or "",
+                "printer_id": equipment or serial or device_id,
+                "counts": {}, "latest_reading_at": None, "warnings": [],
+            })
+            delta = None
+            if (before is not None and after is not None
+                    and before_at is not None and after_at is not None):
+                difference = int(after) - int(before)
+                if difference >= 0 and after_at > before_at:
+                    delta = difference
+                else:
+                    item["warnings"].append(f"{counter}: invalid or reset meter boundary")
+            else:
+                item["warnings"].append(f"{counter}: missing meter boundary")
+            item["counts"][counter] = delta
+            if after_at is not None and (
+                item["latest_reading_at"] is None or after_at > item["latest_reading_at"]
+            ):
+                item["latest_reading_at"] = after_at
+
+        ranked: list[dict[str, Any]] = []
+        exceptions: list[dict[str, Any]] = []
+        for item in devices.values():
+            # Enrichment consumes only a separately-authorized, immutable source
+            # snapshot. No Graph credentials, HTTP calls or document retrieval
+            # occur inside the KFS database read.
+            if self.customer_evidence_index is not None and item["serial_number"]:
+                match = self.customer_evidence_index.match(
+                    serial_number=item["serial_number"],
+                    kfs_customer=(
+                        item["customer"] if item["customer_mapping_verified"] else None
+                    ),
+                )
+                if match.status == "verified":
+                    item["customer"] = match.customer_name
+                    item["customer_mapping_verified"] = True
+                    item["customer_mapping_source"] = "aot_sharepoint"
+                    item["customer_evidence"] = [
+                        {
+                            "drive_id": claim.source_drive_id,
+                            "item_id": claim.source_item_id,
+                            "etag": claim.source_etag,
+                            "sha256": claim.source_sha256,
+                            "sheet": claim.source_sheet,
+                        }
+                        for claim in match.evidence
+                    ]
+                elif match.status == "conflict":
+                    item["customer"] = "Conflict (requires customer review)"
+                    item["customer_mapping_verified"] = False
+                    item["customer_mapping_source"] = "conflict"
+                    item["warnings"].append(
+                        "Conflicting source customer assignments for this serial"
+                    )
+                    item["customer_evidence"] = [
+                        {
+                            "drive_id": claim.source_drive_id,
+                            "item_id": claim.source_item_id,
+                            "etag": claim.source_etag,
+                            "sha256": claim.source_sha256,
+                            "sheet": claim.source_sheet,
+                        }
+                        for claim in match.evidence
+                    ]
+            counts = item.pop("counts")
+            item["black_white_pages"] = counts.get("blackWhite")
+            item["total_pages"] = counts.get("total")
+            color = counts.get("color")
+            # Some monochrome printers do not expose a color counter. When
+            # independently measured total and B&W usage are identical, a zero
+            # color delta is mathematically determined, not estimated.
+            if (
+                color is None
+                and "color: missing meter boundary" in item["warnings"]
+                and item["total_pages"] is not None
+                and item["black_white_pages"] is not None
+                and item["total_pages"] == item["black_white_pages"]
+            ):
+                color = 0
+                item["color_counter_status"] = "zero_verified_from_total_and_bw"
+                item["warnings"].remove("color: missing meter boundary")
+            else:
+                item["color_counter_status"] = "measured" if color is not None else "unavailable"
+            item["color_pages"] = color
+            if None in (item["black_white_pages"], item["color_pages"], item["total_pages"]):
+                exceptions.append(item)
+            elif item["black_white_pages"] + item["color_pages"] != item["total_pages"]:
+                item["warnings"].append("B&W plus color differs from total")
+                exceptions.append(item)
+            else:
+                ranked.append(item)
+        ranked.sort(key=lambda item: (-item["total_pages"], item["device_id"]))
+        for item in ranked + exceptions:
+            if item["latest_reading_at"] is not None:
+                item["latest_reading_at"] = item["latest_reading_at"].isoformat()
+
+        warnings: list[str] = []
+        if snapshot_id is None or snapshot_ended_at is None:
+            warnings.append("No successful KFS collection snapshot exists for the reporting period")
+        elif end - snapshot_ended_at > timedelta(hours=36):
+            warnings.append("Latest successful KFS inventory snapshot is stale")
+        if snapshot_errors is None or snapshot_errors != 0:
+            warnings.append("KFS inventory collection contains errors or lacks an error count")
+        if reported_count is None or int(reported_count) != inventory_count:
+            warnings.append("KFS reported device count differs from inventory records")
+        if inventory_count != len(devices):
+            warnings.append("Inventoried devices are missing from the meter comparison")
+        if exceptions:
+            warnings.append("Missing, reset, or inconsistent monthly meters for some printers")
+        customer_mapping_missing_count = sum(
+            not item["customer_mapping_verified"] for item in ranked + exceptions
+        )
+        supplemental_mapping_count = sum(
+            item["customer_mapping_source"] == "aot_sharepoint"
+            for item in ranked + exceptions
+        )
+        customer_mapping_conflict_count = sum(
+            item["customer_mapping_source"] == "conflict"
+            for item in ranked + exceptions
+        )
+        color_zero_verified_count = sum(
+            item["color_counter_status"] == "zero_verified_from_total_and_bw"
+            for item in ranked + exceptions
+        )
+        if supplemental_mapping_count:
+            warnings.append(
+                f"Supplemental AOT SharePoint evidence matched {supplemental_mapping_count} device serials"
+            )
+        if customer_mapping_conflict_count:
+            warnings.append(
+                f"Conflicting customer evidence for {customer_mapping_conflict_count} devices requires review"
+            )
+        if customer_mapping_missing_count:
+            warnings.append(
+                f"KFS customer assignments missing for {customer_mapping_missing_count} managed printers"
+            )
+        if any(not item["customer_mapping_verified"] for item in ranked[:limit]):
+            warnings.append("A ranked printer is missing its customer assignment in KFS")
+
+        coverage_verified = (
+            snapshot_id is not None and snapshot_ended_at is not None
+            and timedelta(0) <= end - snapshot_ended_at <= timedelta(hours=36)
+            and snapshot_errors == 0 and reported_count is not None
+            and int(reported_count) == inventory_count == len(devices)
+        )
+        return {
+            "report_type": "ranked_monthly_usage",
+            "schema_version": "1.0",
+            "period_start": start.isoformat(), "period_end": end.isoformat(),
+            "inventory_run_id": str(snapshot_id) if snapshot_id is not None else None,
+            "inventory_reading_at": snapshot_ended_at.isoformat() if snapshot_ended_at else None,
+            "fleet_devices_reported": reported_count,
+            "fleet_devices_in_inventory": inventory_count,
+            "fleet_devices_in_history": len(devices),
+            "eligible_devices": len(ranked), "exception_count": len(exceptions),
+            "customer_mapping_missing_count": customer_mapping_missing_count,
+            "supplemental_mapping_count": supplemental_mapping_count,
+            "customer_mapping_conflict_count": customer_mapping_conflict_count,
+            "color_zero_verified_count": color_zero_verified_count,
+            "top_devices": ranked[:limit], "exceptions": exceptions,
+            "coverage_verified": coverage_verified,
+            "complete": (
+                coverage_verified and not exceptions
+                and all(item["customer_mapping_verified"] for item in ranked[:limit])
+            ),
+            "warnings": warnings,
+        }
+
 def resolve_period(arguments: Mapping[str, Any]) -> tuple[datetime, datetime]:
     month = str(arguments.get("month") or "").strip()
     timezone_name = str(arguments.get("timezone") or "America/New_York").strip()
@@ -319,6 +593,9 @@ def resolve_period(arguments: Mapping[str, Any]) -> tuple[datetime, datetime]:
 @dataclass(frozen=True, slots=True)
 class GovernedKfsMeterHistoryInvoker:
     store: KfsMeterHistoryStore
+    # The optional resolver is injected by trusted, feature-gated runtime
+    # composition. It is never selected or overridden by conversation input.
+    customer_evidence_resolver: Callable[[datetime], ApprovedCustomerEvidenceIndex] | None = None
 
     def invoke(
         self,
@@ -342,6 +619,24 @@ class GovernedKfsMeterHistoryInvoker:
             data = self.store.search(arguments=request.arguments, start=start, end=end)
         elif resolution.capability_name == PRINT_METER_USAGE_READ:
             data = self.store.usage(arguments=request.arguments, start=start, end=end)
+        elif resolution.capability_name == PRINT_FLEET_USAGE_RANK:
+            # Month-to-date rankings must not request future month-end readings.
+            # Historical closed months retain their exact full-month boundary.
+            now = datetime.now(timezone.utc)
+            if start >= now:
+                raise ValueError("fleet usage ranking period must have started")
+            effective_end = min(end, now)
+            store = self.store
+            if self.customer_evidence_resolver is not None:
+                source = self.customer_evidence_resolver(now)
+                if not isinstance(source, ApprovedCustomerEvidenceIndex):
+                    raise RuntimeError("governed copier evidence provider returned an invalid index")
+                if not isinstance(self.store, KfsMeterHistoryStore):
+                    raise RuntimeError("governed copier enrichment requires the immutable meter history store")
+                store = replace(self.store, customer_evidence_index=source)
+            data = store.fleet_rank(
+                arguments=request.arguments, start=start, end=effective_end,
+            )
         else:
             raise LookupError(
                 f"unsupported KFS meter history capability: {resolution.capability_name}"

@@ -1,0 +1,25 @@
+{
+  "schema": "aot-kfs-copier-document-sources/v1",
+  "organization_id": "aot",
+  "principal_id": "jason-kfs-evidence-service",
+  "microsoft_tenant_id": "f7054323-d52b-4863-8c2f-1898f0b6077c",
+  "approval_reference": "https://github.com/al-teamaot-com/jason/issues/2176",
+  "grant_expires_at": "REPLACE_WITH_APPROVED_UTC_EXPIRY_WITHIN_30_DAYS",
+  "approved_sources": [
+    {
+      "site_id": "absolnet.sharepoint.com,c85a85f8-6a50-4569-880f-d261c65df2bb,e5b7a724-dc9b-406b-aed8-2961f1f71153",
+      "drive_id": "b!-IVayFBqaUWID9Jhxl3yuySnt-Wb3GtArtgpYfH3EVNo8p5rPdImQ5Z7APH0M9tF",
+      "item_id": "01NWNXUCSS7U666XAYMVAY77T7TRXUBGAQ"
+    },
+    {
+      "site_id": "absolnet.sharepoint.com,c85a85f8-6a50-4569-880f-d261c65df2bb,e5b7a724-dc9b-406b-aed8-2961f1f71153",
+      "drive_id": "b!-IVayFBqaUWID9Jhxl3yuySnt-Wb3GtArtgpYfH3EVNo8p5rPdImQ5Z7APH0M9tF",
+      "item_id": "01NWNXUCVHM2NI67XF5RELUAVFHBOFGIGJ"
+    },
+    {
+      "site_id": "absolnet.sharepoint.com,c85a85f8-6a50-4569-880f-d261c65df2bb,e5b7a724-dc9b-406b-aed8-2961f1f71153",
+      "drive_id": "b!-IVayFBqaUWID9Jhxl3yuySnt-Wb3GtArtgpYfH3EVNo8p5rPdImQ5Z7APH0M9tF",
+      "item_id": "01NWNXUCVGQKG5YZEAYZHIS4E6OFWYFVEV"
+    }
+  ]
+}

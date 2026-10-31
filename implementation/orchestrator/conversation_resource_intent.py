@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
@@ -222,6 +224,10 @@ class MetadataFirstResourceInquiryInterpreter:
         if not normalized_text:
             return None
 
+        ranked_usage = self._interpret_ranked_usage(normalized_text)
+        if ranked_usage is not None:
+            return ranked_usage
+
         named_endpoint = self._interpret_named_endpoint(
             text=text,
             normalized_text=normalized_text,
@@ -285,6 +291,95 @@ class MetadataFirstResourceInquiryInterpreter:
             permission_mode="observe",
             result_intent=result_intent,
             completeness_requirement=completeness_requirement,
+        )
+
+    def _interpret_ranked_usage(self, normalized_text: str) -> ResourceInquiry | None:
+        """Lower a bounded rank request using only an explicitly registered report.
+
+        The query shape is declared by a governed capability. This parser supplies
+        the human's period and top-N, never a provider, credential, or authority.
+        Unrelated printer questions continue through ordinary interpretation.
+        """
+        if not re.search(r"\b(printers?|copiers?|mfp|print fleet)\b", normalized_text):
+            return None
+        if not re.search(r"\b(top|highest|most|rank|ranking|busiest|largest)\b", normalized_text):
+            return None
+        if not re.search(r"\b(volume|usage|pages?|impressions?|printed|copies|printing)\b", normalized_text):
+            return None
+
+        candidates = [
+            contract
+            for contract in self.contracts
+            if contract.get("query_shape") == "ranked_monthly_usage"
+            and "print_device" in contract.get("resource_types", ())
+            and not contract.get("selector_required")
+            and {"month", "limit", "timezone"}.issubset(
+                set(contract.get("selector_keys", ()))
+            )
+        ]
+        if len(candidates) != 1:
+            return None
+        contract = candidates[0]
+
+        match = re.search(r"\btop\s+(\d{1,3})\b", normalized_text)
+        if match:
+            limit = int(match.group(1))
+        else:
+            word_match = re.search(
+                r"\btop\s+(one|two|three|four|five|six|seven|eight|nine|ten)\b",
+                normalized_text,
+            )
+            limit = (
+                {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+                 "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}[
+                    word_match.group(1)
+                ]
+                if word_match else 5
+            )
+        if not 1 <= limit <= 100:
+            raise ValueError("fleet ranking must request between 1 and 100 devices")
+
+        timezone_name = str(contract.get("report_timezone") or "America/New_York")
+        now = datetime.now(ZoneInfo(timezone_name))
+        year, month = now.year, now.month
+        months = {
+            "january": 1, "february": 2, "march": 3, "april": 4,
+            "may": 5, "june": 6, "july": 7, "august": 8,
+            "september": 9, "october": 10, "november": 11, "december": 12,
+        }
+        iso = re.search(r"\b(20\d{2})\s+(0?[1-9]|1[0-2])\b", normalized_text)
+        if iso:
+            year, month = int(iso.group(1)), int(iso.group(2))
+        else:
+            named = re.search(
+                r"\b(" + "|".join(months) + r")\b(?:\s+(20\d{2}))?",
+                normalized_text,
+            )
+            if named:
+                month = months[named.group(1)]
+                year = int(named.group(2)) if named.group(2) else now.year
+            elif "last month" in normalized_text:
+                year, month = (now.year - 1, 12) if now.month == 1 else (now.year, now.month - 1)
+
+        facts = tuple(
+            str(item).strip()
+            for item in contract.get("canonical_facts", ())
+            if str(item).strip()
+        )
+        if len(facts) != 1:
+            return None
+        return ResourceInquiry(
+            resource_type="print_device",
+            resource_selector={
+                "month": f"{year:04d}-{month:02d}",
+                "limit": str(limit),
+                "timezone": timezone_name,
+            },
+            requested_facts=facts,
+            execution_mode="deterministic",
+            permission_mode="observe",
+            result_intent="summary",
+            completeness_requirement="complete",
         )
 
     def _interpret_named_endpoint(
