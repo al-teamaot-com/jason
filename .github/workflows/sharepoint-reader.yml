@@ -1,0 +1,48 @@
+name: Governed SharePoint Reader
+on:
+  pull_request:
+    paths:
+      - 'implementation/connectors/microsoft_graph/sharepoint_*.py'
+      - 'implementation/connectors/microsoft_graph/aot_document_policy.py'
+      - 'implementation/connectors/microsoft_graph/test_aot_document_policy.py'
+      - 'implementation/connectors/microsoft_graph/test_sharepoint_*.py'
+      - 'implementation/runtime_service/src/jason_runtime/microsoft_sharepoint.py'
+      - 'implementation/runtime_service/tests/test_microsoft_sharepoint.py'
+      - 'tools/provider_secret_provision.py'
+      - 'implementation/connectors/core/openbao_secrets.py'
+      - '.github/workflows/sharepoint-reader.yml'
+  push:
+    paths:
+      - 'implementation/connectors/microsoft_graph/sharepoint_*.py'
+      - 'implementation/connectors/microsoft_graph/aot_document_policy.py'
+      - 'implementation/connectors/microsoft_graph/test_aot_document_policy.py'
+      - 'implementation/connectors/microsoft_graph/test_sharepoint_*.py'
+      - 'implementation/runtime_service/src/jason_runtime/microsoft_sharepoint.py'
+      - 'implementation/runtime_service/tests/test_microsoft_sharepoint.py'
+      - 'tools/provider_secret_provision.py'
+      - 'implementation/connectors/core/openbao_secrets.py'
+      - '.github/workflows/sharepoint-reader.yml'
+jobs:
+  reader-and-secret-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependency
+        run: python -m pip install pytest
+      - name: Compile and run focused tests
+        env:
+          PYTHONPATH: implementation:implementation/runtime_service/src
+        run: |
+          python -m py_compile implementation/connectors/microsoft_graph/sharepoint_reader.py
+          python -m py_compile implementation/connectors/microsoft_graph/sharepoint_connector.py
+          python -m py_compile implementation/connectors/microsoft_graph/aot_document_policy.py
+          python -m py_compile implementation/connectors/microsoft_graph/sharepoint_manifest.py
+          python -m py_compile implementation/runtime_service/src/jason_runtime/microsoft_sharepoint.py
+          python -m pytest -q implementation/connectors/microsoft_graph/test_sharepoint_reader.py implementation/connectors/microsoft_graph/test_sharepoint_connector.py implementation/connectors/microsoft_graph/test_sharepoint_manifest.py implementation/connectors/microsoft_graph/test_aot_document_policy.py implementation/runtime_service/tests/test_microsoft_sharepoint.py tools/tests/test_provider_secret_provision.py
+      - name: Verify no-network lifecycle preflight
+        run: |
+          python tools/provider_secret.py create microsoft_graph_sharepoint --check-only > /tmp/check.json
+          python -c 'import json; x=json.load(open("/tmp/check.json")); assert x["status"]=="pass" and x["logical_name"]=="microsoft_graph.sharepoint_read" and not x["network_contacted"] and not x["secret_entered"]'
