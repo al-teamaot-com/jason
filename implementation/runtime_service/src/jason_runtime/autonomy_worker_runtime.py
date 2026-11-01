@@ -670,7 +670,7 @@ class SQLiteOperationalWorkStore:
         event_key = hashlib.sha256(
             f"{ticket_id}|{playbook_id}|{note_title}|{fingerprint}".encode("utf-8")
         ).hexdigest()
-        if event_type not in {"work_started", "work_completed", "patch_completed", "work_blocked"}:
+        if event_type not in {"work_started", "work_completed", "patch_completed", "work_blocked", "patch_approval_aging"}:
             raise ValueError("unsupported owner notification event")
         serialized = json.dumps(dict(arguments), sort_keys=True)
         if len(serialized) > 2400:
@@ -686,12 +686,45 @@ class SQLiteOperationalWorkStore:
             )
         return event_key
 
+    def queue_patch_approval_notification(
+        self, *, notification: Any, now: datetime,
+    ) -> str:
+        """Queue one KB/stage notification in the EXISTING Teams outbox.
+
+        ticket_id=0 is the documented cross-ticket KB aggregation sentinel.
+        This entry is never treated as an Autotask ticket/note.
+        """
+        if getattr(notification, "stage", "") not in {
+            "day16_notice", "day21_escalation", "urgent_review"
+        }:
+            raise ValueError("patch event must be a verified actionable stage")
+        if not str(getattr(notification, "idempotency_key", "")).startswith("vulscan-aging-"):
+            raise ValueError("patch event identity invalid")
+        arguments = {
+            "kb": notification.kb,
+            "stage": notification.stage,
+            "released": notification.released.isoformat(),
+            "age_days": notification.age_days,
+            "policy_ids": list(notification.policy_ids),
+            "affected_clients": notification.affected_clients,
+            "affected_devices": notification.affected_devices,
+            "idempotency_key": notification.idempotency_key,
+            "text": notification.text,
+        }
+        return self.queue_teams_notification(
+            ticket_id=0, playbook_id="vulscan_patch_approval_aging",
+            note_title=f"VulScan-{notification.kb}-{notification.stage}",
+            fingerprint=notification.idempotency_key,
+            event_type="patch_approval_aging", arguments=arguments, now=now,
+        )
+
     def due_teams_notifications(
         self, *, now: datetime, limit: int = 4,
     ) -> tuple[Mapping[str, Any], ...]:
         rows = self._connection.execute(
             "SELECT * FROM autonomy_teams_notification_outbox "
             "WHERE state='pending' AND next_due_at<=? "
+            "AND event_type!='patch_approval_aging' "
             "ORDER BY CASE WHEN event_type IN (\'work_started\',\'work_completed\',\'patch_completed\') THEN 0 ELSE 1 END, "
             "next_due_at,recorded_at LIMIT ?",
             (now.isoformat(), min(4, max(1, int(limit)))),
@@ -713,6 +746,50 @@ class SQLiteOperationalWorkStore:
                 (state,int(attempts),next_due_at.isoformat(),
                  last_error,message_id,event_key),
             )
+
+    def due_patch_approval_notifications(
+        self, *, now: datetime, limit: int = 4,
+    ) -> tuple[Mapping[str, Any], ...]:
+        rows = self._connection.execute(
+            "SELECT * FROM autonomy_teams_notification_outbox "
+            "WHERE state='pending' AND event_type='patch_approval_aging' "
+            "AND next_due_at<=? ORDER BY next_due_at, recorded_at LIMIT ?",
+            (now.isoformat(), min(4, max(1, int(limit)))),
+        ).fetchall()
+        return tuple(dict(row) for row in rows)
+
+    def claim_patch_approval_notification(
+        self, *, event_key: str, now: datetime | None = None,
+    ) -> bool:
+        """Claim before sending: uncertain sends require reconciliation, not replay."""
+        claimed_at = now or datetime.now(timezone.utc)
+        if claimed_at.tzinfo is None:
+            raise ValueError("patch send claim requires timezone-aware time")
+        with self._connection:
+            result = self._connection.execute(
+                "UPDATE autonomy_teams_notification_outbox "
+                "SET state='sending', attempts=attempts+1, next_due_at=? "
+                "WHERE event_key=? AND state='pending' "
+                "AND event_type='patch_approval_aging'",
+                (claimed_at.isoformat(), event_key),
+            )
+        return result.rowcount == 1
+
+    def reconcile_inflight_patch_approval_notifications(
+        self, *, older_than: datetime,
+    ) -> int:
+        """Reconcile interrupted sends without ever replaying a Teams POST."""
+        if older_than.tzinfo is None:
+            raise ValueError("patch send recovery requires timezone-aware time")
+        with self._connection:
+            result = self._connection.execute(
+                "UPDATE autonomy_teams_notification_outbox "
+                "SET state='unverified', last_error='send_interrupted_delivery_unknown' "
+                "WHERE event_type='patch_approval_aging' AND state='sending' "
+                "AND next_due_at<=?",
+                (older_than.isoformat(),),
+            )
+        return result.rowcount
 
     def list_waiting_device_access(self) -> tuple[OperationalWork, ...]:
         rows = self._connection.execute(
@@ -1233,6 +1310,7 @@ class OperationalAutonomyMaintenance:
         ticket_splitter=None,
         client_questions=None,
         contact_reads=None,
+        vulscan_v2_approval_supervisor=None,
     ) -> None:
         if not 1 <= int(max_active_work_items) <= 20:
             raise ValueError("max_active_work_items must be between 1 and 20")
@@ -1266,6 +1344,10 @@ class OperationalAutonomyMaintenance:
         self.ticket_splitter = ticket_splitter
         self.client_questions = client_questions
         self.contact_reads = contact_reads
+        # Disabled unless exact V2 owner-promotion and source-read readiness
+        # are established by trusted runtime composition. Never use an env
+        # flag alone to bypass the existing ten-day handoff.
+        self.vulscan_v2_approval_supervisor = vulscan_v2_approval_supervisor
         self._next_due = 0.0
         self._resource_automation_cache: dict[int, bool] = {}
         self._ticket_status_cache: dict[int, str] = {}
@@ -5872,7 +5954,22 @@ class OperationalAutonomyMaintenance:
             if first_seen is None:
                 first_seen = now
             age_seconds = max(0.0, (now - first_seen).total_seconds())
-            if age_seconds >= VULSCAN_APPROVAL_ESCALATION_SECONDS:
+            v2_supervised = False
+            if self.vulscan_v2_approval_supervisor is not None:
+                # Trusted callback must prove exact KBs, policy/owner promotion,
+                # current source evidence and the canonical Teams lane are
+                # ready for every NOT_APPROVED item. No bypass on uncertainty.
+                try:
+                    v2_supervised = self.vulscan_v2_approval_supervisor(
+                        work, tuple(rows)
+                    ) is True
+                except Exception:
+                    # A stale/unavailable authorization, Datto or Teams read
+                    # must NOT strand the ticket or silently bypass the
+                    # existing ten-day human-review handoff. V2 remains
+                    # advisory until separately verified and promoted.
+                    v2_supervised = False
+            if age_seconds >= VULSCAN_APPROVAL_ESCALATION_SECONDS and not v2_supervised:
                 note = (
                     "STATUS: HUMAN REVIEW REQUIRED. "
                     "ACTION REQUIRED: Approve or intentionally defer the listed patch(es). "
@@ -5902,11 +5999,19 @@ class OperationalAutonomyMaintenance:
             note += (
                 "At least one reported KB is currently NOT_APPROVED. "
                 "STATUS: WAITING - PATCH NOT APPROVED. "
-                "NEXT STEP: No technician action is required yet; Jason will recheck the exact "
-                "KB approval state daily and keep this ticket in the Jason queue. "
-                "ESCALATION: If the same exact KB remains NOT_APPROVED for 10 calendar days, "
-                "Jason will move the ticket to Help Desk I / Human Review for an approve-or-defer "
-                "decision. The playbook will not approve patches autonomously."
+                "NEXT STEP: Jason will recheck exact KB approval states daily and retain "
+                "ticket ownership in the Jason queue. "
+                + (
+                    "Approval age is supervised by separately promoted VulScan V2 "
+                    "using authoritative Microsoft release dates; Day 16 is an "
+                    "owner Teams review and Day 21 a follow-up, not an automatic "
+                    "Help Desk ticket handoff. No patch is approved automatically."
+                    if v2_supervised else
+                    "ESCALATION: If the exact KB remains NOT_APPROVED for 10 "
+                    "calendar days under the existing V1 process, Jason moves "
+                    "the ticket to Help Desk I / Human Review for an approve-or-defer "
+                    "decision. The playbook will not approve patches autonomously."
+                )
             )
             reason = (
                 "VulScan waiting for patch approval; "

@@ -32,6 +32,8 @@ ENDPOINT_ALERT_HISTORY_SEARCH = "endpoint.alert.history.search"
 ENDPOINT_AUDIT_READ = "endpoint.audit.read"
 ENDPOINT_SOFTWARE_SEARCH = "endpoint.software.search"
 ENDPOINT_PATCH_SEARCH = "endpoint.patch.search"
+ENDPOINT_PATCH_POLICY_SEARCH = "endpoint.patch.policy.search"
+MANAGEMENT_SITE_PATCH_SEARCH = "management.site.patch.search"
 MANAGEMENT_ALERT_SEARCH = "management.alert.search"
 MANAGEMENT_SITE_SEARCH = "management.site.search"
 SITE_VARIABLE_LIST = "management.site.variable.list"
@@ -517,6 +519,50 @@ def endpoint_patch_search(now: datetime) -> CapabilityDefinition:
     )
 
 
+def endpoint_patch_policy_search(now: datetime) -> CapabilityDefinition:
+    return _read_resource_capability(
+        now=now,
+        capability_name=ENDPOINT_PATCH_POLICY_SEARCH,
+        display_name="Read Endpoint Patch Policies",
+        business_purpose=(
+            "Read all Datto Patch Management policy assignments for one "
+            "durably identified endpoint without modifying approval settings."
+        ),
+        resource_types="endpoint_patch_policy,patch_policy,endpoint",
+        operation="search",
+        selector_keys="resource_id",
+        fact_hints="patch management policy,patch policy,assigned patch policies",
+        canonical_facts="assigned patch-management policies",
+        planning_guidance=(
+            "Require an exact authorized Datto endpoint identity and inspect "
+            "complete policy assignments; never assume a single global policy."
+        ),
+        collection_fact="policies",
+    )
+
+
+def management_site_patch_search(now: datetime) -> CapabilityDefinition:
+    return _read_resource_capability(
+        now=now,
+        capability_name=MANAGEMENT_SITE_PATCH_SEARCH,
+        display_name="Read Managed Site Patches",
+        business_purpose=(
+            "Read complete Datto patch evidence for exactly one authorized site "
+            "to support policy-scoped patch-aging monitoring."
+        ),
+        resource_types="management_site_patch,site_patch,management_site",
+        operation="search",
+        selector_keys="resource_id",
+        fact_hints="site patches,site patch status,site missing updates",
+        canonical_facts="managed site patch status",
+        planning_guidance=(
+            "Require a verified durable site UID and scope every returned "
+            "endpoint/patch to that site; incomplete paging is not a full inventory."
+        ),
+        collection_fact="patches",
+    )
+
+
 def management_alert_search(now: datetime) -> CapabilityDefinition:
     return _read_resource_capability(
         now=now,
@@ -887,6 +933,8 @@ def datto_rmm_endpoint_provider(now: datetime) -> ExecutionProvider:
                 ENDPOINT_AUDIT_READ,
                 ENDPOINT_SOFTWARE_SEARCH,
                 ENDPOINT_PATCH_SEARCH,
+                ENDPOINT_PATCH_POLICY_SEARCH,
+                MANAGEMENT_SITE_PATCH_SEARCH,
                 MANAGEMENT_ALERT_SEARCH,
                 MANAGEMENT_SITE_SEARCH,
                 SITE_VARIABLE_LIST,
@@ -943,6 +991,8 @@ def register_endpoint_resource_foundation(
     capabilities.register(endpoint_audit_read(now))
     capabilities.register(endpoint_software_search(now))
     capabilities.register(endpoint_patch_search(now))
+    capabilities.register(endpoint_patch_policy_search(now))
+    capabilities.register(management_site_patch_search(now))
     capabilities.register(management_alert_search(now))
     capabilities.register(management_site_search(now))
     capabilities.register(site_variable_list(now))

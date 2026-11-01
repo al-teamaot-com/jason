@@ -1018,3 +1018,74 @@ def test_device_patch_filter_matches_exact_kb_and_preserves_ambiguity() -> None:
     )
     assert single["match_count"] == 1
     assert single["exact_selector_match"] is True
+
+
+
+def test_site_patch_v2_collection_paging_bounded_and_complete(monkeypatch) -> None:
+    """A legitimate 1,100-row site spans five 250-row read-only pages."""
+    monkeypatch.setattr(
+        "connectors.datto_rmm.connector.acquire_access_token",
+        lambda *, credentials: DattoRmmAccessToken("runtime-token"),
+    )
+    total = 1100
+    responses = []
+    for page in range(5):
+        offset = page * 250
+        end = min(total, offset + 250)
+        responses.append({
+            "patches": [
+                {"deviceUid": f"device-{n}", "kbArticleId": "5127648",
+                 "installStatus": "NOT_APPROVED"} for n in range(offset, end)
+            ],
+            "pageDetails": {
+                "count": end - offset, "totalCount": total,
+                "nextPageUrl": (
+                    None if end == total else
+                    f"https://provider.example/api/v2/site/site-verified/patches?max=250&page={page+1}"
+                ),
+            },
+        })
+    transport = Transport(responses)
+    audit = Audit()
+    connector = DattoRmmConnector(secrets=Secrets(), transport=transport, audit=audit)
+    result = connector.execute(connector_request(
+        capability="datto_rmm.site.patches.list",
+        arguments={"resource_id": "site-verified", "completeness_requirement": "complete"},
+    ))
+    assert len(result.data["patches"]) == total
+    assert result.data["pageDetails"]["totalCount"] == total
+    assert result.data["pageDetails"]["nextPageUrl"] is None
+    assert [x["params"]["page"] for x in transport.calls] == list(range(5))
+    assert all(x["method"] == "GET" for x in transport.calls)
+    assert all(x["params"]["max"] == 250 for x in transport.calls)
+    assert len(transport.calls) == 5
+    observed = [
+        detail for event, detail in audit.events
+        if event == "connector.adaptation_observed"
+    ]
+    assert observed[-1]["complete"] is True
+    assert observed[-1]["pages_aggregated"] == 5
+    assert observed[-1]["final_count"] == total
+
+
+def test_site_patch_v2_collection_refuses_provider_declared_more_than_6000(monkeypatch) -> None:
+    """Oversized site collections fail immediately, never partially summarized."""
+    monkeypatch.setattr(
+        "connectors.datto_rmm.connector.acquire_access_token",
+        lambda *, credentials: DattoRmmAccessToken("runtime-token"),
+    )
+    transport = Transport([{
+        "patches": [{"kbArticleId": "5127648"}],
+        "pageDetails": {
+            "count": 1, "totalCount": 6001,
+            "nextPageUrl": "https://provider.example/site/uid/patches?max=250&page=1",
+        },
+    }])
+    connector = DattoRmmConnector(secrets=Secrets(), transport=transport, audit=Audit())
+    with pytest.raises(ValueError, match="6000-row scan bound"):
+        connector.execute(connector_request(
+            capability="datto_rmm.site.patches.list",
+            arguments={"site_uid": "site-verified", "completeness_requirement": "complete"},
+        ))
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["method"] == "GET"

@@ -134,6 +134,18 @@ def build_datto_rmm_manifest() -> IntegrationManifest:
                 ),
                 collection_supported=True,
             ),
+            IntegrationOperation(
+                operation_id="endpoint.patch.policy.search",
+                kind=OperationKind.SEARCH,
+                capability_name="endpoint.patch.policy.search",
+                description=(
+                    "Read the Patch Management policies assigned to an exact "
+                    "managed endpoint, without changing policy or approvals."
+                ),
+                read_only=True,
+                selector_names=("resource_id",),
+                collection_supported=True,
+            ),
         ),
         observations=(
             ResourceObservation(
@@ -201,6 +213,11 @@ def build_datto_rmm_manifest() -> IntegrationManifest:
                 name="name",
                 description="Human-readable site name used for discovery.",
             ),
+            SelectorDefinition(
+                name="resource_id",
+                description="Verified durable Datto managed-site UID.",
+                verified_identity_required=True,
+            ),
         ),
         operations=(
             IntegrationOperation(
@@ -210,6 +227,18 @@ def build_datto_rmm_manifest() -> IntegrationManifest:
                 description="Search governed Datto RMM site records.",
                 read_only=True,
                 selector_names=("name",),
+                collection_supported=True,
+            ),
+            IntegrationOperation(
+                operation_id="site.patch.search",
+                kind=OperationKind.SEARCH,
+                capability_name="management.site.patch.search",
+                description=(
+                    "Read all reported patches for devices in one verified "
+                    "Datto RMM site, with strict site scope and full paging."
+                ),
+                read_only=True,
+                selector_names=("resource_id",),
                 collection_supported=True,
             ),
         ),
