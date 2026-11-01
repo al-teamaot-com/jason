@@ -30,6 +30,7 @@ PRINT_DEVICE_READ = "print.device.read"
 PRINT_METER_READ = "print.meter.read"
 PRINT_METER_HISTORY_SEARCH = "print.meter.history.search"
 PRINT_METER_USAGE_READ = "print.meter.usage.read"
+PRINT_FLEET_USAGE_RANK = "print.fleet.usage.rank"
 PRINT_SUPPLIES_READ = "print.supplies.read"
 PRINT_ALERT_SEARCH = "print.alert.search"
 KYOCERA_KFS_PROVIDER = "kyocera_kfs"
@@ -40,6 +41,7 @@ _PRINT_CAPABILITIES = (
     PRINT_METER_READ,
     PRINT_METER_HISTORY_SEARCH,
     PRINT_METER_USAGE_READ,
+    PRINT_FLEET_USAGE_RANK,
     PRINT_SUPPLIES_READ,
     PRINT_ALERT_SEARCH,
 )
@@ -55,6 +57,8 @@ def _read_capability(
     operation: str,
     selector_keys: str,
     fact_hints: str,
+    query_shape: str = "",
+    canonical_facts: str = "",
 ) -> CapabilityDefinition:
     return CapabilityDefinition(
         capability_name=name,
@@ -108,6 +112,8 @@ def _read_capability(
             "operation": operation,
             "selector_keys": selector_keys,
             "fact_hints": fact_hints,
+            "query_shape": query_shape,
+            "canonical_facts": canonical_facts,
             "scope_model": "aot_internal_dealer_fleet",
             "client_scope_status": "not_exposed_until_explicit_kfs_autotask_mapping",
         },
@@ -123,7 +129,7 @@ def print_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             purpose="Locate managed copier and MFP devices in AOT's internal dealer fleet.",
             resource_types="print_device",
             operation="search",
-            selector_keys="serial_number,device_id,name,hostname,ip_address",
+            selector_keys="serial_number,device_id,name,hostname,ip_address,limit,offset",
             fact_hints="copier printer MFP Kyocera serial model device customer location",
         ),
         _read_capability(
@@ -165,6 +171,18 @@ def print_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             operation="read",
             selector_keys="resource_id,device_id,serial_number,month,start,end,timezone,counters",
             fact_hints="monthly usage last month meter delta impressions pages copies prints color mono scans period usage",
+        ),
+        _read_capability(
+            now=now,
+            name=PRINT_FLEET_USAGE_RANK,
+            display_name="Rank Print Fleet Monthly Usage",
+            purpose="Rank all eligible managed print devices using stored monthly impression deltas.",
+            resource_types="print_meter,print_device",
+            operation="read",
+            selector_keys="month,start,end,timezone,limit,boundary_hours",
+            fact_hints="monthly print volume ranking,top printers by volume,highest volume printers,most pages printed",
+            query_shape="ranked_monthly_usage",
+            canonical_facts="monthly print volume ranking",
         ),
         _read_capability(
             now=now,

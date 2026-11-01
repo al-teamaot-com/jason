@@ -1,0 +1,354 @@
+"""Negative and positive acceptance for approved AOT copier workbook evidence."""
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from io import BytesIO
+from types import SimpleNamespace
+import base64
+import hashlib
+
+import pytest
+from openpyxl import Workbook
+
+from jason_runtime.kfs_customer_document_evidence import (
+    ApprovedCustomerEvidenceIndex,
+    ApprovedSharePointWorkbook,
+    document_from_governed_sharepoint_reads,
+)
+
+NOW = datetime(2026, 10, 30, tzinfo=timezone.utc)
+TENANT = "aot-tenant"
+SITE = "approved-admin-site"
+DRIVE = "approved-admin-document-library"
+
+
+def workbook_bytes(sheets: list[tuple[str, list[tuple]]]) -> bytes:
+    wb = Workbook()
+    wb.remove(wb.active)
+    for sheet_name, rows in sheets:
+        ws = wb.create_sheet(sheet_name)
+        for row in rows:
+            ws.append(row)
+    buffer = BytesIO()
+    wb.save(buffer)
+    wb.close()
+    return buffer.getvalue()
+
+
+def source(*, sheet, name="Copier log.xlsx", item="document-1",
+           site=SITE, drive=DRIVE, age_days=10) -> ApprovedSharePointWorkbook:
+    return ApprovedSharePointWorkbook(
+        tenant_id=TENANT, site_id=site, drive_id=drive, item_id=item,
+        etag=f"etag-{item}", web_url=f"https://aot.sharepoint.com/item/{item}",
+        filename=name, modified_at=NOW - timedelta(days=age_days),
+        content=workbook_bytes(sheet),
+    )
+
+
+def index(*documents: ApprovedSharePointWorkbook):
+    return ApprovedCustomerEvidenceIndex.from_documents(
+        documents=documents,
+        tenant_id=TENANT,
+        allowed_site_ids=frozenset({SITE}),
+        allowed_drive_ids=frozenset({DRIVE}),
+        now=NOW,
+    )
+
+
+def test_aot_delivery_receipt_matches_exact_serial_number():
+    doc = source(
+        name="AOT Delivery Receipt Equipment 2026.xlsx",
+        sheet=[
+            ("Receipt - 1", [
+                ("", "CO. NAME:", "Marcella Operator LLC", ""),
+                ("", "ID#:", "1403", ""),
+                ("Copier", "Kyocera MZ6001i", "S/N:", "1G55503749"),
+            ]),
+        ],
+    )
+    result = index(doc)
+    found = result.match(serial_number="1G55503749")
+    assert found.status == "verified"
+    assert found.customer_name == "Marcella Operator LLC"
+    assert len(found.evidence) == 1
+    assert found.evidence[0].source_item_id == doc.item_id
+    assert found.evidence[0].source_etag == doc.etag
+    assert len(found.evidence[0].source_sha256) == 64
+    assert result.match(serial_number="1G5550374").status == "not_found"
+
+
+def test_aot_copier_log_keeps_serials_scoped_to_their_own_sheet():
+    doc = source(
+        name="Virginia Health Services Copier Log.xlsx",
+        sheet=[
+            ("Marcella", [
+                ("", "Company:", ""),
+                ("", "Marcella Operator LLC", ""),
+                ("", "MZ6001i", "1403"),
+                ("", "Serial #:", "1G55503749"),
+            ]),
+            ("Atlantic", [
+                ("", "Company:", ""),
+                ("", "Atlantic View Operator", ""),
+                ("", "MZ6001i", "1398"),
+                ("", "Serial #:", "1G55504297"),
+            ]),
+            ("Water Reed", [
+                ("", "Company:", ""),
+                ("", "Water Reed Operator", ""),
+                ("", "MZ6001i", "1405"),
+                ("", "Serial #:", "1G55503694"),
+            ]),
+        ],
+    )
+    mapped = index(doc)
+    assert mapped.match(serial_number="1G55503749").customer_name == "Marcella Operator LLC"
+    assert mapped.match(serial_number="1G55504297").customer_name == "Atlantic View Operator"
+    assert mapped.match(serial_number="1G55503694").customer_name == "Water Reed Operator"
+    assert mapped.match(serial_number="RRG2301432").status == "not_found"
+
+
+def test_distinct_documents_with_agreeing_name_are_verified():
+    a = source(sheet=[("One", [("CO. NAME:", "Marcella Operator LLC"), ("SN:", "1G55503749")])])
+    b = source(
+        sheet=[("Two", [("CO. NAME:", "Marcella Operator LLC"), ("S/N:", "1G55503749")])],
+        item="other-source",
+    )
+    match = index(a, b).match(serial_number="1G55503749")
+    assert match.status == "verified"
+    assert len(match.evidence) == 2
+
+
+def test_conflicting_source_names_fail_closed():
+    a = source(sheet=[("One", [("CO. NAME:", "Marcella Operator LLC"), ("SN:", "1G55503749")])])
+    b = source(sheet=[("Two", [("CO. NAME:", "Other Customer"), ("SN:", "1G55503749")])], item="other")
+    match = index(a, b).match(serial_number="1G55503749")
+    assert match.status == "conflict"
+    assert match.customer_name is None
+    assert len(match.evidence) == 2
+
+
+def test_disagreement_with_existing_kfs_customer_fails_closed():
+    doc = source(sheet=[("One", [("CO. NAME:", "Marcella Operator LLC"), ("SN:", "1G55503749")])])
+    match = index(doc).match(serial_number="1G55503749", kfs_customer="Different Company")
+    assert match.status == "conflict"
+    assert match.customer_name is None
+
+
+@pytest.mark.parametrize("field,value", [
+    ("site", "different-site"),
+    ("drive", "different-library"),
+])
+def test_unknown_document_scope_is_rejected_before_parsing(field, value):
+    opts = {field: value}
+    doc = source(sheet=[("One", [("CO. NAME:", "Client"), ("SN:", "1G55503749")])], **opts)
+    with pytest.raises(PermissionError, match="outside approved"):
+        index(doc)
+
+
+def test_missing_scope_is_rejected():
+    doc = source(sheet=[("One", [("CO. NAME:", "Client"), ("SN:", "1G55503749")])])
+    with pytest.raises(PermissionError, match="approved tenant"):
+        ApprovedCustomerEvidenceIndex.from_documents(
+            documents=(doc,), tenant_id=TENANT,
+            allowed_site_ids=frozenset(), allowed_drive_ids=frozenset({DRIVE}), now=NOW,
+        )
+
+
+def test_stale_customer_source_is_ignored():
+    doc = source(sheet=[("One", [("CO. NAME:", "Client"), ("SN:", "1G55503749")])], age_days=500)
+    assert index(doc).match(serial_number="1G55503749").status == "not_found"
+
+
+def test_duplicate_versioned_document_not_counted_twice():
+    doc = source(sheet=[("One", [("CO. NAME:", "Client"), ("SN:", "1G55503749")])])
+    with pytest.raises(ValueError, match="duplicate"):
+        index(doc, doc)
+
+
+def test_vendor_and_bare_serial_without_customer_label_do_not_create_mapping():
+    doc = source(sheet=[("One", [("eCopier Solutions",), ("Serial #:", "1G55503749")])])
+    assert index(doc).match(serial_number="1G55503749").status == "not_found"
+
+
+def test_unauthorized_or_macro_enabled_file_is_rejected():
+    doc = source(sheet=[("One", [("CO. NAME:", "Client"), ("SN:", "1G55503749")])])
+    with pytest.raises(ValueError, match="non-macro"):
+        ApprovedSharePointWorkbook(
+            tenant_id=doc.tenant_id, site_id=doc.site_id, drive_id=doc.drive_id,
+            item_id=doc.item_id, etag=doc.etag, web_url=doc.web_url,
+            filename="Copier log.xlsm", modified_at=doc.modified_at, content=doc.content,
+        )
+
+
+def test_named_aot_meter_log_correlated_with_explicit_header_and_exact_serial():
+    doc = source(
+        name="ST MATTHEWS CATHOLIC SCHOOL  Log (ID# 1202, 1203, 1206, 1207).xlsx",
+        sheet=[("October meter logs", [
+            ("St. Matthews yearly overages to be billed in August",),
+            ("Teacher workroom ID# 1207 8003i sn# RRG2301432",),
+        ])],
+    )
+    match = index(doc).match(serial_number="RRG2301432")
+    assert match.status == "verified"
+    assert match.customer_name == "ST MATTHEWS CATHOLIC SCHOOL"
+    assert match.evidence[0].source_item_id == doc.item_id
+
+
+def test_named_log_without_corroborating_customer_heading_is_not_trusted():
+    doc = source(
+        name="ST MATTHEWS CATHOLIC SCHOOL Log (ID# 1207).xlsx",
+        sheet=[("October meter logs", [
+            ("Another customer's meter sheet",),
+            ("Teacher workroom ID# 1207 8003i sn# RRG2301432",),
+        ])],
+    )
+    assert index(doc).match(serial_number="RRG2301432").status == "not_found"
+
+
+def test_generic_multi_customer_log_filename_is_not_customer_evidence():
+    doc = source(
+        name="eCopiers (Virginia Health Services)14 machines (3 year CPC log).xlsx",
+        sheet=[("October meter logs", [
+            ("eCopier Solutions",),
+            ("Teacher workroom ID# 1207 8003i sn# RRG2301432",),
+        ])],
+    )
+    assert index(doc).match(serial_number="RRG2301432").status == "not_found"
+
+
+def test_multicustomer_table_is_not_mapped_to_first_customer():
+    doc = source(
+        name="Copier master log.xlsx",
+        sheet=[("All Customers", [
+            ("Company Name", "Serial Number", "ID Number"),
+            ("Marcella Operator LLC", "1G55503749", "1403"),
+            ("Atlantic View Operator", "1G55504297", "1398"),
+        ])],
+    )
+    mapped = index(doc)
+    assert mapped.match(serial_number="1G55503749").status == "not_found"
+    assert mapped.match(serial_number="1G55504297").status == "not_found"
+
+
+def test_stacked_receipts_for_different_customers_do_not_cross_assign():
+    doc = source(
+        name="AOT Copier Delivery Receipts.xlsx",
+        sheet=[("Stacked Receipts", [
+            ("CO. NAME:", "Marcella Operator LLC"),
+            ("S/N:", "1G55503749"),
+            ("CO. NAME:", "Atlantic View Operator"),
+            ("S/N:", "1G55504297"),
+        ])],
+    )
+    mapped = index(doc)
+    assert mapped.match(serial_number="1G55503749").status == "not_found"
+    assert mapped.match(serial_number="1G55504297").status == "not_found"
+
+
+def test_unrelated_workbook_class_is_rejected():
+    with pytest.raises(ValueError, match="approved copier-log or receipt class"):
+        source(
+            name="Sales Forecast.xlsx",
+            sheet=[("Customers", [
+                ("CO. NAME:", "Marcella Operator LLC"),
+                ("S/N:", "1G55503749"),
+            ])],
+        )
+
+
+def example_governed_reader_results():
+    workbook = workbook_bytes([("Client", [
+        ("CO. NAME:", "Marcella Operator LLC"),
+        ("S/N:", "1G55503749"),
+    ])])
+    metadata = {
+        "item": {
+            "id": "file-123", "site_id": SITE, "drive_id": DRIVE,
+            "name": "Copier Delivery Receipt.xlsx",
+            "eTag": '"version-17"',
+            "size": len(workbook),
+            "lastModifiedDateTime": "2026-10-29T14:15:00Z",
+            "webUrl": "https://aot.sharepoint.com/copiers/file-123",
+            "file": {
+                "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            },
+        }
+    }
+    content = {
+        "content_b64": base64.b64encode(workbook).decode("ascii"),
+        "sha256": hashlib.sha256(workbook).hexdigest(),
+        "byte_length": len(workbook),
+        "encoding": "base64",
+    }
+    def result(op, data):
+        return SimpleNamespace(provider="microsoft_graph", capability=op, data=data)
+    return (
+        result("knowledge.document.metadata.read", metadata),
+        result("knowledge.document.content.read", content),
+        result("knowledge.document.metadata.read", dict(metadata)),
+    )
+
+
+def read_governed_result(*, before=None, content=None, after=None, item="file-123"):
+    original = example_governed_reader_results()
+    return document_from_governed_sharepoint_reads(
+        tenant_id=TENANT, site_id=SITE, drive_id=DRIVE, item_id=item,
+        metadata_before=original[0] if before is None else before,
+        content_result=original[1] if content is None else content,
+        metadata_after=original[2] if after is None else after,
+    )
+
+
+def test_governed_sharepoint_reader_evidence_can_feed_serial_index():
+    doc = read_governed_result()
+    match = index(doc).match(serial_number="1G55503749")
+    assert match.status == "verified"
+    assert match.customer_name == "Marcella Operator LLC"
+    assert match.evidence[0].source_etag == '"version-17"'
+
+
+def test_rejects_source_version_change_across_three_governed_reads():
+    before, content, after = example_governed_reader_results()
+    changed = dict(after.data["item"], eTag='"version-18"')
+    after = SimpleNamespace(provider="microsoft_graph", capability=after.capability,
+                            data={"item": changed})
+    with pytest.raises(ValueError, match="changed during read"):
+        read_governed_result(before=before, content=content, after=after)
+
+
+def test_rejects_governed_content_digest_mismatch():
+    before, content, after = example_governed_reader_results()
+    invalid = SimpleNamespace(provider="microsoft_graph", capability=content.capability,
+                              data={**content.data, "sha256": "0" * 64})
+    with pytest.raises(ValueError, match="digest validation failed"):
+        read_governed_result(before=before, content=invalid, after=after)
+
+
+def test_rejects_governed_document_identity_mismatch():
+    with pytest.raises(PermissionError, match="authorized selectors"):
+        read_governed_result(item="different-file")
+
+
+def test_rejects_ungoverned_content_provider_substitution():
+    before, content, after = example_governed_reader_results()
+    forged = SimpleNamespace(provider="generic_graph", capability=content.capability, data=content.data)
+    with pytest.raises(PermissionError, match="governed Microsoft Graph"):
+        read_governed_result(before=before, content=forged, after=after)
+
+
+def test_rejects_incorrect_document_mime_even_with_xlsx_name():
+    before, content, after = example_governed_reader_results()
+    modified = dict(before.data["item"])
+    modified["file"] = {"mimeType": "application/octet-stream"}
+    result = SimpleNamespace(provider="microsoft_graph", capability=before.capability,
+                             data={"item": modified})
+    with pytest.raises(ValueError, match="media type"):
+        read_governed_result(before=result, content=content, after=result)
+
+
+def test_rejects_wrong_governed_operation():
+    before, content, after = example_governed_reader_results()
+    invalid = SimpleNamespace(provider="microsoft_graph", capability="knowledge.document.search", data=content.data)
+    with pytest.raises(PermissionError, match="unexpected governed"):
+        read_governed_result(before=before, content=invalid, after=after)

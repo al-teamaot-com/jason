@@ -12,6 +12,7 @@ from orchestrator.print_capability_catalog import (
     KYOCERA_KFS_PROVIDER,
     PRINT_METER_HISTORY_SEARCH,
     PRINT_METER_USAGE_READ,
+    PRINT_FLEET_USAGE_RANK,
 )
 
 
@@ -86,11 +87,13 @@ def test_meter_history_authority_seeds_exact_aot_observe_grants():
     assert created == (
         "production-kfs-read-print-meter-history-search",
         "production-kfs-read-print-meter-usage-read",
+        "production-kfs-read-print-fleet-usage-rank",
     )
     grants = list(authority.grants.values.values())
     assert {grant.capability for grant in grants} == {
         PRINT_METER_HISTORY_SEARCH,
         PRINT_METER_USAGE_READ,
+        PRINT_FLEET_USAGE_RANK,
     }
     assert all(grant.subject_id == "organization:aot" for grant in grants)
     assert all(grant.organization_id == "aot" for grant in grants)
@@ -106,7 +109,7 @@ def test_meter_history_authority_is_idempotent_and_disabled_by_default():
 
     first = ensure_meter_history_read_authority(authority, enabled=True)
     second = ensure_meter_history_read_authority(authority, enabled=True)
-    assert len(first) == 2
+    assert len(first) == 3
     assert second == ()
 
 
@@ -164,4 +167,77 @@ def test_client_scoped_access_stays_fail_closed_until_mapping_exists():
                 client_id="client-1",
             ),
             resolution=resolution(PRINT_METER_USAGE_READ),
+        )
+
+
+
+def test_authorized_rank_invokes_fresh_governed_customer_evidence(monkeypatch):
+    from pathlib import Path
+    from jason_runtime.kfs_customer_document_evidence import ApprovedCustomerEvidenceIndex
+    from jason_runtime.kfs_meter_history import KfsMeterHistoryStore
+    index = ApprovedCustomerEvidenceIndex({})
+    calls = []
+
+    def fake_rank(self, *, arguments, start, end):
+        calls.append(("rank", self.customer_evidence_index, arguments["month"]))
+        return {"top_devices": [], "warnings": ["provisional"]}
+
+    monkeypatch.setattr(KfsMeterHistoryStore, "fleet_rank", fake_rank)
+    store = KfsMeterHistoryStore(
+        host="unused", port=5432, database="unused",
+        user="readonly", password_file=Path("/unused"),
+    )
+    invoker = GovernedKfsMeterHistoryInvoker(
+        store=store,
+        customer_evidence_resolver=lambda now: calls.append(("refresh", now)) or index,
+    )
+    result = invoker.invoke(
+        request=request(PRINT_FLEET_USAGE_RANK, {"month": "2026-09"}),
+        resolution=resolution(PRINT_FLEET_USAGE_RANK),
+    )
+    assert calls[0][0] == "refresh"
+    assert calls[1] == ("rank", index, "2026-09")
+    assert store.customer_evidence_index is None
+    assert result.output["warnings"] == ("provisional",)
+
+
+def test_unauthorized_rank_never_tries_sharepoint_document_refresh():
+    from pathlib import Path
+    from jason_runtime.kfs_meter_history import KfsMeterHistoryStore
+    calls = []
+    store = KfsMeterHistoryStore(
+        host="unused", port=5432, database="unused",
+        user="readonly", password_file=Path("/unused"),
+    )
+    invoker = GovernedKfsMeterHistoryInvoker(
+        store=store,
+        customer_evidence_resolver=lambda now: calls.append(now),
+    )
+    with pytest.raises(PermissionError, match="AOT-internal"):
+        invoker.invoke(
+            request=request(
+                PRINT_FLEET_USAGE_RANK, {"month": "2026-09"},
+                client_id="some-client",
+            ),
+            resolution=resolution(PRINT_FLEET_USAGE_RANK),
+        )
+    assert calls == []
+
+
+def test_governed_sharepoint_failure_prevents_unverified_rank_output():
+    from pathlib import Path
+    from jason_runtime.kfs_meter_history import KfsMeterHistoryStore
+    store = KfsMeterHistoryStore(
+        host="unused", port=5432, database="unused",
+        user="readonly", password_file=Path("/unused"),
+    )
+    def denied(_now):
+        raise PermissionError("approved SharePoint document grant expired")
+    invoker = GovernedKfsMeterHistoryInvoker(
+        store=store, customer_evidence_resolver=denied,
+    )
+    with pytest.raises(PermissionError, match="grant expired"):
+        invoker.invoke(
+            request=request(PRINT_FLEET_USAGE_RANK, {"month": "2026-09"}),
+            resolution=resolution(PRINT_FLEET_USAGE_RANK),
         )
