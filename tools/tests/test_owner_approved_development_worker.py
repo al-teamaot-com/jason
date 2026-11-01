@@ -2208,6 +2208,37 @@ def test_stale_clean_worker_is_readmitted_from_fresh_isolated_clone_without_old_
     assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==[]
 
 
+def test_stale_clean_worker_can_recover_again_after_later_main_advance(tmp_path,monkeypatch):
+    import json
+    repo,spool,item,state,old,old_sha,first_main,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==['DEV-42']
+    record=state['items']['DEV-42']
+    first_clone=module.ensure_stale_source_clone(repo,42,first_main)
+    rid=module.support.queue_reasoning(
+        spool,kind='edit_plan',item=item,
+        context=module.owner_development_search_context(item,record),
+    )
+    response={'request_id':rid,'kind':'edit_plan','support_item':'DEV-42',
+              'status':'succeeded','result':{'edits':[],'test_paths':[]}}
+    path=spool/'reasoning'/'responses'/f'{rid}.json';path.parent.mkdir(parents=True,exist_ok=True)
+    path.write_text(json.dumps(response))
+    (repo/'code.txt').write_text('newer tracked code\n')
+    git('add','code.txt');git('commit','-m','later protected main advance')
+    git('fetch','origin','main')
+    second_main=git('rev-parse','origin/main')
+    record.update({'phase':'blocked',
+                   'reason':'EvidenceToolError: stale worktree requires governed clean-source recovery',
+                   'reasoning_request_id':rid,
+                   'worktree':str(first_clone),
+                   'branch':git('branch','--show-current',cwd=first_clone)})
+    assert record['stale_source_recovery_revision']==first_main
+    assert second_main != first_main
+    assert module.readmit_stale_clean_development_source(state,[item],spool,repo,max_active=3)==['DEV-42']
+    assert record['stale_source_recovery_revision']==second_main
+    assert record['stale_source_recovery_prior_revision']==first_main
+    assert record['worktree']==str(module.ensure_stale_source_clone(repo,42,second_main))
+
+
 def test_stale_source_refuses_dirty_original_and_keeps_blocker(tmp_path,monkeypatch):
     repo,spool,item,state,old,old_sha,current,git = _stale_owner_recovery_fixture(tmp_path,monkeypatch)
     (old/'code.txt').write_text('valuable uncommitted change\n')
