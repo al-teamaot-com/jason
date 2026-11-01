@@ -87,7 +87,8 @@ def test_current_owner_focus_admits_bounded_priority_workstreams_plus_first_todo
     assert len(policy['issue_numbers']) == len(expected)
     assert {1196, 1458, 1467, 1500}.isdisjoint(policy['issue_numbers'])
     assert 'Universal Teams Approver' in policy['directive']
-    assert policy['authority_source'] == 'https://github.com/al-teamaot-com/jason/issues/1467'
+    assert '#2209' in policy['directive']
+    assert '2026-11-01' in policy['authority_source']
 
     # Existing broad PM/TODO release work is parked, not newly admitted.
     # Previously blocked work is *not* equivalent to live in-flight editing.
