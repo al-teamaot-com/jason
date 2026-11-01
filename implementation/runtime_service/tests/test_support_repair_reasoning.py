@@ -57,6 +57,25 @@ def test_reasoning_maintenance_processes_bounded_search_request(tmp_path: Path):
     assert len(client.calls) == 1
 
 
+def test_reasoning_maintenance_accepts_legacy_development_request_kind(tmp_path: Path):
+    client = Client()
+    request_dir = tmp_path / 'reasoning' / 'requests'
+    request_dir.mkdir(parents=True)
+    request = _request('development')
+    (request_dir / f"{request['request_id']}.json").write_text(json.dumps(request), encoding='utf-8')
+
+    maintenance = SupportRepairReasoningMaintenance(
+        structured_client=client,
+        spool=tmp_path,
+        interval_seconds=1,
+    )
+    assert maintenance.tick() is True
+    response = json.loads((tmp_path / 'reasoning' / 'responses' / f"{request['request_id']}.json").read_text())
+    assert response['status'] == 'succeeded'
+    assert response['result']['summary'] == 'normalize queue alias'
+    assert len(client.calls) == 1
+
+
 def test_reasoning_accepts_owner_approved_development_work_item(tmp_path: Path):
     client = Client()
     request_dir = tmp_path / 'reasoning' / 'requests'
