@@ -926,3 +926,55 @@ def test_auxiliary_process_sends_queued_ticket_owner_notifications_even_when_adm
         isinstance(m, TicketOwnerNotificationMaintenance)
         for m in http.maintenance.services
     )
+
+
+
+def test_subscription_first_composition_does_not_resolve_openai_api_secret(tmp_path, monkeypatch):
+    from orchestrator.subscription_reasoning import SubscriptionStructuredJsonClient
+
+    calls = []
+    original = __import__(
+        "jason_runtime.composition", fromlist=["OpenBaoSecretResolver"]
+    ).OpenBaoSecretResolver.resolve
+
+    def guarded_resolve(self, name, context):
+        calls.append(name)
+        if name == "openai.semantic_intent":
+            raise AssertionError("subscription-first composition must not resolve OpenAI API credentials")
+        return original(self, name, context)
+
+    monkeypatch.setattr(
+        "jason_runtime.composition.OpenBaoSecretResolver.resolve",
+        guarded_resolve,
+    )
+    settings = replace(
+        _settings(tmp_path),
+        hosted_conversation_enabled=True,
+        hosted_semantics_enabled=True,
+        subscription_reasoning_enabled=True,
+        subscription_reasoning_url="http://subscription-reasoning:8091",
+        openai_api_fallback_enabled=False,
+    )
+    application = build_runtime_application(settings)
+
+    assert isinstance(application.conversation_reasoning_client, SubscriptionStructuredJsonClient)
+    assert "openai.semantic_intent" not in calls
+
+
+def test_subscription_settings_default_api_fallback_off(monkeypatch, tmp_path):
+    monkeypatch.setenv("JASON_AUTHORITY_DB", str(tmp_path / "authority.sqlite3"))
+    monkeypatch.setenv("JASON_TEAMS_IDENTITY_BINDINGS_DB", str(tmp_path / "bindings.sqlite3"))
+    monkeypatch.setenv("JASON_TEAMS_CONTINUATION_DB", str(tmp_path / "continuation.sqlite3"))
+    monkeypatch.setenv("JASON_REPLAY_DB", str(tmp_path / "replay.sqlite3"))
+    monkeypatch.setenv("JASON_SECURITY_AUDIT_DB", str(tmp_path / "security.sqlite3"))
+    monkeypatch.setenv("JASON_ORCHESTRATION_EVENTS_DB", str(tmp_path / "events.sqlite3"))
+    monkeypatch.setenv("JASON_TRUSTED_KEYS_REGISTRY", str(_trusted_registry(tmp_path)))
+    monkeypatch.setenv("JASON_OLLAMA_MODEL", "local-test")
+    monkeypatch.setenv("JASON_SUBSCRIPTION_REASONING_ENABLED", "true")
+    monkeypatch.delenv("JASON_OPENAI_API_FALLBACK_ENABLED", raising=False)
+
+    settings = RuntimeSettings.from_env()
+
+    assert settings.subscription_reasoning_enabled is True
+    assert settings.openai_api_fallback_enabled is False
+    assert settings.subscription_reasoning_url == "http://jason-subscription-reasoning:8091"
