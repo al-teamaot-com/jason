@@ -7379,6 +7379,7 @@ def process_procurement_invoice(
     tax: str = "0",
     fees: str = "0",
     source_capture_sha256: str = "",
+    requester_comments: str = "",
 ) -> dict[str, Any]:
     """Process a vendor invoice through AOT's fixed Jason procurement workflow.
 
@@ -7404,6 +7405,12 @@ def process_procurement_invoice(
             "status": "rejected",
             "error_code": "procurement_invoice_lines_required",
         }
+    comments = str(requester_comments or "").strip()
+    if len(comments) > 4000:
+        return {
+            "status": "rejected",
+            "error_code": "procurement_requester_comments_too_long",
+        }
     normalized: dict[str, Any] = {
         "source_kind": "vendor_invoice",
         "source_reference": reference,
@@ -7415,6 +7422,7 @@ def process_procurement_invoice(
         "vendor": {"name": vendor},
         "lines": [dict(x) for x in lines],
         "invoice_number": invoice,
+        "requester_comments": comments,
     }
     optional = {
         "invoice_total": invoice_total,
