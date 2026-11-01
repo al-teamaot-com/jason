@@ -350,7 +350,7 @@ def test_provider_identity_recovery_whole_main_bound_is_still_finite():
         item for item in reviewed_recovery_policy()["profiles"]
         if item["id"] == "provider_identity_and_authority_recovery"
     )
-    assert profile["max_changed_files"] == 64
+    assert profile["max_changed_files"] == 65
     record = provider_identity_record()
     while len(record["changed_files"]) < 65:
         record["changed_files"].append(
@@ -363,6 +363,11 @@ def test_provider_identity_recovery_whole_main_bound_is_still_finite():
         patch.object(runner, "recovery_live_production_alignment",
                      return_value={"runtime_health_mode": "healthy"}),
     ):
+        assert runner.governed_open_breaker_recovery_context(
+            ROOT, ROOT, record, require_owner_approval=False,
+            control=open_control(), drift=provider_identity_drift(),
+        ) is not None
+        record["changed_files"].append("docs/recovery-bound-over-limit.md")
         assert runner.governed_open_breaker_recovery_context(
             ROOT, ROOT, record, require_owner_approval=False,
             control=open_control(), drift=provider_identity_drift(),
