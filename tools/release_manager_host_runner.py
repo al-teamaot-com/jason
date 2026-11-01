@@ -3503,7 +3503,9 @@ def pin_exact_rollback_image(
             raise ReleaseManagerError("pinned rollback image tag readback mismatch")
 
 
-def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
+def _deploy_production_locked(
+    repo: Path, state_root: Path, record: dict[str, Any], *, allow_pinned_manual: bool = False
+) -> dict[str, Any]:
     if record.get("state") != "production_eligible":
         raise ReleaseManagerError("release is not Production Eligible")
     validate_release_record_contract(record)
@@ -3623,7 +3625,12 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     # Recheck after CCC/manifest work, immediately before the first production
     # transition. A GitHub merge during long preflight must not make a
     # formerly-current candidate silently supersede newer protected work.
-    require_current_protected_release_source(repo, record)
+    if allow_pinned_manual:
+        require_current_protected_release_source(
+            repo, record, allow_pinned_manual=True
+        )
+    else:
+        require_current_protected_release_source(repo, record)
     require_current_manual_scope_review(repo, state_root, record)
     require_owner_production_deployment_unfrozen(state_root)
     gate_transition(repo, state_root, record, "production")
@@ -4129,7 +4136,9 @@ def require_owner_production_deployment_unfrozen(state_root: Path) -> None:
     )
 
 
-def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
+def deploy_production(
+    repo: Path, state_root: Path, record: dict[str, Any], *, allow_pinned_manual: bool = False
+) -> dict[str, Any]:
     require_owner_production_deployment_unfrozen(state_root)
     lock = acquire_production_transaction_lock(repo, state_root, record)
     try:
@@ -4137,7 +4146,12 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
         require_current_manual_scope_review(repo, state_root, record)
         # Check fresh authoritative source before retention, breaker work, or
         # production deployment. Applies to explicit/manual and automatic paths.
-        require_current_protected_release_source(repo, record)
+        if allow_pinned_manual:
+            require_current_protected_release_source(
+                repo, record, allow_pinned_manual=True
+            )
+        else:
+            require_current_protected_release_source(repo, record)
         # Verify that the independent root reconciler is installed and active
         # before even bounded stopped-container retention maintenance.
         require_host_reconciler_ready(state_root)
@@ -4147,6 +4161,10 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
         # production lock, BEFORE root breaker revalidation and any live change.
         reconcile_stopped_rollback_retention()
         revalidate_circuit_breaker(state_root)
+        if allow_pinned_manual:
+            return _deploy_production_locked(
+                repo, state_root, record, allow_pinned_manual=True
+            )
         return _deploy_production_locked(repo, state_root, record)
     finally:
         release_production_transaction_lock(lock)
@@ -4318,7 +4336,9 @@ def authoritative_auto_promotion_head(repo: Path) -> str:
     return lines[0][0]
 
 
-def require_current_protected_release_source(repo: Path, record: dict[str, Any]) -> None:
+def require_current_protected_release_source(
+    repo: Path, record: dict[str, Any], *, allow_pinned_manual: bool = False
+) -> None:
     """Reject a superseded/manual candidate before a production transaction.
 
     Automatic selection already compares to main; manual promotion must obey the
@@ -4331,10 +4351,20 @@ def require_current_protected_release_source(repo: Path, record: dict[str, Any])
         raise ReleaseManagerError("production candidate or baseline SHA is invalid")
     current_main = authoritative_auto_promotion_head(repo)
     if candidate != current_main:
-        raise ReleaseManagerError(
-            "production release candidate is behind protected main; "
-            "reprepare and revalidate the exact current main revision"
-        )
+        if not allow_pinned_manual:
+            raise ReleaseManagerError(
+                "production release candidate is behind protected main; "
+                "reprepare and revalidate the exact current main revision"
+            )
+        import manual_release_scope
+        try:
+            manual_release_scope.verify_pinned_candidate_against_main(
+                repo, baseline, candidate, current_main=current_main
+            )
+        except (manual_release_scope.ScopeBlocked, OSError, ValueError) as exc:
+            raise ReleaseManagerError(
+                "pinned manual release blocked by newer protected changes: " + str(exc)
+            ) from exc
     # A valid candidate on main must also include the installed production
     # history; otherwise promoting it would drop production changes.
     ancestry = subprocess.run(
@@ -5073,7 +5103,10 @@ def main() -> int:
         print(json.dumps(record, indent=2))
         return 0
     if args.command == "promote":
-        record = deploy_production(repo, state_root, load_record(state_root, args.release_id))
+        record = deploy_production(
+            repo, state_root, load_record(state_root, args.release_id),
+            allow_pinned_manual=True,
+        )
         print(json.dumps(record, indent=2))
         return 0
     if args.command == "retry-closeout":

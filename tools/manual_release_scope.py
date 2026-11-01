@@ -5,6 +5,7 @@ A reviewed scope is NOT an Owner's exact-SHA deployment authorization.
 """
 from __future__ import annotations
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
@@ -60,13 +61,60 @@ def repository_from_origin(repo):
     return path
 
 
+def verify_pinned_candidate_against_main(repo, baseline, candidate, current_main=None):
+    """Allow a manual pinned candidate only when newer protected commits are unrelated.
+
+    This is read-only verification, not approval. Every path touched since the
+    candidate (including subsequently reverted edits) is considered. Runtime
+    release-control and policy paths always force a new review/release.
+    """
+    if not SHA.fullmatch(candidate) or not SHA.fullmatch(baseline):
+        raise ScopeBlocked("exact SHA required")
+    if current_main is None:
+        remote = command(["git", "ls-remote", "origin", "refs/heads/main"], repo).split()
+        if len(remote) != 2 or remote[1] != "refs/heads/main" or not SHA.fullmatch(remote[0]):
+            raise ScopeBlocked("protected main cannot be verified")
+        current_main = remote[0]
+    if not SHA.fullmatch(current_main):
+        raise ScopeBlocked("protected main revision invalid")
+    command(["git", "merge-base", "--is-ancestor", baseline, candidate], repo)
+    command(["git", "merge-base", "--is-ancestor", candidate, current_main], repo)
+    if current_main == candidate:
+        return
+    policy_file = Path(repo) / "config/release-manager-policy.json"
+    if not policy_file.is_file() or policy_file.is_symlink():
+        raise ScopeBlocked("protected release policy unavailable")
+    try:
+        policy = json.loads(policy_file.read_text(encoding="utf-8"))
+        patterns = policy["protected_core_globs"]
+        if not isinstance(patterns, list) or not patterns or not all(
+            isinstance(x, str) and x for x in patterns
+        ):
+            raise ValueError("invalid protected patterns")
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise ScopeBlocked("protected release policy invalid") from exc
+    candidate_paths = set(command(["git", "diff", "--no-renames", "--name-only",
+                                   baseline, candidate], repo).splitlines())
+    newer_paths = set(command(["git", "log", "--format=", "--name-only",
+                               "--no-renames", candidate + ".." + current_main],
+                              repo).splitlines())
+    control_paths = {
+        "tools/manual_release_scope.py",
+        "config/release-manager-policy.json",
+        "config/production-desired-state.json",
+    }
+    conflicts = sorted(path for path in newer_paths if path in candidate_paths
+                       or path in control_paths
+                       or any(fnmatch.fnmatch(path, pat) for pat in patterns))
+    if conflicts:
+        raise ScopeBlocked("newer protected commits affect pinned release scope or controls: "
+                           + ", ".join(conflicts[:6]))
+
+
 def source_scope(repo, baseline, candidate):
     if not SHA.fullmatch(baseline) or not SHA.fullmatch(candidate):
         raise ScopeBlocked("exact SHA required")
-    remote = command(["git", "ls-remote", "origin", "refs/heads/main"], repo).split()
-    if len(remote) != 2 or remote != [candidate, "refs/heads/main"]:
-        raise ScopeBlocked("candidate differs from current protected main")
-    command(["git", "merge-base", "--is-ancestor", baseline, candidate], repo)
+    verify_pinned_candidate_against_main(repo, baseline, candidate)
     commits = []
     lines = command(["git", "log", "--first-parent", "--reverse",
                      "--format=%H%x09%s", baseline + ".." + candidate], repo).splitlines()
