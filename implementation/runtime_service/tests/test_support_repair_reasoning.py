@@ -465,3 +465,55 @@ def test_normal_development_edit_turn_allows_bounded_evidence_requests(tmp_path)
     system=client.calls[0]['system']
     assert 'read-only evidence_requests' in system
     assert 'LAST authorized source-evidence turn' not in system
+
+
+
+def test_subscription_auth_failure_is_actionable_and_nonretryable(tmp_path):
+    class SubscriptionAuthFailureClient:
+        def complete(self, **kwargs):
+            raise ConnectorTransportError(
+                "HTTP transport failed with status 401",
+                status_code=401,
+                provider_error_code="subscription_auth_required",
+            )
+
+    directory = tmp_path / "reasoning" / "requests"
+    directory.mkdir(parents=True)
+    request = _request("search_plan")
+    (directory / (request["request_id"] + ".json")).write_text(json.dumps(request))
+    maint = SupportRepairReasoningMaintenance(
+        structured_client=SubscriptionAuthFailureClient(),
+        spool=tmp_path,
+    )
+    assert maint.tick()
+    response = json.loads(
+        (tmp_path / "reasoning" / "responses" / (request["request_id"] + ".json")).read_text()
+    )
+    assert response["primary_provider_error_code"] == "subscription_auth_required"
+    assert response["required_owner_action"] == "sign_in_chatgpt_subscription"
+    assert response["retryable"] is False
+
+
+def test_subscription_usage_limit_is_actionable_and_nonretryable(tmp_path):
+    class SubscriptionLimitClient:
+        def complete(self, **kwargs):
+            raise ConnectorTransportError(
+                "HTTP transport failed with status 429",
+                status_code=429,
+                provider_error_code="subscription_sharing_usage_limit_exceeded",
+            )
+
+    directory = tmp_path / "reasoning" / "requests"
+    directory.mkdir(parents=True)
+    request = _request("search_plan")
+    (directory / (request["request_id"] + ".json")).write_text(json.dumps(request))
+    maint = SupportRepairReasoningMaintenance(
+        structured_client=SubscriptionLimitClient(),
+        spool=tmp_path,
+    )
+    assert maint.tick()
+    response = json.loads(
+        (tmp_path / "reasoning" / "responses" / (request["request_id"] + ".json")).read_text()
+    )
+    assert response["required_owner_action"] == "review_chatgpt_subscription_usage"
+    assert response["retryable"] is False
