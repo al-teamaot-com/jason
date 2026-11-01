@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jason.local/schemas/recovery-state-inventory.schema.json",
+  "title": "Jason Recovery State Inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "classes"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "classes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "state_class",
+          "category",
+          "recovery_action",
+          "full_recovery_export",
+          "portable_deployment_export",
+          "contains_secrets",
+          "machine_bound",
+          "consistency",
+          "examples"
+        ],
+        "properties": {
+          "state_class": { "type": "string", "minLength": 1 },
+          "category": {
+            "enum": [
+              "configuration",
+              "policy",
+              "authority",
+              "audit",
+              "workflow",
+              "provider_mapping",
+              "business_state",
+              "secret",
+              "cryptographic_material",
+              "service_definition",
+              "observability",
+              "cache",
+              "transient",
+              "machine_identity"
+            ]
+          },
+          "recovery_action": {
+            "enum": [
+              "restore",
+              "reconstruct",
+              "regenerate",
+              "reenroll",
+              "discard"
+            ]
+          },
+          "full_recovery_export": { "type": "boolean" },
+          "portable_deployment_export": { "type": "boolean" },
+          "contains_secrets": { "type": "boolean" },
+          "machine_bound": { "type": "boolean" },
+          "consistency": {
+            "enum": [
+              "atomic_file",
+              "sqlite_consistent_snapshot",
+              "database_native_backup",
+              "provider_export",
+              "versioned_source",
+              "reconstructable",
+              "not_applicable"
+            ]
+          },
+          "examples": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "notes": { "type": "string" }
+        }
+      }
+    }
+  }
+}
