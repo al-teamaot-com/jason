@@ -226,6 +226,65 @@ def consume_mobile_release_decisions(
             raise PermissionError("processed mobile decision marker has conflicting evidence")
         return True
 
+    def processed_marker_needs_exact_reconstruction(
+        approval_id: str, evidence_sha: str,
+    ) -> bool:
+        """Return True only when an exact processed grant lost record materialization.
+
+        This is not decision replay. The immutable processed marker merely makes
+        the original signed receipt eligible for full re-verification below when
+        the same production-eligible release record has been recreated without
+        its owner_approval field. Candidate SHA and manifest digest must still
+        match exactly. Changed, historical or completed releases stay processed.
+        """
+        marker = consumed_dir / (approval_id + ".json")
+        if not marker.exists():
+            return False
+        stored = json.loads(marker.read_text(encoding="utf-8"))
+        if (stored.get("approval_id") != approval_id
+                or stored.get("signed_evidence_sha256") != evidence_sha):
+            raise PermissionError("processed mobile decision marker has conflicting evidence")
+        if stored.get("decision") != "approve" or stored.get("review_only") is True:
+            return False
+        release_id = str(stored.get("release_id") or "")
+        candidate_sha = str(stored.get("candidate_sha") or "")
+        manifest_sha = str(stored.get("manifest_sha256") or "")
+        if (not release_id or not re_full_sha(candidate_sha)
+                or not re.fullmatch(r"[0-9a-f]{64}", manifest_sha)):
+            raise PermissionError("processed mobile decision marker is incomplete")
+        record_path = state_root / "records" / (release_id + ".json")
+        if not record_path.is_file():
+            return False
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        if (record.get("state") != "production_eligible"
+                or str((record.get("release_candidate") or {}).get("candidate_sha") or "")
+                    != candidate_sha
+                or digest(record.get("release_manifest") or {}) != manifest_sha):
+            return False
+        # Missing approval alone is not evidence of lost materialization: unit
+        # tests and alternative exact approvers may intentionally leave release
+        # persistence to the caller. Reconstruction is eligible only when the
+        # current release record itself proves it was recreated *after* this
+        # immutable Teams decision had already been processed.
+        try:
+            marker_processed_at = datetime.fromisoformat(str(stored["processed_at"]))
+            record_created_at = datetime.fromisoformat(str(record["created_at"]))
+        except (KeyError, TypeError, ValueError):
+            return False
+        if (marker_processed_at.tzinfo is None or record_created_at.tzinfo is None
+                or record_created_at <= marker_processed_at):
+            return False
+        approval = record.get("owner_approval") or {}
+        if approval.get("approved") is True:
+            exact_source = "authenticated_mobile_teams_owner:" + approval_id
+            if (approval.get("candidate_sha") != candidate_sha
+                    or approval.get("source") != exact_source):
+                raise PermissionError(
+                    "processed Teams decision conflicts with current owner approval"
+                )
+            return False
+        return True
+
     # A completed historical decision needs no authority-database read at all.
     # Validate every immutable receipt marker BEFORE loading identity stores.
     # This eliminates schema write-lock attempts on 1.8 GiB of shared authority
@@ -235,7 +294,10 @@ def consume_mobile_release_decisions(
         approval_id, _, _, _, evidence_sha = row
         if not isinstance(approval_id, str) or not approval_id.startswith(REQUEST_PREFIX):
             raise PermissionError("unknown mobile decision ID prefix")
-        if not already_processed(approval_id, evidence_sha):
+        if (not already_processed(approval_id, evidence_sha)
+                or processed_marker_needs_exact_reconstruction(
+                    approval_id, evidence_sha
+                )):
             pending.append(row)
     if not pending:
         return 0
@@ -244,7 +306,10 @@ def consume_mobile_release_decisions(
     completed = 0
     for approval_id, encoded, receipt_json, envelope_json, evidence_sha in pending:
         # Another authenticated cycle may have just completed this receipt.
-        if already_processed(approval_id, evidence_sha):
+        reconstructing_processed = processed_marker_needs_exact_reconstruction(
+            approval_id, evidence_sha
+        )
+        if already_processed(approval_id, evidence_sha) and not reconstructing_processed:
             continue
         marker = consumed_dir / (approval_id + ".json")
         request = SQLiteApprovalRequestRepository._decode(encoded)
@@ -489,17 +554,18 @@ def consume_mobile_release_decisions(
             stored = json.loads((state_root / "records" / (release_id + ".json")).read_text())
             if stored.get("owner_approval") != prior_approval:
                 raise PermissionError("prior exact owner release grant changed during CCC review")
-        _private_atomic(marker, {
-            "schema_version": "1.0", "approval_id": approval_id,
-            "release_id": candidate.release_id,
-            "candidate_sha": sha,
-            "manifest_sha256": candidate.manifest_sha256,
-            "mobile_policy_sha256": policy.policy_sha256,
-            "signed_evidence_sha256": evidence_sha,
-            "decision": "approve",
-            **({"review_only": True} if review_only else {}),
-            "processed_at": datetime.now(timezone.utc).isoformat(),
-        })
+        if not reconstructing_processed:
+            _private_atomic(marker, {
+                "schema_version": "1.0", "approval_id": approval_id,
+                "release_id": candidate.release_id,
+                "candidate_sha": sha,
+                "manifest_sha256": candidate.manifest_sha256,
+                "mobile_policy_sha256": policy.policy_sha256,
+                "signed_evidence_sha256": evidence_sha,
+                "decision": "approve",
+                **({"review_only": True} if review_only else {}),
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+            })
         completed += 1
     return completed
 

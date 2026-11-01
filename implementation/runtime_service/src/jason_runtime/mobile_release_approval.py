@@ -640,8 +640,15 @@ class MobileReleaseApprovalMaintenance:
             raise PermissionError("Teams release policy changed without the reviewed runtime activation")
         paths = tuple(sorted((self.state_root / "mobile-release-offers").glob("release-*.json"),
                              key=lambda p: p.stat().st_mtime, reverse=True))[:20]
-        existing_ids = {
-            request.metadata.get("release_id")
+        existing_subjects = {
+            (
+                request.metadata.get("release_id"),
+                request.metadata.get("candidate_sha"),
+                request.metadata.get("rollback_sha"),
+                request.metadata.get("manifest_sha256"),
+                request.metadata.get("owner_policy_sha256"),
+                request.metadata.get("review_only") is True,
+            )
             for request in self.requests.list_all()
             if request.capability == CAPABILITY
         }
@@ -728,9 +735,18 @@ class MobileReleaseApprovalMaintenance:
                     and offered <= containment.released_at):
                 # An offer created before/during a hold may not be revived.
                 continue
-            if path.stem in existing_ids:
-                # Terminal cards are never silently reissued. A fresh review
-                # requires a separately recorded owner/release request.
+            offer_subject = (
+                offer.get("release_id"),
+                offer.get("candidate_sha"),
+                offer.get("live_rollback_sha"),
+                offer.get("manifest_sha256"),
+                policy.policy_sha256,
+                offer.get("review_only") is True,
+            )
+            if offer_subject in existing_subjects:
+                # The same immutable approval subject is one-shot even after a
+                # terminal decision. A changed manifest/policy/review mode is a
+                # different subject and receives a distinct approval_id/card.
                 continue
             try:
                 evidence = read_eligible_release(

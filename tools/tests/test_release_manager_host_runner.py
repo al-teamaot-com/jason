@@ -4622,3 +4622,67 @@ def test_freeze_exception_policy_is_production_control_core():
     assert runner.classify_change_risk(
         "release_blocker", ["config/production-deployment-freeze-exception.json"]
     ) == "production_control_core"
+
+def test_approval_only_republishes_same_release_offer_when_manifest_changes(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    import json
+    import release_mobile_approval_consumer as mobile_consumer
+    import jason_runtime.mobile_release_approval as mobile_policy
+    import jason_runtime.owner_release_approval_containment as containment
+
+    hold = tmp_path / "auto-promotion-incident-hold"
+    hold.touch()
+    policy = tmp_path / "mobile-approval-policy.json"
+    policy.write_text("{}")
+    (tmp_path / "records").mkdir()
+    release_id = runner.record_id(SHA_A)
+    record = {
+        "release_id": release_id, "state": "production_eligible",
+        "risk_profile": "normal", "rollback_sha": SHA_B,
+        "release_candidate": {"candidate_sha": SHA_A},
+        "release_manifest": {"candidate_sha": SHA_A, "rollback_sha": SHA_B},
+        "preproduction": {"acceptance_passed": True, "rollback_readiness_passed": True},
+        "development": {"required_checks_passed": True},
+        "owner_approval": {"approved": False},
+    }
+    record_path = tmp_path / "records" / (release_id + ".json")
+    runner.atomic_json(record_path, record)
+    reviewed = SimpleNamespace(schema_version="1.0",
+                               allowed_risk_profiles=frozenset({"normal"}))
+    live = {"revision": SHA_B,
+            "inspect": {"Config": {"Env": ["JASON_RELEASE_MOBILE_APPROVAL_MODE=owner_only_pilot"]}}}
+    control = {"schema_version": "1.0", "circuit_breaker": {"state": "closed"},
+               "last_known_good": {"manifest": {"revision": SHA_B}}}
+    drift = {"schema_version": "1.0", "status": "pass", "problems": []}
+
+    def snapshot(state, filename):
+        return control if filename == "production-control-state.json" else drift
+
+    with (
+        patch.object(runner, "DEFAULT_STATE", tmp_path),
+        patch.object(runner, "MOBILE_APPROVAL_POLICY", policy),
+        patch.object(runner, "_read_protected_snapshot", side_effect=snapshot),
+        patch.object(runner, "live_runtime", return_value=live),
+        patch.object(runner, "live_production_alignment", return_value={}),
+        patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
+        patch.object(mobile_consumer, "_install_repo_modules"),
+        patch.object(mobile_consumer, "consume_mobile_release_decisions"),
+        patch.object(mobile_policy, "read_mobile_release_policy", return_value=reviewed),
+        patch.object(containment, "read_release_approval_containment",
+                     return_value=SimpleNamespace(active=False)),
+    ):
+        assert runner.approval_only_while_promotion_held(ROOT, tmp_path)
+        offer_path = tmp_path / "mobile-release-offers" / (release_id + ".json")
+        first = json.loads(offer_path.read_text())
+
+        changed = json.loads(record_path.read_text())
+        changed["release_manifest"]["changed_files"] = ["rebuilt-artifact.py"]
+        runner.atomic_json(record_path, changed)
+
+        assert runner.approval_only_while_promotion_held(ROOT, tmp_path)
+        second = json.loads(offer_path.read_text())
+        assert second["release_id"] == first["release_id"]
+        assert second["candidate_sha"] == first["candidate_sha"]
+        assert second["live_rollback_sha"] == first["live_rollback_sha"]
+        assert second["manifest_sha256"] != first["manifest_sha256"]
