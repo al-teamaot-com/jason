@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import pmv3_work_engine as engine
+import pmv3_worker_pool as worker_pool
 
 
 class SchedulerInputError(RuntimeError):
@@ -45,6 +46,7 @@ def ingest_work(state: dict[str, Any], path: Path) -> int:
             approval_required=bool(raw.get("approval_required", False)),
             approval_request_id=str(raw.get("approval_request_id") or ""),
             idempotent=bool(raw.get("idempotent", False)),
+            required_role=str(raw.get("required_role") or ""),
         )
         if not item["action"]:
             raise SchedulerInputError("work item action required")
@@ -116,8 +118,11 @@ def simulation_handler(outcomes: dict[str, list[dict[str, str]]]):
     return handler
 
 
-def snapshot(state: Mapping[str, Any], *, admitted: int, approvals: int) -> dict[str, Any]:
-    return {
+def snapshot(
+    state: Mapping[str, Any], *, admitted: int, approvals: int,
+    pool_status: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    result = {
         "schema_version": engine.SCHEMA_VERSION,
         "cycle": int(state.get("cycle") or 0),
         "updated_at": state.get("updated_at"),
@@ -126,6 +131,9 @@ def snapshot(state: Mapping[str, Any], *, admitted: int, approvals: int) -> dict
         "progress_percent": engine.progress_percent(state),
         "metrics": dict(state.get("metrics") or {}),
     }
+    if pool_status is not None:
+        result["worker_pool"] = dict(pool_status)
+    return result
 
 
 def run_once(
@@ -137,6 +145,8 @@ def run_once(
     outcomes_path: Path,
     status_path: Path,
     capacity: int,
+    worker_pool_path: Path | None = None,
+    worker_health_path: Path | None = None,
 ) -> dict[str, Any]:
     state = engine.load_state(state_path)
     admitted = ingest_work(state, work_path)
@@ -144,15 +154,35 @@ def run_once(
     facts = load_facts(facts_path)
     outcomes = load_simulated_outcomes(outcomes_path)
 
+    allocator = None
+    pool_status = None
+    effective_capacity = max(0, int(capacity))
+    if (worker_pool_path is None) != (worker_health_path is None):
+        raise SchedulerInputError("worker pool and health inputs must be supplied together")
+    if worker_pool_path is not None and worker_health_path is not None:
+        pool = worker_pool.load_pool(worker_pool_path)
+        health = worker_pool.load_health(worker_health_path)
+        effective_capacity = worker_pool.available_capacity(pool, health)
+        allocator = lambda candidates, current: worker_pool.assignment_plan(
+            candidates, current, pool, health, max_assignments=effective_capacity
+        )
+        pool_status = {
+            "pool_id": pool["pool_id"],
+            "eligible_capacity": effective_capacity,
+            "eligible_worker_count": len(worker_pool.eligible_slots(pool, health)),
+            "assignment_strategy": pool["assignment_strategy"],
+        }
+
     engine.execute_cycle(
         state,
         facts=facts,
         handler=simulation_handler(outcomes),
-        capacity=capacity,
+        capacity=effective_capacity,
         checkpoint=lambda current: engine.atomic_write(state_path, current),
+        worker_allocator=allocator,
     )
     engine.atomic_write(state_path, state)
-    result = snapshot(state, admitted=admitted, approvals=approvals)
+    result = snapshot(state, admitted=admitted, approvals=approvals, pool_status=pool_status)
     engine.atomic_write(status_path, result)
     return result
 
@@ -165,7 +195,9 @@ def main() -> int:
     parser.add_argument("--approvals", type=Path, required=True)
     parser.add_argument("--outcomes", type=Path, required=True)
     parser.add_argument("--status", type=Path, required=True)
-    parser.add_argument("--capacity", type=int, default=3)
+    parser.add_argument("--capacity", type=int, default=3, help="legacy/static capacity when no worker pool is supplied")
+    parser.add_argument("--worker-pool", type=Path)
+    parser.add_argument("--worker-health", type=Path)
     args = parser.parse_args()
     result = run_once(
         state_path=args.state,
@@ -174,7 +206,9 @@ def main() -> int:
         approvals_path=args.approvals,
         outcomes_path=args.outcomes,
         status_path=args.status,
-        capacity=max(1, args.capacity),
+        capacity=max(0, args.capacity),
+        worker_pool_path=args.worker_pool,
+        worker_health_path=args.worker_health,
     )
     print(
         "PMV3_SCHEDULER=OK"

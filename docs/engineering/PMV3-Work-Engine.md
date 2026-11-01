@@ -21,6 +21,42 @@ The implementation must prove the following before production integration:
 - external authority/credential/billing gates remain external and are not invented;
 - completion percentage describes the entire accepted PMV3 workload, not setup steps.
 
+## Elastic role-based worker pool
+
+Canonical Owner requirements for this behavior are tracked in PMV3 #2192 and TODO-OPS-013 #1500.
+
+PMV3 engineering capacity is device-agnostic. The scheduler may use any number
+of exact Owner-enrolled devices that expose an accepted versioned worker role.
+Claw2-PC is the first acceptance target, not a hard-coded secondary host.
+
+The pool contract is:
+
+- role manifests define the reusable component/service behavior;
+- enrollment binds an exact device identity to an exact role/version;
+- independent health/attestation determines whether that role instance supplies
+  scheduling capacity;
+- capacity is the sum of healthy role-instance concurrency, not a fixed number
+  attached to the production host;
+- PMV3 assigns runnable items with a central worker claim before execution;
+- stable action keys, fenced claims and durable checkpoints prevent duplicate
+  execution when a worker restarts, drains, disappears or is replaced;
+- recoverable work may be reassigned to another healthy eligible instance while
+  unrelated work continues;
+- a worker pool member receives no production approval/deployment authority,
+  production secrets, direct provider access or new tenant authority merely by
+  being enrolled.
+
+`config/worker-pools/pmv3-engineering-workers-v1.json` is the reviewed pool
+registry foundation. `tools/pmv3_worker_pool.py` validates membership and
+produces deterministic least-loaded assignment plans. The generic preproduction
+scheduler can consume a worker-pool registry plus an independent health snapshot
+and derives effective capacity from those sources. A member whose enrollment is
+not `active` contributes zero capacity even if health claims it is ready.
+
+Production remote execution remains separately governed under TODO-OPS-013.
+The pool planner does not provision a machine or grant shell authority.
+
+
 ## Isolation
 
 The first PMV3 implementation is intentionally handler-driven. Tests and

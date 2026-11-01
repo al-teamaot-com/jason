@@ -278,3 +278,55 @@ def test_validation_failure_is_bounded_retryable():
     module.execute_cycle(state, facts={}, handler=handler, now=due)
     assert state["items"]["PMV3-17"]["phase"] == "complete"
     assert len(calls) == 2
+
+
+def test_worker_allocator_binds_distinct_claims_before_execution():
+    state = module.empty_state()
+    module.admit(state, module.make_item("PMV3-W1", "build-a"))
+    module.admit(state, module.make_item("PMV3-W2", "build-b"))
+    seen = {}
+
+    def allocator(candidates, current):
+        assert [item["id"] for item in candidates] == ["PMV3-W1", "PMV3-W2"]
+        return {
+            "PMV3-W1": {"worker_id": "worker-a", "worker_role": "dev@1"},
+            "PMV3-W2": {"worker_id": "worker-b", "worker_role": "dev@1"},
+        }
+
+    def handler(item, key):
+        seen[item["id"]] = (item["worker_id"], item["worker_role"])
+        return module.Outcome("complete", receipt="ok-" + item["id"])
+
+    module.execute_cycle(
+        state, facts={}, handler=handler, capacity=2, now=NOW,
+        worker_allocator=allocator,
+    )
+    assert seen == {
+        "PMV3-W1": ("worker-a", "dev@1"),
+        "PMV3-W2": ("worker-b", "dev@1"),
+    }
+    assert state["items"]["PMV3-W1"]["phase"] == "complete"
+    assert state["items"]["PMV3-W2"]["phase"] == "complete"
+
+
+def test_interrupted_worker_claim_is_unfenced_before_safe_reassignment():
+    state = module.empty_state()
+    module.admit(state, module.make_item("PMV3-W3", "recover", idempotent=True))
+    item = state["items"]["PMV3-W3"]
+    item["phase"] = "running"
+    item["worker_id"] = "lost-worker"
+    item["worker_role"] = "dev@1"
+
+    def allocator(candidates, current):
+        return {"PMV3-W3": {"worker_id": "replacement-worker", "worker_role": "dev@1"}}
+
+    def handler(item, key):
+        assert item["worker_id"] == "replacement-worker"
+        return module.Outcome("complete", receipt="reassigned")
+
+    module.execute_cycle(
+        state, facts={}, handler=handler, capacity=1, now=NOW,
+        worker_allocator=allocator,
+    )
+    assert state["items"]["PMV3-W3"]["phase"] == "complete"
+    assert state["items"]["PMV3-W3"]["worker_id"] == "replacement-worker"
