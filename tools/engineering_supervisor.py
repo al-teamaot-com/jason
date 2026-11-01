@@ -82,6 +82,8 @@ def classify(phase: str, reason: str, *, lane: str) -> tuple[str, str]:
         return "recoverable_source", "native_worker_verify_rollback_interruption_or_escalate"
     if "invalid exact source symbol" in text:
         return "recoverable_source", "native_worker_verify_symbol_parser_upgrade_or_escalate"
+    if "source path not authorized" in text:
+        return "recoverable_source", "native_worker_retry_authorized_source_discovery_or_escalate"
     if "invalid source search" in text:
         return "recoverable_source", "native_worker_verify_search_shape_upgrade_or_escalate"
     if "source evidence turn budget exhausted" in text:
