@@ -128,6 +128,7 @@ alignment, current protected-main source, recorded whole-main scope review,
 preproduction and rollback readiness, and signed exact-SHA Teams Owner approval.
 The reviewed whole-main recovery remains bounded to 64 changed files; a larger
 candidate fails closed and must be separately reviewed.
+The subscription sidecar uses the fixed Docker volume name `jason_codex_subscription_auth`, so a governed production Compose deployment reuses the previously authenticated ChatGPT session instead of creating a project-prefixed empty volume.
 
 ### Subscription-first PMv3 reasoning
 
