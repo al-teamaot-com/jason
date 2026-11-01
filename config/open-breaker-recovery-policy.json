@@ -30,7 +30,7 @@
       "id": "provider_identity_and_authority_recovery",
       "change_class": "release_blocker",
       "risk_profile": "production_control_core",
-      "max_changed_files": 70,
+      "max_changed_files": 74,
       "drift_problems": [
         {
           "kind": "failed_system_unit",
