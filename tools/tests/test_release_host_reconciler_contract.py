@@ -107,7 +107,7 @@ def test_root_worker_materializes_candidate_reconcile_script_and_requires_contra
 
 def test_root_worker_has_bounded_outer_timeout_and_preserves_timeout_evidence():
     text = (ROOT / "tools" / "release_host_reconcile_worker.py").read_text(encoding="utf-8")
-    assert "HOST_RECONCILE_TIMEOUT_SECONDS = 360" in text
+    assert "HOST_RECONCILE_TIMEOUT_SECONDS = 4200" in text
     assert "except subprocess.TimeoutExpired as exc" in text
     assert "candidate host reconciliation script exceeded" in text
     assert "detail[-3000:]" in text
@@ -131,8 +131,8 @@ def test_root_worker_unit_timeout_exceeds_script_deadline_and_processes_one_requ
     unit = (ROOT / 'infrastructure/openclaw-operations/systemd/jason-release-host-reconcile.service').read_text(encoding='utf-8')
     path = (ROOT / 'infrastructure/openclaw-operations/systemd/jason-release-host-reconcile.path').read_text(encoding='utf-8')
     assert 'MAX_REQUESTS_PER_RUN = 1' in text
-    assert 'HOST_RECONCILE_TIMEOUT_SECONDS = 360' in text
-    assert 'TimeoutStartSec=480' in unit
+    assert 'HOST_RECONCILE_TIMEOUT_SECONDS = 4200' in text
+    assert 'TimeoutStartSec=4500' in unit
     assert 'DirectoryNotEmpty=' in path
 
 
@@ -197,12 +197,12 @@ def test_pinned_legacy_health_timeout_does_not_skip_mandatory_health_verificatio
     assert "body = body.replace(LEGACY_HEALTH_FROM, LEGACY_HEALTH_TO)" in text
     assert "HOST_RECONCILE_LEGACY_ROLLBACK_TIMEOUT_SECONDS = 410" in text
     assert "if source_revision == LEGACY_LKG_SHA" in text
-    # The native Release Manager's independent 420-second absolute deadline
-    # and root systemd unit's 480-second deadline must still bound the work.
+    # The native Release Manager and root systemd unit remain finitely bounded
+    # above the root worker's recovery-proof window.
     manager = (ROOT / "tools" / "release_manager_host_runner.py").read_text()
     systemd = (ROOT / "infrastructure/openclaw-operations/systemd/jason-release-host-reconcile.service").read_text()
-    assert "timeout_seconds: float = 420.0" in manager
-    assert "TimeoutStartSec=480" in systemd
+    assert "timeout_seconds: float = 4440.0" in manager
+    assert "TimeoutStartSec=4500" in systemd
 
 
 
