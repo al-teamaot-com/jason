@@ -2,6 +2,7 @@ import importlib.util
 import json
 import pytest
 import subprocess
+import sys
 from pathlib import Path
 
 MODULE = Path(__file__).resolve().parents[1] / 'support_repair_host_worker.py'
@@ -2085,7 +2086,7 @@ def _invalid_symbol_recovery_fixture(tmp_path, monkeypatch, *, upgrade=True):
         return fresh
     monkeypatch.setattr(worker, "ensure_worktree", make_worktree)
     monkeypatch.setattr(worker, "support_worktree_path", lookup)
-    monkeypatch.setitem(sys.modules, worker.__name__, worker)
+    monkeypatch.setitem(worker.sys.modules, worker.__name__, worker)
     class Gate:
         def path_denial_reason(self, path, policy):
             return "denied" if "secrets" in path else None
@@ -2205,6 +2206,87 @@ def test_invalid_symbol_readmission_denies_changed_ancestry(tmp_path, monkeypatc
         {"items": {item["id"]: record}}, [item], repo, spool, gate, {}, max_active=2
     ) == []
     assert not fresh.exists()
+
+
+def test_legacy_invalid_symbol_phrase_is_downgraded_to_governed_search(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    def git(*args):
+        return worker.run(["git", *args], cwd=repo)
+    git("init")
+    git("config", "user.email", "test@example.invalid")
+    git("config", "user.name", "Test")
+    (repo / "tools").mkdir()
+    (repo / "tools/support_repair_host_worker.py").write_text("def branch_name(x):\n    return x\n")
+    (repo / "tools/release_manager_host_runner.py").write_text(
+        "CONTROL = 'production-control-state'\n"
+        "def load_control_state(root):\n    return {'schema_version':'1.0'}\n"
+    )
+    git("add", ".")
+    git("commit", "-m", "base")
+    head = git("rev-parse", "HEAD")
+    git("update-ref", "refs/remotes/origin/main", head)
+    item = {"id": "SUPPORT-OPS-061", "priority": "P0",
+            "title": "Root-owned release state", "evidence": "readback",
+            "acceptance": "safe controller readback"}
+    spool = tmp_path / "spool"
+    prior = worker.queue_reasoning(spool, kind="edit_plan", item=item, context={})
+    response = spool / "reasoning/responses" / (prior + ".json")
+    response.parent.mkdir(parents=True, exist_ok=True)
+    response.write_text(json.dumps({
+        "status": "succeeded", "request_id": prior, "kind": "edit_plan",
+        "support_item": item["id"],
+        "result": {
+            "summary": "Need exact controller source", "blocked_reason": None,
+            "edits": [], "test_paths": [],
+            "evidence_requests": [{"tool": "read_source",
+                "path": "tools/release_manager_host_runner.py",
+                "query": "production-control-state"}],
+        },
+    }))
+    record = {"phase": "blocked",
+              "reason": "EvidenceToolError: invalid exact source symbol",
+              "branch": worker.branch_name(item["id"]),
+              "reasoning_request_id": prior}
+    state = {"items": {item["id"]: record}}
+    fresh = tmp_path / "fresh"
+    def make_worktree(source, item_id, branch):
+        assert item_id == item["id"]
+        if not fresh.is_dir():
+            worker.run(["git", "worktree", "add", "-b", branch, str(fresh), "origin/main"], cwd=repo)
+        return fresh
+    monkeypatch.setattr(worker, "ensure_worktree", make_worktree)
+    monkeypatch.setattr(worker, "safe_search", lambda *args, **kwargs: [{
+        "path": "tools/release_manager_host_runner.py",
+        "content": "CONTROL = production-control-state",
+    }])
+    evidence_policy = {
+        "enabled": True,
+        "max_evidence_turns_per_item": 4,
+        "max_tool_requests_per_turn": 3,
+        "allowed_read_tools": ["search_source", "read_source"],
+        "max_sources_per_turn": 3,
+        "max_source_chars": 12000,
+        "max_total_source_chars": 24000,
+        "max_previous_sources": 2,
+        "max_receipts": 5,
+    }
+    monkeypatch.setattr(worker.engineering_evidence_tools, "load_policy", lambda repo: evidence_policy)
+    monkeypatch.setitem(sys.modules, worker.__name__, worker)
+    class Gate:
+        def path_denial_reason(self, path, policy):
+            return None
+    assert worker.readmit_legacy_malformed_source_selector_as_search(
+        state, [item], repo, spool, Gate(), evidence_policy, max_active=2
+    ) == [item["id"]]
+    assert record["phase"] == "implementing"
+    assert record["evidence_turn_count"] == 1
+    assert record["legacy_symbol_search_recovery_original_request_id"] == prior
+    assert record["reasoning_request_id"] != prior
+    next_request = json.loads((spool / "reasoning/requests" /
+                               (record["reasoning_request_id"] + ".json")).read_text())
+    assert next_request["context"]["previous_reasoning_request_id"] == prior
+    assert next_request["context"]["read_only_tool_receipts"]
 
 
 def test_symbol_blocker_supervisor_classifies_native_verified_path():

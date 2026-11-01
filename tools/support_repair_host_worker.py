@@ -2785,6 +2785,138 @@ def readmit_verified_legacy_search_shape_after_upgrade(
             continue
     return resumed
 
+def readmit_legacy_malformed_source_selector_as_search(
+    state: dict[str, Any], eligible: list[dict[str, str]],
+    repo: Path, spool: Path, gate, policy: Mapping[str, Any],
+    *, max_active: int,
+) -> list[str]:
+    """Recover one legacy P0 read_source selector that is plainly search text.
+
+    Historical evidence requests sometimes used a non-Python phrase such as
+    production-control-state as a read_source symbol. This recovery does not
+    reinterpret that phrase as code. It may only downgrade exactly one such
+    malformed request to the existing governed read-only search_source tool,
+    after validating the original request/response shape and tracked path.
+    No edit, shell, approval, or provider authority is introduced.
+    """
+    records = state.get('items') if isinstance(state.get('items'), dict) else {}
+    active = sum(1 for entry in records.values() if isinstance(entry, Mapping)
+                 and entry.get('phase') in {'diagnosing', 'implementing',
+                                            'ci_repair_needed', 'ci_repairing'})
+    slots = max(0, max(1, int(max_active)) - active)
+    resumed: list[str] = []
+    for item in eligible:
+        if not slots:
+            break
+        item_id = str(item.get('id') or '')
+        record = records.get(item_id)
+        turn_count = record.get('evidence_turn_count', 0) if isinstance(record, dict) else 0
+        if (item.get('priority') != 'P0' or not isinstance(record, dict)
+                or record.get('phase') != 'blocked'
+                or record.get('reason') != 'EvidenceToolError: invalid exact source symbol'
+                or record.get('legacy_symbol_search_recovery_request_id')
+                or record.get('symbol_read_recovery_request_id')
+                or record.get('pr_number')
+                or record.get('blocker_class') in {'external_authority', 'blocked_by_dependency'}
+                or type(turn_count) is not int or not 0 <= turn_count < 4):
+            continue
+        prior_id = str(record.get('reasoning_request_id') or '')
+        if not re.fullmatch(r'[0-9a-f]{64}', prior_id):
+            continue
+        branch = branch_name(item_id) + '-context-' + prior_id[:12]
+        try:
+            head = run(['git', 'rev-parse', 'origin/main'], cwd=repo)
+            if not re.fullmatch(r'[0-9a-f]{40}', head):
+                continue
+            request_path = spool / 'reasoning' / 'requests' / (prior_id + '.json')
+            if not request_path.is_file() or request_path.stat().st_size > 250000:
+                continue
+            request = json.loads(request_path.read_text(encoding='utf-8'))
+            response = reasoning_response(spool, prior_id)
+            if (not isinstance(request, Mapping)
+                    or request.get('request_id') != prior_id
+                    or request_id(request) != prior_id
+                    or request.get('kind') != 'edit_plan'
+                    or request.get('support_item') != item_id
+                    or not isinstance(request.get('context'), Mapping)
+                    or not isinstance(response, Mapping)
+                    or response.get('status') != 'succeeded'
+                    or response.get('request_id') != prior_id
+                    or response.get('kind') != 'edit_plan'
+                    or response.get('support_item') != item_id
+                    or not isinstance(response.get('result'), Mapping)):
+                continue
+            result = response['result']
+            source_calls = result.get('evidence_requests')
+            if (result.get('blocked_reason') or result.get('edits')
+                    or result.get('test_paths')
+                    or not isinstance(source_calls, list)
+                    or not 1 <= len(source_calls) <= 3):
+                continue
+            worktree = ensure_worktree(repo, item_id, branch)
+            if (run(['git', 'branch', '--show-current'], cwd=worktree) != branch
+                    or run(['git', 'rev-parse', 'HEAD'], cwd=worktree) != head
+                    or run(['git', 'status', '--porcelain', '--untracked-files=all'], cwd=worktree)):
+                continue
+            malformed_index = None
+            malformed_query = None
+            for index, action in enumerate(source_calls):
+                if not isinstance(action, Mapping) or action.get('tool') != 'read_source':
+                    continue
+                query = action.get('query')
+                try:
+                    engineering_evidence_tools.exact_source_symbols(query)
+                except engineering_evidence_tools.EvidenceToolError:
+                    if malformed_index is not None:
+                        malformed_index = -1
+                        break
+                    path = action.get('path')
+                    if (not isinstance(query, str)
+                            or not 3 <= len(query.strip()) <= 100
+                            or re.fullmatch(r'[A-Za-z0-9_ .:/-]{3,100}', query.strip()) is None
+                            or '..' in query
+                            or not isinstance(path, str)
+                            or not engineering_evidence_tools._safe_path(worktree, path, gate, policy)):
+                        malformed_index = -1
+                        break
+                    malformed_index = index
+                    malformed_query = query.strip()
+            if malformed_index is None or malformed_index < 0 or malformed_query is None:
+                continue
+            sanitized = dict(result)
+            repaired_calls = [dict(action) for action in source_calls]
+            repaired_calls[malformed_index] = {
+                'tool': 'search_source', 'path': None, 'query': malformed_query,
+            }
+            sanitized['evidence_requests'] = repaired_calls
+            next_record = dict(record)
+            next_record['evidence_turn_count'] = turn_count
+            ok = engineering_evidence_tools.continue_evidence_session(
+                response_result=sanitized, record=next_record, item=item, spool=spool,
+                worktree=worktree, repo=repo, gate=gate, repair_policy=policy,
+                support=sys.modules[__name__], queue_reasoning=queue_reasoning,
+                context_base=request['context'],
+            )
+            if not ok or next_record.get('reasoning_request_id') == prior_id:
+                continue
+            record.update(next_record)
+            record.update({
+                'phase': 'implementing',
+                'branch': branch,
+                'reason': 'Legacy malformed source selector safely downgraded to governed read-only search.',
+                'legacy_symbol_search_recovery_request_id': next_record['reasoning_request_id'],
+                'legacy_symbol_search_recovery_original_request_id': prior_id,
+                'legacy_symbol_search_recovery_source_revision': head,
+                'updated_at': now(),
+            })
+            resumed.append(item_id)
+            slots -= 1
+        except (WorkerError, engineering_evidence_tools.EvidenceToolError,
+                OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+    return resumed
+
+
 def readmit_verified_malformed_source_symbol_after_upgrade(
     state: dict[str, Any], eligible: list[dict[str, str]],
     repo: Path, spool: Path, gate, policy: Mapping[str, Any],
@@ -3229,6 +3361,9 @@ def main() -> int:
         state, support, repo, spool, gate, policy, max_active=args.max_active,
     )
     resume_verified_recovery_interrupted_by_rollback(
+        state, support, repo, spool, gate, policy, max_active=args.max_active,
+    )
+    readmit_legacy_malformed_source_selector_as_search(
         state, support, repo, spool, gate, policy, max_active=args.max_active,
     )
     readmit_verified_malformed_source_symbol_after_upgrade(
