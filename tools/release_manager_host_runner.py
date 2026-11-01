@@ -39,6 +39,7 @@ DEFAULT_REPO = Path("/home/al/.local/lib/jason/engineering-worker-source")
 DEFAULT_STATE = Path("/var/lib/jason/openclaw/release-manager")
 MOBILE_APPROVAL_POLICY = Path("/var/lib/jason/authority/mobile-release-approval-policy.json")
 SOURCE_MOBILE_APPROVAL_POLICY = Path("config/mobile-release-approval-policy.json")
+SOURCE_OPEN_BREAKER_RECOVERY_POLICY = Path("config/open-breaker-recovery-policy.json")
 SHA = re.compile(r"^[0-9a-f]{40}$")
 MUTATION_ENV_OVERRIDES = {
     "JASON_AUTOTASK_MUTATION_ENABLED": "false",
@@ -897,6 +898,7 @@ def classify_change_risk(change_class: str, files: list[str]) -> str:
             "config/release-manager-policy.json",
             "config/production-desired-state.json",
             "config/mobile-release-approval-policy.json",
+            "config/open-breaker-recovery-policy.json",
             "tools/install_release_host_reconciler.py",
             "tools/install_release_control_transition.py",
             "tools/protected_root_policy_migration.py",
@@ -3503,7 +3505,10 @@ def pin_exact_rollback_image(
             raise ReleaseManagerError("pinned rollback image tag readback mismatch")
 
 
-def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
+def _deploy_production_locked(
+    repo: Path, state_root: Path, record: dict[str, Any], *,
+    recovery_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if record.get("state") != "production_eligible":
         raise ReleaseManagerError("release is not Production Eligible")
     validate_release_record_contract(record)
@@ -3582,7 +3587,20 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     record["ccc_pre_mutation_gate"] = ccc_preflight
 
     controller_pin = controller_identity(deploy_worktree)
-    baseline_manifest = capture_production_manifest(rollback_sha)
+    if recovery_context is None:
+        baseline_manifest = capture_production_manifest(rollback_sha)
+    else:
+        protected = load_control_state(state_root)
+        baseline_manifest = dict(
+            (protected.get("last_known_good") or {}).get("manifest") or {}
+        )
+        if (baseline_manifest.get("complete") is not True
+                or baseline_manifest.get("revision") != rollback_sha):
+            raise ReleaseManagerError(
+                "open-breaker recovery rollback manifest differs from protected LKG"
+            )
+        record["open_breaker_recovery"] = dict(recovery_context)
+        record["open_breaker_recovery"]["admitted_at"] = now()
     owner_read_canary_session = None
     if (candidate_autotask_profile is not None
             and candidate_autotask_profile != prior_autotask_profile):
@@ -3596,9 +3614,14 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
     record["last_known_good_manifest"] = baseline_manifest
     record["pre_mutation_health"] = {
         "passed": True,
-        "observed_at": baseline_manifest["observed_at"],
+        "observed_at": (
+            now() if recovery_context is not None
+            else baseline_manifest["observed_at"]
+        ),
         "revision": rollback_sha,
         "manifest_complete": bool(baseline_manifest.get("complete")),
+        **({"open_breaker_recovery_profile": recovery_context["profile_id"]}
+           if recovery_context is not None else {}),
     }
     # Protected baseline is already a root-owned, verified last-known-good.
     # The root transition worker only accepts approved candidate release IDs,
@@ -3610,8 +3633,24 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         existing_manifest = dict((protected_state.get("last_known_good") or {}).get("manifest") or {})
         if existing_manifest.get("revision") != rollback_sha or existing_manifest.get("complete") is not True:
             raise ReleaseManagerError("root protected rollback baseline differs from verified production")
-        if dict(protected_state.get("circuit_breaker") or {}).get("state") != "closed":
-            raise ReleaseManagerError("root protected circuit breaker is not closed")
+        protected_breaker = dict(protected_state.get("circuit_breaker") or {})
+        if protected_breaker.get("state") != "closed":
+            if recovery_context is None:
+                raise ReleaseManagerError("root protected circuit breaker is not closed")
+            refreshed_recovery = governed_open_breaker_recovery_context(
+                repo, state_root, record, require_owner_approval=True,
+            )
+            comparable = ("profile_id", "candidate_sha", "rollback_sha",
+                          "drift_problems", "policy_sha256")
+            if (refreshed_recovery is None
+                    or any(refreshed_recovery.get(key) != recovery_context.get(key)
+                           for key in comparable)):
+                raise ReleaseManagerError(
+                    "open-breaker recovery context changed before production mutation"
+                )
+            recovery_context = refreshed_recovery
+            record["open_breaker_recovery"] = dict(recovery_context)
+            record["open_breaker_recovery"]["revalidated_at"] = now()
     else:
         set_last_known_good(
             state_root,
@@ -3771,6 +3810,7 @@ def _deploy_production_locked(repo: Path, state_root: Path, record: dict[str, An
         }
         record["evidence_bundle"] = {
             "release_id": record["release_id"],
+            "open_breaker_recovery": record.get("open_breaker_recovery"),
             "candidate_sha": candidate_sha,
             "release_manifest": record["release_manifest"],
             "risk_profile": record["risk_profile"],
@@ -4146,8 +4186,33 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
         # Remove only historical stopped rollback containers under the exclusive
         # production lock, BEFORE root breaker revalidation and any live change.
         reconcile_stopped_rollback_retention()
-        revalidate_circuit_breaker(state_root)
-        return _deploy_production_locked(repo, state_root, record)
+        recovery_context = None
+        try:
+            revalidate_circuit_breaker(state_root)
+        except ReleaseManagerError as ordinary_breaker_error:
+            # Only a source-reviewed, exact-drift recovery profile may continue
+            # after the ordinary breaker path fails. Any missing/mismatched
+            # recovery evidence preserves the original fail-closed error.
+            try:
+                control = _read_protected_snapshot(
+                    state_root, "production-control-state.json"
+                )
+                drift = _read_protected_snapshot(
+                    state_root, "production-drift.json"
+                )
+                recovery_context = governed_open_breaker_recovery_context(
+                    repo, state_root, record, require_owner_approval=True,
+                    control=control, drift=drift,
+                )
+            except ReleaseManagerError:
+                recovery_context = None
+            if recovery_context is None:
+                raise ordinary_breaker_error
+        if recovery_context is None:
+            return _deploy_production_locked(repo, state_root, record)
+        return _deploy_production_locked(
+            repo, state_root, record, recovery_context=recovery_context
+        )
     finally:
         release_production_transaction_lock(lock)
 
@@ -4369,6 +4434,174 @@ def live_release_mobile_approval_mode(runtime: dict[str, Any]) -> str:
     return selected[0] if selected[0] in {"owner_only_pilot", "owner_reviewed"} else "off"
 
 
+def _open_breaker_recovery_policy(repo: Path, candidate_sha: str) -> dict[str, Any]:
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    try:
+        raw = subprocess.check_output(
+            ["git", "-C", str(repo), "show",
+             candidate_sha + ":" + str(SOURCE_OPEN_BREAKER_RECOVERY_POLICY)],
+            stderr=subprocess.DEVNULL, timeout=15,
+        )
+        policy = json.loads(raw)
+    except (OSError, ValueError, TypeError, subprocess.CalledProcessError,
+            subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
+        raise ReleaseManagerError("open-breaker recovery policy is unavailable") from exc
+    if len(raw) > 32768 or not isinstance(policy, dict):
+        raise ReleaseManagerError("open-breaker recovery policy is invalid")
+    if (set(policy) != {"schema_version", "enabled", "profiles"}
+            or policy.get("schema_version") != "1.0"
+            or policy.get("enabled") is not True
+            or not isinstance(policy.get("profiles"), list)
+            or not 1 <= len(policy["profiles"]) <= 16):
+        raise ReleaseManagerError("open-breaker recovery policy contract is invalid")
+    seen: set[str] = set()
+    for profile in policy["profiles"]:
+        required = {"id", "change_class", "risk_profile", "max_changed_files",
+                    "drift_problems", "required_changed_files"}
+        if not isinstance(profile, dict) or set(profile) != required:
+            raise ReleaseManagerError("open-breaker recovery profile shape is invalid")
+        identity = profile.get("id")
+        if (not isinstance(identity, str)
+                or re.fullmatch(r"[a-z][a-z0-9_]{2,63}", identity) is None
+                or identity in seen):
+            raise ReleaseManagerError("open-breaker recovery profile identity is invalid")
+        seen.add(identity)
+        if (profile.get("change_class") != "release_blocker"
+                or profile.get("risk_profile") != "production_control_core"
+                or type(profile.get("max_changed_files")) is not int
+                or not 1 <= profile["max_changed_files"] <= 32):
+            raise ReleaseManagerError("open-breaker recovery profile authority is invalid")
+        problems = profile.get("drift_problems")
+        files = profile.get("required_changed_files")
+        if (not isinstance(problems, list) or not 1 <= len(problems) <= 8
+                or not isinstance(files, list) or not 1 <= len(files) <= 16
+                or len(set(files)) != len(files)):
+            raise ReleaseManagerError("open-breaker recovery profile bounds are invalid")
+        problem_ids: set[tuple[str, str]] = set()
+        for problem in problems:
+            if (not isinstance(problem, dict) or set(problem) != {"kind", "unit"}
+                    or re.fullmatch(r"failed_(?:system|user)_unit", str(problem.get("kind") or "")) is None
+                    or re.fullmatch(r"jason-[a-z0-9_.@-]{1,120}", str(problem.get("unit") or "")) is None):
+                raise ReleaseManagerError("open-breaker recovery drift identity is invalid")
+            problem_ids.add((problem["kind"], problem["unit"]))
+        if len(problem_ids) != len(problems):
+            raise ReleaseManagerError("open-breaker recovery drift identities must be unique")
+        if any(not isinstance(value, str) or not value or value.startswith("/") or ".." in value
+               for value in files):
+            raise ReleaseManagerError("open-breaker recovery required file is invalid")
+    return policy
+
+
+def _drift_problem_identities(drift: Mapping[str, Any]) -> tuple[tuple[str, str], ...]:
+    problems = drift.get("problems")
+    if not isinstance(problems, list) or not problems or len(problems) > 16:
+        raise ReleaseManagerError("open-breaker recovery requires bounded nonempty drift")
+    result: list[tuple[str, str]] = []
+    for problem in problems:
+        if not isinstance(problem, Mapping):
+            raise ReleaseManagerError("open-breaker recovery drift entry is invalid")
+        kind = str(problem.get("kind") or "")
+        unit = str(problem.get("unit") or "")
+        if (re.fullmatch(r"failed_(?:system|user)_unit", kind) is None
+                or re.fullmatch(r"jason-[a-z0-9_.@-]{1,120}", unit) is None
+                or str(problem.get("state") or "") != "failed"):
+            raise ReleaseManagerError("open-breaker recovery drift is outside reviewed unit-failure scope")
+        result.append((kind, unit))
+    if len(set(result)) != len(result):
+        raise ReleaseManagerError("open-breaker recovery drift contains duplicate identity")
+    return tuple(sorted(result))
+
+
+def governed_open_breaker_recovery_context(
+    repo: Path, state_root: Path, record: dict[str, Any], *,
+    require_owner_approval: bool,
+    control: Mapping[str, Any] | None = None,
+    drift: Mapping[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Prove one source-reviewed recovery release may cross an already-open breaker.
+
+    This is not a generic breaker bypass. The fresh root drift set must match one
+    reviewed profile exactly; live production and immutable LKG must still equal
+    the recorded rollback SHA; exact-main, preproduction, scope review and signed
+    Teams owner authority remain mandatory. Closeout still requires clean drift.
+    """
+    control_doc = dict(control or _read_protected_snapshot(
+        state_root, "production-control-state.json"))
+    drift_doc = dict(drift or _read_protected_snapshot(
+        state_root, "production-drift.json"))
+    breaker = control_doc.get("circuit_breaker") or {}
+    if (not isinstance(breaker, Mapping)
+            or breaker.get("state") != "open"
+            or breaker.get("source") != "production_drift_watchdog"
+            or breaker.get("reason") != "continuous_production_drift_detected"
+            or drift_doc.get("schema_version") != "1.0"
+            or drift_doc.get("status") != "drift_detected"):
+        return None
+    try:
+        observed = datetime.fromisoformat(str(drift_doc.get("observed_at") or "").replace("Z", "+00:00"))
+        age = (datetime.now(timezone.utc) - observed).total_seconds()
+    except (ValueError, TypeError):
+        return None
+    if observed.tzinfo is None or not -10 <= age <= 180:
+        return None
+    if (record.get("state") != "production_eligible"
+            or record.get("change_class") != "release_blocker"
+            or record.get("risk_profile") != "production_control_core"
+            or not (record.get("development") or {}).get("required_checks_passed")
+            or not (record.get("preproduction") or {}).get("acceptance_passed")
+            or not (record.get("preproduction") or {}).get("rollback_readiness_passed")
+            or (record.get("preproduction") or {}).get("provider_mutations_disabled") is not True):
+        return None
+    candidate = exact_sha(str((record.get("release_candidate") or {}).get("candidate_sha") or ""),
+                          "candidate_sha")
+    rollback = exact_sha(str(record.get("rollback_sha") or ""), "rollback_sha")
+    if authoritative_auto_promotion_head(repo) != candidate:
+        return None
+    lkg = (control_doc.get("last_known_good") or {}).get("manifest") or {}
+    if (not isinstance(lkg, Mapping) or lkg.get("complete") is not True
+            or lkg.get("revision") != rollback):
+        return None
+    live_production_alignment(rollback)
+    require_current_manual_scope_review(repo, state_root, record)
+    policy = _open_breaker_recovery_policy(repo, candidate)
+    actual = _drift_problem_identities(drift_doc)
+    changed = set(str(value) for value in (record.get("changed_files") or []))
+    matches: list[dict[str, Any]] = []
+    for profile in policy["profiles"]:
+        expected = tuple(sorted(
+            (str(problem["kind"]), str(problem["unit"]))
+            for problem in profile["drift_problems"]
+        ))
+        required_files = set(str(value) for value in profile["required_changed_files"])
+        if (actual == expected
+                and required_files.issubset(changed)
+                and len(changed) <= int(profile["max_changed_files"])):
+            matches.append(profile)
+    if len(matches) != 1:
+        return None
+    owner = record.get("owner_approval") or {}
+    if require_owner_approval and (
+        owner.get("approved") is not True
+        or owner.get("candidate_sha") != candidate
+        or not str(owner.get("source") or "").startswith("authenticated_mobile_teams_owner:relapproval-")
+    ):
+        return None
+    return {
+        "schema_version": "1.0",
+        "profile_id": matches[0]["id"],
+        "candidate_sha": candidate,
+        "rollback_sha": rollback,
+        "drift_observed_at": drift_doc["observed_at"],
+        "drift_problems": [
+            {"kind": kind, "unit": unit} for kind, unit in actual
+        ],
+        "policy_sha256": "sha256:" + hashlib.sha256(
+            json.dumps(policy, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+        "owner_approval_required": bool(require_owner_approval),
+    }
+
+
 def signed_owner_offer_purpose(
     record: dict[str, Any], candidate_sha: str, reviewed_policy: Any,
     live_mode: str, *, ccc_root: Path,
@@ -4472,19 +4705,14 @@ def approval_only_while_promotion_held(repo: Path, state_root: Path) -> bool:
 
 
 def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
-    """Private locked implementation; never call outside the serialized gate."""
-    # Trust only fresh root-published evidence and a healthy, aligned live
-    # production baseline; never revalidate or close an opened breaker here.
+    """Private locked implementation; never call outside the serialized gate.
+
+    Clean production follows the ordinary owner-review path. An open breaker may
+    issue/consume a Teams card only for an exact source-reviewed recovery profile.
+    This worker remains nonexecuting in both cases.
+    """
     control = _read_protected_snapshot(state_root, "production-control-state.json")
     drift = _read_protected_snapshot(state_root, "production-drift.json")
-    if ((control.get("circuit_breaker") or {}).get("state") != "closed"
-            or drift.get("status") != "pass" or drift.get("problems")):
-        # Expected safety hold is NOT a broken systemd service: returning
-        # nonzero makes this failed user unit show up as production drift,
-        # which opens the root breaker again indefinitely. Stay completely
-        # nonexecuting, but report the blocked condition for supervision.
-        print("RELEASE_APPROVAL_ONLY=SAFETY_GATE_BLOCKED", flush=True)
-        return False
     live = live_runtime()
     live_sha = exact_sha(live["revision"], "live_production_sha")
     live_production_alignment(live_sha)
@@ -4517,19 +4745,6 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         print("RELEASE_APPROVAL_ONLY=REVIEWED_MODE_NOT_ACTIVE", flush=True)
         return False
 
-    # This consumer independently verifies original signed owner evidence,
-    # release record, role/binding, policy, replay and CCC material review. It
-    # records only the existing exact-SHA owner/CCC authorization; it does not
-    # call deploy_production or change the incident hold.
-    try:
-        consume_mobile_release_decisions(
-            repo=repo, state_root=state_root, approve_release=approve_release,
-        )
-    except MobileReleaseEvidenceBusy:
-        print("RELEASE_APPROVAL_ONLY=SIGNED_OWNER_EVIDENCE_BUSY", flush=True)
-        return False
-
-    # A newer protected HEAD or changed baseline makes old offers invalid.
     main_sha = authoritative_auto_promotion_head(repo)
     record_file = record_path(state_root, record_id(main_sha))
     if not record_file.is_file():
@@ -4545,6 +4760,51 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
             or not (record.get("development") or {}).get("required_checks_passed")):
         print("RELEASE_APPROVAL_ONLY=NO_CURRENT_ELIGIBLE_RELEASE", flush=True)
         return False
+
+    ordinary_safe = (
+        (control.get("circuit_breaker") or {}).get("state") == "closed"
+        and drift.get("status") == "pass"
+        and drift.get("problems") == []
+    )
+    recovery_context = None
+    if not ordinary_safe:
+        recovery_context = governed_open_breaker_recovery_context(
+            repo, state_root, record, require_owner_approval=False,
+            control=control, drift=drift,
+        )
+        if recovery_context is None:
+            print("RELEASE_APPROVAL_ONLY=SAFETY_GATE_BLOCKED", flush=True)
+            return False
+        if str(record.get("risk_profile") or "") not in reviewed_policy.allowed_risk_profiles:
+            print("RELEASE_APPROVAL_ONLY=RECOVERY_RISK_NOT_AUTHORIZED", flush=True)
+            return False
+
+    # This consumer independently verifies original signed owner evidence,
+    # release record, role/binding, policy, replay and CCC material review. It
+    # records only the existing exact-SHA owner/CCC authorization; it does not
+    # call deploy_production or change the incident hold/breaker.
+    try:
+        consume_mobile_release_decisions(
+            repo=repo, state_root=state_root, approve_release=approve_release,
+        )
+    except MobileReleaseEvidenceBusy:
+        print("RELEASE_APPROVAL_ONLY=SIGNED_OWNER_EVIDENCE_BUSY", flush=True)
+        return False
+
+    # The signed decision may have updated owner/CCC evidence. Re-read the same
+    # exact record under the release mutex before deciding whether another card
+    # is still required.
+    record = load_record(state_root, record_id(main_sha))
+    if recovery_context is not None:
+        refreshed = governed_open_breaker_recovery_context(
+            repo, state_root, record, require_owner_approval=False,
+            control=control, drift=drift,
+        )
+        if refreshed is None or refreshed["profile_id"] != recovery_context["profile_id"]:
+            print("RELEASE_APPROVAL_ONLY=RECOVERY_CONTEXT_CHANGED", flush=True)
+            return False
+        recovery_context = refreshed
+
     purpose = signed_owner_offer_purpose(
         record, main_sha, reviewed_policy, mode,
         ccc_root=Path("/var/lib/jason/ccc"),
@@ -4566,8 +4826,8 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
                 or existing.get("live_rollback_sha") != live_sha
                 or existing.get("release_id") != record_id(main_sha)):
             raise ReleaseManagerError("existing Teams owner offer conflicts with exact release")
-        # Never bump an old offer TTL, reissue a card or overwrite evidence
-        # after an uncertain transport outcome or a previous owner decision.
+        if recovery_context is not None and existing.get("recovery_profile_id") != recovery_context["profile_id"]:
+            raise ReleaseManagerError("existing Teams owner offer conflicts with recovery profile")
         print("RELEASE_APPROVAL_ONLY=EXISTING_OFFER_PRESERVED", flush=True)
         return False
     manifest_digest = hashlib.sha256(json.dumps(
@@ -4582,11 +4842,18 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         "protected_main_sha": main_sha,
         "live_rollback_sha": live_sha,
         **({"review_only": True} if purpose == "ccc_material_review_only" else {}),
+        **({
+            "recovery_profile_id": recovery_context["profile_id"],
+            "recovery_policy_sha256": recovery_context["policy_sha256"],
+            "recovery_drift_observed_at": recovery_context["drift_observed_at"],
+        } if recovery_context is not None else {}),
         "published_at": now(),
     })
-    print("RELEASE_APPROVAL_ONLY=OFFER_PUBLISHED_NONEXECUTING", flush=True)
+    print("RELEASE_APPROVAL_ONLY=" + (
+        "RECOVERY_OFFER_PUBLISHED_NONEXECUTING" if recovery_context is not None
+        else "OFFER_PUBLISHED_NONEXECUTING"
+    ), flush=True)
     return True
-
 
 
 def request_expired_owner_card_renewal(

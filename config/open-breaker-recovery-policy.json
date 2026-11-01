@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "enabled": true,
+  "profiles": [
+    {
+      "id": "authority_integrity_timeout",
+      "change_class": "release_blocker",
+      "risk_profile": "production_control_core",
+      "max_changed_files": 16,
+      "drift_problems": [
+        {
+          "kind": "failed_system_unit",
+          "unit": "jason-openclaw-authority-full-integrity.service"
+        },
+        {
+          "kind": "failed_system_unit",
+          "unit": "jason-openclaw-authority-health.service"
+        }
+      ],
+      "required_changed_files": [
+        "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-full-integrity.service",
+        "tools/openclaw_authority_health_snapshot.py",
+        "tools/openclaw_authority_operational_health.py"
+      ]
+    }
+  ]
+}
