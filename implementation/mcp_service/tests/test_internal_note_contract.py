@@ -148,3 +148,22 @@ def test_owner_organization_scope_reaches_exact_authority(
         authority.request.capability
         == "service.ticket.note.create"
     )
+
+
+def test_internal_note_mcp_payload_matches_runtime_connector_contract():
+    """Prevent MCP/runtime split-version drift for internal note visibility."""
+    from types import SimpleNamespace
+
+    from jason_runtime.autotask_internal_note import AutotaskInternalNoteConnector
+
+    arguments = server._internal_note_arguments(
+        ticket_id=12345,
+        note="Cross-layer contract validation",
+        title="Jason contract validation",
+    )
+
+    expected = AutotaskInternalNoteConnector._expected_payload(
+        SimpleNamespace(arguments=arguments)
+    )
+
+    assert expected == arguments["payload"]
