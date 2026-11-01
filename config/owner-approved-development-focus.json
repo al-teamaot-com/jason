@@ -2,6 +2,7 @@
   "schema_version": "1.0",
   "enabled": true,
   "issue_numbers": [
+    2209,
     1545,
     759,
     1470,
@@ -11,6 +12,6 @@
     1566,
     1493
   ],
-  "directive": "Current Owner-approved functional-first P0 delivery order, October 25 2026: (1) Universal Teams Approver #1545/#1440 with real authenticated Approve/Deny and pilot acceptance, (2) all-staff PO/invoice intake #759 through existing governed Teams/Autotask UDF capability, (3) QuickBooks bank and credit-card reconciliation read-only evidence #1470. Admit these three bounded existing Owner-authored issues concurrently up to the three-slot engineering cap, without admitting unrelated feature work or using an EPIC as blanket authorization. Already active work reaches a safe checkpoint. Work first, then harden, while preserving no-financial-write/no-user-disruption without specific approval, identity verification, audit, provider isolation, native protected CI and exact-SHA release gates. Do not claim source merge is production completion.",
-  "authority_source": "https://github.com/al-teamaot-com/jason/issues/1467"
+  "directive": "Owner sequencing supersedes the October 25-only Big 3 focus for the governed TODO production-lifecycle acceptance test. Admit #2209 (TODO-CONN-021) as the first TODO production test immediately, while preserving the existing protected Owner-approved focus items and three-slot engineering cap. Do not admit #1455/TODO-OPS-014 ahead of #2209; it remains the second TODO production test and should be admitted only after #2209 reaches the next verified safe checkpoint in the governed lifecycle. Existing active work may continue to a safe checkpoint. Preserve all existing production, disruption, financial, provider-isolation, CI, and exact-SHA approval gates.",
+  "authority_source": "Owner directive in Project Jason conversation on 2026-11-01; canonical TODO approvals merged by PR #2208 and intake issue #2209"
 }
