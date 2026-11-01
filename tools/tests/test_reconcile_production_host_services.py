@@ -480,6 +480,20 @@ def test_authority_health_refreshes_full_proof_only_when_existing_evidence_is_no
     assert '120s systemctl start "$unit"' in text
 
 
+def test_boot_recovery_is_installed_from_exact_immutable_release_without_forcing_service_run() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    assert 'step_start boot_recovery_install' in text
+    assert 'install -o root -g root -m 0750 "$BOOT_RECOVERY_SCRIPT" /usr/local/sbin/jason-boot-recovery' in text
+    assert 'install -o root -g root -m 0644 "$BOOT_RECOVERY_SERVICE" /etc/systemd/system/jason-boot-recovery.service' in text
+    assert 'install -o root -g root -m 0644 "$BOOT_RECOVERY_TIMER" /etc/systemd/system/jason-boot-recovery.timer' in text
+    assert 'cmp -s "$BOOT_RECOVERY_SCRIPT" /usr/local/sbin/jason-boot-recovery' in text
+    assert 'systemctl enable jason-boot-recovery.service jason-boot-recovery.timer' in text
+    assert 'systemctl start jason-boot-recovery.timer' in text
+    assert 'systemctl start jason-boot-recovery.service' not in text
+    assert 'JASON_BOOT_RECOVERY_INSTALL=PASS' in text
+    assert text.index('step_start boot_recovery_install') < text.index('step_start root_release_transition_install')
+
+
 def test_pm_v2_shadow_is_installed_only_inside_governed_host_reconciliation() -> None:
     text = RECONCILE.read_text(encoding="utf-8")
     assert 'step_start pm_v2_shadow_user_unit_install' in text
