@@ -10,10 +10,11 @@ import tempfile
 from pathlib import Path
 
 DEFAULT_OUTPUT = Path('/var/lib/jason/openclaw/operational-health.json')
-# Full SQLite checks now cover a >22 GB orchestration audit and multi-GB
-# authority backup/restore. Retain a strict bound, but allow one 30-minute
+# Full SQLite checks now cover a >28 GB orchestration audit and multi-GB
+# authority backup/restore. Retain a strict bound, but allow one 60-minute
 # overnight attempt; never convert a timeout into a passing proof.
-SOURCE_HEALTH_TIMEOUT_SECONDS = 1800
+SOURCE_HEALTH_TIMEOUT_SECONDS = 3600
+BACKUP_TEMP_ROOT = Path('/srv/jason/archive')
 SOURCE_HEALTH_TIMEOUT_EXIT_CODE = 124
 
 
@@ -46,7 +47,7 @@ def main() -> int:
     tool = Path(__file__).with_name('openclaw_authority_operational_health.py')
     try:
         completed = subprocess.run(
-            [sys.executable, str(tool)],
+            [sys.executable, str(tool), '--backup-temp-root', str(BACKUP_TEMP_ROOT)],
             capture_output=True,
             text=True,
             check=False,
