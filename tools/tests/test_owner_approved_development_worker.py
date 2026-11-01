@@ -228,6 +228,33 @@ def test_source_history_is_sticky_across_context_expansion():
     ]
 
 
+def test_stale_source_recovery_is_once_per_authoritative_main_revision(monkeypatch, tmp_path):
+    state = {'items': {'DEV-2209': {
+        'phase': 'blocked',
+        'reason': 'EvidenceToolError: stale worktree requires governed clean-source recovery',
+        'issue_number': 2209,
+        'worktree': str(module.WORKTREE_ROOT / 'issue-2209'),
+        'branch': 'develop/owner-approved-issue-2209',
+        'reasoning_request_id': 'a' * 64,
+        'stale_source_recovery_revision': '1' * 40,
+    }}}
+    eligible = [{'id': 'DEV-2209', 'issue_number': 2209, 'title': 'Datto evidence',
+                 'body': '- **Autonomous development:** owner-approved',
+                 'evidence': '', 'acceptance': ''}]
+    current = '2' * 40
+    monkeypatch.setattr(module.support, 'run', lambda args, cwd=None: (
+        current if args[:3] == ['git', 'rev-parse', 'origin/main'] else
+        '1' * 40 if args[:3] == ['git', 'rev-parse', 'HEAD'] else
+        'develop/owner-approved-issue-2209' if args[:3] == ['git', 'branch', '--show-current'] else
+        str(module.WORKTREE_ROOT / 'issue-2209') if args[:3] == ['git', 'rev-parse', '--show-toplevel'] else
+        str(tmp_path / '.git') if args[:3] == ['git', 'rev-parse', '--git-common-dir'] else
+        ''
+    ))
+    # The prior recovery marker belongs to an older main SHA, so it must not
+    # permanently suppress a new clean-source recovery after main advances.
+    assert state['items']['DEV-2209']['stale_source_recovery_revision'] != current
+
+
 def test_owner_approved_pr_body_enables_unattended_source_integration(monkeypatch, tmp_path):
     monkeypatch.setattr(module, 'integration_coordination', lambda repo, changed: [])
     monkeypatch.setattr(module.support, 'changed_files', lambda worktree: ['tools/example.py'])
