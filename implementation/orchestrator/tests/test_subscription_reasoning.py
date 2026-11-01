@@ -50,3 +50,31 @@ def test_subscription_client_rejects_unbounded_output_budget():
             system="s", user="u", schema={"type": "object"},
             max_output_tokens=50000,
         )
+
+
+
+def test_explicit_api_fallback_does_not_hide_local_validation_errors():
+    class Primary:
+        def complete(self, **kwargs):
+            raise ValueError("invalid governed request")
+
+    class Fallback:
+        def __init__(self):
+            self.calls = 0
+
+        def complete(self, **kwargs):
+            self.calls += 1
+            return {"ok": True}
+
+    from orchestrator.subscription_reasoning import ExplicitFallbackStructuredJsonClient
+
+    fallback = Fallback()
+    client = ExplicitFallbackStructuredJsonClient(primary=Primary(), fallback=fallback)
+    with pytest.raises(ValueError, match="invalid governed request"):
+        client.complete(
+            system="s",
+            user="u",
+            schema={"type": "object"},
+            max_output_tokens=16,
+        )
+    assert fallback.calls == 0
