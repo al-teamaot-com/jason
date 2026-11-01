@@ -1155,6 +1155,94 @@ def run_functional_smoke_tests(candidate_sha: str) -> dict[str, Any]:
     }
 
 
+def live_runtime_unchecked_health() -> dict[str, Any]:
+    raw = json.loads(output(["docker", "inspect", "jason-runtime"]))[0]
+    labels = raw.get("Config", {}).get("Labels") or {}
+    revision = str(labels.get("com.teamaot.jason.source_revision") or "").casefold()
+    if not SHA.fullmatch(revision):
+        raise ReleaseManagerError("live jason-runtime source revision is not an exact SHA")
+    if str(raw.get("State", {}).get("Status") or "") != "running":
+        raise ReleaseManagerError("live jason-runtime is not running")
+    return {
+        "revision": revision,
+        "image_id": str(raw["Image"]),
+        "inspect": raw,
+    }
+
+
+def _runtime_health_body() -> tuple[int, dict[str, Any]]:
+    code = (
+        "import http.client,json;"
+        "c=http.client.HTTPConnection('127.0.0.1',8080,timeout=5);"
+        "c.request('GET','/healthz');r=c.getresponse();"
+        "b=r.read().decode();"
+        "print(json.dumps({'http_status':r.status,'body':json.loads(b)}))"
+    )
+    raw = json.loads(output(["docker", "exec", "jason-runtime", "python3", "-c", code]))
+    status = raw.get("http_status")
+    body = raw.get("body")
+    if type(status) is not int or not isinstance(body, dict):
+        raise ReleaseManagerError("runtime health evidence is malformed")
+    return status, body
+
+
+def _verify_recovery_runtime_health(runtime: dict[str, Any], profile: Mapping[str, Any]) -> str:
+    contract = profile.get("runtime_health")
+    if not isinstance(contract, Mapping):
+        raise ReleaseManagerError("recovery runtime health contract is missing")
+    mode = str(contract.get("mode") or "")
+    if mode == "healthy":
+        live_runtime()
+        return mode
+    if mode != "ticket_worker_provider_auth_degraded":
+        raise ReleaseManagerError("unsupported recovery runtime health mode")
+    docker_health = str(((runtime.get("inspect") or {}).get("State", {}).get("Health") or {}).get("Status") or "")
+    if docker_health != str(contract.get("docker_health") or ""):
+        raise ReleaseManagerError("recovery runtime Docker health differs from reviewed profile")
+    http_status, body = _runtime_health_body()
+    worker = body.get("ticket_worker")
+    if (http_status != int(contract.get("http_status") or 0)
+            or set(body) != {"authority", "component", "status", "ticket_worker"}
+            or body.get("authority") != "central-orchestrator"
+            or body.get("component") != "jason-runtime"
+            or body.get("status") != contract.get("component_status")
+            or not isinstance(worker, dict)
+            or set(worker) != {"last_restart_reason", "status", "ticket_worker"}
+            or worker.get("status") != contract.get("ticket_worker_status")
+            or worker.get("ticket_worker") != contract.get("ticket_worker")
+            or worker.get("last_restart_reason") != contract.get("last_restart_reason")):
+        raise ReleaseManagerError("runtime degradation is outside reviewed provider-identity recovery profile")
+    return mode
+
+
+def recovery_live_production_alignment(
+    expected_sha: str, lkg: Mapping[str, Any], profile: Mapping[str, Any]
+) -> dict[str, Any]:
+    expected_sha = exact_sha(expected_sha, "recovery baseline SHA")
+    runtime = live_runtime_unchecked_health()
+    mcp = live_mcp()
+    current_release = Path("/opt/jason/current").resolve()
+    host_revision = current_release.name.casefold()
+    if not SHA.fullmatch(host_revision):
+        raise ReleaseManagerError("/opt/jason/current does not resolve to an exact SHA release")
+    if (runtime["revision"] != expected_sha or mcp["revision"] != expected_sha
+            or host_revision != expected_sha):
+        raise ReleaseManagerError("recovery production baseline revisions are not aligned")
+    if (str(lkg.get("runtime_image_id") or "") != runtime["image_id"]
+            or str(lkg.get("mcp_image_id") or "") != mcp["image_id"]):
+        raise ReleaseManagerError("recovery production images differ from immutable LKG")
+    mode = _verify_recovery_runtime_health(runtime, profile)
+    return {
+        "runtime_revision": runtime["revision"],
+        "runtime_image_id": runtime["image_id"],
+        "runtime_health_mode": mode,
+        "mcp_revision": mcp["revision"],
+        "mcp_image_id": mcp["image_id"],
+        "host_revision": host_revision,
+        "host_release": str(current_release),
+    }
+
+
 def live_runtime() -> dict[str, Any]:
     raw = json.loads(output(["docker", "inspect", "jason-runtime"]))[0]
     labels = raw.get("Config", {}).get("Labels") or {}
@@ -1224,6 +1312,29 @@ def live_production_alignment(candidate_sha: str) -> dict[str, Any]:
             + ", ".join(mismatches)
         )
     return observed
+
+
+def wait_live_runtime_for_recovery(
+    candidate_sha: str, recovery_context: Mapping[str, Any],
+    attempts: int = 30, interval_seconds: int = 2,
+) -> dict[str, Any]:
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    profile_id = str(recovery_context.get("profile_id") or "")
+    for _ in range(attempts):
+        raw = live_runtime_unchecked_health()
+        if raw["revision"] != candidate_sha:
+            time.sleep(interval_seconds)
+            continue
+        health = str(((raw.get("inspect") or {}).get("State", {}).get("Health") or {}).get("Status") or "")
+        if health == "healthy":
+            return live_runtime()
+        if profile_id == "provider_identity_and_authority_recovery" and health == "unhealthy":
+            _verify_recovery_runtime_health(
+                raw, {"runtime_health": dict(recovery_context.get("runtime_health") or {})}
+            )
+            return raw
+        time.sleep(interval_seconds)
+    raise ReleaseManagerError("candidate runtime did not reach reviewed healthy/recovery state")
 
 
 def wait_live_runtime(attempts: int = 30, interval_seconds: int = 2) -> dict[str, Any]:
@@ -3528,7 +3639,16 @@ def _deploy_production_locked(
     # host boundary is already installed and the rollback baseline is aligned.
     require_host_reconciler_ready(state_root)
     rollback_sha = str(record["rollback_sha"])
-    live_production_alignment(rollback_sha)
+    if recovery_context is None:
+        live_production_alignment(rollback_sha)
+    else:
+        protected_baseline = load_control_state(state_root)
+        lkg_baseline = dict((protected_baseline.get("last_known_good") or {}).get("manifest") or {})
+        policy = _open_breaker_recovery_policy(repo, candidate_sha)
+        matching = [item for item in policy["profiles"] if item.get("id") == recovery_context.get("profile_id")]
+        if len(matching) != 1:
+            raise ReleaseManagerError("open-breaker recovery profile disappeared before production")
+        recovery_live_production_alignment(rollback_sha, lkg_baseline, matching[0])
 
     # Prove the exact candidate source is materializable before recording that
     # production deployment has begun. A repository/source failure must leave
@@ -3550,7 +3670,9 @@ def _deploy_production_locked(
     candidate_worker_uid = worker_enrollment.approved_diagnostic_uid(deploy_worktree)
     previous_worker_uid = worker_enrollment.live_diagnostic_uid(output)
     prior_quickbooks_profile = live_quickbooks_read_profile()
-    prior_release_approval_mode = live_release_mobile_approval_mode(live_runtime())
+    prior_release_approval_mode = live_release_mobile_approval_mode(
+        live_runtime() if recovery_context is None else live_runtime_unchecked_health()
+    )
     if prior_release_approval_mode not in {"off", "owner_only_pilot", "owner_reviewed"}:
         raise ReleaseManagerError("live release approval mode is not a supported rollback baseline")
     candidate_autotask_profile = declared_autotask_read_profile(deploy_worktree)
@@ -3699,7 +3821,11 @@ def _deploy_production_locked(
             cwd=deploy_worktree,
             env=env,
         )
-        live_after_runtime = wait_live_runtime()
+        live_after_runtime = (
+            wait_live_runtime()
+            if recovery_context is None
+            else wait_live_runtime_for_recovery(candidate_sha, recovery_context)
+        )
         approval_policy_activation = verify_live_mobile_release_approval_activation(
             deploy_worktree, live_after_runtime
         )
@@ -4458,7 +4584,7 @@ def _open_breaker_recovery_policy(repo: Path, candidate_sha: str) -> dict[str, A
     seen: set[str] = set()
     for profile in policy["profiles"]:
         required = {"id", "change_class", "risk_profile", "max_changed_files",
-                    "drift_problems", "required_changed_files"}
+                    "drift_problems", "required_changed_files", "runtime_health"}
         if not isinstance(profile, dict) or set(profile) != required:
             raise ReleaseManagerError("open-breaker recovery profile shape is invalid")
         identity = profile.get("id")
@@ -4490,6 +4616,28 @@ def _open_breaker_recovery_policy(repo: Path, candidate_sha: str) -> dict[str, A
         if any(not isinstance(value, str) or not value or value.startswith("/") or ".." in value
                for value in files):
             raise ReleaseManagerError("open-breaker recovery required file is invalid")
+        runtime_health = profile.get("runtime_health")
+        if not isinstance(runtime_health, dict):
+            raise ReleaseManagerError("open-breaker recovery runtime health contract is invalid")
+        mode = runtime_health.get("mode")
+        if mode == "healthy":
+            if set(runtime_health) != {"mode"}:
+                raise ReleaseManagerError("healthy recovery runtime contract is invalid")
+        elif mode == "ticket_worker_provider_auth_degraded":
+            expected_runtime = {
+                "mode", "docker_health", "http_status", "component_status",
+                "ticket_worker_status", "ticket_worker", "last_restart_reason",
+            }
+            if (set(runtime_health) != expected_runtime
+                    or runtime_health.get("docker_health") != "unhealthy"
+                    or runtime_health.get("http_status") != 503
+                    or runtime_health.get("component_status") != "degraded"
+                    or runtime_health.get("ticket_worker_status") != "degraded"
+                    or runtime_health.get("ticket_worker") != "process_not_alive"
+                    or runtime_health.get("last_restart_reason") != "restart_budget_exhausted:missing_process"):
+                raise ReleaseManagerError("provider-identity recovery runtime contract is invalid")
+        else:
+            raise ReleaseManagerError("unsupported open-breaker recovery runtime health mode")
     return policy
 
 
@@ -4562,7 +4710,6 @@ def governed_open_breaker_recovery_context(
     if (not isinstance(lkg, Mapping) or lkg.get("complete") is not True
             or lkg.get("revision") != rollback):
         return None
-    live_production_alignment(rollback)
     require_current_manual_scope_review(repo, state_root, record)
     policy = _open_breaker_recovery_policy(repo, candidate)
     actual = _drift_problem_identities(drift_doc)
@@ -4580,6 +4727,11 @@ def governed_open_breaker_recovery_context(
             matches.append(profile)
     if len(matches) != 1:
         return None
+    profile = matches[0]
+    try:
+        baseline = recovery_live_production_alignment(rollback, lkg, profile)
+    except ReleaseManagerError:
+        return None
     owner = record.get("owner_approval") or {}
     if require_owner_approval and (
         owner.get("approved") is not True
@@ -4589,7 +4741,7 @@ def governed_open_breaker_recovery_context(
         return None
     return {
         "schema_version": "1.0",
-        "profile_id": matches[0]["id"],
+        "profile_id": profile["id"],
         "candidate_sha": candidate,
         "rollback_sha": rollback,
         "drift_observed_at": drift_doc["observed_at"],
@@ -4599,6 +4751,8 @@ def governed_open_breaker_recovery_context(
         "policy_sha256": "sha256:" + hashlib.sha256(
             json.dumps(policy, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest(),
+        "runtime_health_mode": baseline["runtime_health_mode"],
+        "runtime_health": dict(profile["runtime_health"]),
         "owner_approval_required": bool(require_owner_approval),
     }
 
@@ -4714,10 +4868,31 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
     """
     control = _read_protected_snapshot(state_root, "production-control-state.json")
     drift = _read_protected_snapshot(state_root, "production-drift.json")
-    live = live_runtime()
-    live_sha = exact_sha(live["revision"], "live_production_sha")
-    live_production_alignment(live_sha)
-    lkg = ((control.get("last_known_good") or {}).get("manifest") or {}).get("revision")
+    ordinary_safe = (
+        (control.get("circuit_breaker") or {}).get("state") == "closed"
+        and drift.get("status") == "pass"
+        and drift.get("problems") == []
+    )
+    main_sha: str | None = None
+    record: dict[str, Any] | None = None
+    if ordinary_safe:
+        live = live_runtime()
+        live_sha = exact_sha(live["revision"], "live_production_sha")
+        live_production_alignment(live_sha)
+    else:
+        # Do not weaken ordinary health checks. Only inspect an unhealthy runtime
+        # after proving there is an exact current release that could qualify for
+        # a source-reviewed recovery profile.
+        main_sha = authoritative_auto_promotion_head(repo)
+        candidate_path = record_path(state_root, record_id(main_sha))
+        if not candidate_path.is_file():
+            print("RELEASE_APPROVAL_ONLY=SAFETY_GATE_BLOCKED", flush=True)
+            return False
+        record = load_record(state_root, record_id(main_sha))
+        live = live_runtime_unchecked_health()
+        live_sha = exact_sha(live["revision"], "live_production_sha")
+    lkg_manifest = ((control.get("last_known_good") or {}).get("manifest") or {})
+    lkg = lkg_manifest.get("revision")
     if lkg != live_sha:
         raise ReleaseManagerError("approval-only production baseline does not match LKG")
 
@@ -4746,12 +4921,14 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         print("RELEASE_APPROVAL_ONLY=REVIEWED_MODE_NOT_ACTIVE", flush=True)
         return False
 
-    main_sha = authoritative_auto_promotion_head(repo)
-    record_file = record_path(state_root, record_id(main_sha))
-    if not record_file.is_file():
-        print("RELEASE_APPROVAL_ONLY=NO_CURRENT_ELIGIBLE_RELEASE", flush=True)
-        return False
-    record = load_record(state_root, record_id(main_sha))
+    if main_sha is None:
+        main_sha = authoritative_auto_promotion_head(repo)
+    if record is None:
+        record_file = record_path(state_root, record_id(main_sha))
+        if not record_file.is_file():
+            print("RELEASE_APPROVAL_ONLY=NO_CURRENT_ELIGIBLE_RELEASE", flush=True)
+            return False
+        record = load_record(state_root, record_id(main_sha))
     if (record.get("state") != "production_eligible"
             or (record.get("release_candidate") or {}).get("candidate_sha") != main_sha
             or (record.get("release_manifest") or {}).get("candidate_sha") != main_sha
@@ -4762,11 +4939,6 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         print("RELEASE_APPROVAL_ONLY=NO_CURRENT_ELIGIBLE_RELEASE", flush=True)
         return False
 
-    ordinary_safe = (
-        (control.get("circuit_breaker") or {}).get("state") == "closed"
-        and drift.get("status") == "pass"
-        and drift.get("problems") == []
-    )
     recovery_context = None
     if not ordinary_safe:
         recovery_context = governed_open_breaker_recovery_context(
@@ -4815,9 +4987,12 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         return False
 
     # Recheck hold and protected source before durable offer publication.
+    recheck_live = (
+        live_runtime() if ordinary_safe else live_runtime_unchecked_health()
+    )
     if (not (state_root / "auto-promotion-incident-hold").is_file()
             or authoritative_auto_promotion_head(repo) != main_sha
-            or exact_sha(live_runtime()["revision"], "live_production_sha") != live_sha):
+            or exact_sha(recheck_live["revision"], "live_production_sha") != live_sha):
         raise ReleaseManagerError("approval-only offer source, hold or baseline changed")
     offer_root = state_root / "mobile-release-offers"
     offer = offer_root / (record_id(main_sha) + ".json")

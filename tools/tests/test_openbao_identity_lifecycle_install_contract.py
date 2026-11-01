@@ -28,3 +28,15 @@ def test_host_reconcile_installs_and_verifies_identity_lifecycle_worker():
     assert 'JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=PASS' in text
     assert text.index('step_start root_release_transition_install') < text.index('step_start openbao_identity_lifecycle_install')
     assert text.index('step_start openbao_identity_lifecycle_install') < text.index('step_start production_drift_guard')
+
+
+def test_host_reconcile_runs_provider_identity_recovery_before_final_drift_checks():
+    text = (ROOT / 'tools/reconcile_production_host_services.sh').read_text()
+    assert 'provider_identity_and_authority_recovery' in text
+    assert 'recover-release --source-revision "$SOURCE_REVISION"' in text
+    assert 'docker restart jason-runtime jason-mcp-pilot' in text
+    assert 'jason-provider-health-canary.service' in text
+    assert 'jason-dnsfilter-boundary-reconcile.service' in text
+    recovery = text.index('step_start provider_identity_release_recovery')
+    drift = text.index('step_start production_drift_guard')
+    assert recovery < drift

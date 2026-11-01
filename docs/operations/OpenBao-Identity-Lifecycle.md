@@ -71,9 +71,9 @@ The replacement is installed before the previous identity is revoked. Provider A
 
 ## Runtime refresh
 
-Current provider credentials are individual Docker bind-mounted files. Atomic replacement of a host SecretID can leave a running container bound to the previous inode. Every successful identity rotation therefore reports `runtime_refresh_required=true`.
+Current provider credentials are individual Docker bind-mounted files. Atomic replacement of a host SecretID can leave a running container bound to the previous inode. Every successful identity rotation therefore reports `runtime_refresh_required=true`. Autotask read rotation updates the protected bootstrap source plus both the runtime staged SecretID and the MCP runtime-secret projection before the previous accessor is revoked.
 
-Rotation alone does not restart `jason-runtime`. Runtime recreation remains a separately governed production action/release step. After recreation, provider-backed verification must prove the new identity works before the incident is closed.
+Routine rotation alone does not restart Jason containers. During the source-reviewed `provider_identity_and_authority_recovery` release profile, however, the governed root host transaction performs bootstrap/rotation only after exact signed Teams approval, then restarts only `jason-runtime` and `jason-mcp-pilot` so Docker remounts the replacement identity. It requires exact candidate revisions, healthy runtime, running MCP, a fresh Autotask governed provider-canary PASS, and successful DNSFilter reconciliation before the ordinary production drift guard is allowed to pass. Any failure follows normal release rollback.
 
 ## Root worker boundary
 

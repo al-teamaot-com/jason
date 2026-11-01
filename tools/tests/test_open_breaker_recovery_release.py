@@ -92,7 +92,7 @@ def test_exact_profile_allows_only_signed_teams_owner_recovery():
     record = recovery_record()
     with (
         patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
-        patch.object(runner, "live_production_alignment", return_value={}),
+        patch.object(runner, "recovery_live_production_alignment", return_value={"runtime_health_mode":"healthy"}),
         patch.object(runner, "require_current_manual_scope_review"),
         patch.object(runner, "_open_breaker_recovery_policy", return_value=reviewed_recovery_policy()),
     ):
@@ -108,7 +108,7 @@ def test_exact_profile_allows_only_signed_teams_owner_recovery():
     record = recovery_record(owner_source="explicit_owner_instruction")
     with (
         patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
-        patch.object(runner, "live_production_alignment", return_value={}),
+        patch.object(runner, "recovery_live_production_alignment", return_value={"runtime_health_mode":"healthy"}),
         patch.object(runner, "require_current_manual_scope_review"),
         patch.object(runner, "_open_breaker_recovery_policy", return_value=reviewed_recovery_policy()),
     ):
@@ -122,7 +122,7 @@ def test_unrelated_drift_or_missing_repair_file_blocks_recovery():
     record = recovery_record()
     with (
         patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
-        patch.object(runner, "live_production_alignment", return_value={}),
+        patch.object(runner, "recovery_live_production_alignment", return_value={"runtime_health_mode":"healthy"}),
         patch.object(runner, "require_current_manual_scope_review"),
         patch.object(runner, "_open_breaker_recovery_policy", return_value=reviewed_recovery_policy()),
     ):
@@ -146,7 +146,7 @@ def test_reviewed_authority_recovery_bundle_allows_18_files_but_not_19():
     record["changed_files"] = required
     with (
         patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
-        patch.object(runner, "live_production_alignment", return_value={}),
+        patch.object(runner, "recovery_live_production_alignment", return_value={"runtime_health_mode":"healthy"}),
         patch.object(runner, "require_current_manual_scope_review"),
         patch.object(runner, "_open_breaker_recovery_policy", return_value=reviewed_recovery_policy()),
     ):
@@ -190,8 +190,9 @@ def test_recovery_offer_is_nonexecuting_and_profile_bound(tmp_path):
         patch.object(runner, "MOBILE_APPROVAL_POLICY", policy),
         patch.object(runner, "_read_protected_snapshot",
                      side_effect=lambda root, name: open_control() if name.endswith("control-state.json") else authority_drift()),
+        patch.object(runner, "live_runtime_unchecked_health", return_value=live),
         patch.object(runner, "live_runtime", return_value=live),
-        patch.object(runner, "live_production_alignment", return_value={}),
+        patch.object(runner, "recovery_live_production_alignment", return_value={"runtime_health_mode":"healthy"}),
         patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
         patch.object(runner, "governed_open_breaker_recovery_context", return_value=context),
         patch.object(mobile_consumer, "_install_repo_modules"),
@@ -231,3 +232,86 @@ def test_deploy_wrapper_crosses_open_breaker_only_with_proven_recovery(tmp_path)
         assert runner.deploy_production(ROOT, tmp_path, record) is record
     revalidate.assert_called_once()
     assert deploy_locked.call_args.kwargs["recovery_context"] == context
+
+
+def provider_identity_drift(*, extra=False):
+    problems = authority_drift()["problems"] + [
+        {"kind": "failed_user_unit", "state": "failed",
+         "unit": "jason-dnsfilter-boundary-reconcile.service"},
+    ]
+    if extra:
+        problems.append({"kind": "failed_system_unit", "state": "failed",
+                         "unit": "jason-unrelated.service"})
+    return {
+        "schema_version": "1.0",
+        "status": "drift_detected",
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+        "problems": problems,
+    }
+
+
+def provider_identity_record():
+    record = recovery_record()
+    record["changed_files"] = [
+        "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-full-integrity.service",
+        "tools/openclaw_authority_health_snapshot.py",
+        "tools/openclaw_authority_operational_health.py",
+        "tools/openbao_identity_lifecycle.py",
+        "tools/openbao_identity_lifecycle_worker.py",
+        "tools/install_openbao_identity_lifecycle.py",
+        "tools/reconcile_production_host_services.sh",
+        "tools/release_manager_host_runner.py",
+    ]
+    return record
+
+
+def test_provider_identity_recovery_requires_exact_drift_and_degraded_runtime_profile():
+    record = provider_identity_record()
+    with (
+        patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
+        patch.object(runner, "require_current_manual_scope_review"),
+        patch.object(runner, "_open_breaker_recovery_policy", return_value=reviewed_recovery_policy()),
+        patch.object(runner, "recovery_live_production_alignment",
+                     return_value={"runtime_health_mode": "ticket_worker_provider_auth_degraded"}),
+    ):
+        context = runner.governed_open_breaker_recovery_context(
+            ROOT, ROOT, record, require_owner_approval=True,
+            control=open_control(), drift=provider_identity_drift(),
+        )
+        assert context is not None
+        assert context["profile_id"] == "provider_identity_and_authority_recovery"
+        assert context["runtime_health_mode"] == "ticket_worker_provider_auth_degraded"
+        assert context["runtime_health"]["ticket_worker"] == "process_not_alive"
+        assert runner.governed_open_breaker_recovery_context(
+            ROOT, ROOT, record, require_owner_approval=True,
+            control=open_control(), drift=provider_identity_drift(extra=True),
+        ) is None
+
+
+def test_provider_identity_degraded_runtime_contract_is_exact():
+    profile = next(
+        item for item in reviewed_recovery_policy()["profiles"]
+        if item["id"] == "provider_identity_and_authority_recovery"
+    )
+    runtime = {"inspect": {"State": {"Health": {"Status": "unhealthy"}}}}
+    body = {
+        "authority": "central-orchestrator",
+        "component": "jason-runtime",
+        "status": "degraded",
+        "ticket_worker": {
+            "last_restart_reason": "restart_budget_exhausted:missing_process",
+            "status": "degraded",
+            "ticket_worker": "process_not_alive",
+        },
+    }
+    with patch.object(runner, "_runtime_health_body", return_value=(503, body)):
+        assert runner._verify_recovery_runtime_health(runtime, profile) == "ticket_worker_provider_auth_degraded"
+    bad = json.loads(json.dumps(body))
+    bad["ticket_worker"]["last_restart_reason"] = "different_failure"
+    with patch.object(runner, "_runtime_health_body", return_value=(503, bad)):
+        try:
+            runner._verify_recovery_runtime_health(runtime, profile)
+        except runner.ReleaseManagerError:
+            pass
+        else:
+            raise AssertionError("unexpected runtime degradation must fail closed")
