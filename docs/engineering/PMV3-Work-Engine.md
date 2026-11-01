@@ -23,6 +23,8 @@ The implementation must prove the following before production integration:
 
 ## Elastic role-based worker pool
 
+Canonical Owner requirements for this behavior are tracked in PMV3 #2192 and TODO-OPS-013 #1500.
+
 PMV3 engineering capacity is device-agnostic. The scheduler may use any number
 of exact Owner-enrolled devices that expose an accepted versioned worker role.
 Claw2-PC is the first acceptance target, not a hard-coded secondary host.
