@@ -4686,3 +4686,105 @@ def test_approval_only_republishes_same_release_offer_when_manifest_changes(tmp_
         assert second["candidate_sha"] == first["candidate_sha"]
         assert second["live_rollback_sha"] == first["live_rollback_sha"]
         assert second["manifest_sha256"] != first["manifest_sha256"]
+
+
+def _provider_identity_recovery_ccc_report():
+    report = _ccc_test_report()
+    report['status'] = 'FAIL'
+    for row in report['checks']:
+        if row['check_id'] == 'runtime-source-alignment':
+            row['status'] = 'NOT_PROVEN'
+        elif row['check_id'] == 'systemd-failed-units':
+            row['status'] = 'FAIL'
+            row['evidence'] = {'failed_units': [
+                'jason-openclaw-authority-full-integrity.service loaded failed failed',
+                'jason-openclaw-authority-health.service loaded failed failed',
+                'jason-production-drift-watchdog.service loaded failed failed',
+            ]}
+        elif row['check_id'] == 'openclaw-authority-health':
+            row['status'] = 'FAIL'
+        elif row['check_id'] == 'governed-provider-boundary-canaries':
+            row['status'] = 'FAIL'
+            row['evidence'] = {
+                'expected_canary_count': 8,
+                'failures': [{
+                    'name': 'autotask',
+                    'provider': 'autotask',
+                    'status': 'failed',
+                    'error_code': 'OPENBAO_AUTH_FAILED',
+                    'expected_status': 'denied',
+                }],
+                'results': [{
+                    'name': 'autotask',
+                    'provider': 'autotask',
+                    'status': 'failed',
+                    'error_code': 'OPENBAO_AUTH_FAILED',
+                    'expected_status': 'denied',
+                }],
+            }
+    return report
+
+
+def _provider_identity_recovery_context():
+    return {
+        'schema_version': '1.0',
+        'profile_id': 'provider_identity_and_authority_recovery',
+        'candidate_sha': SHA_A,
+        'rollback_sha': SHA_B,
+        'owner_approval_required': True,
+    }
+
+
+def test_recovery_ccc_preflight_allows_only_exact_provider_identity_signature():
+    report = _provider_identity_recovery_ccc_report()
+    evidence = runner.verify_release_ccc_report(
+        report, candidate_sha=SHA_A, runtime_sha=SHA_B,
+        before_mutation=True,
+        recovery_context=_provider_identity_recovery_context(),
+    )
+    assert evidence['status'] == 'FAIL'
+    assert evidence['mode'] == 'approved_provider_identity_recovery_preflight'
+    assert evidence['recovery_preflight_exception'] is True
+
+
+def test_recovery_ccc_preflight_exception_fails_closed_on_drift():
+    import copy
+    import pytest
+    cases = []
+    wrong_profile = _provider_identity_recovery_context()
+    wrong_profile['profile_id'] = 'authority_integrity_timeout'
+    cases.append((_provider_identity_recovery_ccc_report(), wrong_profile))
+
+    unrelated = _provider_identity_recovery_ccc_report()
+    check = next(x for x in unrelated['checks'] if x['check_id'] == 'systemd-failed-units')
+    check['evidence']['failed_units'].append('jason-unrelated.service loaded failed failed')
+    cases.append((unrelated, _provider_identity_recovery_context()))
+
+    wrong_error = _provider_identity_recovery_ccc_report()
+    canary = next(x for x in wrong_error['checks'] if x['check_id'] == 'governed-provider-boundary-canaries')
+    canary['evidence']['failures'][0]['error_code'] = 'DIFFERENT_ERROR'
+    canary['evidence']['results'][0]['error_code'] = 'DIFFERENT_ERROR'
+    cases.append((wrong_error, _provider_identity_recovery_context()))
+
+    extra = _provider_identity_recovery_ccc_report()
+    next(x for x in extra['checks'] if x['check_id'] == 'j900-release-validation')['status'] = 'FAIL'
+    cases.append((extra, _provider_identity_recovery_context()))
+
+    for report, context in cases:
+        with pytest.raises(runner.ReleaseManagerError, match='pre-mutation CCC denied'):
+            runner.verify_release_ccc_report(
+                report, candidate_sha=SHA_A, runtime_sha=SHA_B,
+                before_mutation=True, recovery_context=context,
+            )
+
+
+def test_recovery_ccc_exception_is_never_valid_post_mutation():
+    import pytest
+    report = _provider_identity_recovery_ccc_report()
+    report['runtime_revision'] = SHA_A
+    with pytest.raises(runner.ReleaseManagerError, match='post-mutation CCC'):
+        runner.verify_release_ccc_report(
+            report, candidate_sha=SHA_A, runtime_sha=SHA_A,
+            before_mutation=False,
+            recovery_context=_provider_identity_recovery_context(),
+        )

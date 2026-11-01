@@ -3652,6 +3652,7 @@ CCC_REQUIRED_CHECKS = frozenset({
 def verify_release_ccc_report(
     report: dict[str, Any], *, candidate_sha: str, runtime_sha: str,
     before_mutation: bool, owner_material_review_waiver: Mapping[str, Any] | None = None,
+    recovery_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Fail closed on any CCC exception other than expected predeploy alignment.
 
@@ -3754,6 +3755,10 @@ def verify_release_ccc_report(
                 raise CCCMaterialReviewRequired(
                     "pre-mutation CCC requires independently recorded exact-owner material review"
                 )
+            elif _recovery_preflight_ccc_exception(
+                report, exceptional, recovery_context
+            ):
+                mode = "approved_provider_identity_recovery_preflight"
             else:
                 raise ReleaseManagerError("pre-mutation CCC denied: " + str(exceptional)[:300])
         else:
@@ -3778,6 +3783,9 @@ def verify_release_ccc_report(
             status == "PASS" for key, status in indexed.items()
             if key != "material-change-owner-review"
             and not (before_mutation and key == "runtime-source-alignment")
+        ),
+        "recovery_preflight_exception": (
+            mode == "approved_provider_identity_recovery_preflight"
         ),
         "source_revision": candidate_sha, "runtime_revision": runtime_sha,
         "run_id": str(report.get("run_id") or ""),
@@ -3859,9 +3867,105 @@ def retryable_ccc_provider_exceptions(report: Mapping[str, Any]) -> bool:
             and all(entry.get("status") == "exception" for entry in indexed))
 
 
+def _recovery_preflight_ccc_exception(
+    report: Mapping[str, Any],
+    exceptional: Mapping[str, str],
+    recovery_context: Mapping[str, Any] | None,
+) -> bool:
+    """Allow only the exact pre-existing provider/authority recovery signature.
+
+    This is intentionally narrower than the open-breaker profile itself. It is
+    valid only before mutation, only for the reviewed provider identity recovery
+    profile, and only when CCC evidence proves the known Autotask AppRole auth
+    failure plus the bounded authority/watchdog failed-unit set. It never turns
+    a failed CCC report into PASS; the caller records a distinct recovery mode.
+    Post-mutation CCC does not call this helper and must fully certify production.
+    """
+    if not isinstance(recovery_context, Mapping):
+        return False
+    if (
+        recovery_context.get("schema_version") != "1.0"
+        or recovery_context.get("profile_id") != "provider_identity_and_authority_recovery"
+        or recovery_context.get("owner_approval_required") is not True
+        or report.get("status") != "FAIL"
+        or exceptional != {
+            "runtime-source-alignment": "NOT_PROVEN",
+            "systemd-failed-units": "FAIL",
+            "openclaw-authority-health": "FAIL",
+            "governed-provider-boundary-canaries": "FAIL",
+        }
+    ):
+        return False
+    checks = report.get("checks")
+    if not isinstance(checks, list):
+        return False
+    indexed = {
+        str(row.get("check_id") or ""): row
+        for row in checks if isinstance(row, Mapping)
+    }
+    failed_units = (
+        (indexed.get("systemd-failed-units") or {}).get("evidence") or {}
+    ).get("failed_units")
+    if not isinstance(failed_units, list) or not failed_units:
+        return False
+    observed_units: set[str] = set()
+    for value in failed_units:
+        if not isinstance(value, str):
+            return False
+        match = re.search(r"(jason-[a-z0-9_.@-]+\.service)", value)
+        if match is None:
+            return False
+        observed_units.add(match.group(1))
+    allowed_units = {
+        "jason-openclaw-authority-full-integrity.service",
+        "jason-openclaw-authority-health.service",
+        "jason-production-drift-watchdog.service",
+    }
+    if not observed_units.issubset(allowed_units):
+        return False
+    auth_health = indexed.get("openclaw-authority-health") or {}
+    if auth_health.get("status") != "FAIL":
+        return False
+    canary = indexed.get("governed-provider-boundary-canaries") or {}
+    evidence = canary.get("evidence")
+    if not isinstance(evidence, Mapping):
+        return False
+    failures = evidence.get("failures")
+    results = evidence.get("results")
+    if (
+        not isinstance(failures, list) or len(failures) != 1
+        or not isinstance(results, list)
+    ):
+        return False
+    failure = failures[0]
+    if not isinstance(failure, Mapping):
+        return False
+    if (
+        failure.get("name") != "autotask"
+        or failure.get("provider") != "autotask"
+        or failure.get("status") != "failed"
+        or failure.get("error_code") != "OPENBAO_AUTH_FAILED"
+        or failure.get("expected_status") != "denied"
+    ):
+        return False
+    matching = [
+        row for row in results
+        if isinstance(row, Mapping) and row.get("name") == "autotask"
+    ]
+    if len(matching) != 1:
+        return False
+    observed = matching[0]
+    return (
+        observed.get("provider") == "autotask"
+        and observed.get("status") == "failed"
+        and observed.get("error_code") == "OPENBAO_AUTH_FAILED"
+    )
+
+
 def run_release_ccc_gate(
     candidate_sha: str, runtime_sha: str, *, before_mutation: bool,
     owner_material_review_waiver: Mapping[str, Any] | None = None,
+    recovery_context: Mapping[str, Any] | None = None,
     ccc_runner: Path = Path("/opt/jason/ccc-current/tools/run_ccc.py"),
     ccc_config: Path = Path("/var/lib/jason/ccc/ccc.json"),
     latest: Path = Path("/var/lib/jason/ccc/latest.json"),
@@ -3910,6 +4014,7 @@ def run_release_ccc_gate(
                 report, candidate_sha=candidate_sha, runtime_sha=runtime_sha,
                 before_mutation=before_mutation,
                 owner_material_review_waiver=owner_material_review_waiver,
+                recovery_context=recovery_context,
             )
         except ReleaseManagerError as exc:
             # verify_release_ccc_report checked exact candidate and runtime SHA,
@@ -3970,10 +4075,19 @@ def run_release_ccc_gate(
                     "live_certified_owner_material_review_waiver",
                 }
             )
-            if not accepted_waiver_report and evidence["status"] == "PASS":
+            accepted_recovery_preflight = (
+                before_mutation
+                and evidence.get("status") == "FAIL"
+                and evidence.get("mode")
+                    == "approved_provider_identity_recovery_preflight"
+                and evidence.get("recovery_preflight_exception") is True
+            )
+            if (not accepted_waiver_report and not accepted_recovery_preflight
+                    and evidence["status"] == "PASS"):
                 raise ReleaseManagerError("independent CCC process failed despite PASS report")
-            if not accepted_waiver_report and evidence["status"] != "PASS":
-                raise ReleaseManagerError("independent CCC process failed without accepted waiver")
+            if (not accepted_waiver_report and not accepted_recovery_preflight
+                    and evidence["status"] != "PASS"):
+                raise ReleaseManagerError("independent CCC process failed without accepted exception")
         if failed_monitoring_runs or failed_provider_runs:
             if str(evidence["run_id"]) in (*failed_monitoring_runs, *failed_provider_runs):
                 raise ReleaseManagerError("CCC reused an earlier failed report identifier")
@@ -4134,6 +4248,7 @@ def _deploy_production_locked(
     ccc_preflight = run_release_ccc_gate(
         candidate_sha, rollback_sha, before_mutation=True,
         owner_material_review_waiver=owner_material_review_waiver,
+        recovery_context=recovery_context,
     )
     record["ccc_pre_mutation_gate"] = ccc_preflight
 
