@@ -67,6 +67,7 @@ MUTATION_ENV_OVERRIDES = {
 
 CONTROLLER_SOURCE = Path(__file__).resolve()
 CONTROL_STATE_SCHEMA_VERSION = "1.0"
+RELEASE_ROOT = Path("/opt/jason/releases")
 USER_CONTROL_TIMERS = (
     "jason-release-manager.timer",
     "jason-support-repair-worker.timer",
@@ -671,18 +672,76 @@ def unit_active(unit: str, *, user: bool) -> bool:
     return completed.returncode == 0 and completed.stdout.strip() == "active"
 
 
-def scheduled_control_alignment() -> dict[str, str]:
+def release_scheduled_control_units(expected_sha: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Obtain timer requirements from the exact immutable release, never N+1.
+
+    Pre-desired-state releases are evaluated from their own checked-in unit
+    files. Unknown/malformed contracts must fail closed, not report health.
+    """
+    sha = exact_sha(expected_sha, "expected_sha")
+    release_dir = RELEASE_ROOT / sha
+    if release_dir.is_symlink() or not release_dir.is_dir():
+        raise ReleaseManagerError("exact immutable release unavailable for timer validation")
+    policy_path = release_dir / "config" / "production-desired-state.json"
+    if policy_path.is_symlink():
+        raise ReleaseManagerError("release timer policy must not be a symlink")
+    control = (
+        ("user", USER_CONTROL_TIMERS, "infrastructure/openclaw-operations/systemd/user"),
+        ("system", SYSTEM_CONTROL_TIMERS, "infrastructure/openclaw-operations/systemd"),
+    )
+    required: list[tuple[str, ...]] = []
+    if policy_path.exists():
+        try:
+            policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ReleaseManagerError("release timer policy is unreadable or malformed") from exc
+        if not isinstance(policy, dict) or policy.get("schema_version") != "1.0":
+            raise ReleaseManagerError("release timer policy schema unsupported")
+        for scope, timers, source_root in control:
+            declared = policy.get(f"required_{scope}_units")
+            if (not isinstance(declared, list)
+                    or any(not isinstance(name, str) for name in declared)
+                    or len(declared) != len(set(declared))):
+                raise ReleaseManagerError("release timer policy required unit list invalid")
+            selected = tuple(unit for unit in timers if unit in declared)
+            for unit in selected:
+                source = release_dir / source_root / unit
+                if source.is_symlink() or not source.is_file():
+                    raise ReleaseManagerError("required release timer source missing: " + unit)
+            required.append(selected)
+    else:
+        # Historical immutable releases predate the desired-state contract.
+        # This is NOT permission to silently accept an absent release source.
+        for _, timers, source_root in control:
+            selected = []
+            for unit in timers:
+                source = release_dir / source_root / unit
+                if source.is_symlink():
+                    raise ReleaseManagerError("legacy release timer source is a symlink: " + unit)
+                if source.is_file():
+                    selected.append(unit)
+            required.append(tuple(selected))
+    if not any(required):
+        raise ReleaseManagerError("immutable release declares no known control timers")
+    return required[0], required[1]
+
+
+def scheduled_control_alignment(expected_sha: str) -> dict[str, str]:
+    required_user, required_system = release_scheduled_control_units(expected_sha)
     states: dict[str, str] = {}
-    for unit in USER_CONTROL_TIMERS:
-        active = unit_active(unit, user=True)
-        states[unit] = "active" if active else "inactive"
-        if not active:
-            raise ReleaseManagerError(f"required user control timer is not active: {unit}")
-    for unit in SYSTEM_CONTROL_TIMERS:
-        active = unit_active(unit, user=False)
-        states[unit] = "active" if active else "inactive"
-        if not active:
-            raise ReleaseManagerError(f"required system control timer is not active: {unit}")
+    for user, timers, required in (
+        (True, USER_CONTROL_TIMERS, required_user),
+        (False, SYSTEM_CONTROL_TIMERS, required_system),
+    ):
+        for unit in timers:
+            active = unit_active(unit, user=user)
+            if unit in required:
+                states[unit] = "active" if active else "inactive"
+                if not active:
+                    raise ReleaseManagerError("required release control timer is not active: " + unit)
+            elif active:
+                # An N+1 timer remaining after rollback is drift, not success.
+                raise ReleaseManagerError("undeclared release control timer remains active: " + unit)
     return states
 
 
@@ -936,7 +995,7 @@ def capture_production_manifest(expected_sha: str) -> dict[str, Any]:
         manager_revision = manager_source.resolve().name.casefold()
     if manager_revision != expected_sha:
         raise ReleaseManagerError("Release Manager source revision is not aligned with production")
-    timers = scheduled_control_alignment()
+    timers = scheduled_control_alignment(expected_sha)
     return {
         "schema_version": "1.0",
         "revision": expected_sha,
