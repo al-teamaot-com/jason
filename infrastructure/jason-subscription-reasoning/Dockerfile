@@ -11,13 +11,12 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && npm install -g "@openai/codex@${CODEX_VERSION}" \
-    && useradd --uid 1000 --gid 100 --create-home --home-dir /home/jason jason \
     && mkdir -p /app /var/lib/jason/codex \
-    && chown -R 1000:100 /app /var/lib/jason/codex
+    && chown -R node:node /app /var/lib/jason/codex
 
 COPY implementation/runtime_service/src/jason_runtime/subscription_reasoning_service.py /app/subscription_reasoning_service.py
 
-USER 1000:100
+USER node
 WORKDIR /app
 
 EXPOSE 8091
