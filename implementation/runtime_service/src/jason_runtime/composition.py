@@ -1725,17 +1725,24 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
 
         hosted_semantic_translator = None
         if settings.hosted_semantics_enabled:
-            if openai_api_key is None or model_usage_ledger is None:
-                raise RuntimeError("hosted semantic dependencies were not composed")
-            hosted_semantic_translator = OpenAISemanticIntentTranslator(
-                api_key=openai_api_key,
-                transport=http_transport,
-                model=settings.openai_semantic_model,
-                usage_ledger=model_usage_ledger,
-                input_cost_per_million_tokens=settings.openai_input_cost_per_million_tokens,
-                cached_input_cost_per_million_tokens=settings.openai_cached_input_cost_per_million_tokens,
-                output_cost_per_million_tokens=settings.openai_output_cost_per_million_tokens,
-            )
+            if settings.subscription_reasoning_enabled:
+                if hosted_structured_client is None:
+                    raise RuntimeError("subscription semantic dependencies were not composed")
+                hosted_semantic_translator = SubscriptionSemanticIntentTranslator(
+                    structured_client=hosted_structured_client,
+                )
+            else:
+                if openai_api_key is None or model_usage_ledger is None:
+                    raise RuntimeError("hosted semantic dependencies were not composed")
+                hosted_semantic_translator = OpenAISemanticIntentTranslator(
+                    api_key=openai_api_key,
+                    transport=http_transport,
+                    model=settings.openai_semantic_model,
+                    usage_ledger=model_usage_ledger,
+                    input_cost_per_million_tokens=settings.openai_input_cost_per_million_tokens,
+                    cached_input_cost_per_million_tokens=settings.openai_cached_input_cost_per_million_tokens,
+                    output_cost_per_million_tokens=settings.openai_output_cost_per_million_tokens,
+                )
 
         resource_intent_resolver = GovernedResourceConversationIntentResolver(
             interpreter=GroundedSemanticResourceInquiryInterpreter(
