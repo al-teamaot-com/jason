@@ -22,7 +22,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -94,7 +94,7 @@ def classify(
         counts = supervisor.get("category_counts") if isinstance(supervisor.get("category_counts"), Mapping) else {}
         recoverable = sum(int(counts.get(name) or 0) for name in (
             "recoverable_source", "recoverable_transport",
-            "recoverable_validation", "needs_triage",
+            "recoverable_validation", "recoverable_credit", "needs_triage",
         ))
         if recoverable:
             return "recoverable", "approved_work_stalled_recoverable"
@@ -107,7 +107,7 @@ def classify(
         counts = supervisor.get("category_counts") if isinstance(supervisor.get("category_counts"), Mapping) else {}
         recoverable = sum(int(counts.get(name) or 0) for name in (
             "recoverable_source", "recoverable_transport",
-            "recoverable_validation", "needs_triage",
+            "recoverable_validation", "recoverable_credit", "needs_triage",
         ))
         return (
             ("recoverable", "critical_support_recoverable")
