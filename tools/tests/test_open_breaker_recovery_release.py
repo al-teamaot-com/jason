@@ -350,9 +350,9 @@ def test_provider_identity_recovery_whole_main_bound_is_still_finite():
         item for item in reviewed_recovery_policy()["profiles"]
         if item["id"] == "provider_identity_and_authority_recovery"
     )
-    assert profile["max_changed_files"] == 65
+    assert profile["max_changed_files"] == 70
     record = provider_identity_record()
-    while len(record["changed_files"]) < 65:
+    while len(record["changed_files"]) < 70:
         record["changed_files"].append(
             f"docs/recovery-bound-{len(record['changed_files']):02d}.md"
         )
@@ -376,7 +376,7 @@ def test_provider_identity_recovery_whole_main_bound_is_still_finite():
 
 def test_precreate_provider_recovery_accepts_exact_degraded_lkg_without_granting_authority():
     record = provider_identity_record()
-    while len(record["changed_files"]) < 65:
+    while len(record["changed_files"]) < 70:
         record["changed_files"].append(
             f"docs/precreate-reviewed-{len(record['changed_files']):02d}.md"
         )
@@ -402,7 +402,7 @@ def test_precreate_provider_recovery_accepts_exact_degraded_lkg_without_granting
         )
     assert context is not None
     assert context["profile_id"] == "provider_identity_and_authority_recovery"
-    assert context["changed_file_count"] == 65
+    assert context["changed_file_count"] == 70
     assert context["runtime_health_mode"] == "ticket_worker_provider_auth_degraded"
     assert context["owner_approval_granted"] is False
     assert context["production_authority_granted"] is False
@@ -410,7 +410,7 @@ def test_precreate_provider_recovery_accepts_exact_degraded_lkg_without_granting
 
 def test_precreate_provider_recovery_rejects_unrelated_drift_and_over_bound_scope():
     record = provider_identity_record()
-    while len(record["changed_files"]) < 65:
+    while len(record["changed_files"]) < 70:
         record["changed_files"].append(
             f"docs/precreate-reviewed-{len(record['changed_files']):02d}.md"
         )

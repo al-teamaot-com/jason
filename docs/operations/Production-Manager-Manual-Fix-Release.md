@@ -50,3 +50,15 @@ If more than one merged PR appears, add a separate `--include-pr` for **every** 
 - Release freeze still active, circuit breaker open, drift present, root controller mismatch, storage insufficient or transaction already running.
 
 **Known design limitation:** This is a safe manually *selected release batch*, not yet a selective-release-branch/cherry-pick deployment facility. A standalone hotfix can ship alone only when protected main's baseline-to-candidate inventory contains only that fix (and its reviewed dependencies). Developing a separate signed hotfix-source lane must be a distinct governance decision, not a workaround that disables the current main ancestry safeguard.
+
+## Signed Teams one-transaction freeze exception
+
+A production recovery may itself require code that cannot be activated while the global Owner deployment freeze is active. The bootstrap remains fail-closed: a source merge, ordinary exact-SHA release approval, chat instruction, shell command, GitHub comment, or direct marker edit is **not** a freeze exception.
+
+For the bounded provider-identity/authority recovery, protected source may contain `config/production-deployment-freeze-exception.json`. That declaration is incident-specific and short-lived. It binds the exact rollback SHA, reviewed recovery-profile ID, automatic freeze restoration, no standing authority, and a human-readable purpose beginning `ONE-TIME PRODUCTION FREEZE EXCEPTION`. The exact declaration and its digest are copied into the immutable release record/manifest, so the existing signed Teams release card binds the exception intent through both the manifest fingerprint and purpose hash.
+
+The exception is eligible only when the release is still `production_eligible`, protected main is the exact candidate, the complete manual scope digest is current, fresh drift matches the declared open-breaker recovery profile exactly, rollback/LKG alignment passes, and `owner_approval.source` is an authenticated signed Teams release approval for that exact candidate. The production transaction lock is acquired before any freeze state is changed.
+
+Under the lock, Release Manager verifies the active 0600 freeze marker against the private exact backup, writes a durable per-release receipt, removes the marker only for that transaction, and runs the normal native recovery deployment. Ordinary retention, CCC, rollback, provider canaries, host reconciliation, drift and postflight gates are unchanged. The identical freeze bytes, ownership mode and SHA-256 are restored in `finally` before the production lock is released on success or rollback. The receipt records `standing_authority=false` and grants no additional provider or endpoint authority.
+
+If the process terminates while the marker is absent, the next release transaction must first restore the freeze from the exact backup and stop, requiring a fresh retry. Multiple or mismatched unfinished receipts fail closed. The declaration expires and is bound to the incident rollback; it is not reusable for later releases.

@@ -4477,3 +4477,148 @@ def test_run_release_ccc_gate_accepts_nonzero_only_for_exact_owner_waiver(tmp_pa
         )
     assert evidence["mode"] == "candidate_transition_owner_material_review_waiver"
     assert evidence["technical_checks_passed"] is True
+
+
+def _freeze_exception_doc():
+    return {
+        "schema_version": "1.0",
+        "status": "requested",
+        "purpose": (
+            "ONE-TIME PRODUCTION FREEZE EXCEPTION + provider identity and authority recovery. "
+            "Approve authorizes exactly one deployment transaction for this SHA; the production "
+            "freeze is restored automatically afterward."
+        ),
+        "required_recovery_profile_id": "provider_identity_and_authority_recovery",
+        "rollback_sha": SHA_B,
+        "expires_at": "2099-11-02T06:00:00+00:00",
+        "standing_authority": False,
+        "restore_freeze_after_transaction": True,
+        "signed_teams_release_approval_required": True,
+        "declaration_sha256": "sha256:" + "f" * 64,
+    }
+
+
+def _freeze_recovery_context():
+    return {
+        "profile_id": "provider_identity_and_authority_recovery",
+        "candidate_sha": SHA_A,
+        "rollback_sha": SHA_B,
+    }
+
+
+def _freeze_release_record():
+    declaration = _freeze_exception_doc()
+    return {
+        "release_id": runner.record_id(SHA_A),
+        "state": "production_eligible",
+        "rollback_sha": SHA_B,
+        "release_candidate": {"candidate_sha": SHA_A},
+        "release_manifest": {
+            "candidate_sha": SHA_A,
+            "rollback_sha": SHA_B,
+            "one_transaction_freeze_exception": declaration,
+        },
+        "one_transaction_freeze_exception": declaration,
+        "manual_scope_review": {
+            "schema_version": "1.0",
+            "candidate_sha": SHA_A,
+            "baseline_sha": SHA_B,
+            "scope_sha256": "d" * 64,
+        },
+        "owner_approval": {
+            "approved": True,
+            "candidate_sha": SHA_A,
+            "source": "authenticated_mobile_teams_owner:relapproval-" + "a" * 32,
+        },
+    }
+
+
+def test_one_transaction_freeze_context_requires_signed_teams_exact_recovery():
+    import copy
+    record = _freeze_release_record()
+    with patch.object(
+        runner, "declared_one_transaction_freeze_exception",
+        return_value=_freeze_exception_doc(),
+    ):
+        context = runner.one_transaction_freeze_exception_context(
+            ROOT, Path("/tmp"), record, _freeze_recovery_context()
+        )
+        assert context is not None
+        assert context["candidate_sha"] == SHA_A
+        assert context["scope_sha256"] == "d" * 64
+        assert context["standing_authority"] is False
+
+        bad = copy.deepcopy(record)
+        bad["owner_approval"]["source"] = "explicit_owner_instruction"
+        assert runner.one_transaction_freeze_exception_context(
+            ROOT, Path("/tmp"), bad, _freeze_recovery_context()
+        ) is None
+
+        wrong_profile = dict(_freeze_recovery_context(), profile_id="authority_integrity_timeout")
+        assert runner.one_transaction_freeze_exception_context(
+            ROOT, Path("/tmp"), record, wrong_profile
+        ) is None
+
+
+def test_one_transaction_freeze_begin_and_restore_are_byte_identical(tmp_path):
+    marker = tmp_path / runner.PRODUCTION_FREEZE_MARKER
+    backup = tmp_path / runner.PRODUCTION_FREEZE_BACKUP
+    raw = b'{"schema_version":"1.0","status":"active"}\n'
+    marker.write_bytes(raw); marker.chmod(0o600)
+    backup.write_bytes(raw); backup.chmod(0o600)
+    context = {
+        "release_id": runner.record_id(SHA_A),
+        "candidate_sha": SHA_A,
+        "rollback_sha": SHA_B,
+        "scope_sha256": "d" * 64,
+        "recovery_profile_id": "provider_identity_and_authority_recovery",
+        "declaration_sha256": "sha256:" + "f" * 64,
+        "owner_approval_source": "authenticated_mobile_teams_owner:relapproval-" + "a" * 32,
+    }
+    opened = runner.begin_one_transaction_freeze_exception(tmp_path, context)
+    assert not marker.exists()
+    receipt = __import__("json").loads(Path(opened["receipt_path"]).read_text())
+    assert receipt["status"] == "unfrozen_active"
+    assert receipt["standing_authority"] is False
+    assert receipt["additional_provider_or_endpoint_authority"] is False
+    runner.restore_one_transaction_freeze_exception(
+        tmp_path, opened, release_state="closed"
+    )
+    assert marker.read_bytes() == raw
+    assert marker.stat().st_mode & 0o777 == 0o600
+    receipt = __import__("json").loads(Path(opened["receipt_path"]).read_text())
+    assert receipt["freeze_restored"] is True
+    assert receipt["freeze_sha256_before"] == receipt["freeze_sha256_after"]
+    assert receipt["release_state_after"] == "closed"
+
+
+def test_stranded_one_transaction_freeze_is_restored_before_retry(tmp_path):
+    import pytest
+    backup = tmp_path / runner.PRODUCTION_FREEZE_BACKUP
+    raw = b'{"schema_version":"1.0","status":"active"}\n'
+    backup.write_bytes(raw); backup.chmod(0o600)
+    receipt_path = tmp_path / "owner-unfreeze-receipts" / (runner.record_id(SHA_A) + ".json")
+    runner.atomic_json(receipt_path, {
+        "schema_version": "2.0",
+        "authorization": "signed_teams_one_transaction_unfreeze",
+        "release_id": runner.record_id(SHA_A),
+        "freeze_restored": False,
+        "status": "unfrozen_active",
+        "freeze_mode_before": 0o600,
+        "freeze_uid_before": backup.stat().st_uid,
+        "freeze_gid_before": backup.stat().st_gid,
+        "freeze_sha256_before": __import__('hashlib').sha256(raw).hexdigest(),
+    })
+    with pytest.raises(runner.ReleaseManagerError, match="restored production freeze"):
+        runner.restore_stranded_one_transaction_freeze_under_lock(tmp_path)
+    marker = tmp_path / runner.PRODUCTION_FREEZE_MARKER
+    assert marker.read_bytes() == raw
+    receipt = __import__("json").loads(receipt_path.read_text())
+    assert receipt["freeze_restored"] is True
+    assert receipt["status"] == "stranded_transaction_restored"
+
+
+def test_freeze_exception_policy_is_production_control_core():
+    assert runner.classify_change_risk(
+        "release_blocker", ["config/production-deployment-freeze-exception.json"]
+    ) == "production_control_core"

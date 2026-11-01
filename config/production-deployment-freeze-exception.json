@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "status": "requested",
+  "purpose": "ONE-TIME PRODUCTION FREEZE EXCEPTION + provider identity and authority recovery. Approve authorizes exactly one deployment transaction for this SHA; the production freeze is restored automatically afterward.",
+  "required_recovery_profile_id": "provider_identity_and_authority_recovery",
+  "rollback_sha": "1b28ddc9863aee563755cb57599cf211ee82ac19",
+  "expires_at": "2026-11-02T06:00:00+00:00",
+  "standing_authority": false,
+  "restore_freeze_after_transaction": true,
+  "signed_teams_release_approval_required": true
+}

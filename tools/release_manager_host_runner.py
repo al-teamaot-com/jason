@@ -40,6 +40,9 @@ DEFAULT_STATE = Path("/var/lib/jason/openclaw/release-manager")
 MOBILE_APPROVAL_POLICY = Path("/var/lib/jason/authority/mobile-release-approval-policy.json")
 SOURCE_MOBILE_APPROVAL_POLICY = Path("config/mobile-release-approval-policy.json")
 SOURCE_OPEN_BREAKER_RECOVERY_POLICY = Path("config/open-breaker-recovery-policy.json")
+SOURCE_PRODUCTION_FREEZE_EXCEPTION = Path("config/production-deployment-freeze-exception.json")
+PRODUCTION_FREEZE_MARKER = "production-deployment-freeze"
+PRODUCTION_FREEZE_BACKUP = "production-deployment-freeze.pmv3-one-release-backup"
 SHA = re.compile(r"^[0-9a-f]{40}$")
 MUTATION_ENV_OVERRIDES = {
     "JASON_AUTOTASK_MUTATION_ENABLED": "false",
@@ -301,6 +304,274 @@ def release_description(repo: Path, candidate_sha: str) -> str:
         value = "Jason production build " + candidate_sha[:12]
     value = " ".join(str(value or "").split()).strip()
     return (value or ("Jason production build " + candidate_sha[:12]))[:300]
+
+
+def declared_one_transaction_freeze_exception(
+    repo: Path, candidate_sha: str, *, expected_rollback_sha: str | None = None,
+) -> dict[str, Any] | None:
+    """Read the exact-candidate freeze exception declaration from Git.
+
+    The declaration is incident-specific and short-lived. It does not itself
+    grant authority; a signed Teams exact-release approval remains mandatory.
+    """
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    try:
+        raw = subprocess.check_output(
+            ["git", "-C", str(repo), "show",
+             candidate_sha + ":" + str(SOURCE_PRODUCTION_FREEZE_EXCEPTION)],
+            stderr=subprocess.DEVNULL, timeout=15,
+        )
+    except subprocess.CalledProcessError:
+        return None
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ReleaseManagerError("production freeze exception source is unavailable") from exc
+    if len(raw) > 8192:
+        raise ReleaseManagerError("production freeze exception declaration is too large")
+    try:
+        doc = json.loads(raw)
+    except (ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise ReleaseManagerError("production freeze exception declaration is invalid JSON") from exc
+    required = {
+        "schema_version", "status", "purpose", "required_recovery_profile_id",
+        "rollback_sha", "expires_at", "standing_authority",
+        "restore_freeze_after_transaction", "signed_teams_release_approval_required",
+    }
+    if not isinstance(doc, dict) or set(doc) != required:
+        raise ReleaseManagerError("production freeze exception declaration shape is invalid")
+    purpose = str(doc.get("purpose") or "")
+    profile = str(doc.get("required_recovery_profile_id") or "")
+    rollback = exact_sha(str(doc.get("rollback_sha") or ""), "freeze exception rollback_sha")
+    if (doc.get("schema_version") != "1.0" or doc.get("status") != "requested"
+            or not purpose.startswith("ONE-TIME PRODUCTION FREEZE EXCEPTION")
+            or not 80 <= len(purpose) <= 500
+            or profile != "provider_identity_and_authority_recovery"
+            or doc.get("standing_authority") is not False
+            or doc.get("restore_freeze_after_transaction") is not True
+            or doc.get("signed_teams_release_approval_required") is not True):
+        raise ReleaseManagerError("production freeze exception declaration exceeds reviewed authority")
+    if expected_rollback_sha is not None and rollback != exact_sha(
+        expected_rollback_sha, "expected rollback SHA"
+    ):
+        raise ReleaseManagerError("production freeze exception rollback does not match release")
+    try:
+        expires = datetime.fromisoformat(str(doc.get("expires_at") or "").replace("Z", "+00:00"))
+    except (ValueError, TypeError) as exc:
+        raise ReleaseManagerError("production freeze exception expiry is invalid") from exc
+    now_dt = datetime.now(timezone.utc)
+    if (expires.tzinfo is None or expires <= now_dt
+            or (expires - now_dt).total_seconds() > 24 * 60 * 60):
+        raise ReleaseManagerError("production freeze exception is expired or unreasonably long")
+    result = dict(doc)
+    result["rollback_sha"] = rollback
+    result["declaration_sha256"] = "sha256:" + hashlib.sha256(raw).hexdigest()
+    return result
+
+
+def one_transaction_freeze_exception_context(
+    repo: Path, state_root: Path, record: Mapping[str, Any],
+    recovery_context: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Prove this exact signed Teams release may temporarily lift the freeze."""
+    if str(record.get("state") or "") != "production_eligible":
+        return None
+    candidate = exact_sha(str((record.get("release_candidate") or {}).get("candidate_sha") or ""),
+                          "candidate_sha")
+    rollback = exact_sha(str(record.get("rollback_sha") or ""), "rollback_sha")
+    try:
+        declared = declared_one_transaction_freeze_exception(
+            repo, candidate, expected_rollback_sha=rollback,
+        )
+    except ReleaseManagerError:
+        return None
+    if declared is None:
+        return None
+    recorded = record.get("one_transaction_freeze_exception")
+    if not isinstance(recorded, Mapping) or dict(recorded) != declared:
+        return None
+    manifest = record.get("release_manifest") or {}
+    if (not isinstance(manifest, Mapping)
+            or manifest.get("one_transaction_freeze_exception") != declared):
+        return None
+    if recovery_context.get("profile_id") != declared["required_recovery_profile_id"]:
+        return None
+    if recovery_context.get("candidate_sha") != candidate or recovery_context.get("rollback_sha") != rollback:
+        return None
+    review = record.get("manual_scope_review") or {}
+    if (not isinstance(review, Mapping) or review.get("candidate_sha") != candidate
+            or review.get("baseline_sha") != rollback
+            or not re.fullmatch(r"[0-9a-f]{64}", str(review.get("scope_sha256") or ""))):
+        return None
+    owner = record.get("owner_approval") or {}
+    source = str(owner.get("source") or "")
+    if (owner.get("approved") is not True or owner.get("candidate_sha") != candidate
+            or re.fullmatch(r"authenticated_mobile_teams_owner:relapproval-[0-9a-f]{32}", source) is None):
+        return None
+    return {
+        "schema_version": "1.0",
+        "release_id": str(record.get("release_id") or ""),
+        "candidate_sha": candidate,
+        "rollback_sha": rollback,
+        "scope_sha256": str(review["scope_sha256"]),
+        "recovery_profile_id": str(recovery_context["profile_id"]),
+        "declaration_sha256": str(declared["declaration_sha256"]),
+        "expires_at": str(declared["expires_at"]),
+        "owner_approval_source": source,
+        "standing_authority": False,
+        "restore_freeze_after_transaction": True,
+    }
+
+
+def _freeze_marker_snapshot(state_root: Path) -> dict[str, Any]:
+    marker = state_root / PRODUCTION_FREEZE_MARKER
+    info = marker.lstat()
+    if (not stat.S_ISREG(info.st_mode) or marker.is_symlink()
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_uid != os.geteuid() or info.st_gid != os.getegid()
+            or not 1 <= info.st_size <= 4096):
+        raise ReleaseManagerError("production deployment freeze marker metadata is unsafe")
+    raw = marker.read_bytes()
+    return {
+        "raw": raw,
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "mode": stat.S_IMODE(info.st_mode),
+        "uid": info.st_uid,
+        "gid": info.st_gid,
+    }
+
+
+def _freeze_receipt_path(state_root: Path, release_id: str) -> Path:
+    return state_root / "owner-unfreeze-receipts" / (release_id + ".json")
+
+
+def restore_stranded_one_transaction_freeze_under_lock(state_root: Path) -> None:
+    """Restore or close a freeze left by a crashed one-release transaction."""
+    marker = state_root / PRODUCTION_FREEZE_MARKER
+    receipts = state_root / "owner-unfreeze-receipts"
+    if not receipts.is_dir():
+        return
+    active: list[tuple[Path, dict[str, Any]]] = []
+    for path in sorted(receipts.glob("release-*.json"), key=lambda item: item.stat().st_mtime, reverse=True)[:50]:
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+        if (doc.get("schema_version") == "2.0"
+                and doc.get("authorization") == "signed_teams_one_transaction_unfreeze"
+                and doc.get("freeze_restored") is False
+                and doc.get("status") in {"authorized_pending", "unfrozen_active"}):
+            active.append((path, doc))
+    if not active:
+        return
+    if len(active) != 1:
+        raise ReleaseManagerError("multiple unfinished production freeze exceptions require human review")
+    receipt_path, receipt = active[0]
+    backup = state_root / PRODUCTION_FREEZE_BACKUP
+    info = backup.lstat()
+    raw = backup.read_bytes()
+    if (not stat.S_ISREG(info.st_mode) or backup.is_symlink()
+            or stat.S_IMODE(info.st_mode) != int(receipt.get("freeze_mode_before") or 0)
+            or info.st_uid != int(receipt.get("freeze_uid_before") or -1)
+            or info.st_gid != int(receipt.get("freeze_gid_before") or -1)
+            or hashlib.sha256(raw).hexdigest() != receipt.get("freeze_sha256_before")):
+        raise ReleaseManagerError("production freeze crash-recovery backup does not match receipt")
+    if marker.exists() or marker.is_symlink():
+        restored = _freeze_marker_snapshot(state_root)
+        if restored["sha256"] != receipt["freeze_sha256_before"]:
+            raise ReleaseManagerError("active freeze exception receipt conflicts with restored marker")
+    else:
+        _atomic_private_bytes(marker, raw)
+        os.chmod(marker, int(receipt["freeze_mode_before"]))
+        restored = _freeze_marker_snapshot(state_root)
+        if restored["sha256"] != receipt["freeze_sha256_before"]:
+            raise ReleaseManagerError("production freeze crash recovery verification failed")
+    receipt["freeze_restored"] = True
+    receipt["freeze_sha256_after"] = restored["sha256"]
+    receipt["status"] = "stranded_transaction_restored"
+    receipt["completed_at"] = now()
+    atomic_json(receipt_path, receipt)
+    raise ReleaseManagerError(
+        "restored production freeze left open by an interrupted one-release transaction; retry promotion"
+    )
+
+
+def begin_one_transaction_freeze_exception(
+    state_root: Path, context: Mapping[str, Any],
+) -> dict[str, Any]:
+    snapshot = _freeze_marker_snapshot(state_root)
+    marker = state_root / PRODUCTION_FREEZE_MARKER
+    backup = state_root / PRODUCTION_FREEZE_BACKUP
+    if backup.exists() or backup.is_symlink():
+        info = backup.lstat()
+        raw = backup.read_bytes()
+        if (not stat.S_ISREG(info.st_mode) or backup.is_symlink()
+                or stat.S_IMODE(info.st_mode) != snapshot["mode"]
+                or info.st_uid != snapshot["uid"] or info.st_gid != snapshot["gid"]
+                or raw != snapshot["raw"]):
+            raise ReleaseManagerError("production freeze backup differs from active marker")
+    else:
+        _atomic_private_bytes(backup, snapshot["raw"])
+        os.chmod(backup, snapshot["mode"])
+    receipt_path = _freeze_receipt_path(state_root, str(context["release_id"]))
+    if receipt_path.exists() or receipt_path.is_symlink():
+        raise ReleaseManagerError("one-release freeze exception receipt already exists")
+    approval_id = str(context["owner_approval_source"]).split(":", 1)[1]
+    receipt = {
+        "schema_version": "2.0",
+        "authorization": "signed_teams_one_transaction_unfreeze",
+        "approval_id": approval_id,
+        "release_id": str(context["release_id"]),
+        "candidate_sha": str(context["candidate_sha"]),
+        "rollback_sha": str(context["rollback_sha"]),
+        "scope_sha256": str(context["scope_sha256"]),
+        "recovery_profile_id": str(context["recovery_profile_id"]),
+        "declaration_sha256": str(context["declaration_sha256"]),
+        "standing_authority": False,
+        "additional_provider_or_endpoint_authority": False,
+        "freeze_sha256_before": snapshot["sha256"],
+        "freeze_mode_before": snapshot["mode"],
+        "freeze_uid_before": snapshot["uid"],
+        "freeze_gid_before": snapshot["gid"],
+        "freeze_restored": False,
+        "status": "authorized_pending",
+        "authorized_at": now(),
+    }
+    atomic_json(receipt_path, receipt)
+    marker.unlink()
+    try:
+        receipt["status"] = "unfrozen_active"
+        receipt["unfrozen_at"] = now()
+        atomic_json(receipt_path, receipt)
+    except BaseException:
+        _atomic_private_bytes(marker, snapshot["raw"])
+        os.chmod(marker, snapshot["mode"])
+        receipt["freeze_restored"] = True
+        receipt["status"] = "begin_failed_freeze_restored"
+        receipt["completed_at"] = now()
+        atomic_json(receipt_path, receipt)
+        raise
+    return {"receipt_path": receipt_path, "receipt": receipt, "raw": snapshot["raw"]}
+
+
+def restore_one_transaction_freeze_exception(
+    state_root: Path, opened: Mapping[str, Any], *, release_state: str,
+) -> None:
+    marker = state_root / PRODUCTION_FREEZE_MARKER
+    receipt_path = Path(opened["receipt_path"])
+    receipt = dict(opened["receipt"])
+    raw = bytes(opened["raw"])
+    if marker.exists() or marker.is_symlink():
+        raise ReleaseManagerError("production freeze marker unexpectedly reappeared during transaction")
+    _atomic_private_bytes(marker, raw)
+    os.chmod(marker, int(receipt["freeze_mode_before"]))
+    restored = _freeze_marker_snapshot(state_root)
+    if restored["sha256"] != receipt["freeze_sha256_before"]:
+        raise ReleaseManagerError("production freeze restoration verification failed")
+    receipt["freeze_restored"] = True
+    receipt["freeze_sha256_after"] = restored["sha256"]
+    receipt["release_state_after"] = str(release_state or "unknown")
+    receipt["status"] = "deployment_returned"
+    receipt["completed_at"] = now()
+    atomic_json(receipt_path, receipt)
 
 
 def write_owner_notification_event(
@@ -899,6 +1170,7 @@ def classify_change_risk(change_class: str, files: list[str]) -> str:
             "config/production-desired-state.json",
             "config/mobile-release-approval-policy.json",
             "config/open-breaker-recovery-policy.json",
+            "config/production-deployment-freeze-exception.json",
             "tools/install_release_host_reconciler.py",
             "tools/install_release_control_transition.py",
             "tools/protected_root_policy_migration.py",
@@ -2703,6 +2975,15 @@ def create_record(
             "required protected checks are not green: " + ", ".join(checks["failures"])
         )
     risk_profile = classify_change_risk(change_class, files)
+    freeze_exception = declared_one_transaction_freeze_exception(
+        repo, candidate_sha, expected_rollback_sha=rollback_sha,
+    )
+    if freeze_exception is not None and (
+        change_class != "release_blocker" or risk_profile != "production_control_core"
+    ):
+        raise ReleaseManagerError(
+            "production freeze exception is limited to reviewed production-control recovery"
+        )
     precreate_recovery = None
     if alignment is None:
         precreate_recovery = precreate_open_breaker_recovery_alignment(
@@ -2728,13 +3009,17 @@ def create_record(
         "state": "requested",
         "change_class": change_class,
         **binding,
-        "description": release_description(repo, candidate_sha),
+        "description": (
+            str(freeze_exception["purpose"]) if freeze_exception is not None
+            else release_description(repo, candidate_sha)
+        ),
         "risk_profile": risk_profile,
         "created_at": now(),
         "updated_at": now(),
         "rollback_sha": rollback_sha,
         "changed_files": files,
         "precreate_open_breaker_recovery": precreate_recovery,
+        "one_transaction_freeze_exception": freeze_exception,
         "active_support_repairs": [],
         "support_impact": {"checked": True, "blocking_items": []},
         "development": {
@@ -2810,6 +3095,8 @@ def create_record(
             repo / SOURCE_MOBILE_APPROVAL_POLICY
         ),
         "mobile_release_approval_mode": declared_mobile_release_approval_policy(repo)["mode"],
+        **({"one_transaction_freeze_exception": freeze_exception}
+           if freeze_exception is not None else {}),
     }
     gate_transition(repo, state_root, record, "release_candidate")
     save_record(state_root, record)
@@ -4438,29 +4725,25 @@ def require_owner_production_deployment_unfrozen(state_root: Path) -> None:
 
 
 def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
-    require_owner_production_deployment_unfrozen(state_root)
+    # Freeze evaluation is serialized under the same production transaction
+    # lock. This permits one exact signed recovery exception without creating a
+    # race where another promoter observes the marker temporarily absent.
     lock = acquire_production_transaction_lock(repo, state_root, record)
+    opened_freeze: dict[str, Any] | None = None
     try:
-        require_owner_production_deployment_unfrozen(state_root)
+        restore_stranded_one_transaction_freeze_under_lock(state_root)
         require_current_manual_scope_review(repo, state_root, record)
-        # Check fresh authoritative source before retention, breaker work, or
-        # production deployment. Applies to explicit/manual and automatic paths.
         require_current_protected_release_source(repo, record)
-        # Verify that the independent root reconciler is installed and active
-        # before even bounded stopped-container retention maintenance.
         require_host_reconciler_ready(state_root)
-        # Explicit/manual promotion needs the same bounded rollback retention
-        # headroom already reserved by prepare_release and the automatic timer.
-        # Remove only historical stopped rollback containers under the exclusive
-        # production lock, BEFORE root breaker revalidation and any live change.
-        reconcile_stopped_rollback_retention()
+
         recovery_context = None
-        try:
-            revalidate_circuit_breaker(state_root)
-        except ReleaseManagerError as ordinary_breaker_error:
-            # Only a source-reviewed, exact-drift recovery profile may continue
-            # after the ordinary breaker path fails. Any missing/mismatched
-            # recovery evidence preserves the original fail-closed error.
+        marker = state_root / PRODUCTION_FREEZE_MARKER
+        freeze_active = marker.exists() or marker.is_symlink()
+        if freeze_active:
+            # A frozen recovery is admitted only when the complete fresh drift
+            # set matches the reviewed recovery profile AND the already signed
+            # Teams release card bound the source-declared one-transaction
+            # freeze purpose, manifest and scope.
             try:
                 control = _read_protected_snapshot(
                     state_root, "production-control-state.json"
@@ -4474,15 +4757,61 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
                 )
             except ReleaseManagerError:
                 recovery_context = None
-            if recovery_context is None:
-                raise ordinary_breaker_error
+            exception_context = (
+                one_transaction_freeze_exception_context(
+                    repo, state_root, record, recovery_context,
+                ) if recovery_context is not None else None
+            )
+            if exception_context is None:
+                require_owner_production_deployment_unfrozen(state_root)
+                raise ReleaseManagerError("production freeze exception evidence is incomplete")
+            opened_freeze = begin_one_transaction_freeze_exception(
+                state_root, exception_context,
+            )
+            # The global freeze was validly lifted for this one transaction;
+            # bounded stopped-container retention may now run.
+            reconcile_stopped_rollback_retention()
+        else:
+            # Ordinary unfrozen promotion preserves the historical ordering:
+            # retention first, then breaker revalidation.
+            reconcile_stopped_rollback_retention()
+            try:
+                revalidate_circuit_breaker(state_root)
+            except ReleaseManagerError as ordinary_breaker_error:
+                try:
+                    control = _read_protected_snapshot(
+                        state_root, "production-control-state.json"
+                    )
+                    drift = _read_protected_snapshot(
+                        state_root, "production-drift.json"
+                    )
+                    recovery_context = governed_open_breaker_recovery_context(
+                        repo, state_root, record, require_owner_approval=True,
+                        control=control, drift=drift,
+                    )
+                except ReleaseManagerError:
+                    recovery_context = None
+                if recovery_context is None:
+                    raise ordinary_breaker_error
+
         if recovery_context is None:
             return _deploy_production_locked(repo, state_root, record)
         return _deploy_production_locked(
             repo, state_root, record, recovery_context=recovery_context
         )
     finally:
-        release_production_transaction_lock(lock)
+        try:
+            if opened_freeze is not None:
+                try:
+                    latest = load_record(state_root, str(record.get("release_id") or ""))
+                    release_state = str(latest.get("state") or "unknown")
+                except Exception:
+                    release_state = str(record.get("state") or "unknown")
+                restore_one_transaction_freeze_exception(
+                    state_root, opened_freeze, release_state=release_state,
+                )
+        finally:
+            release_production_transaction_lock(lock)
 
 
 def prepare_release(
@@ -4737,7 +5066,7 @@ def _open_breaker_recovery_policy(repo: Path, candidate_sha: str) -> dict[str, A
         if (profile.get("change_class") != "release_blocker"
                 or profile.get("risk_profile") != "production_control_core"
                 or type(profile.get("max_changed_files")) is not int
-                or not 1 <= profile["max_changed_files"] <= 65):
+                or not 1 <= profile["max_changed_files"] <= 70):
             raise ReleaseManagerError("open-breaker recovery profile authority is invalid")
         problems = profile.get("drift_problems")
         files = profile.get("required_changed_files")
