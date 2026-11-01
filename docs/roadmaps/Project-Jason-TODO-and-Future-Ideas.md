@@ -1203,6 +1203,41 @@ These aliases preserve old PR, support, session, and conversation references. An
 
 ---
 
+### TODO-CONN-021 — Datto RMM activity/job attribution for security and operational evidence
+
+- **Priority:** P1
+- **Status:** Approved for Autonomous Engineering — owner-approved 2026-11-01; first TODO production-lifecycle acceptance test
+- **Autonomous engineering readiness:** Approved — bounded read-only Stage 1
+- **Risk level:** Moderate
+- **Authority basis:** Owner approval on 2026-11-01 authorizes bounded autonomous engineering and preproduction for Stage 1 only. Production deployment remains separately exact-SHA Teams-approved. No endpoint execution, alert closure, ticket resolution, client communication, or disruptive action is authorized by this TODO.
+- **Idea:** Add a provider-neutral governed activity/history evidence capability, with Datto RMM as the first provider implementation, so Jason can attribute suspicious or operational endpoint activity to an authoritative technician, automation, component, job, script, or deployment when the evidence supports it.
+- **Why it matters:** EDR and Windows evidence often reports SYSTEM as the process user without identifying the initiating technician or automation. Accurate DRMM activity/job correlation reduces false escalation, strengthens autonomous investigation, and gives ticket/security playbooks higher-quality evidence.
+- **Stage 1 scope:** Search exact-client, exact-device Datto RMM historical activity/jobs over a bounded time window and return structured evidence including authoritative initiator identity/type when available, job/activity identifiers, component/script/deployment identity, timestamps/time delta, and provider evidence references.
+- **Safety:** Fail closed on ambiguous, missing, stale, or cross-client evidence. SYSTEM identity, signed software, command similarity, or timestamp proximity alone never proves attribution.
+- **Architecture:** Expose the evidence through a provider-neutral capability rather than an EDR-specific Datto implementation. Evidence collection must remain separate from downstream ticket-writing, alert-resolution, or remediation authority.
+- **Acceptance test:** Controlled known-good historical activity returns the verified initiator/automation and exact job/component evidence; no-match and ambiguous cases remain explicitly unattributed; cross-client results are rejected; provider-unavailable and stale-history cases fail safely; results are reusable by downstream playbooks without granting write authority.
+- **Production-test role:** This is the first TODO used to prove TODO admission -> autonomous engineering -> protected PR/CI -> preproduction -> immutable Release Manager candidate -> exact-SHA Teams approval -> governed production deployment -> live provider-backed acceptance -> final TODO reconciliation.
+- **Tracked intake issue:** #1976
+- **Decision owner:** AOT Owner / Jason Governance Authority
+
+### TODO-OPS-014 — Jason Technician Workbench: guided PowerShell, live troubleshooting, and automation development
+
+- **Priority:** P1
+- **Status:** Approved for Autonomous Engineering — owner-approved 2026-11-01; second TODO production-lifecycle acceptance test
+- **Autonomous engineering readiness:** Approved — bounded technician-visible Phase 1
+- **Risk level:** High
+- **Authority basis:** Owner approval on 2026-11-01 authorizes bounded autonomous engineering and preproduction for the initial technician-visible/read-only or low-risk diagnostic phase. Production remains separately exact-SHA Teams-approved. This TODO does not authorize unrestricted SYSTEM shell execution, disruptive actions, hidden endpoint execution, or global Datto RMM component publication.
+- **Idea:** Build a governed technician workbench where an authenticated AOT technician and Jason can work on the same exact device/ticket context, beginning with Datto RMM Web Remote PowerShell or a supported companion transport. Jason should teach, assist, troubleshoot, interpret output, and progressively convert proven troubleshooting into reusable automation.
+- **Technician modes:** Guided/Teach Me, Assisted/Work With Me, and Autonomous/Handle It, with all modes bounded by existing Jason authority, command classification, exact client/device binding, audit, approval, and disruption rules.
+- **Phase 1 scope:** Technician-visible diagnostic collaboration: Jason may propose, explain, and where policy permits execute read-only/low-risk PowerShell diagnostics; read and interpret returned output; correlate results with Autotask, DRMM, EDR, IT Glue, BackupIQ, DNS/security and other approved evidence; preserve a structured session trace; and produce a reviewed ticket summary.
+- **Learning requirement:** Jason should increase technician understanding rather than hide the work. Commands, output, interpretation, hypotheses, and next steps must be reviewable, with pause/ask-why/continue/stop controls where supported.
+- **Automation-development path:** Proven interactive diagnostic/remediation sequences may be normalized into candidate Datto RMM components and Jason playbooks with PowerShell 5.1/noninteractive/SYSTEM-safe conventions, result markers, exit codes, parameters/site variables, detection, verification, documentation, and rollback considerations. Candidate creation does not itself authorize publication or activation.
+- **Safety:** Interactive troubleshooting authority and unattended automation authority are separate. Reboot, shutdown, forced logoff, network interruption, or disruptive service restart still requires explicit approval. Unsupported Datto session sharing must not be implemented through cookie/session hijacking or undocumented private endpoints.
+- **Acceptance test:** On a designated test endpoint/ticket, prove exact technician/customer/device/ticket binding, visible multi-step diagnostic execution or synchronized equivalent, output interpretation, policy denial/approval behavior, stop/revocation enforcement, auditable replay, client isolation, and generation of a reviewed automation/playbook candidate without publishing it.
+- **Production-test role:** This is the second TODO used to exercise the same complete governed TODO-to-production lifecycle after TODO-CONN-021 and to capture defects in admission, Teams start notification, autonomous continuation/retry, PR/CI handoff, Release Manager candidate creation, exact-SHA approval delivery, deployment, live acceptance, final reconciliation, and completion notification.
+- **Tracked intake issue:** #1455
+- **Decision owner:** AOT Owner / Jason Governance Authority
+
 ## New-item template
 
 Copy this section when adding an idea:
