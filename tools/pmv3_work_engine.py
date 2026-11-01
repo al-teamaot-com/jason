@@ -128,6 +128,7 @@ def make_item(
     approval_required: bool = False,
     approval_request_id: str = "",
     idempotent: bool = False,
+    required_role: str = "",
 ) -> dict[str, Any]:
     now = iso(utcnow())
     return {
@@ -139,6 +140,9 @@ def make_item(
         "approval_request_id": approval_request_id,
         "approval": None,
         "idempotent": bool(idempotent),
+        "required_role": str(required_role),
+        "worker_id": "",
+        "worker_role": "",
         "phase": "waiting" if dependency else "runnable",
         "reason": "dependency_wait" if dependency else "",
         "dependency": dependency,
@@ -268,16 +272,20 @@ def recheck(state: dict[str, Any], facts: Mapping[str, bool], *, now: datetime) 
                 item["updated_at"] = iso(now)
 
 
-def runnable_items(state: Mapping[str, Any], *, capacity: int) -> list[dict[str, Any]]:
-    active = sum(1 for item in state["items"].values() if item.get("phase") in ACTIVE)
-    slots = max(0, int(capacity) - active)
+def runnable_candidates(state: Mapping[str, Any]) -> list[dict[str, Any]]:
     candidates = [
         dict(item)
         for item in state["items"].values()
         if item.get("phase") == "runnable" and bool(item.get("approved")) and approval_satisfied(item)
     ]
     candidates.sort(key=lambda x: (int(x.get("priority") or 100), str(x.get("updated_at") or ""), str(x.get("id") or "")))
-    return candidates[:slots]
+    return candidates
+
+
+def runnable_items(state: Mapping[str, Any], *, capacity: int) -> list[dict[str, Any]]:
+    active = sum(1 for item in state["items"].values() if item.get("phase") in ACTIVE)
+    slots = max(0, int(capacity) - active)
+    return runnable_candidates(state)[:slots]
 
 
 def backoff_seconds(attempts: int) -> int:
@@ -348,6 +356,7 @@ def execute_cycle(
     capacity: int = 3,
     now: datetime | None = None,
     checkpoint: Callable[[Mapping[str, Any]], None] | None = None,
+    worker_allocator: Callable[[list[dict[str, Any]], Mapping[str, Any]], Mapping[str, Mapping[str, str]]] | None = None,
 ) -> dict[str, Any]:
     now = now or utcnow()
     state["cycle"] = int(state.get("cycle") or 0) + 1
@@ -369,11 +378,23 @@ def execute_cycle(
                 item["reason"] = "indeterminate_execution_requires_reconciliation"
                 item["dependency"] = "reconciliation_required"
             item["claimed_at"] = None
+            item["worker_id"] = ""
+            item["worker_role"] = ""
             item["updated_at"] = iso(now)
 
     recheck(state, facts, now=now)
 
-    for item in runnable_items(state, capacity=capacity):
+    assignments: Mapping[str, Mapping[str, str]] = {}
+    if worker_allocator is None:
+        selected = runnable_items(state, capacity=capacity)
+    else:
+        candidates = runnable_candidates(state)
+        assignments = worker_allocator(candidates, state)
+        if not isinstance(assignments, Mapping):
+            raise ValueError("worker allocator must return a mapping")
+        selected = [item for item in candidates if item["id"] in assignments][:max(0, int(capacity))]
+
+    for item in selected:
         stored = state["items"][item["id"]]
         key = action_key(str(item["id"]), str(item["action"]), int(item.get("generation") or 1))
         if key in state["receipts"]:
@@ -383,6 +404,16 @@ def execute_cycle(
             continue
 
         stored["phase"] = "running"
+        if worker_allocator is not None:
+            allocation = assignments.get(item["id"])
+            if not isinstance(allocation, Mapping):
+                continue
+            worker_id = str(allocation.get("worker_id") or "")
+            worker_role = str(allocation.get("worker_role") or "")
+            if not worker_id or not worker_role:
+                raise ValueError("worker allocation requires worker_id and worker_role")
+            stored["worker_id"] = worker_id
+            stored["worker_role"] = worker_role
         stored["attempts"] = int(stored.get("attempts") or 0) + 1
         stored["claimed_at"] = iso(now)
         stored["updated_at"] = iso(now)
