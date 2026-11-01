@@ -101,3 +101,7 @@ A provider identity incident is not complete until:
 - runtime health is healthy;
 - production drift no longer contains the provider-related failure;
 - no provider API credential or KV value was changed by the identity repair.
+
+### Downstream CCC recovery
+
+A failed scheduled `jason-ccc.service` caused by the same provider-identity/authority-health incident is treated as downstream evidence, not hidden with `reset-failed`. The provider-identity recovery profile includes that exact failed unit. During the signed recovery transaction the initial provider canary is deferred until identity repair, then Jason requires fresh provider canary and DNSFilter reconciliation success, installs/runs the candidate CCC scheduler using the authenticated-Teams candidate material-review record, and requires `/var/lib/jason/ccc/latest.json` to report `PASS` for the exact candidate source and runtime SHA before final production drift validation.

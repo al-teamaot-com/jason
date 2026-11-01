@@ -238,6 +238,8 @@ def provider_identity_drift(*, extra=False):
     problems = authority_drift()["problems"] + [
         {"kind": "failed_user_unit", "state": "failed",
          "unit": "jason-dnsfilter-boundary-reconcile.service"},
+        {"kind": "failed_system_unit", "state": "failed",
+         "unit": "jason-ccc.service"},
     ]
     if extra:
         problems.append({"kind": "failed_system_unit", "state": "failed",

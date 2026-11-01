@@ -40,3 +40,17 @@ def test_host_reconcile_runs_provider_identity_recovery_before_final_drift_check
     recovery = text.index('step_start provider_identity_release_recovery')
     drift = text.index('step_start production_drift_guard')
     assert recovery < drift
+
+
+def test_provider_recovery_defers_initial_canary_and_requires_fresh_ccc_pass():
+    text = (ROOT / 'tools/reconcile_production_host_services.sh').read_text()
+    assert 'JASON_PROVIDER_CANARY_INITIAL=DEFERRED_UNTIL_IDENTITY_RECOVERY' in text
+    assert 'material-review-${SOURCE_REVISION:0:16}.json' in text
+    assert 'install_ccc_scheduler.sh' in text
+    assert "d.get('status') != 'PASS'" in text
+    assert "d.get('source_revision') != sha" in text
+    assert "d.get('runtime_revision') != sha" in text
+    identity = text.index('step_start provider_identity_release_recovery')
+    ccc = text.index('JASON_CCC_POST_RECOVERY=PASS')
+    drift = text.index('step_start production_drift_guard')
+    assert identity < ccc < drift

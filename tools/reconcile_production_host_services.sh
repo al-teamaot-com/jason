@@ -299,6 +299,23 @@ step_pass release_owned_unit_delta
 
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 
+RECOVERY_PROFILE="$(/usr/bin/python3 - "$SOURCE_REVISION" <<'PY2'
+import json, pathlib, sys
+sha=sys.argv[1]
+root=pathlib.Path('/var/lib/jason/openclaw/release-manager/records')
+prefix='release-'+sha[:16]
+matched=[]
+for path in sorted(root.glob(prefix+'*.json')):
+    try: doc=json.loads(path.read_text(encoding='utf-8'))
+    except Exception: continue
+    if ((doc.get('release_candidate') or {}).get('candidate_sha') == sha
+            and doc.get('state') == 'production'):
+        matched.append(str((doc.get('open_breaker_recovery') or {}).get('profile_id') or ''))
+if len(matched) > 1: raise SystemExit('multiple production recovery records for exact candidate')
+print(matched[0] if matched else '')
+PY2
+)"
+
 for unit in "${EXPORTER_UNITS[@]}"; do
   src="$RELEASE_DIR/infrastructure/showcase/systemd/$unit"
   test -f "$src" || { echo "ERROR: missing canonical exporter unit: $src" >&2; exit 2; }
@@ -404,8 +421,12 @@ for timer in "${MAINTENANCE_TIMERS[@]}"; do
 done
 CURRENT_UNIT="$PROVIDER_CANARY_TIMER"
 systemctl enable --now "$PROVIDER_CANARY_TIMER"
-CURRENT_UNIT="$PROVIDER_CANARY_SERVICE"
-timeout --signal=TERM --kill-after=5s 45s systemctl start "$PROVIDER_CANARY_SERVICE"
+if [ "$RECOVERY_PROFILE" = "provider_identity_and_authority_recovery" ]; then
+  echo "JASON_PROVIDER_CANARY_INITIAL=DEFERRED_UNTIL_IDENTITY_RECOVERY"
+else
+  CURRENT_UNIT="$PROVIDER_CANARY_SERVICE"
+  timeout --signal=TERM --kill-after=5s 45s systemctl start "$PROVIDER_CANARY_SERVICE"
+fi
 
 ensure_authority_full_integrity_proof() {
   local evidence=/var/lib/jason/openclaw/operational-full-health.json
@@ -764,22 +785,6 @@ fi
 step_pass openbao_identity_lifecycle_install
 echo "JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=PASS"
 
-RECOVERY_PROFILE="$(/usr/bin/python3 - "$SOURCE_REVISION" <<'PY2'
-import json, pathlib, sys
-sha=sys.argv[1]
-root=pathlib.Path('/var/lib/jason/openclaw/release-manager/records')
-prefix='release-'+sha[:16]
-matched=[]
-for path in sorted(root.glob(prefix+'*.json')):
-    try: doc=json.loads(path.read_text(encoding='utf-8'))
-    except Exception: continue
-    if ((doc.get('release_candidate') or {}).get('candidate_sha') == sha
-            and doc.get('state') == 'production'):
-        matched.append(str((doc.get('open_breaker_recovery') or {}).get('profile_id') or ''))
-if len(matched) > 1: raise SystemExit('multiple production recovery records for exact candidate')
-print(matched[0] if matched else '')
-PY2
-)"
 if [ "$RECOVERY_PROFILE" = "provider_identity_and_authority_recovery" ]; then
   step_start provider_identity_release_recovery
   /usr/bin/python3 /usr/local/lib/jason/openbao_identity_lifecycle.py \
@@ -832,6 +837,32 @@ PY2
     echo "ERROR: DNSFilter reconciliation did not pass after identity recovery" >&2
     exit 9
   fi
+
+  CCC_REVIEW="/var/lib/jason/ccc/material-review-${SOURCE_REVISION:0:16}.json"
+  if [ ! -f "$CCC_REVIEW" ]; then
+    echo "ERROR: candidate Teams CCC material review is missing" >&2
+    exit 9
+  fi
+  CCC_STARTED_AT="$(date +%s)"
+  /usr/bin/bash "$RELEASE_DIR/tools/install_ccc_scheduler.sh" "$SOURCE_REVISION" "$CCC_REVIEW"
+  /usr/bin/python3 - "$SOURCE_REVISION" "$CCC_STARTED_AT" <<'PY2'
+import json, sys, time
+from pathlib import Path
+sha=sys.argv[1]; started=float(sys.argv[2])
+p=Path('/var/lib/jason/ccc/latest.json')
+d=json.loads(p.read_text(encoding='utf-8'))
+finished=str(d.get('finished_at') or '')
+try:
+    epoch=__import__('datetime').datetime.fromisoformat(finished.replace('Z','+00:00')).timestamp()
+except Exception:
+    raise SystemExit('CCC latest evidence has invalid finished_at')
+if (epoch < started - 1 or epoch > time.time()+10
+        or d.get('status') != 'PASS'
+        or d.get('source_revision') != sha
+        or d.get('runtime_revision') != sha):
+    raise SystemExit('CCC did not freshly prove exact candidate/runtime PASS after recovery')
+PY2
+  echo "JASON_CCC_POST_RECOVERY=PASS"
   step_pass provider_identity_release_recovery
   echo "JASON_PROVIDER_IDENTITY_RELEASE_RECOVERY=PASS"
 else
