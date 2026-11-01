@@ -1330,7 +1330,7 @@ def readmit_stale_clean_development_source(
                 or rec.get('phase') != 'blocked'
                 or rec.get('reason') != 'EvidenceToolError: stale worktree requires governed clean-source recovery'
                 or rec.get('pr_number')
-                or rec.get('stale_source_recovery_revision')
+                or rec.get('stale_source_recovery_revision') == current
                 or rec.get('blocker_class') in {'external_authority', 'blocked_by_dependency', 'internal_retry_exhausted'}
                 or issue_has_closed_dependency_gate(item)):
             continue
