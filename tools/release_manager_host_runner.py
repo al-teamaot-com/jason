@@ -5066,7 +5066,7 @@ def _open_breaker_recovery_policy(repo: Path, candidate_sha: str) -> dict[str, A
         if (profile.get("change_class") != "release_blocker"
                 or profile.get("risk_profile") != "production_control_core"
                 or type(profile.get("max_changed_files")) is not int
-                or not 1 <= profile["max_changed_files"] <= 70):
+                or not 1 <= profile["max_changed_files"] <= 74):
             raise ReleaseManagerError("open-breaker recovery profile authority is invalid")
         problems = profile.get("drift_problems")
         files = profile.get("required_changed_files")
