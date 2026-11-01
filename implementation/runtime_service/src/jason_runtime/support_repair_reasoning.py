@@ -20,6 +20,8 @@ _BILLING_ERRORS = {
     'project_spend_limit_exceeded': 'review_project_spend_limit',
     'organization_usage_limit_exceeded': 'review_provider_usage_limit',
     'insufficient_quota': 'review_provider_billing_or_quota',
+    'subscription_auth_required': 'sign_in_chatgpt_subscription',
+    'subscription_sharing_usage_limit_exceeded': 'review_chatgpt_subscription_usage',
 }
 logger = logging.getLogger(__name__)
 
