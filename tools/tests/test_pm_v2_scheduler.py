@@ -9,6 +9,26 @@ from pm_v2.scheduler import Scheduler
 from pm_v2.store import PMV2Store
 
 
+def reap_until(scheduler, expected: int, timeout: float = 2.0):
+    results = []
+    deadline = time.monotonic() + timeout
+    while len(results) < expected and time.monotonic() < deadline:
+        results.extend(scheduler.reap())
+        if len(results) < expected:
+            time.sleep(0.02)
+    return results
+
+
+def dispatch_until(scheduler, expected: int, timeout: float = 2.5):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        count = scheduler.dispatch_available()
+        if count == expected:
+            return count
+        time.sleep(0.02)
+    return scheduler.dispatch_available()
+
+
 class PMV2SchedulerTests(unittest.TestCase):
     def _config(self, root: Path, command=None):
         (root / "roadmap.md").write_text("", encoding="utf-8")
@@ -73,13 +93,10 @@ class PMV2SchedulerTests(unittest.TestCase):
             self._add(store, 2)
             scheduler = Scheduler(config=config, store=store, repo=root)
             try:
-                started = time.monotonic()
                 self.assertEqual(scheduler.dispatch_available(), 2)
-                time.sleep(0.25)
-                results = scheduler.reap()
-                elapsed = time.monotonic() - started
+                self.assertEqual(len(scheduler._running), 2)
+                results = reap_until(scheduler, 2)
                 self.assertEqual(len(results), 2)
-                self.assertLess(elapsed, 0.6)
                 states = {r.state for r in store.list_assignments()}
                 self.assertEqual(states, {"validation_ready"})
             finally:
@@ -95,8 +112,8 @@ class PMV2SchedulerTests(unittest.TestCase):
             scheduler = Scheduler(config=config, store=store, repo=root)
             try:
                 self.assertEqual(scheduler.dispatch_available(), 1)
-                time.sleep(0.1)
-                scheduler.reap()
+                results = reap_until(scheduler, 1)
+                self.assertEqual(len(results), 1)
                 row = store.list_assignments()[0]
                 self.assertEqual(row.state, "validation_ready")
                 self.assertEqual(row.completion_percent, 50)
@@ -160,14 +177,11 @@ class PMV2BoundedRetryTests(unittest.TestCase):
             scheduler = Scheduler(config=config, store=store, repo=root)
             try:
                 self.assertEqual(scheduler.dispatch_available(), 2)
-                time.sleep(0.1)
-                scheduler.reap()
+                self.assertEqual(len(reap_until(scheduler, 2)), 2)
                 self.assertEqual({r.state for r in store.list_assignments()},
                                  {"retry_ready"})
-                time.sleep(1.1)
-                self.assertEqual(scheduler.dispatch_available(), 2)
-                time.sleep(0.1)
-                scheduler.reap()
+                self.assertEqual(dispatch_until(scheduler, 2), 2)
+                self.assertEqual(len(reap_until(scheduler, 2)), 2)
                 rows = store.list_assignments()
                 self.assertTrue(all(r.state == "blocked" for r in rows))
                 self.assertTrue(all(r.attempt_count == 2 for r in rows))

@@ -172,8 +172,12 @@ class PMV2RunningControlTests(unittest.TestCase):
                     principal_id="owner", request_id="pause-1",
                 )
                 self.assertEqual(store.get_assignment("a1").state, "pause_requested")
-                time.sleep(0.3)
-                scheduler.reap()
+                deadline = time.monotonic() + 2.0
+                while time.monotonic() < deadline:
+                    scheduler.reap()
+                    if store.get_assignment("a1").state == "paused":
+                        break
+                    time.sleep(0.02)
                 self.assertEqual(store.get_assignment("a1").state, "paused")
             finally:
                 scheduler.shutdown()
