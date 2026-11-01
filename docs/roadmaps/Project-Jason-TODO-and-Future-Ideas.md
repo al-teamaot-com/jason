@@ -1235,6 +1235,7 @@ These aliases preserve old PR, support, session, and conversation references. An
 - **Safety:** Interactive troubleshooting authority and unattended automation authority are separate. Reboot, shutdown, forced logoff, network interruption, or disruptive service restart still requires explicit approval. Unsupported Datto session sharing must not be implemented through cookie/session hijacking or undocumented private endpoints.
 - **Acceptance test:** On a designated test endpoint/ticket, prove exact technician/customer/device/ticket binding, visible multi-step diagnostic execution or synchronized equivalent, output interpretation, policy denial/approval behavior, stop/revocation enforcement, auditable replay, client isolation, and generation of a reviewed automation/playbook candidate without publishing it.
 - **Production-test role:** This is the second TODO used to exercise the same complete governed TODO-to-production lifecycle after TODO-CONN-021 and to capture defects in admission, Teams start notification, autonomous continuation/retry, PR/CI handoff, Release Manager candidate creation, exact-SHA approval delivery, deployment, live acceptance, final reconciliation, and completion notification.
+- **Sequencing:** Do not admit this second test ahead of TODO-CONN-021; preserve the Owner-approved first-test/second-test order.
 - **Tracked intake issue:** #1455
 - **Decision owner:** AOT Owner / Jason Governance Authority
 
