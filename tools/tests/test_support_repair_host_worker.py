@@ -3010,3 +3010,28 @@ def test_stale_clean_source_recovery_refuses_unsafe_or_duplicate_state(
     ) == []
     assert calls == []
     assert record['phase'] == 'blocked'
+
+
+
+def test_support_reasoning_owner_action_is_preserved_for_lifecycle_notification():
+    response = {
+        "error": "HTTP transport failed with status 429",
+        "primary_provider_error_code": "subscription_sharing_usage_limit_exceeded",
+        "required_owner_action": "review_chatgpt_subscription_usage",
+    }
+    update = worker.blocked_reasoning_record(
+        response, "reasoning request failed: "
+    )
+    assert update["phase"] == "blocked"
+    assert update["notification_class"] == "owner_action_required"
+    assert update["owner_action"] == "review_chatgpt_subscription_usage"
+    assert update["provider_blocker_code"] == "subscription_sharing_usage_limit_exceeded"
+
+
+def test_support_reasoning_non_owner_action_does_not_fabricate_notification():
+    update = worker.blocked_reasoning_record(
+        {"error": "HTTP transport failed"}, "reasoning request failed: "
+    )
+    assert update["phase"] == "blocked"
+    assert "notification_class" not in update
+    assert "owner_action" not in update
