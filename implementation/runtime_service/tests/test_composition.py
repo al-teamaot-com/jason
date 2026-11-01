@@ -951,6 +951,7 @@ def test_subscription_first_composition_does_not_resolve_openai_api_secret(tmp_p
         _settings(tmp_path),
         hosted_conversation_enabled=True,
         hosted_semantics_enabled=True,
+        dynamic_conversation_enabled=True,
         subscription_reasoning_enabled=True,
         subscription_reasoning_url="http://subscription-reasoning:8091",
         openai_api_fallback_enabled=False,
