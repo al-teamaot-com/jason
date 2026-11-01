@@ -19,6 +19,8 @@ class ReflectionSignalKind(str, Enum):
     WORKER_UNSUPPORTED_CAPABILITY = "worker_unsupported_capability"
     WORKER_GOVERNANCE_BLOCKER = "worker_governance_blocker"
     USER_CORRECTION = "user_correction"
+    ENGINEERING_STALLED = "engineering_stalled"
+    ENGINEERING_CI_REPEAT_FAILURE = "engineering_ci_repeat_failure"
 
 
 class CandidateActorKind(str, Enum):
