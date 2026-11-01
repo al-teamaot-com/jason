@@ -751,6 +751,40 @@ else
   echo "JASON_PM_V2_SHADOW_RECONCILIATION=DEFERRED_BOOTSTRAP"
 fi
 
+step_start boot_recovery_install
+BOOT_RECOVERY_SCRIPT="$RELEASE_DIR/tools/jason_boot_recovery.py"
+BOOT_RECOVERY_SERVICE="$RELEASE_DIR/infrastructure/boot-recovery/jason-boot-recovery.service"
+BOOT_RECOVERY_TIMER="$RELEASE_DIR/infrastructure/boot-recovery/jason-boot-recovery.timer"
+for required in "$BOOT_RECOVERY_SCRIPT" "$BOOT_RECOVERY_SERVICE" "$BOOT_RECOVERY_TIMER"; do
+  test -f "$required" || { echo "ERROR: boot recovery source missing: $required" >&2; exit 9; }
+done
+install -o root -g root -m 0750 "$BOOT_RECOVERY_SCRIPT" /usr/local/sbin/jason-boot-recovery
+install -o root -g root -m 0644 "$BOOT_RECOVERY_SERVICE" /etc/systemd/system/jason-boot-recovery.service
+install -o root -g root -m 0644 "$BOOT_RECOVERY_TIMER" /etc/systemd/system/jason-boot-recovery.timer
+cmp -s "$BOOT_RECOVERY_SCRIPT" /usr/local/sbin/jason-boot-recovery || {
+  echo "ERROR: installed boot recovery controller differs from exact immutable release" >&2
+  exit 9
+}
+cmp -s "$BOOT_RECOVERY_SERVICE" /etc/systemd/system/jason-boot-recovery.service || {
+  echo "ERROR: installed boot recovery service differs from exact immutable release" >&2
+  exit 9
+}
+cmp -s "$BOOT_RECOVERY_TIMER" /etc/systemd/system/jason-boot-recovery.timer || {
+  echo "ERROR: installed boot recovery timer differs from exact immutable release" >&2
+  exit 9
+}
+systemctl daemon-reload
+systemctl enable jason-boot-recovery.service jason-boot-recovery.timer >/dev/null
+if [ "$(systemctl is-active jason-boot-recovery.timer 2>/dev/null || true)" != "active" ]; then
+  systemctl start jason-boot-recovery.timer
+fi
+if [ "$(systemctl is-active jason-boot-recovery.timer 2>/dev/null || true)" != "active" ]; then
+  echo "ERROR: boot recovery timer is not active after governed install" >&2
+  exit 9
+fi
+step_pass boot_recovery_install
+echo "JASON_BOOT_RECOVERY_INSTALL=PASS"
+
 step_start root_release_transition_install
 /usr/bin/python3 "$RELEASE_DIR/tools/install_release_control_transition.py"
 cmp -s "$RELEASE_DIR/tools/release_control_transition_worker.py" /usr/local/lib/jason/release_control_transition_worker.py || {

@@ -51,7 +51,9 @@ Repository-controlled files:
 - `infrastructure/boot-recovery/jason-boot-recovery.service`
 - `infrastructure/boot-recovery/jason-boot-recovery.timer`
 
-Host installation:
+Host installation is reconciled automatically from the exact immutable production release by `tools/reconcile_production_host_services.sh`. It installs and byte-verifies the controller/service/timer, reloads systemd, preserves/enables the two-minute timer, and does not force an extra recovery service run during host reconciliation. The timer performs the next bounded recovery check.
+
+Historical/manual installation reference:
 
 ```bash
 sudo install -o root -g root -m 0750 tools/jason_boot_recovery.py /usr/local/sbin/jason-boot-recovery
