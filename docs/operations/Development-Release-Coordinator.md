@@ -116,6 +116,48 @@ A support item stops automatically only for a genuine governance/capability bloc
 
 For every autonomously claimed Support List item, the support-repair lane must emit owner lifecycle events through the same canonical governed Teams owner-notification path used for TODO engineering: **repair started**, **blocked / owner action required** when applicable, and **production-verified complete**. The start message identifies the support ID, defect summary, and repair scope. The blocked message identifies the exact blocker and required owner action. The completion message identifies the merged/deployed revision and the production acceptance evidence that proves the defect is resolved. A support fix is not "complete" for notification purposes merely because code was committed, CI passed, or a PR merged. Notification delivery uses the same durable message/correlation identity, provider/readback verification, bounded retry, duplicate suppression, and `SUPPORT-CONN-037` reliability requirements as TODO lifecycle messages.
 
+### Subscription-first PMv3 reasoning
+
+PMv3 engineering and support reasoning use the AOT Owner's ChatGPT-authenticated
+Codex subscription path by default when `JASON_SUBSCRIPTION_REASONING_ENABLED=true`.
+The runtime sends only bounded prompt text and a strict JSON output schema to the
+isolated `jason-subscription-reasoning` sidecar. The sidecar has outbound network
+access for the ChatGPT/Codex service but receives no Autotask, Datto, GitHub,
+OpenBao, Microsoft, KFS, AWS, or other Jason provider credentials.
+
+The sidecar executes Codex noninteractively with ephemeral sessions, ignored user
+and repository rules, a read-only sandbox, and an output schema. Its result is
+still only reasoning evidence: the existing deterministic host workers validate
+paths, exact-text edits, tests, authority, provider isolation, CI, Release Manager,
+CCC, rollback, and exact-SHA Teams production approval independently.
+
+Direct OpenAI API billing is not an implicit fallback. It is used only when
+`JASON_OPENAI_API_FALLBACK_ENABLED=true` is explicitly configured. The production
+default is false. When subscription mode is enabled with API fallback disabled,
+the main runtime does not resolve the OpenAI API secret for hosted conversation
+or semantic reasoning.
+
+The subscription session is stored only in the dedicated
+`jason_codex_subscription_auth` volume. Initial activation requires one interactive
+ChatGPT/Codex sign-in from an authorized operator:
+
+```bash
+docker exec -it jason-subscription-reasoning codex login --device-auth
+```
+
+The operator completes the displayed OpenAI device-authentication flow. Jason must
+not capture, print, copy into source control, or move the resulting subscription
+credential into OpenBao or another provider secret store.
+
+Missing/expired subscription authentication is recorded as
+`subscription_auth_required` with owner action
+`sign_in_chatgpt_subscription`. A ChatGPT plan usage limit is recorded as
+`subscription_sharing_usage_limit_exceeded` with owner action
+`review_chatgpt_subscription_usage`. Owner-approved development preserves those
+machine-readable actions and routes them through the existing deduplicated
+work-blocked lifecycle notification path. Neither condition grants an API fallback,
+provider write, new approval, or production action.
+
 ### Verified hosted-model credit replenishment
 
 A hosted-model credit or billing error is **not** an ordinary transient transport
