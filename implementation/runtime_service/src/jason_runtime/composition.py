@@ -88,6 +88,13 @@ from orchestrator.openai_semantic_intent_translation import (
     OpenAISemanticIntentTranslator,
 )
 from orchestrator.openai_reasoning import OpenAIStructuredJsonClient
+from orchestrator.subscription_reasoning import (
+    ExplicitFallbackStructuredJsonClient,
+    SubscriptionStructuredJsonClient,
+)
+from orchestrator.subscription_semantic_intent_translation import (
+    SubscriptionSemanticIntentTranslator,
+)
 from orchestrator.model_runtime_adapter import (
     ModelRuntimeAdapter,
     openai_structured_output_compatible_schema,
@@ -437,6 +444,9 @@ class RuntimeSettings:
     semantic_planner_enabled: bool = False
     hosted_semantics_enabled: bool = False
     hosted_conversation_enabled: bool = False
+    subscription_reasoning_enabled: bool = False
+    subscription_reasoning_url: str = "http://jason-subscription-reasoning:8091"
+    openai_api_fallback_enabled: bool = False
     openai_semantic_model: str = "gpt-5-nano"
     openai_conversation_model: str = "gpt-5-nano"
     openai_pricing_model: str = "gpt-5-nano"
@@ -719,6 +729,16 @@ class RuntimeSettings:
             ).strip().casefold() in {"1", "true", "yes", "on"},
             hosted_conversation_enabled=os.getenv(
                 "JASON_HOSTED_CONVERSATION_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            subscription_reasoning_enabled=os.getenv(
+                "JASON_SUBSCRIPTION_REASONING_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            subscription_reasoning_url=os.getenv(
+                "JASON_SUBSCRIPTION_REASONING_URL",
+                "http://jason-subscription-reasoning:8091",
+            ).strip(),
+            openai_api_fallback_enabled=os.getenv(
+                "JASON_OPENAI_API_FALLBACK_ENABLED", "false"
             ).strip().casefold() in {"1", "true", "yes", "on"},
             openai_semantic_model=os.getenv(
                 "JASON_OPENAI_SEMANTIC_MODEL", "gpt-5-nano"
