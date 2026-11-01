@@ -36,7 +36,7 @@ A passing report requires:
 - restored authority record counts exactly match the online backup snapshot; live-source counts are reported separately because normal authority/audit activity may commit after the snapshot is taken;
 - no provider contact and no provider credential resolution.
 
-The backup/restore proof uses an ephemeral local temporary directory and does not replace the live database.
+The backup/restore proof uses an ephemeral temporary directory and does not replace the live database. The nightly systemd unit places that temporary work on the existing `/srv/jason/archive` filesystem so multi-GB backup/restore proof does not consume scarce root-filesystem headroom.
 
 ### Full-integrity execution budget
 
@@ -45,17 +45,19 @@ The separate daily `jason-openclaw-authority-full-integrity.service` runs the
 replay, security-audit, and orchestration-audit SQLite stores; key-registry
 checks; and a real authority backup/restore with integrity and count proof.
 
-On October 26, 2026, the live orchestration audit database was approximately
-22 GB and the authority database approximately 2.4 GB. The full checker
-exceeded the prior 900-second bound while the host filesystem was 95% full.
-The nightly checker therefore uses a **bounded 1800-second (30-minute)**
-subprocess budget, with a **2100-second (35-minute)** systemd service ceiling
-so the wrapper can write explicit timeout evidence.
+By November 1, 2026, the live orchestration audit database had grown to approximately
+28 GB and the authority database to approximately 3.2 GB. The complete checker
+exceeded the prior 1800-second bound while the root filesystem was 97% full.
+The nightly checker therefore uses a **bounded 3600-second (60-minute)**
+subprocess budget, with a **3900-second (65-minute)** systemd service ceiling
+so the wrapper can write explicit timeout evidence. Its multi-GB authority
+backup/restore scratch files are created on the separately mounted archive
+filesystem rather than the production root filesystem.
 
 These are larger execution budgets, **not weaker checks**. Do not replace
 `integrity_check` with `quick_check`, sample tables, omit the orchestration
 store, delete audit history, or skip backup/restore verification. If the full
-checker still exceeds 1800 seconds, the wrapper writes a new `status=fail`
+checker still exceeds 3600 seconds, the wrapper writes a new `status=fail`
 snapshot with `operational_health_timeout` and exits 124. Previously passing
 evidence cannot masquerade as current. Snapshot files remain mode `0600`
 and do not use provider credentials.
