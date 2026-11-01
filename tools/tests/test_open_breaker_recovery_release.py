@@ -307,7 +307,7 @@ def test_provider_identity_degraded_runtime_contract_is_exact():
             "ticket_worker": "process_not_alive",
         },
     }
-    assert profile["mode"] == "healthy_or_ticket_worker_provider_auth_degraded"
+    assert profile["runtime_health"]["mode"] == "healthy_or_ticket_worker_provider_auth_degraded"
     with patch.object(runner, "_runtime_health_body", return_value=(503, body)):
         assert runner._verify_recovery_runtime_health(runtime, profile) == "ticket_worker_provider_auth_degraded"
     bad = json.loads(json.dumps(body))
