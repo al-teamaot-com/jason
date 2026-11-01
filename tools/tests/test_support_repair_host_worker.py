@@ -546,14 +546,47 @@ def test_support_id_from_title_is_exact_and_case_normalized():
     assert worker.support_id_from_title('unrelated issue') is None
 
 
+def _stage_current_self_heal_incident(root: Path, fp: str, family: str, details: dict) -> Path:
+    directory = root / 'incidents'
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / (fp + '.json')
+    payload = {
+        'schema_version': '2.0',
+        'state': 'repair_required',
+        'fingerprint': fp,
+        'family': family,
+        'support_item': 'SUPPORT-AUTO-' + fp[:12].upper(),
+        **details,
+    }
+    path.write_text(json.dumps(payload), encoding='utf-8')
+    return path
+
+
+def _publish_current_self_heal_state(root: Path, specs: list[tuple[str, str]]) -> None:
+    directory = root / 'incidents'
+    root.mkdir(parents=True, exist_ok=True)
+    (root / 'state.json').write_text(json.dumps({
+        'schema_version': '2.0',
+        'state': 'repair_required',
+        'incidents': [
+            {'fingerprint': fingerprint, 'family': family}
+            for fingerprint, family in specs
+        ],
+        'incident_paths': [
+            str(directory / (fingerprint + '.json'))
+            for fingerprint, _ in specs
+        ],
+    }), encoding='utf-8')
+
+
 def test_load_self_heal_incidents_returns_repair_required_items(tmp_path):
     root = tmp_path / 'self-heal'
-    incidents = root / 'incidents'
-    incidents.mkdir(parents=True)
-    (incidents / 'abc.json').write_text(
-        '{"state":"repair_required","support_item":"SUPPORT-AUTO-ABCDEF123456","priority":"P1","title":"degraded","evidence":"failed","acceptance":"restore"}',
-        encoding='utf-8',
-    )
+    fp = 'abcdef123456000000000000'
+    _stage_current_self_heal_incident(root, fp, 'runtime_health', {
+        'priority': 'P1', 'title': 'degraded',
+        'evidence': 'failed', 'acceptance': 'restore',
+    })
+    _publish_current_self_heal_state(root, [(fp, 'runtime_health')])
     items = worker.load_self_heal_incidents(root)
     assert len(items) == 1
     assert items[0]['id'] == 'SUPPORT-AUTO-ABCDEF123456'
@@ -641,7 +674,9 @@ def test_load_correlated_self_heal_incident_includes_root_invariant_and_verifica
         'occurrence_count': 2,
         'verification_contract': {'required_checks': ['rerun production convergence detector']},
     }
-    (incidents / 'correlated.json').write_text(json.dumps(payload), encoding='utf-8')
+    fp = '123456abcdef000000000000'
+    _stage_current_self_heal_incident(root, fp, 'production_convergence', payload)
+    _publish_current_self_heal_state(root, [(fp, 'production_convergence')])
     items = worker.load_self_heal_incidents(root)
     assert len(items) == 1
     assert items[0]['priority'] == 'P0'
@@ -649,6 +684,72 @@ def test_load_correlated_self_heal_incident_includes_root_invariant_and_verifica
     assert 'repair level: L2 bounded_autonomous_repair' in items[0]['evidence']
     assert 'occurrence: 2' in items[0]['evidence']
     assert 'rerun production convergence detector' in items[0]['acceptance']
+
+
+def test_recovered_github_does_not_admit_legacy_incident_spool(tmp_path):
+    root = tmp_path / 'self-heal'
+    directory = root / 'incidents'
+    directory.mkdir(parents=True)
+    for i in range(125):
+        (directory / f'legacy-{i}.json').write_text(json.dumps({
+            'state': 'repair_required',
+            'support_item': f'SUPPORT-AUTO-{i:012X}',
+            'priority': 'P1', 'title': 'legacy scan incident',
+        }), encoding='utf-8')
+    fp1 = 'abc123abc123000000000000'
+    fp2 = 'def456def456000000000000'
+    _stage_current_self_heal_incident(root, fp1, 'provider_health', {'priority': 'P0'})
+    _stage_current_self_heal_incident(root, fp2, 'ticket_admission', {'priority': 'P1'})
+    _publish_current_self_heal_state(root, [(fp1, 'provider_health'), (fp2, 'ticket_admission')])
+    items = worker.load_self_heal_incidents(root)
+    assert {item['id'] for item in items} == {
+        'SUPPORT-AUTO-ABC123ABC123', 'SUPPORT-AUTO-DEF456DEF456',
+    }
+    assert len(list(directory.glob('*.json'))) == 127  # evidence is retained
+
+
+def test_healthy_watchdog_never_reopens_stale_incidents(tmp_path):
+    root = tmp_path / 'self-heal'
+    fp = 'aaaabbbbcccc000000000000'
+    _stage_current_self_heal_incident(root, fp, 'provider_health', {})
+    _publish_current_self_heal_state(root, [(fp, 'provider_health')])
+    state = json.loads((root / 'state.json').read_text(encoding='utf-8'))
+    state['state'] = 'healthy'
+    (root / 'state.json').write_text(json.dumps(state), encoding='utf-8')
+    assert worker.load_self_heal_incidents(root) == []
+
+
+def test_legacy_watchdog_manifest_requires_explicit_migration(tmp_path):
+    root = tmp_path / 'self-heal'
+    directory = root / 'incidents'
+    directory.mkdir(parents=True)
+    (directory / 'legacy.json').write_text(
+        json.dumps({'state': 'repair_required', 'support_item': 'SUPPORT-AUTO-AAAAAAAAAAAA'}),
+        encoding='utf-8',
+    )
+    (root / 'state.json').write_text(json.dumps({'schema_version': '1.0', 'state': 'repair_required'}))
+    assert worker.load_self_heal_incidents(root) == []
+
+
+def test_self_heal_live_manifest_blocks_untrusted_paths_and_identity_mismatch(tmp_path):
+    root = tmp_path / 'self-heal'
+    fp = 'abc123abc123000000000000'
+    path = _stage_current_self_heal_incident(root, fp, 'provider_health', {})
+    _publish_current_self_heal_state(root, [(fp, 'provider_health')])
+    state_path = root / 'state.json'
+    state = json.loads(state_path.read_text(encoding='utf-8'))
+    state['incident_paths'] = [str(tmp_path / 'outside.json')]
+    state_path.write_text(json.dumps(state), encoding='utf-8')
+    import pytest
+    with pytest.raises(worker.WorkerError, match='Unsafe self-heal incident locator'):
+        worker.load_self_heal_incidents(root)
+    state['incident_paths'] = [str(path)]
+    state_path.write_text(json.dumps(state), encoding='utf-8')
+    data = json.loads(path.read_text(encoding='utf-8'))
+    data['fingerprint'] = 'f' * 24
+    path.write_text(json.dumps(data), encoding='utf-8')
+    with pytest.raises(worker.WorkerError, match='evidence mismatch'):
+        worker.load_self_heal_incidents(root)
 
 
 def test_self_heal_post_production_verification_requires_related_family_clear(tmp_path, monkeypatch):
