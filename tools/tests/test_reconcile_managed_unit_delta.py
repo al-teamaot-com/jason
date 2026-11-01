@@ -308,3 +308,27 @@ def test_isolated_host_reconcile_does_not_mutate_if_user_plan_fails(tmp_path):
     assert (system / system_unit).exists()
     assert (user / user_unit).exists()
     assert not log.exists()
+
+
+def test_historical_rollback_plan_uses_exact_immutable_timer_files(tmp_path):
+    root, candidate, target, installed, userd = setup_releases(tmp_path)
+    unit = "jason-production-drift-watchdog.timer"
+    shared = "jason-delegation-maintenance.timer"
+    manifest(candidate, system=(unit, shared))
+    (target / "infrastructure/showcase/systemd" / shared).write_text("old-required")
+    definition = "[Timer]\nOnCalendar=hourly\n"
+    (candidate / "infrastructure/showcase/systemd" / unit).write_text(definition)
+    (installed / unit).write_text(definition)
+    assert mod.declared_units(target, "system") == {shared}
+    assert mod.plan_unit_removals(candidate, target, installed, scope="system") == [unit]
+
+
+def test_historical_rollback_absent_units_and_symlinks_fail_closed(tmp_path):
+    root, candidate, target, installed, userd = setup_releases(tmp_path)
+    manifest(candidate, system=("jason-new.timer",))
+    with pytest.raises(mod.UnitDeltaError, match="no trusted unit"):
+        mod.declared_units(target, "system")
+    target_unit = target / "infrastructure/showcase/systemd/jason-invented.timer"
+    target_unit.symlink_to("/etc/passwd")
+    with pytest.raises(mod.UnitDeltaError, match="symlink"):
+        mod.declared_units(target, "system")

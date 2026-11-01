@@ -315,3 +315,50 @@ def test_v13_postrelease_rejects_negative_actiontype_id_even_when_read_succeeded
     assert response["status"] == "failed"
     assert response["error_code"] == "governed_dynamic_schema_read_malformed"
     assert response["customer_data_included"] is False
+
+
+def test_v13_preflight_uses_same_complete_authenticated_provider_path(monkeypatch):
+    captured = MCPReadFixture()
+    monkeypatch.setenv("JASON_SOURCE_REVISION", BASELINE)
+    monkeypatch.setenv(
+        "JASON_PROVIDER_READ_ACTIVATION_PROFILE",
+        "itglue-autotask-entra-dynamic-schema-read-catalog-v13",
+    )
+    monkeypatch.setattr(
+        server, "_authenticated_identity",
+        lambda: ("person-entra-" + "a" * 32, "aot", "delegated_microsoft_identity", None),
+    )
+    monkeypatch.setattr(server, "execute_read_capability", captured)
+    result = canary(phase="before", page_size=50)
+    assert result["status"] == "succeeded"
+    assert result["summary"]["running_revision"] == BASELINE
+    assert result["summary"]["generic_project_read_verified"] is True
+    assert result["summary"]["dynamic_schema_read_verified"] is True
+    assert [name for name, _ in captured.calls] == [
+        "service.ticket.count", "service.ticket.search", "service.ticket.read",
+        "service.entity.search", "service.entity.search",
+    ]
+    assert result["production_release_approval"] is False
+    assert "PRIVATE" not in json.dumps(result)
+
+
+def test_v13_preflight_rejects_missing_generic_project_read(monkeypatch):
+    captured = MCPReadFixture()
+    monkeypatch.setenv("JASON_SOURCE_REVISION", BASELINE)
+    monkeypatch.setenv(
+        "JASON_PROVIDER_READ_ACTIVATION_PROFILE",
+        "itglue-autotask-entra-dynamic-schema-read-catalog-v13",
+    )
+    monkeypatch.setattr(
+        server, "_authenticated_identity",
+        lambda: ("person-entra-" + "a" * 32, "aot", "delegated_microsoft_identity", None),
+    )
+    def denied_projects(*, capability, arguments):
+        if capability == "service.entity.search" and arguments.get("entity") == "Projects":
+            return {"status": "denied", "provider": "autotask",
+                    "error_code": "INFORMATION_RELEASE_DENIED"}
+        return captured(capability=capability, arguments=arguments)
+    monkeypatch.setattr(server, "execute_read_capability", denied_projects)
+    result = canary(phase="before", page_size=50)
+    assert result["status"] == "failed"
+    assert result["error_code"] == "governed_generic_project_read_not_successful"
