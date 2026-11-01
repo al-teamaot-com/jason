@@ -1253,6 +1253,97 @@ def recovery_live_production_alignment(
     }
 
 
+def precreate_open_breaker_recovery_alignment(
+    repo: Path,
+    state_root: Path,
+    *,
+    candidate_sha: str,
+    rollback_sha: str,
+    change_class: str,
+    risk_profile: str,
+    files: list[str],
+) -> dict[str, Any] | None:
+    """Prove a degraded LKG may be used only to CREATE its exact repair candidate.
+
+    Candidate creation is non-mutating, but historically required a healthy live
+    runtime. A provider-auth incident can make the ticket worker unhealthy before
+    the immutable repair candidate exists. This seam accepts only an already
+    source-reviewed open-breaker profile whose complete drift set, file bound,
+    protected LKG and exact runtime degradation all match. It grants no Owner
+    approval and cannot enter production; normal preproduction, scope review,
+    signed Teams approval and in-transaction recovery revalidation remain required.
+    """
+    if change_class != "release_blocker" or risk_profile != "production_control_core":
+        return None
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    rollback_sha = exact_sha(rollback_sha, "rollback_sha")
+    try:
+        control = _read_protected_snapshot(state_root, "production-control-state.json")
+        drift = _read_protected_snapshot(state_root, "production-drift.json")
+    except (OSError, ValueError, TypeError, ReleaseManagerError):
+        return None
+    breaker = control.get("circuit_breaker") or {}
+    if (not isinstance(breaker, Mapping)
+            or breaker.get("state") != "open"
+            or breaker.get("source") != "production_drift_watchdog"
+            or breaker.get("reason") != "continuous_production_drift_detected"
+            or drift.get("schema_version") != "1.0"
+            or drift.get("status") != "drift_detected"):
+        return None
+    try:
+        observed = datetime.fromisoformat(
+            str(drift.get("observed_at") or "").replace("Z", "+00:00")
+        )
+        age = (datetime.now(timezone.utc) - observed).total_seconds()
+    except (ValueError, TypeError):
+        return None
+    if observed.tzinfo is None or not -10 <= age <= 180:
+        return None
+    lkg = (control.get("last_known_good") or {}).get("manifest") or {}
+    if (not isinstance(lkg, Mapping) or lkg.get("complete") is not True
+            or lkg.get("revision") != rollback_sha):
+        return None
+    try:
+        policy = _open_breaker_recovery_policy(repo, candidate_sha)
+        actual = _drift_problem_identities(drift)
+    except ReleaseManagerError:
+        return None
+    changed = set(str(value) for value in files)
+    matches: list[dict[str, Any]] = []
+    for profile in policy["profiles"]:
+        expected = tuple(sorted(
+            (str(problem["kind"]), str(problem["unit"]))
+            for problem in profile["drift_problems"]
+        ))
+        required_files = set(str(value) for value in profile["required_changed_files"])
+        if (actual == expected
+                and required_files.issubset(changed)
+                and len(changed) <= int(profile["max_changed_files"])):
+            matches.append(profile)
+    if len(matches) != 1:
+        return None
+    profile = matches[0]
+    try:
+        alignment = recovery_live_production_alignment(rollback_sha, lkg, profile)
+    except ReleaseManagerError:
+        return None
+    return {
+        "schema_version": "1.0",
+        "profile_id": str(profile["id"]),
+        "candidate_sha": candidate_sha,
+        "rollback_sha": rollback_sha,
+        "drift_observed_at": str(drift["observed_at"]),
+        "runtime_health_mode": alignment["runtime_health_mode"],
+        "changed_file_count": len(changed),
+        "policy_sha256": "sha256:" + hashlib.sha256(
+            json.dumps(policy, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest(),
+        "alignment": alignment,
+        "owner_approval_granted": False,
+        "production_authority_granted": False,
+    }
+
+
 def live_runtime() -> dict[str, Any]:
     raw = json.loads(output(["docker", "inspect", "jason-runtime"]))[0]
     labels = raw.get("Config", {}).get("Labels") or {}
@@ -2567,11 +2658,35 @@ def create_record(
 ) -> dict[str, Any]:
     candidate_sha = exact_sha(candidate_sha, "candidate_sha")
     rollback_sha = exact_sha(rollback_sha, "rollback_sha")
-    alignment = live_production_alignment(rollback_sha)
-    if alignment["runtime_revision"] != rollback_sha:
+    ordinary_alignment_error: ReleaseManagerError | None = None
+    try:
+        alignment = live_production_alignment(rollback_sha)
+    except ReleaseManagerError as exc:
+        ordinary_alignment_error = exc
+        alignment = None
+    if alignment is not None and alignment["runtime_revision"] != rollback_sha:
         raise ReleaseManagerError(
             "rollback SHA must equal the exact aligned production revision"
         )
+    if ordinary_alignment_error is not None:
+        if change_class != "release_blocker":
+            raise ordinary_alignment_error
+        try:
+            preview_control = _read_protected_snapshot(
+                state_root, "production-control-state.json"
+            )
+            preview_drift = _read_protected_snapshot(
+                state_root, "production-drift.json"
+            )
+        except (OSError, ValueError, TypeError, ReleaseManagerError):
+            raise ordinary_alignment_error
+        preview_breaker = preview_control.get("circuit_breaker") or {}
+        if (not isinstance(preview_breaker, Mapping)
+                or preview_breaker.get("state") != "open"
+                or preview_breaker.get("source") != "production_drift_watchdog"
+                or preview_breaker.get("reason") != "continuous_production_drift_detected"
+                or preview_drift.get("status") != "drift_detected"):
+            raise ordinary_alignment_error
     verify_candidate_on_main(repo, candidate_sha)
     if change_class == 'support':
         binding = verify_support_release_binding(
@@ -2587,11 +2702,26 @@ def create_record(
         raise ReleaseManagerError(
             "required protected checks are not green: " + ", ".join(checks["failures"])
         )
+    risk_profile = classify_change_risk(change_class, files)
+    precreate_recovery = None
+    if alignment is None:
+        precreate_recovery = precreate_open_breaker_recovery_alignment(
+            repo, state_root,
+            candidate_sha=candidate_sha, rollback_sha=rollback_sha,
+            change_class=change_class, risk_profile=risk_profile, files=files,
+        )
+        if precreate_recovery is None:
+            assert ordinary_alignment_error is not None
+            raise ordinary_alignment_error
+        alignment = dict(precreate_recovery["alignment"])
+    if alignment["runtime_revision"] != rollback_sha:
+        raise ReleaseManagerError(
+            "rollback SHA must equal the exact aligned production revision"
+        )
 
     release_id = release_id_override or record_id(candidate_sha)
     if release_id_override and not re.fullmatch(re.escape(record_id(candidate_sha)) + r"-retry-[1-9][0-9]{0,2}", release_id_override):
         raise ReleaseManagerError("invalid recovery attempt identity")
-    risk_profile = classify_change_risk(change_class, files)
     record = {
         "schema_version": "2.0",
         "release_id": release_id,
@@ -2604,6 +2734,7 @@ def create_record(
         "updated_at": now(),
         "rollback_sha": rollback_sha,
         "changed_files": files,
+        "precreate_open_breaker_recovery": precreate_recovery,
         "active_support_repairs": [],
         "support_impact": {"checked": True, "blocking_items": []},
         "development": {

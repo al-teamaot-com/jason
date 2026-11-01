@@ -374,6 +374,84 @@ def test_provider_identity_recovery_whole_main_bound_is_still_finite():
         ) is None
 
 
+def test_precreate_provider_recovery_accepts_exact_degraded_lkg_without_granting_authority():
+    record = provider_identity_record()
+    while len(record["changed_files"]) < 65:
+        record["changed_files"].append(
+            f"docs/precreate-reviewed-{len(record['changed_files']):02d}.md"
+        )
+    alignment = {
+        "runtime_revision": SHA_B,
+        "runtime_image_id": "sha256:" + "1" * 64,
+        "runtime_health_mode": "ticket_worker_provider_auth_degraded",
+        "mcp_revision": SHA_B,
+        "mcp_image_id": "sha256:" + "2" * 64,
+        "host_revision": SHA_B,
+        "host_release": "/opt/jason/releases/" + SHA_B,
+    }
+    with (
+        patch.object(runner, "_read_protected_snapshot",
+                     side_effect=lambda root, name: open_control() if name.endswith("control-state.json") else provider_identity_drift()),
+        patch.object(runner, "_open_breaker_recovery_policy", return_value=reviewed_recovery_policy()),
+        patch.object(runner, "recovery_live_production_alignment", return_value=alignment),
+    ):
+        context = runner.precreate_open_breaker_recovery_alignment(
+            ROOT, ROOT, candidate_sha=SHA_A, rollback_sha=SHA_B,
+            change_class="release_blocker", risk_profile="production_control_core",
+            files=record["changed_files"],
+        )
+    assert context is not None
+    assert context["profile_id"] == "provider_identity_and_authority_recovery"
+    assert context["changed_file_count"] == 65
+    assert context["runtime_health_mode"] == "ticket_worker_provider_auth_degraded"
+    assert context["owner_approval_granted"] is False
+    assert context["production_authority_granted"] is False
+
+
+def test_precreate_provider_recovery_rejects_unrelated_drift_and_over_bound_scope():
+    record = provider_identity_record()
+    while len(record["changed_files"]) < 65:
+        record["changed_files"].append(
+            f"docs/precreate-reviewed-{len(record['changed_files']):02d}.md"
+        )
+    alignment = {
+        "runtime_revision": SHA_B, "runtime_image_id": "sha256:" + "1" * 64,
+        "runtime_health_mode": "ticket_worker_provider_auth_degraded",
+        "mcp_revision": SHA_B, "mcp_image_id": "sha256:" + "2" * 64,
+        "host_revision": SHA_B, "host_release": "/opt/jason/releases/" + SHA_B,
+    }
+    with (
+        patch.object(runner, "_read_protected_snapshot",
+                     side_effect=lambda root, name: open_control() if name.endswith("control-state.json") else provider_identity_drift(extra=True)),
+        patch.object(runner, "_open_breaker_recovery_policy", return_value=reviewed_recovery_policy()),
+        patch.object(runner, "recovery_live_production_alignment", return_value=alignment),
+    ):
+        assert runner.precreate_open_breaker_recovery_alignment(
+            ROOT, ROOT, candidate_sha=SHA_A, rollback_sha=SHA_B,
+            change_class="release_blocker", risk_profile="production_control_core",
+            files=record["changed_files"],
+        ) is None
+    record["changed_files"].append("docs/precreate-over-bound.md")
+    with (
+        patch.object(runner, "_read_protected_snapshot",
+                     side_effect=lambda root, name: open_control() if name.endswith("control-state.json") else provider_identity_drift()),
+        patch.object(runner, "_open_breaker_recovery_policy", return_value=reviewed_recovery_policy()),
+        patch.object(runner, "recovery_live_production_alignment", return_value=alignment),
+    ):
+        assert runner.precreate_open_breaker_recovery_alignment(
+            ROOT, ROOT, candidate_sha=SHA_A, rollback_sha=SHA_B,
+            change_class="release_blocker", risk_profile="production_control_core",
+            files=record["changed_files"],
+        ) is None
+
+
+def test_precreate_recovery_is_not_available_to_non_release_blocker_change():
+    assert runner.precreate_open_breaker_recovery_alignment(
+        ROOT, ROOT, candidate_sha=SHA_A, rollback_sha=SHA_B,
+        change_class="feature", risk_profile="production_control_core", files=[]
+    ) is None
+
+
 def test_dual_provider_recovery_runtime_contract_accepts_only_healthy_or_exact_degraded():
     profile = next(
         item for item in reviewed_recovery_policy()["profiles"]
