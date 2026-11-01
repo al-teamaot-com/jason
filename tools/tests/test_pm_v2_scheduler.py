@@ -20,13 +20,13 @@ def reap_until(scheduler, expected: int, timeout: float = 2.0):
 
 
 def dispatch_until(scheduler, expected: int, timeout: float = 2.5):
+    total = 0
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        count = scheduler.dispatch_available()
-        if count == expected:
-            return count
-        time.sleep(0.02)
-    return scheduler.dispatch_available()
+    while total < expected and time.monotonic() < deadline:
+        total += scheduler.dispatch_available()
+        if total < expected:
+            time.sleep(0.02)
+    return total
 
 
 class PMV2SchedulerTests(unittest.TestCase):
