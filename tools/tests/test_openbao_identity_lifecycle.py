@@ -26,6 +26,7 @@ def configure_tmp(monkeypatch, tmp_path: Path):
     source_a = tmp_path / "autotask"
     source_d = tmp_path / "dnsfilter"
     staged = tmp_path / "runtime" / "autotask" / "secret_id"
+    mcp_staged = tmp_path / "mcp-runtime" / "autotask" / "secret-id"
     for root, role, secret in (
         (source_a, "role-a", "old-a"),
         (source_d, "role-d", "old-d"),
@@ -33,6 +34,7 @@ def configure_tmp(monkeypatch, tmp_path: Path):
         private(root / "role-id", role)
         private(root / "secret-id", secret)
     private(staged, "old-a", 0o400)
+    private(mcp_staged, "old-a", 0o600)
     monkeypatch.setattr(module.os, "geteuid", lambda: 0)
     monkeypatch.setattr(module, "ROOT_UID", os.getuid())
     monkeypatch.setattr(module, "ROOT_GID", os.getgid())
@@ -43,7 +45,7 @@ def configure_tmp(monkeypatch, tmp_path: Path):
         module,
         "PROFILES",
         {
-            "autotask_read": module.IdentityProfile("autotask_read", source_a, staged),
+            "autotask_read": module.IdentityProfile("autotask_read", source_a, (staged, mcp_staged)),
             "dnsfilter": module.IdentityProfile("dnsfilter", source_d),
         },
     )
@@ -151,8 +153,11 @@ def test_rotation_installs_new_before_revoking_old_and_marks_runtime_refresh(mon
     assert result["provider_api_credentials_changed"] is False
     assert (source_a / "secret-id").read_text().strip() == "new-secret"
     assert staged.read_text().strip() == "new-secret"
+    mcp_projection = module.PROFILES["autotask_read"].secret_id_projections[1]
+    assert mcp_projection.read_text().strip() == "new-secret"
+    assert result["secret_id_projection_count"] == 2
     assert order[-1] == ("revoke", "old-accessor")
-    assert [x[0] for x in order[:2]] == ["write", "write"]
+    assert [x[0] for x in order[:3]] == ["write", "write", "write"]
 
 
 def test_rotation_rejects_unknown_provider(monkeypatch, tmp_path):
@@ -190,3 +195,53 @@ def test_bootstrap_from_init_without_token_fails_closed(monkeypatch, tmp_path):
     os.chmod(init, 0o600)
     with pytest.raises(module.IdentityLifecycleError, match='no usable'):
         module.bootstrap_from_init(init)
+
+
+def test_release_recovery_requires_signed_teams_record_and_rotates_both(monkeypatch, tmp_path):
+    configure_tmp(monkeypatch, tmp_path)
+    sha = "a" * 40
+    release_dir = tmp_path / sha
+    release_dir.mkdir()
+    current = tmp_path / "current"
+    current.symlink_to(release_dir, target_is_directory=True)
+    records = tmp_path / "records"
+    records.mkdir()
+    release_id = "release-" + sha[:16]
+    record = {
+        "release_id": release_id,
+        "state": "production",
+        "risk_profile": "production_control_core",
+        "release_candidate": {"candidate_sha": sha},
+        "changed_files": [
+            "tools/openbao_identity_lifecycle.py",
+            "tools/openbao_identity_lifecycle_worker.py",
+            "tools/install_openbao_identity_lifecycle.py",
+            "tools/reconcile_production_host_services.sh",
+            "tools/release_manager_host_runner.py",
+        ],
+        "owner_approval": {
+            "approved": True,
+            "candidate_sha": sha,
+            "source": "authenticated_mobile_teams_owner:relapproval-" + "c" * 32,
+        },
+        "open_breaker_recovery": {
+            "profile_id": "provider_identity_and_authority_recovery",
+        },
+    }
+    (records / (release_id + ".json")).write_text(json.dumps(record))
+    monkeypatch.setattr(module, "CURRENT_RELEASE", current)
+    monkeypatch.setattr(module, "RELEASE_RECORDS", records)
+    monkeypatch.setattr(module, "bootstrap_from_init", lambda: {"status": "pass"})
+    rotated = []
+    monkeypatch.setattr(module, "rotate", lambda provider: rotated.append(provider) or {
+        "new_identity_installed": True,
+    })
+    result = module.recover_approved_release(sha)
+    assert result["status"] == "pass"
+    assert rotated == ["autotask_read", "dnsfilter"]
+
+    denied = json.loads(json.dumps(record))
+    denied["owner_approval"]["source"] = "explicit_owner_instruction"
+    (records / (release_id + ".json")).write_text(json.dumps(denied))
+    with pytest.raises(module.IdentityLifecycleError, match="uniquely proven"):
+        module.recover_approved_release(sha)

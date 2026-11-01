@@ -32,6 +32,9 @@ ROLE_RE = re.compile(r"[A-Za-z0-9_.-]{1,128}\Z")
 ROOT_UID = 0
 ROOT_GID = 0
 INIT_FILE = Path("/opt/jason/bootstrap/secrets/openbao/init.json")
+RELEASE_RECORDS = Path("/var/lib/jason/openclaw/release-manager/records")
+CURRENT_RELEASE = Path("/opt/jason/current")
+SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
 
 
 class IdentityLifecycleError(RuntimeError):
@@ -42,15 +45,16 @@ class IdentityLifecycleError(RuntimeError):
 class IdentityProfile:
     provider: str
     source_dir: Path
-    staged_runtime_secret_id: Path | None = None
+    secret_id_projections: tuple[Path, ...] = ()
 
 
 PROFILES: dict[str, IdentityProfile] = {
     "autotask_read": IdentityProfile(
         provider="autotask_read",
         source_dir=Path("/opt/jason/bootstrap/secrets/openbao/autotask-read-approle"),
-        staged_runtime_secret_id=Path(
-            "/run/jason-runtime-credentials/openbao/autotask/secret_id"
+        secret_id_projections=(
+            Path("/run/jason-runtime-credentials/openbao/autotask/secret_id"),
+            Path("/var/lib/jason/runtime-secrets/openbao/autotask-read-approle/secret-id"),
         ),
     ),
     "dnsfilter": IdentityProfile(
@@ -396,15 +400,15 @@ def rotate(provider: str) -> dict[str, Any]:
             new_secret,
             template=profile.source_dir / "secret-id",
         )
-        staged = False
-        if profile.staged_runtime_secret_id is not None:
+        projections_updated: list[str] = []
+        for projection in profile.secret_id_projections:
             _write_private_like(
-                profile.staged_runtime_secret_id,
+                projection,
                 new_secret,
-                template=profile.staged_runtime_secret_id,
+                template=projection,
                 approved_owner_uids=frozenset({0, pwd.getpwnam("al").pw_uid}),
             )
-            staged = True
+            projections_updated.append(str(projection))
         _api(
             f"auth/approle/role/{role_name}/secret-id-accessor/destroy",
             method="POST",
@@ -421,7 +425,7 @@ def rotate(provider: str) -> dict[str, Any]:
                 "rotated_at": now.isoformat(),
                 "replacement_accessor_recorded": bool(new_accessor),
                 "old_identity_revoked": True,
-                "runtime_staged_copy_updated": staged,
+                "secret_id_projection_count": len(projections_updated),
                 "runtime_refresh_required": True,
                 "provider_api_credentials_changed": False,
                 "secret_values_recorded": False,
@@ -432,7 +436,7 @@ def rotate(provider: str) -> dict[str, Any]:
             "provider": provider,
             "old_identity_revoked": True,
             "new_identity_installed": True,
-            "runtime_staged_copy_updated": staged,
+            "secret_id_projection_count": len(projections_updated),
             "runtime_refresh_required": True,
             "provider_api_credentials_changed": False,
             "secret_values_printed": False,
@@ -492,6 +496,75 @@ def bootstrap_from_init(init_file: Path = INIT_FILE) -> dict[str, Any]:
     return result
 
 
+def _approved_provider_recovery_record(source_revision: str) -> dict[str, Any]:
+    revision = source_revision.casefold()
+    if not SHA_RE.fullmatch(revision):
+        raise IdentityLifecycleError("exact recovery source revision required")
+    try:
+        current = CURRENT_RELEASE.resolve(strict=True).name.casefold()
+    except OSError as exc:
+        raise IdentityLifecycleError("current production source unavailable") from exc
+    if current != revision:
+        raise IdentityLifecycleError("identity recovery source is not current production")
+    prefix = "release-" + revision[:16]
+    matches: list[dict[str, Any]] = []
+    for path in sorted(RELEASE_RECORDS.glob(prefix + "*.json")):
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o002:
+                os.close(fd)
+                continue
+            with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                record = json.load(handle)
+        except (OSError, ValueError, TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(record, dict):
+            continue
+        candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
+        owner = record.get("owner_approval") or {}
+        recovery = record.get("open_breaker_recovery") or {}
+        changed = set(str(value) for value in (record.get("changed_files") or []))
+        required = {
+            "tools/openbao_identity_lifecycle.py",
+            "tools/openbao_identity_lifecycle_worker.py",
+            "tools/install_openbao_identity_lifecycle.py",
+            "tools/reconcile_production_host_services.sh",
+            "tools/release_manager_host_runner.py",
+        }
+        if (candidate == revision
+                and record.get("state") == "production"
+                and record.get("risk_profile") == "production_control_core"
+                and recovery.get("profile_id") == "provider_identity_and_authority_recovery"
+                and owner.get("approved") is True
+                and owner.get("candidate_sha") == revision
+                and str(owner.get("source") or "").startswith("authenticated_mobile_teams_owner:relapproval-")
+                and required.issubset(changed)):
+            matches.append(record)
+    if len(matches) != 1:
+        raise IdentityLifecycleError("exact Teams-approved provider recovery release is not uniquely proven")
+    return matches[0]
+
+
+def recover_approved_release(source_revision: str) -> dict[str, Any]:
+    if os.geteuid() != 0:
+        raise PermissionError("provider identity release recovery must run as root")
+    _approved_provider_recovery_record(source_revision)
+    bootstrap_result = bootstrap_from_init()
+    autotask = rotate("autotask_read")
+    dnsfilter = rotate("dnsfilter")
+    return {
+        "status": "pass",
+        "source_revision": source_revision.casefold(),
+        "bootstrap_status": bootstrap_result.get("status"),
+        "autotask_read_rotated": autotask.get("new_identity_installed") is True,
+        "dnsfilter_rotated": dnsfilter.get("new_identity_installed") is True,
+        "runtime_refresh_required": True,
+        "provider_api_credentials_changed": False,
+        "secret_values_printed": False,
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Governed OpenBao provider identity lifecycle")
     sub = parser.add_subparsers(dest="action", required=True)
@@ -500,6 +573,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("bootstrap-from-init")
     rot = sub.add_parser("rotate")
     rot.add_argument("provider", choices=tuple(sorted(PROFILES)))
+    recover = sub.add_parser("recover-release")
+    recover.add_argument("--source-revision", required=True)
     sub.add_parser("status")
     return parser
 
@@ -522,6 +597,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             result = bootstrap_from_init()
         elif args.action == "rotate":
             result = rotate(args.provider)
+        elif args.action == "recover-release":
+            result = recover_approved_release(args.source_revision)
         else:
             result = {
                 "status": "pass" if ROLE_MAP.is_file() else "not_bootstrapped",

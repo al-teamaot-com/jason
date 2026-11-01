@@ -11,5 +11,5 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=true
-ReadWritePaths=/var/lib/jason/openclaw/identity-lifecycle /opt/jason/bootstrap/secrets/openbao/init.json /var/lib/jason/runtime-secrets/openbao/identity-lifecycle-approle /var/lib/jason/runtime-secrets/openbao/dnsfilter-read-approle /run/jason-runtime-credentials/openbao/autotask /opt/jason/bootstrap/secrets/openbao/autotask-read-approle
+ReadWritePaths=/var/lib/jason/openclaw/identity-lifecycle /opt/jason/bootstrap/secrets/openbao/init.json /var/lib/jason/runtime-secrets/openbao/identity-lifecycle-approle /var/lib/jason/runtime-secrets/openbao/dnsfilter-read-approle /var/lib/jason/runtime-secrets/openbao/autotask-read-approle /run/jason-runtime-credentials/openbao/autotask /opt/jason/bootstrap/secrets/openbao/autotask-read-approle
 

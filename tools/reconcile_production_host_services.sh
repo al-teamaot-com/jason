@@ -764,6 +764,80 @@ fi
 step_pass openbao_identity_lifecycle_install
 echo "JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=PASS"
 
+RECOVERY_PROFILE="$(/usr/bin/python3 - "$SOURCE_REVISION" <<'PY2'
+import json, pathlib, sys
+sha=sys.argv[1]
+root=pathlib.Path('/var/lib/jason/openclaw/release-manager/records')
+prefix='release-'+sha[:16]
+matched=[]
+for path in sorted(root.glob(prefix+'*.json')):
+    try: doc=json.loads(path.read_text(encoding='utf-8'))
+    except Exception: continue
+    if ((doc.get('release_candidate') or {}).get('candidate_sha') == sha
+            and doc.get('state') == 'production'):
+        matched.append(str((doc.get('open_breaker_recovery') or {}).get('profile_id') or ''))
+if len(matched) > 1: raise SystemExit('multiple production recovery records for exact candidate')
+print(matched[0] if matched else '')
+PY2
+)"
+if [ "$RECOVERY_PROFILE" = "provider_identity_and_authority_recovery" ]; then
+  step_start provider_identity_release_recovery
+  /usr/bin/python3 /usr/local/lib/jason/openbao_identity_lifecycle.py \
+    recover-release --source-revision "$SOURCE_REVISION"
+
+  docker restart jason-runtime jason-mcp-pilot >/dev/null
+  RUNTIME_RECOVERED=0
+  for attempt in $(seq 1 60); do
+    runtime_revision="$(docker inspect jason-runtime --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
+    runtime_health="$(docker inspect jason-runtime --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null || true)"
+    mcp_revision="$(docker inspect jason-mcp-pilot --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
+    mcp_state="$(docker inspect jason-mcp-pilot --format '{{.State.Status}}' 2>/dev/null || true)"
+    if [ "$runtime_revision" = "$SOURCE_REVISION" ] \
+       && [ "$runtime_health" = "healthy" ] \
+       && [ "$mcp_revision" = "$SOURCE_REVISION" ] \
+       && [ "$mcp_state" = "running" ]; then
+      RUNTIME_RECOVERED=1
+      break
+    fi
+    sleep 2
+  done
+  if [ "$RUNTIME_RECOVERED" -ne 1 ]; then
+    echo "ERROR: provider identity recovery did not restore exact candidate runtime/MCP health" >&2
+    exit 9
+  fi
+
+  CURRENT_UNIT="$PROVIDER_CANARY_SERVICE"
+  CANARY_STARTED_AT="$(date +%s)"
+  systemctl start "$PROVIDER_CANARY_SERVICE"
+  /usr/bin/python3 - "$CANARY_STARTED_AT" <<'PY2'
+import json, sys, time
+from pathlib import Path
+started=float(sys.argv[1])
+p=Path('/var/lib/jason/provider-health-canaries.json')
+d=json.loads(p.read_text(encoding='utf-8'))
+generated=d.get('generated_at_epoch')
+if (not isinstance(generated,(int,float)) or generated < started - 1
+        or generated > time.time() + 10
+        or d.get('policy') != 'provider-health-canary-v1'
+        or d.get('principal') != 'jason-provider-canary'):
+    raise SystemExit('provider canary evidence is stale or outside reviewed contract')
+items=[x for x in d.get('results',[]) if isinstance(x,dict) and x.get('provider')=='autotask']
+if not items or any(x.get('healthy') is not True or x.get('error_class') != 'none' for x in items):
+    raise SystemExit('Autotask governed provider canary did not prove healthy after identity recovery')
+PY2
+  CURRENT_UNIT=""
+
+  run_as_al systemctl --user start jason-dnsfilter-boundary-reconcile.service
+  if [ "$(run_as_al systemctl --user show jason-dnsfilter-boundary-reconcile.service -p Result --value)" != "success" ]; then
+    echo "ERROR: DNSFilter reconciliation did not pass after identity recovery" >&2
+    exit 9
+  fi
+  step_pass provider_identity_release_recovery
+  echo "JASON_PROVIDER_IDENTITY_RELEASE_RECOVERY=PASS"
+else
+  echo "JASON_PROVIDER_IDENTITY_RELEASE_RECOVERY=NOT_APPLICABLE"
+fi
+
 echo "JASON_HOST_SERVICE_RECONCILIATION=PASS"
 echo "HOST_RECONCILIATION_SCRIPT_SOURCE_REVISION=$SOURCE_REVISION"
 echo "MANAGED_ENGINEERING_SOURCE=PASS"
