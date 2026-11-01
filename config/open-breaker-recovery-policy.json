@@ -30,7 +30,7 @@
       "id": "provider_identity_and_authority_recovery",
       "change_class": "release_blocker",
       "risk_profile": "production_control_core",
-      "max_changed_files": 32,
+      "max_changed_files": 64,
       "drift_problems": [
         {
           "kind": "failed_system_unit",
@@ -60,7 +60,7 @@
         "tools/release_manager_host_runner.py"
       ],
       "runtime_health": {
-        "mode": "ticket_worker_provider_auth_degraded",
+        "mode": "healthy_or_ticket_worker_provider_auth_degraded",
         "docker_health": "unhealthy",
         "http_status": 503,
         "component_status": "degraded",

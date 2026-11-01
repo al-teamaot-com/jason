@@ -283,6 +283,7 @@ def test_provider_identity_recovery_requires_exact_drift_and_degraded_runtime_pr
         assert context is not None
         assert context["profile_id"] == "provider_identity_and_authority_recovery"
         assert context["runtime_health_mode"] == "ticket_worker_provider_auth_degraded"
+        assert context["runtime_health"]["mode"] == "healthy_or_ticket_worker_provider_auth_degraded"
         assert context["runtime_health"]["ticket_worker"] == "process_not_alive"
         assert runner.governed_open_breaker_recovery_context(
             ROOT, ROOT, record, require_owner_approval=True,
@@ -306,6 +307,7 @@ def test_provider_identity_degraded_runtime_contract_is_exact():
             "ticket_worker": "process_not_alive",
         },
     }
+    assert profile["runtime_health"]["mode"] == "healthy_or_ticket_worker_provider_auth_degraded"
     with patch.object(runner, "_runtime_health_body", return_value=(503, body)):
         assert runner._verify_recovery_runtime_health(runtime, profile) == "ticket_worker_provider_auth_degraded"
     bad = json.loads(json.dumps(body))
@@ -317,3 +319,82 @@ def test_provider_identity_degraded_runtime_contract_is_exact():
             pass
         else:
             raise AssertionError("unexpected runtime degradation must fail closed")
+
+
+
+def test_provider_identity_recovery_accepts_healthy_runtime_after_controlled_recovery():
+    record = provider_identity_record()
+    # Whole protected-main recovery is still bounded; exact scope review is mandatory.
+    while len(record["changed_files"]) < 54:
+        record["changed_files"].append(
+            f"docs/reviewed-whole-main-recovery-{len(record['changed_files']):02d}.md"
+        )
+    with (
+        patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
+        patch.object(runner, "require_current_manual_scope_review"),
+        patch.object(runner, "_open_breaker_recovery_policy", return_value=reviewed_recovery_policy()),
+        patch.object(runner, "recovery_live_production_alignment",
+                     return_value={"runtime_health_mode": "healthy"}),
+    ):
+        context = runner.governed_open_breaker_recovery_context(
+            ROOT, ROOT, record, require_owner_approval=False,
+            control=open_control(), drift=provider_identity_drift(),
+        )
+    assert context is not None
+    assert context["profile_id"] == "provider_identity_and_authority_recovery"
+    assert context["runtime_health_mode"] == "healthy"
+
+
+def test_provider_identity_recovery_whole_main_bound_is_still_finite():
+    profile = next(
+        item for item in reviewed_recovery_policy()["profiles"]
+        if item["id"] == "provider_identity_and_authority_recovery"
+    )
+    assert profile["max_changed_files"] == 64
+    record = provider_identity_record()
+    while len(record["changed_files"]) < 65:
+        record["changed_files"].append(
+            f"docs/recovery-bound-{len(record['changed_files']):02d}.md"
+        )
+    with (
+        patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
+        patch.object(runner, "require_current_manual_scope_review"),
+        patch.object(runner, "_open_breaker_recovery_policy", return_value=reviewed_recovery_policy()),
+        patch.object(runner, "recovery_live_production_alignment",
+                     return_value={"runtime_health_mode": "healthy"}),
+    ):
+        assert runner.governed_open_breaker_recovery_context(
+            ROOT, ROOT, record, require_owner_approval=False,
+            control=open_control(), drift=provider_identity_drift(),
+        ) is None
+
+
+def test_dual_provider_recovery_runtime_contract_accepts_only_healthy_or_exact_degraded():
+    profile = next(
+        item for item in reviewed_recovery_policy()["profiles"]
+        if item["id"] == "provider_identity_and_authority_recovery"
+    )
+    healthy_runtime = {
+        "inspect": {"State": {"Health": {"Status": "healthy"}}}
+    }
+    with patch.object(runner, "live_runtime", return_value={"revision": SHA_B}):
+        assert runner._verify_recovery_runtime_health(
+            healthy_runtime, profile
+        ) == "healthy"
+    degraded_runtime = {
+        "inspect": {"State": {"Health": {"Status": "unhealthy"}}}
+    }
+    body = {
+        "authority": "central-orchestrator",
+        "component": "jason-runtime",
+        "status": "degraded",
+        "ticket_worker": {
+            "last_restart_reason": "restart_budget_exhausted:missing_process",
+            "status": "degraded",
+            "ticket_worker": "process_not_alive",
+        },
+    }
+    with patch.object(runner, "_runtime_health_body", return_value=(503, body)):
+        assert runner._verify_recovery_runtime_health(
+            degraded_runtime, profile
+        ) == "ticket_worker_provider_auth_degraded"

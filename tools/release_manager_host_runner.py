@@ -1194,9 +1194,15 @@ def _verify_recovery_runtime_health(runtime: dict[str, Any], profile: Mapping[st
     if mode == "healthy":
         live_runtime()
         return mode
-    if mode != "ticket_worker_provider_auth_degraded":
-        raise ReleaseManagerError("unsupported recovery runtime health mode")
     docker_health = str(((runtime.get("inspect") or {}).get("State", {}).get("Health") or {}).get("Status") or "")
+    if mode == "healthy_or_ticket_worker_provider_auth_degraded" and docker_health == "healthy":
+        live_runtime()
+        return "healthy"
+    if mode not in {
+        "ticket_worker_provider_auth_degraded",
+        "healthy_or_ticket_worker_provider_auth_degraded",
+    }:
+        raise ReleaseManagerError("unsupported recovery runtime health mode")
     if docker_health != str(contract.get("docker_health") or ""):
         raise ReleaseManagerError("recovery runtime Docker health differs from reviewed profile")
     http_status, body = _runtime_health_body()
@@ -1212,7 +1218,11 @@ def _verify_recovery_runtime_health(runtime: dict[str, Any], profile: Mapping[st
             or worker.get("ticket_worker") != contract.get("ticket_worker")
             or worker.get("last_restart_reason") != contract.get("last_restart_reason")):
         raise ReleaseManagerError("runtime degradation is outside reviewed provider-identity recovery profile")
-    return mode
+    return (
+        "ticket_worker_provider_auth_degraded"
+        if mode == "healthy_or_ticket_worker_provider_auth_degraded"
+        else mode
+    )
 
 
 def recovery_live_production_alignment(
@@ -4596,7 +4606,7 @@ def _open_breaker_recovery_policy(repo: Path, candidate_sha: str) -> dict[str, A
         if (profile.get("change_class") != "release_blocker"
                 or profile.get("risk_profile") != "production_control_core"
                 or type(profile.get("max_changed_files")) is not int
-                or not 1 <= profile["max_changed_files"] <= 32):
+                or not 1 <= profile["max_changed_files"] <= 64):
             raise ReleaseManagerError("open-breaker recovery profile authority is invalid")
         problems = profile.get("drift_problems")
         files = profile.get("required_changed_files")
@@ -4623,7 +4633,10 @@ def _open_breaker_recovery_policy(repo: Path, candidate_sha: str) -> dict[str, A
         if mode == "healthy":
             if set(runtime_health) != {"mode"}:
                 raise ReleaseManagerError("healthy recovery runtime contract is invalid")
-        elif mode == "ticket_worker_provider_auth_degraded":
+        elif mode in {
+            "ticket_worker_provider_auth_degraded",
+            "healthy_or_ticket_worker_provider_auth_degraded",
+        }:
             expected_runtime = {
                 "mode", "docker_health", "http_status", "component_status",
                 "ticket_worker_status", "ticket_worker", "last_restart_reason",

@@ -224,3 +224,4 @@ networks:
 
 volumes:
   jason_codex_subscription_auth:
+    name: jason_codex_subscription_auth
