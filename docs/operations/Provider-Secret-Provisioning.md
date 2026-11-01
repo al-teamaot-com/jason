@@ -105,6 +105,10 @@ If the KV secret no longer exists, reactivation fails closed and the operator mu
 
 Status reports metadata only: logical name, KV current version/presence, AppRole artifact completeness, runtime active/inactive state, and identity expiration metadata. It never reads or displays provider secret values.
 
+## Autonomous AppRole identity recovery
+
+Provider API credential rotation and provider AppRole identity rotation are separate operations. `tools/openbao_identity_lifecycle.py` and the installed root worker provide the governed identity-only path for supported production identities. The lifecycle role has no provider KV read/write authority. See `docs/operations/OpenBao-Identity-Lifecycle.md` for the bootstrap, Teams binding, root-worker request contract, overlap-first rotation, and required runtime refresh/verification.
+
 ## Runtime boundary
 
 Runtime resolution uses `implementation/connectors/core/openbao_secrets.py` and provider-specific AppRole files. The resolver authenticates to `auth/approle/login`, reads the allow-listed KV v2 record, returns only approved fields to the authorized connector execution context, and calls `auth/token/revoke-self` in a `finally` path.

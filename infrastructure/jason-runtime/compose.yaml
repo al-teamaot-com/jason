@@ -87,6 +87,9 @@ services:
       JASON_HOSTED_SEMANTICS_ENABLED: "true"
       JASON_OPENAI_SEMANTIC_MODEL: "gpt-5.4-mini"
       JASON_HOSTED_CONVERSATION_ENABLED: "true"
+      JASON_SUBSCRIPTION_REASONING_ENABLED: ${JASON_SUBSCRIPTION_REASONING_ENABLED:-true}
+      JASON_SUBSCRIPTION_REASONING_URL: ${JASON_SUBSCRIPTION_REASONING_URL:-http://jason-subscription-reasoning:8091}
+      JASON_OPENAI_API_FALLBACK_ENABLED: ${JASON_OPENAI_API_FALLBACK_ENABLED:-false}
       JASON_OPENAI_CONVERSATION_MODEL: "gpt-5.4-mini"
       JASON_OPENAI_PRICING_MODEL: "gpt-5.4-mini"
       JASON_OPENAI_INPUT_COST_PER_MILLION: "0.75"
@@ -154,12 +157,50 @@ services:
       - openclaw
       - core
       - observability
+      - subscription_reasoning
     healthcheck:
       test:
         - CMD
         - python
         - -c
         - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).read()"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  jason-subscription-reasoning:
+    build:
+      context: ../..
+      dockerfile: infrastructure/jason-subscription-reasoning/Dockerfile
+    image: jason-subscription-reasoning:production
+    container_name: jason-subscription-reasoning
+    user: "1000:1000"
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=64m
+    environment:
+      CODEX_HOME: /var/lib/jason/codex
+      JASON_SUBSCRIPTION_REASONING_HOST: "0.0.0.0"
+      JASON_SUBSCRIPTION_REASONING_PORT: "8091"
+      JASON_SUBSCRIPTION_REASONING_TIMEOUT_SECONDS: ${JASON_SUBSCRIPTION_REASONING_TIMEOUT_SECONDS:-180}
+      JASON_CODEX_MODEL: ${JASON_CODEX_MODEL:-}
+    volumes:
+      - jason_codex_subscription_auth:/var/lib/jason/codex:rw
+    networks:
+      - subscription_reasoning
+      - subscription_egress
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/readyz', timeout=3).read()"
       interval: 30s
       timeout: 5s
       retries: 3
@@ -175,3 +216,12 @@ networks:
   observability:
     external: true
     name: jason-observability
+  subscription_reasoning:
+    driver: bridge
+    internal: true
+  subscription_egress:
+    driver: bridge
+
+volumes:
+  jason_codex_subscription_auth:
+    name: jason_codex_subscription_auth

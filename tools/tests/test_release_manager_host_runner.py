@@ -1933,7 +1933,8 @@ class HostReconciliationTimeoutContractTests(unittest.TestCase):
         import inspect
         default = inspect.signature(runner.request_host_reconcile).parameters['timeout_seconds'].default
         self.assertGreater(default, 202 + 17 + 60)
-        self.assertLessEqual(default, 480)
+        self.assertGreaterEqual(default, 4200)
+        self.assertLessEqual(default, 4500)
 
     def test_absent_host_result_still_fails_closed(self):
         with tempfile.TemporaryDirectory() as td:

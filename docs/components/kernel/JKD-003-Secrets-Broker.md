@@ -64,6 +64,8 @@ The orchestrator authorizes work but must not retrieve, possess, transmit, log, 
 18. Production KV v2 create/update operations must use compare-and-set semantics. Blind overwrite is prohibited.
 19. Routine deactivation revokes runtime identity while preserving encrypted secret history. Irreversible secret destruction and provider-side credential revocation are separate governed retirement actions.
 20. Provider identity rotation must install replacement runtime identity material before revoking the previous identity wherever the secret provider supports overlap.
+21. Routine provider AppRole identity repair must use a dedicated least-privilege identity-lifecycle authority that cannot read or write provider KV data; one-time bootstrap authority must be retired after that lifecycle identity is established.
+22. A protected-bootstrap recovery path may consume existing initialization material only inside a root-governed, exact-SHA, authenticated-Teams-approved production-control release and must revoke and remove the bootstrap token after success.
 
 ## Production OpenBao identity invariant
 

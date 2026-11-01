@@ -1,0 +1,73 @@
+{
+  "schema_version": "1.0",
+  "enabled": true,
+  "profiles": [
+    {
+      "id": "authority_integrity_timeout",
+      "change_class": "release_blocker",
+      "risk_profile": "production_control_core",
+      "max_changed_files": 18,
+      "drift_problems": [
+        {
+          "kind": "failed_system_unit",
+          "unit": "jason-openclaw-authority-full-integrity.service"
+        },
+        {
+          "kind": "failed_system_unit",
+          "unit": "jason-openclaw-authority-health.service"
+        }
+      ],
+      "required_changed_files": [
+        "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-full-integrity.service",
+        "tools/openclaw_authority_health_snapshot.py",
+        "tools/openclaw_authority_operational_health.py"
+      ],
+      "runtime_health": {
+        "mode": "healthy"
+      }
+    },
+    {
+      "id": "provider_identity_and_authority_recovery",
+      "change_class": "release_blocker",
+      "risk_profile": "production_control_core",
+      "max_changed_files": 64,
+      "drift_problems": [
+        {
+          "kind": "failed_system_unit",
+          "unit": "jason-openclaw-authority-full-integrity.service"
+        },
+        {
+          "kind": "failed_system_unit",
+          "unit": "jason-openclaw-authority-health.service"
+        },
+        {
+          "kind": "failed_user_unit",
+          "unit": "jason-dnsfilter-boundary-reconcile.service"
+        },
+        {
+          "kind": "failed_system_unit",
+          "unit": "jason-ccc.service"
+        }
+      ],
+      "required_changed_files": [
+        "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-full-integrity.service",
+        "tools/openclaw_authority_health_snapshot.py",
+        "tools/openclaw_authority_operational_health.py",
+        "tools/openbao_identity_lifecycle.py",
+        "tools/openbao_identity_lifecycle_worker.py",
+        "tools/install_openbao_identity_lifecycle.py",
+        "tools/reconcile_production_host_services.sh",
+        "tools/release_manager_host_runner.py"
+      ],
+      "runtime_health": {
+        "mode": "healthy_or_ticket_worker_provider_auth_degraded",
+        "docker_health": "unhealthy",
+        "http_status": 503,
+        "component_status": "degraded",
+        "ticket_worker_status": "degraded",
+        "ticket_worker": "process_not_alive",
+        "last_restart_reason": "restart_budget_exhausted:missing_process"
+      }
+    }
+  ]
+}

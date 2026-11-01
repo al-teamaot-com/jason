@@ -130,3 +130,68 @@ def test_controller_cannot_create_or_import_approval():
     assert "decision=" not in lowered
     assert "channel=" not in lowered
     assert "teams_only_approval" in source
+
+
+def test_credit_probe_is_bounded_by_durable_cooldown(tmp_path):
+    spool = tmp_path / "spool"
+    calls = []
+    def runner(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 4)
+    first = module.maybe_run_credit_probe(
+        spool=spool, runner=runner, cooldown_seconds=900,
+    )
+    second = module.maybe_run_credit_probe(
+        spool=spool, runner=runner, cooldown_seconds=900,
+    )
+    assert first["status"] == "unavailable"
+    assert second["status"] == "cooldown"
+    assert len(calls) == 1
+    assert calls[0][:3] == ["docker", "exec", "jason-runtime"]
+
+
+def test_verified_credit_probe_keeps_pmv3_running_for_worker_readmission(tmp_path):
+    spool = tmp_path / "spool"
+    pipeline_calls = {"n": 0}
+    probe_calls = {"n": 0}
+    snapshots = [
+        {
+            "pipeline": {
+                "status": "degraded", "failed_work_stages": [],
+                "failed_control_stages": [],
+                "operational_blocker": {"reason": "approved_work_stalled"},
+            },
+            "supervisor": {
+                "status": "degraded", "reason": "internal_recovery_needed",
+                "category_counts": {"recoverable_credit": 1},
+                "disposition_sha256": "credit-blocked",
+                "approved_outstanding": 1, "active": 0,
+            },
+        },
+        {
+            "pipeline": {"status": "healthy", "failed_work_stages": [], "failed_control_stages": []},
+            "supervisor": {
+                "status": "healthy", "reason": None, "category_counts": {},
+                "disposition_sha256": "resumed",
+                "approved_outstanding": 0, "active": 0,
+            },
+        },
+    ]
+    def runner(argv, **kwargs):
+        if argv and argv[0] == "docker":
+            probe_calls["n"] += 1
+            return subprocess.CompletedProcess(argv, 0)
+        idx = min(pipeline_calls["n"], len(snapshots) - 1)
+        snap = snapshots[idx]
+        pipeline_calls["n"] += 1
+        write(spool / "engineering-pipeline-state.json", snap["pipeline"])
+        write(spool / "engineering-supervisor-state.json", snap["supervisor"])
+        return subprocess.CompletedProcess(argv, 0)
+    state = module.controller_run(
+        scripts=tmp_path, repo=tmp_path, spool=spool, release_state=tmp_path,
+        runner=runner, max_passes=3,
+    )
+    assert probe_calls["n"] == 1
+    assert pipeline_calls["n"] == 2
+    assert state["status"] == "complete"
+    assert state["passes"][0]["credit_probe"]["status"] == "verified"

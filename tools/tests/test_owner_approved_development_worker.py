@@ -148,6 +148,7 @@ def test_source_context_blocker_detects_missing_excerpt_context():
     assert module.source_context_blocker(
         'Blocked: the repository excerpts do not include the specific implementation needed for an exact change.'
     )
+    assert module.source_context_blocker('EvidenceToolError: source path not authorized')
     assert not module.source_context_blocker('Owner approval is required for production deployment.')
     assert not module.source_context_blocker('Provider credential is unavailable.')
 
@@ -252,6 +253,7 @@ def test_self_recoverable_blocker_is_narrow():
         'The supplied excerpts do not expose enough exact source context.'
     )
     assert module.self_recoverable_blocker('development reasoning failed: HTTP transport failed')
+    assert module.self_recoverable_blocker('EvidenceToolError: source path not authorized')
     assert not module.self_recoverable_blocker('Owner approval required for a new provider permission.')
     assert not module.self_recoverable_blocker('Microsoft admin consent is required.')
 
@@ -2524,3 +2526,28 @@ def test_evidence_recovery_requires_protected_recent_release_readbacks(tmp_path,
     assert not module.verified_live_evidence_recovery_release(spool,sha,current)
     drift.chmod(0o600)
     assert module.verified_live_evidence_recovery_release(spool,sha,current)
+
+
+
+def test_reasoning_owner_action_is_preserved_for_lifecycle_notification():
+    response = {
+        "error": "HTTP transport failed with status 401",
+        "primary_provider_error_code": "subscription_auth_required",
+        "required_owner_action": "sign_in_chatgpt_subscription",
+    }
+    update = module.blocked_reasoning_record(
+        response, "development reasoning failed: "
+    )
+    assert update["phase"] == "blocked"
+    assert update["notification_class"] == "owner_action_required"
+    assert update["owner_action"] == "sign_in_chatgpt_subscription"
+    assert update["provider_blocker_code"] == "subscription_auth_required"
+
+
+def test_reasoning_non_owner_action_does_not_fabricate_notification():
+    update = module.blocked_reasoning_record(
+        {"error": "HTTP transport failed"}, "development reasoning failed: "
+    )
+    assert update["phase"] == "blocked"
+    assert "notification_class" not in update
+    assert "owner_action" not in update

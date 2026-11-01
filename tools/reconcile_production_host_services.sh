@@ -299,6 +299,23 @@ step_pass release_owned_unit_delta
 
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 
+RECOVERY_PROFILE="$(/usr/bin/python3 - "$SOURCE_REVISION" <<'PY2'
+import json, pathlib, sys
+sha=sys.argv[1]
+root=pathlib.Path('/var/lib/jason/openclaw/release-manager/records')
+prefix='release-'+sha[:16]
+matched=[]
+for path in sorted(root.glob(prefix+'*.json')):
+    try: doc=json.loads(path.read_text(encoding='utf-8'))
+    except Exception: continue
+    if ((doc.get('release_candidate') or {}).get('candidate_sha') == sha
+            and doc.get('state') == 'production'):
+        matched.append(str((doc.get('open_breaker_recovery') or {}).get('profile_id') or ''))
+if len(matched) > 1: raise SystemExit('multiple production recovery records for exact candidate')
+print(matched[0] if matched else '')
+PY2
+)"
+
 for unit in "${EXPORTER_UNITS[@]}"; do
   src="$RELEASE_DIR/infrastructure/showcase/systemd/$unit"
   test -f "$src" || { echo "ERROR: missing canonical exporter unit: $src" >&2; exit 2; }
@@ -404,8 +421,83 @@ for timer in "${MAINTENANCE_TIMERS[@]}"; do
 done
 CURRENT_UNIT="$PROVIDER_CANARY_TIMER"
 systemctl enable --now "$PROVIDER_CANARY_TIMER"
-CURRENT_UNIT="$PROVIDER_CANARY_SERVICE"
-timeout --signal=TERM --kill-after=5s 45s systemctl start "$PROVIDER_CANARY_SERVICE"
+if [ "$RECOVERY_PROFILE" = "provider_identity_and_authority_recovery" ]; then
+  echo "JASON_PROVIDER_CANARY_INITIAL=DEFERRED_UNTIL_IDENTITY_RECOVERY"
+else
+  CURRENT_UNIT="$PROVIDER_CANARY_SERVICE"
+  timeout --signal=TERM --kill-after=5s 45s systemctl start "$PROVIDER_CANARY_SERVICE"
+fi
+
+ensure_authority_full_integrity_proof() {
+  local evidence=/var/lib/jason/openclaw/operational-full-health.json
+  local max_age_seconds=$((30 * 60 * 60))
+  local al_uid
+  al_uid="$(id -u al)"
+  if /usr/bin/python3 - "$evidence" "$max_age_seconds" "$al_uid" <<'PY2'
+import json, os, stat, sys, time
+path=sys.argv[1]; max_age=int(sys.argv[2]); expected_uid=int(sys.argv[3])
+try:
+    info=os.lstat(path)
+    if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600:
+        raise SystemExit(2)
+    if info.st_uid != expected_uid:
+        raise SystemExit(2)
+    age=time.time()-info.st_mtime
+    if not 0 <= age <= max_age:
+        raise SystemExit(2)
+    doc=json.load(open(path, encoding='utf-8'))
+    if (doc.get('status') != 'pass' or doc.get('snapshot_source_exit_code') != 0
+            or doc.get('provider_contacted') is not False
+            or doc.get('provider_credentials_used') is not False
+            or doc.get('failures') != []):
+        raise SystemExit(2)
+except (OSError, ValueError, TypeError, json.JSONDecodeError):
+    raise SystemExit(2)
+raise SystemExit(0)
+PY2
+  then
+    echo "JASON_AUTHORITY_FULL_INTEGRITY=EXISTING_RECENT_PASS"
+    return 0
+  fi
+
+  CURRENT_UNIT=jason-openclaw-authority-full-integrity.service
+  local state
+  state="$(systemctl is-active "$CURRENT_UNIT" 2>/dev/null || true)"
+  if [ "$state" = "activating" ] || [ "$state" = "active" ]; then
+    echo "JASON_AUTHORITY_FULL_INTEGRITY=WAIT_EXISTING_JOB"
+    # `start` on an already-starting oneshot joins the existing start job. It
+    # does not restart, stop, cancel or replace the in-flight proof.
+    systemctl start "$CURRENT_UNIT"
+  else
+    systemctl reset-failed "$CURRENT_UNIT" || true
+    echo "JASON_AUTHORITY_FULL_INTEGRITY=RUN_REPAIRED_PROOF"
+    systemctl start "$CURRENT_UNIT"
+  fi
+  if [ "$(systemctl show "$CURRENT_UNIT" -p Result --value)" != "success" ]; then
+    echo "ERROR: repaired authority full-integrity proof did not complete successfully" >&2
+    systemctl status "$CURRENT_UNIT" --no-pager -l || true
+    return 1
+  fi
+  /usr/bin/python3 - "$evidence" "$max_age_seconds" "$al_uid" <<'PY2'
+import json, os, stat, sys, time
+path=sys.argv[1]; max_age=int(sys.argv[2]); expected_uid=int(sys.argv[3])
+info=os.lstat(path)
+if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != expected_uid:
+    raise SystemExit('authority full-integrity evidence ownership/mode invalid')
+if not 0 <= time.time()-info.st_mtime <= max_age:
+    raise SystemExit('authority full-integrity evidence stale after proof')
+doc=json.load(open(path, encoding='utf-8'))
+if (doc.get('status') != 'pass' or doc.get('snapshot_source_exit_code') != 0
+        or doc.get('provider_contacted') is not False
+        or doc.get('provider_credentials_used') is not False
+        or doc.get('failures') != []):
+    raise SystemExit('authority full-integrity evidence did not prove PASS')
+PY2
+  echo "JASON_AUTHORITY_FULL_INTEGRITY=FRESH_PASS"
+}
+
+ensure_authority_full_integrity_proof
+
 for unit in "${MAINTENANCE_SERVICES[@]}"; do
   CURRENT_UNIT="$unit"
   if [ "$unit" = "jason-openclaw-authority-health.service" ]; then
@@ -671,6 +763,111 @@ if [ "$(systemctl is-active jason-release-control-transition.timer 2>/dev/null |
 fi
 step_pass root_release_transition_install
 echo "JASON_ROOT_RELEASE_TRANSITION_RECONCILIATION=PASS"
+
+step_start openbao_identity_lifecycle_install
+/usr/bin/python3 "$RELEASE_DIR/tools/install_openbao_identity_lifecycle.py"
+cmp -s "$RELEASE_DIR/tools/provider_secret_provision.py" /usr/local/lib/jason/provider_secret_provision.py || {
+  echo "ERROR: installed provider secret provisioning library differs from production source" >&2
+  exit 9
+}
+cmp -s "$RELEASE_DIR/tools/openbao_identity_lifecycle.py" /usr/local/lib/jason/openbao_identity_lifecycle.py || {
+  echo "ERROR: installed OpenBao identity lifecycle library differs from production source" >&2
+  exit 9
+}
+cmp -s "$RELEASE_DIR/tools/openbao_identity_lifecycle_worker.py" /usr/local/lib/jason/openbao_identity_lifecycle_worker.py || {
+  echo "ERROR: installed OpenBao identity lifecycle worker differs from production source" >&2
+  exit 9
+}
+if [ "$(systemctl is-active jason-openbao-identity-lifecycle.timer 2>/dev/null || true)" != "active" ]; then
+  echo "ERROR: OpenBao identity lifecycle timer is not active after production install" >&2
+  exit 9
+fi
+step_pass openbao_identity_lifecycle_install
+echo "JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=PASS"
+
+if [ "$RECOVERY_PROFILE" = "provider_identity_and_authority_recovery" ]; then
+  step_start provider_identity_release_recovery
+  /usr/bin/python3 /usr/local/lib/jason/openbao_identity_lifecycle.py \
+    recover-release --source-revision "$SOURCE_REVISION"
+
+  docker restart jason-runtime jason-mcp-pilot >/dev/null
+  RUNTIME_RECOVERED=0
+  for attempt in $(seq 1 60); do
+    runtime_revision="$(docker inspect jason-runtime --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
+    runtime_health="$(docker inspect jason-runtime --format '{{if .State.Health}}{{.State.Health.Status}}{{end}}' 2>/dev/null || true)"
+    mcp_revision="$(docker inspect jason-mcp-pilot --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
+    mcp_state="$(docker inspect jason-mcp-pilot --format '{{.State.Status}}' 2>/dev/null || true)"
+    if [ "$runtime_revision" = "$SOURCE_REVISION" ] \
+       && [ "$runtime_health" = "healthy" ] \
+       && [ "$mcp_revision" = "$SOURCE_REVISION" ] \
+       && [ "$mcp_state" = "running" ]; then
+      RUNTIME_RECOVERED=1
+      break
+    fi
+    sleep 2
+  done
+  if [ "$RUNTIME_RECOVERED" -ne 1 ]; then
+    echo "ERROR: provider identity recovery did not restore exact candidate runtime/MCP health" >&2
+    exit 9
+  fi
+
+  CURRENT_UNIT="$PROVIDER_CANARY_SERVICE"
+  CANARY_STARTED_AT="$(date +%s)"
+  systemctl start "$PROVIDER_CANARY_SERVICE"
+  /usr/bin/python3 - "$CANARY_STARTED_AT" <<'PY2'
+import json, sys, time
+from pathlib import Path
+started=float(sys.argv[1])
+p=Path('/var/lib/jason/provider-health-canaries.json')
+d=json.loads(p.read_text(encoding='utf-8'))
+generated=d.get('generated_at_epoch')
+if (not isinstance(generated,(int,float)) or generated < started - 1
+        or generated > time.time() + 10
+        or d.get('policy') != 'provider-health-canary-v1'
+        or d.get('principal') != 'jason-provider-canary'):
+    raise SystemExit('provider canary evidence is stale or outside reviewed contract')
+items=[x for x in d.get('results',[]) if isinstance(x,dict) and x.get('provider')=='autotask']
+if not items or any(x.get('healthy') is not True or x.get('error_class') != 'none' for x in items):
+    raise SystemExit('Autotask governed provider canary did not prove healthy after identity recovery')
+PY2
+  CURRENT_UNIT=""
+
+  run_as_al systemctl --user start jason-dnsfilter-boundary-reconcile.service
+  if [ "$(run_as_al systemctl --user show jason-dnsfilter-boundary-reconcile.service -p Result --value)" != "success" ]; then
+    echo "ERROR: DNSFilter reconciliation did not pass after identity recovery" >&2
+    exit 9
+  fi
+
+  CCC_REVIEW="/var/lib/jason/ccc/material-review-${SOURCE_REVISION:0:16}.json"
+  if [ ! -f "$CCC_REVIEW" ]; then
+    echo "ERROR: candidate Teams CCC material review is missing" >&2
+    exit 9
+  fi
+  CCC_STARTED_AT="$(date +%s)"
+  /usr/bin/bash "$RELEASE_DIR/tools/install_ccc_scheduler.sh" "$SOURCE_REVISION" "$CCC_REVIEW"
+  /usr/bin/python3 - "$SOURCE_REVISION" "$CCC_STARTED_AT" <<'PY2'
+import json, sys, time
+from pathlib import Path
+sha=sys.argv[1]; started=float(sys.argv[2])
+p=Path('/var/lib/jason/ccc/latest.json')
+d=json.loads(p.read_text(encoding='utf-8'))
+finished=str(d.get('finished_at') or '')
+try:
+    epoch=__import__('datetime').datetime.fromisoformat(finished.replace('Z','+00:00')).timestamp()
+except Exception:
+    raise SystemExit('CCC latest evidence has invalid finished_at')
+if (epoch < started - 1 or epoch > time.time()+10
+        or d.get('status') != 'PASS'
+        or d.get('source_revision') != sha
+        or d.get('runtime_revision') != sha):
+    raise SystemExit('CCC did not freshly prove exact candidate/runtime PASS after recovery')
+PY2
+  echo "JASON_CCC_POST_RECOVERY=PASS"
+  step_pass provider_identity_release_recovery
+  echo "JASON_PROVIDER_IDENTITY_RELEASE_RECOVERY=PASS"
+else
+  echo "JASON_PROVIDER_IDENTITY_RELEASE_RECOVERY=NOT_APPLICABLE"
+fi
 
 echo "JASON_HOST_SERVICE_RECONCILIATION=PASS"
 echo "HOST_RECONCILIATION_SCRIPT_SOURCE_REVISION=$SOURCE_REVISION"

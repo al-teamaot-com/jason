@@ -34,7 +34,7 @@ def test_snapshot_uses_bounded_timeout_for_full_integrity_checks(monkeypatch, tm
     monkeypatch.setattr(module.sys, "argv", [str(SCRIPT), "--output", str(tmp_path / "health.json")])
 
     assert module.main() == 0
-    assert observed["timeout"] == 1800
+    assert observed["timeout"] == 3600
     assert json.loads((tmp_path / "health.json").read_text())["status"] == "pass"
 
 
@@ -55,7 +55,7 @@ def test_timeout_records_explicit_failure_and_replaces_stale_pass(monkeypatch, t
     result = json.loads(output.read_text(encoding="utf-8"))
     assert result["status"] == "fail"
     assert result["failures"] == ["operational_health_timeout"]
-    assert result["snapshot_timeout_seconds"] == 1800
+    assert result["snapshot_timeout_seconds"] == 3600
     assert result["snapshot_source_exit_code"] == 124
     assert "stale" not in result
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
@@ -73,8 +73,32 @@ def test_systemd_timeout_exceeds_checker_deadline():
         if line.startswith("TimeoutStartSec=")
     ]
     assert len(timeouts) == 1, "Full-integrity systemd job requires one bounded timeout"
-    assert 1800 <= module.SOURCE_HEALTH_TIMEOUT_SECONDS < timeouts[0] <= 2400
+    assert 3600 <= module.SOURCE_HEALTH_TIMEOUT_SECONDS < timeouts[0] <= 4200
 
+
+
+def test_snapshot_uses_archive_temp_root_and_systemd_allows_only_existing_archive_mount(monkeypatch, tmp_path):
+    module = _load_module()
+    observed = {}
+
+    class Completed:
+        stdout = json.dumps({"status": "pass"})
+        returncode = 0
+
+    def fake_run(args, **kwargs):
+        observed["args"] = args
+        return Completed()
+
+    monkeypatch.setattr(module.subprocess, "run", fake_run)
+    monkeypatch.setattr(module.sys, "argv", [str(SCRIPT), "--output", str(tmp_path / "health.json")])
+    assert module.main() == 0
+    assert observed["args"][-2:] == ["--backup-temp-root", "/srv/jason/archive"]
+
+    unit = (
+        SCRIPT.parents[1]
+        / "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-full-integrity.service"
+    ).read_text(encoding="utf-8")
+    assert "ReadWritePaths=/var/lib/jason/openclaw /srv/jason/archive" in unit
 
 def test_nonzero_source_exit_cannot_publish_pass(monkeypatch, tmp_path):
     module = _load_module()
@@ -97,6 +121,6 @@ def test_full_sqlite_integrity_and_authority_restore_checks_remain_enabled():
     source = checker.read_text(encoding="utf-8")
     assert "PRAGMA integrity_check" in source
     assert "'orchestration_audit': args.orchestration_audit" in source
-    assert "backup_restore_proof(args.authority_database)" in source
+    assert "backup_restore_proof(args.authority_database, args.backup_temp_root)" in source
     assert "sqlite_integrity(backup)" in source
     assert "sqlite_integrity(restored)" in source

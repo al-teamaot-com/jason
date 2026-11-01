@@ -31,9 +31,10 @@ POLICY_UNIT_LISTS = (
 
 REQUEST_ID = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 # Process one request per systemd activation; DirectoryNotEmpty retriggers for
-# remaining requests. Multiple 360s scripts must never overrun one unit start.
+# remaining requests. A recovery reconcile may need one bounded 60-minute
+# SQLite integrity/restore proof plus ordinary host activation.
 MAX_REQUESTS_PER_RUN = 1
-HOST_RECONCILE_TIMEOUT_SECONDS = 360
+HOST_RECONCILE_TIMEOUT_SECONDS = 4200
 # Pinned historical rollback-only check; never skip the mandatory health start.
 LEGACY_LKG_SHA = "aca94fdc0bfa551162f6ea99d7ddded311786414"
 LEGACY_HOST_SCRIPT_SHA256 = "d8bf41dfe824b8eb01ae192386907a6657f09c245aa246306597a1162c7d1707"

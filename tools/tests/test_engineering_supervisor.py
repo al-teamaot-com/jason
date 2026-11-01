@@ -87,6 +87,16 @@ def test_supervisor_fails_closed_on_bad_work_inventory(tmp_path):
         supervisor.build_snapshot(tmp_path)
 
 
+def test_supervisor_classifies_denied_source_path_as_recoverable_source():
+    category, action = supervisor.classify(
+        "development_blocked",
+        "EvidenceToolError: source path not authorized",
+        lane="approved_todo",
+    )
+    assert category == "recoverable_source"
+    assert action == "native_worker_retry_authorized_source_discovery_or_escalate"
+
+
 def test_supervisor_does_not_turn_genuine_authority_hold_into_recovery():
     phase = "development_blocked"
     assert supervisor.classify(phase, "Credential needed for client API", lane="approved_todo")[0] == "external_dependency"
@@ -113,3 +123,13 @@ def test_rollback_worktree_mismatch_is_recoverable_only_by_native_verified_worke
     )
     assert category == 'recoverable_source'
     assert action == 'native_worker_verify_rollback_interruption_or_escalate'
+
+
+def test_credit_exhaustion_is_pmv3_recoverable_not_manual_babysitting():
+    category, action = supervisor.classify(
+        "development_blocked",
+        "development reasoning failed: Hosted reasoning blocked: credit_balance_exhausted; Owner action: restore_provider_credits",
+        lane="approved_todo",
+    )
+    assert category == "recoverable_credit"
+    assert action == "pmv3_verify_hosted_credit_then_readmit"

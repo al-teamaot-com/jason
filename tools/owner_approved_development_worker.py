@@ -564,6 +564,7 @@ def source_context_blocker(reason: str) -> bool:
         'unseen repository',
         'not expose enough',
         'missing source',
+        'source path not authorized',
         'enough surrounding',
         'cannot form a complete, exact replacement',
         "can't form a complete, exact replacement",
@@ -1970,6 +1971,26 @@ def readmit_development_after_verified_credit_replenishment(
 
 
 
+
+
+def blocked_reasoning_record(response: Mapping[str, Any], prefix: str) -> dict[str, Any]:
+    """Preserve machine-readable owner action from any governed reasoning provider."""
+    update: dict[str, Any] = {
+        'phase': 'blocked',
+        'reason': prefix + str(response.get('error') or ''),
+        'updated_at': now(),
+    }
+    owner_action = str(response.get('required_owner_action') or '').strip()
+    if owner_action:
+        update.update({
+            'notification_class': 'owner_action_required',
+            'owner_action': owner_action,
+            'provider_blocker_code': str(
+                response.get('primary_provider_error_code') or ''
+            )[:120],
+        })
+    return update
+
 def blocked_work_next_action(reason: str) -> dict[str, str]:
     text = str(reason or "").casefold()
     if any(x in text for x in ("approval", "authorization", "credential")):
@@ -2329,14 +2350,9 @@ def main() -> int:
                 if response is None:
                     continue
                 if response.get('status') != 'succeeded':
-                    record.update({
-                        'phase': 'blocked',
-                        'reason': (
-                            'development reasoning failed: '
-                            + str(response.get('error') or '')
-                        ),
-                        'updated_at': now(),
-                    })
+                    record.update(blocked_reasoning_record(
+                        response, 'development reasoning failed: '
+                    ))
                     continue
                 result = response.get('result') or {}
                 blocked_reason = str(result.get('blocked_reason') or '').strip()
@@ -2474,14 +2490,9 @@ def main() -> int:
                 if response is None:
                     continue
                 if response.get('status') != 'succeeded':
-                    record.update({
-                        'phase': 'blocked',
-                        'reason': (
-                            'development edit reasoning failed: '
-                            + str(response.get('error') or '')
-                        ),
-                        'updated_at': now(),
-                    })
+                    record.update(blocked_reasoning_record(
+                        response, 'development edit reasoning failed: '
+                    ))
                     continue
                 result = response.get('result') or {}
                 if engineering_evidence_tools.continue_evidence_session(
