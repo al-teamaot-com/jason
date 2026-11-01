@@ -43,6 +43,10 @@
         {
           "kind": "failed_user_unit",
           "unit": "jason-dnsfilter-boundary-reconcile.service"
+        },
+        {
+          "kind": "failed_system_unit",
+          "unit": "jason-ccc.service"
         }
       ],
       "required_changed_files": [
