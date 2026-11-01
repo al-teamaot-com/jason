@@ -1218,7 +1218,11 @@ def _verify_recovery_runtime_health(runtime: dict[str, Any], profile: Mapping[st
             or worker.get("ticket_worker") != contract.get("ticket_worker")
             or worker.get("last_restart_reason") != contract.get("last_restart_reason")):
         raise ReleaseManagerError("runtime degradation is outside reviewed provider-identity recovery profile")
-    return mode
+    return (
+        "ticket_worker_provider_auth_degraded"
+        if mode == "healthy_or_ticket_worker_provider_auth_degraded"
+        else mode
+    )
 
 
 def recovery_live_production_alignment(
