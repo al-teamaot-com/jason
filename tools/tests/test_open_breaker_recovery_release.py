@@ -137,6 +137,29 @@ def test_unrelated_drift_or_missing_repair_file_blocks_recovery():
         ) is None
 
 
+
+def test_reviewed_authority_recovery_bundle_allows_18_files_but_not_19():
+    record = recovery_record()
+    required = list(record["changed_files"])
+    while len(required) < 18:
+        required.append(f"docs/recovery-evidence-{len(required):02d}.md")
+    record["changed_files"] = required
+    with (
+        patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
+        patch.object(runner, "live_production_alignment", return_value={}),
+        patch.object(runner, "require_current_manual_scope_review"),
+        patch.object(runner, "_open_breaker_recovery_policy", return_value=reviewed_recovery_policy()),
+    ):
+        assert runner.governed_open_breaker_recovery_context(
+            ROOT, ROOT, record, require_owner_approval=False,
+            control=open_control(), drift=authority_drift(),
+        ) is not None
+        record["changed_files"].append("docs/recovery-evidence-over-bound.md")
+        assert runner.governed_open_breaker_recovery_context(
+            ROOT, ROOT, record, require_owner_approval=False,
+            control=open_control(), drift=authority_drift(),
+        ) is None
+
 def test_recovery_offer_is_nonexecuting_and_profile_bound(tmp_path):
     import release_mobile_approval_consumer as mobile_consumer
     mobile_consumer._install_repo_modules(ROOT)
