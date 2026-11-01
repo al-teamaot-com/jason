@@ -175,7 +175,7 @@ services:
       dockerfile: infrastructure/jason-subscription-reasoning/Dockerfile
     image: jason-subscription-reasoning:production
     container_name: jason-subscription-reasoning
-    user: "1000:100"
+    user: "1000:1000"
     restart: unless-stopped
     read_only: true
     cap_drop:
