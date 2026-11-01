@@ -62,3 +62,34 @@ class SubscriptionStructuredJsonClient:
                 provider_error_code="subscription_reasoning_invalid_response",
             )
         return dict(result)
+
+
+@dataclass(frozen=True, slots=True)
+class ExplicitFallbackStructuredJsonClient:
+    """Use API fallback only when configuration explicitly supplies one."""
+
+    primary: Any
+    fallback: Any
+
+    def complete(
+        self,
+        *,
+        system: str,
+        user: str,
+        schema: Mapping[str, Any],
+        max_output_tokens: int,
+    ) -> Mapping[str, Any]:
+        try:
+            return self.primary.complete(
+                system=system,
+                user=user,
+                schema=schema,
+                max_output_tokens=max_output_tokens,
+            )
+        except ConnectorTransportError:
+            return self.fallback.complete(
+                system=system,
+                user=user,
+                schema=schema,
+                max_output_tokens=max_output_tokens,
+            )
