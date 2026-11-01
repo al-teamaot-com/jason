@@ -116,6 +116,19 @@ A support item stops automatically only for a genuine governance/capability bloc
 
 For every autonomously claimed Support List item, the support-repair lane must emit owner lifecycle events through the same canonical governed Teams owner-notification path used for TODO engineering: **repair started**, **blocked / owner action required** when applicable, and **production-verified complete**. The start message identifies the support ID, defect summary, and repair scope. The blocked message identifies the exact blocker and required owner action. The completion message identifies the merged/deployed revision and the production acceptance evidence that proves the defect is resolved. A support fix is not "complete" for notification purposes merely because code was committed, CI passed, or a PR merged. Notification delivery uses the same durable message/correlation identity, provider/readback verification, bounded retry, duplicate suppression, and `SUPPORT-CONN-037` reliability requirements as TODO lifecycle messages.
 
+### Open-breaker recovery after runtime restoration
+
+A bounded runtime recovery (for example, restarting the existing Jason runtime
+container without changing its image) does not by itself invalidate an exact
+source-reviewed open-breaker recovery. For the provider-identity and authority
+recovery profile, Release Manager accepts either the reviewed degraded
+ticket-worker health contract or a fully healthy runtime, while continuing to
+require the exact four-unit drift set, the required repair files, immutable LKG
+alignment, current protected-main source, recorded whole-main scope review,
+preproduction and rollback readiness, and signed exact-SHA Teams Owner approval.
+The reviewed whole-main recovery remains bounded to 64 changed files; a larger
+candidate fails closed and must be separately reviewed.
+
 ### Subscription-first PMv3 reasoning
 
 PMv3 engineering and support reasoning use the AOT Owner's ChatGPT-authenticated
