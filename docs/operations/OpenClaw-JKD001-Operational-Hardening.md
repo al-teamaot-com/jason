@@ -154,3 +154,9 @@ Stop or deny when:
 ## Constitutional boundary
 
 Operational maintenance never grants authority. Expiry cleanup, health inspection, key registry maintenance, and backup proof are administrative controls around the existing governed architecture. OpenClaw remains ingress/delegate, JKD-001 remains the authority service, governance gates remain mandatory, and the Central Orchestrator remains the sole execution coordinator.
+
+### Release reconciliation of failed/stale full-integrity proof
+
+The frequent authority-health check remains read-only and lightweight, but it cannot certify production unless `operational-full-health.json` contains a recent successful complete SQLite integrity and authority backup/restore proof. During a governed host release, reconciliation therefore reuses a recent full PASS when available and otherwise runs the exact installed `jason-openclaw-authority-full-integrity.service` before the fast-health handoff. An already-running full-proof oneshot is joined with `systemctl start`; it is not restarted, stopped, killed, or replaced.
+
+Because the complete proof may consume the full 60-minute checker budget on the current multi-GB audit stores, the nested reconciliation deadlines are intentionally ordered and finite: the full-integrity systemd service remains bounded by its own 65-minute ceiling, the root host script is bounded at 70 minutes, the unprivileged Release Manager waits 74 minutes, and the root reconciliation unit is bounded at 75 minutes. A missing, failed, stale, or late proof remains a release failure and follows normal rollback; `reset-failed` is never accepted as health evidence.

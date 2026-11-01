@@ -406,6 +406,77 @@ CURRENT_UNIT="$PROVIDER_CANARY_TIMER"
 systemctl enable --now "$PROVIDER_CANARY_TIMER"
 CURRENT_UNIT="$PROVIDER_CANARY_SERVICE"
 timeout --signal=TERM --kill-after=5s 45s systemctl start "$PROVIDER_CANARY_SERVICE"
+
+ensure_authority_full_integrity_proof() {
+  local evidence=/var/lib/jason/openclaw/operational-full-health.json
+  local max_age_seconds=$((30 * 60 * 60))
+  local al_uid
+  al_uid="$(id -u al)"
+  if /usr/bin/python3 - "$evidence" "$max_age_seconds" "$al_uid" <<'PY2'
+import json, os, stat, sys, time
+path=sys.argv[1]; max_age=int(sys.argv[2]); expected_uid=int(sys.argv[3])
+try:
+    info=os.lstat(path)
+    if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600:
+        raise SystemExit(2)
+    if info.st_uid != expected_uid:
+        raise SystemExit(2)
+    age=time.time()-info.st_mtime
+    if not 0 <= age <= max_age:
+        raise SystemExit(2)
+    doc=json.load(open(path, encoding='utf-8'))
+    if (doc.get('status') != 'pass' or doc.get('snapshot_source_exit_code') != 0
+            or doc.get('provider_contacted') is not False
+            or doc.get('provider_credentials_used') is not False
+            or doc.get('failures') != []):
+        raise SystemExit(2)
+except (OSError, ValueError, TypeError, json.JSONDecodeError):
+    raise SystemExit(2)
+raise SystemExit(0)
+PY2
+  then
+    echo "JASON_AUTHORITY_FULL_INTEGRITY=EXISTING_RECENT_PASS"
+    return 0
+  fi
+
+  CURRENT_UNIT=jason-openclaw-authority-full-integrity.service
+  local state
+  state="$(systemctl is-active "$CURRENT_UNIT" 2>/dev/null || true)"
+  if [ "$state" = "activating" ] || [ "$state" = "active" ]; then
+    echo "JASON_AUTHORITY_FULL_INTEGRITY=WAIT_EXISTING_JOB"
+    # `start` on an already-starting oneshot joins the existing start job. It
+    # does not restart, stop, cancel or replace the in-flight proof.
+    systemctl start "$CURRENT_UNIT"
+  else
+    systemctl reset-failed "$CURRENT_UNIT" || true
+    echo "JASON_AUTHORITY_FULL_INTEGRITY=RUN_REPAIRED_PROOF"
+    systemctl start "$CURRENT_UNIT"
+  fi
+  if [ "$(systemctl show "$CURRENT_UNIT" -p Result --value)" != "success" ]; then
+    echo "ERROR: repaired authority full-integrity proof did not complete successfully" >&2
+    systemctl status "$CURRENT_UNIT" --no-pager -l || true
+    return 1
+  fi
+  /usr/bin/python3 - "$evidence" "$max_age_seconds" "$al_uid" <<'PY2'
+import json, os, stat, sys, time
+path=sys.argv[1]; max_age=int(sys.argv[2]); expected_uid=int(sys.argv[3])
+info=os.lstat(path)
+if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != expected_uid:
+    raise SystemExit('authority full-integrity evidence ownership/mode invalid')
+if not 0 <= time.time()-info.st_mtime <= max_age:
+    raise SystemExit('authority full-integrity evidence stale after proof')
+doc=json.load(open(path, encoding='utf-8'))
+if (doc.get('status') != 'pass' or doc.get('snapshot_source_exit_code') != 0
+        or doc.get('provider_contacted') is not False
+        or doc.get('provider_credentials_used') is not False
+        or doc.get('failures') != []):
+    raise SystemExit('authority full-integrity evidence did not prove PASS')
+PY2
+  echo "JASON_AUTHORITY_FULL_INTEGRITY=FRESH_PASS"
+}
+
+ensure_authority_full_integrity_proof
+
 for unit in "${MAINTENANCE_SERVICES[@]}"; do
   CURRENT_UNIT="$unit"
   if [ "$unit" = "jason-openclaw-authority-health.service" ]; then
