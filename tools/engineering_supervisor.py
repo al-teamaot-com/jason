@@ -67,8 +67,10 @@ def classify(phase: str, reason: str, *, lane: str) -> tuple[str, str]:
         return "active", "continue_native_worker"
     if phase not in {"blocked", "escalated", "development_blocked", "waiting_external_dependency"}:
         return "needs_triage", "inspect_bounded_state_evidence"
+    if "credit_balance_exhausted" in text:
+        return "recoverable_credit", "pmv3_verify_hosted_credit_then_readmit"
     if any(term in text for term in ("credential", "api details", "api access", "provider license",
-                                      "billing credits", "credit_balance_exhausted", "tenant permission")):
+                                      "billing credits", "tenant permission")):
         return "external_dependency", "obtain_authorized_provider_dependency"
     if any(term in text for term in ("prerequisite", "blocked by dependency", "after support-cap",
                                       "do not begin", "gate hold", "until the prerequisite")):
@@ -171,7 +173,8 @@ def build_snapshot(spool: Path, prior: Mapping[str, Any] | None = None) -> dict[
     capacity = int(intake.get("engineering_capacity") or 0)
     stalled = outstanding > 0 and active == 0 and capacity > 0
     internal = sum(counts.get(name, 0) for name in (
-        "recoverable_source", "recoverable_transport", "recoverable_validation", "needs_triage"))
+        "recoverable_source", "recoverable_transport", "recoverable_validation",
+        "recoverable_credit", "needs_triage"))
     blocker = ("internal_recovery_needed" if stalled and internal
                else "external_or_governed_gate" if stalled else None)
     return {
