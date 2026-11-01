@@ -15,7 +15,8 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-SPOOL = Path("/var/lib/jason/openclaw/release-manager/host-reconcile")
+RELEASE_STATE = Path("/var/lib/jason/openclaw/release-manager")
+SPOOL = RELEASE_STATE / "host-reconcile"
 REQUESTS = SPOOL / "requests"
 RESULTS = SPOOL / "results"
 CANDIDATE_SCRIPTS = SPOOL / "candidate-scripts"
@@ -89,6 +90,13 @@ def _mcp_revision() -> str:
     if not SHA.fullmatch(value):
         raise HostReconcileError("live MCP revision is not an exact SHA")
     return value
+
+
+def _host_operator_uid() -> int:
+    try:
+        return pwd.getpwnam("al").pw_uid
+    except KeyError as exc:
+        raise HostReconcileError("Jason host operator account is unavailable") from exc
 
 
 def _git(*args: str) -> list[str]:
@@ -228,6 +236,78 @@ def _verified_migration_ancestor(ancestor: str, descendant: str) -> bool:
     return result.returncode == 0
 
 
+def _forward_recovery_release_authorized(
+    source_revision: str, lkg_revision: str, breaker: dict[str, object],
+) -> bool:
+    """Verify one exact owner-approved forward recovery may retain applied root policy."""
+    if (
+        breaker.get("state") != "open"
+        or breaker.get("source") not in {
+            "production_drift_watchdog", "root_governed_transition"
+        }
+        or not _verified_migration_ancestor(lkg_revision, source_revision)
+    ):
+        return False
+
+    record_path = RELEASE_STATE / "records" / (
+        "release-" + source_revision[:16] + ".json"
+    )
+    try:
+        meta = record_path.lstat()
+        if (
+            not stat.S_ISREG(meta.st_mode)
+            or record_path.is_symlink()
+            or meta.st_uid != _host_operator_uid()
+            or meta.st_mode & 0o022
+            or meta.st_size > 1048576
+        ):
+            return False
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
+
+    owner = record.get("owner_approval") or {}
+    manifest = record.get("release_manifest") or {}
+    exception = record.get("one_transaction_freeze_exception") or {}
+    if (
+        record.get("state") != "production"
+        or record.get("risk_profile") != "production_control_core"
+        or (record.get("release_candidate") or {}).get("candidate_sha")
+            != source_revision
+        or record.get("rollback_sha") != lkg_revision
+        or manifest.get("candidate_sha") != source_revision
+        or manifest.get("rollback_sha") != lkg_revision
+        or owner.get("approved") is not True
+        or owner.get("candidate_sha") != source_revision
+        or not str(owner.get("source") or "").startswith(
+            "authenticated_mobile_teams_owner:relapproval-"
+        )
+        or exception.get("required_recovery_profile_id")
+            != "provider_identity_and_authority_recovery"
+        or exception.get("rollback_sha") != lkg_revision
+        or exception.get("standing_authority") is not False
+        or exception.get("signed_teams_release_approval_required") is not True
+        or exception.get("restore_freeze_after_transaction") is not True
+    ):
+        return False
+
+    try:
+        raw = subprocess.check_output(
+            _git("show", f"{source_revision}:{SOURCE_DRIFT_POLICY}"),
+            text=True, timeout=15,
+        )
+        candidate_policy = json.loads(raw)
+        root_policy = _protected_root_drift_policy()
+        for field in POLICY_UNIT_LISTS:
+            if _declared_units(candidate_policy, field) != _declared_units(
+                root_policy, field
+            ):
+                return False
+    except (OSError, subprocess.SubprocessError, ValueError, HostReconcileError):
+        return False
+    return True
+
+
 def _restore_root_policy_for_target(source_revision: str) -> str:
     """Restore audited rollback or retain exact independently committed policy."""
     module = _trusted_root_policy_helper()
@@ -264,15 +344,28 @@ def _restore_root_policy_for_target(source_revision: str) -> str:
             or previous_is_exact_verified_baseline
         ))
     )
+    forward_recovery_target = (
+        lkg.get("complete") is True
+        and isinstance(lkg_revision, str)
+        and SHA.fullmatch(lkg_revision) is not None
+        and _forward_recovery_release_authorized(
+            source_revision, lkg_revision, breaker
+        )
+    )
     if (receipt.get("phase") == "applied"
-            and lkg.get("complete") is True and authorized_target):
+            and lkg.get("complete") is True
+            and (authorized_target or forward_recovery_target)):
         data = module._root_only(module.POLICY)
         if module.digest(data) != receipt.get("applied_sha256"):
             raise HostReconcileError("committed root policy differs from reviewed migration")
         migration_sha = receipt.get("candidate_sha")
         if (_verified_migration_ancestor(migration_sha, lkg_revision)
                 and _verified_migration_ancestor(migration_sha, source_revision)):
-            return "PREVIOUS_MIGRATION_LKG_VERIFIED"
+            return (
+                "PREVIOUS_MIGRATION_FORWARD_DESCENDANT_VERIFIED"
+                if forward_recovery_target
+                else "PREVIOUS_MIGRATION_LKG_VERIFIED"
+            )
     raise HostReconcileError("active root policy migration does not belong to target SHA")
 
 

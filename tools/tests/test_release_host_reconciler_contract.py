@@ -374,3 +374,171 @@ def test_migration_lineage_is_exact_and_fails_closed(monkeypatch):
                             subprocess.TimeoutExpired("git", 15)))
     with pytest.raises(worker.HostReconcileError, match="unavailable"):
         worker._verified_migration_ancestor(ancestor, descendant)
+
+
+
+def test_applied_root_policy_survives_exact_owner_approved_forward_recovery(
+        tmp_path, monkeypatch):
+    import hashlib
+    import importlib.util
+    import json
+    import pytest
+    from types import SimpleNamespace
+
+    spec = importlib.util.spec_from_file_location(
+        "jason_root_forward_recovery",
+        ROOT / "tools" / "release_host_reconcile_worker.py",
+    )
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+
+    old, migrated, lkg, candidate = ("a"*40, "b"*40, "c"*40, "d"*40)
+    active = tmp_path / "active.json"
+    policy = tmp_path / "policy.json"
+    control = tmp_path / "production-control-state.json"
+    records = tmp_path / "records"
+    records.mkdir()
+
+    root_policy = {
+        "schema_version": "1.0",
+        "required_system_units": ["jason-known.timer"],
+        "allowed_system_units": [],
+        "required_user_units": [],
+        "allowed_user_units": [],
+    }
+    raw = (json.dumps(root_policy, sort_keys=True) + "\n").encode()
+    policy.write_bytes(raw)
+    active.write_text(json.dumps({
+        "schema_version": "1.0",
+        "candidate_sha": migrated,
+        "rollback_sha": old,
+        "phase": "applied",
+        "applied_sha256": hashlib.sha256(raw).hexdigest(),
+    }))
+    control.write_text(json.dumps({
+        "schema_version": "1.0",
+        "circuit_breaker": {
+            "state": "open",
+            "source": "production_drift_watchdog",
+        },
+        "last_known_good": {
+            "manifest": {"revision": lkg, "complete": True}
+        },
+    }))
+    release_path = records / ("release-" + candidate[:16] + ".json")
+    release_path.write_text(json.dumps({
+        "release_id": "release-" + candidate[:16],
+        "state": "production",
+        "risk_profile": "production_control_core",
+        "rollback_sha": lkg,
+        "release_candidate": {"candidate_sha": candidate},
+        "release_manifest": {
+            "candidate_sha": candidate,
+            "rollback_sha": lkg,
+        },
+        "owner_approval": {
+            "approved": True,
+            "candidate_sha": candidate,
+            "source": "authenticated_mobile_teams_owner:relapproval-test123",
+        },
+        "one_transaction_freeze_exception": {
+            "required_recovery_profile_id":
+                "provider_identity_and_authority_recovery",
+            "rollback_sha": lkg,
+            "standing_authority": False,
+            "signed_teams_release_approval_required": True,
+            "restore_freeze_after_transaction": True,
+        },
+    }))
+    release_path.chmod(0o600)
+    helper = SimpleNamespace(
+        ROOT=tmp_path,
+        ACTIVE=active,
+        POLICY=policy,
+        _json=lambda data: json.loads(data),
+        _root_only=lambda path: path.read_bytes(),
+        digest=lambda data: hashlib.sha256(data).hexdigest(),
+        prepare_rollback=lambda sha: (_ for _ in ()).throw(
+            AssertionError("forward recovery must not rewrite root policy")
+        ),
+    )
+    monkeypatch.setattr(worker, "RELEASE_STATE", tmp_path)
+    monkeypatch.setattr(worker, "_trusted_root_policy_helper", lambda: helper)
+    monkeypatch.setattr(worker, "_protected_root_drift_policy",
+                        lambda: root_policy)
+    ancestry = {
+        (migrated, lkg),
+        (migrated, candidate),
+        (lkg, candidate),
+    }
+    monkeypatch.setattr(
+        worker, "_verified_migration_ancestor",
+        lambda ancestor, descendant: (ancestor, descendant) in ancestry,
+    )
+    monkeypatch.setattr(
+        worker.subprocess, "check_output",
+        lambda *args, **kwargs: json.dumps(root_policy),
+    )
+
+    monkeypatch.setattr(
+        worker, "_host_operator_uid",
+        lambda: release_path.lstat().st_uid,
+    )
+    meta = release_path.lstat()
+    assert meta.st_mode & 0o022 == 0
+    release_check = json.loads(release_path.read_text())
+    assert release_check["state"] == "production"
+    assert release_check["risk_profile"] == "production_control_core"
+    assert release_check["rollback_sha"] == lkg
+    assert release_check["release_candidate"]["candidate_sha"] == candidate
+    assert release_check["release_manifest"]["candidate_sha"] == candidate
+    assert release_check["release_manifest"]["rollback_sha"] == lkg
+    assert release_check["owner_approval"]["approved"] is True
+    assert release_check["owner_approval"]["candidate_sha"] == candidate
+    assert release_check["owner_approval"]["source"].startswith(
+        "authenticated_mobile_teams_owner:relapproval-"
+    )
+    assert release_check["one_transaction_freeze_exception"][
+        "required_recovery_profile_id"
+    ] == "provider_identity_and_authority_recovery"
+    assert worker._verified_migration_ancestor(lkg, candidate)
+    assert worker._forward_recovery_release_authorized(
+        candidate, lkg, {"state": "open", "source": "production_drift_watchdog"}
+    ) is True
+    assert (
+        worker._restore_root_policy_for_target(candidate)
+        == "PREVIOUS_MIGRATION_FORWARD_DESCENDANT_VERIFIED"
+    )
+    assert policy.read_bytes() == raw
+
+    release = json.loads(release_path.read_text())
+    release["owner_approval"]["approved"] = False
+    release_path.write_text(json.dumps(release))
+    with pytest.raises(worker.HostReconcileError, match="does not belong"):
+        worker._restore_root_policy_for_target(candidate)
+
+    release["owner_approval"]["approved"] = True
+    release["state"] = "production_eligible"
+    release_path.write_text(json.dumps(release))
+    with pytest.raises(worker.HostReconcileError, match="does not belong"):
+        worker._restore_root_policy_for_target(candidate)
+
+    release["state"] = "production"
+    release_path.write_text(json.dumps(release))
+    monkeypatch.setattr(
+        worker.subprocess, "check_output",
+        lambda *args, **kwargs: json.dumps({
+            **root_policy,
+            "allowed_system_units": ["jason-unreviewed.service"],
+        }),
+    )
+    with pytest.raises(worker.HostReconcileError, match="does not belong"):
+        worker._restore_root_policy_for_target(candidate)
+
+    monkeypatch.setattr(
+        worker.subprocess, "check_output",
+        lambda *args, **kwargs: json.dumps(root_policy),
+    )
+    ancestry.remove((lkg, candidate))
+    with pytest.raises(worker.HostReconcileError, match="does not belong"):
+        worker._restore_root_policy_for_target(candidate)
