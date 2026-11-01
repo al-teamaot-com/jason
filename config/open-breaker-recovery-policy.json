@@ -6,7 +6,7 @@
       "id": "authority_integrity_timeout",
       "change_class": "release_blocker",
       "risk_profile": "production_control_core",
-      "max_changed_files": 16,
+      "max_changed_files": 18,
       "drift_problems": [
         {
           "kind": "failed_system_unit",
