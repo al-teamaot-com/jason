@@ -167,13 +167,19 @@ low reasoning-effort setting as the running OpenAI client. Success is
 reported only after the same request has a positive-token, provider-reported
 completed receipt carrying `workflow_id=provider-credit-verify` and
 `routing_profile=operator-authorized-diagnostic`. A blocked result must not be
-converted into a hand-entered success or an unbounded retry. The diagnostic
-makes a small billable request and must be operator-authorized.
+converted into a hand-entered success or an unbounded retry. The diagnostic makes a small billable request. Under the standing PMv3
+engineering agreement, PMv3 may invoke this exact diagnostic automatically
+only when authoritative supervisor state contains a blocked
+`credit_balance_exhausted` work item. Automated probes are durably throttled
+to at most one attempt every 15 minutes while the blocker persists. A failed
+probe changes no work authority and does not retry the blocked engineering
+request.
 
-The subsequent scheduled support and owner-approved development workers
-independently re-admit at most one eligible bounded request per blocked item,
-subject to the original approval, immutable failed receipt, 12-hour receipt
-freshness, capacity, and each worker's existing exclusions. Observe real
+After a provider-reported metered diagnostic succeeds, the subsequent scheduled
+support and owner-approved development workers independently re-admit at most one
+eligible bounded request per blocked item, subject to the original approval,
+immutable failed receipt, 12-hour receipt freshness, capacity, and each worker's
+existing exclusions. Observe real
 reasoning, tests, PR progression and protected release acceptance before
 claiming autonomous development is recovered. A successful diagnostic alone
 is not that acceptance.

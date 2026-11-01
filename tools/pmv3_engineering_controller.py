@@ -94,7 +94,7 @@ def classify(
         counts = supervisor.get("category_counts") if isinstance(supervisor.get("category_counts"), Mapping) else {}
         recoverable = sum(int(counts.get(name) or 0) for name in (
             "recoverable_source", "recoverable_transport",
-            "recoverable_validation", "needs_triage",
+            "recoverable_validation", "recoverable_credit", "needs_triage",
         ))
         if recoverable:
             return "recoverable", "approved_work_stalled_recoverable"
@@ -107,7 +107,7 @@ def classify(
         counts = supervisor.get("category_counts") if isinstance(supervisor.get("category_counts"), Mapping) else {}
         recoverable = sum(int(counts.get(name) or 0) for name in (
             "recoverable_source", "recoverable_transport",
-            "recoverable_validation", "needs_triage",
+            "recoverable_validation", "recoverable_credit", "needs_triage",
         ))
         return (
             ("recoverable", "critical_support_recoverable")
@@ -116,6 +116,63 @@ def classify(
         )
 
     return "waiting_external", "unclassified_governed_gate"
+
+
+CREDIT_PROBE_COOLDOWN_SECONDS = 900
+
+
+def credit_recovery_needed(supervisor: Mapping[str, Any]) -> bool:
+    counts = supervisor.get("category_counts")
+    return isinstance(counts, Mapping) and int(counts.get("recoverable_credit") or 0) > 0
+
+
+def maybe_run_credit_probe(
+    *,
+    spool: Path,
+    runner: Callable[..., Any],
+    cooldown_seconds: int = CREDIT_PROBE_COOLDOWN_SECONDS,
+) -> dict[str, Any]:
+    """Run one tiny hosted-credit diagnostic on a durable bounded cooldown.
+
+    The diagnostic grants no development, provider-write, release, or production
+    authority. A success merely creates the metered receipt already required by
+    the native workers before they may re-admit one blocked reasoning request.
+    """
+    path = spool / "pmv3-credit-recovery-state.json"
+    prior = load_json(path)
+    observed = datetime.now(timezone.utc)
+    last_raw = str(prior.get("last_probe_at") or "")
+    if last_raw:
+        try:
+            last = datetime.fromisoformat(last_raw.replace("Z", "+00:00"))
+            if last.tzinfo is not None and (observed - last).total_seconds() < max(60, int(cooldown_seconds)):
+                return {
+                    "status": "cooldown",
+                    "last_probe_at": last.isoformat(),
+                    "last_return_code": prior.get("last_return_code"),
+                }
+        except ValueError:
+            pass
+    command = [
+        "docker", "exec", "jason-runtime",
+        "python", "-m", "jason_runtime.verify_hosted_credit",
+    ]
+    try:
+        result = runner(command, timeout=60, check=False)
+        rc = int(result.returncode)
+        status = "verified" if rc == 0 else "unavailable"
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        rc = -1
+        status = "probe_failed"
+        prior["last_error_type"] = type(exc).__name__
+    receipt = {
+        "schema_version": "1.0",
+        "last_probe_at": observed.isoformat(timespec="seconds"),
+        "last_return_code": rc,
+        "status": status,
+    }
+    atomic_json(path, receipt)
+    return receipt
 
 
 def run_pipeline(
@@ -187,6 +244,13 @@ def controller_run(
         pipeline = load_json(spool / "engineering-pipeline-state.json")
         supervisor = load_json(spool / "engineering-supervisor-state.json")
         disposition, reason = classify(pipeline, supervisor)
+        credit_probe = None
+        if credit_recovery_needed(supervisor):
+            credit_probe = maybe_run_credit_probe(spool=spool, runner=runner)
+            if credit_probe.get("status") == "verified":
+                # The next ordinary pipeline pass consumes the metered receipt
+                # through the existing owner-development/support readmission path.
+                disposition, reason = "recoverable", "hosted_credit_verified"
         fp = progress_fingerprint(pipeline, supervisor)
         if fp == previous_fp:
             unchanged += 1
@@ -203,6 +267,8 @@ def controller_run(
             "unchanged_passes": unchanged,
             "checked_at": now(),
         }
+        if credit_probe is not None:
+            entry["credit_probe"] = credit_probe
         state["passes"].append(entry)
         atomic_json(state_path, state)
 
