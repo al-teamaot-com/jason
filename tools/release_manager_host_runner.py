@@ -5469,6 +5469,12 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         raise ReleaseManagerError("approval-only offer source, hold or baseline changed")
     offer_root = state_root / "mobile-release-offers"
     offer = offer_root / (record_id(main_sha) + ".json")
+    manifest_digest = hashlib.sha256(json.dumps(
+        record["release_manifest"], sort_keys=True, separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")).hexdigest()
+    review_only_offer = purpose == "ccc_material_review_only"
+    replacing_stale_offer = False
     if offer.exists():
         existing = json.loads(offer.read_text(encoding="utf-8"))
         if (existing.get("candidate_sha") != main_sha
@@ -5477,12 +5483,19 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
             raise ReleaseManagerError("existing Teams owner offer conflicts with exact release")
         if recovery_context is not None and existing.get("recovery_profile_id") != recovery_context["profile_id"]:
             raise ReleaseManagerError("existing Teams owner offer conflicts with recovery profile")
-        print("RELEASE_APPROVAL_ONLY=EXISTING_OFFER_PRESERVED", flush=True)
-        return False
-    manifest_digest = hashlib.sha256(json.dumps(
-        record["release_manifest"], sort_keys=True, separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode("utf-8")).hexdigest()
+        exact_subject = (
+            existing.get("manifest_sha256") == manifest_digest
+            and (existing.get("review_only") is True) == review_only_offer
+        )
+        if exact_subject:
+            print("RELEASE_APPROVAL_ONLY=EXISTING_OFFER_PRESERVED", flush=True)
+            return False
+        # The offer file is dispatch intent, not the approval ledger. A prior
+        # card/decision remains durable in the approval database. Replacing this
+        # non-authoritative offer is allowed only for the same exact release
+        # identity/rollback/profile when its immutable manifest or review mode
+        # changed. The runtime will mint a NEW approval_id for the new subject.
+        replacing_stale_offer = True
     atomic_json(offer, {
         "schema_version": "1.0",
         "release_id": record_id(main_sha),
@@ -5490,7 +5503,7 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         "manifest_sha256": manifest_digest,
         "protected_main_sha": main_sha,
         "live_rollback_sha": live_sha,
-        **({"review_only": True} if purpose == "ccc_material_review_only" else {}),
+        **({"review_only": True} if review_only_offer else {}),
         **({
             "recovery_profile_id": recovery_context["profile_id"],
             "recovery_policy_sha256": recovery_context["policy_sha256"],
@@ -5499,8 +5512,10 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         "published_at": now(),
     })
     print("RELEASE_APPROVAL_ONLY=" + (
-        "RECOVERY_OFFER_PUBLISHED_NONEXECUTING" if recovery_context is not None
-        else "OFFER_PUBLISHED_NONEXECUTING"
+        "STALE_OFFER_REPUBLISHED_NONEXECUTING" if replacing_stale_offer
+        else ("RECOVERY_OFFER_PUBLISHED_NONEXECUTING"
+              if recovery_context is not None
+              else "OFFER_PUBLISHED_NONEXECUTING")
     ), flush=True)
     return True
 

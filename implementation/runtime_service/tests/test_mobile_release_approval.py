@@ -892,3 +892,61 @@ def test_pending_or_approved_card_blocks_new_renewal(tmp_path):
     case.maintenance._next_due = NOW
     assert case.maintenance.tick() is False
     assert len(case.sender.sent) == 1
+
+def test_owner_issuer_sends_fresh_card_for_changed_manifest_same_release_id(tmp_path):
+    from dataclasses import replace
+    from jason_runtime.mobile_release_approval import (
+        MobileReleaseApprovalMaintenance, MobileReleaseOwnerAuthority,
+        read_eligible_release, read_mobile_release_policy, create_mobile_release_request,
+    )
+    policy_path = policy_file(tmp_path)
+    root, _ = release_record(tmp_path)
+    policy = read_mobile_release_policy(policy_path)
+    evidence = read_eligible_release(root, RELEASE, policy)
+    make_eligible_main_offer(root, policy_path)
+
+    repo = SQLiteApprovalRequestRepository(tmp_path / "requests.sqlite3")
+    approvals = ApprovalRequestService(repo, MobileReleaseOwnerAuthority(policy_path))
+    historical = create_mobile_release_request(
+        evidence, policy, now=NOW - timedelta(minutes=1),
+    )
+    # Historical terminal request for the same SHA/release ID but an older
+    # rebuilt artifact manifest. It must not suppress the current exact subject.
+    repo.put(replace(
+        historical,
+        status=ApprovalRequestStatus.APPROVED,
+        metadata={
+            **historical.metadata,
+            "manifest_sha256": "0" * 64,
+        },
+    ))
+
+    class Sender:
+        def __init__(self):
+            self.sent = []
+        def send(self, request):
+            self.sent.append(request)
+            return ("teams-message-new-manifest",)
+
+    sender = Sender()
+    worker = MobileReleaseApprovalMaintenance(
+        enabled=True, policy_path=policy_path, state_root=root,
+        requests=repo, approvals=approvals, sender=sender,
+        interval_seconds=60, clock=lambda: NOW,
+    )
+    assert worker.tick() is True
+    assert len(sender.sent) == 1
+    fresh = sender.sent[0]
+    assert fresh.approval_id != historical.approval_id
+    assert fresh.metadata["release_id"] == historical.metadata["release_id"]
+    assert fresh.metadata["candidate_sha"] == historical.metadata["candidate_sha"]
+    assert fresh.metadata["manifest_sha256"] == evidence.manifest_sha256
+    stored_historical = repo.get(historical.approval_id)
+    assert stored_historical is not None
+    assert fresh.metadata["manifest_sha256"] != stored_historical.metadata["manifest_sha256"]
+
+    # The newly issued exact subject is now one-shot.
+    worker._next_due = NOW
+    assert worker.tick() is False
+    assert len(sender.sent) == 1
+    assert len(repo.list_all()) == 2
