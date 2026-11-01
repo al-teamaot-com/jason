@@ -1298,6 +1298,25 @@ def readmit_source_context_after_verified_worker_upgrade(
     return resumed
 
 
+def stale_recovery_source_identity(
+    record: Mapping[str, Any], issue: int, repo: Path,
+) -> tuple[Path, str, Path] | None:
+    """Return only an exact previously governed source checkout identity."""
+    original_path = WORKTREE_ROOT / f'issue-{issue}'
+    original_branch = f'develop/owner-approved-issue-{issue}'
+    if (record.get('worktree') == str(original_path)
+            and record.get('branch') == original_branch):
+        return original_path, original_branch, (repo / '.git').resolve()
+    prior = str(record.get('stale_source_recovery_revision') or '')
+    if re.fullmatch(r'[0-9a-f]{40}', prior):
+        recovered_path = WORKTREE_ROOT / f'issue-{issue}-stale-{prior[:12]}'
+        recovered_branch = f'develop/owner-approved-issue-{issue}-stale-{prior[:12]}'
+        if (record.get('worktree') == str(recovered_path)
+                and record.get('branch') == recovered_branch):
+            return recovered_path, recovered_branch, (recovered_path / '.git').resolve()
+    return None
+
+
 def readmit_stale_clean_development_source(
     state: dict[str, Any], admitted: list[dict[str, Any]], spool: Path, repo: Path,
     *, max_active: int,
@@ -1334,13 +1353,12 @@ def readmit_stale_clean_development_source(
                 or rec.get('blocker_class') in {'external_authority', 'blocked_by_dependency', 'internal_retry_exhausted'}
                 or issue_has_closed_dependency_gate(item)):
             continue
-        old_path = WORKTREE_ROOT / f'issue-{issue}'
-        old_branch = f'develop/owner-approved-issue-{issue}'
+        identity = stale_recovery_source_identity(rec, issue, repo)
         rid = str(rec.get('reasoning_request_id') or '')
-        if (rec.get('worktree') != str(old_path)
-                or rec.get('branch') != old_branch
-                or not re.fullmatch(r'[a-f0-9]{64}', rid)
-                or old_path.is_symlink() or not old_path.is_dir()):
+        if (identity is None or not re.fullmatch(r'[a-f0-9]{64}', rid)):
+            continue
+        old_path, old_branch, expected_common_dir = identity
+        if old_path.is_symlink() or not old_path.is_dir():
             continue
         try:
             old_sha = support.run(['git', 'rev-parse', 'HEAD'], cwd=old_path)
@@ -1348,7 +1366,7 @@ def readmit_stale_clean_development_source(
                     or old_sha == current
                     or support.run(['git', 'branch', '--show-current'], cwd=old_path) != old_branch
                     or support.run(['git', 'rev-parse', '--show-toplevel'], cwd=old_path) != str(old_path)
-                    or Path(support.run(['git', 'rev-parse', '--git-common-dir'], cwd=old_path)).resolve() != (repo / '.git').resolve()
+                    or Path(support.run(['git', 'rev-parse', '--git-common-dir'], cwd=old_path)).resolve() != expected_common_dir
                     or support.run(['git', 'status', '--porcelain', '--untracked-files=all'], cwd=old_path)
                     or support.run(['git', 'ls-files', '--others', '--ignored', '--exclude-standard'], cwd=old_path)
                     or subprocess.run(['git', '-C', str(repo), 'merge-base', '--is-ancestor',old_sha,current],
