@@ -77,12 +77,12 @@ def test_ambiguous_owner_selection_fails_closed(monkeypatch,tmp_path):
         worker.reconcile_owner_selected_pull_requests(tmp_path,{'items':{}},[item(body='- Development pull request: #1518\n- Development pull request: #1514')])
 
 
-def test_current_owner_focus_admits_three_bounded_priority_workstreams():
+def test_current_owner_focus_admits_bounded_priority_workstreams_plus_first_todo_test():
     import json
     repo = Path(__file__).resolve().parents[2]
     policy = json.loads((repo / 'config' / 'owner-approved-development-focus.json').read_text())
     assert policy['schema_version'] == '1.0' and policy['enabled'] is True
-    expected = {1545, 759, 1470, 1440, 1553, 1468, 1566, 1493}
+    expected = {2209, 1545, 759, 1470, 1440, 1553, 1468, 1566, 1493}
     assert set(policy['issue_numbers']) == expected
     assert len(policy['issue_numbers']) == len(expected)
     assert {1196, 1458, 1467, 1500}.isdisjoint(policy['issue_numbers'])
