@@ -3222,6 +3222,26 @@ def readmit_preserved_anchor_failure(
     return resumed
 
 
+
+
+def blocked_reasoning_record(response: Mapping[str, Any], prefix: str) -> dict[str, Any]:
+    """Preserve provider-neutral owner-action metadata for support lifecycle delivery."""
+    update: dict[str, Any] = {
+        'phase': 'blocked',
+        'reason': prefix + str(response.get('error') or ''),
+        'updated_at': now(),
+    }
+    owner_action = str(response.get('required_owner_action') or '').strip()
+    if owner_action:
+        update.update({
+            'notification_class': 'owner_action_required',
+            'owner_action': owner_action,
+            'provider_blocker_code': str(
+                response.get('primary_provider_error_code') or ''
+            )[:120],
+        })
+    return update
+
 def load_state(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {'schema_version': '1.0', 'items': {}}
@@ -3605,7 +3625,9 @@ def main() -> int:
                 if response is None:
                     continue
                 if response.get('status') != 'succeeded':
-                    record.update({'phase': 'blocked', 'reason': 'reasoning request failed: ' + str(response.get('error') or ''), 'updated_at': now()})
+                    record.update(blocked_reasoning_record(
+                        response, 'reasoning request failed: '
+                    ))
                     continue
                 result = response.get('result') or {}
                 if result.get('blocked_reason'):
@@ -3629,7 +3651,9 @@ def main() -> int:
                 if response is None:
                     continue
                 if response.get('status') != 'succeeded':
-                    record.update({'phase': 'blocked', 'reason': 'edit reasoning failed: ' + str(response.get('error') or ''), 'updated_at': now()})
+                    record.update(blocked_reasoning_record(
+                        response, 'edit reasoning failed: '
+                    ))
                     continue
                 result = response.get('result') or {}
                 if engineering_evidence_tools.continue_evidence_session(
