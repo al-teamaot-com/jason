@@ -564,6 +564,7 @@ def source_context_blocker(reason: str) -> bool:
         'unseen repository',
         'not expose enough',
         'missing source',
+        'source path not authorized',
         'enough surrounding',
         'cannot form a complete, exact replacement',
         "can't form a complete, exact replacement",

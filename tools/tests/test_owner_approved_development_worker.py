@@ -148,6 +148,7 @@ def test_source_context_blocker_detects_missing_excerpt_context():
     assert module.source_context_blocker(
         'Blocked: the repository excerpts do not include the specific implementation needed for an exact change.'
     )
+    assert module.source_context_blocker('EvidenceToolError: source path not authorized')
     assert not module.source_context_blocker('Owner approval is required for production deployment.')
     assert not module.source_context_blocker('Provider credential is unavailable.')
 
@@ -252,6 +253,7 @@ def test_self_recoverable_blocker_is_narrow():
         'The supplied excerpts do not expose enough exact source context.'
     )
     assert module.self_recoverable_blocker('development reasoning failed: HTTP transport failed')
+    assert module.self_recoverable_blocker('EvidenceToolError: source path not authorized')
     assert not module.self_recoverable_blocker('Owner approval required for a new provider permission.')
     assert not module.self_recoverable_blocker('Microsoft admin consent is required.')
 
