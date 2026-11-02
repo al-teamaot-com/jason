@@ -398,6 +398,63 @@ def test_crash_after_exact_owner_record_restores_only_verified_marker(tmp_path):
     assert json.loads(marker.read_text())["recovery"] == "previous_exact_owner_approval_verified"
 
 
+def test_redundant_signed_full_release_decision_preserves_explicit_owner_grant(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True,
+    )
+    flow.handle(**args)
+    release = json.loads(release_path.read_text(encoding="utf-8"))
+    release["owner_approval"] = {
+        "approved": True,
+        "candidate_sha": SHA,
+        "source": "explicit_owner_instruction",
+        "recorded_at": NOW.isoformat(),
+    }
+    release_path.write_text(json.dumps(release), encoding="utf-8")
+    opts["approve_release"] = lambda *_args, **_kwargs: pytest.fail(
+        "redundant signed decision must not replace explicit owner authority"
+    )
+
+    assert consume_mobile_release_decisions(**opts) == 0
+
+    after = json.loads(release_path.read_text(encoding="utf-8"))
+    assert after["owner_approval"]["source"] == "explicit_owner_instruction"
+    marker = (
+        opts["state_root"]
+        / "mobile-release-decisions-processed"
+        / (request.approval_id + ".json")
+    )
+    evidence = json.loads(marker.read_text(encoding="utf-8"))
+    assert evidence["recovery"] == (
+        "redundant_signed_teams_decision_preserved_explicit_owner_approval"
+    )
+    assert evidence["authority_mutated"] is False
+    assert not (
+        opts["ccc_root"] / ("material-review-" + SHA[:16] + ".json")
+    ).exists()
+
+
+def test_redundant_signed_decision_rejects_mismatched_explicit_owner_grant(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True,
+    )
+    flow.handle(**args)
+    release = json.loads(release_path.read_text(encoding="utf-8"))
+    release["owner_approval"] = {
+        "approved": True,
+        "candidate_sha": "a" * 40,
+        "source": "explicit_owner_instruction",
+        "recorded_at": NOW.isoformat(),
+    }
+    release_path.write_text(json.dumps(release), encoding="utf-8")
+    opts["approve_release"] = lambda *_args, **_kwargs: pytest.fail(
+        "mismatched explicit owner grant must not be consumed"
+    )
+
+    with pytest.raises(PermissionError, match="does not match"):
+        consume_mobile_release_decisions(**opts)
+
+
 def test_actual_delivered_card_signed_click_and_independent_host_attestation(tmp_path):
     """Prove real worker's delivery ledger mutation cannot cause a Teams 403.
 
