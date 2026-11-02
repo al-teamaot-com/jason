@@ -15,6 +15,7 @@ import sqlite3
 import stat
 import sys
 import tempfile
+import uuid
 from typing import Callable
 from urllib.parse import quote
 
@@ -24,6 +25,7 @@ DEFAULT_CCC_ROOT = Path("/var/lib/jason/ccc")
 DEFAULT_BINDINGS = Path("/var/lib/jason/openclaw/teams-identity-bindings.sqlite3")
 DEFAULT_AUTHORITY = Path("/var/lib/jason/authority/authority.sqlite3")
 DEFAULT_TRUSTED_KEYS = Path("/var/lib/jason/openclaw/trusted-keys/registry.json")
+OWNER_EMAIL_FALLBACKS = {"person-al": "al@teamaot.com"}
 
 
 class MobileReleaseEvidenceBusy(RuntimeError):
@@ -80,6 +82,42 @@ def _read_only_jason_identity(path: Path, identity_id: str):
             raise MobileReleaseEvidenceBusy("owner identity evidence database busy") from exc
         raise
     return None if row is None else IdentityRecord(**json.loads(row[0]))
+
+
+def _authorized_policy_owner_identity(*, binding, owner, policy, receipt_identity_id: str) -> str:
+    """Resolve one authenticated Entra actor to the already-authorized policy owner.
+
+    The release policy remains symbolic (person-al). A canonical Entra-derived
+    Jason identity may satisfy that symbolic owner only when the active binding
+    proves the exact reviewed Owner email, object-derived identity, AOT scope,
+    and no client scope. This mirrors the runtime delivery/callback boundary
+    without adding a new approver.
+    """
+    if receipt_identity_id not in policy.owner_identity_ids:
+        raise PermissionError("mobile release receipt approver is outside owner policy")
+    if (owner is None or owner.status != "active"
+            or owner.organization_id != policy.organization_id):
+        raise PermissionError("mobile release approval has no active independent Jason owner identity")
+    if owner.identity_id == receipt_identity_id:
+        return receipt_identity_id
+    fallback_email = OWNER_EMAIL_FALLBACKS.get(receipt_identity_id)
+    if fallback_email is None:
+        raise PermissionError("mobile release approval has no active independent Jason owner identity")
+    try:
+        expected_identity = (
+            "person-entra-" + uuid.UUID(str(binding.microsoft_object_id)).hex
+        )
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise PermissionError("mobile release owner binding identity is invalid") from exc
+    if (
+        str(getattr(binding, "email_address", "") or "").strip().casefold()
+        != fallback_email.casefold()
+        or getattr(binding, "client_id", None) is not None
+        or str(getattr(binding, "jason_identity_id", "")) != expected_identity
+        or str(getattr(owner, "identity_id", "")) != expected_identity
+    ):
+        raise PermissionError("mobile release approval has no active independent Jason owner identity")
+    return receipt_identity_id
 
 
 def _install_repo_modules(repo: Path) -> None:
@@ -188,6 +226,65 @@ def consume_mobile_release_decisions(
             raise PermissionError("processed mobile decision marker has conflicting evidence")
         return True
 
+    def processed_marker_needs_exact_reconstruction(
+        approval_id: str, evidence_sha: str,
+    ) -> bool:
+        """Return True only when an exact processed grant lost record materialization.
+
+        This is not decision replay. The immutable processed marker merely makes
+        the original signed receipt eligible for full re-verification below when
+        the same production-eligible release record has been recreated without
+        its owner_approval field. Candidate SHA and manifest digest must still
+        match exactly. Changed, historical or completed releases stay processed.
+        """
+        marker = consumed_dir / (approval_id + ".json")
+        if not marker.exists():
+            return False
+        stored = json.loads(marker.read_text(encoding="utf-8"))
+        if (stored.get("approval_id") != approval_id
+                or stored.get("signed_evidence_sha256") != evidence_sha):
+            raise PermissionError("processed mobile decision marker has conflicting evidence")
+        if stored.get("decision") != "approve" or stored.get("review_only") is True:
+            return False
+        release_id = str(stored.get("release_id") or "")
+        candidate_sha = str(stored.get("candidate_sha") or "")
+        manifest_sha = str(stored.get("manifest_sha256") or "")
+        if (not release_id or not re_full_sha(candidate_sha)
+                or not re.fullmatch(r"[0-9a-f]{64}", manifest_sha)):
+            raise PermissionError("processed mobile decision marker is incomplete")
+        record_path = state_root / "records" / (release_id + ".json")
+        if not record_path.is_file():
+            return False
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        if (record.get("state") != "production_eligible"
+                or str((record.get("release_candidate") or {}).get("candidate_sha") or "")
+                    != candidate_sha
+                or digest(record.get("release_manifest") or {}) != manifest_sha):
+            return False
+        # Missing approval alone is not evidence of lost materialization: unit
+        # tests and alternative exact approvers may intentionally leave release
+        # persistence to the caller. Reconstruction is eligible only when the
+        # current release record itself proves it was recreated *after* this
+        # immutable Teams decision had already been processed.
+        try:
+            marker_processed_at = datetime.fromisoformat(str(stored["processed_at"]))
+            record_created_at = datetime.fromisoformat(str(record["created_at"]))
+        except (KeyError, TypeError, ValueError):
+            return False
+        if (marker_processed_at.tzinfo is None or record_created_at.tzinfo is None
+                or record_created_at <= marker_processed_at):
+            return False
+        approval = record.get("owner_approval") or {}
+        if approval.get("approved") is True:
+            exact_source = "authenticated_mobile_teams_owner:" + approval_id
+            if (approval.get("candidate_sha") != candidate_sha
+                    or approval.get("source") != exact_source):
+                raise PermissionError(
+                    "processed Teams decision conflicts with current owner approval"
+                )
+            return False
+        return True
+
     # A completed historical decision needs no authority-database read at all.
     # Validate every immutable receipt marker BEFORE loading identity stores.
     # This eliminates schema write-lock attempts on 1.8 GiB of shared authority
@@ -197,7 +294,10 @@ def consume_mobile_release_decisions(
         approval_id, _, _, _, evidence_sha = row
         if not isinstance(approval_id, str) or not approval_id.startswith(REQUEST_PREFIX):
             raise PermissionError("unknown mobile decision ID prefix")
-        if not already_processed(approval_id, evidence_sha):
+        if (not already_processed(approval_id, evidence_sha)
+                or processed_marker_needs_exact_reconstruction(
+                    approval_id, evidence_sha
+                )):
             pending.append(row)
     if not pending:
         return 0
@@ -206,7 +306,10 @@ def consume_mobile_release_decisions(
     completed = 0
     for approval_id, encoded, receipt_json, envelope_json, evidence_sha in pending:
         # Another authenticated cycle may have just completed this receipt.
-        if already_processed(approval_id, evidence_sha):
+        reconstructing_processed = processed_marker_needs_exact_reconstruction(
+            approval_id, evidence_sha
+        )
+        if already_processed(approval_id, evidence_sha) and not reconstructing_processed:
             continue
         marker = consumed_dir / (approval_id + ".json")
         request = SQLiteApprovalRequestRepository._decode(encoded)
@@ -264,9 +367,14 @@ def consume_mobile_release_decisions(
         if binding is None or binding.status != "active":
             raise PermissionError("mobile owner Entra binding has been revoked")
         owner = _read_only_jason_identity(authority_db, binding.jason_identity_id)
-        if (owner is None or owner.status != "active" or owner.organization_id != policy.organization_id
-                or owner.identity_id != receipt["approver_identity_id"]
-                or owner.identity_id == request.requested_by):
+        policy_owner_identity = _authorized_policy_owner_identity(
+            binding=binding,
+            owner=owner,
+            policy=policy,
+            receipt_identity_id=str(receipt["approver_identity_id"]),
+        )
+        if (owner.identity_id == request.requested_by
+                or policy_owner_identity == request.requested_by):
             raise PermissionError("mobile release approval has no active independent Jason owner identity")
         # Recovery is immutable: a crashed worker may have committed the
         # governed exact-owner approval before writing its processed marker.
@@ -289,15 +397,35 @@ def consume_mobile_release_decisions(
                 raise PermissionError("CCC-only Teams decision lacks an exact prior owner release grant")
         if prior_approval.get("approved") is True and not review_only:
             manifest = raw_release.get("release_manifest") or {}
+            prior_source = str(prior_approval.get("source") or "")
+            if prior_source == "explicit_owner_instruction":
+                if (prior_approval.get("candidate_sha") != request.metadata["candidate_sha"]
+                        or digest(manifest) != request.metadata["manifest_sha256"]):
+                    raise PermissionError(
+                        "existing explicit owner approval does not match signed Teams release subject"
+                    )
+                _private_atomic(marker, {
+                    "schema_version": "1.0", "approval_id": approval_id,
+                    "release_id": release_id,
+                    "candidate_sha": request.metadata["candidate_sha"],
+                    "manifest_sha256": request.metadata["manifest_sha256"],
+                    "mobile_policy_sha256": policy.policy_sha256,
+                    "signed_evidence_sha256": evidence_sha,
+                    "decision": "approve",
+                    "processed_at": datetime.now(timezone.utc).isoformat(),
+                    "recovery": "redundant_signed_teams_decision_preserved_explicit_owner_approval",
+                    "authority_mutated": False,
+                })
+                continue
             named = ccc_root / ("material-review-" + request.metadata["candidate_sha"][:16] + ".json")
-            if (prior_approval.get("source") != exact_prior_source
+            if (prior_source != exact_prior_source
                     or prior_approval.get("candidate_sha") != request.metadata["candidate_sha"]
                     or digest(manifest) != request.metadata["manifest_sha256"]
                     or not named.is_file()):
                 raise PermissionError("existing owner approval was not from this exact signed Teams decision")
             review = json.loads(named.read_text(encoding="utf-8"))
             if (review.get("source_revision") != request.metadata["candidate_sha"]
-                    or review.get("recorded_by") != owner.identity_id
+                    or review.get("recorded_by") != policy_owner_identity
                     or review.get("signed_evidence_sha256") != evidence_sha
                     or review.get("mobile_approval_id") != approval_id):
                 raise PermissionError("prior CCC review is not the same signed Teams decision")
@@ -386,7 +514,7 @@ def consume_mobile_release_decisions(
         sha = candidate.candidate_sha
         material_review = {
             "schema_version": "1.0", "status": "approved", "source_revision": sha,
-            "recorded_by": owner.identity_id,
+            "recorded_by": policy_owner_identity,
             "recorded_at": timestamp.astimezone(timezone.utc).isoformat(),
             "reason": "Authenticated Teams owner decision " + approval_id,
             "mobile_approval_id": approval_id,
@@ -397,7 +525,7 @@ def consume_mobile_release_decisions(
         named = ccc_root / ("material-review-" + sha[:16] + ".json")
         if named.exists():
             prior = json.loads(named.read_text(encoding="utf-8"))
-            if prior.get("source_revision") != sha or prior.get("recorded_by") != owner.identity_id:
+            if prior.get("source_revision") != sha or prior.get("recorded_by") != policy_owner_identity:
                 raise PermissionError("conflicting CCC owner review for exact SHA")
             if review_only and (prior.get("signed_evidence_sha256") != evidence_sha
                                 or prior.get("mobile_approval_id") != approval_id):
@@ -446,17 +574,18 @@ def consume_mobile_release_decisions(
             stored = json.loads((state_root / "records" / (release_id + ".json")).read_text())
             if stored.get("owner_approval") != prior_approval:
                 raise PermissionError("prior exact owner release grant changed during CCC review")
-        _private_atomic(marker, {
-            "schema_version": "1.0", "approval_id": approval_id,
-            "release_id": candidate.release_id,
-            "candidate_sha": sha,
-            "manifest_sha256": candidate.manifest_sha256,
-            "mobile_policy_sha256": policy.policy_sha256,
-            "signed_evidence_sha256": evidence_sha,
-            "decision": "approve",
-            **({"review_only": True} if review_only else {}),
-            "processed_at": datetime.now(timezone.utc).isoformat(),
-        })
+        if not reconstructing_processed:
+            _private_atomic(marker, {
+                "schema_version": "1.0", "approval_id": approval_id,
+                "release_id": candidate.release_id,
+                "candidate_sha": sha,
+                "manifest_sha256": candidate.manifest_sha256,
+                "mobile_policy_sha256": policy.policy_sha256,
+                "signed_evidence_sha256": evidence_sha,
+                "decision": "approve",
+                **({"review_only": True} if review_only else {}),
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+            })
         completed += 1
     return completed
 

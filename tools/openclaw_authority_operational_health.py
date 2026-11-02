@@ -85,8 +85,9 @@ def registry_health(path: Path) -> dict[str, object]:
     return {'present': True, 'active_records': active, 'mode': mode(path)}
 
 
-def backup_restore_proof(source: Path) -> dict[str, object]:
-    with tempfile.TemporaryDirectory(prefix='jason-authority-backup-') as td:
+def backup_restore_proof(source: Path, temp_root: Path | None = None) -> dict[str, object]:
+    directory = str(temp_root) if temp_root is not None else None
+    with tempfile.TemporaryDirectory(prefix='jason-authority-backup-', dir=directory) as td:
         backup = Path(td) / 'authority.backup.sqlite3'
         restored = Path(td) / 'authority.restored.sqlite3'
         with sqlite3.connect(source) as src, sqlite3.connect(backup) as dst:
@@ -132,7 +133,7 @@ def run(args: argparse.Namespace) -> int:
             failures.append(f'{name}_integrity')
 
     delegation = active_delegation_state(args.authority_database) if args.authority_database.exists() else {}
-    backup = backup_restore_proof(args.authority_database) if args.authority_database.exists() else {}
+    backup = backup_restore_proof(args.authority_database, args.backup_temp_root) if args.authority_database.exists() else {}
     registry = registry_health(args.key_registry)
     if not registry.get('present'):
         failures.append('key_registry_missing')
@@ -171,6 +172,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument('--security-audit', type=Path, default=DEFAULT_SECURITY)
     p.add_argument('--orchestration-audit', type=Path, default=DEFAULT_ORCH)
     p.add_argument('--key-registry', type=Path, default=DEFAULT_REGISTRY)
+    p.add_argument('--backup-temp-root', type=Path, default=None)
     return p
 
 

@@ -1307,3 +1307,55 @@ def test_status_surfaces_upstream_approved_production_commitments(monkeypatch, t
     assert commitments['blocked_count'] == 1
     assert commitments['release_queue_empty_but_upstream_pending'] is True
     assert [item['todo_id'] for item in commitments['items']] == ['TODO-OPS-001', 'TODO-OPS-007']
+
+
+
+def test_status_surfaces_pmv3_engineering_controller(monkeypatch, tmp_path):
+    state = tmp_path / "pmv3-controller.json"
+    state.write_text(
+        json.dumps({
+            "schema_version": "3.0",
+            "started_at": "2026-10-31T17:00:00+00:00",
+            "finished_at": "2026-10-31T17:02:00+00:00",
+            "status": "bounded_stall",
+            "reason": "recoverable_state_not_advancing",
+            "teams_only_approval": True,
+            "passes": [
+                {
+                    "pass": 1,
+                    "disposition": "recoverable",
+                    "progress_sha256": "abc123",
+                    "unchanged_passes": 0,
+                },
+                {
+                    "pass": 2,
+                    "disposition": "recoverable",
+                    "progress_sha256": "abc123",
+                    "unchanged_passes": 1,
+                },
+            ],
+            "pass_count": 2,
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("JASON_PMV3_ENGINEERING_STATE", str(state))
+    monkeypatch.setattr(server, "_active_action_capabilities", lambda: [])
+    monkeypatch.setattr(server, "_autonomous_ticket_work_snapshot", lambda: {"status": "succeeded"})
+    monkeypatch.setattr(server, "_production_commitment_snapshot", lambda: {"status": "succeeded"})
+
+    result = server.jason_mcp_status()
+    pmv3 = result["pmv3_engineering"]
+    assert pmv3["status"] == "bounded_stall"
+    assert pmv3["reason"] == "recoverable_state_not_advancing"
+    assert pmv3["pass_count"] == 2
+    assert pmv3["last_disposition"] == "recoverable"
+    assert pmv3["last_progress_sha256"] == "abc123"
+    assert pmv3["teams_only_approval"] is True
+
+
+def test_status_pmv3_missing_state_is_truthful(monkeypatch, tmp_path):
+    monkeypatch.setenv("JASON_PMV3_ENGINEERING_STATE", str(tmp_path / "missing.json"))
+    result = server._pmv3_engineering_snapshot()
+    assert result["status"] == "unavailable"
+    assert result["reason"] == "pmv3_controller_state_missing"
+    assert result["teams_only_approval"] is True

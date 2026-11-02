@@ -94,8 +94,18 @@
       "lease_fencing_and_resume",
       "safe_drain",
       "role_recovery",
-      "no_worker_production_deploy"
+      "no_worker_production_deploy",
+      "two_worker_parallel_claims",
+      "single_worker_loss_exactly_once_reassignment"
     ],
     "status": "pending"
+  },
+  "pool_semantics": {
+    "scalable_membership": true,
+    "device_binding": "external_exact_owner_enrollment",
+    "capacity": "sum_of_healthy_attested_role_instances",
+    "assignment": "central_fenced_lease",
+    "failure_recovery": "checkpoint_then_exactly_once_reassignment",
+    "first_target_is_not_special_case": true
   }
 }

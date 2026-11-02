@@ -28,6 +28,7 @@ def main() -> int:
     home = Path.home()
     runner = repo / 'tools' / 'support_repair_host_worker.py'
     pipeline_runner = repo / 'tools' / 'engineering_pipeline.py'
+    pmv3_controller = repo / 'tools' / 'pmv3_engineering_controller.py'
     development_runner = repo / 'tools' / 'owner_approved_development_worker.py'
     supervisor_runner = repo / 'tools' / 'engineering_supervisor.py'
     breaker_recovery_runner = repo / 'tools' / 'release_breaker_recovery_manager.py'
@@ -44,6 +45,8 @@ def main() -> int:
         raise SystemExit('support repair host worker source is missing')
     if not pipeline_runner.is_file():
         raise SystemExit('engineering pipeline coordinator source is missing')
+    if not pmv3_controller.is_file():
+        raise SystemExit('PMV3 engineering controller source is missing')
     if not development_runner.is_file():
         raise SystemExit('owner-approved development worker source is missing')
     if not supervisor_runner.is_file() or not evidence_module.is_file():
@@ -76,6 +79,7 @@ def main() -> int:
     source_link.symlink_to(repo, target_is_directory=True)
     _copy(runner, install_root / 'support_repair_host_worker.py', 0o700)
     _copy(pipeline_runner, install_root / 'engineering_pipeline.py', 0o700)
+    _copy(pmv3_controller, install_root / 'pmv3_engineering_controller.py', 0o700)
     _copy(development_runner, install_root / 'owner_approved_development_worker.py', 0o700)
     _copy(supervisor_runner, install_root / 'engineering_supervisor.py', 0o700)
     _copy(breaker_recovery_runner, install_root / 'release_breaker_recovery_manager.py', 0o700)

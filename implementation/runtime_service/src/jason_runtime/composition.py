@@ -88,6 +88,13 @@ from orchestrator.openai_semantic_intent_translation import (
     OpenAISemanticIntentTranslator,
 )
 from orchestrator.openai_reasoning import OpenAIStructuredJsonClient
+from orchestrator.subscription_reasoning import (
+    ExplicitFallbackStructuredJsonClient,
+    SubscriptionStructuredJsonClient,
+)
+from orchestrator.subscription_semantic_intent_translation import (
+    SubscriptionSemanticIntentTranslator,
+)
 from orchestrator.model_runtime_adapter import (
     ModelRuntimeAdapter,
     openai_structured_output_compatible_schema,
@@ -181,6 +188,11 @@ from orchestrator.semantic_fact_resolver import DEFAULT_SEMANTIC_FACT_RESOLVER
 from orchestrator.semantic_fact_reasoning import OllamaSemanticFactReasoner
 from orchestrator.semantic_mapping_registry import JsonSemanticMappingRegistryLoader
 from orchestrator.provider_read_authority import GovernedProviderReadAuthorityMatcher
+from .aot_operational_read_authority import ensure_aot_technician_read_authority
+from .aot_routine_write_authority import (
+    configured_aot_routine_autotask_write,
+    ensure_aot_routine_autotask_write_authority,
+)
 from orchestrator.resource_reasoner import MetadataResourceCapabilityReasoner
 from orchestrator.service import CentralOrchestrator
 from orchestrator.governed_execution_ledger import SQLiteGovernedExecutionLedger
@@ -290,6 +302,12 @@ from .teams_message_send import (
     build_invoker as build_teams_message_send_invoker,
     register_foundation as register_teams_message_send_foundation,
 )
+from .pm_v2_runtime import (
+    PM_V2_CONTROL,
+    PM_V2_STATUS,
+    build_pm_v2_runtime_invoker,
+    register_pm_v2_runtime_foundation,
+)
 from .procurement_web_read import (
     CAPABILITY as PROCUREMENT_WEB_PRODUCT_READ,
     PROFILE as PROCUREMENT_WEB_READ_PROFILE,
@@ -345,6 +363,8 @@ from .procurement_teams_flow import (
 from .autonomy_shadow_composition import build_autonomy_shadow_maintenance
 from .autonomy_targeted_wake_runtime import TicketAttentionRelay
 from .autonomy_worker_composition import build_autonomy_worker_maintenance
+from .autonomy_teams_notification_maintenance import TicketOwnerNotificationMaintenance
+from .autonomy_worker_runtime import SQLiteOperationalWorkStore
 from .daily_drmm_alert_reconciliation_composition import build_daily_drmm_alert_reconciliation_maintenance
 from .windows_time_source_shadow_composition import build_windows_time_source_shadow_maintenance
 from .autonomy_targeted_wake_runtime import CompositeAutonomyMaintenance
@@ -424,6 +444,9 @@ class RuntimeSettings:
     semantic_planner_enabled: bool = False
     hosted_semantics_enabled: bool = False
     hosted_conversation_enabled: bool = False
+    subscription_reasoning_enabled: bool = False
+    subscription_reasoning_url: str = "http://jason-subscription-reasoning:8091"
+    openai_api_fallback_enabled: bool = False
     openai_semantic_model: str = "gpt-5-nano"
     openai_conversation_model: str = "gpt-5-nano"
     openai_pricing_model: str = "gpt-5-nano"
@@ -570,7 +593,7 @@ class RuntimeSettings:
     )
     teams_gateway_internal_url: str = "http://jason-teams-gateway:3979"
     teams_proactive_token_file: Path = Path(
-        "/run/jason-secrets/teams-proactive/token"
+        "/run/jason-secrets/teams-proactive-gateway/token"
     )
     procurement_submissions_db: Path = Path(
         "/var/lib/jason/openclaw/procurement/submissions.sqlite3"
@@ -706,6 +729,16 @@ class RuntimeSettings:
             ).strip().casefold() in {"1", "true", "yes", "on"},
             hosted_conversation_enabled=os.getenv(
                 "JASON_HOSTED_CONVERSATION_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            subscription_reasoning_enabled=os.getenv(
+                "JASON_SUBSCRIPTION_REASONING_ENABLED", "false"
+            ).strip().casefold() in {"1", "true", "yes", "on"},
+            subscription_reasoning_url=os.getenv(
+                "JASON_SUBSCRIPTION_REASONING_URL",
+                "http://jason-subscription-reasoning:8091",
+            ).strip(),
+            openai_api_fallback_enabled=os.getenv(
+                "JASON_OPENAI_API_FALLBACK_ENABLED", "false"
             ).strip().casefold() in {"1", "true", "yes", "on"},
             openai_semantic_model=os.getenv(
                 "JASON_OPENAI_SEMANTIC_MODEL", "gpt-5-nano"
@@ -1034,7 +1067,7 @@ class RuntimeSettings:
             teams_proactive_token_file=Path(
                 os.getenv(
                     "JASON_TEAMS_PROACTIVE_TOKEN_FILE",
-                    "/run/jason-secrets/teams-proactive/token",
+                    "/run/jason-secrets/teams-proactive-gateway/token",
                 )
             ),
             procurement_submissions_db=Path(
@@ -1350,9 +1383,12 @@ def _deterministic_resource_contracts(
     return tuple(contracts)
 
 
-def build_runtime_application(settings: RuntimeSettings, *, universal_approval_handler=None,
+def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile: str = "all",
+                              health_probe=None, universal_approval_handler=None,
         teams_workflow_approval_handlers: Mapping[str, Any] | None = None) -> RuntimeHttpApplication:
     settings.validate()
+    if maintenance_profile not in {"all", "ticket_worker", "auxiliary"}:
+        raise ValueError("unknown maintenance profile")
 
     authority_store = SQLiteIdentityAuthorityStore(settings.authority_db)
     approval_repository = SQLiteApprovalRepository(authority_store)
@@ -1529,6 +1565,9 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
     register_teams_message_send_foundation(
         capabilities=capabilities, providers=providers, now=now,
     )
+    register_pm_v2_runtime_foundation(
+        capabilities=capabilities, providers=providers, now=now,
+    )
     register_procurement_web_read_foundation(
         capabilities=capabilities, providers=providers, now=now,
     )
@@ -1548,15 +1587,26 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         now=now,
     )
 
+    identity_repository = SQLiteIdentityRepository(authority_store)
+    routine_autotask_write_enabled = configured_aot_routine_autotask_write()
     identity_authority = IdentityAuthorityService(
-        identities=SQLiteIdentityRepository(authority_store),
+        identities=identity_repository,
         grants=SQLiteAuthorityGrantRepository(authority_store),
         approvals=approval_repository,
         contexts=authority_store,
         audit=authority_store,
         capability_matcher=GovernedProviderReadAuthorityMatcher(
-            capabilities=capabilities, providers=providers
+            capabilities=capabilities, providers=providers,
+            identities=identity_repository,
+            routine_write_enabled=routine_autotask_write_enabled,
         ),
+    )
+    # Mandatory standing observe policy. Authenticated AOT human staff receive
+    # operational reads across approved registered providers; write pathways,
+    # client isolation, source information authorization and audit are intact.
+    ensure_aot_technician_read_authority(identity_authority)
+    ensure_aot_routine_autotask_write_authority(
+        identity_authority, enabled=routine_autotask_write_enabled,
     )
     ensure_meter_history_read_authority(
         identity_authority,
@@ -1583,9 +1633,23 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         base_url=settings.ollama_url,
     )
 
+    subscription_structured_client = None
+    if settings.subscription_reasoning_enabled:
+        if not settings.subscription_reasoning_url:
+            raise ValueError("subscription reasoning URL must not be empty")
+        subscription_structured_client = SubscriptionStructuredJsonClient(
+            transport=http_transport,
+            base_url=settings.subscription_reasoning_url,
+        )
+
     model_usage_ledger = None
     openai_api_key = None
-    if settings.hosted_semantics_enabled or settings.hosted_conversation_enabled:
+    api_structured_client = None
+    api_path_required = (
+        (not settings.subscription_reasoning_enabled)
+        and (settings.hosted_semantics_enabled or settings.hosted_conversation_enabled)
+    ) or settings.openai_api_fallback_enabled
+    if api_path_required:
         model_usage_ledger = SQLiteUsageLedger(settings.model_usage_db)
         semantic_secret_resolver = OpenBaoSecretResolver(
             base_url=settings.openbao_url,
@@ -1611,12 +1675,7 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
                 raise ValueError("OpenAI API key resolved empty")
         finally:
             semantic_secret_values.clear()
-
-    hosted_conversation_client = None
-    if settings.hosted_conversation_enabled:
-        if openai_api_key is None or model_usage_ledger is None:
-            raise RuntimeError("hosted conversation dependencies were not composed")
-        hosted_conversation_client = ModelRuntimeAdapter(
+        api_structured_client = ModelRuntimeAdapter(
             client=OpenAIStructuredJsonClient(
                 api_key=openai_api_key,
                 transport=http_transport,
@@ -1629,6 +1688,24 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
             schema_adapter=openai_structured_output_compatible_schema,
             result_adapter=openai_structured_output_restore_optional_values,
         )
+
+    hosted_structured_client = subscription_structured_client or api_structured_client
+    if (
+        subscription_structured_client is not None
+        and settings.openai_api_fallback_enabled
+    ):
+        if api_structured_client is None:
+            raise RuntimeError("explicit API fallback dependencies were not composed")
+        hosted_structured_client = ExplicitFallbackStructuredJsonClient(
+            primary=subscription_structured_client,
+            fallback=api_structured_client,
+        )
+
+    hosted_conversation_client = (
+        hosted_structured_client if settings.hosted_conversation_enabled else None
+    )
+    if settings.hosted_conversation_enabled and hosted_conversation_client is None:
+        raise RuntimeError("hosted conversation dependencies were not composed")
 
     intent_resolver = None
     if not settings.dynamic_conversation_enabled:
@@ -1648,17 +1725,24 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
 
         hosted_semantic_translator = None
         if settings.hosted_semantics_enabled:
-            if openai_api_key is None or model_usage_ledger is None:
-                raise RuntimeError("hosted semantic dependencies were not composed")
-            hosted_semantic_translator = OpenAISemanticIntentTranslator(
-                api_key=openai_api_key,
-                transport=http_transport,
-                model=settings.openai_semantic_model,
-                usage_ledger=model_usage_ledger,
-                input_cost_per_million_tokens=settings.openai_input_cost_per_million_tokens,
-                cached_input_cost_per_million_tokens=settings.openai_cached_input_cost_per_million_tokens,
-                output_cost_per_million_tokens=settings.openai_output_cost_per_million_tokens,
-            )
+            if settings.subscription_reasoning_enabled:
+                if hosted_structured_client is None:
+                    raise RuntimeError("subscription semantic dependencies were not composed")
+                hosted_semantic_translator = SubscriptionSemanticIntentTranslator(
+                    structured_client=hosted_structured_client,
+                )
+            else:
+                if openai_api_key is None or model_usage_ledger is None:
+                    raise RuntimeError("hosted semantic dependencies were not composed")
+                hosted_semantic_translator = OpenAISemanticIntentTranslator(
+                    api_key=openai_api_key,
+                    transport=http_transport,
+                    model=settings.openai_semantic_model,
+                    usage_ledger=model_usage_ledger,
+                    input_cost_per_million_tokens=settings.openai_input_cost_per_million_tokens,
+                    cached_input_cost_per_million_tokens=settings.openai_cached_input_cost_per_million_tokens,
+                    output_cost_per_million_tokens=settings.openai_output_cost_per_million_tokens,
+                )
 
         resource_intent_resolver = GovernedResourceConversationIntentResolver(
             interpreter=GroundedSemanticResourceInquiryInterpreter(
@@ -1748,6 +1832,11 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         secrets=openbao,
         transport=http_transport,
         audit=ConnectorEventAudit(orchestration_events),
+        # Source reads must share the SAME authenticated, authority-bound
+        # Microsoft/Jason resolver as the other governed runtime paths.
+        # A new environment-derived resolver can lose requester identity
+        # and turn all Autotask reads into service-only denials.
+        bindings=source_authorization_bindings,
     )
     quickbooks_read_invoker = (
         build_quickbooks_read_invoker(
@@ -2100,6 +2189,9 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         invoker=datto_powershell_read_invoker,
     )
     invokers.register(TEAMS_MESSAGE_SEND, build_teams_message_send_invoker())
+    pm_v2_invoker = build_pm_v2_runtime_invoker()
+    invokers.register(PM_V2_STATUS, pm_v2_invoker)
+    invokers.register(PM_V2_CONTROL, pm_v2_invoker)
     invokers.register(
         PROCUREMENT_WEB_PRODUCT_READ,
         build_procurement_web_read_invoker(),
@@ -2544,6 +2636,9 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
             ),
             signed_evidence=MobileReleaseSignedEvidenceStore(settings.release_mobile_approval_db),
             required_policy_version=expected_version,
+            owner_identity_email_fallbacks={
+                "person-al": "al@teamaot.com",
+            },
         )
         if settings.release_mobile_approval_worker_enabled:
             release_mobile_maintenance = MobileReleaseApprovalMaintenance(
@@ -2557,6 +2652,9 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
                     token_file=settings.teams_proactive_token_file,
                     bindings=durable_bindings,
                     owner_identity_ids=owner_policy.owner_identity_ids,
+                    owner_identity_email_fallbacks={
+                        "person-al": "al@teamaot.com",
+                    },
                 ),
                 interval_seconds=settings.release_mobile_interval_seconds,
                 required_policy_version=expected_version,
@@ -2710,7 +2808,10 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         enabled=settings.support_repair_autonomy_enabled,
         structured_client=hosted_conversation_client or ollama_client,
         fallback_structured_client=(
-            ollama_client if hosted_conversation_client is not None else None
+            ollama_client
+            if hosted_conversation_client is not None
+            and not settings.subscription_reasoning_enabled
+            else None
         ),
         spool=settings.support_repair_spool,
     )
@@ -2784,25 +2885,65 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
             gateway_url=settings.teams_gateway_internal_url,
             token_file=settings.teams_proactive_token_file,
         )
-    autonomy_maintenance = CompositeAutonomyMaintenance(
-        release_mobile_maintenance,
-        owner_uat_maintenance,
-        universal_plan_maintenance,
-        universal_plan_status_maintenance,
-        playbook_review_maintenance,
-        autonomous_work_lifecycle_notification_maintenance,
-        autonomous_deployment_completion_notification_maintenance,
-        release_manager_owner_notification_maintenance,
-        self_heal_escalation_notification_maintenance,
-        support_repair_reasoning_maintenance,
-        autonomous_repair_deployment_maintenance,
-        operational_autonomy_maintenance,
-        drmm_recent_alert_reconciliation_maintenance,
-        procurement_billing_audit_maintenance,
-        procurement_approval_maintenance,
-        windows_time_source_shadow_maintenance,
-        shadow_autonomy_maintenance,
+    # The ticket worker only persists Teams intents. Auxiliary is a separate
+    # supervised runtime process; slow Teams providers must never delay ticket
+    # discovery, admission, readback verification or scan heartbeats.
+    ticket_owner_notification_maintenance = (
+        TicketOwnerNotificationMaintenance(
+            store=SQLiteOperationalWorkStore(settings.autonomy_worker_db),
+            notifier=autonomous_completion_notifier,
+            audit=reflection_audit,
+            interval_seconds=15,
+        )
+        # Auxiliary settings disable ticket admission, not owner-notification delivery.
+        if maintenance_profile != "ticket_worker"
+        and (maintenance_profile == "auxiliary" or settings.autonomy_worker_enabled)
+        and autonomous_completion_notifier is not None
+        else None
     )
+    if maintenance_profile == "ticket_worker":
+        autonomy_maintenance = CompositeAutonomyMaintenance(operational_autonomy_maintenance)
+    elif maintenance_profile == "auxiliary":
+        autonomy_maintenance = CompositeAutonomyMaintenance(
+            ticket_owner_notification_maintenance,
+            release_mobile_maintenance,
+            owner_uat_maintenance,
+            universal_plan_maintenance,
+            universal_plan_status_maintenance,
+            playbook_review_maintenance,
+            autonomous_work_lifecycle_notification_maintenance,
+            autonomous_deployment_completion_notification_maintenance,
+            release_manager_owner_notification_maintenance,
+            self_heal_escalation_notification_maintenance,
+            support_repair_reasoning_maintenance,
+            autonomous_repair_deployment_maintenance,
+            drmm_recent_alert_reconciliation_maintenance,
+            procurement_billing_audit_maintenance,
+            procurement_approval_maintenance,
+            windows_time_source_shadow_maintenance,
+            shadow_autonomy_maintenance,
+        )
+    else:
+        autonomy_maintenance = CompositeAutonomyMaintenance(
+            ticket_owner_notification_maintenance,
+            release_mobile_maintenance,
+            owner_uat_maintenance,
+            universal_plan_maintenance,
+            universal_plan_status_maintenance,
+            playbook_review_maintenance,
+            autonomous_work_lifecycle_notification_maintenance,
+            autonomous_deployment_completion_notification_maintenance,
+            release_manager_owner_notification_maintenance,
+            self_heal_escalation_notification_maintenance,
+            support_repair_reasoning_maintenance,
+            autonomous_repair_deployment_maintenance,
+            operational_autonomy_maintenance,
+            drmm_recent_alert_reconciliation_maintenance,
+            procurement_billing_audit_maintenance,
+            procurement_approval_maintenance,
+            windows_time_source_shadow_maintenance,
+            shadow_autonomy_maintenance,
+        )
     ticket_attention_relay.bind(autonomy_maintenance)
 
     return RuntimeHttpApplication(
@@ -2818,4 +2959,5 @@ def build_runtime_application(settings: RuntimeSettings, *, universal_approval_h
         microsoft_identity_bindings=bindings,
         microsoft_user_directory=microsoft_directory.directory,
         maintenance=autonomy_maintenance,
+        health_probe=health_probe,
     )

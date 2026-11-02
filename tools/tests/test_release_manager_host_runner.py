@@ -311,6 +311,58 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             self.assertEqual(record["release_manifest"]["rollback_sha"], SHA_B)
             self.assertEqual(record["release_candidate"]["provenance"]["source_sha"], SHA_A)
 
+    def test_create_record_prefers_reviewed_recovery_context_while_breaker_open(self):
+        with tempfile.TemporaryDirectory() as td:
+            state_root = Path(td)
+            recovery = {
+                "profile_id": "provider_identity_and_authority_recovery",
+                "alignment": {
+                    "runtime_revision": SHA_B,
+                    "mcp_revision": SHA_B,
+                    "host_revision": SHA_B,
+                },
+            }
+            declaration = {
+                "purpose": "provider identity recovery",
+                "rollback_sha": SHA_B,
+            }
+            with (
+                patch.object(
+                    runner,
+                    "live_production_alignment",
+                    return_value={
+                        "runtime_revision": SHA_B,
+                        "mcp_revision": SHA_B,
+                        "host_revision": SHA_B,
+                    },
+                ),
+                patch.object(runner, "verify_candidate_on_main"),
+                patch.object(runner, "changed_files", return_value=["tools/release_manager_host_runner.py"]),
+                patch.object(runner, "required_checks", return_value=["runtime-service"]),
+                patch.object(runner, "github_checks", return_value={"passed": True, "required": ["runtime-service"], "failures": []}),
+                patch.object(runner, "classify_change_risk", return_value="production_control_core"),
+                patch.object(runner, "declared_one_transaction_freeze_exception", return_value=declaration),
+                patch.object(runner, "precreate_open_breaker_recovery_alignment", return_value=recovery) as precreate,
+                patch.object(runner, "build_candidate", return_value=("jason-runtime:release-test", "sha256:new")),
+                patch.object(
+                    runner,
+                    "build_mcp_candidate",
+                    return_value=("jason-mcp:release-test", "sha256:mcp-new", "sha256:mcp-base"),
+                ),
+            ):
+                record = runner.create_record(
+                    repo=ROOT,
+                    state_root=state_root,
+                    candidate_sha=SHA_A,
+                    rollback_sha=SHA_B,
+                    change_class="release_blocker",
+                    owner_approved=False,
+                )
+            precreate.assert_called_once()
+            self.assertEqual(record["precreate_open_breaker_recovery"], recovery)
+            self.assertEqual(record["release_candidate"]["candidate_sha"], SHA_A)
+
+
     def test_create_record_rejects_required_check_failure(self):
         with tempfile.TemporaryDirectory() as td:
             with (
@@ -413,6 +465,125 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 "owner_approval_recorded",
             )
             save_record.assert_called_once_with(state_root, record)
+
+    def test_approve_release_materializes_same_owner_decision_as_exact_ccc_review(self):
+        import json
+        with tempfile.TemporaryDirectory() as td:
+            state_root = Path(td) / "release-manager"
+            ccc_root = Path(td) / "ccc"
+            state_root.mkdir()
+            ccc_root.mkdir()
+            release_id = runner.record_id(SHA_A)
+            scope_sha = "1" * 64
+            record = {
+                "release_id": release_id,
+                "state": "production_eligible",
+                "risk_profile": "production_control_core",
+                "release_manifest": {
+                    "candidate_sha": SHA_A,
+                    "rollback_sha": SHA_B,
+                },
+                "manual_scope_review": {
+                    "schema_version": "1.0",
+                    "candidate_sha": SHA_A,
+                    "baseline_sha": SHA_B,
+                    "scope_sha256": scope_sha,
+                    "included_prs": [],
+                    "included_commits": [],
+                    "acknowledged_prs": [],
+                    "acknowledged_worktrees": [],
+                },
+                "release_candidate": {
+                    "candidate_sha": SHA_A,
+                    "image": "jason-runtime:test",
+                    "artifact_digest": "sha256:runtime",
+                    "mcp_image": "jason-mcp:test",
+                    "mcp_artifact_digest": "sha256:mcp",
+                },
+                "owner_approval": {"approved": False},
+                "history": [],
+            }
+            review_path = ccc_root / "material-review.json"
+            with (
+                patch.object(runner, "load_record", return_value=record),
+                patch.object(runner, "verify_candidate_on_main"),
+                patch.object(runner, "require_current_manual_scope_review"),
+                patch.object(runner, "DEFAULT_STATE", state_root),
+                patch.object(runner, "CCC_MATERIAL_REVIEW", review_path),
+                patch.object(
+                    runner,
+                    "image_id",
+                    side_effect=lambda image: {
+                        "jason-runtime:test": "sha256:runtime",
+                        "jason-mcp:test": "sha256:mcp",
+                    }[image],
+                ),
+                patch.object(runner, "save_record") as save_record,
+            ):
+                approved = runner.approve_release(
+                    ROOT,
+                    state_root,
+                    release_id=release_id,
+                    candidate_sha=SHA_A,
+                )
+            review = json.loads(review_path.read_text(encoding="utf-8"))
+            named = json.loads(
+                (ccc_root / ("material-review-" + SHA_A[:16] + ".json")).read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(review["status"], "approved")
+            self.assertEqual(review["source_revision"], SHA_A)
+            self.assertEqual(review["recorded_by"], "person-al")
+            self.assertEqual(review["scope_sha256"], scope_sha)
+            self.assertEqual(review["release_id"], release_id)
+            self.assertEqual(named, review)
+            self.assertEqual(
+                approved["owner_material_review"]["scope_sha256"],
+                scope_sha,
+            )
+            self.assertEqual(
+                approved["history"][-1]["gate"],
+                "owner_approval_materialized_as_ccc_review",
+            )
+            save_record.assert_called_once_with(state_root, record)
+
+    def test_protected_core_approval_refuses_to_create_human_authority_without_scope(self):
+        record = {
+            "state": "production_eligible",
+            "risk_profile": "production_control_core",
+            "release_candidate": {
+                "candidate_sha": SHA_A,
+                "image": "jason-runtime:test",
+                "artifact_digest": "sha256:runtime",
+                "mcp_image": "jason-mcp:test",
+                "mcp_artifact_digest": "sha256:mcp",
+            },
+            "owner_approval": {"approved": False},
+            "history": [],
+        }
+        with (
+            patch.object(runner, "load_record", return_value=record),
+            patch.object(runner, "verify_candidate_on_main"),
+            patch.object(
+                runner,
+                "image_id",
+                side_effect=lambda image: {
+                    "jason-runtime:test": "sha256:runtime",
+                    "jason-mcp:test": "sha256:mcp",
+                }[image],
+            ),
+        ):
+            with self.assertRaisesRegex(
+                runner.ReleaseManagerError,
+                "requires exact recorded scope review",
+            ):
+                runner.approve_release(
+                    ROOT,
+                    Path("/tmp"),
+                    release_id="release-test",
+                    candidate_sha=SHA_A,
+                )
 
     def test_approve_release_is_idempotent_for_same_exact_sha(self):
         record = {
@@ -595,7 +766,9 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 runner,
                 "_deploy_production_locked",
                 side_effect=runner.ReleaseManagerError("forced failure"),
-            ), patch.object(runner, 'require_host_reconciler_ready'), \
+            ), patch.object(runner, 'require_current_manual_scope_review'), \
+         patch.object(runner, 'require_current_protected_release_source'), \
+               patch.object(runner, 'require_host_reconciler_ready'), \
                patch.object(runner, 'reconcile_stopped_rollback_retention', return_value=16):
                 with self.assertRaisesRegex(runner.ReleaseManagerError, "forced failure"):
                     runner.deploy_production(ROOT, root, release)
@@ -872,6 +1045,8 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 return "sha256:runtime" if value == "jason-runtime:test" else "sha256:mcp"
             with (
                 patch.object(runner, "image_id", side_effect=image),
+                patch.object(runner, "require_current_manual_scope_review"),
+                patch.object(runner, "require_current_protected_release_source"),
                 patch.object(runner, "require_host_reconciler_ready"),
                 patch.object(runner, "live_production_alignment", return_value={}),
                 patch.object(runner, "worktree", side_effect=runner.ReleaseManagerError("repo unavailable")),
@@ -902,6 +1077,9 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             mcp_script.parent.mkdir(parents=True)
             runtime_script.write_text("#!/bin/sh\n", encoding="utf-8")
             mcp_script.write_text("#!/bin/sh\n", encoding="utf-8")
+            policy = candidate_tree / "config/mobile-release-approval-policy.json"
+            policy.parent.mkdir(parents=True, exist_ok=True)
+            policy.write_bytes((ROOT / "config/mobile-release-approval-policy.json").read_bytes())
             with (
                 patch.object(runner, "require_host_reconciler_ready") as host_ready,
                 patch.object(runner, "worktree", return_value=candidate_tree) as make_tree,
@@ -1031,31 +1209,25 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             ["authority.sqlite3", "governed-execution.sqlite3", "support-repair"],
         )
 
-    def test_preprod_preserves_sqlite_data_and_wal_but_skips_regenerable_shm(self):
+    def test_preprod_lists_sqlite_data_but_excludes_volatile_sidecars(self):
         names = (
             "governed-execution.sqlite3\n"
             "governed-execution.sqlite3-wal\n"
             "governed-execution.sqlite3-shm\n"
+            "governed-execution.sqlite3-journal\n"
             "authority.sqlite3\n"
             "authority.sqlite3-shm\n"
             "authority.sqlite3-wal\n"
             "not-sqlite-shm\n"
             "governed-execution.sqlite3-shm-other\n"
         )
-        result = runner.bounded_preprod_openclaw_entries(names)
         self.assertEqual(
-            result,
-            [
-                "governed-execution.sqlite3",
-                "governed-execution.sqlite3-wal",
-                "authority.sqlite3",
-                "authority.sqlite3-wal",
-                "not-sqlite-shm",
-                "governed-execution.sqlite3-shm-other",
-            ],
+            runner.bounded_preprod_openclaw_entries(names),
+            ["governed-execution.sqlite3", "authority.sqlite3", "not-sqlite-shm",
+             "governed-execution.sqlite3-shm-other"],
         )
 
-    def test_preprod_does_not_copy_ephemeral_shm_after_listing_to_docker_cp(self):
+    def test_preprod_never_copies_sqlite_or_volatiles_with_docker_cp(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as td:
             clone = Path(td) / "clone"
@@ -1070,29 +1242,22 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                         "authority.sqlite3\n"
                         "authority.sqlite3-shm"
                     )
-                if cmd[:2] == ["docker", "cp"] and str(cmd[2]).endswith("-shm"):
-                    raise subprocess.CalledProcessError(1, cmd)
                 return ""
             with (
                 patch.object(runner.shutil, "disk_usage", return_value=Mock(free=12 * 1024**3)),
                 patch.object(runner, "run", side_effect=fake_run),
+                patch.object(runner, "verified_live_openclaw_bind", return_value=Path(td)) as bind,
+                patch.object(runner, "transactional_preprod_sqlite_backup") as snapshot,
             ):
                 runner.copy_state_from_live_container("/var/lib/jason/openclaw", clone)
-            copied = [
-                str(cmd[2]).rsplit("/", 1)[-1]
-                for cmd in commands if cmd[:2] == ["docker", "cp"]
-            ]
-            self.assertEqual(
-                copied,
-                [
-                    "governed-execution.sqlite3",
-                    "governed-execution.sqlite3-wal",
-                    "authority.sqlite3",
-                ],
-            )
-            self.assertFalse(any(name.endswith("-shm") for name in copied))
+            copied = [cmd[2] for cmd in commands if cmd[:2] == ["docker", "cp"]]
+            self.assertEqual(copied, [])
+            self.assertEqual(snapshot.call_count, 2)
+            self.assertEqual({c.args[0].name for c in snapshot.call_args_list},
+                             {"governed-execution.sqlite3", "authority.sqlite3"})
+            bind.assert_called_once_with()
 
-    def test_preprod_missing_sqlite_wal_remains_a_hard_clone_failure(self):
+    def test_preprod_missing_sqlite_wal_is_included_in_transactional_snapshot(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as td:
             clone = Path(td) / "clone"
@@ -1107,11 +1272,12 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             with (
                 patch.object(runner.shutil, "disk_usage", return_value=Mock(free=12 * 1024**3)),
                 patch.object(runner, "run", side_effect=fake_run),
+                patch.object(runner, "verified_live_openclaw_bind", return_value=Path(td)),
+                patch.object(runner, "transactional_preprod_sqlite_backup") as snapshot,
             ):
-                with self.assertRaises(subprocess.CalledProcessError):
-                    runner.copy_state_from_live_container("/var/lib/jason/openclaw", clone)
-            self.assertTrue(any(str(cmd[2]).endswith("-wal") for cmd in commands
-                                if cmd[:2] == ["docker", "cp"]))
+                runner.copy_state_from_live_container("/var/lib/jason/openclaw", clone)
+            snapshot.assert_called_once()
+            self.assertFalse(any(c[:2] == ["docker", "cp"] for c in commands))
 
     def test_bounded_preprod_refuses_unsafe_or_oversized_listing(self):
         for value in ("", "../escape\n", "a/b\n", "dup\ndup\n", "entry\n" * 257):
@@ -1133,7 +1299,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                     )
             command.assert_not_called()
 
-    def test_bounded_preprod_copies_authority_but_not_large_event_journal(self):
+    def test_bounded_preprod_snapshots_authority_but_skips_event_history(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as td:
             target = Path(td) / "clone"
@@ -1146,17 +1312,18 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             with (
                 patch.object(runner.shutil, "disk_usage", return_value=Mock(free=12 * 1024**3)),
                 patch.object(runner, "run", side_effect=record),
+                patch.object(runner, "verified_live_openclaw_bind", return_value=Path(td)),
+                patch.object(runner, "transactional_preprod_sqlite_backup") as snapshot,
             ):
-                runner.copy_state_from_live_container(
-                    "/var/lib/jason/openclaw", target,
-                )
+                runner.copy_state_from_live_container("/var/lib/jason/openclaw", target)
             copied = [str(v[2]) for v in commands if v[:2] == ["docker", "cp"]]
-            self.assertEqual(len(copied), 2)
-            self.assertTrue(any(name.endswith("/authority.sqlite3") for name in copied))
-            self.assertTrue(any(name.endswith("/support-repair") for name in copied))
+            self.assertEqual(len(copied), 1)
+            self.assertTrue(copied[0].endswith("/support-repair"))
+            snapshot.assert_called_once()
+            self.assertEqual(snapshot.call_args.args[0].name, "authority.sqlite3")
             self.assertFalse(any("orchestration-events" in name for name in copied))
 
-    def test_bounded_preprod_refuses_growth_past_reserve_after_copy(self):
+    def test_bounded_preprod_refuses_growth_after_transactional_snapshot(self):
         from unittest.mock import Mock
         with tempfile.TemporaryDirectory() as td:
             target = Path(td) / "clone"
@@ -1170,12 +1337,13 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 patch.object(runner.shutil, "disk_usage",
                              side_effect=[Mock(free=8 * 1024**3), Mock(free=2 * 1024**3)]),
                 patch.object(runner, "run", side_effect=record),
+                patch.object(runner, "verified_live_openclaw_bind", return_value=Path(td)),
+                patch.object(runner, "transactional_preprod_sqlite_backup") as snapshot,
             ):
                 with self.assertRaisesRegex(runner.ReleaseManagerError, "bounded disk capacity"):
-                    runner.copy_state_from_live_container(
-                        "/var/lib/jason/openclaw", target,
-                    )
-            self.assertEqual(len([c for c in seen if c[:2] == ["docker", "cp"]]), 1)
+                    runner.copy_state_from_live_container("/var/lib/jason/openclaw", target)
+            self.assertEqual(len([c for c in seen if c[:2] == ["docker", "cp"]]), 0)
+            snapshot.assert_called_once()
 
     def test_release_manager_defaults_to_managed_source_not_developer_checkout(self):
         self.assertEqual(
@@ -1903,6 +2071,196 @@ class GovernedReleaseReissueTests(unittest.TestCase):
             self.assertEqual(result['reissued_from'], runner.record_id(SHA_A))
             self.assertEqual(runner.load_record(root, runner.record_id(SHA_A)), historical)
 
+    def test_verified_recovery_rollback_reissues_under_open_breaker(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            base = runner.record_id(SHA_A)
+            historical = {
+                "release_id": base,
+                "state": "rolled_back",
+                "failure": {"rollback_verified": True},
+                "rollback_sha": SHA_B,
+                "release_candidate": {"candidate_sha": SHA_A},
+                "precreate_open_breaker_recovery": {
+                    "profile_id": "provider_identity_and_authority_recovery",
+                    "rollback_sha": SHA_B,
+                },
+            }
+            runner.atomic_json(runner.record_path(root, base), historical)
+
+            def create(**kw):
+                return {"release_id": kw["release_id_override"], "state": "release_candidate"}
+
+            with patch.object(
+                    runner, "governed_open_breaker_recovery_context",
+                    return_value={"rollback_sha": SHA_B, "profile_id": "provider_identity_and_authority_recovery"},
+                 ), \
+                 patch.object(
+                    runner, "revalidate_circuit_breaker",
+                    side_effect=AssertionError("ordinary breaker revalidation used"),
+                 ), \
+                 patch.object(
+                    runner, "live_runtime",
+                    side_effect=AssertionError("live runtime used for recovery retry"),
+                 ), \
+                 patch.object(runner, "create_record", side_effect=create), \
+                 patch.object(runner, "run_preproduction", side_effect=lambda repo, state_root, record: record):
+                result = runner.prepare_release(
+                    ROOT, root, SHA_A, "release_blocker", reissue_rolled_back=True
+                )
+            self.assertEqual(result["release_id"], base + "-retry-1")
+            self.assertEqual(result["reissued_from"], base)
+            self.assertEqual(runner.load_record(root, base), historical)
+
+    def test_reconstructed_failed_attempt_with_restored_receipt_can_reissue(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            base = runner.record_id(SHA_A)
+            scope_sha = "c" * 64
+            declaration_sha = "sha256:" + "d" * 64
+            original = {
+                "release_id": base,
+                "state": "production_eligible",
+                "rollback_sha": SHA_B,
+                "manual_scope_review": {"scope_sha256": scope_sha},
+                "one_transaction_freeze_exception": {
+                    "declaration_sha256": declaration_sha,
+                },
+                "release_candidate": {"candidate_sha": SHA_A},
+            }
+            runner.atomic_json(runner.record_path(root, base), original)
+            freeze = root / runner.PRODUCTION_FREEZE_MARKER
+            freeze.write_bytes(b"frozen\n")
+            freeze.chmod(0o600)
+            freeze_sha = __import__("hashlib").sha256(freeze.read_bytes()).hexdigest()
+            receipt = {
+                "schema_version": "2.0",
+                "authorization": "signed_teams_one_transaction_unfreeze",
+                "release_id": base,
+                "candidate_sha": SHA_A,
+                "rollback_sha": SHA_B,
+                "scope_sha256": scope_sha,
+                "declaration_sha256": declaration_sha,
+                "freeze_restored": True,
+                "status": "deployment_returned",
+                "release_state_after": "failed",
+                "standing_authority": False,
+                "additional_provider_or_endpoint_authority": False,
+                "freeze_sha256_before": freeze_sha,
+                "freeze_sha256_after": freeze_sha,
+            }
+            receipt_path = root / "owner-unfreeze-receipts" / (base + ".json")
+            runner.atomic_json(receipt_path, receipt)
+
+            def create(**kw):
+                return {"release_id": kw["release_id_override"], "state": "release_candidate"}
+
+            with patch.object(
+                    runner, "governed_open_breaker_recovery_context",
+                    return_value={"rollback_sha": SHA_B, "profile_id": "provider_identity_and_authority_recovery"},
+                 ), \
+                 patch.object(
+                    runner, "revalidate_circuit_breaker",
+                    side_effect=AssertionError("ordinary breaker revalidation used"),
+                 ), \
+                 patch.object(
+                    runner, "live_runtime",
+                    side_effect=AssertionError("live runtime used for recovery reissue"),
+                 ), \
+                 patch.object(runner, "create_record", side_effect=create), \
+                 patch.object(runner, "run_preproduction", side_effect=lambda repo, state_root, record: record):
+                result = runner.prepare_release(
+                    ROOT, root, SHA_A, "release_blocker", reissue_rolled_back=True
+                )
+            self.assertEqual(result["release_id"], base + "-retry-1")
+            self.assertEqual(result["reissued_from"], base)
+            self.assertEqual(runner.load_record(root, base), original)
+
+    def test_reconstructed_pre_mutation_attempt_with_restored_receipt_can_reissue(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            base = runner.record_id(SHA_A)
+            scope_sha = "c" * 64
+            declaration_sha = "sha256:" + "d" * 64
+            original = {
+                "release_id": base,
+                "state": "production_eligible",
+                "rollback_sha": SHA_B,
+                "manual_scope_review": {"scope_sha256": scope_sha},
+                "one_transaction_freeze_exception": {
+                    "declaration_sha256": declaration_sha,
+                },
+                "release_candidate": {"candidate_sha": SHA_A},
+                "owner_approval": {
+                    "approved": True,
+                    "candidate_sha": SHA_A,
+                },
+                "precreate_open_breaker_recovery": {
+                    "alignment": {
+                        "runtime_image_id": "runtime-lkg",
+                        "mcp_image_id": "mcp-lkg",
+                    },
+                },
+                "production": None,
+                "failure": None,
+            }
+            runner.atomic_json(runner.record_path(root, base), original)
+            freeze = root / runner.PRODUCTION_FREEZE_MARKER
+            freeze.write_bytes(b"frozen\n")
+            freeze.chmod(0o600)
+            freeze_sha = __import__("hashlib").sha256(freeze.read_bytes()).hexdigest()
+            receipt = {
+                "schema_version": "2.0",
+                "authorization": "signed_teams_one_transaction_unfreeze",
+                "release_id": base,
+                "candidate_sha": SHA_A,
+                "rollback_sha": SHA_B,
+                "scope_sha256": scope_sha,
+                "declaration_sha256": declaration_sha,
+                "freeze_restored": True,
+                "status": "deployment_returned",
+                "release_state_after": "production_eligible",
+                "standing_authority": False,
+                "additional_provider_or_endpoint_authority": False,
+                "freeze_sha256_before": freeze_sha,
+                "freeze_sha256_after": freeze_sha,
+            }
+            receipt_path = root / "owner-unfreeze-receipts" / (base + ".json")
+            runner.atomic_json(receipt_path, receipt)
+
+            with patch.object(
+                    runner, "live_runtime_unchecked_health",
+                    return_value={"revision": SHA_B, "image_id": "runtime-lkg"},
+                 ), patch.object(
+                    runner, "live_mcp",
+                    return_value={"revision": SHA_B, "image_id": "mcp-lkg"},
+                 ), patch.object(
+                    runner.Path, "resolve",
+                    return_value=Path("/opt/jason/releases") / SHA_B,
+                 ):
+                self.assertTrue(
+                    runner.restored_failed_freeze_receipt_allows_reissue(
+                        root, original, SHA_A
+                    )
+                )
+
+            # Any observed runtime revision change proves production moved and must fail closed.
+            with patch.object(
+                    runner, "live_runtime_unchecked_health",
+                    return_value={"revision": SHA_A, "image_id": "runtime-lkg"},
+                 ), patch.object(
+                    runner, "live_mcp",
+                    return_value={"revision": SHA_B, "image_id": "mcp-lkg"},
+                 ), patch.object(
+                    runner.Path, "resolve",
+                    return_value=Path("/opt/jason/releases") / SHA_B,
+                 ):
+                self.assertFalse(
+                    runner.restored_failed_freeze_receipt_allows_reissue(
+                        root, original, SHA_A
+                    )
+                )
+
     def test_unverified_rollback_cannot_reissue(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -1936,7 +2294,8 @@ class HostReconciliationTimeoutContractTests(unittest.TestCase):
         import inspect
         default = inspect.signature(runner.request_host_reconcile).parameters['timeout_seconds'].default
         self.assertGreater(default, 202 + 17 + 60)
-        self.assertLessEqual(default, 480)
+        self.assertGreaterEqual(default, 4200)
+        self.assertLessEqual(default, 4500)
 
     def test_absent_host_result_still_fails_closed(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1953,6 +2312,8 @@ def test_explicit_promotion_reserves_retention_before_breaker_and_deploy():
     calls = []
     handle = object()
     with patch.object(runner, 'acquire_production_transaction_lock', return_value=handle), \
+         patch.object(runner, 'require_current_manual_scope_review'), \
+         patch.object(runner, 'require_current_protected_release_source'), \
          patch.object(runner, 'require_host_reconciler_ready'), \
          patch.object(runner, 'release_production_transaction_lock', side_effect=lambda h: calls.append('unlock')), \
          patch.object(runner, 'reconcile_stopped_rollback_retention', side_effect=lambda: calls.append('retention')), \
@@ -1968,6 +2329,8 @@ def test_explicit_promotion_missing_root_reconciler_denies_cleanup():
     unlocked = []
     with patch.object(runner, 'acquire_production_transaction_lock', return_value=object()), \
          patch.object(runner, 'release_production_transaction_lock', side_effect=lambda h: unlocked.append(True)), \
+         patch.object(runner, 'require_current_manual_scope_review'), \
+         patch.object(runner, 'require_current_protected_release_source'), \
          patch.object(runner, 'require_host_reconciler_ready', side_effect=runner.ReleaseManagerError('root reconciler not ready')), \
          patch.object(runner, 'reconcile_stopped_rollback_retention') as cleanup, \
          patch.object(runner, 'revalidate_circuit_breaker') as breaker, \
@@ -1985,6 +2348,8 @@ def test_explicit_promotion_retention_failure_blocks_mutation():
     import pytest
     calls = []
     with patch.object(runner, 'acquire_production_transaction_lock', return_value=object()), \
+         patch.object(runner, 'require_current_manual_scope_review'), \
+         patch.object(runner, 'require_current_protected_release_source'), \
          patch.object(runner, 'require_host_reconciler_ready'), \
          patch.object(runner, 'release_production_transaction_lock', side_effect=lambda h: calls.append('unlock')), \
          patch.object(runner, 'reconcile_stopped_rollback_retention', side_effect=runner.ReleaseManagerError('historical cleanup failed')), \
@@ -2285,15 +2650,19 @@ def test_ccc_precedes_mutation_and_postflight_precedes_closed_release():
     assert source.index('ccc_postflight = run_release_ccc_gate(') < source.index('set_last_known_good(\n            state_root,\n            production_manifest')
 
 
-def test_production_complete_notification_follows_root_last_known_good_commit():
+def test_post_verification_publication_is_not_a_rollback_gate():
     import inspect
     source = inspect.getsource(runner._deploy_production_locked)
     commit = source.index('set_last_known_good(\n            state_root,\n            production_manifest')
     verified = source.index('gate_transition(repo, state_root, record, "production_verified")')
     closed = source.index('gate_transition(repo, state_root, record, "closed")')
     persisted = source.index('save_record(state_root, record)', closed)
-    complete_notification = source.index('"production_queue_completed"')
-    assert commit < verified < closed < persisted < complete_notification
+    queued = source.index('pending_administrative_closeout(record)')
+    separated = source.index('return record', source.index('else:', persisted))
+    assert queued < commit < verified < closed < persisted < separated
+    assert source.index('except Exception as error:') < separated
+    assert 'publish_production_closeout(' not in source
+    assert '"production_queue_completed"' in inspect.getsource(runner.run_administrative_closeout)
 
 
 def test_release_contract_accepts_emitted_string_risk_enum_with_exact_manifest():
@@ -2984,6 +3353,8 @@ def test_preprod_copy_excludes_recursive_scratch_only_from_operational_records(t
         patch.object(runner.shutil, "disk_usage",
                      return_value=Mock(free=12 * 1024**3)),
         patch.object(runner, "run", side_effect=fake_run),
+        patch.object(runner, "verified_live_openclaw_bind", return_value=tmp_path),
+        patch.object(runner, "transactional_preprod_sqlite_backup") as snapshot,
     ):
         runner.copy_state_from_live_container(
             "/var/lib/jason/openclaw", tmp_path / "clone",
@@ -2997,8 +3368,10 @@ def test_preprod_copy_excludes_recursive_scratch_only_from_operational_records(t
                for path in copied)
     assert any(path.endswith("/release-manager/mobile-release-decisions-processed")
                for path in copied)
-    assert any(path.endswith("/reflection.sqlite3") for path in copied)
+    assert not any(path.endswith("/reflection.sqlite3") for path in copied)
     assert any(path.endswith("/support-repair") for path in copied)
+    snapshot.assert_called_once()
+    assert snapshot.call_args.args[0].name == "reflection.sqlite3"
     assert not any(path.endswith("/release-manager/preprod") for path in copied)
     assert not any(path.endswith("/release-manager/worktrees") for path in copied)
     assert not (tmp_path / "clone/release-manager/preprod").exists()
@@ -3335,6 +3708,7 @@ def _exercise_serialized_preprod(monkeypatch, tmp_path, *, fail_health=False):
         return subprocess.CompletedProcess(argv, 0)
 
     monkeypatch.setattr(runner, "gate_transition", transition)
+    monkeypatch.setattr(runner, "require_candidate_controller_for_preproduction", lambda *a: None)
     monkeypatch.setattr(runner, "image_id", lambda _: "sha256:fixture")
     monkeypatch.setattr(runner, "acquire_production_transaction_lock", acquire)
     monkeypatch.setattr(runner, "release_production_transaction_lock", release)
@@ -3344,8 +3718,10 @@ def _exercise_serialized_preprod(monkeypatch, tmp_path, *, fail_health=False):
     monkeypatch.setattr(runner, "wait_health", wait)
     monkeypatch.setattr(runner, "verify_preprod_env",
                         lambda *args: events.append("env_verified"))
-    monkeypatch.setattr(runner, "production_preflight",
-                        lambda *args: events.append("preflight"))
+    def accepted_preflight(*args):
+        events.append("preflight")
+        return "sha256:" + "c" * 64
+    monkeypatch.setattr(runner, "production_preflight", accepted_preflight)
     monkeypatch.setattr(runner, "write_owner_notification_event",
                         lambda *args: events.append("notice"))
     monkeypatch.setattr(runner, "save_record",
@@ -3368,6 +3744,68 @@ def _exercise_serialized_preprod(monkeypatch, tmp_path, *, fail_health=False):
     assert not held["active"]
     assert not scratch.exists()
 
+
+
+
+def test_preproduction_revalidates_open_breaker_recovery_before_using_degraded_live_runtime(monkeypatch, tmp_path):
+    record = {
+        "release_id": "release-" + SHA_A[:16],
+        "state": "release_candidate",
+        "rollback_sha": SHA_B,
+        "precreate_open_breaker_recovery": {"profile_id": "provider_identity_and_authority_recovery"},
+        "release_candidate": {
+            "candidate_sha": SHA_A,
+            "image": "candidate-runtime",
+            "artifact_digest": "sha256:fixture",
+            "mcp_image": "candidate-mcp",
+            "mcp_artifact_digest": "sha256:fixture",
+        },
+    }
+    monkeypatch.setattr(runner, "require_candidate_controller_for_preproduction", lambda *a: None)
+    monkeypatch.setattr(runner, "gate_transition", lambda *a: None)
+    monkeypatch.setattr(runner, "image_id", lambda image: "sha256:fixture" if "candidate" in image else "sha256:rollback")
+    monkeypatch.setattr(runner, "acquire_production_transaction_lock", lambda *a: object())
+    monkeypatch.setattr(runner, "release_production_transaction_lock", lambda *a: None)
+    monkeypatch.setattr(runner, "_read_protected_snapshot", lambda *a: {})
+    recovery_kwargs = {}
+    def recovery_context(*args, **kwargs):
+        recovery_kwargs.update(kwargs)
+        return {"profile_id": "provider_identity_and_authority_recovery"}
+    monkeypatch.setattr(runner, "governed_open_breaker_recovery_context", recovery_context)
+    monkeypatch.setattr(runner, "live_runtime", lambda: (_ for _ in ()).throw(AssertionError("ordinary health gate used")))
+    monkeypatch.setattr(runner, "live_runtime_unchecked_health", lambda: {"revision": SHA_B})
+    monkeypatch.setattr(runner, "create_preprod_container", lambda **k: ("preprod", tmp_path / "scratch"))
+    monkeypatch.setattr(runner, "run", lambda *a, **k: None)
+    monkeypatch.setattr(runner, "wait_health", lambda *a: None)
+    monkeypatch.setattr(runner, "verify_preprod_env", lambda *a: None)
+    monkeypatch.setattr(runner, "production_preflight", lambda *a: "sha256:" + "c" * 64)
+    monkeypatch.setattr(runner, "write_owner_notification_event", lambda *a: None)
+    monkeypatch.setattr(runner, "save_record", lambda *a: None)
+    monkeypatch.setattr(runner.subprocess, "run", lambda *a, **k: None)
+    result = runner.run_preproduction(tmp_path, tmp_path / "state", record)
+    assert result["preproduction"]["acceptance_passed"] is True
+    assert recovery_kwargs["allowed_record_states"] == frozenset({"release_candidate", "preproduction"})
+    assert recovery_kwargs["require_preproduction_evidence"] is False
+    assert recovery_kwargs["require_manual_scope_review"] is False
+
+
+def test_preproduction_recovery_fails_closed_when_live_context_changed(monkeypatch, tmp_path):
+    import pytest
+    record = {
+        "release_id": "release-" + SHA_A[:16],
+        "state": "release_candidate",
+        "precreate_open_breaker_recovery": {"profile_id": "provider_identity_and_authority_recovery"},
+        "release_candidate": {"candidate_sha": SHA_A, "image": "candidate-runtime", "artifact_digest": "sha256:fixture", "mcp_image": "candidate-mcp", "mcp_artifact_digest": "sha256:fixture"},
+    }
+    monkeypatch.setattr(runner, "require_candidate_controller_for_preproduction", lambda *a: None)
+    monkeypatch.setattr(runner, "gate_transition", lambda *a: None)
+    monkeypatch.setattr(runner, "image_id", lambda *a: "sha256:fixture")
+    monkeypatch.setattr(runner, "acquire_production_transaction_lock", lambda *a: object())
+    monkeypatch.setattr(runner, "release_production_transaction_lock", lambda *a: None)
+    monkeypatch.setattr(runner, "_read_protected_snapshot", lambda *a: {})
+    monkeypatch.setattr(runner, "governed_open_breaker_recovery_context", lambda *a, **k: None)
+    with pytest.raises(runner.ReleaseManagerError, match="preproduction recovery context no longer matches"):
+        runner.run_preproduction(tmp_path, tmp_path / "state", record)
 
 def test_preprod_ephemeral_container_is_guarded_by_serialized_release_lock(
         monkeypatch, tmp_path):
@@ -3837,3 +4275,1066 @@ class BoundSupportReleaseIdentityTests(unittest.TestCase):
                         support_item='SUPPORT-OPS-059', support_pr_number=2018,
                     )
                 retention.assert_not_called()
+
+
+def test_native_preflight_rejects_lkg_declaration_mismatch(tmp_path):
+    from unittest.mock import patch
+    with (patch.object(runner, "declared_autotask_read_profiles",
+                       return_value=("v13", "v10")),
+          patch.object(runner, "live_autotask_read_profile", return_value="v13"),
+          patch.object(runner, "declared_quickbooks_read_profile", return_value=None),
+          patch.object(runner, "declared_mobile_release_approval_policy",
+                       return_value={"mode": "owner_reviewed"})):
+        with __import__("pytest").raises(runner.ReleaseManagerError,
+                                        match="rollback profile disagrees"):
+            runner.native_deploy_environment(tmp_path, "runtime", "mcp", SHA_A)
+
+
+def test_native_preflight_passes_same_bound_env_to_both_scripts(tmp_path):
+    from unittest.mock import patch
+    with (patch.object(runner, "declared_autotask_read_profiles",
+                       return_value=("v13", "v13")),
+          patch.object(runner, "live_autotask_read_profile", return_value="v13"),
+          patch.object(runner, "declared_quickbooks_read_profile", return_value=None),
+          patch.object(runner, "declared_mobile_release_approval_policy",
+                       return_value={"mode": "owner_reviewed"})):
+        env = runner.native_deploy_environment(tmp_path, "runtime", "mcp", SHA_A)
+    assert env["JASON_PROVIDER_READ_ACTIVATION_PROFILE"] == "v13"
+    assert env["JASON_PROVIDER_READ_ROLLBACK_PROFILE"] == "v13"
+    assert env["JASON_RUNTIME_PRODUCTION_IMAGE"] == "runtime"
+    assert env["JASON_MCP_PRODUCTION_IMAGE"] == "mcp"
+    assert env["JASON_SOURCE_REVISION_OVERRIDE"] == SHA_A
+
+
+def test_transactional_sqlite_snapshot_includes_uncheckpointed_commits(tmp_path):
+    import sqlite3
+    live = tmp_path / "live"
+    live.mkdir()
+    database = live / "governed-execution.sqlite3"
+    connection = sqlite3.connect(database)
+    try:
+        assert connection.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+        connection.execute("PRAGMA wal_autocheckpoint=0")
+        connection.execute("CREATE TABLE evidence(id INTEGER PRIMARY KEY, value TEXT)")
+        connection.execute("INSERT INTO evidence(value) VALUES ('committed-wal-row')")
+        connection.commit()
+        assert (live / "governed-execution.sqlite3-wal").exists()
+        clone = tmp_path / "isolated.sqlite3"
+        runner.transactional_preprod_sqlite_backup(database, clone)
+        from contextlib import closing
+        with closing(sqlite3.connect(f"file:{clone}?mode=ro", uri=True)) as copied:
+            assert copied.execute("SELECT value FROM evidence").fetchone()[0] == "committed-wal-row"
+        assert not (tmp_path / "isolated.sqlite3-wal").exists()
+        assert clone.stat().st_mode & 0o077 == 0
+        assert connection.execute("SELECT count(*) FROM evidence").fetchone()[0] == 1
+    finally:
+        connection.close()
+
+
+def test_transactional_sqlite_snapshot_fails_closed_if_main_disappeared(tmp_path):
+    import pytest
+    with pytest.raises(runner.ReleaseManagerError, match="unsafe"):
+        runner.transactional_preprod_sqlite_backup(
+            tmp_path / "gone.sqlite3", tmp_path / "isolated.sqlite3",
+        )
+    assert not (tmp_path / "isolated.sqlite3").exists()
+
+
+def test_verified_live_bind_fails_closed_on_wrong_mount(tmp_path):
+    import json
+    from unittest.mock import patch
+    wrong = [{"Mounts": [{"Type": "bind", "Destination": "/tmp", "Source": str(tmp_path), "RW": True}]}]
+    with patch.object(runner, "output", return_value=json.dumps(wrong)):
+        with __import__("pytest").raises(runner.ReleaseManagerError,
+                                         match="ambiguous"):
+            runner.verified_live_openclaw_bind()
+    valid = [{"Mounts": [{"Type": "bind", "Destination": "/var/lib/jason/openclaw", "Source": str(tmp_path), "RW": True}]}]
+    with patch.object(runner, "output", return_value=json.dumps(valid)):
+        assert runner.verified_live_openclaw_bind() == tmp_path
+
+
+def test_preproduction_fails_on_live_rollback_profile_mismatch_before_scripts(tmp_path):
+    import json
+    import pytest
+    candidate = tmp_path / 'candidate'
+    (candidate / 'config').mkdir(parents=True)
+    (candidate / 'config/autotask-entity-read-profile.json').write_text(
+        json.dumps({'schema_version':'1.0','read_profile':
+                    'itglue-autotask-entra-dynamic-schema-read-catalog-v13',
+                    'rollback_read_profile':
+                    'itglue-autotask-entra-procurement-billing-reconciliation-catalog-v10'}))
+    with (patch.object(runner, 'require_host_reconciler_ready'),
+          patch.object(runner, 'worktree', return_value=candidate),
+          patch.object(runner, 'remove_worktree'),
+          patch.object(runner, 'live_autotask_read_profile',
+                       return_value='itglue-autotask-entra-dynamic-schema-read-catalog-v13'),
+          patch.object(runner, 'declared_quickbooks_read_profile', return_value=None),
+          patch.object(runner, 'run') as script):
+        with pytest.raises(runner.ReleaseManagerError,
+                           match='rollback profile disagrees'):
+            runner.production_preflight(tmp_path,tmp_path,'runtime:real','mcp:real',SHA_A)
+    script.assert_not_called()
+
+
+def test_native_contract_digest_changes_with_rollback_profile_not_worker_uid(tmp_path):
+    base = {
+        'JASON_RUNTIME_PRODUCTION_IMAGE': 'runtime:candidate',
+        'JASON_MCP_PRODUCTION_IMAGE': 'mcp:candidate',
+        'JASON_SOURCE_REVISION_OVERRIDE': SHA_A,
+        'JASON_PROVIDER_READ_ACTIVATION_PROFILE': 'v13',
+        'JASON_PROVIDER_READ_ROLLBACK_PROFILE': 'v13',
+    }
+    digest = runner.native_deploy_contract_digest(base)
+    assert digest.startswith('sha256:')
+    assert len(digest) == 71
+    assert runner.native_deploy_contract_digest({**base,
+        'JASON_DIAGNOSTIC_WORKER_DEVICE_UID': 'different'}) == digest
+    assert runner.native_deploy_contract_digest({**base,
+        'JASON_PROVIDER_READ_ROLLBACK_PROFILE': 'v10'}) != digest
+    assert runner.native_deploy_contract_digest({**base,
+        'JASON_MCP_PRODUCTION_IMAGE': 'mcp:changed'}) != digest
+
+
+def test_transactional_sqlite_snapshot_rejects_disk_budget_before_copy(tmp_path):
+    import sqlite3
+    from unittest.mock import Mock
+    import pytest
+    source = tmp_path / 'real.sqlite3'
+    with sqlite3.connect(source) as conn:
+        conn.execute('CREATE TABLE operational_evidence(v TEXT)')
+    target = tmp_path / 'isolated.sqlite3'
+    with patch.object(runner.shutil, 'disk_usage', return_value=Mock(free=128)):
+        with pytest.raises(runner.ReleaseManagerError, match='isolated capacity'):
+            runner.transactional_preprod_sqlite_backup(source,target)
+    assert not target.exists()
+
+
+def test_preproduction_refuses_old_controller_for_new_candidate(tmp_path):
+    import hashlib
+    import pytest
+    candidate=b"#!/usr/bin/env python3\n# candidate controller revision\n"
+    with (patch.object(runner.subprocess, "check_output", return_value=candidate) as source,
+          patch.object(runner, "file_digest", return_value="sha256:" + "0" * 64)):
+        with pytest.raises(runner.ReleaseManagerError, match="exact candidate Production Manager"):
+            runner.require_candidate_controller_for_preproduction(tmp_path, SHA_A)
+    assert source.call_args.args[0][-1] == SHA_A + ":tools/release_manager_host_runner.py"
+
+
+def test_preproduction_accepts_only_exact_immutable_candidate_controller(tmp_path):
+    import hashlib
+    candidate=b"#!/usr/bin/env python3\n# candidate controller revision\n"
+    expected="sha256:"+hashlib.sha256(candidate).hexdigest()
+    with (patch.object(runner.subprocess, "check_output", return_value=candidate),
+          patch.object(runner, "file_digest", return_value=expected)):
+        runner.require_candidate_controller_for_preproduction(tmp_path, SHA_A)
+
+
+def test_preproduction_controller_gate_runs_before_state_transition(tmp_path):
+    import pytest
+    release={"state":"release_candidate", "release_candidate":{"candidate_sha":SHA_A}}
+    with (patch.object(runner, "require_candidate_controller_for_preproduction",
+                       side_effect=runner.ReleaseManagerError("old controller refused")),
+          patch.object(runner,"gate_transition") as transition):
+        with pytest.raises(runner.ReleaseManagerError, match="old controller refused"):
+            runner.run_preproduction(tmp_path,tmp_path,release)
+    transition.assert_not_called()
+    assert release["state"]=="release_candidate"
+
+
+def test_restricted_sqlite_uses_confined_snapshot_not_raw_copy(tmp_path):
+    import sqlite3
+    from unittest.mock import patch
+    live=tmp_path/'live'
+    live.mkdir(mode=0o700)
+    source=live/'root-owned.sqlite3'
+    with sqlite3.connect(source) as conn:
+        conn.execute('CREATE TABLE state(k TEXT)')
+    out=tmp_path/'copy.sqlite3'
+    real_access=runner.os.access
+    with (patch.object(runner.os, 'access',
+                       side_effect=lambda p, mode: False if str(p)==str(source)
+                                   else real_access(p,mode)),
+          patch.object(runner, 'confined_readonly_preprod_sqlite_backup') as helper):
+        runner.transactional_preprod_sqlite_backup(source,out)
+    helper.assert_called_once_with(source,out)
+
+
+def test_confined_sqlite_helper_is_readonly_cap_bounded_and_cleans_up(tmp_path):
+    import sqlite3
+    import os
+    from unittest.mock import patch
+    import subprocess
+    live=tmp_path/'live';live.mkdir(mode=0o700)
+    source=live/'root-owned.sqlite3'
+    with sqlite3.connect(source) as conn:
+        conn.execute('CREATE TABLE evidence(k TEXT)')
+    clone_dir=tmp_path/'clone';clone_dir.mkdir(mode=0o700)
+    target=clone_dir/source.name
+    commands=[]
+    def fake_docker(argv,**kwargs):
+        commands.append(list(argv))
+        action=argv[1]
+        if action=='cp':
+            with sqlite3.connect(target) as copied:
+                copied.execute('CREATE TABLE evidence(k TEXT)')
+            target.chmod(0o600)
+        return subprocess.CompletedProcess(argv,0,
+            stdout=b'CONFINED_SQLITE_SNAPSHOT_OK\n' if action=='start' else b'ok\n')
+    with (patch.object(runner, 'verified_live_openclaw_bind',return_value=live),
+          patch.object(runner.subprocess,'run',side_effect=fake_docker)):
+        runner.confined_readonly_preprod_sqlite_backup(source,target)
+    assert [cmd[1] for cmd in commands]==['create','start','cp','rm']
+    create=commands[0]
+    for option,value in (('--network','none'),('--cap-drop','ALL'),
+                         ('--cap-add','DAC_READ_SEARCH'),('--user','0:0')):
+        assert create[create.index(option)+1]==value
+    assert '--read-only' in create
+    assert 'no-new-privileges' in create
+    assert any('target=/live,readonly' in value for value in create)
+    assert not any('target=/live,' in value and 'readonly' not in value
+                   for value in create)
+    assert target.is_file() and target.stat().st_uid==os.getuid()
+    assert not any(clone_dir.glob('.jason-sqlite-snapshot-*'))
+
+
+def test_confined_sqlite_helper_failure_removes_container_and_partial_clone(tmp_path):
+    import sqlite3,subprocess
+    import pytest
+    from unittest.mock import patch
+    live=tmp_path/'live';live.mkdir(mode=0o700)
+    source=live/'restricted.sqlite3'
+    with sqlite3.connect(source) as conn:
+        conn.execute('CREATE TABLE test(k TEXT)')
+    clone_dir=tmp_path/'clone';clone_dir.mkdir(mode=0o700)
+    target=clone_dir/source.name
+    actions=[]
+    def fail_start(argv,**kwargs):
+        actions.append(argv[1])
+        if argv[1]=='start':
+            raise subprocess.CalledProcessError(1,argv)
+        return subprocess.CompletedProcess(argv,0,stdout=b'created')
+    with (patch.object(runner,'verified_live_openclaw_bind',return_value=live),
+          patch.object(runner.subprocess,'run',side_effect=fail_start)):
+        with pytest.raises(runner.ReleaseManagerError,match='confined readonly SQLite backup failed'):
+            runner.confined_readonly_preprod_sqlite_backup(source,target)
+    assert actions==['create','start','rm']
+    assert not target.exists()
+    assert not any(clone_dir.glob('.jason-sqlite-snapshot-*'))
+
+
+def test_confined_sqlite_helper_rejects_wrong_live_bind_before_container(tmp_path):
+    import sqlite3,pytest
+    from unittest.mock import patch
+    live=tmp_path/'live';live.mkdir(mode=0o700)
+    source=live/'readonly.sqlite3'
+    with sqlite3.connect(source) as conn:
+        conn.execute('CREATE TABLE evidence(x TEXT)')
+    clone_dir=tmp_path/'clone';clone_dir.mkdir(mode=0o700)
+    with (patch.object(runner,'verified_live_openclaw_bind',return_value=tmp_path),
+          patch.object(runner.subprocess,'run') as invocation):
+        with pytest.raises(runner.ReleaseManagerError,match='not the live runtime bind'):
+            runner.confined_readonly_preprod_sqlite_backup(source,clone_dir/source.name)
+    invocation.assert_not_called()
+
+
+def test_secondary_closeout_records_failed_publication_but_notifies_and_retries(tmp_path):
+    from unittest.mock import patch
+    candidate = SHA_A
+    record = {
+        'release_id': runner.record_id(candidate), 'state': 'closed',
+        'release_candidate': {'candidate_sha': candidate},
+        'production': {'live_sha': candidate, 'verified_at': runner.now()},
+    }
+    runner.pending_administrative_closeout(record)
+    with (patch.object(runner, 'publish_production_closeout',
+                       side_effect=runner.ReleaseManagerError('secret GitHub URL in exception')) as publish,
+          patch.object(runner, 'write_owner_notification_event') as notification):
+        result = runner.run_administrative_closeout(tmp_path, tmp_path, record)
+    assert result['state'] == 'closed'
+    assert result['production']['documentation_reconciliation'] == 'pending'
+    assert result['production']['control_board_publication'] == 'pending'
+    assert result['production']['owner_notification'] == 'pass'
+    assert result['administrative_closeout']['needs_retry'] is True
+    assert result['administrative_closeout']['documentation_control_board']['attempts'] == 1
+    assert 'secret GitHub URL' not in str(result)
+    publish.assert_called_once()
+    notification.assert_called_once()
+    reread = runner.load_record(tmp_path, result['release_id'])
+    assert reread['state'] == 'closed'
+    assert reread['administrative_closeout']['needs_retry'] is True
+    with (patch.object(runner, 'publish_production_closeout',
+                       return_value={'documentation':'pass','control_board':'pass'}) as publish,
+          patch.object(runner, 'write_owner_notification_event') as notification):
+        finished = runner.run_administrative_closeout(tmp_path, tmp_path, reread)
+    assert finished['state'] == 'closed'
+    assert finished['administrative_closeout']['needs_retry'] is False
+    assert finished['production']['documentation_reconciliation'] == 'pass'
+    assert finished['production']['control_board_publication'] == 'pass'
+    assert finished['administrative_closeout']['documentation_control_board']['attempts'] == 2
+    publish.assert_called_once()
+    notification.assert_not_called()  # idempotent, already posted
+
+
+def test_secondary_closeout_notification_failure_preserves_retry_even_after_documentation_pass(tmp_path):
+    record = {
+        'release_id': runner.record_id(SHA_A), 'state': 'closed',
+        'release_candidate': {'candidate_sha': SHA_A},
+        'production': {'live_sha': SHA_A, 'verified_at': runner.now()},
+    }
+    runner.pending_administrative_closeout(record)
+    with (patch.object(runner, 'publish_production_closeout',
+                       return_value={'documentation':'pass','control_board':'pass'}),
+          patch.object(runner, 'write_owner_notification_event',
+                       side_effect=OSError('synthetic unavailable channel'))):
+        result = runner.run_administrative_closeout(tmp_path, tmp_path, record)
+    assert result['state'] == 'closed'
+    assert result['production']['documentation_reconciliation'] == 'pass'
+    assert result['production']['owner_notification'] == 'pending'
+    assert result['administrative_closeout']['needs_retry'] is True
+    with (patch.object(runner, 'publish_production_closeout') as publish,
+          patch.object(runner, 'write_owner_notification_event') as notify):
+        updated = runner.run_administrative_closeout(tmp_path, tmp_path, result)
+    assert updated['administrative_closeout']['needs_retry'] is False
+    assert updated['production']['owner_notification'] == 'pass'
+    publish.assert_not_called()  # do not republish completed work
+    notify.assert_called_once()
+
+
+def test_automatic_closeout_retry_uses_existing_timer_without_auto_promotion(tmp_path):
+    from unittest.mock import patch
+    record = {
+        'release_id': runner.record_id(SHA_A), 'state': 'closed',
+        'release_candidate': {'candidate_sha': SHA_A},
+        'production': {'live_sha': SHA_A, 'verified_at': runner.now()},
+    }
+    runner.pending_administrative_closeout(record)
+    runner.save_record(tmp_path, record)
+    with (patch.object(runner, 'live_production_alignment', return_value={'runtime_revision':SHA_A}) as live,
+          patch.object(runner, 'acquire_production_transaction_lock', return_value=object()) as acquire,
+          patch.object(runner, 'release_production_transaction_lock') as release,
+          patch.object(runner, 'worktree', return_value=tmp_path) as wt,
+          patch.object(runner, 'remove_worktree') as cleanup,
+          patch.object(runner, 'publish_production_closeout',
+                       return_value={'documentation':'pass','control_board':'pass'}),
+          patch.object(runner, 'write_owner_notification_event') as notify,
+          patch.object(runner.gate, 'load_json',
+                       return_value={'schedule':{'automatic_promotion_enabled':False}})):
+        assert runner.promote_eligible(tmp_path, tmp_path) is False
+    live.assert_called_once_with(SHA_A)
+    acquire.assert_called_once()
+    release.assert_called_once()
+    wt.assert_called_once_with(tmp_path, tmp_path, SHA_A)
+    cleanup.assert_called_once_with(tmp_path, tmp_path)
+    notify.assert_called_once()
+    reread = runner.load_record(tmp_path, record['release_id'])
+    assert reread['state'] == 'closed'
+    assert reread['administrative_closeout']['needs_retry'] is False
+
+
+def test_automatic_closeout_does_not_retry_before_interval_or_for_stale_live_release(tmp_path):
+    record = {
+        'release_id': runner.record_id(SHA_A), 'state': 'closed',
+        'release_candidate': {'candidate_sha': SHA_A},
+        'production': {'live_sha': SHA_A, 'verified_at': runner.now()},
+    }
+    runner.pending_administrative_closeout(record)
+    record['administrative_closeout']['last_attempt_at'] = runner.now()
+    runner.save_record(tmp_path, record)
+    with (patch.object(runner, 'live_production_alignment') as live,
+          patch.object(runner, 'publish_production_closeout') as publish):
+        assert runner.retry_due_administrative_closeouts(tmp_path,tmp_path) == 0
+    live.assert_not_called()
+    publish.assert_not_called()
+    record['administrative_closeout']['last_attempt_at'] = '2020-01-01T00:00:00+00:00'
+    runner.save_record(tmp_path, record)
+    with (patch.object(runner, 'acquire_production_transaction_lock', return_value=object()),
+          patch.object(runner, 'release_production_transaction_lock'),
+          patch.object(runner, 'live_production_alignment',
+                       side_effect=runner.ReleaseManagerError('live SHA superseded')),
+          patch.object(runner, 'worktree') as checkout,
+          patch.object(runner, 'publish_production_closeout') as publish):
+        assert runner.retry_due_administrative_closeouts(tmp_path,tmp_path) == 0
+    checkout.assert_not_called()
+    publish.assert_not_called()
+    assert runner.load_record(tmp_path, record['release_id'])['administrative_closeout']['needs_retry'] is True
+
+
+def test_secondary_closeout_cannot_run_before_release_is_closed(tmp_path):
+    import pytest
+    for state in ('production', 'production_verified', 'production_eligible', 'rolled_back'):
+        record = {
+            'release_id': runner.record_id(SHA_A), 'state': state,
+            'release_candidate': {'candidate_sha': SHA_A},
+            'production': {'live_sha': SHA_A, 'verified_at': runner.now()},
+        }
+        runner.pending_administrative_closeout(record)
+        with (patch.object(runner, 'publish_production_closeout') as publish,
+              pytest.raises(runner.ReleaseManagerError, match='fully verified closed')):
+            runner.run_administrative_closeout(tmp_path, tmp_path, record)
+        publish.assert_not_called()
+
+
+def test_release_manager_timer_runs_post_deploy_retry_when_auto_promotion_disabled():
+    source = (ROOT / 'tools/release_manager_host_runner.py').read_text()
+    retry = source.index('retry_due_administrative_closeouts(repo, state_root)',
+                         source.index('def promote_eligible('))
+    disabled = source.index('automatic_promotion_enabled', retry)
+    assert retry < disabled
+    service = (ROOT / 'infrastructure/openclaw-operations/systemd/user/jason-release-manager.service').read_text()
+    timer = (ROOT / 'infrastructure/openclaw-operations/systemd/user/jason-release-manager.timer').read_text()
+    assert 'promote-eligible' in service
+    assert 'OnCalendar=*-*-* *:00/5:00' in timer
+
+
+def _exact_owner_material_review_waiver(candidate=SHA_A, scope="d" * 64):
+    return {
+        "schema_version": "1.0",
+        "status": "waived_by_owner",
+        "one_time": True,
+        "candidate_sha": candidate,
+        "scope_sha256": scope,
+        "recorded_by": "person-al",
+        "source": "explicit_owner_instruction",
+        "reason": "one-time bootstrap owner override",
+        "recorded_at": "2026-10-31T12:00:00+00:00",
+    }
+
+
+def test_owner_material_review_waiver_accepts_only_missing_human_review_predeploy():
+    report = _ccc_exact_missing_owner_review_report()
+    waiver = _exact_owner_material_review_waiver()
+    evidence = runner.verify_release_ccc_report(
+        report,
+        candidate_sha=SHA_A,
+        runtime_sha=SHA_B,
+        before_mutation=True,
+        owner_material_review_waiver=waiver,
+    )
+    assert evidence["status"] == "NOT_PROVEN"
+    assert evidence["mode"] == "candidate_transition_owner_material_review_waiver"
+    assert evidence["technical_checks_passed"] is True
+    assert evidence["owner_material_review_waiver"] == waiver
+
+
+def test_owner_material_review_waiver_allows_postdeploy_only_when_all_technical_checks_pass():
+    import copy
+    import pytest
+
+    report = _ccc_exact_missing_owner_review_report()
+    report["runtime_revision"] = SHA_A
+    for check in report["checks"]:
+        if check["check_id"] == "runtime-source-alignment":
+            check["status"] = "PASS"
+    waiver = _exact_owner_material_review_waiver()
+    evidence = runner.verify_release_ccc_report(
+        report,
+        candidate_sha=SHA_A,
+        runtime_sha=SHA_A,
+        before_mutation=False,
+        owner_material_review_waiver=waiver,
+    )
+    assert evidence["status"] == "NOT_PROVEN"
+    assert evidence["mode"] == "live_certified_owner_material_review_waiver"
+    assert evidence["technical_checks_passed"] is True
+
+    extra_failure = copy.deepcopy(report)
+    next(x for x in extra_failure["checks"]
+         if x["check_id"] == "systemd-failed-units")["status"] = "FAIL"
+    extra_failure["status"] = "FAIL"
+    with pytest.raises(runner.ReleaseManagerError, match="post-mutation CCC"):
+        runner.verify_release_ccc_report(
+            extra_failure,
+            candidate_sha=SHA_A,
+            runtime_sha=SHA_A,
+            before_mutation=False,
+            owner_material_review_waiver=waiver,
+        )
+
+
+def test_owner_material_review_waiver_never_matches_other_candidate():
+    import pytest
+    report = _ccc_exact_missing_owner_review_report()
+    with pytest.raises(runner.ReleaseManagerError, match="does not match CCC candidate"):
+        runner.verify_release_ccc_report(
+            report,
+            candidate_sha=SHA_A,
+            runtime_sha=SHA_B,
+            before_mutation=True,
+            owner_material_review_waiver=_exact_owner_material_review_waiver(SHA_B),
+        )
+
+
+def test_verified_owner_material_review_waiver_binds_owner_risk_and_scope():
+    import copy
+    import pytest
+    waiver = _exact_owner_material_review_waiver()
+    record = {
+        "risk_profile": "production_control_core",
+        "owner_approval": {"approved": True, "candidate_sha": SHA_A},
+        "manual_scope_review": {
+            "schema_version": "1.0", "candidate_sha": SHA_A,
+            "scope_sha256": "d" * 64,
+        },
+        "owner_material_review_waiver": waiver,
+    }
+    assert runner.verified_owner_material_review_waiver(record, SHA_A) == waiver
+
+    mutations = []
+    bad = copy.deepcopy(record); bad["risk_profile"] = "normal"; mutations.append(bad)
+    bad = copy.deepcopy(record); bad["owner_approval"]["candidate_sha"] = SHA_B; mutations.append(bad)
+    bad = copy.deepcopy(record); bad["manual_scope_review"]["scope_sha256"] = "e" * 64; mutations.append(bad)
+    bad = copy.deepcopy(record); bad["owner_material_review_waiver"]["recorded_by"] = "person-other"; mutations.append(bad)
+    bad = copy.deepcopy(record); bad["owner_material_review_waiver"]["one_time"] = False; mutations.append(bad)
+    for candidate in mutations:
+        with pytest.raises(runner.ReleaseManagerError):
+            runner.verified_owner_material_review_waiver(candidate, SHA_A)
+
+
+def test_explicit_owner_approve_can_record_one_time_material_review_waiver():
+    record = {
+        "release_id": runner.record_id(SHA_A),
+        "state": "production_eligible",
+        "risk_profile": "production_control_core",
+        "release_candidate": {
+            "candidate_sha": SHA_A,
+            "image": "jason-runtime:test",
+            "artifact_digest": "sha256:" + "a" * 64,
+            "mcp_image": "jason-mcp:test",
+            "mcp_artifact_digest": "sha256:" + "b" * 64,
+        },
+        "manual_scope_review": {
+            "schema_version": "1.0",
+            "candidate_sha": SHA_A,
+            "scope_sha256": "d" * 64,
+        },
+        "history": [],
+    }
+    with (
+        patch.object(runner, "load_record", return_value=record),
+        patch.object(runner, "verify_candidate_on_main"),
+        patch.object(runner, "image_id", side_effect=[
+            "sha256:" + "a" * 64, "sha256:" + "b" * 64,
+        ]),
+        patch.object(runner, "require_current_manual_scope_review"),
+        patch.object(runner, "save_record") as save,
+    ):
+        result = runner.approve_release(
+            ROOT,
+            Path("/tmp"),
+            release_id=record["release_id"],
+            candidate_sha=SHA_A,
+            source="explicit_owner_instruction",
+            waive_ccc_material_review=True,
+            waiver_reason="one-time bootstrap override",
+        )
+    assert result["owner_approval"]["approved"] is True
+    waiver = result["owner_material_review_waiver"]
+    assert waiver["status"] == "waived_by_owner"
+    assert waiver["candidate_sha"] == SHA_A
+    assert waiver["scope_sha256"] == "d" * 64
+    assert waiver["recorded_by"] == "person-al"
+    assert waiver["one_time"] is True
+    save.assert_called_once()
+
+
+def test_owner_material_review_waiver_requires_protected_core_exact_scope_and_reason():
+    import copy
+    import pytest
+    base = {
+        "release_id": runner.record_id(SHA_A),
+        "state": "production_eligible",
+        "risk_profile": "production_control_core",
+        "release_candidate": {
+            "candidate_sha": SHA_A,
+            "image": "jason-runtime:test",
+            "artifact_digest": "sha256:" + "a" * 64,
+            "mcp_image": "jason-mcp:test",
+            "mcp_artifact_digest": "sha256:" + "b" * 64,
+        },
+        "manual_scope_review": {
+            "schema_version": "1.0", "candidate_sha": SHA_A,
+            "scope_sha256": "d" * 64,
+        },
+        "history": [],
+    }
+    cases = []
+    bad = copy.deepcopy(base); bad["risk_profile"] = "normal"; cases.append((bad, "reason"))
+    bad = copy.deepcopy(base); bad.pop("manual_scope_review"); cases.append((bad, "reason"))
+    cases.append((copy.deepcopy(base), ""))
+    for record, reason in cases:
+        with (
+            patch.object(runner, "load_record", return_value=record),
+            patch.object(runner, "verify_candidate_on_main"),
+            patch.object(runner, "image_id", side_effect=[
+                "sha256:" + "a" * 64, "sha256:" + "b" * 64,
+            ]),
+            patch.object(runner, "require_current_manual_scope_review"),
+            patch.object(runner, "save_record"),
+        ):
+            with pytest.raises(runner.ReleaseManagerError):
+                runner.approve_release(
+                    ROOT,
+                    Path("/tmp"),
+                    release_id=record["release_id"],
+                    candidate_sha=SHA_A,
+                    source="explicit_owner_instruction",
+                    waive_ccc_material_review=True,
+                    waiver_reason=reason,
+                )
+
+
+def test_run_release_ccc_gate_accepts_nonzero_for_expected_candidate_transition(tmp_path):
+    import json
+    from types import SimpleNamespace
+    ccc = tmp_path / "run_ccc.py"; ccc.write_text("")
+    config = tmp_path / "ccc.json"; config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    report = _ccc_test_report()
+    report["finished_at"] = datetime.now(timezone.utc).isoformat()
+    latest.write_text(json.dumps(report))
+    with patch.object(runner.subprocess, "run", return_value=SimpleNamespace(returncode=1)):
+        evidence = runner.run_release_ccc_gate(
+            SHA_A, SHA_B, before_mutation=True,
+            ccc_runner=ccc, ccc_config=config, latest=latest,
+        )
+    assert evidence["mode"] == "candidate_transition"
+    assert evidence["technical_checks_passed"] is True
+
+
+def test_run_release_ccc_gate_accepts_nonzero_only_for_exact_owner_waiver(tmp_path):
+    import json
+    from types import SimpleNamespace
+    ccc = tmp_path / "run_ccc.py"; ccc.write_text("")
+    config = tmp_path / "ccc.json"; config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    report = _ccc_exact_missing_owner_review_report()
+    report["finished_at"] = datetime.now(timezone.utc).isoformat()
+    latest.write_text(json.dumps(report))
+    with patch.object(runner.subprocess, "run", return_value=SimpleNamespace(returncode=1)):
+        evidence = runner.run_release_ccc_gate(
+            SHA_A, SHA_B, before_mutation=True,
+            owner_material_review_waiver=_exact_owner_material_review_waiver(),
+            ccc_runner=ccc, ccc_config=config, latest=latest,
+        )
+    assert evidence["mode"] == "candidate_transition_owner_material_review_waiver"
+    assert evidence["technical_checks_passed"] is True
+
+
+def _freeze_exception_doc():
+    return {
+        "schema_version": "1.0",
+        "status": "requested",
+        "purpose": (
+            "ONE-TIME PRODUCTION FREEZE EXCEPTION + provider identity and authority recovery. "
+            "Approve authorizes exactly one deployment transaction for this SHA; the production "
+            "freeze is restored automatically afterward."
+        ),
+        "required_recovery_profile_id": "provider_identity_and_authority_recovery",
+        "rollback_sha": SHA_B,
+        "expires_at": "2099-11-02T06:00:00+00:00",
+        "standing_authority": False,
+        "restore_freeze_after_transaction": True,
+        "signed_teams_release_approval_required": True,
+        "declaration_sha256": "sha256:" + "f" * 64,
+    }
+
+
+def _freeze_recovery_context():
+    return {
+        "profile_id": "provider_identity_and_authority_recovery",
+        "candidate_sha": SHA_A,
+        "rollback_sha": SHA_B,
+    }
+
+
+def _freeze_release_record():
+    declaration = _freeze_exception_doc()
+    return {
+        "release_id": runner.record_id(SHA_A),
+        "state": "production_eligible",
+        "rollback_sha": SHA_B,
+        "release_candidate": {"candidate_sha": SHA_A},
+        "release_manifest": {
+            "candidate_sha": SHA_A,
+            "rollback_sha": SHA_B,
+            "one_transaction_freeze_exception": declaration,
+        },
+        "one_transaction_freeze_exception": declaration,
+        "manual_scope_review": {
+            "schema_version": "1.0",
+            "candidate_sha": SHA_A,
+            "baseline_sha": SHA_B,
+            "scope_sha256": "d" * 64,
+        },
+        "owner_approval": {
+            "approved": True,
+            "candidate_sha": SHA_A,
+            "source": "authenticated_mobile_teams_owner:relapproval-" + "a" * 32,
+        },
+    }
+
+
+def test_one_transaction_freeze_context_requires_signed_teams_exact_recovery():
+    import copy
+    record = _freeze_release_record()
+    with patch.object(
+        runner, "declared_one_transaction_freeze_exception",
+        return_value=_freeze_exception_doc(),
+    ):
+        context = runner.one_transaction_freeze_exception_context(
+            ROOT, Path("/tmp"), record, _freeze_recovery_context()
+        )
+        assert context is not None
+        assert context["candidate_sha"] == SHA_A
+        assert context["scope_sha256"] == "d" * 64
+        assert context["standing_authority"] is False
+
+        bad = copy.deepcopy(record)
+        bad["owner_approval"]["source"] = "explicit_owner_instruction"
+        assert runner.one_transaction_freeze_exception_context(
+            ROOT, Path("/tmp"), bad, _freeze_recovery_context()
+        ) is None
+
+        wrong_profile = dict(_freeze_recovery_context(), profile_id="authority_integrity_timeout")
+        assert runner.one_transaction_freeze_exception_context(
+            ROOT, Path("/tmp"), record, wrong_profile
+        ) is None
+
+
+
+def test_owner_unfreeze_release_requires_exact_owner_scope_and_writes_audit(tmp_path):
+    from unittest.mock import patch
+    release_id = runner.record_id(SHA_A)
+    (tmp_path / "records").mkdir()
+    marker = tmp_path / runner.PRODUCTION_FREEZE_MARKER
+    marker.write_text(
+        '{"reason":"owner freeze","remove_only_after":"new explicit exact-SHA owner unfreeze decision",'
+        '"schema_version":"1.0","scope":"manual-and-automatic-production-promotions","status":"active"}\n'
+    )
+    marker.chmod(0o600)
+    record = {
+        "release_id": release_id,
+        "state": "production_eligible",
+        "rollback_sha": SHA_B,
+        "release_candidate": {"candidate_sha": SHA_A},
+        "owner_approval": {
+            "approved": True, "candidate_sha": SHA_A,
+            "source": "explicit_owner_instruction", "recorded_at": "now",
+        },
+        "manual_scope_review": {
+            "schema_version": "1.0", "candidate_sha": SHA_A,
+            "baseline_sha": SHA_B, "scope_sha256": "d" * 64,
+        },
+        "history": [],
+    }
+    runner.atomic_json(tmp_path / "records" / (release_id + ".json"), record)
+    with patch.object(runner, "verify_candidate_on_main"), \
+         patch.object(runner, "require_current_manual_scope_review"), \
+         patch.object(runner, "live_production_alignment"):
+        receipt = runner.owner_unfreeze_release(
+            ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A
+        )
+    assert receipt["authorization"] == "explicit_exact_sha_owner_unfreeze"
+    assert receipt["automatic_publish_authority"] is False
+    assert receipt["standing_authority"] is False
+    assert receipt["status"] == "unfrozen"
+    assert not marker.exists()
+    saved = __import__("json").loads(
+        (tmp_path / "owner-explicit-unfreeze-receipts" / (release_id + ".json")).read_text()
+    )
+    assert saved["candidate_sha"] == SHA_A
+    assert saved["rollback_sha"] == SHA_B
+
+
+def test_owner_unfreeze_release_rejects_non_exact_owner_approval(tmp_path):
+    from unittest.mock import patch
+    release_id = runner.record_id(SHA_A)
+    (tmp_path / "records").mkdir()
+    marker = tmp_path / runner.PRODUCTION_FREEZE_MARKER
+    marker.write_text(
+        '{"remove_only_after":"new explicit exact-SHA owner unfreeze decision",'
+        '"scope":"manual-and-automatic-production-promotions","status":"active"}\n'
+    )
+    marker.chmod(0o600)
+    runner.atomic_json(tmp_path / "records" / (release_id + ".json"), {
+        "release_id": release_id, "state": "production_eligible", "rollback_sha": SHA_B,
+        "release_candidate": {"candidate_sha": SHA_A},
+        "owner_approval": {"approved": False},
+        "manual_scope_review": {"schema_version": "1.0", "candidate_sha": SHA_A,
+                                "baseline_sha": SHA_B, "scope_sha256": "d" * 64},
+    })
+    with patch.object(runner, "verify_candidate_on_main"):
+        with __import__("pytest").raises(runner.ReleaseManagerError, match="exact-SHA explicit Owner approval"):
+            runner.owner_unfreeze_release(
+                ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A
+            )
+    assert marker.exists()
+
+
+def test_one_transaction_freeze_begin_and_restore_are_byte_identical(tmp_path):
+    marker = tmp_path / runner.PRODUCTION_FREEZE_MARKER
+    backup = tmp_path / runner.PRODUCTION_FREEZE_BACKUP
+    raw = b'{"schema_version":"1.0","status":"active"}\n'
+    marker.write_bytes(raw); marker.chmod(0o600)
+    backup.write_bytes(raw); backup.chmod(0o600)
+    context = {
+        "release_id": runner.record_id(SHA_A),
+        "candidate_sha": SHA_A,
+        "rollback_sha": SHA_B,
+        "scope_sha256": "d" * 64,
+        "recovery_profile_id": "provider_identity_and_authority_recovery",
+        "declaration_sha256": "sha256:" + "f" * 64,
+        "owner_approval_source": "authenticated_mobile_teams_owner:relapproval-" + "a" * 32,
+    }
+    opened = runner.begin_one_transaction_freeze_exception(tmp_path, context)
+    assert not marker.exists()
+    receipt = __import__("json").loads(Path(opened["receipt_path"]).read_text())
+    assert receipt["status"] == "unfrozen_active"
+    assert receipt["standing_authority"] is False
+    assert receipt["additional_provider_or_endpoint_authority"] is False
+    runner.restore_one_transaction_freeze_exception(
+        tmp_path, opened, release_state="closed"
+    )
+    assert marker.read_bytes() == raw
+    assert marker.stat().st_mode & 0o777 == 0o600
+    receipt = __import__("json").loads(Path(opened["receipt_path"]).read_text())
+    assert receipt["freeze_restored"] is True
+    assert receipt["freeze_sha256_before"] == receipt["freeze_sha256_after"]
+    assert receipt["release_state_after"] == "closed"
+
+
+def test_stranded_one_transaction_freeze_is_restored_before_retry(tmp_path):
+    import pytest
+    backup = tmp_path / runner.PRODUCTION_FREEZE_BACKUP
+    raw = b'{"schema_version":"1.0","status":"active"}\n'
+    backup.write_bytes(raw); backup.chmod(0o600)
+    receipt_path = tmp_path / "owner-unfreeze-receipts" / (runner.record_id(SHA_A) + ".json")
+    runner.atomic_json(receipt_path, {
+        "schema_version": "2.0",
+        "authorization": "signed_teams_one_transaction_unfreeze",
+        "release_id": runner.record_id(SHA_A),
+        "freeze_restored": False,
+        "status": "unfrozen_active",
+        "freeze_mode_before": 0o600,
+        "freeze_uid_before": backup.stat().st_uid,
+        "freeze_gid_before": backup.stat().st_gid,
+        "freeze_sha256_before": __import__('hashlib').sha256(raw).hexdigest(),
+    })
+    with pytest.raises(runner.ReleaseManagerError, match="restored production freeze"):
+        runner.restore_stranded_one_transaction_freeze_under_lock(tmp_path)
+    marker = tmp_path / runner.PRODUCTION_FREEZE_MARKER
+    assert marker.read_bytes() == raw
+    receipt = __import__("json").loads(receipt_path.read_text())
+    assert receipt["freeze_restored"] is True
+    assert receipt["status"] == "stranded_transaction_restored"
+
+
+def test_freeze_exception_policy_is_production_control_core():
+    assert runner.classify_change_risk(
+        "release_blocker", ["config/production-deployment-freeze-exception.json"]
+    ) == "production_control_core"
+
+def test_approval_only_republishes_same_release_offer_when_manifest_changes(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    import json
+    import release_mobile_approval_consumer as mobile_consumer
+    import jason_runtime.mobile_release_approval as mobile_policy
+    import jason_runtime.owner_release_approval_containment as containment
+
+    hold = tmp_path / "auto-promotion-incident-hold"
+    hold.touch()
+    policy = tmp_path / "mobile-approval-policy.json"
+    policy.write_text("{}")
+    (tmp_path / "records").mkdir()
+    release_id = runner.record_id(SHA_A)
+    record = {
+        "release_id": release_id, "state": "production_eligible",
+        "risk_profile": "normal", "rollback_sha": SHA_B,
+        "release_candidate": {"candidate_sha": SHA_A},
+        "release_manifest": {"candidate_sha": SHA_A, "rollback_sha": SHA_B},
+        "preproduction": {"acceptance_passed": True, "rollback_readiness_passed": True},
+        "development": {"required_checks_passed": True},
+        "owner_approval": {"approved": False},
+    }
+    record_path = tmp_path / "records" / (release_id + ".json")
+    runner.atomic_json(record_path, record)
+    reviewed = SimpleNamespace(schema_version="1.0",
+                               allowed_risk_profiles=frozenset({"normal"}))
+    live = {"revision": SHA_B,
+            "inspect": {"Config": {"Env": ["JASON_RELEASE_MOBILE_APPROVAL_MODE=owner_only_pilot"]}}}
+    control = {"schema_version": "1.0", "circuit_breaker": {"state": "closed"},
+               "last_known_good": {"manifest": {"revision": SHA_B}}}
+    drift = {"schema_version": "1.0", "status": "pass", "problems": []}
+
+    def snapshot(state, filename):
+        return control if filename == "production-control-state.json" else drift
+
+    with (
+        patch.object(runner, "DEFAULT_STATE", tmp_path),
+        patch.object(runner, "MOBILE_APPROVAL_POLICY", policy),
+        patch.object(runner, "_read_protected_snapshot", side_effect=snapshot),
+        patch.object(runner, "live_runtime", return_value=live),
+        patch.object(runner, "live_production_alignment", return_value={}),
+        patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
+        patch.object(mobile_consumer, "_install_repo_modules"),
+        patch.object(mobile_consumer, "consume_mobile_release_decisions"),
+        patch.object(mobile_policy, "read_mobile_release_policy", return_value=reviewed),
+        patch.object(containment, "read_release_approval_containment",
+                     return_value=SimpleNamespace(active=False)),
+    ):
+        assert runner.approval_only_while_promotion_held(ROOT, tmp_path)
+        offer_path = tmp_path / "mobile-release-offers" / (release_id + ".json")
+        first = json.loads(offer_path.read_text())
+
+        changed = json.loads(record_path.read_text())
+        changed["release_manifest"]["changed_files"] = ["rebuilt-artifact.py"]
+        runner.atomic_json(record_path, changed)
+
+        assert runner.approval_only_while_promotion_held(ROOT, tmp_path)
+        second = json.loads(offer_path.read_text())
+        assert second["release_id"] == first["release_id"]
+        assert second["candidate_sha"] == first["candidate_sha"]
+        assert second["live_rollback_sha"] == first["live_rollback_sha"]
+        assert second["manifest_sha256"] != first["manifest_sha256"]
+
+
+def _provider_identity_recovery_ccc_report():
+    report = _ccc_test_report()
+    report['status'] = 'FAIL'
+    for row in report['checks']:
+        if row['check_id'] == 'runtime-source-alignment':
+            row['status'] = 'NOT_PROVEN'
+        elif row['check_id'] == 'systemd-failed-units':
+            row['status'] = 'FAIL'
+            row['evidence'] = {'failed_units': [
+                'jason-openclaw-authority-full-integrity.service loaded failed failed',
+                'jason-openclaw-authority-health.service loaded failed failed',
+                'jason-production-drift-watchdog.service loaded failed failed',
+            ]}
+        elif row['check_id'] == 'openclaw-authority-health':
+            row['status'] = 'FAIL'
+        elif row['check_id'] == 'governed-provider-boundary-canaries':
+            row['status'] = 'FAIL'
+            row['evidence'] = {
+                'expected_canary_count': 8,
+                'failures': [{
+                    'name': 'autotask',
+                    'provider': 'autotask',
+                    'status': 'failed',
+                    'error_code': 'OPENBAO_AUTH_FAILED',
+                    'expected_status': 'denied',
+                }],
+                'results': [{
+                    'name': 'autotask',
+                    'provider': 'autotask',
+                    'status': 'failed',
+                    'error_code': 'OPENBAO_AUTH_FAILED',
+                    'expected_status': 'denied',
+                }],
+            }
+    return report
+
+
+def _provider_identity_recovery_context():
+    return {
+        'schema_version': '1.0',
+        'profile_id': 'provider_identity_and_authority_recovery',
+        'candidate_sha': SHA_A,
+        'rollback_sha': SHA_B,
+        'owner_approval_required': True,
+    }
+
+
+def test_recovery_ccc_preflight_allows_only_exact_provider_identity_signature():
+    report = _provider_identity_recovery_ccc_report()
+    evidence = runner.verify_release_ccc_report(
+        report, candidate_sha=SHA_A, runtime_sha=SHA_B,
+        before_mutation=True,
+        recovery_context=_provider_identity_recovery_context(),
+    )
+    assert evidence['status'] == 'FAIL'
+    assert evidence['mode'] == 'approved_provider_identity_recovery_preflight'
+    assert evidence['recovery_preflight_exception'] is True
+
+
+def test_recovery_ccc_preflight_allows_healed_optional_authority_failures():
+    report = _provider_identity_recovery_ccc_report()
+    for row in report['checks']:
+        if row['check_id'] in {'systemd-failed-units', 'openclaw-authority-health'}:
+            row['status'] = 'PASS'
+            row.pop('evidence', None)
+    evidence = runner.verify_release_ccc_report(
+        report, candidate_sha=SHA_A, runtime_sha=SHA_B,
+        before_mutation=True,
+        recovery_context=_provider_identity_recovery_context(),
+    )
+    assert evidence['status'] == 'FAIL'
+    assert evidence['mode'] == 'approved_provider_identity_recovery_preflight'
+    assert evidence['recovery_preflight_exception'] is True
+
+
+def test_recovery_ccc_preflight_exception_fails_closed_on_drift():
+    import copy
+    import pytest
+    cases = []
+    wrong_profile = _provider_identity_recovery_context()
+    wrong_profile['profile_id'] = 'authority_integrity_timeout'
+    cases.append((_provider_identity_recovery_ccc_report(), wrong_profile))
+
+    unrelated = _provider_identity_recovery_ccc_report()
+    check = next(x for x in unrelated['checks'] if x['check_id'] == 'systemd-failed-units')
+    check['evidence']['failed_units'].append('jason-unrelated.service loaded failed failed')
+    cases.append((unrelated, _provider_identity_recovery_context()))
+
+    wrong_error = _provider_identity_recovery_ccc_report()
+    canary = next(x for x in wrong_error['checks'] if x['check_id'] == 'governed-provider-boundary-canaries')
+    canary['evidence']['failures'][0]['error_code'] = 'DIFFERENT_ERROR'
+    canary['evidence']['results'][0]['error_code'] = 'DIFFERENT_ERROR'
+    cases.append((wrong_error, _provider_identity_recovery_context()))
+
+    extra = _provider_identity_recovery_ccc_report()
+    next(x for x in extra['checks'] if x['check_id'] == 'j900-release-validation')['status'] = 'FAIL'
+    cases.append((extra, _provider_identity_recovery_context()))
+
+    for report, context in cases:
+        with pytest.raises(runner.ReleaseManagerError, match='pre-mutation CCC denied'):
+            runner.verify_release_ccc_report(
+                report, candidate_sha=SHA_A, runtime_sha=SHA_B,
+                before_mutation=True, recovery_context=context,
+            )
+
+
+def test_recovery_ccc_exception_is_never_valid_post_mutation():
+    import pytest
+    report = _provider_identity_recovery_ccc_report()
+    report['runtime_revision'] = SHA_A
+    with pytest.raises(runner.ReleaseManagerError, match='post-mutation CCC'):
+        runner.verify_release_ccc_report(
+            report, candidate_sha=SHA_A, runtime_sha=SHA_A,
+            before_mutation=False,
+            recovery_context=_provider_identity_recovery_context(),
+        )
+
+
+def test_eligible_release_record_prefers_latest_valid_retry(tmp_path):
+    import release_manager_host_runner as runner
+    sha = 'a' * 40
+    root = tmp_path / 'state'
+    (root / 'records').mkdir(parents=True)
+    base = runner.record_id(sha)
+    runner.atomic_json(runner.record_path(root, base), {
+        'release_id': base, 'state': 'failed',
+        'release_candidate': {'candidate_sha': sha},
+        'release_manifest': {'candidate_sha': sha},
+    })
+    for n, state in [(1, 'production_eligible'), (2, 'production_eligible')]:
+        rid = f'{base}-retry-{n}'
+        runner.atomic_json(runner.record_path(root, rid), {
+            'release_id': rid, 'state': state,
+            'release_candidate': {'candidate_sha': sha},
+            'release_manifest': {'candidate_sha': sha},
+        })
+    rid, record = runner._eligible_release_record_for_sha(root, sha)
+    assert rid == base + '-retry-2'
+    assert record['state'] == 'production_eligible'

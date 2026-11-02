@@ -138,9 +138,43 @@ def resolve_approved_client_message(
     workflow_id: str,
     template_id: str,
     path: Path | None = None,
+    ticket_number: str | None = None,
 ) -> ApprovedClientMessage:
     wanted_workflow = _nonempty_text(workflow_id, field="workflow_id")
     wanted_template = _nonempty_text(template_id, field="template_id")
+    # Preserve all existing exact static approved-workflow messages unchanged.
+    # Client questions have a separate activation profile and may only add one
+    # bounded, authoritative ticket reference to immutable approved wording.
+    from .client_information_requests import (
+        CLIENT_QUESTION_WORKFLOW_ID,
+        client_question_profile_enabled,
+        load_round1_catalog,
+        render_question,
+        ClientQuestionError,
+    )
+    if wanted_workflow == CLIENT_QUESTION_WORKFLOW_ID:
+        if not client_question_profile_enabled():
+            raise ApprovedClientMessageRegistryError(
+                "client information request profile is disabled"
+            )
+        try:
+            catalog = load_round1_catalog()
+            question = catalog.by_template_id(wanted_template)
+            if question.review_class != "routine":
+                raise ClientQuestionError("CLIENT_QUESTION_HUMAN_REVIEW_REQUIRED")
+            body = render_question(question, str(ticket_number or ""), catalog=catalog)
+        except ClientQuestionError as exc:
+            raise ApprovedClientMessageRegistryError(
+                "client information request not approved for this ticket"
+            ) from exc
+        return ApprovedClientMessage(
+            template_id=question.template_id,
+            workflow_id=CLIENT_QUESTION_WORKFLOW_ID,
+            title=question.title,
+            body=body,
+            recipient_policy="ticket_contact",
+            require_email_notifications=True,
+        )
 
     matches = tuple(
         item

@@ -51,6 +51,7 @@ Before a release is admitted:
 1. resolve exact candidate SHA;
 2. resolve exact current healthy production SHA as rollback SHA;
 3. verify candidate is reachable from protected `origin/main`;
+   At **promotion time**, the exact candidate SHA must additionally equal the latest independently fetched protected `main` HEAD and descend from the live verified rollback baseline. This applies to manual and automatic releases. A previously approved/pre-production-verified candidate that has been superseded is rejected **before production mutation** and must be reprepared and reapproved from current protected source. No active development checkout or unmerged worktree is rewritten to satisfy this gate.
 4. verify required protected GitHub checks;
 5. record changed files;
 6. classify protected-core impact;
@@ -316,3 +317,35 @@ production_control_core. The owner-only V1 Teams pilot (normal risk)
 cannot authorize installing it. Use independent reviewed high-impact
 owner release approval and CCC, and do not mark Support issue #1099
 closed without postrelease bridge/MCP acceptance evidence.
+
+## 25. Governed Open-Breaker Recovery Releases
+
+An open production circuit breaker normally blocks every promotion. A narrowly bounded exception exists only for a **release-blocker recovery** that repairs the exact fresh drift condition keeping the breaker open.
+
+The exception is controlled by `config/open-breaker-recovery-policy.json`. A recovery profile is source-reviewed and must identify:
+
+- one `release_blocker` change class;
+- the `production_control_core` risk class;
+- an exact bounded set of failed Jason system/user units;
+- the exact repair files that must be present in the candidate;
+- a maximum changed-file count.
+
+A recovery release is eligible to receive a Teams Owner card only when all ordinary immutable-release evidence already exists: exact protected-main SHA, exact rollback/LKG SHA, green required checks, isolated preproduction acceptance, rollback readiness, provider mutations disabled, and a current recorded manual scope review. Live runtime, MCP, and host must still align to the exact rollback/LKG revision. The fresh root-published drift set must match exactly one reviewed recovery profile; unrelated drift blocks the exception.
+
+The approval-only worker remains nonexecuting. It may publish or consume the normal signed Owner Teams card while the breaker is open only for a matching recovery profile. Production recovery requires `owner_approval.source` to originate from `authenticated_mobile_teams_owner:relapproval-*`; CLI approval, chat text, GitHub comments, local files, shell state, or policy edits cannot satisfy the recovery gate.
+
+At promotion, the ordinary breaker revalidation runs first. Only if that normal path fails may Release Manager re-evaluate the open-breaker recovery profile under the same serialized production transaction. The profile, exact SHA, rollback SHA, scope review, live/LKG alignment, fresh drift set, and signed Teams approval are all re-read before the first mutation. A changed or additional drift problem stops the release.
+
+The open breaker is **not** treated as clean during deployment. The exact immutable LKG manifest remains the rollback baseline. The forward release must still pass normal deployment, host reconciliation, functional smoke, independent CCC, and final desired-state drift verification. Last-known-good advancement and breaker closure remain delegated to the existing root transition worker and occur only after clean post-release drift is independently proven. Failure follows the normal deterministic rollback path.
+
+The `provider_identity_and_authority_recovery` profile is additionally allowed to enter the transaction when the LKG runtime is running but reports only the exact reviewed ticket-worker degradation (`HTTP 503`, `process_not_alive`, `restart_budget_exhausted:missing_process`) and fresh drift is exactly the reviewed authority-health plus DNSFilter reconciliation failures. Release Manager never labels that state healthy. It allows the candidate runtime to reach host reconciliation in that exact transitional state; the root host transaction must then perform the Teams-bound OpenBao identity recovery, restart the exact candidate runtime/MCP, prove fresh Autotask and DNSFilter success, and restore ordinary healthy runtime before final release verification. Any other runtime degradation or additional drift fails closed.
+
+## 26. Exact-release Owner Unfreeze
+
+The blanket `production-deployment-freeze` remains stronger than ordinary release approval. For a normal release, it may now be lifted only through the governed Release Manager `unfreeze-release` action.
+
+That action requires the exact release ID and candidate SHA, a `production_eligible` release, current protected-main identity, explicit Owner approval bound to the same SHA, a fresh complete manual scope review, and verified alignment to the recorded live rollback baseline. The existing freeze marker must be a safe private regular file whose policy explicitly requires a new exact-SHA Owner unfreeze decision.
+
+Before removing the marker, Release Manager writes a private durable receipt binding the release ID, candidate SHA, rollback SHA, scope digest, Owner approval source, and pre-unfreeze freeze digest. The receipt explicitly grants neither standing deployment authority nor automatic-publish authority. A conflicting receipt, stale scope, changed source, unsafe marker, or baseline mismatch fails closed.
+
+This action only removes the blanket freeze for the reviewed release workflow. Production promotion still requires all ordinary Release Manager gates. Automatic publishing remains disabled until separately authorized and deployed.

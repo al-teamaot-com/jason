@@ -5,6 +5,16 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IMAGE="${JASON_RUNTIME_PRODUCTION_IMAGE:-jason-runtime:production}"
 REVISION="${JASON_SOURCE_REVISION_OVERRIDE:-}"
 COMPLETION_TEAMS_PROFILE="${JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE:-person-al-v1}"
+if [ "${JASON_PM_V2_CONTROL_PROFILE+x}" = "x" ]; then
+  PM_V2_CONTROL_PROFILE="$JASON_PM_V2_CONTROL_PROFILE"
+else
+  PM_V2_CONTROL_PROFILE="$(
+    docker inspect jason-runtime --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null |
+      sed -n 's/^JASON_PM_V2_CONTROL_PROFILE=//p' |
+      tail -n 1
+  )"
+fi
+PM_V2_SHARED_ROOT="${JASON_PM_V2_SHARED_ROOT:-/var/lib/jason/openclaw/pm-v2}"
 if [ "${JASON_QUICKBOOKS_READ_PROFILE+x}" = "x" ]; then
   QUICKBOOKS_READ_PROFILE="$JASON_QUICKBOOKS_READ_PROFILE"
 else
@@ -14,6 +24,65 @@ else
       tail -n 1
   )"
 fi
+
+# Source-declared v13 and last-known-good v10 are both exact-SHA reviewed.
+# PM v10's non-mutating preflight does not inject profile variables; enforce
+# immutable source and verify the current container's known-good profile
+# independently instead of weakening the actual release activation contract.
+PROFILE_PAIR="$(
+  python3 - "$REPO_ROOT/config/autotask-entity-read-profile.json" <<'PY'
+import json, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+if p.is_symlink() or not p.is_file():
+    raise SystemExit("DENIED: immutable Autotask read/rollback profile absent")
+o = json.loads(p.read_text(encoding="utf-8"))
+allowed = {"itglue-autotask-entra-procurement-billing-reconciliation-catalog-v10",
+           "itglue-autotask-entra-comprehensive-entity-read-catalog-v11",
+           "itglue-autotask-entra-dynamic-schema-read-catalog-v13"}
+if (not isinstance(o, dict)
+        or set(o) != {"schema_version", "read_profile", "rollback_read_profile"}
+        or o.get("schema_version") != "1.0"
+        or o.get("read_profile") not in allowed
+        or o.get("rollback_read_profile") not in allowed):
+    raise SystemExit("DENIED: unapproved Autotask candidate/rollback profile pair")
+print(o["read_profile"] + "|" + o["rollback_read_profile"])
+PY
+)" || exit 2
+IFS='|' read -r SOURCE_READ_PROFILE DECLARED_ROLLBACK_PROFILE <<< "$PROFILE_PAIR"
+# Optional PM overrides never supersede the exact source contract.
+if [ -n "${JASON_PROVIDER_READ_ACTIVATION_PROFILE:-}" ] &&
+   [ "$JASON_PROVIDER_READ_ACTIVATION_PROFILE" != "$SOURCE_READ_PROFILE" ]; then
+  echo "DENIED: invoking candidate provider-read profile differs from reviewed source" >&2
+  exit 2
+fi
+if [ -n "${JASON_PROVIDER_READ_ROLLBACK_PROFILE:-}" ] &&
+   [ "$JASON_PROVIDER_READ_ROLLBACK_PROFILE" != "$DECLARED_ROLLBACK_PROFILE" ]; then
+  echo "DENIED: invoking rollback provider-read profile differs from reviewed source" >&2
+  exit 2
+fi
+case "$IMAGE" in
+  jason-runtime:rollback-current)
+    # Original v10 code/image may have no source declaration of its own.
+    # On exact native rollback use the current candidate's reviewed LKG pair.
+    AUTOTASK_READ_PROFILE="$DECLARED_ROLLBACK_PROFILE"
+    ;;
+  *)
+    # During runtime->MCP transition only verify this service's previous
+    # profile; the other service may legitimately be on the new revision.
+    LIVE_READ_PROFILE="$(docker inspect jason-runtime --format '{{range .Config.Env}}{{println .}}{{end}}' |
+      sed -n 's/^JASON_PROVIDER_READ_ACTIVATION_PROFILE=//p')"
+    # Permit an existing exact source-bound profile to be upgraded in place,
+    # while preserving the separately declared known-good rollback profile.
+    # Unknown or unrelated profiles remain denied before any deployment.
+    if [ "$LIVE_READ_PROFILE" != "$DECLARED_ROLLBACK_PROFILE" ] &&
+       [ "$LIVE_READ_PROFILE" != "$SOURCE_READ_PROFILE" ]; then
+      echo "DENIED: current service profile is neither approved source nor LKG" >&2
+      exit 2
+    fi
+    AUTOTASK_READ_PROFILE="$SOURCE_READ_PROFILE"
+    ;;
+esac
 
 if [ -z "$REVISION" ]; then
   REVISION="$(docker image inspect "$IMAGE" --format '{{index .Config.Labels "com.teamaot.jason.source_revision"}}' 2>/dev/null || true)"
@@ -79,14 +148,55 @@ case "$OWNER_UAT_MODE:$OWNER_UAT_WORKER" in
   *) echo "DENIED: UAT manifest activation returned unsupported mode" >&2; exit 2 ;;
 esac
 
+# Owner-reviewed release approval is source-bound. Preproduction can validate
+# the exact candidate declaration but always runs the approval lane OFF.
+SOURCE_RELEASE_APPROVAL_MODE="$(python3 - "$REPO_ROOT/config/mobile-release-approval-policy.json" <<'PY2'
+import json, sys
+from pathlib import Path
+p=Path(sys.argv[1])
+if p.is_symlink() or not p.is_file():
+    raise SystemExit("DENIED: immutable mobile release approval policy absent")
+d=json.loads(p.read_text(encoding="utf-8"))
+if (d.get("schema_version") != "2.0"
+        or d.get("organization_id") != "aot"
+        or d.get("policy_mode") != "owner_reviewed"
+        or d.get("owner_identity_ids") != ["person-al"]
+        or set(d.get("allowed_risk_profiles") or []) != {"normal", "production_control_core"}
+        or d.get("ttl_seconds") not in range(300, 901)
+        or d.get("capability") != "release.production.approve"
+        or d.get("high_impact_review") != {
+            "owner_exact_sha_required": True,
+            "signed_teams_identity_required": True,
+            "independent_ccc_required": True,
+            "protected_release_gates_unchanged": True,
+        }):
+    raise SystemExit("DENIED: source mobile release approval policy is not the reviewed owner V2 contract")
+print("owner_reviewed")
+PY2
+)" || exit 2
+if [ ${#UAT_PREFLIGHT[@]} -gt 0 ]; then
+  RELEASE_APPROVAL_MODE="off"
+elif [ "$IMAGE" = "jason-runtime:rollback-current" ]; then
+  RELEASE_APPROVAL_MODE="${JASON_RELEASE_MOBILE_APPROVAL_ROLLBACK_MODE:-off}"
+  case "$RELEASE_APPROVAL_MODE" in owner_only_pilot|owner_reviewed|off) ;; *) echo "DENIED: invalid rollback release approval mode" >&2; exit 2;; esac
+else
+  if [ "${JASON_RELEASE_MOBILE_APPROVAL_MODE:-}" != "$SOURCE_RELEASE_APPROVAL_MODE" ]; then
+    echo "DENIED: invoking release approval mode differs from reviewed source" >&2
+    exit 2
+  fi
+  RELEASE_APPROVAL_MODE="$SOURCE_RELEASE_APPROVAL_MODE"
+fi
+
 exec python3 "$REPO_ROOT/tools/deploy_live_container.py"   --live jason-runtime   --image "$IMAGE"   --rollback "$ROLLBACK"   --source-revision "$REVISION"   --harden \
   --set-env "JASON_OWNER_UAT_MODE=$OWNER_UAT_MODE" \
   --set-env "JASON_OWNER_UAT_WORKER_ENABLED=$OWNER_UAT_WORKER" \
   --set-env "JASON_OWNER_UAT_SESSION_ID=$OWNER_UAT_SESSION" \
-  --set-env "JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE=$COMPLETION_TEAMS_PROFILE" \
+  --set-env "JASON_RELEASE_MOBILE_APPROVAL_MODE=$RELEASE_APPROVAL_MODE" \
+  --set-env "JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE=$COMPLETION_TEAMS_PROFILE"   --set-env "JASON_PM_V2_CONTROL_PROFILE=$PM_V2_CONTROL_PROFILE"   --set-env "JASON_PM_V2_SHARED_ROOT=$PM_V2_SHARED_ROOT" \
   --set-env "JASON_QUICKBOOKS_OPENBAO_ROLE_ID_PATH=$QBO_MOUNT_BASE/role_id" \
   --set-env "JASON_QUICKBOOKS_OPENBAO_SECRET_ID_PATH=$QBO_MOUNT_BASE/secret_id" \
   --set-env "JASON_QUICKBOOKS_OAUTH_DB=$QBO_DB" \
+  --set-env "JASON_PROVIDER_READ_ACTIVATION_PROFILE=$AUTOTASK_READ_PROFILE" \
   --set-env "JASON_QUICKBOOKS_READ_PROFILE=$QUICKBOOKS_READ_PROFILE" \
   --set-env "JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID=${JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID:-}" \
   --add-readonly-bind "$QBO_ROLE_HOST:$QBO_MOUNT_BASE/role_id" \

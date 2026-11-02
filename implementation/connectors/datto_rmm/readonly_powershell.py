@@ -227,7 +227,14 @@ class ReadOnlyPowerShellClassifier:
                 sensitive=bool(sensitive_reasons),
             )
 
-        raw_tokens = [match.group(1) for match in COMMAND_TOKEN.finditer(text)]
+        # An event channel name's Microsoft-Windows prefix is provider data,
+        # not an executable command. Do not alter the command sent to Windows.
+        token_text = re.sub(
+            r"(?i)(?<![\w])Microsoft-Windows-(?=[A-Za-z0-9_-]+/)",
+            "EventProvider/",
+            text,
+        )
+        raw_tokens = [match.group(1) for match in COMMAND_TOKEN.finditer(token_text)]
         if not raw_tokens:
             return PowerShellClassification(
                 "uncertain",

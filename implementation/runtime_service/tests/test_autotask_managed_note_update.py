@@ -289,3 +289,52 @@ def test_update_rejects_note_changed_after_plan_preparation_before_patch():
         connector.execute(_request(description="new body"))
     assert transport.note_reads == 2
     assert not any(r["method"] == "PATCH" for r in transport.requests)
+
+
+
+def test_readonly_triage_managed_note_update_verified_and_exact_title_only():
+    title = "Jason - Governed Read-Only Investigation"
+    transport = _Transport(
+        title=title, description="Previously verified Jason evidence",
+    )
+    result = _connector(transport).execute(
+        _request(title=title, description="New verified diagnostic evidence")
+    )
+    assert result.data["jasonVerification"]["readbackVerified"] is True
+    assert result.data["jasonVerification"]["ticketNoteId"] == 456
+    assert transport.note["description"] == "New verified diagnostic evidence"
+    assert transport.note["creatorResourceID"] == 29682930
+    assert sum(x["method"] == "PATCH" for x in transport.requests) == 1
+
+    for invalid in (
+        "Jason - Governed Read-Only Investigation for another ticket",
+        "Jason - Governed Read-Only Investigation (customer visible)",
+        "Jason - Governed Read-Only Investigation Copy",
+    ):
+        other = _Transport(title=invalid)
+        with pytest.raises(PermissionError, match="TITLE_NOT_ALLOWED"):
+            _connector(other).execute(
+                _request(title=invalid, description="inappropriate mutation")
+            )
+        assert not any(x["method"] == "PATCH" for x in other.requests)
+
+
+def test_readonly_triage_note_still_rejects_external_owner_and_public_visibility():
+    title = "Jason - Governed Read-Only Investigation"
+    other = _Transport(title=title, creator=7654)
+    with pytest.raises(
+        AutotaskManagedNoteUpdateVerificationError,
+        match="creator does not match",
+    ):
+        _connector(other).execute(
+            _request(title=title, description="must remain unchanged")
+        )
+    assert not any(x["method"] == "PATCH" for x in other.requests)
+    public = _Transport(title=title, publish=1)
+    with pytest.raises(
+        (AutotaskManagedNoteUpdateVerificationError, PermissionError),
+    ):
+        _connector(public).execute(
+            _request(title=title, description="must remain private")
+        )
+    assert not any(x["method"] == "PATCH" for x in public.requests)
