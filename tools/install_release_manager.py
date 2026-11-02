@@ -89,6 +89,11 @@ def main() -> int:
 
     copy_mode(ROOT / "tools" / "release_manager_host_runner.py", LIB / "release_manager_host_runner.py", 0o755)
     copy_mode(ROOT / "tools" / "release_manager_gate.py", LIB / "release_manager_gate.py", 0o644)
+    # The installed PM invokes the genuine authenticated MCP read acceptance
+    # gate before release close. Its source-bound helper must be installed
+    # atomically with the entrypoint on all future native N -> N+1 upgrades.
+    copy_mode(ROOT / "tools" / "production_read_canary_gate.py",
+              LIB / "production_read_canary_gate.py", 0o644)
     copy_mode(ROOT / "tools" / "worker_execution_enrollment.py", LIB / "worker_execution_enrollment.py", 0o644)
     copy_mode(
         ROOT / "infrastructure" / "openclaw-operations" / "systemd" / "user" / "jason-release-manager.service",

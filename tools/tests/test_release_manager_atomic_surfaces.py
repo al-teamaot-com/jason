@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -62,6 +63,17 @@ def record():
             "mcp_image": "jason-mcp:test-a",
             "mcp_artifact_digest": "sha256:mcp-a",
         },
+        # Exercise real rollback fault injection AFTER the production-input
+        # contract gate; no test may bypass that new fail-closed check.
+        "preproduction": {
+            "acceptance_passed": True,
+            "native_deploy_contract_digest": runner.native_deploy_contract_digest({
+                "JASON_RUNTIME_PRODUCTION_IMAGE": "jason-runtime:test-a",
+                "JASON_MCP_PRODUCTION_IMAGE": "jason-mcp:test-a",
+                "JASON_SOURCE_REVISION_OVERRIDE": SHA_A,
+                "JASON_RELEASE_MOBILE_APPROVAL_MODE": "owner_reviewed",
+            }),
+        },
         "history": [],
     }
 
@@ -83,6 +95,9 @@ def create_candidate_scripts(candidate_tree: Path) -> None:
         path = candidate_tree / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("#!/bin/sh\n", encoding="utf-8")
+    policy = candidate_tree / "config/mobile-release-approval-policy.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_bytes((ROOT / "config/mobile-release-approval-policy.json").read_bytes())
 
 
 def fake_gate(_repo, _state_root, release, target):
@@ -93,7 +108,7 @@ def fake_gate(_repo, _state_root, release, target):
 
 
 @pytest.fixture(autouse=True)
-def atomic_release_sandbox(monkeypatch):
+def atomic_release_sandbox(monkeypatch, tmp_path):
     """Exercise the transaction under real gates, with NO host/Docker access.
 
     The original legacy fixture predated mandatory release manifest and CCC
@@ -101,7 +116,43 @@ def atomic_release_sandbox(monkeypatch):
     unit harness aligned with the validated source contract while stubbing
     only the external effects, not the rollback execution path itself.
     """
+    live_policy = tmp_path / "live-mobile-release-approval-policy.json"
+    live_policy.write_text(json.dumps({
+        "schema_version": "1.0",
+        "organization_id": "aot",
+        "policy_mode": "owner_only_pilot",
+        "owner_identity_ids": ["person-al"],
+        "allowed_risk_profiles": ["normal"],
+        "ttl_seconds": 900,
+        "capability": "release.production.approve",
+    }) + "\n", encoding="utf-8")
+    live_policy.chmod(0o600)
+    monkeypatch.setattr(runner, "MOBILE_APPROVAL_POLICY", live_policy)
+    # Atomic transaction tests must never depend on a host Docker daemon.
+    # Individual tests can still override this baseline read when simulating
+    # candidate/rollback transitions.
+    monkeypatch.setattr(
+        runner, "live_runtime",
+        lambda: {
+            "revision": SHA_B,
+            "image_id": BASELINE_RUNTIME_IMAGE,
+            "inspect": {
+                "Config": {
+                    "Env": ["JASON_RELEASE_MOBILE_APPROVAL_MODE=owner_only_pilot"]
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(
+        runner, "live_release_mobile_approval_mode",
+        lambda runtime: (
+            "owner_reviewed" if str((runtime or {}).get("revision") or "") == SHA_A
+            else "owner_only_pilot"
+        ),
+    )
     monkeypatch.setattr(runner, "verify_candidate_on_main", lambda *a: None)
+    monkeypatch.setattr(runner, "require_current_protected_release_source", lambda *a: None)
+    monkeypatch.setattr(runner, "require_current_manual_scope_review", lambda *a: None)
     monkeypatch.setattr(runner, "run_release_ccc_gate",
                         lambda *a, **k: {"status": "PASS",
                                         "mode": "candidate_transition" if k.get("before_mutation") else "live_certified"})
@@ -221,15 +272,30 @@ def test_atomic_deploy_updates_runtime_mcp_host_and_release_manager_before_close
                 "install_release_manager_from_current",
                 side_effect=manager,
             ),
-            patch.object(
-                runner,
-                "publish_production_closeout",
-                return_value={"documentation": "pass", "control_board": "pass"},
-            ),
+            patch.object(runner, "publish_production_closeout") as published,
+            patch.object(runner, "write_owner_notification_event") as notified,
+            patch.object(runner, "open_circuit_breaker") as breaker,
         ):
             result = runner.deploy_production(ROOT, state_root, record())
 
         assert result["state"] == "closed"
+        assert "failure" not in result
+        breaker.assert_not_called()
+        # Administrative publication still does not execute within live
+        # promotion. Production lifecycle notifications are durable status
+        # events and are intentionally emitted independently of publication.
+        published.assert_not_called()
+        assert [
+            call.args[2] for call in notified.call_args_list
+        ] == ["production_push_started", "production_push_result"]
+        assert (
+            notified.call_args_list[-1].kwargs["result_status"]
+            == "verified_success"
+        )
+        assert result["administrative_closeout"]["needs_retry"] is True
+        assert result["administrative_closeout"]["documentation_control_board"]["status"] == "pending"
+        assert result["administrative_closeout"]["owner_notification"]["status"] == "pending"
+        assert result["production"]["documentation_reconciliation"] == "pending"
         assert events[:4] == [
             "runtime",
             "mcp",

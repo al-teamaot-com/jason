@@ -24,6 +24,8 @@ from orchestrator.provider_read_capability_catalog import (
     SERVICE_COMPANY_READ,
     SERVICE_CONFIGURATION_SEARCH,
     SERVICE_CONTACT_READ,
+    SERVICE_CONTACT_SEARCH,
+    SERVICE_NOTIFICATION_HISTORY_SEARCH,
     SERVICE_ENTITY_FIELDS_DESCRIBE,
     SERVICE_RESOURCE_READ,
     SERVICE_TICKET_NOTES_SEARCH,
@@ -598,3 +600,114 @@ def test_autonomy_worker_policy_allows_configuration_search() -> None:
     assert release.allowed is True
     assert "internal_autonomy_production_worker" in release.authorization_basis
     assert "autonomous-worker-read-v1" in release.authorization_basis
+
+
+@pytest.mark.parametrize("capability", (
+    SERVICE_TICKET_READ,
+    SERVICE_CONTACT_READ,
+    SERVICE_TICKET_NOTES_SEARCH,
+    SERVICE_NOTIFICATION_HISTORY_SEARCH,
+))
+def test_client_question_read_policy_requires_exact_activation_and_service_identity(
+    monkeypatch, capability,
+):
+    from orchestrator.autotask_information_authorizer import (
+        _AUTONOMOUS_CLIENT_QUESTION_POLICY,
+    )
+    request = _request(
+        capability,
+        requester_kind="service",
+        principal_id="jason-autonomy-worker",
+        policy_ids=(_AUTONOMOUS_CLIENT_QUESTION_POLICY,),
+    )
+    delegate = _Delegate({"provider": "autotask", "data": {"items": []}})
+    authorizer = AutotaskImpersonationInformationAuthorizer(
+        delegate=delegate, bindings=_Bindings(None)
+    )
+    monkeypatch.delenv("JASON_CLIENT_INFORMATION_REQUEST_PROFILE", raising=False)
+    no_profile = authorizer.invoke(
+        request=request, resolution=_resolution(capability)
+    )
+    assert no_profile.information_authorization.require_allowed(
+        InformationAction.RELEASE
+    ).allowed is False
+
+    monkeypatch.setenv("JASON_CLIENT_INFORMATION_REQUEST_PROFILE", "approved-round1-v1")
+    authorized = authorizer.invoke(
+        request=request, resolution=_resolution(capability)
+    )
+    decision = authorized.information_authorization.require_allowed(
+        InformationAction.RELEASE
+    )
+    assert decision.allowed is True
+    assert "internal_client_question_evidence" in decision.authorization_basis
+
+    wrong_principal = _request(
+        capability,
+        requester_kind="service",
+        principal_id="some-other-service",
+        policy_ids=(_AUTONOMOUS_CLIENT_QUESTION_POLICY,),
+    )
+    denied = authorizer.invoke(
+        request=wrong_principal, resolution=_resolution(capability)
+    )
+    assert denied.information_authorization.require_allowed(
+        InformationAction.RELEASE
+    ).allowed is False
+
+
+def test_client_question_read_policy_does_not_authorize_unrelated_ticket_search(
+    monkeypatch,
+):
+    monkeypatch.setenv("JASON_CLIENT_INFORMATION_REQUEST_PROFILE", "approved-round1-v1")
+    request = _request(
+        SERVICE_TICKET_SEARCH,
+        requester_kind="service",
+        principal_id="jason-autonomy-worker",
+        policy_ids=("autonomous-client-question-read-v1",),
+    )
+    invocation = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"items": []}}),
+        bindings=_Bindings(None),
+    ).invoke(request=request, resolution=_resolution(SERVICE_TICKET_SEARCH))
+    assert invocation.information_authorization.require_allowed(
+        InformationAction.RELEASE
+    ).allowed is False
+
+
+
+@pytest.mark.parametrize("profile,policy,principal,allow", (
+    ("", "autonomous-ticket-contact-context-read-v1", "jason-autonomy-worker", False),
+    ("approved-v1", "autonomous-worker-read-v1", "jason-autonomy-worker", False),
+    ("approved-v1", "autonomous-ticket-contact-context-read-v1", "other-service", False),
+    ("approved-v1", "autonomous-ticket-contact-context-read-v1", "jason-autonomy-worker", True),
+))
+def test_ticket_contact_context_requires_explicit_profile_policy_and_principal(
+        monkeypatch, profile, policy, principal, allow):
+    monkeypatch.setenv("JASON_TICKET_CONTACT_CONTEXT_PROFILE", profile)
+    request = _request(
+        SERVICE_CONTACT_READ, requester_kind="service",
+        principal_id=principal, policy_ids=(policy,),
+    )
+    result = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"item": {"id": 42}}}),
+        bindings=_Bindings(None),
+    ).invoke(request=request, resolution=_resolution(SERVICE_CONTACT_READ))
+    release = result.information_authorization.require_allowed(InformationAction.RELEASE)
+    assert release.allowed is allow
+    if allow:
+        assert "internal_autonomy_ticket_contact_context" in release.authorization_basis
+
+
+def test_ticket_contact_profile_does_not_authorize_contact_enumeration(monkeypatch):
+    monkeypatch.setenv("JASON_TICKET_CONTACT_CONTEXT_PROFILE", "approved-v1")
+    request = _request(
+        SERVICE_CONTACT_SEARCH, requester_kind="service",
+        principal_id="jason-autonomy-worker",
+        policy_ids=("autonomous-ticket-contact-context-read-v1",),
+    )
+    result = AutotaskImpersonationInformationAuthorizer(
+        delegate=_Delegate({"provider": "autotask", "data": {"items": []}}),
+        bindings=_Bindings(None),
+    ).invoke(request=request, resolution=_resolution(SERVICE_CONTACT_SEARCH))
+    assert result.information_authorization.require_allowed(InformationAction.RELEASE).allowed is False

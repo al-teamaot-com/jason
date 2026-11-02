@@ -124,6 +124,27 @@ a per-SHA named review. Existing manual `approve` and
 `record_ccc_material_review.py` commands remain an authenticated **break-glass
 fallback**, not a routine requirement.
 
+## Redundant signed decision after an explicit exact-SHA owner grant
+
+An exact release may already have a valid `explicit_owner_instruction` approval
+when a previously issued full-release Teams card later produces a valid signed
+Approve decision for the **same candidate SHA and immutable manifest**. The host
+consumer treats that later decision as redundant audit evidence only:
+
+- it does not replace or relabel the existing explicit owner authority;
+- it does not call `approve_release()` again;
+- it does not create a CCC material-review artifact;
+- it writes a replay-protected processed marker identifying the redundant signed
+  decision and records `authority_mutated=false`;
+- candidate-SHA or manifest mismatch still fails closed.
+
+This rule applies only to a redundant **full-release** decision. A separately
+issued `review_only` CCC material-review decision remains independently
+actionable and continues through its existing signed-evidence validation path.
+This prevents the five-minute Release Manager service from failing merely
+because two independently valid owner channels refer to the same exact release,
+without allowing either channel to broaden or inherit authority.
+
 ## Initial limits and production dependencies
 
 - The pilot applies to exact normal-risk release owner approval **only**.
@@ -504,3 +525,137 @@ provider requests should be blindly retried while the provider reports
 exhaustion. The developer lane will then independently readmit as capacity
 allows. These development recovery checks are not end-to-end certification of
 Teams, all-staff invoicing, or QuickBooks reconciliation.
+
+### Legacy owner alias and Entra-authenticated binding compatibility — 2026-10-31
+
+The reviewed release policy intentionally continues to name the canonical owner
+as `person-al`, while authenticated Teams auto-enrollment persists Microsoft
+bindings as `person-entra-<object-id>`. A literal binding lookup therefore cannot
+be assumed to exist for the symbolic owner alias.
+
+For the **release approval sender only**, direct `person-al` lookup remains first.
+If absent, composition explicitly permits the exact fallback
+`person-al -> al@teamaot.com`. The sender may use that fallback only when the
+persisted active binding has the exact email, no client scope, and a Jason
+identity equal to `person-entra-` plus the normalized Microsoft object-ID UUID.
+Wrong email, inactive status, client scope, malformed object ID, or identity
+mismatch fail closed before any Teams send. Other approval workflows receive no
+fallback unless separately configured.
+
+This compatibility rule does not grant approval, change policy membership, edit
+the binding database, or substitute email possession for Microsoft identity.
+The signed Teams callback and the existing exact-release consumer remain the
+only path from a human decision to release/CCC evidence.
+
+
+### Canonical proactive token mount alignment — PMV3 release preparation
+
+Live PMV3 release preparation on 2026-10-31 exposed a second delivery-layer
+configuration defect before any owner approval or production deployment. The
+runtime container had two read-only proactive-token mounts:
+
+- legacy runtime secret: `/run/jason-secrets/teams-proactive/token`;
+- active Teams gateway credential:
+  `/run/jason-secrets/teams-proactive-gateway/token`.
+
+The active Teams gateway used the latter credential source while runtime sender
+defaults still selected the legacy mount. Fingerprint comparison proved the
+credentials differed; the canonical gateway therefore returned HTTP 401 before
+provider delivery. No approval card was delivered and no owner authority was
+created.
+
+All runtime Teams senders now default to the already-mounted active gateway
+credential at `/run/jason-secrets/teams-proactive-gateway/token`. The
+`JASON_TEAMS_PROACTIVE_TOKEN_FILE` override remains supported. This is
+credential-path alignment only: no secret value is committed, copied into
+source, rotated, or granted additional scope.
+
+Regression coverage requires the RuntimeSettings default, governed Teams send,
+and autonomous completion sender to share the same active gateway token path and
+reject reintroduction of the legacy default.
+
+
+#### Concurrent composition workstreams
+
+The token-path alignment touches only the `RuntimeSettings` Teams proactive
+credential default. Current open branches #2177, #2178, #2125, #2128 and #2126
+also modify `composition.py` for KFS reporting, VulScan V2, routine governed
+read/write registration and Windows Time JSON shadow respectively. Those
+settings, registrations, provider/authority gates and default-off controls are
+independent and must be preserved when later integrated. The PMV3 token-path
+correction does not absorb or supersede them.
+
+
+### Release callback symbolic-owner compatibility — 2026-10-31
+
+A live PMV3 release card was delivered to the verified Owner Teams account and
+the Owner pressed Approve. Bot Framework authentication and gateway ingress
+succeeded, but the deployed rollback runtime rejected the interaction with
+HTTP 403 `approval_interaction_denied` and the precise security-audit reason
+`mobile release actor is not the authorized owner`.
+
+Evidence showed the active Microsoft binding is correctly persisted as the
+canonical Entra-derived Jason identity while the reviewed release policy
+intentionally retains the symbolic Owner identity `person-al`. Outbound
+delivery already had a bounded symbolic-owner fallback, but the inbound release
+decision flow still required literal identity equality.
+
+The inbound flow now applies the same narrowly bounded compatibility rule. It
+maps the authenticated Entra-derived actor to `person-al` only when all of
+the following are true:
+
+- the signed callback Microsoft object matches the active binding;
+- the binding email is exactly `al@teamaot.com` (case-insensitive);
+- the binding Jason identity is exactly `person-entra-<hex UUID>` derived
+  from that Microsoft object ID;
+- the active Jason identity record is the same derived identity in AOT;
+- the binding has no client scope;
+- the reviewed release policy already names `person-al`; and
+- the configured release-only fallback explicitly maps `person-al` to the
+  verified Owner email.
+
+The durable ApprovalResponse is still recorded as the reviewed policy identity
+`person-al`; the signed gateway evidence and authentication evidence hash
+retain the actual Microsoft/Entra actor proof. Wrong email, malformed or
+mismatched derived identity, client-scoped binding, inactive binding, wrong
+tenant/object, unsigned callback, or policy mismatch remain fail-closed.
+
+The rejected live click is not converted into approval and must not be replayed.
+A fresh exact-SHA card is required after the corrected callback code completes
+the normal protected release process.
+
+
+### Host release consumer symbolic-owner compatibility — 2026-10-31
+
+A fresh signed Teams Approve for the PMV3 Owner UAT release was accepted by
+the deployed callback and recorded in the gateway decision store. The
+independent host-side release consumer then rejected that already-authenticated
+decision with:
+
+`PermissionError: mobile release approval has no active independent Jason owner identity`.
+
+The consumer was the final approval layer still requiring the active Jason
+identity itself to literally equal the symbolic release-policy owner
+`person-al`. Production intentionally stores the verified Microsoft account
+under its canonical Entra-derived Jason identity instead.
+
+The host consumer now applies the same bounded symbolic-owner compatibility
+rule already used by delivery and callback processing. It resolves the signed
+Microsoft tenant/object to the active binding, loads the bound Jason identity,
+and permits the policy identity `person-al` only when:
+
+- the durable approval receipt already names an owner listed in the exact
+  release policy;
+- the binding and Jason identity are active and in AOT;
+- the binding email is exactly `al@teamaot.com` (case-insensitive);
+- the binding has no client scope;
+- the binding Jason identity and active authority identity are exactly
+  `person-entra-<hex UUID>` derived from the authenticated Microsoft object;
+- the signed approval evidence, request, policy digest, manifest digest,
+  expiry, replay protections and release eligibility all still pass.
+
+The resulting CCC material-review record continues to use the reviewed symbolic
+policy identity `person-al`; the signed evidence retains the actual Microsoft
+actor and authentication evidence. Wrong email, client-scoped binding,
+mismatched derived identity, revoked identity, wrong tenant/object, replay,
+tampering, stale release/policy or unsigned evidence remain fail-closed.

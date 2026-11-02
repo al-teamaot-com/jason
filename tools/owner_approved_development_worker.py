@@ -33,6 +33,7 @@ BLOCKED = re.compile(
     r'(?im)^\s*-\s*\*\*(?:Autonomous development|Status):\*\*\s*(?:blocked|manual-only)\s*$'
 )
 META = re.compile(r'(?im)^\s*-\s*Development issue\s*:\s*#([1-9][0-9]*)\s*$')
+PM_V2_OWNER = re.compile(r'(?im)^\s*-\s*Development controller\s*:\s*PM-V2\s*$')
 ACTIVE_PHASES = {'identified', 'diagnosing', 'implementing', 'ci_repair_needed', 'ci_repairing'}
 SUPPORT_ACTIVE_PHASES = ACTIVE_PHASES - {'identified'}
 TERMINAL_PHASES = {
@@ -101,7 +102,9 @@ def exact_approved_symbols(scope: str) -> list[str]:
     return list(dict.fromkeys(re.findall(r'`([A-Za-z_][A-Za-z0-9_]*)`', scope)))[:24]
 
 
-def owner_approved_issues(repo: Path) -> list[dict[str, Any]]:
+def owner_approved_issues(
+    repo: Path, *, exact_issue_number: int | None = None
+) -> list[dict[str, Any]]:
     slug = repository_name(repo)
     issues = support.gh_json([
         'issue', 'list', '--state', 'open', '--limit', '1000',
@@ -113,6 +116,14 @@ def owner_approved_issues(repo: Path) -> list[dict[str, Any]]:
         if not APPROVAL.search(body) or BLOCKED.search(body):
             continue
         number = int(issue['number'])
+        if exact_issue_number is not None and number != exact_issue_number:
+            continue
+        # During the V1/V2 parallel pilot, an explicit PM-V2 controller marker
+        # reserves that issue for exact-selector dispatch. The legacy global
+        # scanner skips it, preventing both managers from developing the same
+        # approved scope at once.
+        if exact_issue_number is None and PM_V2_OWNER.search(body):
+            continue
         detail = support.gh_json(['api', f'repos/{slug}/issues/{number}'], cwd=repo) or {}
         if str(detail.get('author_association') or '').upper() != 'OWNER':
             continue
@@ -553,6 +564,7 @@ def source_context_blocker(reason: str) -> bool:
         'unseen repository',
         'not expose enough',
         'missing source',
+        'source path not authorized',
         'enough surrounding',
         'cannot form a complete, exact replacement',
         "can't form a complete, exact replacement",
@@ -1959,6 +1971,26 @@ def readmit_development_after_verified_credit_replenishment(
 
 
 
+
+
+def blocked_reasoning_record(response: Mapping[str, Any], prefix: str) -> dict[str, Any]:
+    """Preserve machine-readable owner action from any governed reasoning provider."""
+    update: dict[str, Any] = {
+        'phase': 'blocked',
+        'reason': prefix + str(response.get('error') or ''),
+        'updated_at': now(),
+    }
+    owner_action = str(response.get('required_owner_action') or '').strip()
+    if owner_action:
+        update.update({
+            'notification_class': 'owner_action_required',
+            'owner_action': owner_action,
+            'provider_blocker_code': str(
+                response.get('primary_provider_error_code') or ''
+            )[:120],
+        })
+    return update
+
 def blocked_work_next_action(reason: str) -> dict[str, str]:
     text = str(reason or "").casefold()
     if any(x in text for x in ("approval", "authorization", "credential")):
@@ -2028,6 +2060,7 @@ def main() -> int:
     parser.add_argument('--repo', type=Path, default=DEFAULT_REPO)
     parser.add_argument('--spool', type=Path, default=DEFAULT_SPOOL)
     parser.add_argument('--max-active', type=int, default=2)
+    parser.add_argument('--issue-number', type=int)
     args = parser.parse_args()
 
     repo = args.repo.resolve()
@@ -2037,10 +2070,24 @@ def main() -> int:
     state.setdefault('items', {})
 
     support.run(['git', 'fetch', '--no-tags', 'origin', 'main'], cwd=repo)
-    eligible = owner_approved_issues(repo)
-    eligible_ids = {item['id'] for item in eligible}
-    reconcile_issue_dependency_holds(state, eligible, repo)
-    admitted = [item for item in eligible if not issue_has_closed_dependency_gate(item)]
+    all_eligible = owner_approved_issues(repo)
+    # Include the exact PM-V2-reserved issue in the global approval inventory so
+    # legacy state is never falsely marked as having lost Owner approval.
+    selected = (
+        owner_approved_issues(repo, exact_issue_number=args.issue_number)
+        if args.issue_number is not None else all_eligible
+    )
+    if args.issue_number is not None and not selected:
+        raise support.WorkerError(
+            f'exact owner-approved development issue #{args.issue_number} is unavailable'
+        )
+    global_by_id = {item['id']: item for item in all_eligible}
+    for item in selected:
+        global_by_id[item['id']] = item
+    approval_inventory = list(global_by_id.values())
+    eligible_ids = set(global_by_id)
+    reconcile_issue_dependency_holds(state, selected, repo)
+    admitted = [item for item in selected if not issue_has_closed_dependency_gate(item)]
     focus_path=repo/'config'/'owner-approved-development-focus.json'
     focus=json.loads(focus_path.read_text()) if focus_path.exists() else {'enabled':False}
     admitted=apply_owner_development_focus(state,admitted,focus)
@@ -2075,7 +2122,8 @@ def main() -> int:
     )
     state['discovery'] = {
         'observed_at': now(),
-        'approved_issue_numbers': [item['issue_number'] for item in eligible],
+        'approved_issue_numbers': [item['issue_number'] for item in approval_inventory],
+        'selected_issue_number': args.issue_number,
         'approval_rule': 'exact owner-authored Autonomous development: owner-approved marker',
     }
 
@@ -2302,14 +2350,9 @@ def main() -> int:
                 if response is None:
                     continue
                 if response.get('status') != 'succeeded':
-                    record.update({
-                        'phase': 'blocked',
-                        'reason': (
-                            'development reasoning failed: '
-                            + str(response.get('error') or '')
-                        ),
-                        'updated_at': now(),
-                    })
+                    record.update(blocked_reasoning_record(
+                        response, 'development reasoning failed: '
+                    ))
                     continue
                 result = response.get('result') or {}
                 blocked_reason = str(result.get('blocked_reason') or '').strip()
@@ -2447,14 +2490,9 @@ def main() -> int:
                 if response is None:
                     continue
                 if response.get('status') != 'succeeded':
-                    record.update({
-                        'phase': 'blocked',
-                        'reason': (
-                            'development edit reasoning failed: '
-                            + str(response.get('error') or '')
-                        ),
-                        'updated_at': now(),
-                    })
+                    record.update(blocked_reasoning_record(
+                        response, 'development edit reasoning failed: '
+                    ))
                     continue
                 result = response.get('result') or {}
                 if engineering_evidence_tools.continue_evidence_session(

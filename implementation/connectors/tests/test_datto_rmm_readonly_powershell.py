@@ -60,6 +60,21 @@ def test_general_diagnostic_powershell_is_classified_read_only(command):
     assert classification.allowed_as_read_only is True
 
 
+@pytest.mark.parametrize("command", [
+    "Get-WinEvent -LogName 'Microsoft-Windows-PowerShell/Operational' -MaxEvents 10",
+    "Get-WinEvent -ListLog Microsoft-Windows-PowerShell/Operational",
+    "Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-PowerShell/Operational';Id=4104} -MaxEvents 15",
+])
+def test_windows_event_channel_name_is_data_not_a_command(command):
+    assert ReadOnlyPowerShellClassifier.classify(command).allowed_as_read_only
+    assert policy().prepare_command(device_uid='device-uid-1', command=command).command == command
+
+
+def test_event_channel_selector_does_not_override_mutation_guard():
+    command = "Get-WinEvent -LogName 'Microsoft-Windows-PowerShell/Operational'; Stop-Service Spooler"
+    assert ReadOnlyPowerShellClassifier.classify(command).classification == 'mutating'
+
+
 def test_general_read_only_pipeline_can_be_prepared():
     command = (
         "Get-Process | Sort-Object WorkingSet -Descending | "

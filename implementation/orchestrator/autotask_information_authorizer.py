@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from typing import Any, Protocol
 
 from connectors.autotask.impersonating_connector import (
@@ -27,13 +28,18 @@ from .provider_read_capability_catalog import (
     AUTOTASK_PROVIDER,
     SERVICE_COMPANY_READ,
     SERVICE_COMPANY_SEARCH,
+    SERVICE_CONTACT_READ,
+    SERVICE_NOTIFICATION_HISTORY_SEARCH,
     SERVICE_CONFIGURATION_READ,
     SERVICE_CONFIGURATION_SEARCH,
+    SERVICE_ENTITY_SEARCH,
+    SERVICE_ENTITY_READ,
     SERVICE_ENTITY_FIELDS_DESCRIBE,
     SERVICE_RESOURCE_READ,
     SERVICE_RESOURCE_SEARCH,
     SERVICE_TICKET_COUNT,
     SERVICE_TICKET_NOTES_SEARCH,
+    SERVICE_TICKET_TIME_ENTRY_SEARCH,
     SERVICE_TICKET_READ,
     SERVICE_TICKET_SEARCH,
 )
@@ -77,6 +83,22 @@ _AUTONOMOUS_WORKER_READS = frozenset(
     }
 )
 _AUTONOMOUS_WORKER_POLICY = "autonomous-worker-read-v1"
+# Contact details are a distinct, opt-in evidence surface. Never widen the
+# general worker policy by implication or use the client-question profile.
+_AUTONOMOUS_TICKET_CONTACT_READS = frozenset({SERVICE_CONTACT_READ})
+_AUTONOMOUS_TICKET_CONTACT_POLICY = "autonomous-ticket-contact-context-read-v1"
+_AUTONOMOUS_TICKET_CONTACT_PROFILE_ENV = "JASON_TICKET_CONTACT_CONTEXT_PROFILE"
+# Separate read-only evidence boundary for the client-question lifecycle.
+# Do NOT expand the general autonomous-worker allowlist. This profile is
+# disabled by default and cannot be reused by other service principals.
+_AUTONOMOUS_CLIENT_QUESTION_READS = frozenset({
+    SERVICE_TICKET_READ,
+    SERVICE_CONTACT_READ,
+    SERVICE_TICKET_NOTES_SEARCH,
+    SERVICE_NOTIFICATION_HISTORY_SEARCH,
+})
+_AUTONOMOUS_CLIENT_QUESTION_POLICY = "autonomous-client-question-read-v1"
+_AUTONOMOUS_CLIENT_QUESTION_PROFILE_ENV = "JASON_CLIENT_INFORMATION_REQUEST_PROFILE"
 
 # Retained only for the provider-native impersonation compatibility path. The
 # temporary Jason-managed path derives its eligible reads from the registered
@@ -88,6 +110,7 @@ _IMPERSONATED_CANONICAL_READS = frozenset(
         SERVICE_TICKET_READ,
         SERVICE_TICKET_SEARCH,
         SERVICE_TICKET_COUNT,
+        SERVICE_TICKET_TIME_ENTRY_SEARCH,
     }
 )
 
@@ -214,6 +237,39 @@ def _autonomous_worker_requester_authorization_proven(
     )
 
 
+def _autonomous_ticket_contact_read_authorized(
+    *, request: OrchestrationRequest, capability_name: str,
+) -> bool:
+    return bool(
+        os.getenv(_AUTONOMOUS_TICKET_CONTACT_PROFILE_ENV, "").strip() == "approved-v1"
+        and capability_name in _AUTONOMOUS_TICKET_CONTACT_READS
+        and request.authority_allowed
+        and request.authority_context_id
+        and request.permission_mode == "observe"
+        and request.requester_kind == "service"
+        and request.principal_id == _AUTONOMOUS_SHADOW_PRINCIPAL
+        and _AUTONOMOUS_TICKET_CONTACT_POLICY in request.policy_ids
+        and request.orchestration_mode is OrchestrationMode.EXECUTE
+    )
+
+
+def _autonomous_client_question_read_authorized(
+    *, request: OrchestrationRequest, capability_name: str,
+) -> bool:
+    return bool(
+        os.getenv(_AUTONOMOUS_CLIENT_QUESTION_PROFILE_ENV, "").strip()
+        == "approved-round1-v1"
+        and capability_name in _AUTONOMOUS_CLIENT_QUESTION_READS
+        and request.authority_allowed
+        and request.authority_context_id
+        and request.permission_mode == "observe"
+        and request.requester_kind == "service"
+        and request.principal_id == _AUTONOMOUS_SHADOW_PRINCIPAL
+        and _AUTONOMOUS_CLIENT_QUESTION_POLICY in request.policy_ids
+        and request.orchestration_mode is OrchestrationMode.EXECUTE
+    )
+
+
 def _autonomous_shadow_requester_authorization_proven(
     *,
     request: OrchestrationRequest,
@@ -265,14 +321,35 @@ class AutotaskImpersonationInformationAuthorizer:
             else None
         )
 
+        if (provider_id == AUTOTASK_PROVIDER
+                and resolution.capability_name == SERVICE_TICKET_TIME_ENTRY_SEARCH
+                and (mode != AUTOTASK_AUTH_MODE_IMPERSONATED
+                     or os.getenv("JASON_AUTOTASK_TIME_ENTRY_NATIVE_READ_PROVEN", "") != "verified")):
+            raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_PERMISSION_NOT_PROVEN")
+
         invocation = self.delegate.invoke(request=request, resolution=resolution)
 
         if provider_id != AUTOTASK_PROVIDER:
             return invocation
 
         if mode == AUTOTASK_AUTH_MODE_JASON_MANAGED:
+            if resolution.capability_name == SERVICE_TICKET_TIME_ENTRY_SEARCH:
+                raise PermissionError("AUTOTASK_TIME_ENTRY_REQUESTER_PERMISSION_NOT_PROVEN")
             if resolution.capability_name not in AUTOTASK_CAPABILITIES:
                 return invocation
+            if resolution.capability_name in {SERVICE_ENTITY_SEARCH, SERVICE_ENTITY_READ}:
+                # Internal provider reads may correlate across AOT's customers,
+                # but a customer-bound identity must NEVER receive the generic
+                # cross-customer query result. Existing customer-scoped routes
+                # continue to own client-specific disclosures.
+                binding = _active_trusted_binding(request=request, bindings=self.bindings)
+                if (
+                    binding is None
+                    or getattr(binding, "client_id", None) is not None
+                    or request.client_id is not None
+                    or request.organization_id != "aot"
+                ):
+                    return invocation
             if (
                 is_provider_health_canary_request(
                     request=request,
@@ -309,6 +386,28 @@ class AutotaskImpersonationInformationAuthorizer:
                     "jkd001_authority_context",
                     "central_orchestrator_governed_read",
                     _AUTONOMOUS_WORKER_POLICY,
+                )
+            elif _autonomous_ticket_contact_read_authorized(
+                request=request,
+                capability_name=resolution.capability_name,
+            ):
+                basis = (
+                    "jason_managed",
+                    "internal_autonomy_ticket_contact_context",
+                    "jkd001_authority_context",
+                    "central_orchestrator_governed_read",
+                    _AUTONOMOUS_TICKET_CONTACT_POLICY,
+                )
+            elif _autonomous_client_question_read_authorized(
+                request=request,
+                capability_name=resolution.capability_name,
+            ):
+                basis = (
+                    "jason_managed",
+                    "internal_client_question_evidence",
+                    "jkd001_authority_context",
+                    "central_orchestrator_governed_read",
+                    _AUTONOMOUS_CLIENT_QUESTION_POLICY,
                 )
             elif _autonomous_shadow_requester_authorization_proven(
                 request=request,

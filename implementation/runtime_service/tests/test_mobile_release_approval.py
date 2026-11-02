@@ -1,5 +1,6 @@
 """Owner-only mobile release pilot: policy, immutable intent and signed decision."""
 import json
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -329,6 +330,60 @@ def test_reviewed_v2_owner_click_records_one_receipt_without_execution(tmp_path)
     assert record.read_bytes() == before
     with pytest.raises(PermissionError):
         click(flow, req)
+
+
+def _entra_alias_case(flow, object_id, *, email="al@teamaot.com", client_id=None,
+                      binding_identity=None):
+    expected = "person-entra-" + uuid.UUID(object_id).hex
+    bound_identity = binding_identity or expected
+    binding = SimpleNamespace(
+        status="active",
+        jason_identity_id=bound_identity,
+        email_address=email,
+        microsoft_object_id=object_id,
+        client_id=client_id,
+    )
+    flow.bindings.find = lambda **kw: binding
+    flow.identities.get = lambda key: SimpleNamespace(
+        status="active", identity_id=key, organization_id="aot"
+    )
+    flow.owner_identity_email_fallbacks = {"person-al": "al@teamaot.com"}
+    flow.signed_verifier.parsed.microsoft_object_id = object_id
+    flow.signed_verifier.verify = lambda token: SimpleNamespace(
+        tenant_id="tenant-a",
+        object_id=object_id,
+        authentication_evidence_hash="f" * 64,
+    )
+    return expected
+
+
+def test_reviewed_v2_owner_alias_accepts_verified_entra_binding(tmp_path):
+    flow, req, repo, record = flow_fixture(tmp_path, reviewed=True)
+    object_id = "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
+    _entra_alias_case(flow, object_id)
+    result = click(flow, req, microsoft_object_id=object_id)
+    assert result["approval_status"] == "approved"
+    receipt = repo.accepted_decision(req.approval_id)
+    assert receipt.decided_by == "person-al"
+    assert receipt.authentication_evidence_hash == "f" * 64
+
+
+@pytest.mark.parametrize("case", ["wrong_email", "client_scoped", "wrong_derived_identity"])
+def test_reviewed_v2_owner_alias_fails_closed_on_binding_mismatch(tmp_path, case):
+    flow, req, repo, record = flow_fixture(tmp_path, reviewed=True)
+    object_id = "bee80bdc-ffb0-4c50-b453-c09d4d411f5f"
+    kwargs = {}
+    if case == "wrong_email":
+        kwargs["email"] = "someone@example.com"
+    elif case == "client_scoped":
+        kwargs["client_id"] = "client-1"
+    else:
+        kwargs["binding_identity"] = "person-entra-00000000000000000000000000000000"
+    _entra_alias_case(flow, object_id, **kwargs)
+    with pytest.raises(PermissionError, match="authorized owner"):
+        click(flow, req, microsoft_object_id=object_id)
+    assert repo.get(req.approval_id).status == ApprovalRequestStatus.PENDING
+    assert repo.accepted_decision(req.approval_id) is None
 
 
 def test_reviewed_v2_changed_policy_cannot_consume_pending_click(tmp_path):
@@ -837,3 +892,73 @@ def test_pending_or_approved_card_blocks_new_renewal(tmp_path):
     case.maintenance._next_due = NOW
     assert case.maintenance.tick() is False
     assert len(case.sender.sent) == 1
+
+def test_owner_issuer_sends_fresh_card_for_changed_manifest_same_release_id(tmp_path):
+    from dataclasses import replace
+    from jason_runtime.mobile_release_approval import (
+        MobileReleaseApprovalMaintenance, MobileReleaseOwnerAuthority,
+        read_eligible_release, read_mobile_release_policy, create_mobile_release_request,
+    )
+    policy_path = policy_file(tmp_path)
+    root, _ = release_record(tmp_path)
+    policy = read_mobile_release_policy(policy_path)
+    evidence = read_eligible_release(root, RELEASE, policy)
+    make_eligible_main_offer(root, policy_path)
+
+    repo = SQLiteApprovalRequestRepository(tmp_path / "requests.sqlite3")
+    approvals = ApprovalRequestService(repo, MobileReleaseOwnerAuthority(policy_path))
+    historical = create_mobile_release_request(
+        evidence, policy, now=NOW - timedelta(minutes=1),
+    )
+    # Historical terminal request for the same SHA/release ID but an older
+    # rebuilt artifact manifest. It must not suppress the current exact subject.
+    repo.put(replace(
+        historical,
+        status=ApprovalRequestStatus.APPROVED,
+        metadata={
+            **historical.metadata,
+            "manifest_sha256": "0" * 64,
+        },
+    ))
+
+    class Sender:
+        def __init__(self):
+            self.sent = []
+        def send(self, request):
+            self.sent.append(request)
+            return ("teams-message-new-manifest",)
+
+    sender = Sender()
+    worker = MobileReleaseApprovalMaintenance(
+        enabled=True, policy_path=policy_path, state_root=root,
+        requests=repo, approvals=approvals, sender=sender,
+        interval_seconds=60, clock=lambda: NOW,
+    )
+    assert worker.tick() is True
+    assert len(sender.sent) == 1
+    fresh = sender.sent[0]
+    assert fresh.approval_id != historical.approval_id
+    assert fresh.metadata["release_id"] == historical.metadata["release_id"]
+    assert fresh.metadata["candidate_sha"] == historical.metadata["candidate_sha"]
+    assert fresh.metadata["manifest_sha256"] == evidence.manifest_sha256
+    stored_historical = repo.get(historical.approval_id)
+    assert stored_historical is not None
+    assert fresh.metadata["manifest_sha256"] != stored_historical.metadata["manifest_sha256"]
+
+    # The newly issued exact subject is now one-shot.
+    worker._next_due = NOW
+    assert worker.tick() is False
+    assert len(sender.sent) == 1
+    assert len(repo.list_all()) == 2
+
+
+def test_retry_release_id_matches_exact_candidate_sha():
+    from jason_runtime.mobile_release_approval import release_id_matches_candidate
+    sha = 'a' * 40
+    assert release_id_matches_candidate('release-' + sha[:16], sha)
+    assert release_id_matches_candidate('release-' + sha[:16] + '-retry-1', sha)
+    assert release_id_matches_candidate('release-' + sha[:16] + '-retry-999', sha)
+    assert not release_id_matches_candidate('release-' + sha[:16] + '-retry-0', sha)
+    assert not release_id_matches_candidate('release-' + sha[:16] + '-retry-1000', sha)
+    assert not release_id_matches_candidate('release-' + ('b' * 16) + '-retry-1', sha)
+    assert not release_id_matches_candidate('release-' + sha[:16] + '-other-1', sha)

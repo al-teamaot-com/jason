@@ -188,3 +188,17 @@ def test_provider_failure_is_sanitized_and_correlated():
 def test_direct_agent_invocation_contract_is_rejected():
     with pytest.raises(ValueError, match="Direct agent invocation"):
         request(requester_kind="agent", arguments={"target_agent": "other-agent"})
+
+
+def test_invocation_argument_error_returns_safe_machine_readable_code():
+    class BadArgumentsInvoker:
+        def invoke(self, *, request, resolution):
+            raise ValueError("secret client filter detail")
+
+    audit = Audit()
+    result = CentralOrchestrator(
+        resolution=Resolution(), invoker=BadArgumentsInvoker(), audit=audit
+    ).execute(request())
+    assert result.status is OrchestrationStatus.FAILED
+    assert result.error_code == "INVALID_CAPABILITY_ARGUMENTS"
+    assert "secret client filter detail" not in repr(result) + repr(audit.events)

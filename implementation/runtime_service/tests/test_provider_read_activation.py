@@ -26,6 +26,8 @@ from orchestrator.provider_read_capability_catalog import (
     IT_GLUE_PROVIDER,
     MICROSOFT_GRAPH_MAIL_CAPABILITIES,
     SERVICE_COMPANY_READ,
+    SERVICE_ENTITY_SEARCH,
+    SERVICE_ENTITY_READ,
     SERVICE_CONTRACT_READ,
     SERVICE_CONTRACT_SEARCH,
     SERVICE_TICKET_ATTACHMENT_SEARCH,
@@ -36,7 +38,9 @@ from orchestrator.provider_read_capability_catalog import (
 )
 from jason_runtime.provider_read_activation import (
     PROVIDER_READ_ACTIVATION_ENV,
+    PROVIDER_READ_AUTOTASK_COMPREHENSIVE_ENTITY_READ_PROFILE,
     PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES,
+    PROVIDER_READ_ENTRA_PROCUREMENT_BILLING_RECONCILIATION_CATALOG_PROFILE,
     PROVIDER_READ_ENTRA_PROCUREMENT_CATALOG_CAPABILITIES,
     PROVIDER_READ_ENTRA_PROCUREMENT_CATALOG_PROFILE,
     PROVIDER_READ_ENTRA_PROCUREMENT_MAIL_CATALOG_CAPABILITIES,
@@ -94,7 +98,8 @@ def _all_provider_read_capabilities() -> frozenset[str]:
 
 
 def _legacy_provider_read_capabilities() -> frozenset[str]:
-    return _all_provider_read_capabilities() - PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES
+    return (_all_provider_read_capabilities() - PROVIDER_READ_AUTOTASK_PROCUREMENT_CAPABILITIES
+            - {SERVICE_ENTITY_SEARCH, SERVICE_ENTITY_READ})
 
 
 def test_unset_profile_remains_fail_closed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -493,3 +498,27 @@ def test_service_resource_reads_are_dormant_in_v8_and_activate_only_in_v9() -> N
     )
     assert SERVICE_RESOURCE_SEARCH in set(v9.capability_names)
     assert SERVICE_RESOURCE_READ in set(v9.capability_names)
+
+
+def test_v10_activation_unchanged_when_v11_read_source_is_present():
+    capabilities, providers = _registries()
+    current = apply_provider_read_activation_profile(
+        capabilities=capabilities, providers=providers,
+        profile=PROVIDER_READ_ENTRA_PROCUREMENT_BILLING_RECONCILIATION_CATALOG_PROFILE,
+    )
+    assert SERVICE_ENTITY_SEARCH not in current.capability_names
+    assert SERVICE_ENTITY_READ not in current.capability_names
+    assert capabilities.get(capability_name=SERVICE_ENTITY_SEARCH, version="1.0").lifecycle_status is CapabilityLifecycle.PILOT
+    assert capabilities.get(capability_name=SERVICE_ENTITY_READ, version="1.0").lifecycle_status is CapabilityLifecycle.PILOT
+
+
+def test_v11_requires_explicit_new_activation_profile_to_enable_broad_provider_read():
+    capabilities, providers = _registries()
+    state = apply_provider_read_activation_profile(
+        capabilities=capabilities, providers=providers,
+        profile=PROVIDER_READ_AUTOTASK_COMPREHENSIVE_ENTITY_READ_PROFILE,
+    )
+    assert SERVICE_ENTITY_SEARCH in state.capability_names
+    assert SERVICE_ENTITY_READ in state.capability_names
+    assert capabilities.get(capability_name=SERVICE_ENTITY_SEARCH, version="1.0").lifecycle_status is CapabilityLifecycle.ACTIVE
+    assert capabilities.get(capability_name=SERVICE_ENTITY_READ, version="1.0").lifecycle_status is CapabilityLifecycle.ACTIVE

@@ -198,3 +198,17 @@ def test_clarification_required_is_successful_conversation_transport():
         response.body["status"]
         == "clarification_required"
     )
+
+
+def test_healthz_degrades_when_ticket_supervisor_is_stale():
+    from jason_runtime.http import RuntimeHttpApplication
+    class Ingress:
+        def handle(self, envelope):
+            return {}
+    app = RuntimeHttpApplication(
+        ingress=Ingress(),
+        health_probe=lambda: {"status": "degraded", "ticket_worker": "heartbeat_stale"},
+    )
+    response = app.dispatch(method="GET", path="/healthz", headers={}, body=b"")
+    assert response.status_code == 503
+    assert response.body["ticket_worker"]["ticket_worker"] == "heartbeat_stale"

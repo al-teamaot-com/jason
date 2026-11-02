@@ -13,6 +13,7 @@ from connectors.core.contracts import (
     ConnectorConfigurationError,
     ConnectorTransportError,
 )
+from connectors.core.http_transport import _safe_network_failure_code
 
 KFS_PUBLIC_API_HOST = "api.kyods.com"
 KFS_DEFAULT_API_URL = f"https://{KFS_PUBLIC_API_HOST}"
@@ -71,6 +72,38 @@ def require_kfs_credentials(credentials: Mapping[str, str]) -> None:
             raise ConnectorConfigurationError(
                 "Kyocera KFS Manager login must be distinct from the dealer API gateway credential."
             )
+
+
+class KyoceraKfsApplicationStatusError(ConnectorTransportError):
+    """A provider application-status failure, distinct from an HTTP failure.
+
+    Exposes only a bounded numeric status and never the KFS login response,
+    request contents, gateway credentials, or provider-controlled message.
+    """
+
+    def __init__(self, operation: str, code: Any):
+        super().__init__("Kyocera KFS operation returned an unsuccessful application status", service="kyocera_kfs")
+        safe_code = code if type(code) is int and 100 <= code <= 999 else "UNKNOWN"
+        self.error_code = f"KFS_APPLICATION_STATUS_{safe_code}"
+        self.operation = operation  # internal fixed operation label, not response text
+
+
+class KyoceraKfsSafeResponseError(ConnectorTransportError):
+    """A fixed diagnostic for a KFS response that is not usable JSON.
+
+    No provider text, body, Authorization or credential values are retained.
+    """
+
+    _ALLOWED_CODES = frozenset({
+        "NETWORK_TIMEOUT", "DNS_RESOLUTION", "TLS_FAILURE",
+        "CONNECTION_REFUSED", "NETWORK_UNREACHABLE", "NETWORK_IO_FAILURE",
+        "INVALID_JSON", "INVALID_RESPONSE_SHAPE",
+    })
+
+    def __init__(self, code: str):
+        safe_code = code if code in self._ALLOWED_CODES else "NETWORK_IO_FAILURE"
+        super().__init__("Kyocera KFS read could not obtain a valid response", service="kyocera_kfs")
+        self.error_code = f"KFS_{safe_code}"
 
 
 class KyoceraKfsSessionClient:
@@ -146,18 +179,26 @@ class KyoceraKfsSessionClient:
             with self._opener.open(request, timeout=self.timeout_seconds) as response:
                 raw = response.read()
         except HTTPError as exc:
+            # Keep HTTP status as bounded diagnostic metadata. The previous
+            # exception discarded it, collapsing 401/403/429/5xx into one
+            # opaque PROVIDER_TRANSPORT_FAILURE. Never include HTTP response
+            # body, headers, tokens, or the provider-supplied error message.
             raise ConnectorTransportError(
-                f"Kyocera KFS HTTP request failed with status {exc.code}"
+                "Kyocera KFS HTTP request failed",
+                status_code=int(exc.code),
+                service="kyocera_kfs",
             ) from exc
         except (URLError, TimeoutError, OSError) as exc:
-            raise ConnectorTransportError("Kyocera KFS HTTP request failed") from exc
+            # Network failure taxonomy is a fixed local classification, not an
+            # uncontrolled exception message or provider response body.
+            raise KyoceraKfsSafeResponseError(_safe_network_failure_code(exc)) from exc
 
         try:
             decoded = json.loads(raw.decode("utf-8")) if raw else {}
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise ConnectorTransportError("Kyocera KFS response was not valid JSON") from exc
+            raise KyoceraKfsSafeResponseError("INVALID_JSON") from exc
         if not isinstance(decoded, Mapping):
-            raise ConnectorTransportError("Kyocera KFS response must be a JSON object")
+            raise KyoceraKfsSafeResponseError("INVALID_RESPONSE_SHAPE")
         return dict(decoded)
 
     @staticmethod
@@ -165,6 +206,7 @@ class KyoceraKfsSessionClient:
         status = payload.get("status")
         code = status.get("code") if isinstance(status, Mapping) else None
         if code != 200:
-            raise ConnectorTransportError(
-                f"{operation} failed with KFS status {code!r}"
-            )
+            # An HTTP 200 may still carry a failed KFS *application* status;
+            # never mislabel it PROVIDER_HTTP_STATUS_401, and never leak the
+            # provider's optional human-readable error text.
+            raise KyoceraKfsApplicationStatusError(operation, code)

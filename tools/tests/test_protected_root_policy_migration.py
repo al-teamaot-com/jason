@@ -666,3 +666,51 @@ def test_held_offer_rollback_wrong_target_never_stops_units(monkeypatch,tmp_path
             m.prepare_rollback('c'*40)
         run.assert_not_called()
     assert len(list(m.SYSTEMD_USER_UNITS.iterdir()))==2
+
+
+def test_pm_v2_shadow_exact_allowed_service_migrates_and_rolls_back_symmetrically(monkeypatch, tmp_path):
+    """PM V2 persistence adds exactly one optional release-owned user service."""
+    prior = source(new=True)
+    prior["required_user_units"] += ["jason-release-approval-only.timer"]
+    prior["allowed_user_units"] += ["jason-release-approval-only.service"]
+    candidate = {key: (list(value) if isinstance(value, list) else value) for key, value in prior.items()}
+    candidate["allowed_user_units"] = list(prior["allowed_user_units"]) + [
+        "jason-pm-v2-shadow.service"
+    ]
+    policy, original, _ = configure(
+        monkeypatch, tmp_path, policy=prior, old=prior, candidate=candidate
+    )
+    assert m.preview_exact_migration(CANDIDATE, BASE) == "OWNER_CCC_REVIEWED_DELTA_ONLY"
+    assert policy.read_bytes() == original
+    assert m.stage_for_candidate(CANDIDATE, BASE) == "STAGED_ALLOWED_ONLY"
+    staged = json.loads(policy.read_text())
+    assert "jason-pm-v2-shadow.service" in staged["allowed_user_units"]
+    assert "jason-pm-v2-shadow.service" not in staged["required_user_units"]
+    assert m.apply_for_candidate(CANDIDATE, BASE) == "APPLIED_REQUIRED_AFTER_HEALTH"
+    final = json.loads(policy.read_text())
+    assert "jason-pm-v2-shadow.service" in final["allowed_user_units"]
+    receipt = json.loads(m.ACTIVE.read_text())
+    assert receipt["reviewed_delta"] == {
+        k: sorted(v) for k, v in m.APPROVED_PM_V2_SHADOW_DELTA.items()
+    }
+    assert m.prepare_rollback(BASE) == "ROLLBACK_ALLOWED_STAGE"
+    service = m.SYSTEMD_USER_UNITS / "jason-pm-v2-shadow.service"
+    service.write_text("reviewed candidate service")
+    with pytest.raises(m.MigrationRefused, match="candidate user unit still installed"):
+        m.complete_rollback(BASE)
+    service.unlink()
+    assert m.complete_rollback(BASE) == "RESTORED"
+    assert policy.read_bytes() == original
+
+
+def test_pm_v2_shadow_policy_plan_rejects_any_extra_unit(monkeypatch, tmp_path):
+    prior = source(new=True)
+    prior["required_user_units"] += ["jason-release-approval-only.timer"]
+    prior["allowed_user_units"] += ["jason-release-approval-only.service"]
+    candidate = {key: (list(value) if isinstance(value, list) else value) for key, value in prior.items()}
+    candidate["allowed_user_units"] = list(prior["allowed_user_units"]) + [
+        "jason-pm-v2-shadow.service", "jason-unreviewed.service"
+    ]
+    configure(monkeypatch, tmp_path, policy=prior, old=prior, candidate=candidate)
+    with pytest.raises(m.MigrationRefused, match="unapproved desired-state"):
+        m.preview_exact_migration(CANDIDATE, BASE)

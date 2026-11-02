@@ -1,0 +1,73 @@
+name: Validate Production Manager V2
+
+on:
+  pull_request:
+    paths:
+      - 'tools/pm_v2/**'
+      - 'tools/tests/test_pm_v2_*.py'
+      - 'tools/owner_approved_development_worker.py'
+      - 'tools/release_manager_host_runner.py'
+      - 'implementation/runtime_service/src/jason_runtime/autonomous_completion_notification.py'
+      - 'implementation/runtime_service/tests/test_autonomous_completion_notification.py'
+      - 'config/pm-v2*.json'
+      - 'docs/operations/Production-Manager-V2-Bootstrap.md'
+      - 'infrastructure/pm-v2/**'
+      - '.github/workflows/production-manager-v2.yml'
+  push:
+    paths:
+      - 'tools/pm_v2/**'
+      - 'tools/tests/test_pm_v2_*.py'
+      - 'tools/owner_approved_development_worker.py'
+      - 'tools/release_manager_host_runner.py'
+      - 'implementation/runtime_service/src/jason_runtime/autonomous_completion_notification.py'
+      - 'implementation/runtime_service/tests/test_autonomous_completion_notification.py'
+      - 'config/pm-v2*.json'
+      - 'docs/operations/Production-Manager-V2-Bootstrap.md'
+      - 'infrastructure/pm-v2/**'
+      - '.github/workflows/production-manager-v2.yml'
+
+jobs:
+  pm-v2-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install PM V2 test dependencies
+        run: python -m pip install cryptography
+      - name: Compile PM V2
+        run: python -m py_compile tools/pm_v2/*.py
+      - name: Run PM V2 regression corpus
+        env:
+          PYTHONPATH: tools
+        run: python -m unittest discover -s tools/tests -p 'test_pm_v2_*.py'
+
+  shared-development-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest cryptography
+      - name: Verify shared development worker
+        env:
+          PYTHONPATH: tools
+        run: python -m pytest -q tools/tests/test_owner_approved_development_worker.py
+
+  shared-release-and-teams-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest
+      - name: Verify shared Release Manager and Teams lifecycle
+        env:
+          PYTHONPATH: tools:implementation:implementation/runtime_service/src
+        run: |
+          python -m pytest -q tools/tests/test_release_manager_host_runner.py
+          python -m pytest -q tools/tests/test_release_manager_atomic_surfaces.py
+          python -m pytest -q implementation/runtime_service/tests/test_autonomous_completion_notification.py

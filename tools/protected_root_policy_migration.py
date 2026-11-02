@@ -58,7 +58,20 @@ APPROVED_HELD_OFFER_DELTA = {
     "required_user_units": frozenset({"jason-release-approval-only.timer"}),
     "allowed_user_units": frozenset({"jason-release-approval-only.service"}),
 }
-APPROVED_PLANS = (APPROVED_DELTA, APPROVED_HELD_OFFER_DELTA)
+# PM V2 acceptance requires a persistent shadow controller, but it remains
+# optional until V1 replacement is separately approved. This exact one-unit
+# delta is the only additional desired-state migration permitted here.
+APPROVED_PM_V2_SHADOW_DELTA = {
+    "required_system_units": frozenset(),
+    "allowed_system_units": frozenset(),
+    "required_user_units": frozenset(),
+    "allowed_user_units": frozenset({"jason-pm-v2-shadow.service"}),
+}
+APPROVED_PLANS = (
+    APPROVED_DELTA,
+    APPROVED_HELD_OFFER_DELTA,
+    APPROVED_PM_V2_SHADOW_DELTA,
+)
 
 
 def _staged_delta(plan: dict[str, frozenset[str]]) -> dict[str, frozenset[str]]:

@@ -19,6 +19,7 @@ import re
 import secrets
 import sqlite3
 import stat
+import uuid
 from typing import Any, Mapping
 
 from connectors.src.jason_connectors.approval_requests import (
@@ -29,7 +30,7 @@ from jason_runtime.playbook_autonomy_review import TeamsGatewayPlaybookApprovalS
 from jason_runtime.owner_release_approval_containment import read_release_approval_containment
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
-RELEASE_ID = re.compile(r"^release-[0-9a-f]{16}$")
+RELEASE_ID = re.compile(r"^release-[0-9a-f]{16}(?:-retry-[1-9][0-9]{0,2})?$")
 CAPABILITY = "release.production.approve"
 REQUEST_PREFIX = "relapproval-"
 RISK_LEVELS = frozenset({"normal", "production_repair", "production_control_core", "schema_or_contract"})
@@ -42,6 +43,12 @@ def canonical_bytes(value: Any) -> bytes:
 
 def digest(value: Any) -> str:
     return hashlib.sha256(canonical_bytes(value)).hexdigest()
+
+def release_id_matches_candidate(release_id: str, candidate_sha: str) -> bool:
+    if not SHA.fullmatch(candidate_sha):
+        return False
+    base = "release-" + candidate_sha[:16]
+    return re.fullmatch(re.escape(base) + r"(?:-retry-[1-9][0-9]{0,2})?", release_id) is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,7 +207,7 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
         raise ValueError("mobile approval clock must be timezone-aware")
     if evidence.risk_profile not in policy.allowed_risk_profiles:
         raise PermissionError("release risk is not authorized for mobile pilot")
-    if not SHA.fullmatch(evidence.candidate_sha) or evidence.release_id != "release-" + evidence.candidate_sha[:16]:
+    if not release_id_matches_candidate(evidence.release_id, evidence.candidate_sha):
         raise PermissionError("mobile approval release identity does not match exact SHA")
     shown = ", ".join(evidence.affected_files[:7]) or "(no files)"
     if len(evidence.affected_files) > 7:
@@ -421,6 +428,39 @@ class MobileReleaseApprovalFlow:
     signed_verifier: Any
     signed_evidence: MobileReleaseSignedEvidenceStore
     required_policy_version: str = "1.0"
+    owner_identity_email_fallbacks: Mapping[str, str] | None = None
+
+    def _authorized_owner_identity(self, *, binding, identity, policy: MobileReleasePolicy) -> str:
+        if identity.identity_id in policy.owner_identity_ids:
+            return identity.identity_id
+        fallbacks = {
+            str(owner).strip(): str(email).strip().casefold()
+            for owner, email in dict(self.owner_identity_email_fallbacks or {}).items()
+            if str(owner).strip() and str(email).strip()
+        }
+        for owner_identity in policy.owner_identity_ids:
+            email = fallbacks.get(owner_identity)
+            if email is None:
+                continue
+            try:
+                expected_identity = (
+                    "person-entra-" + uuid.UUID(str(binding.microsoft_object_id)).hex
+                )
+            except (ValueError, AttributeError, TypeError) as exc:
+                raise PermissionError(
+                    "mobile release owner fallback binding identity is invalid"
+                ) from exc
+            if (
+                str(getattr(binding, "email_address", "") or "").strip().casefold() == email
+                and str(getattr(binding, "jason_identity_id", "")) == expected_identity
+                and str(getattr(identity, "identity_id", "")) == expected_identity
+                and getattr(binding, "client_id", None) is None
+                and getattr(binding, "status", None) == "active"
+                and getattr(identity, "status", None) == "active"
+                and getattr(identity, "organization_id", None) == policy.organization_id
+            ):
+                return owner_identity
+        raise PermissionError("mobile release actor is not the authorized owner")
 
     def handle(self, *, approval_id: str, decision: str, microsoft_tenant_id: str,
                microsoft_object_id: str, conversation_id: str, channel_response_id: str,
@@ -453,8 +493,9 @@ class MobileReleaseApprovalFlow:
         policy = read_mobile_release_policy(self.policy_path)
         if policy.schema_version != self.required_policy_version:
             raise PermissionError("Teams owner release policy changed without the reviewed runtime mode")
-        if identity.identity_id not in policy.owner_identity_ids:
-            raise PermissionError("mobile release actor is not the authorized owner")
+        authorized_owner_identity = self._authorized_owner_identity(
+            binding=binding, identity=identity, policy=policy,
+        )
         request = self.requests.get(approval_id)
         if request is None or request.status is not ApprovalRequestStatus.PENDING:
             raise PermissionError("mobile release decision is missing or already terminal")
@@ -536,7 +577,7 @@ class MobileReleaseApprovalFlow:
         )
         accepted = self.approvals.accept_response(
             ApprovalResponse(approval_id=approval_id, organization_id=policy.organization_id,
-                approver_identity_id=identity.identity_id, decision=ApprovalDecision(decision),
+                approver_identity_id=authorized_owner_identity, decision=ApprovalDecision(decision),
                 decided_at=decided_at, channel="microsoft_teams",
                 channel_response_id=channel_response_id,
                 authentication_evidence_hash=principal.authentication_evidence_hash))
@@ -605,8 +646,15 @@ class MobileReleaseApprovalMaintenance:
             raise PermissionError("Teams release policy changed without the reviewed runtime activation")
         paths = tuple(sorted((self.state_root / "mobile-release-offers").glob("release-*.json"),
                              key=lambda p: p.stat().st_mtime, reverse=True))[:20]
-        existing_ids = {
-            request.metadata.get("release_id")
+        existing_subjects = {
+            (
+                request.metadata.get("release_id"),
+                request.metadata.get("candidate_sha"),
+                request.metadata.get("rollback_sha"),
+                request.metadata.get("manifest_sha256"),
+                request.metadata.get("owner_policy_sha256"),
+                request.metadata.get("review_only") is True,
+            )
             for request in self.requests.list_all()
             if request.capability == CAPABILITY
         }
@@ -682,7 +730,7 @@ class MobileReleaseApprovalMaintenance:
                 if (offer.get("schema_version") != "1.0"
                         or offer.get("release_id") != path.stem
                         or not SHA.fullmatch(str(offer.get("candidate_sha") or ""))
-                        or offer.get("release_id") != "release-" + offer["candidate_sha"][:16]
+                        or not release_id_matches_candidate(str(offer.get("release_id") or ""), str(offer.get("candidate_sha") or ""))
                         or offer.get("protected_main_sha") != offer["candidate_sha"]
                         or offered.tzinfo is None
                         or not 0 <= (now - offered).total_seconds() <= 900):
@@ -693,9 +741,18 @@ class MobileReleaseApprovalMaintenance:
                     and offered <= containment.released_at):
                 # An offer created before/during a hold may not be revived.
                 continue
-            if path.stem in existing_ids:
-                # Terminal cards are never silently reissued. A fresh review
-                # requires a separately recorded owner/release request.
+            offer_subject = (
+                offer.get("release_id"),
+                offer.get("candidate_sha"),
+                offer.get("live_rollback_sha"),
+                offer.get("manifest_sha256"),
+                policy.policy_sha256,
+                offer.get("review_only") is True,
+            )
+            if offer_subject in existing_subjects:
+                # The same immutable approval subject is one-shot even after a
+                # terminal decision. A changed manifest/policy/review mode is a
+                # different subject and receives a distinct approval_id/card.
                 continue
             try:
                 evidence = read_eligible_release(

@@ -812,6 +812,15 @@ def test_owner_reviewed_teams_release_mode_requires_exact_v2_policy(tmp_path):
     assert app is not None
     assert cfg.universal_approval_mode == "off"
     assert release_root.joinpath("mobile-release-offers").is_dir() is False
+    from jason_runtime.mobile_release_approval import MobileReleaseApprovalMaintenance
+    release_workers = [
+        service for service in app.maintenance.services
+        if isinstance(service, MobileReleaseApprovalMaintenance)
+    ]
+    assert len(release_workers) == 1
+    assert release_workers[0].sender.owner_identity_email_fallbacks == {
+        "person-al": "al@teamaot.com",
+    }
 
 
 def test_legacy_owner_pilot_refuses_silent_v2_risk_policy_upgrade(tmp_path):
@@ -829,3 +838,144 @@ def test_legacy_owner_pilot_refuses_silent_v2_risk_policy_upgrade(tmp_path):
     cfg.validate()
     with pytest.raises(PermissionError, match="mode and reviewed policy version"):
         build_runtime_application(cfg)
+
+
+
+def test_auxiliary_process_sends_queued_ticket_owner_notifications_even_when_admission_disabled(
+    tmp_path, monkeypatch,
+):
+    """Regression for production: auxiliary settings disable ticket admission."""
+    from datetime import datetime, timezone
+
+    from jason_runtime.autonomy_teams_notification_maintenance import (
+        TicketOwnerNotificationMaintenance,
+    )
+    from jason_runtime.maintenance_process import (
+        auxiliary_maintenance_runtime_settings,
+        http_runtime_settings,
+        ticket_worker_runtime_settings,
+    )
+
+    monkeypatch.setenv("JASON_AUTONOMY_COMPLETION_TEAMS_PROFILE", "person-al-v1")
+    settings = replace(
+        _settings(tmp_path),
+        autonomy_worker_enabled=True,
+        autonomy_worker_db=tmp_path / "operational.sqlite3",
+        autonomy_promotion_db=tmp_path / "promotion.sqlite3",
+        autonomy_targeted_wake_db=tmp_path / "targeted-wake.sqlite3",
+    )
+    auxiliary_settings = auxiliary_maintenance_runtime_settings(settings)
+    assert auxiliary_settings.autonomy_worker_enabled is False
+
+    app = build_runtime_application(
+        auxiliary_settings, maintenance_profile="auxiliary",
+    )
+    senders = [
+        m for m in app.maintenance.services
+        if isinstance(m, TicketOwnerNotificationMaintenance)
+    ]
+    assert len(senders) == 1
+
+    # The real auxiliary composition must drain the shared SQLite outbox.
+    class ReceiptOnlyNotifier:
+        def __init__(self):
+            self.calls = []
+        def send(self, event, **payload):
+            self.calls.append((event, payload))
+            return {"message_id": "provider-receipt-aux-test", "message_id_synthetic": False}
+
+    notifier = ReceiptOnlyNotifier()
+    sender = senders[0]
+    sender.notifier = notifier
+    sender.store.queue_teams_notification(
+        ticket_id=143299,
+        playbook_id="vulscan_missing_patch",
+        note_title="Teams - Ticket Activity - completion",
+        fingerprint="f" * 64,
+        event_type="work_completed",
+        arguments={
+            "work_id": "T20261028.0042",
+            "work_title": "VulScan verified completion",
+            "summary": "Verified Autotask completion",
+        },
+        now=datetime.now(timezone.utc),
+    )
+    sender.tick()
+    assert len(notifier.calls) == 1
+    assert notifier.calls[0][0] == "work_completed"
+    delivered = sender.store._connection.execute(
+        "SELECT state,message_id,attempts FROM autonomy_teams_notification_outbox",
+    ).fetchone()
+    assert tuple(delivered) == ("delivered", "provider-receipt-aux-test", 1)
+    sender._next_due = 0
+    sender.tick()
+    assert len(notifier.calls) == 1
+    sender.store.close()
+
+    # Neither the ticket-admission worker nor HTTP-only profile may have
+    # a second Teams outbox sender.
+    ticket = build_runtime_application(
+        ticket_worker_runtime_settings(settings), maintenance_profile="ticket_worker",
+    )
+    assert not any(
+        isinstance(m, TicketOwnerNotificationMaintenance)
+        for m in ticket.maintenance.services
+    )
+    http = build_runtime_application(http_runtime_settings(settings))
+    assert not any(
+        isinstance(m, TicketOwnerNotificationMaintenance)
+        for m in http.maintenance.services
+    )
+
+
+
+def test_subscription_first_composition_does_not_resolve_openai_api_secret(tmp_path, monkeypatch):
+    from orchestrator.subscription_reasoning import SubscriptionStructuredJsonClient
+
+    calls = []
+    original = __import__(
+        "jason_runtime.composition", fromlist=["OpenBaoSecretResolver"]
+    ).OpenBaoSecretResolver.resolve
+
+    def guarded_resolve(self, name, context):
+        calls.append(name)
+        if name == "openai.semantic_intent":
+            raise AssertionError("subscription-first composition must not resolve OpenAI API credentials")
+        return original(self, name, context)
+
+    monkeypatch.setattr(
+        "jason_runtime.composition.OpenBaoSecretResolver.resolve",
+        guarded_resolve,
+    )
+    settings = replace(
+        _settings(tmp_path),
+        hosted_conversation_enabled=True,
+        hosted_semantics_enabled=True,
+        dynamic_conversation_enabled=True,
+        subscription_reasoning_enabled=True,
+        subscription_reasoning_url="http://subscription-reasoning:8091",
+        openai_api_fallback_enabled=False,
+    )
+    application = build_runtime_application(settings)
+
+    assert isinstance(application.conversation_reasoning_client, SubscriptionStructuredJsonClient)
+    assert "openai.semantic_intent" not in calls
+
+
+def test_subscription_settings_default_api_fallback_off(monkeypatch, tmp_path):
+    monkeypatch.setenv("JASON_AUTHORITY_DB", str(tmp_path / "authority.sqlite3"))
+    monkeypatch.setenv("JASON_TEAMS_IDENTITY_BINDINGS_DB", str(tmp_path / "bindings.sqlite3"))
+    monkeypatch.setenv("JASON_TEAMS_CONTINUATION_DB", str(tmp_path / "continuation.sqlite3"))
+    monkeypatch.setenv("JASON_REPLAY_DB", str(tmp_path / "replay.sqlite3"))
+    monkeypatch.setenv("JASON_SECURITY_AUDIT_DB", str(tmp_path / "security.sqlite3"))
+    monkeypatch.setenv("JASON_ORCHESTRATION_EVENTS_DB", str(tmp_path / "events.sqlite3"))
+    monkeypatch.setenv("JASON_TRUSTED_KEYS_REGISTRY", str(_trusted_registry(tmp_path)))
+    monkeypatch.setenv("JASON_OLLAMA_MODEL", "local-test")
+    monkeypatch.setenv("JASON_SUBSCRIPTION_REASONING_ENABLED", "true")
+    monkeypatch.delenv("JASON_OPENAI_API_FALLBACK_ENABLED", raising=False)
+
+    settings = RuntimeSettings.from_env()
+
+    assert settings.subscription_reasoning_enabled is True
+    assert settings.openai_api_fallback_enabled is False
+    assert settings.subscription_reasoning_url == "http://jason-subscription-reasoning:8091"

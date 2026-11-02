@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "pool_id": "pmv3-engineering-workers",
+  "default_role": "jason-development-worker@0.1.0",
+  "assignment_strategy": "least_loaded_then_device_uid",
+  "lease": {
+    "fencing": "stable_action_key_plus_worker_claim",
+    "checkpoint_required": true,
+    "reassign_after_worker_loss": true
+  },
+  "members": [
+    {
+      "device_uid": "13eda165-08e0-ec79-026a-985b37e2eb9e",
+      "target_name": "Claw2-PC",
+      "provider": "datto_rmm",
+      "enrollment_status": "approved_not_activated",
+      "role_instances": [
+        {
+          "role_id": "jason-development-worker",
+          "role_version": "0.1.0",
+          "max_concurrency": 1
+        }
+      ]
+    }
+  ],
+  "governance": {
+    "direct_provider_access": false,
+    "production_deploy_authority": false,
+    "production_secrets_allowed": false,
+    "new_device_requires_owner_enrollment": true
+  }
+}
