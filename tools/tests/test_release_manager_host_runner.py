@@ -4864,6 +4864,76 @@ def test_one_transaction_freeze_context_requires_signed_teams_exact_recovery():
         ) is None
 
 
+
+def test_owner_unfreeze_release_requires_exact_owner_scope_and_writes_audit(tmp_path):
+    from unittest.mock import patch
+    release_id = runner.record_id(SHA_A)
+    (tmp_path / "records").mkdir()
+    marker = tmp_path / runner.PRODUCTION_FREEZE_MARKER
+    marker.write_text(
+        '{"reason":"owner freeze","remove_only_after":"new explicit exact-SHA owner unfreeze decision",'
+        '"schema_version":"1.0","scope":"manual-and-automatic-production-promotions","status":"active"}\n'
+    )
+    marker.chmod(0o600)
+    record = {
+        "release_id": release_id,
+        "state": "production_eligible",
+        "rollback_sha": SHA_B,
+        "release_candidate": {"candidate_sha": SHA_A},
+        "owner_approval": {
+            "approved": True, "candidate_sha": SHA_A,
+            "source": "explicit_owner_instruction", "recorded_at": "now",
+        },
+        "manual_scope_review": {
+            "schema_version": "1.0", "candidate_sha": SHA_A,
+            "baseline_sha": SHA_B, "scope_sha256": "d" * 64,
+        },
+        "history": [],
+    }
+    runner.atomic_json(tmp_path / "records" / (release_id + ".json"), record)
+    with patch.object(runner, "verify_candidate_on_main"), \
+         patch.object(runner, "require_current_manual_scope_review"), \
+         patch.object(runner, "live_production_alignment"):
+        receipt = runner.owner_unfreeze_release(
+            ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A
+        )
+    assert receipt["authorization"] == "explicit_exact_sha_owner_unfreeze"
+    assert receipt["automatic_publish_authority"] is False
+    assert receipt["standing_authority"] is False
+    assert receipt["status"] == "unfrozen"
+    assert not marker.exists()
+    saved = __import__("json").loads(
+        (tmp_path / "owner-explicit-unfreeze-receipts" / (release_id + ".json")).read_text()
+    )
+    assert saved["candidate_sha"] == SHA_A
+    assert saved["rollback_sha"] == SHA_B
+
+
+def test_owner_unfreeze_release_rejects_non_exact_owner_approval(tmp_path):
+    from unittest.mock import patch
+    release_id = runner.record_id(SHA_A)
+    (tmp_path / "records").mkdir()
+    marker = tmp_path / runner.PRODUCTION_FREEZE_MARKER
+    marker.write_text(
+        '{"remove_only_after":"new explicit exact-SHA owner unfreeze decision",'
+        '"scope":"manual-and-automatic-production-promotions","status":"active"}\n'
+    )
+    marker.chmod(0o600)
+    runner.atomic_json(tmp_path / "records" / (release_id + ".json"), {
+        "release_id": release_id, "state": "production_eligible", "rollback_sha": SHA_B,
+        "release_candidate": {"candidate_sha": SHA_A},
+        "owner_approval": {"approved": False},
+        "manual_scope_review": {"schema_version": "1.0", "candidate_sha": SHA_A,
+                                "baseline_sha": SHA_B, "scope_sha256": "d" * 64},
+    })
+    with patch.object(runner, "verify_candidate_on_main"):
+        with __import__("pytest").raises(runner.ReleaseManagerError, match="exact-SHA explicit Owner approval"):
+            runner.owner_unfreeze_release(
+                ROOT, tmp_path, release_id=release_id, candidate_sha=SHA_A
+            )
+    assert marker.exists()
+
+
 def test_one_transaction_freeze_begin_and_restore_are_byte_identical(tmp_path):
     marker = tmp_path / runner.PRODUCTION_FREEZE_MARKER
     backup = tmp_path / runner.PRODUCTION_FREEZE_BACKUP

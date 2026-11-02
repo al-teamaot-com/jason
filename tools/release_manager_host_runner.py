@@ -4824,6 +4824,89 @@ def _deploy_production_locked(
         remove_worktree(repo, deploy_worktree)
 
 
+
+def owner_unfreeze_release(
+    repo: Path,
+    state_root: Path,
+    *,
+    release_id: str,
+    candidate_sha: str,
+) -> dict[str, Any]:
+    """Lift the blanket production freeze for one exact reviewed Owner-approved release."""
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    if release_id != record_id(candidate_sha):
+        raise ReleaseManagerError("unfreeze release ID and exact SHA do not match")
+    record = load_record(state_root, release_id)
+    if str(record.get("state") or "") != "production_eligible":
+        raise ReleaseManagerError("unfreeze requires a production_eligible release")
+    candidate = record.get("release_candidate") or {}
+    if exact_sha(str(candidate.get("candidate_sha") or ""), "candidate_sha") != candidate_sha:
+        raise ReleaseManagerError("unfreeze candidate SHA does not match release record")
+    verify_candidate_on_main(repo, candidate_sha)
+    owner = record.get("owner_approval") or {}
+    if (owner.get("approved") is not True
+            or owner.get("candidate_sha") != candidate_sha
+            or owner.get("source") != "explicit_owner_instruction"):
+        raise ReleaseManagerError("exact-SHA explicit Owner approval is required to unfreeze")
+    require_current_manual_scope_review(repo, state_root, record)
+    rollback_sha = exact_sha(str(record.get("rollback_sha") or ""), "rollback_sha")
+    live_production_alignment(rollback_sha)
+    marker = state_root / PRODUCTION_FREEZE_MARKER
+    if not marker.exists() or marker.is_symlink():
+        raise ReleaseManagerError("production deployment freeze marker is not safely active")
+    snapshot = _freeze_marker_snapshot(state_root)
+    try:
+        marker_doc = json.loads(snapshot["raw"].decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, TypeError, json.JSONDecodeError) as exc:
+        raise ReleaseManagerError("production deployment freeze marker is invalid") from exc
+    if (marker_doc.get("status") != "active"
+            or marker_doc.get("scope") != "manual-and-automatic-production-promotions"
+            or "exact-SHA owner unfreeze decision" not in str(marker_doc.get("remove_only_after") or "")):
+        raise ReleaseManagerError("production deployment freeze marker policy does not permit exact-release unfreeze")
+    scope = record["manual_scope_review"]
+    receipts = state_root / "owner-explicit-unfreeze-receipts"
+    receipts.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if receipts.is_symlink() or stat.S_IMODE(receipts.stat().st_mode) != 0o700:
+        raise ReleaseManagerError("owner unfreeze receipt directory is unsafe")
+    receipt_path = receipts / (release_id + ".json")
+    expected = {
+        "schema_version": "1.0",
+        "authorization": "explicit_exact_sha_owner_unfreeze",
+        "release_id": release_id,
+        "candidate_sha": candidate_sha,
+        "rollback_sha": rollback_sha,
+        "scope_sha256": str(scope["scope_sha256"]),
+        "owner_approval_source": "explicit_owner_instruction",
+        "freeze_sha256_before": snapshot["sha256"],
+        "standing_authority": False,
+        "automatic_publish_authority": False,
+    }
+    if receipt_path.exists() or receipt_path.is_symlink():
+        existing = json.loads(receipt_path.read_text(encoding="utf-8"))
+        if any(existing.get(k) != v for k, v in expected.items()):
+            raise ReleaseManagerError("existing owner unfreeze receipt conflicts with exact release")
+        if not marker.exists():
+            return existing
+        raise ReleaseManagerError("owner unfreeze receipt exists while freeze marker remains active")
+    receipt = {**expected, "recorded_at": now(), "status": "authorized_pending"}
+    atomic_json(receipt_path, receipt)
+    try:
+        marker.unlink()
+    except BaseException:
+        receipt["status"] = "marker_removal_failed"
+        receipt["failed_at"] = now()
+        atomic_json(receipt_path, receipt)
+        raise
+    receipt["status"] = "unfrozen"
+    receipt["unfrozen_at"] = now()
+    atomic_json(receipt_path, receipt)
+    record.setdefault("history", []).append(
+        {"at": now(), "state": "production_eligible", "gate": "owner_exact_sha_unfreeze_recorded"}
+    )
+    save_record(state_root, record)
+    return receipt
+
+
 def manual_release_scope_review(
     repo: Path, state_root: Path, record: dict[str, Any], *,
     include_prs: tuple[int, ...] = (),
@@ -6215,6 +6298,10 @@ def main() -> int:
     impact.add_argument("--acknowledge-dirty-worktree", action="append", default=[])
     impact.add_argument("--record", action="store_true")
 
+    unfreeze = sub.add_parser("unfreeze-release")
+    unfreeze.add_argument("--release-id", required=True)
+    unfreeze.add_argument("--candidate-sha", required=True)
+
     approve = sub.add_parser("approve")
     approve.add_argument("--release-id", required=True)
     approve.add_argument("--candidate-sha", required=True)
@@ -6299,6 +6386,13 @@ def main() -> int:
                 release_production_transaction_lock(lock)
         print(json.dumps(result, indent=2))
         return 0 if result["status"] == "SCOPE_REVIEWED_NOT_DEPLOYMENT_APPROVED" else 2
+    if args.command == "unfreeze-release":
+        receipt = owner_unfreeze_release(
+            repo=repo, state_root=state_root, release_id=args.release_id,
+            candidate_sha=args.candidate_sha,
+        )
+        print(json.dumps(receipt, indent=2))
+        return 0
     if args.command == "approve":
         record = approve_release(
             repo,
