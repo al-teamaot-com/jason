@@ -3896,17 +3896,22 @@ def _recovery_preflight_ccc_exception(
     """
     if not isinstance(recovery_context, Mapping):
         return False
+    required_exceptional = {
+        "runtime-source-alignment": "NOT_PROVEN",
+        "governed-provider-boundary-canaries": "FAIL",
+    }
+    allowed_exceptional = {
+        **required_exceptional,
+        "systemd-failed-units": "FAIL",
+        "openclaw-authority-health": "FAIL",
+    }
     if (
         recovery_context.get("schema_version") != "1.0"
         or recovery_context.get("profile_id") != "provider_identity_and_authority_recovery"
         or recovery_context.get("owner_approval_required") is not True
         or report.get("status") != "FAIL"
-        or exceptional != {
-            "runtime-source-alignment": "NOT_PROVEN",
-            "systemd-failed-units": "FAIL",
-            "openclaw-authority-health": "FAIL",
-            "governed-provider-boundary-canaries": "FAIL",
-        }
+        or any(exceptional.get(key) != value for key, value in required_exceptional.items())
+        or any(allowed_exceptional.get(key) != value for key, value in exceptional.items())
     ):
         return False
     checks = report.get("checks")
@@ -3916,29 +3921,31 @@ def _recovery_preflight_ccc_exception(
         str(row.get("check_id") or ""): row
         for row in checks if isinstance(row, Mapping)
     }
-    failed_units = (
-        (indexed.get("systemd-failed-units") or {}).get("evidence") or {}
-    ).get("failed_units")
-    if not isinstance(failed_units, list) or not failed_units:
-        return False
-    observed_units: set[str] = set()
-    for value in failed_units:
-        if not isinstance(value, str):
+    if exceptional.get("systemd-failed-units") == "FAIL":
+        failed_units = (
+            (indexed.get("systemd-failed-units") or {}).get("evidence") or {}
+        ).get("failed_units")
+        if not isinstance(failed_units, list) or not failed_units:
             return False
-        match = re.search(r"(jason-[a-z0-9_.@-]+\.service)", value)
-        if match is None:
+        observed_units: set[str] = set()
+        for value in failed_units:
+            if not isinstance(value, str):
+                return False
+            match = re.search(r"(jason-[a-z0-9_.@-]+\.service)", value)
+            if match is None:
+                return False
+            observed_units.add(match.group(1))
+        allowed_units = {
+            "jason-openclaw-authority-full-integrity.service",
+            "jason-openclaw-authority-health.service",
+            "jason-production-drift-watchdog.service",
+        }
+        if not observed_units.issubset(allowed_units):
             return False
-        observed_units.add(match.group(1))
-    allowed_units = {
-        "jason-openclaw-authority-full-integrity.service",
-        "jason-openclaw-authority-health.service",
-        "jason-production-drift-watchdog.service",
-    }
-    if not observed_units.issubset(allowed_units):
-        return False
-    auth_health = indexed.get("openclaw-authority-health") or {}
-    if auth_health.get("status") != "FAIL":
-        return False
+    if exceptional.get("openclaw-authority-health") == "FAIL":
+        auth_health = indexed.get("openclaw-authority-health") or {}
+        if auth_health.get("status") != "FAIL":
+            return False
     canary = indexed.get("governed-provider-boundary-canaries") or {}
     evidence = canary.get("evidence")
     if not isinstance(evidence, Mapping):
