@@ -552,6 +552,53 @@ def begin_one_transaction_freeze_exception(
     return {"receipt_path": receipt_path, "receipt": receipt, "raw": snapshot["raw"]}
 
 
+def restored_failed_freeze_receipt_allows_reissue(
+    state_root: Path, record: Mapping[str, Any], candidate_sha: str,
+) -> bool:
+    """Recognize a prior failed one-release transaction after record reconstruction.
+
+    This grants no production authority. It only permits creation of a fresh
+    retry release identity, which must independently pass preproduction, scope
+    review, signed Teams approval, CCC, deployment and rollback gates.
+    """
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    release_id = record_id(candidate_sha)
+    receipt_path = _freeze_receipt_path(state_root, release_id)
+    try:
+        info = receipt_path.lstat()
+        raw = receipt_path.read_bytes()
+        doc = json.loads(raw)
+        marker = _freeze_marker_snapshot(state_root)
+    except (OSError, ValueError, TypeError, json.JSONDecodeError, ReleaseManagerError):
+        return False
+    if (receipt_path.is_symlink()
+            or not stat.S_ISREG(info.st_mode)
+            or stat.S_IMODE(info.st_mode) != 0o600
+            or info.st_uid != state_root.stat().st_uid
+            or info.st_gid != state_root.stat().st_gid
+            or info.st_size > 8192
+            or not isinstance(doc, Mapping)):
+        return False
+    scope = record.get("manual_scope_review") or {}
+    declaration = record.get("one_transaction_freeze_exception") or {}
+    return bool(
+        doc.get("schema_version") == "2.0"
+        and doc.get("authorization") == "signed_teams_one_transaction_unfreeze"
+        and doc.get("release_id") == release_id
+        and doc.get("candidate_sha") == candidate_sha
+        and doc.get("rollback_sha") == record.get("rollback_sha")
+        and doc.get("scope_sha256") == scope.get("scope_sha256")
+        and doc.get("declaration_sha256") == declaration.get("declaration_sha256")
+        and doc.get("freeze_restored") is True
+        and doc.get("status") == "deployment_returned"
+        and doc.get("release_state_after") in {"failed", "rolled_back"}
+        and doc.get("standing_authority") is False
+        and doc.get("additional_provider_or_endpoint_authority") is False
+        and doc.get("freeze_sha256_before") == doc.get("freeze_sha256_after")
+        and doc.get("freeze_sha256_after") == marker.get("sha256")
+    )
+
+
 def restore_one_transaction_freeze_exception(
     state_root: Path, opened: Mapping[str, Any], *, release_state: str,
 ) -> None:
@@ -4980,8 +5027,17 @@ def prepare_release(
     release_id = record_id(candidate_sha)
     if reissue_rolled_back:
         original = load_record(state_root, release_id)
-        if original.get("state") != "rolled_back" or (original.get("failure") or {}).get("rollback_verified") is not True:
-            raise ReleaseManagerError("reissue requires a verified rolled-back release")
+        verified_rollback = (
+            original.get("state") == "rolled_back"
+            and (original.get("failure") or {}).get("rollback_verified") is True
+        )
+        reconstructed_failed_attempt = restored_failed_freeze_receipt_allows_reissue(
+            state_root, original, candidate_sha
+        )
+        if not (verified_rollback or reconstructed_failed_attempt):
+            raise ReleaseManagerError(
+                "reissue requires a verified rolled-back release or exact restored failed freeze receipt"
+            )
         if (original.get("release_candidate") or {}).get("candidate_sha") != candidate_sha:
             raise ReleaseManagerError("reissue source does not match historical attempt")
         for attempt in range(1, 1000):

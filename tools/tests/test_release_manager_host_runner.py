@@ -1952,6 +1952,60 @@ class GovernedReleaseReissueTests(unittest.TestCase):
             self.assertEqual(result['reissued_from'], runner.record_id(SHA_A))
             self.assertEqual(runner.load_record(root, runner.record_id(SHA_A)), historical)
 
+    def test_reconstructed_failed_attempt_with_restored_receipt_can_reissue(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            base = runner.record_id(SHA_A)
+            scope_sha = "c" * 64
+            declaration_sha = "sha256:" + "d" * 64
+            original = {
+                "release_id": base,
+                "state": "production_eligible",
+                "rollback_sha": SHA_B,
+                "manual_scope_review": {"scope_sha256": scope_sha},
+                "one_transaction_freeze_exception": {
+                    "declaration_sha256": declaration_sha,
+                },
+                "release_candidate": {"candidate_sha": SHA_A},
+            }
+            runner.atomic_json(runner.record_path(root, base), original)
+            freeze = root / runner.PRODUCTION_FREEZE_MARKER
+            freeze.write_bytes(b"frozen\n")
+            freeze.chmod(0o600)
+            freeze_sha = __import__("hashlib").sha256(freeze.read_bytes()).hexdigest()
+            receipt = {
+                "schema_version": "2.0",
+                "authorization": "signed_teams_one_transaction_unfreeze",
+                "release_id": base,
+                "candidate_sha": SHA_A,
+                "rollback_sha": SHA_B,
+                "scope_sha256": scope_sha,
+                "declaration_sha256": declaration_sha,
+                "freeze_restored": True,
+                "status": "deployment_returned",
+                "release_state_after": "failed",
+                "standing_authority": False,
+                "additional_provider_or_endpoint_authority": False,
+                "freeze_sha256_before": freeze_sha,
+                "freeze_sha256_after": freeze_sha,
+            }
+            receipt_path = root / "owner-unfreeze-receipts" / (base + ".json")
+            runner.atomic_json(receipt_path, receipt)
+
+            def create(**kw):
+                return {"release_id": kw["release_id_override"], "state": "release_candidate"}
+
+            with patch.object(runner, "revalidate_circuit_breaker"), \
+                 patch.object(runner, "live_runtime", return_value={"revision": SHA_B}), \
+                 patch.object(runner, "create_record", side_effect=create), \
+                 patch.object(runner, "run_preproduction", side_effect=lambda repo, state_root, record: record):
+                result = runner.prepare_release(
+                    ROOT, root, SHA_A, "release_blocker", reissue_rolled_back=True
+                )
+            self.assertEqual(result["release_id"], base + "-retry-1")
+            self.assertEqual(result["reissued_from"], base)
+            self.assertEqual(runner.load_record(root, base), original)
+
     def test_unverified_rollback_cannot_reissue(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
