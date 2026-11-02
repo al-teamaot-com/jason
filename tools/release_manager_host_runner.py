@@ -5039,9 +5039,10 @@ def prepare_release(
             raise ReleaseManagerError(
                 "reissue requires a verified rolled-back release or exact restored failed freeze receipt"
             )
-        recovery_reissue_context = governed_open_breaker_recovery_context(
-            repo, state_root, original, require_owner_approval=False,
-        )
+        if reconstructed_failed_attempt:
+            recovery_reissue_context = governed_open_breaker_recovery_context(
+                repo, state_root, original, require_owner_approval=False,
+            )
     if recovery_reissue_context is None:
         revalidate_circuit_breaker(state_root)
     if reissue_rolled_back:
