@@ -3406,7 +3406,11 @@ def test_preproduction_revalidates_open_breaker_recovery_before_using_degraded_l
     monkeypatch.setattr(runner, "acquire_production_transaction_lock", lambda *a: object())
     monkeypatch.setattr(runner, "release_production_transaction_lock", lambda *a: None)
     monkeypatch.setattr(runner, "_read_protected_snapshot", lambda *a: {})
-    monkeypatch.setattr(runner, "governed_open_breaker_recovery_context", lambda *a, **k: {"profile_id": "provider_identity_and_authority_recovery"})
+    recovery_kwargs = {}
+    def recovery_context(*args, **kwargs):
+        recovery_kwargs.update(kwargs)
+        return {"profile_id": "provider_identity_and_authority_recovery"}
+    monkeypatch.setattr(runner, "governed_open_breaker_recovery_context", recovery_context)
     monkeypatch.setattr(runner, "live_runtime", lambda: (_ for _ in ()).throw(AssertionError("ordinary health gate used")))
     monkeypatch.setattr(runner, "live_runtime_unchecked_health", lambda: {"revision": SHA_B})
     monkeypatch.setattr(runner, "create_preprod_container", lambda **k: ("preprod", tmp_path / "scratch"))
@@ -3419,6 +3423,7 @@ def test_preproduction_revalidates_open_breaker_recovery_before_using_degraded_l
     monkeypatch.setattr(runner.subprocess, "run", lambda *a, **k: None)
     result = runner.run_preproduction(tmp_path, tmp_path / "state", record)
     assert result["preproduction"]["acceptance_passed"] is True
+    assert recovery_kwargs["allowed_record_states"] == frozenset({"release_candidate", "preproduction"})
 
 
 def test_preproduction_recovery_fails_closed_when_live_context_changed(monkeypatch, tmp_path):
