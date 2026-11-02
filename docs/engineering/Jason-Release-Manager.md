@@ -339,3 +339,13 @@ At promotion, the ordinary breaker revalidation runs first. Only if that normal 
 The open breaker is **not** treated as clean during deployment. The exact immutable LKG manifest remains the rollback baseline. The forward release must still pass normal deployment, host reconciliation, functional smoke, independent CCC, and final desired-state drift verification. Last-known-good advancement and breaker closure remain delegated to the existing root transition worker and occur only after clean post-release drift is independently proven. Failure follows the normal deterministic rollback path.
 
 The `provider_identity_and_authority_recovery` profile is additionally allowed to enter the transaction when the LKG runtime is running but reports only the exact reviewed ticket-worker degradation (`HTTP 503`, `process_not_alive`, `restart_budget_exhausted:missing_process`) and fresh drift is exactly the reviewed authority-health plus DNSFilter reconciliation failures. Release Manager never labels that state healthy. It allows the candidate runtime to reach host reconciliation in that exact transitional state; the root host transaction must then perform the Teams-bound OpenBao identity recovery, restart the exact candidate runtime/MCP, prove fresh Autotask and DNSFilter success, and restore ordinary healthy runtime before final release verification. Any other runtime degradation or additional drift fails closed.
+
+## 26. Exact-release Owner Unfreeze
+
+The blanket `production-deployment-freeze` remains stronger than ordinary release approval. For a normal release, it may now be lifted only through the governed Release Manager `unfreeze-release` action.
+
+That action requires the exact release ID and candidate SHA, a `production_eligible` release, current protected-main identity, explicit Owner approval bound to the same SHA, a fresh complete manual scope review, and verified alignment to the recorded live rollback baseline. The existing freeze marker must be a safe private regular file whose policy explicitly requires a new exact-SHA Owner unfreeze decision.
+
+Before removing the marker, Release Manager writes a private durable receipt binding the release ID, candidate SHA, rollback SHA, scope digest, Owner approval source, and pre-unfreeze freeze digest. The receipt explicitly grants neither standing deployment authority nor automatic-publish authority. A conflicting receipt, stale scope, changed source, unsafe marker, or baseline mismatch fails closed.
+
+This action only removes the blanket freeze for the reviewed release workflow. Production promotion still requires all ordinary Release Manager gates. Automatic publishing remains disabled until separately authorized and deployed.
