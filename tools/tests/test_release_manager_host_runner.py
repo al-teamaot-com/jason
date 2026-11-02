@@ -507,6 +507,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 patch.object(runner, "load_record", return_value=record),
                 patch.object(runner, "verify_candidate_on_main"),
                 patch.object(runner, "require_current_manual_scope_review"),
+                patch.object(runner, "DEFAULT_STATE", state_root),
                 patch.object(runner, "CCC_MATERIAL_REVIEW", review_path),
                 patch.object(
                     runner,
