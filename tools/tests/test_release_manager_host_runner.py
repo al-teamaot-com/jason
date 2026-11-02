@@ -3476,6 +3476,7 @@ def test_preproduction_revalidates_open_breaker_recovery_before_using_degraded_l
     result = runner.run_preproduction(tmp_path, tmp_path / "state", record)
     assert result["preproduction"]["acceptance_passed"] is True
     assert recovery_kwargs["allowed_record_states"] == frozenset({"release_candidate", "preproduction"})
+    assert recovery_kwargs["require_preproduction_evidence"] is False
 
 
 def test_preproduction_recovery_fails_closed_when_live_context_changed(monkeypatch, tmp_path):

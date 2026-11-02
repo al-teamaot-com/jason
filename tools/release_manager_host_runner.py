@@ -3299,6 +3299,7 @@ def run_preproduction(repo: Path, state_root: Path, record: dict[str, Any]) -> d
                 repo, state_root, record, require_owner_approval=False,
                 control=control, drift=drift,
                 allowed_record_states=frozenset({"release_candidate", "preproduction"}),
+                require_preproduction_evidence=False,
             )
             if recovery_context is None:
                 raise ReleaseManagerError(
@@ -5277,6 +5278,7 @@ def governed_open_breaker_recovery_context(
     control: Mapping[str, Any] | None = None,
     drift: Mapping[str, Any] | None = None,
     allowed_record_states: frozenset[str] = frozenset({"production_eligible"}),
+    require_preproduction_evidence: bool = True,
 ) -> dict[str, Any] | None:
     """Prove one source-reviewed recovery release may cross an already-open breaker.
 
@@ -5308,10 +5310,13 @@ def governed_open_breaker_recovery_context(
     if (record.get("state") not in allowed_record_states
             or record.get("change_class") != "release_blocker"
             or record.get("risk_profile") != "production_control_core"
-            or not (record.get("development") or {}).get("required_checks_passed")
-            or not (record.get("preproduction") or {}).get("acceptance_passed")
-            or not (record.get("preproduction") or {}).get("rollback_readiness_passed")
-            or (record.get("preproduction") or {}).get("provider_mutations_disabled") is not True):
+            or not (record.get("development") or {}).get("required_checks_passed")):
+        return None
+    if require_preproduction_evidence and (
+        not (record.get("preproduction") or {}).get("acceptance_passed")
+        or not (record.get("preproduction") or {}).get("rollback_readiness_passed")
+        or (record.get("preproduction") or {}).get("provider_mutations_disabled") is not True
+    ):
         return None
     candidate = exact_sha(str((record.get("release_candidate") or {}).get("candidate_sha") or ""),
                           "candidate_sha")
