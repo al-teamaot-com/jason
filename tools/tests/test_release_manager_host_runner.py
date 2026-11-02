@@ -3384,6 +3384,61 @@ def _exercise_serialized_preprod(monkeypatch, tmp_path, *, fail_health=False):
     assert not scratch.exists()
 
 
+
+
+def test_preproduction_revalidates_open_breaker_recovery_before_using_degraded_live_runtime(monkeypatch, tmp_path):
+    record = {
+        "release_id": "release-" + SHA_A[:16],
+        "state": "release_candidate",
+        "rollback_sha": SHA_B,
+        "precreate_open_breaker_recovery": {"profile_id": "provider_identity_and_authority_recovery"},
+        "release_candidate": {
+            "candidate_sha": SHA_A,
+            "image": "candidate-runtime",
+            "artifact_digest": "sha256:fixture",
+            "mcp_image": "candidate-mcp",
+            "mcp_artifact_digest": "sha256:fixture",
+        },
+    }
+    monkeypatch.setattr(runner, "require_candidate_controller_for_preproduction", lambda *a: None)
+    monkeypatch.setattr(runner, "gate_transition", lambda *a: None)
+    monkeypatch.setattr(runner, "image_id", lambda image: "sha256:fixture" if "candidate" in image else "sha256:rollback")
+    monkeypatch.setattr(runner, "acquire_production_transaction_lock", lambda *a: object())
+    monkeypatch.setattr(runner, "release_production_transaction_lock", lambda *a: None)
+    monkeypatch.setattr(runner, "_read_protected_snapshot", lambda *a: {})
+    monkeypatch.setattr(runner, "governed_open_breaker_recovery_context", lambda *a, **k: {"profile_id": "provider_identity_and_authority_recovery"})
+    monkeypatch.setattr(runner, "live_runtime", lambda: (_ for _ in ()).throw(AssertionError("ordinary health gate used")))
+    monkeypatch.setattr(runner, "live_runtime_unchecked_health", lambda: {"revision": SHA_B})
+    monkeypatch.setattr(runner, "create_preprod_container", lambda **k: ("preprod", tmp_path / "scratch"))
+    monkeypatch.setattr(runner, "run", lambda *a, **k: None)
+    monkeypatch.setattr(runner, "wait_health", lambda *a: None)
+    monkeypatch.setattr(runner, "verify_preprod_env", lambda *a: None)
+    monkeypatch.setattr(runner, "production_preflight", lambda *a: "sha256:" + "c" * 64)
+    monkeypatch.setattr(runner, "write_owner_notification_event", lambda *a: None)
+    monkeypatch.setattr(runner, "save_record", lambda *a: None)
+    monkeypatch.setattr(runner.subprocess, "run", lambda *a, **k: None)
+    result = runner.run_preproduction(tmp_path, tmp_path / "state", record)
+    assert result["preproduction"]["acceptance_passed"] is True
+
+
+def test_preproduction_recovery_fails_closed_when_live_context_changed(monkeypatch, tmp_path):
+    import pytest
+    record = {
+        "release_id": "release-" + SHA_A[:16],
+        "state": "release_candidate",
+        "precreate_open_breaker_recovery": {"profile_id": "provider_identity_and_authority_recovery"},
+        "release_candidate": {"candidate_sha": SHA_A, "image": "candidate-runtime", "artifact_digest": "sha256:fixture", "mcp_image": "candidate-mcp", "mcp_artifact_digest": "sha256:fixture"},
+    }
+    monkeypatch.setattr(runner, "require_candidate_controller_for_preproduction", lambda *a: None)
+    monkeypatch.setattr(runner, "gate_transition", lambda *a: None)
+    monkeypatch.setattr(runner, "image_id", lambda *a: "sha256:fixture")
+    monkeypatch.setattr(runner, "acquire_production_transaction_lock", lambda *a: object())
+    monkeypatch.setattr(runner, "release_production_transaction_lock", lambda *a: None)
+    monkeypatch.setattr(runner, "_read_protected_snapshot", lambda *a: {})
+    monkeypatch.setattr(runner, "governed_open_breaker_recovery_context", lambda *a, **k: None)
+    with pytest.raises(runner.ReleaseManagerError, match="preproduction recovery context no longer matches"):
+        runner.run_preproduction(tmp_path, tmp_path / "state", record)
+
 def test_preprod_ephemeral_container_is_guarded_by_serialized_release_lock(
         monkeypatch, tmp_path):
     _exercise_serialized_preprod(monkeypatch, tmp_path)
