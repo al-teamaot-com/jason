@@ -37,6 +37,7 @@ import worker_execution_enrollment as worker_enrollment
 
 DEFAULT_REPO = Path("/home/al/.local/lib/jason/engineering-worker-source")
 DEFAULT_STATE = Path("/var/lib/jason/openclaw/release-manager")
+CCC_MATERIAL_REVIEW = Path("/var/lib/jason/ccc/material-review.json")
 MOBILE_APPROVAL_POLICY = Path("/var/lib/jason/authority/mobile-release-approval-policy.json")
 SOURCE_MOBILE_APPROVAL_POLICY = Path("config/mobile-release-approval-policy.json")
 SOURCE_OPEN_BREAKER_RECOVERY_POLICY = Path("config/open-breaker-recovery-policy.json")
@@ -3181,6 +3182,110 @@ def create_record(
 
 
 
+def _record_exact_owner_ccc_material_review(
+    repo: Path,
+    state_root: Path,
+    record: dict[str, Any],
+    *,
+    release_id: str,
+    candidate_sha: str,
+    source: str,
+) -> bool:
+    """Materialize one Owner approval into canonical CCC review evidence.
+
+    The Owner approval and CCC human material review are the same human
+    decision when they are bound to the same exact SHA and the same current
+    reviewed release scope. This helper creates only human-review evidence.
+    It does not certify CCC, waive technical checks, alter rollback/drift
+    controls, or authorize a different SHA.
+    """
+    scope = record.get("manual_scope_review")
+    if not isinstance(scope, dict):
+        if str(record.get("risk_profile") or "") == "production_control_core":
+            raise ReleaseManagerError(
+                "protected-core owner approval requires exact recorded scope review"
+            )
+        return False
+    if (scope.get("schema_version") != "1.0"
+            or scope.get("candidate_sha") != candidate_sha
+            or not re.fullmatch(r"[0-9a-f]{64}", str(scope.get("scope_sha256") or ""))):
+        raise ReleaseManagerError(
+            "owner approval scope review does not match exact candidate"
+        )
+    require_current_manual_scope_review(repo, state_root, record)
+
+    # Isolated/preproduction/test state roots must never create or replace the
+    # live human-authorization artifact. They still exercise the scope gate.
+    if state_root.resolve() != DEFAULT_STATE.resolve():
+        return False
+
+    manifest = record.get("release_manifest") or {}
+    manifest_sha256 = hashlib.sha256(json.dumps(
+        manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")).hexdigest()
+    payload = {
+        "schema_version": "1.0",
+        "status": "approved",
+        "source_revision": candidate_sha,
+        "recorded_by": "person-al",
+        "recorded_at": now(),
+        "reason": "Exact-SHA Owner production approval; CCC human review unified",
+        "release_id": release_id,
+        "scope_sha256": str(scope["scope_sha256"]),
+        "release_manifest_sha256": manifest_sha256,
+        "approval_source": str(source or "explicit_owner_instruction"),
+    }
+
+    root = CCC_MATERIAL_REVIEW.parent
+    named = root / ("material-review-" + candidate_sha[:16] + ".json")
+    for path in (named, CCC_MATERIAL_REVIEW):
+        if not path.exists():
+            continue
+        prior = json.loads(path.read_text(encoding="utf-8"))
+        prior_sha = str(prior.get("source_revision") or "")
+        if path == named and prior_sha != candidate_sha:
+            raise ReleaseManagerError(
+                "named CCC material review conflicts with exact candidate"
+            )
+        if prior_sha == candidate_sha:
+            if (prior.get("status") != "approved"
+                    or prior.get("recorded_by") != "person-al"):
+                raise ReleaseManagerError(
+                    "existing CCC material review conflicts with exact Owner approval"
+                )
+            # Preserve richer authenticated Teams provenance while adding the
+            # exact reviewed-scope binding required by the unified approval.
+            payload = {**prior, **payload}
+
+    atomic_json(named, payload)
+    if CCC_MATERIAL_REVIEW.exists():
+        prior = json.loads(CCC_MATERIAL_REVIEW.read_text(encoding="utf-8"))
+        prior_sha = str(prior.get("source_revision") or "")
+        if prior_sha and prior_sha != candidate_sha and SHA.fullmatch(prior_sha):
+            archived = root / ("material-review-" + prior_sha[:16] + ".json")
+            if not archived.exists():
+                atomic_json(archived, prior)
+    atomic_json(CCC_MATERIAL_REVIEW, payload)
+
+    evidence = {
+        "source_revision": candidate_sha,
+        "scope_sha256": str(scope["scope_sha256"]),
+        "release_manifest_sha256": manifest_sha256,
+        "approval_source": str(source or "explicit_owner_instruction"),
+        "canonical_path": str(CCC_MATERIAL_REVIEW),
+    }
+    if record.get("owner_material_review") != evidence:
+        record["owner_material_review"] = evidence
+        record.setdefault("history", []).append({
+            "at": now(),
+            "state": "production_eligible",
+            "gate": "owner_approval_materialized_as_ccc_review",
+            "scope_sha256": str(scope["scope_sha256"]),
+        })
+        return True
+    return False
+
+
 def approve_release(
     repo: Path,
     state_root: Path,
@@ -3209,21 +3314,32 @@ def approve_release(
     if image_id(str(candidate.get("mcp_image") or "")) != str(candidate.get("mcp_artifact_digest") or ""):
         raise ReleaseManagerError("candidate MCP artifact changed before owner approval")
     approval = record.get("owner_approval")
+    approval_changed = False
     if isinstance(approval, dict) and approval.get("approved") is True:
         if str(approval.get("candidate_sha") or "") != candidate_sha:
             raise ReleaseManagerError("existing owner approval is bound to a different SHA")
-        if not waive_ccc_material_review:
-            return record
+        approval_source = str(approval.get("source") or source or "explicit_owner_instruction")
     else:
+        approval_source = str(source or "explicit_owner_instruction")
         record["owner_approval"] = {
             "approved": True,
             "candidate_sha": candidate_sha,
-            "source": str(source or "explicit_owner_instruction"),
+            "source": approval_source,
             "recorded_at": now(),
         }
         record.setdefault("history", []).append(
             {"at": now(), "state": "production_eligible", "gate": "owner_approval_recorded"}
         )
+        approval_changed = True
+
+    material_review_changed = _record_exact_owner_ccc_material_review(
+        repo,
+        state_root,
+        record,
+        release_id=release_id,
+        candidate_sha=candidate_sha,
+        source=approval_source,
+    )
 
     if waive_ccc_material_review:
         # This is a one-release Owner constitutional exception to the separate
@@ -3276,7 +3392,8 @@ def approve_release(
                 "gate": "owner_ccc_material_review_waiver_recorded",
                 "scope_sha256": str(scope["scope_sha256"]),
             })
-    save_record(state_root, record)
+    if approval_changed or material_review_changed or waive_ccc_material_review:
+        save_record(state_root, record)
     return record
 
 def consume_owner_approval_requests(repo: Path, state_root: Path) -> int:
