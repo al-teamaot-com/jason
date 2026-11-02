@@ -119,6 +119,38 @@ class WorkerEnrollmentTests(unittest.TestCase):
                 module.ENV_NAME + "=",
             ], [enrolled]))
 
+    def test_release_baseline_accepts_exact_source_authorized_split(self):
+        uid = "13eda165-08e0-ec79-026a-985b37e2eb9e"
+        enrolled = module.ENV_NAME + "=" + uid
+        disabled = module.ENV_NAME + "="
+        self.assertEqual(
+            module.release_baseline_uid(
+                self.fake_docker_env([disabled], [enrolled]),
+                candidate_uid=uid,
+                rollback_uid=uid,
+            ),
+            uid,
+        )
+        self.assertEqual(
+            module.release_baseline_uid(
+                self.fake_docker_env([enrolled], [disabled]),
+                candidate_uid=uid,
+                rollback_uid=uid,
+            ),
+            uid,
+        )
+
+    def test_release_baseline_rejects_split_not_approved_by_both_sources(self):
+        uid = "13eda165-08e0-ec79-026a-985b37e2eb9e"
+        enrolled = module.ENV_NAME + "=" + uid
+        disabled = module.ENV_NAME + "="
+        with self.assertRaisesRegex(module.WorkerEnrollmentError, "differs"):
+            module.release_baseline_uid(
+                self.fake_docker_env([disabled], [enrolled]),
+                candidate_uid=uid,
+                rollback_uid="00000000-0000-0000-0000-000000000000",
+            )
+
     def test_reject_missing_and_duplicate(self):
         entry = module.ENV_NAME + "=a"
         with self.assertRaisesRegex(module.WorkerEnrollmentError, "missing or duplicated"):
@@ -137,7 +169,9 @@ class WorkerEnrollmentTests(unittest.TestCase):
         mcp = (ROOT / "infrastructure" / "jason-mcp" / "production-deploy.sh").read_text()
         runtime = (ROOT / "infrastructure" / "jason-runtime" / "production-deploy.sh").read_text()
         self.assertIn("approved_diagnostic_uid(deploy_worktree)", runner)
-        self.assertIn("env[worker_enrollment.ENV_NAME] = candidate_worker_uid", runner)
+        self.assertIn("rollback_worker_uid = worker_enrollment.approved_diagnostic_uid(", runner)
+        self.assertIn("release_baseline_uid(", runner)
+        self.assertIn("worker_uid=candidate_worker_uid", runner)
         self.assertIn("live_diagnostic_uid(output) != candidate_worker_uid", runner)
         self.assertIn("rollback_env[worker_enrollment.ENV_NAME] = previous_worker_uid", runner)
         self.assertIn("--set-env \"JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID=", mcp)
