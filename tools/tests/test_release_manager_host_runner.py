@@ -466,6 +466,123 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             )
             save_record.assert_called_once_with(state_root, record)
 
+    def test_approve_release_materializes_same_owner_decision_as_exact_ccc_review(self):
+        with tempfile.TemporaryDirectory() as td:
+            state_root = Path(td) / "release-manager"
+            ccc_root = Path(td) / "ccc"
+            state_root.mkdir()
+            ccc_root.mkdir()
+            release_id = runner.record_id(SHA_A)
+            scope_sha = "1" * 64
+            record = {
+                "release_id": release_id,
+                "state": "production_eligible",
+                "risk_profile": "production_control_core",
+                "release_manifest": {
+                    "candidate_sha": SHA_A,
+                    "rollback_sha": SHA_B,
+                },
+                "manual_scope_review": {
+                    "schema_version": "1.0",
+                    "candidate_sha": SHA_A,
+                    "baseline_sha": SHA_B,
+                    "scope_sha256": scope_sha,
+                    "included_prs": [],
+                    "included_commits": [],
+                    "acknowledged_prs": [],
+                    "acknowledged_worktrees": [],
+                },
+                "release_candidate": {
+                    "candidate_sha": SHA_A,
+                    "image": "jason-runtime:test",
+                    "artifact_digest": "sha256:runtime",
+                    "mcp_image": "jason-mcp:test",
+                    "mcp_artifact_digest": "sha256:mcp",
+                },
+                "owner_approval": {"approved": False},
+                "history": [],
+            }
+            review_path = ccc_root / "material-review.json"
+            with (
+                patch.object(runner, "load_record", return_value=record),
+                patch.object(runner, "verify_candidate_on_main"),
+                patch.object(runner, "require_current_manual_scope_review"),
+                patch.object(runner, "CCC_MATERIAL_REVIEW", review_path),
+                patch.object(
+                    runner,
+                    "image_id",
+                    side_effect=lambda image: {
+                        "jason-runtime:test": "sha256:runtime",
+                        "jason-mcp:test": "sha256:mcp",
+                    }[image],
+                ),
+                patch.object(runner, "save_record") as save_record,
+            ):
+                approved = runner.approve_release(
+                    ROOT,
+                    state_root,
+                    release_id=release_id,
+                    candidate_sha=SHA_A,
+                )
+            review = json.loads(review_path.read_text(encoding="utf-8"))
+            named = json.loads(
+                (ccc_root / ("material-review-" + SHA_A[:16] + ".json")).read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(review["status"], "approved")
+            self.assertEqual(review["source_revision"], SHA_A)
+            self.assertEqual(review["recorded_by"], "person-al")
+            self.assertEqual(review["scope_sha256"], scope_sha)
+            self.assertEqual(review["release_id"], release_id)
+            self.assertEqual(named, review)
+            self.assertEqual(
+                approved["owner_material_review"]["scope_sha256"],
+                scope_sha,
+            )
+            self.assertEqual(
+                approved["history"][-1]["gate"],
+                "owner_approval_materialized_as_ccc_review",
+            )
+            save_record.assert_called_once_with(state_root, record)
+
+    def test_protected_core_approval_refuses_to_create_human_authority_without_scope(self):
+        record = {
+            "state": "production_eligible",
+            "risk_profile": "production_control_core",
+            "release_candidate": {
+                "candidate_sha": SHA_A,
+                "image": "jason-runtime:test",
+                "artifact_digest": "sha256:runtime",
+                "mcp_image": "jason-mcp:test",
+                "mcp_artifact_digest": "sha256:mcp",
+            },
+            "owner_approval": {"approved": False},
+            "history": [],
+        }
+        with (
+            patch.object(runner, "load_record", return_value=record),
+            patch.object(runner, "verify_candidate_on_main"),
+            patch.object(
+                runner,
+                "image_id",
+                side_effect=lambda image: {
+                    "jason-runtime:test": "sha256:runtime",
+                    "jason-mcp:test": "sha256:mcp",
+                }[image],
+            ),
+        ):
+            with self.assertRaisesRegex(
+                runner.ReleaseManagerError,
+                "requires exact recorded scope review",
+            ):
+                runner.approve_release(
+                    ROOT,
+                    Path("/tmp"),
+                    release_id="release-test",
+                    candidate_sha=SHA_A,
+                )
+
     def test_approve_release_is_idempotent_for_same_exact_sha(self):
         record = {
             "state": "production_eligible",
