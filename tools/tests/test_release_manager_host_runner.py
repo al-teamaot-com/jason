@@ -1952,6 +1952,47 @@ class GovernedReleaseReissueTests(unittest.TestCase):
             self.assertEqual(result['reissued_from'], runner.record_id(SHA_A))
             self.assertEqual(runner.load_record(root, runner.record_id(SHA_A)), historical)
 
+    def test_verified_recovery_rollback_reissues_under_open_breaker(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            base = runner.record_id(SHA_A)
+            historical = {
+                "release_id": base,
+                "state": "rolled_back",
+                "failure": {"rollback_verified": True},
+                "rollback_sha": SHA_B,
+                "release_candidate": {"candidate_sha": SHA_A},
+                "precreate_open_breaker_recovery": {
+                    "profile_id": "provider_identity_and_authority_recovery",
+                    "rollback_sha": SHA_B,
+                },
+            }
+            runner.atomic_json(runner.record_path(root, base), historical)
+
+            def create(**kw):
+                return {"release_id": kw["release_id_override"], "state": "release_candidate"}
+
+            with patch.object(
+                    runner, "governed_open_breaker_recovery_context",
+                    return_value={"rollback_sha": SHA_B, "profile_id": "provider_identity_and_authority_recovery"},
+                 ), \
+                 patch.object(
+                    runner, "revalidate_circuit_breaker",
+                    side_effect=AssertionError("ordinary breaker revalidation used"),
+                 ), \
+                 patch.object(
+                    runner, "live_runtime",
+                    side_effect=AssertionError("live runtime used for recovery retry"),
+                 ), \
+                 patch.object(runner, "create_record", side_effect=create), \
+                 patch.object(runner, "run_preproduction", side_effect=lambda repo, state_root, record: record):
+                result = runner.prepare_release(
+                    ROOT, root, SHA_A, "release_blocker", reissue_rolled_back=True
+                )
+            self.assertEqual(result["release_id"], base + "-retry-1")
+            self.assertEqual(result["reissued_from"], base)
+            self.assertEqual(runner.load_record(root, base), historical)
+
     def test_reconstructed_failed_attempt_with_restored_receipt_can_reissue(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
