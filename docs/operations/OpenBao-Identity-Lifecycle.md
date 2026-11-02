@@ -75,6 +75,24 @@ Current provider credentials are individual Docker bind-mounted files. Atomic re
 
 Routine rotation alone does not restart Jason containers. During the source-reviewed `provider_identity_and_authority_recovery` release profile, however, the governed root host transaction performs bootstrap/rotation only after exact signed Teams approval, then restarts only `jason-runtime` and `jason-mcp-pilot` so Docker remounts the replacement identity. It requires exact candidate revisions, healthy runtime, running MCP, a fresh Autotask governed provider-canary PASS, and successful DNSFilter reconciliation before the ordinary production drift guard is allowed to pass. Any failure follows normal release rollback.
 
+## Production unit activation contract
+
+The lifecycle worker is a root-owned scheduled control surface. Its first
+desired-state activation is governed by the protected root migration helper and
+is limited to exactly:
+
+- required system unit: `jason-openbao-identity-lifecycle.timer`
+- allowed system unit: `jason-openbao-identity-lifecycle.service`
+
+The migration stages the timer as **allowed but not required** before the unit
+is installed. Only after the immutable candidate installs and verifies the
+unit may the root policy promote the timer to required. Rollback restores the
+prior root policy and removes candidate-only unit state through normal release
+reconciliation.
+
+This migration plan cannot be combined with another root-unit migration or
+broadened to additional units. Any different unit delta fails closed.
+
 ## Root worker boundary
 
 The root worker accepts only the fixed request fields:
