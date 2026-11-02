@@ -3289,7 +3289,19 @@ def run_preproduction(repo: Path, state_root: Path, record: dict[str, Any]) -> d
     name = ""
     scratch: Path | None = None
     try:
-        live = live_runtime()
+        recovery_context = None
+        if isinstance(record.get("precreate_open_breaker_recovery"), Mapping):
+            control = _read_protected_snapshot(state_root, "production-control-state.json")
+            drift = _read_protected_snapshot(state_root, "production-drift.json")
+            recovery_context = governed_open_breaker_recovery_context(
+                repo, state_root, record, require_owner_approval=False,
+                control=control, drift=drift,
+            )
+            if recovery_context is None:
+                raise ReleaseManagerError(
+                    "preproduction recovery context no longer matches live degraded baseline"
+                )
+        live = live_runtime_unchecked_health() if recovery_context is not None else live_runtime()
         name, scratch = create_preprod_container(
             live=live,
             candidate_image=image,
