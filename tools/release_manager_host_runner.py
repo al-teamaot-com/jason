@@ -1588,7 +1588,8 @@ def precreate_open_breaker_recovery_alignment(
             for problem in profile["drift_problems"]
         ))
         required_files = set(str(value) for value in profile["required_changed_files"])
-        if (actual == expected
+        if (actual
+                and set(actual).issubset(set(expected))
                 and required_files.issubset(changed)
                 and len(changed) <= int(profile["max_changed_files"])):
             matches.append(profile)
@@ -5269,8 +5270,9 @@ def governed_open_breaker_recovery_context(
 ) -> dict[str, Any] | None:
     """Prove one source-reviewed recovery release may cross an already-open breaker.
 
-    This is not a generic breaker bypass. The fresh root drift set must match one
-    reviewed profile exactly; live production and immutable LKG must still equal
+    This is not a generic breaker bypass. The fresh root drift set must be a
+    non-empty subset of one reviewed profile, with no unexpected failures; live
+    production and immutable LKG must still equal
     the recorded rollback SHA; exact-main, preproduction, scope review and signed
     Teams owner authority remain mandatory. Closeout still requires clean drift.
     """
@@ -5321,7 +5323,8 @@ def governed_open_breaker_recovery_context(
             for problem in profile["drift_problems"]
         ))
         required_files = set(str(value) for value in profile["required_changed_files"])
-        if (actual == expected
+        if (actual
+                and set(actual).issubset(set(expected))
                 and required_files.issubset(changed)
                 and len(changed) <= int(profile["max_changed_files"])):
             matches.append(profile)

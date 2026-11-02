@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "tools/release_manager_host_runner.py"
@@ -267,7 +268,7 @@ def provider_identity_record():
     return record
 
 
-def test_provider_identity_recovery_requires_exact_drift_and_degraded_runtime_profile():
+def test_provider_identity_recovery_accepts_healthier_known_subset_but_rejects_extra_drift():
     record = provider_identity_record()
     with (
         patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
@@ -285,10 +286,28 @@ def test_provider_identity_recovery_requires_exact_drift_and_degraded_runtime_pr
         assert context["runtime_health_mode"] == "ticket_worker_provider_auth_degraded"
         assert context["runtime_health"]["mode"] == "healthy_or_ticket_worker_provider_auth_degraded"
         assert context["runtime_health"]["ticket_worker"] == "process_not_alive"
+
+        healthier = provider_identity_drift()
+        healthier["problems"] = healthier["problems"][:-1]
+        context = runner.governed_open_breaker_recovery_context(
+            ROOT, ROOT, record, require_owner_approval=True,
+            control=open_control(), drift=healthier,
+        )
+        assert context is not None
+        assert len(context["drift_problems"]) == 3
+
         assert runner.governed_open_breaker_recovery_context(
             ROOT, ROOT, record, require_owner_approval=True,
             control=open_control(), drift=provider_identity_drift(extra=True),
         ) is None
+
+        empty = provider_identity_drift()
+        empty["problems"] = []
+        with pytest.raises(runner.ReleaseManagerError, match="bounded nonempty drift"):
+            runner.governed_open_breaker_recovery_context(
+                ROOT, ROOT, record, require_owner_approval=True,
+                control=open_control(), drift=empty,
+            )
 
 
 def test_provider_identity_degraded_runtime_contract_is_exact():
