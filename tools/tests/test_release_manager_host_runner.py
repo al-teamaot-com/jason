@@ -311,6 +311,58 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             self.assertEqual(record["release_manifest"]["rollback_sha"], SHA_B)
             self.assertEqual(record["release_candidate"]["provenance"]["source_sha"], SHA_A)
 
+    def test_create_record_prefers_reviewed_recovery_context_while_breaker_open(self):
+        with tempfile.TemporaryDirectory() as td:
+            state_root = Path(td)
+            recovery = {
+                "profile_id": "provider_identity_and_authority_recovery",
+                "alignment": {
+                    "runtime_revision": SHA_B,
+                    "mcp_revision": SHA_B,
+                    "host_revision": SHA_B,
+                },
+            }
+            declaration = {
+                "purpose": "provider identity recovery",
+                "rollback_sha": SHA_B,
+            }
+            with (
+                patch.object(
+                    runner,
+                    "live_production_alignment",
+                    return_value={
+                        "runtime_revision": SHA_B,
+                        "mcp_revision": SHA_B,
+                        "host_revision": SHA_B,
+                    },
+                ),
+                patch.object(runner, "verify_candidate_on_main"),
+                patch.object(runner, "changed_files", return_value=["tools/release_manager_host_runner.py"]),
+                patch.object(runner, "required_checks", return_value=["runtime-service"]),
+                patch.object(runner, "github_checks", return_value={"passed": True, "required": ["runtime-service"], "failures": []}),
+                patch.object(runner, "classify_change_risk", return_value="production_control_core"),
+                patch.object(runner, "declared_one_transaction_freeze_exception", return_value=declaration),
+                patch.object(runner, "precreate_open_breaker_recovery_alignment", return_value=recovery) as precreate,
+                patch.object(runner, "build_candidate", return_value=("jason-runtime:release-test", "sha256:new")),
+                patch.object(
+                    runner,
+                    "build_mcp_candidate",
+                    return_value=("jason-mcp:release-test", "sha256:mcp-new", "sha256:mcp-base"),
+                ),
+            ):
+                record = runner.create_record(
+                    repo=ROOT,
+                    state_root=state_root,
+                    candidate_sha=SHA_A,
+                    rollback_sha=SHA_B,
+                    change_class="release_blocker",
+                    owner_approved=False,
+                )
+            precreate.assert_called_once()
+            self.assertEqual(record["precreate_open_breaker_recovery"], recovery)
+            self.assertEqual(record["release_candidate"]["candidate_sha"], SHA_A)
+
+
     def test_create_record_rejects_required_check_failure(self):
         with tempfile.TemporaryDirectory() as td:
             with (

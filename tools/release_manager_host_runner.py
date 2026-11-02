@@ -2986,16 +2986,17 @@ def create_record(
             "production freeze exception is limited to reviewed production-control recovery"
         )
     precreate_recovery = None
-    if alignment is None:
+    if freeze_exception is not None:
         precreate_recovery = precreate_open_breaker_recovery_alignment(
             repo, state_root,
             candidate_sha=candidate_sha, rollback_sha=rollback_sha,
             change_class=change_class, risk_profile=risk_profile, files=files,
         )
-        if precreate_recovery is None:
-            assert ordinary_alignment_error is not None
-            raise ordinary_alignment_error
+    if precreate_recovery is not None:
         alignment = dict(precreate_recovery["alignment"])
+    elif alignment is None:
+        assert ordinary_alignment_error is not None
+        raise ordinary_alignment_error
     if alignment["runtime_revision"] != rollback_sha:
         raise ReleaseManagerError(
             "rollback SHA must equal the exact aligned production revision"
