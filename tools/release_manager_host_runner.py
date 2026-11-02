@@ -4291,6 +4291,17 @@ def run_release_ccc_gate(
                     "live_certified_owner_material_review_waiver",
                 }
             )
+            accepted_candidate_transition = (
+                before_mutation
+                and evidence.get("status") == "NOT_PROVEN"
+                and evidence.get("mode") == "candidate_transition"
+                and evidence.get("technical_checks_passed") is True
+                and [
+                    (x.get("check_id"), x.get("status"))
+                    for x in report.get("checks", [])
+                    if isinstance(x, Mapping) and x.get("status") != "PASS"
+                ] == [("runtime-source-alignment", "NOT_PROVEN")]
+            )
             accepted_recovery_preflight = (
                 before_mutation
                 and evidence.get("status") == "FAIL"
@@ -4298,11 +4309,11 @@ def run_release_ccc_gate(
                     == "approved_provider_identity_recovery_preflight"
                 and evidence.get("recovery_preflight_exception") is True
             )
-            if (not accepted_waiver_report and not accepted_recovery_preflight
-                    and evidence["status"] == "PASS"):
+            if (not accepted_waiver_report and not accepted_candidate_transition
+                    and not accepted_recovery_preflight and evidence["status"] == "PASS"):
                 raise ReleaseManagerError("independent CCC process failed despite PASS report")
-            if (not accepted_waiver_report and not accepted_recovery_preflight
-                    and evidence["status"] != "PASS"):
+            if (not accepted_waiver_report and not accepted_candidate_transition
+                    and not accepted_recovery_preflight and evidence["status"] != "PASS"):
                 raise ReleaseManagerError("independent CCC process failed without accepted exception")
         if failed_monitoring_runs or failed_provider_runs:
             if str(evidence["run_id"]) in (*failed_monitoring_runs, *failed_provider_runs):

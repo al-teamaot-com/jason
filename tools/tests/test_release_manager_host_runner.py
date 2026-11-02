@@ -4883,6 +4883,24 @@ def test_owner_material_review_waiver_requires_protected_core_exact_scope_and_re
                 )
 
 
+def test_run_release_ccc_gate_accepts_nonzero_for_expected_candidate_transition(tmp_path):
+    import json
+    from types import SimpleNamespace
+    ccc = tmp_path / "run_ccc.py"; ccc.write_text("")
+    config = tmp_path / "ccc.json"; config.write_text("{}")
+    latest = tmp_path / "latest.json"
+    report = _ccc_test_report()
+    report["finished_at"] = datetime.now(timezone.utc).isoformat()
+    latest.write_text(json.dumps(report))
+    with patch.object(runner.subprocess, "run", return_value=SimpleNamespace(returncode=1)):
+        evidence = runner.run_release_ccc_gate(
+            SHA_A, SHA_B, before_mutation=True,
+            ccc_runner=ccc, ccc_config=config, latest=latest,
+        )
+    assert evidence["mode"] == "candidate_transition"
+    assert evidence["technical_checks_passed"] is True
+
+
 def test_run_release_ccc_gate_accepts_nonzero_only_for_exact_owner_waiver(tmp_path):
     import json
     from types import SimpleNamespace
