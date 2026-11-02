@@ -169,7 +169,7 @@ class WorkerEnrollmentTests(unittest.TestCase):
         mcp = (ROOT / "infrastructure" / "jason-mcp" / "production-deploy.sh").read_text()
         runtime = (ROOT / "infrastructure" / "jason-runtime" / "production-deploy.sh").read_text()
         self.assertIn("approved_diagnostic_uid(deploy_worktree)", runner)
-        self.assertIn("approved_diagnostic_uid(\n            rollback_policy_worktree", runner)
+        self.assertIn("rollback_worker_uid = worker_enrollment.approved_diagnostic_uid(", runner)
         self.assertIn("release_baseline_uid(", runner)
         self.assertIn("worker_uid=candidate_worker_uid", runner)
         self.assertIn("live_diagnostic_uid(output) != candidate_worker_uid", runner)
