@@ -253,6 +253,15 @@ def provider_identity_drift(*, extra=False):
     }
 
 
+def clean_drift():
+    return {
+        "schema_version": "1.0",
+        "status": "pass",
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+        "problems": [],
+    }
+
+
 def provider_identity_record():
     record = recovery_record()
     record["changed_files"] = [
@@ -266,6 +275,35 @@ def provider_identity_record():
         "tools/release_manager_host_runner.py",
     ]
     return record
+
+
+def test_provider_identity_recovery_accepts_clean_host_drift_only_for_declared_provider_probe():
+    record = provider_identity_record()
+    record["one_transaction_freeze_exception"] = {
+        "required_recovery_profile_id": "provider_identity_and_authority_recovery",
+    }
+    with (
+        patch.object(runner, "authoritative_auto_promotion_head", return_value=SHA_A),
+        patch.object(runner, "require_current_manual_scope_review"),
+        patch.object(runner, "_open_breaker_recovery_policy", return_value=reviewed_recovery_policy()),
+        patch.object(runner, "recovery_live_production_alignment",
+                     return_value={"runtime_health_mode": "healthy"}),
+    ):
+        context = runner.governed_open_breaker_recovery_context(
+            ROOT, ROOT, record, require_owner_approval=True,
+            control=open_control(), drift=clean_drift(),
+        )
+        assert context is not None
+        assert context["profile_id"] == "provider_identity_and_authority_recovery"
+        assert context["drift_problems"] == []
+        assert context["provider_auth_probe_required"] is True
+        assert context["runtime_health_mode"] == "healthy"
+
+        undeclared = provider_identity_record()
+        assert runner.governed_open_breaker_recovery_context(
+            ROOT, ROOT, undeclared, require_owner_approval=True,
+            control=open_control(), drift=clean_drift(),
+        ) is None
 
 
 def test_provider_identity_recovery_accepts_healthier_known_subset_but_rejects_extra_drift():
