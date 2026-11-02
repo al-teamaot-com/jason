@@ -3300,6 +3300,7 @@ def run_preproduction(repo: Path, state_root: Path, record: dict[str, Any]) -> d
                 control=control, drift=drift,
                 allowed_record_states=frozenset({"release_candidate", "preproduction"}),
                 require_preproduction_evidence=False,
+                require_manual_scope_review=False,
             )
             if recovery_context is None:
                 raise ReleaseManagerError(
@@ -5279,6 +5280,7 @@ def governed_open_breaker_recovery_context(
     drift: Mapping[str, Any] | None = None,
     allowed_record_states: frozenset[str] = frozenset({"production_eligible"}),
     require_preproduction_evidence: bool = True,
+    require_manual_scope_review: bool = True,
 ) -> dict[str, Any] | None:
     """Prove one source-reviewed recovery release may cross an already-open breaker.
 
@@ -5327,7 +5329,8 @@ def governed_open_breaker_recovery_context(
     if (not isinstance(lkg, Mapping) or lkg.get("complete") is not True
             or lkg.get("revision") != rollback):
         return None
-    require_current_manual_scope_review(repo, state_root, record)
+    if require_manual_scope_review:
+        require_current_manual_scope_review(repo, state_root, record)
     policy = _open_breaker_recovery_policy(repo, candidate)
     actual = _drift_problem_identities(drift_doc)
     changed = set(str(value) for value in (record.get("changed_files") or []))
