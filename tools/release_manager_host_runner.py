@@ -3214,6 +3214,11 @@ def _record_exact_owner_ccc_material_review(
         )
     require_current_manual_scope_review(repo, state_root, record)
 
+    # Isolated/preproduction/test state roots must never create or replace the
+    # live human-authorization artifact. They still exercise the scope gate.
+    if state_root.resolve() != DEFAULT_STATE.resolve():
+        return False
+
     manifest = record.get("release_manifest") or {}
     manifest_sha256 = hashlib.sha256(json.dumps(
         manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
