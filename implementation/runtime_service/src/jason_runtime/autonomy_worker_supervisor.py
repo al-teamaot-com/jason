@@ -21,10 +21,16 @@ def read_worker_heartbeat(path: str | Path) -> Mapping[str, object] | None:
         return None
     connection = sqlite3.connect(str(db_path), timeout=1.0)
     try:
-        heartbeat = connection.execute(
-            "SELECT last_started_at,last_completed_at,state "
-            "FROM autonomy_ticket_worker_heartbeat WHERE singleton_id=1"
-        ).fetchone()
+        heartbeat = None
+        try:
+            heartbeat = connection.execute(
+                "SELECT last_started_at,last_completed_at,state "
+                "FROM autonomy_ticket_worker_heartbeat WHERE singleton_id=1"
+            ).fetchone()
+        except sqlite3.OperationalError:
+            # Rolling upgrade compatibility: production databases created by
+            # the prior release do not have the active-scan heartbeat table yet.
+            heartbeat = None
         if heartbeat is not None:
             return {
                 "last_started_at": heartbeat[0],
