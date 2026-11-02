@@ -186,7 +186,7 @@ def atomic_release_sandbox(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, "live_quickbooks_read_profile",
                         lambda *a: sorted(runner.QUICKBOOKS_READ_PROFILES)[0])
     monkeypatch.setattr(runner.worker_enrollment, "approved_diagnostic_uid", lambda *a: "")
-    monkeypatch.setattr(runner.worker_enrollment, "live_diagnostic_uid", lambda *a: "")
+    monkeypatch.setattr(runner.worker_enrollment, "live_diagnostic_uid", lambda *a, **k: "")
 
 
 def test_atomic_deploy_updates_runtime_mcp_host_and_release_manager_before_close():
