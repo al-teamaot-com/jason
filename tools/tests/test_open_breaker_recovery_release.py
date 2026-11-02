@@ -235,7 +235,9 @@ def test_deploy_wrapper_crosses_open_breaker_only_with_proven_recovery(tmp_path)
 
 
 def provider_identity_drift(*, extra=False):
-    problems = authority_drift()["problems"] + [
+    problems = [
+        {"kind": "failed_system_unit", "state": "failed",
+         "unit": "jason-openclaw-authority-health.service"},
         {"kind": "failed_user_unit", "state": "failed",
          "unit": "jason-dnsfilter-boundary-reconcile.service"},
         {"kind": "failed_system_unit", "state": "failed",

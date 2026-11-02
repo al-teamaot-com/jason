@@ -34,10 +34,6 @@
       "drift_problems": [
         {
           "kind": "failed_system_unit",
-          "unit": "jason-openclaw-authority-full-integrity.service"
-        },
-        {
-          "kind": "failed_system_unit",
           "unit": "jason-openclaw-authority-health.service"
         },
         {
