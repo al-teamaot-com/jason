@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "tools/release_manager_host_runner.py"
@@ -302,10 +303,11 @@ def test_provider_identity_recovery_accepts_healthier_known_subset_but_rejects_e
 
         empty = provider_identity_drift()
         empty["problems"] = []
-        assert runner.governed_open_breaker_recovery_context(
-            ROOT, ROOT, record, require_owner_approval=True,
-            control=open_control(), drift=empty,
-        ) is None
+        with pytest.raises(runner.ReleaseManagerError, match="bounded nonempty drift"):
+            runner.governed_open_breaker_recovery_context(
+                ROOT, ROOT, record, require_owner_approval=True,
+                control=open_control(), drift=empty,
+            )
 
 
 def test_provider_identity_degraded_runtime_contract_is_exact():
