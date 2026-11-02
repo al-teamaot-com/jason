@@ -349,3 +349,9 @@ That action requires the exact release ID and candidate SHA, a `production_eligi
 Before removing the marker, Release Manager writes a private durable receipt binding the release ID, candidate SHA, rollback SHA, scope digest, Owner approval source, and pre-unfreeze freeze digest. The receipt explicitly grants neither standing deployment authority nor automatic-publish authority. A conflicting receipt, stale scope, changed source, unsafe marker, or baseline mismatch fails closed.
 
 This action only removes the blanket freeze for the reviewed release workflow. Production promotion still requires all ordinary Release Manager gates. Automatic publishing remains disabled until separately authorized and deployed.
+
+## 27. Worker Enrollment Drift Reconciliation
+
+Before production mutation, Release Manager normally requires the live Runtime and MCP worker-enrollment identities to match exactly. One narrowly bounded historical drift is repairable: one plane may be explicitly empty while the other already carries the exact source-approved diagnostic worker UID, but only when the enrollment policy and worker-role contract are unchanged between the rollback baseline and the candidate.
+
+In that case Release Manager treats the unchanged source-approved UID as the rollback baseline value and the governed deployment writes that exact UID to both planes. Any policy change, two different nonempty UIDs, missing/duplicated assignments, or a value different from the source-approved UID remains a hard production blocker. Rollback also restores the source-approved UID to both planes.

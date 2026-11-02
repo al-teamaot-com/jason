@@ -4309,7 +4309,21 @@ def _deploy_production_locked(
         )
     candidate_quickbooks_profile = declared_quickbooks_read_profile(deploy_worktree)
     candidate_worker_uid = worker_enrollment.approved_diagnostic_uid(deploy_worktree)
-    previous_worker_uid = worker_enrollment.live_diagnostic_uid(output)
+    worker_binding_paths = {
+        "config/worker-execution-enrollment.json",
+        "config/worker-roles/jason-development-worker-v1.json",
+    }
+    worker_binding_changed = bool(worker_binding_paths.intersection(record.get("changed_files") or []))
+    # If the source-approved worker binding is unchanged across the rollback
+    # baseline and candidate, one live plane explicitly empty while the other
+    # already carries that exact binding is repairable by this deployment.
+    # Rollback must also restore the source-approved value to both planes.
+    expected_baseline_worker_uid = (
+        candidate_worker_uid if candidate_worker_uid and not worker_binding_changed else None
+    )
+    previous_worker_uid = worker_enrollment.live_diagnostic_uid(
+        output, expected_uid=expected_baseline_worker_uid,
+    )
     prior_quickbooks_profile = live_quickbooks_read_profile()
     prior_release_approval_mode = live_release_mobile_approval_mode(
         live_runtime() if recovery_context is None else live_runtime_unchecked_health()

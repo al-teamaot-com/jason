@@ -57,7 +57,9 @@ def approved_diagnostic_uid(repo: Path) -> str:
     return uid
 
 
-def live_diagnostic_uid(output: Callable[[list[str]], str]) -> str:
+def live_diagnostic_uid(
+    output: Callable[[list[str]], str], *, expected_uid: str | None = None,
+) -> str:
     """Verify both Docker planes, tolerating only explicitly disabled legacy scope.
 
     A missing live variable is compatible with an *explicitly empty* value in
@@ -86,5 +88,14 @@ def live_diagnostic_uid(output: Callable[[list[str]], str]) -> str:
     if values[0] != values[1]:
         if not all(present):
             raise WorkerEnrollmentError("worker enrollment environment missing or duplicated")
+        # Release Manager may repair one narrowly bounded historical drift:
+        # one plane is explicitly disabled while the other already equals the
+        # unchanged source-approved binding. The caller must prove that the
+        # rollback and candidate policies are identical before supplying it.
+        if expected_uid:
+            if not UID_PATTERN.fullmatch(expected_uid):
+                raise WorkerEnrollmentError("invalid expected worker enrollment identity")
+            if sorted(values) == sorted(["", expected_uid]):
+                return expected_uid
         raise WorkerEnrollmentError("MCP/runtime worker enrollment differs")
     return values[0]

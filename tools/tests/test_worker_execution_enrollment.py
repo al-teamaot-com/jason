@@ -119,6 +119,30 @@ class WorkerEnrollmentTests(unittest.TestCase):
                 module.ENV_NAME + "=",
             ], [enrolled]))
 
+    def test_repair_one_explicit_empty_plane_only_when_exact_expected_uid_is_bound(self):
+        enrolled_uid = "13eda165-08e0-ec79-026a-985b37e2eb9e"
+        enrolled = module.ENV_NAME + "=" + enrolled_uid
+        disabled = module.ENV_NAME + "="
+        self.assertEqual(
+            module.live_diagnostic_uid(
+                self.fake_docker_env([disabled], [enrolled]),
+                expected_uid=enrolled_uid,
+            ),
+            enrolled_uid,
+        )
+        self.assertEqual(
+            module.live_diagnostic_uid(
+                self.fake_docker_env([enrolled], [disabled]),
+                expected_uid=enrolled_uid,
+            ),
+            enrolled_uid,
+        )
+        with self.assertRaisesRegex(module.WorkerEnrollmentError, "differs"):
+            module.live_diagnostic_uid(
+                self.fake_docker_env([disabled], [enrolled]),
+                expected_uid="00000000-0000-0000-0000-000000000000",
+            )
+
     def test_reject_missing_and_duplicate(self):
         entry = module.ENV_NAME + "=a"
         with self.assertRaisesRegex(module.WorkerEnrollmentError, "missing or duplicated"):
@@ -137,7 +161,9 @@ class WorkerEnrollmentTests(unittest.TestCase):
         mcp = (ROOT / "infrastructure" / "jason-mcp" / "production-deploy.sh").read_text()
         runtime = (ROOT / "infrastructure" / "jason-runtime" / "production-deploy.sh").read_text()
         self.assertIn("approved_diagnostic_uid(deploy_worktree)", runner)
-        self.assertIn("env[worker_enrollment.ENV_NAME] = candidate_worker_uid", runner)
+        self.assertIn("env[worker_enrollment.ENV_NAME] = worker_uid", runner)
+        self.assertIn("expected_baseline_worker_uid", runner)
+        self.assertIn("expected_uid=expected_baseline_worker_uid", runner)
         self.assertIn("live_diagnostic_uid(output) != candidate_worker_uid", runner)
         self.assertIn("rollback_env[worker_enrollment.ENV_NAME] = previous_worker_uid", runner)
         self.assertIn("--set-env \"JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID=", mcp)
