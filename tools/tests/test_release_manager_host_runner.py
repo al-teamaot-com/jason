@@ -2125,6 +2125,7 @@ class GovernedReleaseReissueTests(unittest.TestCase):
                     )
                 )
 
+            # Any observed runtime revision change proves production moved and must fail closed.
             with patch.object(
                     runner, "live_runtime_unchecked_health",
                     return_value={"revision": SHA_A, "image_id": "runtime-lkg"},
