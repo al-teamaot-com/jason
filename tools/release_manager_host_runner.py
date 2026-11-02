@@ -4309,7 +4309,18 @@ def _deploy_production_locked(
         )
     candidate_quickbooks_profile = declared_quickbooks_read_profile(deploy_worktree)
     candidate_worker_uid = worker_enrollment.approved_diagnostic_uid(deploy_worktree)
-    previous_worker_uid = worker_enrollment.live_diagnostic_uid(output)
+    rollback_policy_worktree = worktree(repo, state_root, rollback_sha)
+    try:
+        rollback_worker_uid = worker_enrollment.approved_diagnostic_uid(
+            rollback_policy_worktree
+        )
+    finally:
+        remove_worktree(repo, rollback_policy_worktree)
+    previous_worker_uid = worker_enrollment.release_baseline_uid(
+        output,
+        candidate_uid=candidate_worker_uid,
+        rollback_uid=rollback_worker_uid,
+    )
     prior_quickbooks_profile = live_quickbooks_read_profile()
     prior_release_approval_mode = live_release_mobile_approval_mode(
         live_runtime() if recovery_context is None else live_runtime_unchecked_health()
