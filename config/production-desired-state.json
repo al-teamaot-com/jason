@@ -1,14 +1,4 @@
 {
-  "schema_version": "1.0",
-  "forbidden_execution_prefixes": [
-    "/home/al/projects/jason",
-    "/home/al/jason-worktrees/",
-    "/tmp/"
-  ],
-  "required_containers": [
-    "jason-runtime",
-    "jason-mcp-pilot"
-  ],
   "allowed_running_containers": [
     "jason-runtime",
     "jason-mcp-pilot",
@@ -22,12 +12,52 @@
     "jason-work-item-exporter",
     "jason-kfs-postgres"
   ],
+  "allowed_system_units": [
+    "jason-boot-recovery.service",
+    "jason-boot-recovery.timer",
+    "jason-ccc.service",
+    "jason-ccc.timer",
+    "jason-delegation-maintenance.service",
+    "jason-documentation-reconciliation.service",
+    "jason-grafana-assurance-exporter.service",
+    "jason-grafana-assurance.service",
+    "jason-grafana-assurance.timer",
+    "jason-openbao-backup.service",
+    "jason-openbao-backup.timer",
+    "jason-openclaw-authority-full-integrity.service",
+    "jason-openclaw-authority-health.service",
+    "jason-production-drift-watchdog.service",
+    "jason-provider-health-canary.service",
+    "jason-release-control-readback.service",
+    "jason-release-control-transition.service",
+    "jason-release-host-reconcile.service",
+    "jason-runtime.service"
+  ],
+  "allowed_user_units": [
+    "jason-dnsfilter-boundary-reconcile.service",
+    "jason-kfs-collector.service",
+    "jason-openclaw-recovery-source-bridge.service",
+    "jason-openclaw-recovery-source-bridge.timer",
+    "jason-release-approval-only.service",
+    "jason-release-manager.service",
+    "jason-self-heal-watchdog.service",
+    "jason-support-repair-worker.service"
+  ],
+  "forbidden_execution_prefixes": [
+    "/home/al/projects/jason",
+    "/home/al/jason-worktrees/",
+    "/tmp/"
+  ],
+  "max_stopped_rollback_containers": 20,
+  "required_containers": [
+    "jason-runtime",
+    "jason-mcp-pilot"
+  ],
   "required_system_units": [
     "jason-client-posture-exporter.service",
     "jason-core.service",
     "jason-delegation-maintenance.timer",
     "jason-documentation-reconciliation.timer",
-    "jason-openbao-identity-lifecycle.timer",
     "jason-openclaw-authority-full-integrity.timer",
     "jason-openclaw-authority-health.timer",
     "jason-operations-configuration-exporter.service",
@@ -45,28 +75,6 @@
     "jason-usage-attribution-exporter.service",
     "jason-usage-exporter.service"
   ],
-  "allowed_system_units": [
-    "jason-boot-recovery.service",
-    "jason-boot-recovery.timer",
-    "jason-ccc.service",
-    "jason-ccc.timer",
-    "jason-delegation-maintenance.service",
-    "jason-documentation-reconciliation.service",
-    "jason-grafana-assurance-exporter.service",
-    "jason-grafana-assurance.service",
-    "jason-grafana-assurance.timer",
-    "jason-openbao-backup.service",
-    "jason-openbao-backup.timer",
-    "jason-openbao-identity-lifecycle.service",
-    "jason-openclaw-authority-full-integrity.service",
-    "jason-openclaw-authority-health.service",
-    "jason-production-drift-watchdog.service",
-    "jason-provider-health-canary.service",
-    "jason-release-control-readback.service",
-    "jason-release-control-transition.service",
-    "jason-release-host-reconcile.service",
-    "jason-runtime.service"
-  ],
   "required_user_units": [
     "jason-release-manager.timer",
     "jason-support-repair-worker.timer",
@@ -75,21 +83,11 @@
     "jason-kfs-collector.timer",
     "jason-release-approval-only.timer"
   ],
-  "allowed_user_units": [
-    "jason-dnsfilter-boundary-reconcile.service",
-    "jason-kfs-collector.service",
-    "jason-openclaw-recovery-source-bridge.service",
-    "jason-openclaw-recovery-source-bridge.timer",
-    "jason-release-approval-only.service",
-    "jason-release-manager.service",
-    "jason-self-heal-watchdog.service",
-    "jason-support-repair-worker.service"
-  ],
   "rollback_container_prefixes": [
     "jason-runtime-rollback-",
     "jason-mcp-pilot-rollback-",
     "jason-mcp-rollback-",
     "jason-teams-gateway-rollback-"
   ],
-  "max_stopped_rollback_containers": 20
+  "schema_version": "1.0"
 }

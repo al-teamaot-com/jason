@@ -4,10 +4,10 @@ import json
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_identity_lifecycle_units_are_managed_production_state():
+def test_identity_lifecycle_units_are_deferred_during_helper_bootstrap():
     policy = json.loads((ROOT / 'config/production-desired-state.json').read_text())
-    assert 'jason-openbao-identity-lifecycle.timer' in policy['required_system_units']
-    assert 'jason-openbao-identity-lifecycle.service' in policy['allowed_system_units']
+    assert 'jason-openbao-identity-lifecycle.timer' not in policy['required_system_units']
+    assert 'jason-openbao-identity-lifecycle.service' not in policy['allowed_system_units']
 
 
 def test_identity_lifecycle_systemd_is_root_bounded_and_exact_path_writable():
@@ -21,13 +21,15 @@ def test_identity_lifecycle_systemd_is_root_bounded_and_exact_path_writable():
     assert '/var/lib/jason/runtime-secrets/openbao/dnsfilter-read-approle' in unit
 
 
-def test_host_reconcile_installs_and_verifies_identity_lifecycle_worker():
+def test_host_reconcile_stages_lifecycle_code_before_unit_activation():
     text = (ROOT / 'tools/reconcile_production_host_services.sh').read_text()
+    assert 'OPENBAO_IDENTITY_LIFECYCLE_DECLARED' in text
+    assert 'install_openbao_identity_lifecycle.py" --stage-only' in text
+    assert 'JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=DEFERRED_BOOTSTRAP' in text
     assert 'step_start openbao_identity_lifecycle_install' in text
-    assert 'install_openbao_identity_lifecycle.py' in text
     assert 'JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=PASS' in text
-    assert text.index('step_start root_release_transition_install') < text.index('step_start openbao_identity_lifecycle_install')
-    assert text.index('step_start openbao_identity_lifecycle_install') < text.index('step_start production_drift_guard')
+    assert text.index('step_start root_release_transition_install') < text.index('OPENBAO_IDENTITY_LIFECYCLE_DECLARED')
+    assert text.index('OPENBAO_IDENTITY_LIFECYCLE_DECLARED') < text.index('step_start production_drift_guard')
 
 
 def test_host_reconcile_runs_provider_identity_recovery_before_final_drift_checks():
