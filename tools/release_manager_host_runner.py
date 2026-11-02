@@ -3297,6 +3297,7 @@ def run_preproduction(repo: Path, state_root: Path, record: dict[str, Any]) -> d
             recovery_context = governed_open_breaker_recovery_context(
                 repo, state_root, record, require_owner_approval=False,
                 control=control, drift=drift,
+                allowed_record_states=frozenset({"release_candidate", "preproduction"}),
             )
             if recovery_context is None:
                 raise ReleaseManagerError(
@@ -5274,6 +5275,7 @@ def governed_open_breaker_recovery_context(
     require_owner_approval: bool,
     control: Mapping[str, Any] | None = None,
     drift: Mapping[str, Any] | None = None,
+    allowed_record_states: frozenset[str] = frozenset({"production_eligible"}),
 ) -> dict[str, Any] | None:
     """Prove one source-reviewed recovery release may cross an already-open breaker.
 
@@ -5302,7 +5304,7 @@ def governed_open_breaker_recovery_context(
         return None
     if observed.tzinfo is None or not -10 <= age <= 180:
         return None
-    if (record.get("state") != "production_eligible"
+    if (record.get("state") not in allowed_record_states
             or record.get("change_class") != "release_blocker"
             or record.get("risk_profile") != "production_control_core"
             or not (record.get("development") or {}).get("required_checks_passed")
