@@ -581,6 +581,31 @@ def restored_failed_freeze_receipt_allows_reissue(
         return False
     scope = record.get("manual_scope_review") or {}
     declaration = record.get("one_transaction_freeze_exception") or {}
+    release_state_after = str(doc.get("release_state_after") or "")
+    pre_mutation_recovered = False
+    if (
+        release_state_after == "production_eligible"
+        and record.get("state") == "production_eligible"
+        and (record.get("owner_approval") or {}).get("approved") is True
+        and (record.get("owner_approval") or {}).get("candidate_sha") == candidate_sha
+        and not record.get("production")
+        and not record.get("failure")
+    ):
+        try:
+            runtime = live_runtime_unchecked_health()
+            mcp = live_mcp()
+            host_revision = Path("/opt/jason/current").resolve().name.casefold()
+            alignment = (record.get("precreate_open_breaker_recovery") or {}).get("alignment") or {}
+            rollback = exact_sha(str(record.get("rollback_sha") or ""), "rollback_sha")
+            pre_mutation_recovered = bool(
+                runtime["revision"] == rollback
+                and mcp["revision"] == rollback
+                and host_revision == rollback
+                and runtime["image_id"] == alignment.get("runtime_image_id")
+                and mcp["image_id"] == alignment.get("mcp_image_id")
+            )
+        except (OSError, ValueError, TypeError, KeyError, ReleaseManagerError):
+            pre_mutation_recovered = False
     return bool(
         doc.get("schema_version") == "2.0"
         and doc.get("authorization") == "signed_teams_one_transaction_unfreeze"
@@ -591,7 +616,10 @@ def restored_failed_freeze_receipt_allows_reissue(
         and doc.get("declaration_sha256") == declaration.get("declaration_sha256")
         and doc.get("freeze_restored") is True
         and doc.get("status") == "deployment_returned"
-        and doc.get("release_state_after") in {"failed", "rolled_back"}
+        and (
+            release_state_after in {"failed", "rolled_back"}
+            or pre_mutation_recovered
+        )
         and doc.get("standing_authority") is False
         and doc.get("additional_provider_or_endpoint_authority") is False
         and doc.get("freeze_sha256_before") == doc.get("freeze_sha256_after")
