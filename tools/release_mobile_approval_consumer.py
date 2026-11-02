@@ -397,8 +397,28 @@ def consume_mobile_release_decisions(
                 raise PermissionError("CCC-only Teams decision lacks an exact prior owner release grant")
         if prior_approval.get("approved") is True and not review_only:
             manifest = raw_release.get("release_manifest") or {}
+            prior_source = str(prior_approval.get("source") or "")
+            if prior_source == "explicit_owner_instruction":
+                if (prior_approval.get("candidate_sha") != request.metadata["candidate_sha"]
+                        or digest(manifest) != request.metadata["manifest_sha256"]):
+                    raise PermissionError(
+                        "existing explicit owner approval does not match signed Teams release subject"
+                    )
+                _private_atomic(marker, {
+                    "schema_version": "1.0", "approval_id": approval_id,
+                    "release_id": release_id,
+                    "candidate_sha": request.metadata["candidate_sha"],
+                    "manifest_sha256": request.metadata["manifest_sha256"],
+                    "mobile_policy_sha256": policy.policy_sha256,
+                    "signed_evidence_sha256": evidence_sha,
+                    "decision": "approve",
+                    "processed_at": datetime.now(timezone.utc).isoformat(),
+                    "recovery": "redundant_signed_teams_decision_preserved_explicit_owner_approval",
+                    "authority_mutated": False,
+                })
+                continue
             named = ccc_root / ("material-review-" + request.metadata["candidate_sha"][:16] + ".json")
-            if (prior_approval.get("source") != exact_prior_source
+            if (prior_source != exact_prior_source
                     or prior_approval.get("candidate_sha") != request.metadata["candidate_sha"]
                     or digest(manifest) != request.metadata["manifest_sha256"]
                     or not named.is_file()):
