@@ -4843,3 +4843,26 @@ def test_recovery_ccc_exception_is_never_valid_post_mutation():
             before_mutation=False,
             recovery_context=_provider_identity_recovery_context(),
         )
+
+
+def test_eligible_release_record_prefers_latest_valid_retry(tmp_path):
+    import release_manager_host_runner as runner
+    sha = 'a' * 40
+    root = tmp_path / 'state'
+    (root / 'records').mkdir(parents=True)
+    base = runner.record_id(sha)
+    runner.atomic_json(runner.record_path(root, base), {
+        'release_id': base, 'state': 'failed',
+        'release_candidate': {'candidate_sha': sha},
+        'release_manifest': {'candidate_sha': sha},
+    })
+    for n, state in [(1, 'production_eligible'), (2, 'production_eligible')]:
+        rid = f'{base}-retry-{n}'
+        runner.atomic_json(runner.record_path(root, rid), {
+            'release_id': rid, 'state': state,
+            'release_candidate': {'candidate_sha': sha},
+            'release_manifest': {'candidate_sha': sha},
+        })
+    rid, record = runner._eligible_release_record_for_sha(root, sha)
+    assert rid == base + '-retry-2'
+    assert record['state'] == 'production_eligible'

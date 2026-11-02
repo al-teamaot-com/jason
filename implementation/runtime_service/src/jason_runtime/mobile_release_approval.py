@@ -30,7 +30,7 @@ from jason_runtime.playbook_autonomy_review import TeamsGatewayPlaybookApprovalS
 from jason_runtime.owner_release_approval_containment import read_release_approval_containment
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
-RELEASE_ID = re.compile(r"^release-[0-9a-f]{16}$")
+RELEASE_ID = re.compile(r"^release-[0-9a-f]{16}(?:-retry-[1-9][0-9]{0,2})?$")
 CAPABILITY = "release.production.approve"
 REQUEST_PREFIX = "relapproval-"
 RISK_LEVELS = frozenset({"normal", "production_repair", "production_control_core", "schema_or_contract"})
@@ -43,6 +43,12 @@ def canonical_bytes(value: Any) -> bytes:
 
 def digest(value: Any) -> str:
     return hashlib.sha256(canonical_bytes(value)).hexdigest()
+
+def release_id_matches_candidate(release_id: str, candidate_sha: str) -> bool:
+    if not SHA.fullmatch(candidate_sha):
+        return False
+    base = "release-" + candidate_sha[:16]
+    return re.fullmatch(re.escape(base) + r"(?:-retry-[1-9][0-9]{0,2})?", release_id) is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,7 +207,7 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
         raise ValueError("mobile approval clock must be timezone-aware")
     if evidence.risk_profile not in policy.allowed_risk_profiles:
         raise PermissionError("release risk is not authorized for mobile pilot")
-    if not SHA.fullmatch(evidence.candidate_sha) or evidence.release_id != "release-" + evidence.candidate_sha[:16]:
+    if not release_id_matches_candidate(evidence.release_id, evidence.candidate_sha):
         raise PermissionError("mobile approval release identity does not match exact SHA")
     shown = ", ".join(evidence.affected_files[:7]) or "(no files)"
     if len(evidence.affected_files) > 7:
@@ -724,7 +730,7 @@ class MobileReleaseApprovalMaintenance:
                 if (offer.get("schema_version") != "1.0"
                         or offer.get("release_id") != path.stem
                         or not SHA.fullmatch(str(offer.get("candidate_sha") or ""))
-                        or offer.get("release_id") != "release-" + offer["candidate_sha"][:16]
+                        or not release_id_matches_candidate(str(offer.get("release_id") or ""), str(offer.get("candidate_sha") or ""))
                         or offer.get("protected_main_sha") != offer["candidate_sha"]
                         or offered.tzinfo is None
                         or not 0 <= (now - offered).total_seconds() <= 900):

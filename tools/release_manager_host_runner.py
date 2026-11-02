@@ -5459,6 +5459,29 @@ def approval_only_while_promotion_held(repo: Path, state_root: Path) -> bool:
         return _approval_only_on_stable_production(repo, state_root)
 
 
+
+
+def _eligible_release_record_for_sha(state_root: Path, candidate_sha: str) -> tuple[str, dict[str, Any]] | None:
+    base = record_id(candidate_sha)
+    candidates: list[tuple[int, str]] = [(0, base)]
+    records_dir = state_root / "records"
+    if records_dir.is_dir():
+        prefix = base + "-retry-"
+        for path in records_dir.glob(prefix + "*.json"):
+            suffix = path.stem[len(prefix):]
+            if suffix.isdigit() and 1 <= int(suffix) <= 999:
+                candidates.append((int(suffix), path.stem))
+    for _, release_id in sorted(candidates, reverse=True):
+        path = record_path(state_root, release_id)
+        if not path.is_file():
+            continue
+        record = load_record(state_root, release_id)
+        if (record.get("state") == "production_eligible"
+                and (record.get("release_candidate") or {}).get("candidate_sha") == candidate_sha
+                and (record.get("release_manifest") or {}).get("candidate_sha") == candidate_sha):
+            return release_id, record
+    return None
+
 def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
     """Private locked implementation; never call outside the serialized gate.
 
@@ -5484,11 +5507,11 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         # after proving there is an exact current release that could qualify for
         # a source-reviewed recovery profile.
         main_sha = authoritative_auto_promotion_head(repo)
-        candidate_path = record_path(state_root, record_id(main_sha))
-        if not candidate_path.is_file():
+        selected = _eligible_release_record_for_sha(state_root, main_sha)
+        if selected is None:
             print("RELEASE_APPROVAL_ONLY=SAFETY_GATE_BLOCKED", flush=True)
             return False
-        record = load_record(state_root, record_id(main_sha))
+        release_id, record = selected
         live = live_runtime_unchecked_health()
         live_sha = exact_sha(live["revision"], "live_production_sha")
     lkg_manifest = ((control.get("last_known_good") or {}).get("manifest") or {})
@@ -5524,11 +5547,11 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
     if main_sha is None:
         main_sha = authoritative_auto_promotion_head(repo)
     if record is None:
-        record_file = record_path(state_root, record_id(main_sha))
-        if not record_file.is_file():
+        selected = _eligible_release_record_for_sha(state_root, main_sha)
+        if selected is None:
             print("RELEASE_APPROVAL_ONLY=NO_CURRENT_ELIGIBLE_RELEASE", flush=True)
             return False
-        record = load_record(state_root, record_id(main_sha))
+        release_id, record = selected
     if (record.get("state") != "production_eligible"
             or (record.get("release_candidate") or {}).get("candidate_sha") != main_sha
             or (record.get("release_manifest") or {}).get("candidate_sha") != main_sha
@@ -5567,7 +5590,7 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
     # The signed decision may have updated owner/CCC evidence. Re-read the same
     # exact record under the release mutex before deciding whether another card
     # is still required.
-    record = load_record(state_root, record_id(main_sha))
+    record = load_record(state_root, release_id)
     if recovery_context is not None:
         refreshed = governed_open_breaker_recovery_context(
             repo, state_root, record, require_owner_approval=False,
@@ -5595,7 +5618,7 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
             or exact_sha(recheck_live["revision"], "live_production_sha") != live_sha):
         raise ReleaseManagerError("approval-only offer source, hold or baseline changed")
     offer_root = state_root / "mobile-release-offers"
-    offer = offer_root / (record_id(main_sha) + ".json")
+    offer = offer_root / (release_id + ".json")
     manifest_digest = hashlib.sha256(json.dumps(
         record["release_manifest"], sort_keys=True, separators=(",", ":"),
         ensure_ascii=False,
@@ -5606,7 +5629,7 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         existing = json.loads(offer.read_text(encoding="utf-8"))
         if (existing.get("candidate_sha") != main_sha
                 or existing.get("live_rollback_sha") != live_sha
-                or existing.get("release_id") != record_id(main_sha)):
+                or existing.get("release_id") != release_id):
             raise ReleaseManagerError("existing Teams owner offer conflicts with exact release")
         if recovery_context is not None and existing.get("recovery_profile_id") != recovery_context["profile_id"]:
             raise ReleaseManagerError("existing Teams owner offer conflicts with recovery profile")
@@ -5625,7 +5648,7 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
         replacing_stale_offer = True
     atomic_json(offer, {
         "schema_version": "1.0",
-        "release_id": record_id(main_sha),
+        "release_id": release_id,
         "candidate_sha": main_sha,
         "manifest_sha256": manifest_digest,
         "protected_main_sha": main_sha,
