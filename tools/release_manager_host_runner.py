@@ -5375,12 +5375,36 @@ def governed_open_breaker_recovery_context(
     drift_doc = dict(drift or _read_protected_snapshot(
         state_root, "production-drift.json"))
     breaker = control_doc.get("circuit_breaker") or {}
-    if (not isinstance(breaker, Mapping)
-            or breaker.get("state") != "open"
-            or breaker.get("source") != "production_drift_watchdog"
-            or breaker.get("reason") != "continuous_production_drift_detected"
-            or drift_doc.get("schema_version") != "1.0"
-            or drift_doc.get("status") != "drift_detected"):
+    recorded_exception = record.get("one_transaction_freeze_exception") or {}
+    clean_provider_probe = (
+        drift_doc.get("schema_version") == "1.0"
+        and drift_doc.get("status") == "pass"
+        and drift_doc.get("problems") == []
+        and isinstance(recorded_exception, Mapping)
+        and recorded_exception.get("required_recovery_profile_id")
+            == "provider_identity_and_authority_recovery"
+    )
+    ordinary_open_breaker = (
+        isinstance(breaker, Mapping)
+        and breaker.get("state") == "open"
+        and breaker.get("source") == "production_drift_watchdog"
+        and breaker.get("reason") == "continuous_production_drift_detected"
+        and drift_doc.get("schema_version") == "1.0"
+        and drift_doc.get("status") == "drift_detected"
+    )
+    clean_provider_breaker = (
+        clean_provider_probe
+        and isinstance(breaker, Mapping)
+        and breaker.get("state") in {"open", "closed"}
+        and (
+            breaker.get("state") == "closed"
+            or (
+                breaker.get("source") == "production_drift_watchdog"
+                and breaker.get("reason") == "continuous_production_drift_detected"
+            )
+        )
+    )
+    if not (ordinary_open_breaker or clean_provider_breaker):
         return None
     try:
         observed = datetime.fromisoformat(str(drift_doc.get("observed_at") or "").replace("Z", "+00:00"))
@@ -5412,7 +5436,7 @@ def governed_open_breaker_recovery_context(
     if require_manual_scope_review:
         require_current_manual_scope_review(repo, state_root, record)
     policy = _open_breaker_recovery_policy(repo, candidate)
-    actual = _drift_problem_identities(drift_doc)
+    actual = () if clean_provider_probe else _drift_problem_identities(drift_doc)
     changed = set(str(value) for value in (record.get("changed_files") or []))
     matches: list[dict[str, Any]] = []
     for profile in policy["profiles"]:
@@ -5421,8 +5445,12 @@ def governed_open_breaker_recovery_context(
             for problem in profile["drift_problems"]
         ))
         required_files = set(str(value) for value in profile["required_changed_files"])
-        if (actual
-                and set(actual).issubset(set(expected))
+        drift_matches = (
+            profile.get("id") == "provider_identity_and_authority_recovery"
+            if clean_provider_probe
+            else bool(actual) and set(actual).issubset(set(expected))
+        )
+        if (drift_matches
                 and required_files.issubset(changed)
                 and len(changed) <= int(profile["max_changed_files"])):
             matches.append(profile)
@@ -5454,6 +5482,7 @@ def governed_open_breaker_recovery_context(
         ).hexdigest(),
         "runtime_health_mode": baseline["runtime_health_mode"],
         "runtime_health": dict(profile["runtime_health"]),
+        "provider_auth_probe_required": bool(clean_provider_probe),
         "owner_approval_required": bool(require_owner_approval),
     }
 
