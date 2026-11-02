@@ -301,6 +301,37 @@ class AutonomousCompletionNotificationTests(unittest.TestCase):
         self.assertEqual(card["body"][0]["color"], "Accent")
         self.assertIn("ticket updated", json.dumps(card).lower())
 
+    def test_work_blocked_render_translates_internal_state_into_operational_language(self):
+        event, text, card = _render(
+            {
+                "event_type": "work_blocked",
+                "work_id": "T20261102.0006",
+                "work_title": "Vulnerability Detected by VulScan - OWNQCLT2024B",
+                "summary": (
+                    "Ticket T20261102.0006; Client Autotask company #827; "
+                    "Device OWNQCLT2024B; State waiting_dependency; "
+                    "Reason patch_approval_pending."
+                ),
+                "owner_action": (
+                    "Approve or defer the exact outstanding VulScan KBs; "
+                    "no patch approval is granted by this message."
+                ),
+            }
+        )
+        self.assertEqual(event, "work_blocked")
+        self.assertIn("Required action", text)
+        rendered = json.dumps(card)
+        self.assertIn("Action required", rendered)
+        self.assertIn("Current handling", rendered)
+        self.assertIn("Blocker", rendered)
+        self.assertIn("Required action", rendered)
+        self.assertIn("Next", rendered)
+        self.assertIn("Then", rendered)
+        self.assertNotIn("Progress and blocker evidence were preserved", rendered)
+        self.assertNotIn("Still required", rendered)
+        self.assertNotIn("What I'm doing next", rendered)
+        self.assertNotIn("What you need to do", rendered)
+
     def test_work_completed_render_is_green(self):
         event, text, card = _render(
             {

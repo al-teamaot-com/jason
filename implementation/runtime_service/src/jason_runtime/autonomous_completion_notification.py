@@ -399,20 +399,34 @@ def _render(arguments: Mapping[str, Any]) -> tuple[str, str, dict[str, Any]]:
             owner_action = _bounded(owner_action, "owner_action", 300)
         text = f"Jason blocked on {work_id}: {title}. {summary}"
         if owner_action:
-            text += f" Owner action: {owner_action}."
+            text += f" Required action: {owner_action}."
+        current_owner = (
+            "Owner/technician action required"
+            if owner_action
+            else "Jason is monitoring; no technician action required"
+        )
+        required_action = owner_action or "None right now."
+        next_step = (
+            "Jason will detect the required approval/action and automatically resume "
+            "the governed workflow."
+            if owner_action
+            else "Jason will keep monitoring the blocker and automatically resume when it clears."
+        )
+        after_next = (
+            "Jason will continue the approved workflow, verify the result, update the ticket, "
+            "and escalate only if another approval or human intervention is required."
+        )
         facts = [
-            ("Status", "Blocked"),
-            ("Completed", "Progress and blocker evidence were preserved."),
-            ("Still required", summary),
-            ("What I'm doing next", "Recheck this blocker while unrelated eligible work continues."),
-            ("What you need to do", owner_action or "Nothing unless Jason sends a specific action request."),
-            ("Work item", work_id),
-            ("Scope", title),
+            ("Issue", title),
+            ("Current handling", current_owner),
+            ("Blocker", summary),
+            ("Required action", required_action),
+            ("Next", next_step),
+            ("Then", after_next),
+            ("Ticket / work item", work_id),
         ]
-        if owner_action:
-            facts.append(("Owner action", owner_action))
         card = _adaptive_card(
-            title="Jason needs attention",
+            title=("Action required" if owner_action else "Jason monitoring blocker"),
             summary=summary,
             color="Attention",
             facts=tuple(facts),
