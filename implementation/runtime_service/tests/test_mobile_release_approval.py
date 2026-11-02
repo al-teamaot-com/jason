@@ -950,3 +950,15 @@ def test_owner_issuer_sends_fresh_card_for_changed_manifest_same_release_id(tmp_
     assert worker.tick() is False
     assert len(sender.sent) == 1
     assert len(repo.list_all()) == 2
+
+
+def test_retry_release_id_matches_exact_candidate_sha():
+    from jason_runtime.mobile_release_approval import release_id_matches_candidate
+    sha = 'a' * 40
+    assert release_id_matches_candidate('release-' + sha[:16], sha)
+    assert release_id_matches_candidate('release-' + sha[:16] + '-retry-1', sha)
+    assert release_id_matches_candidate('release-' + sha[:16] + '-retry-999', sha)
+    assert not release_id_matches_candidate('release-' + sha[:16] + '-retry-0', sha)
+    assert not release_id_matches_candidate('release-' + sha[:16] + '-retry-1000', sha)
+    assert not release_id_matches_candidate('release-' + ('b' * 16) + '-retry-1', sha)
+    assert not release_id_matches_candidate('release-' + sha[:16] + '-other-1', sha)
