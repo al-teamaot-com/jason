@@ -4802,6 +4802,22 @@ def test_recovery_ccc_preflight_allows_only_exact_provider_identity_signature():
     assert evidence['recovery_preflight_exception'] is True
 
 
+def test_recovery_ccc_preflight_allows_healed_optional_authority_failures():
+    report = _provider_identity_recovery_ccc_report()
+    for row in report['checks']:
+        if row['check_id'] in {'systemd-failed-units', 'openclaw-authority-health'}:
+            row['status'] = 'PASS'
+            row.pop('evidence', None)
+    evidence = runner.verify_release_ccc_report(
+        report, candidate_sha=SHA_A, runtime_sha=SHA_B,
+        before_mutation=True,
+        recovery_context=_provider_identity_recovery_context(),
+    )
+    assert evidence['status'] == 'FAIL'
+    assert evidence['mode'] == 'approved_provider_identity_recovery_preflight'
+    assert evidence['recovery_preflight_exception'] is True
+
+
 def test_recovery_ccc_preflight_exception_fails_closed_on_drift():
     import copy
     import pytest
