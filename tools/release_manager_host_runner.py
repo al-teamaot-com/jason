@@ -5046,7 +5046,10 @@ def prepare_release(
             ))
             or ""
         )
-        if recovery_profile == "provider_identity_and_authority_recovery":
+        if (
+            reconstructed_failed_attempt
+            or recovery_profile == "provider_identity_and_authority_recovery"
+        ):
             recovery_reissue_context = governed_open_breaker_recovery_context(
                 repo, state_root, original, require_owner_approval=False,
             )
