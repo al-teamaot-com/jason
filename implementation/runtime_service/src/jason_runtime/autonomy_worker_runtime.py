@@ -440,6 +440,13 @@ class SQLiteOperationalWorkStore:
         updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS autonomy_ticket_worker_heartbeat (
+        singleton_id INTEGER PRIMARY KEY CHECK(singleton_id=1),
+        last_started_at TEXT,
+        last_completed_at TEXT,
+        state TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS autonomy_ticket_scan_cycle (
         cycle_id TEXT PRIMARY KEY,
         scanned_at TEXT NOT NULL,
@@ -797,6 +804,34 @@ class SQLiteOperationalWorkStore:
                 (int(ticket_id),),
             )
 
+    def mark_scan_started(self, *, started_at: str) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO autonomy_ticket_worker_heartbeat(
+                    singleton_id,last_started_at,last_completed_at,state
+                ) VALUES (1,?,NULL,'running')
+                ON CONFLICT(singleton_id) DO UPDATE SET
+                    last_started_at=excluded.last_started_at,
+                    state='running'
+                """,
+                (started_at,),
+            )
+
+    def mark_scan_failed(self, *, finished_at: str) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO autonomy_ticket_worker_heartbeat(
+                    singleton_id,last_started_at,last_completed_at,state
+                ) VALUES (1,?,?, 'failed')
+                ON CONFLICT(singleton_id) DO UPDATE SET
+                    last_completed_at=excluded.last_completed_at,
+                    state='failed'
+                """,
+                (finished_at, finished_at),
+            )
+
     def record_scan(self, snapshot: TicketScanSnapshot) -> None:
         with self._connection:
             self._connection.execute(
@@ -814,6 +849,17 @@ class SQLiteOperationalWorkStore:
                     snapshot.assigned_elsewhere, snapshot.active_slots,
                     snapshot.selected, snapshot.waiting_device, snapshot.human_review,
                 ),
+            )
+            self._connection.execute(
+                """
+                INSERT INTO autonomy_ticket_worker_heartbeat(
+                    singleton_id,last_started_at,last_completed_at,state
+                ) VALUES (1,?,?, 'completed')
+                ON CONFLICT(singleton_id) DO UPDATE SET
+                    last_completed_at=excluded.last_completed_at,
+                    state='completed'
+                """,
+                (snapshot.scanned_at, snapshot.scanned_at),
             )
             self._connection.execute(
                 """
@@ -2154,11 +2200,15 @@ class OperationalAutonomyMaintenance:
         if now < self._next_due:
             return
         self._next_due = now + self.interval_seconds
+        self.store.mark_scan_started(started_at=datetime.now(timezone.utc).isoformat())
         try:
             candidates = tuple(self.queue_source.reconcile_candidates())
         except Exception:
             # Provider/read failures are never authority to mutate or redispatch.
             # A later cadence retry will reconcile again.
+            self.store.mark_scan_failed(
+                finished_at=datetime.now(timezone.utc).isoformat()
+            )
             return
         by_id = {int(item.resource_id): item for item in candidates}
         self._reconcile_orphaned_waiting_device_rows(by_id)
