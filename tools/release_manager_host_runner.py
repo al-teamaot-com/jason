@@ -5039,7 +5039,17 @@ def prepare_release(
             raise ReleaseManagerError(
                 "reissue requires a verified rolled-back release or exact restored failed freeze receipt"
             )
-        if reconstructed_failed_attempt:
+        recovery_profile = str(
+            ((original.get("precreate_open_breaker_recovery") or {}).get("profile_id"))
+            or ((original.get("one_transaction_freeze_exception") or {}).get(
+                "required_recovery_profile_id"
+            ))
+            or ""
+        )
+        if (
+            reconstructed_failed_attempt
+            or recovery_profile == "provider_identity_and_authority_recovery"
+        ):
             recovery_reissue_context = governed_open_breaker_recovery_context(
                 repo, state_root, original, require_owner_approval=False,
             )
