@@ -5330,7 +5330,6 @@ def governed_open_breaker_recovery_context(
             or lkg.get("revision") != rollback):
         return None
     if require_manual_scope_review:
-        if require_scope_review:
         require_current_manual_scope_review(repo, state_root, record)
     policy = _open_breaker_recovery_policy(repo, candidate)
     actual = _drift_problem_identities(drift_doc)
