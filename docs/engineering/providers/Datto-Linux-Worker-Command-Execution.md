@@ -155,3 +155,5 @@ argument and passes certification. Do not modify origin/main or CCC reports
 to impersonate the candidate. Recording a review is not equal to certification.
 
 Integration coordination: #692 and #1331 are independent open finance and recovery workstreams. This change retains their governance boundaries and does not alter either branch.
+
+Concurrent release-manager overlaps #2153, #2156, and #2158 were reviewed during this normalization change; their timer, pinned-manual, rollback, and Autotask-canary work is orthogonal to the worker-enrollment source contract.
