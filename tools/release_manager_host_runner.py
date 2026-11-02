@@ -5023,8 +5023,9 @@ def prepare_release(
     # before breaker revalidation (which checks drift including retention).
     # Any Docker failure fails closed rather than masking real drift.
     reconcile_stopped_rollback_retention()
-    revalidate_circuit_breaker(state_root)
     release_id = record_id(candidate_sha)
+    original = None
+    recovery_reissue_context = None
     if reissue_rolled_back:
         original = load_record(state_root, release_id)
         verified_rollback = (
@@ -5038,6 +5039,14 @@ def prepare_release(
             raise ReleaseManagerError(
                 "reissue requires a verified rolled-back release or exact restored failed freeze receipt"
             )
+        if reconstructed_failed_attempt:
+            recovery_reissue_context = governed_open_breaker_recovery_context(
+                repo, state_root, original, require_owner_approval=False,
+            )
+    if recovery_reissue_context is None:
+        revalidate_circuit_breaker(state_root)
+    if reissue_rolled_back:
+        assert original is not None
         if (original.get("release_candidate") or {}).get("candidate_sha") != candidate_sha:
             raise ReleaseManagerError("reissue source does not match historical attempt")
         for attempt in range(1, 1000):
@@ -5100,8 +5109,13 @@ def prepare_release(
             f"existing release {release_id} is not safely resumable from state {state}"
         )
 
-    live = live_runtime()
-    rollback_sha = exact_sha(str(live["revision"]), "rollback_sha")
+    if recovery_reissue_context is not None:
+        rollback_sha = exact_sha(
+            str(recovery_reissue_context["rollback_sha"]), "rollback_sha"
+        )
+    else:
+        live = live_runtime()
+        rollback_sha = exact_sha(str(live["revision"]), "rollback_sha")
     record = create_record(
         repo=repo,
         state_root=state_root,
