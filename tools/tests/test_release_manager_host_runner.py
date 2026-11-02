@@ -467,6 +467,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             save_record.assert_called_once_with(state_root, record)
 
     def test_approve_release_materializes_same_owner_decision_as_exact_ccc_review(self):
+        import json
         with tempfile.TemporaryDirectory() as td:
             state_root = Path(td) / "release-manager"
             ccc_root = Path(td) / "ccc"
