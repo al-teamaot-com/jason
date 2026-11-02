@@ -171,7 +171,7 @@ class WorkerEnrollmentTests(unittest.TestCase):
         self.assertIn("approved_diagnostic_uid(deploy_worktree)", runner)
         self.assertIn("approved_diagnostic_uid(\n            rollback_policy_worktree", runner)
         self.assertIn("release_baseline_uid(", runner)
-        self.assertIn("env[worker_enrollment.ENV_NAME] = candidate_worker_uid", runner)
+        self.assertIn("worker_uid=candidate_worker_uid", runner)
         self.assertIn("live_diagnostic_uid(output) != candidate_worker_uid", runner)
         self.assertIn("rollback_env[worker_enrollment.ENV_NAME] = previous_worker_uid", runner)
         self.assertIn("--set-env \"JASON_DATTO_LINUX_SHELL_WORKER_DEVICE_UID=", mcp)
