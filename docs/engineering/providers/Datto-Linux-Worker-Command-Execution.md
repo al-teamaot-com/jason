@@ -101,6 +101,26 @@ ready, install software on the endpoint, make shell standing-safe, or authorize
 disruptive actions. Each generic Linux shell job needs exact per-run approval
 and same-job provider output evidence before any subsequent provisioning.
 
+### Exact split-baseline normalization during governed release
+
+A prior partial migration can leave both production planes on the same verified
+rollback revision while one plane explicitly carries the source-approved worker
+UID and the other explicitly carries an empty value. That split state is
+invalid for normal execution and remains denied.
+
+Release Manager may normalize only that exact historical shape during a
+subsequently Owner-approved exact-SHA release when the immutable **candidate
+source and rollback source independently validate the same non-empty enrollment
+UID**. The live values must be exactly the pair `{"", approved_uid}`; missing
+variables, two different non-empty UIDs, an enrollment absent from either
+source, or any other ambiguity still fails closed.
+
+Normalization is performed only by the serialized Release Manager. Operators
+must not manually inject the environment variable or directly restart a
+container to bypass this check. The canonical approved UID becomes the rollback
+binding as well, so a failed forward deployment restores both planes to the
+same source-authorized state.
+
 ### Concurrent engineering coordination
 
 Reviewed open finance PR #692: it modifies release scripts/installer/controller
