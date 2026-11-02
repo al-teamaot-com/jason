@@ -2057,6 +2057,90 @@ class GovernedReleaseReissueTests(unittest.TestCase):
             self.assertEqual(result["reissued_from"], base)
             self.assertEqual(runner.load_record(root, base), original)
 
+    def test_reconstructed_pre_mutation_attempt_with_restored_receipt_can_reissue(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            base = runner.record_id(SHA_A)
+            scope_sha = "c" * 64
+            declaration_sha = "sha256:" + "d" * 64
+            original = {
+                "release_id": base,
+                "state": "production_eligible",
+                "rollback_sha": SHA_B,
+                "manual_scope_review": {"scope_sha256": scope_sha},
+                "one_transaction_freeze_exception": {
+                    "declaration_sha256": declaration_sha,
+                },
+                "release_candidate": {"candidate_sha": SHA_A},
+                "owner_approval": {
+                    "approved": True,
+                    "candidate_sha": SHA_A,
+                },
+                "precreate_open_breaker_recovery": {
+                    "alignment": {
+                        "runtime_image_id": "runtime-lkg",
+                        "mcp_image_id": "mcp-lkg",
+                    },
+                },
+                "production": None,
+                "failure": None,
+            }
+            runner.atomic_json(runner.record_path(root, base), original)
+            freeze = root / runner.PRODUCTION_FREEZE_MARKER
+            freeze.write_bytes(b"frozen\n")
+            freeze.chmod(0o600)
+            freeze_sha = __import__("hashlib").sha256(freeze.read_bytes()).hexdigest()
+            receipt = {
+                "schema_version": "2.0",
+                "authorization": "signed_teams_one_transaction_unfreeze",
+                "release_id": base,
+                "candidate_sha": SHA_A,
+                "rollback_sha": SHA_B,
+                "scope_sha256": scope_sha,
+                "declaration_sha256": declaration_sha,
+                "freeze_restored": True,
+                "status": "deployment_returned",
+                "release_state_after": "production_eligible",
+                "standing_authority": False,
+                "additional_provider_or_endpoint_authority": False,
+                "freeze_sha256_before": freeze_sha,
+                "freeze_sha256_after": freeze_sha,
+            }
+            receipt_path = root / "owner-unfreeze-receipts" / (base + ".json")
+            runner.atomic_json(receipt_path, receipt)
+
+            with patch.object(
+                    runner, "live_runtime_unchecked_health",
+                    return_value={"revision": SHA_B, "image_id": "runtime-lkg"},
+                 ), patch.object(
+                    runner, "live_mcp",
+                    return_value={"revision": SHA_B, "image_id": "mcp-lkg"},
+                 ), patch.object(
+                    runner.Path, "resolve",
+                    return_value=Path("/opt/jason/releases") / SHA_B,
+                 ):
+                self.assertTrue(
+                    runner.restored_failed_freeze_receipt_allows_reissue(
+                        root, original, SHA_A
+                    )
+                )
+
+            with patch.object(
+                    runner, "live_runtime_unchecked_health",
+                    return_value={"revision": SHA_A, "image_id": "runtime-lkg"},
+                 ), patch.object(
+                    runner, "live_mcp",
+                    return_value={"revision": SHA_B, "image_id": "mcp-lkg"},
+                 ), patch.object(
+                    runner.Path, "resolve",
+                    return_value=Path("/opt/jason/releases") / SHA_B,
+                 ):
+                self.assertFalse(
+                    runner.restored_failed_freeze_receipt_allows_reissue(
+                        root, original, SHA_A
+                    )
+                )
+
     def test_unverified_rollback_cannot_reissue(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
