@@ -1995,8 +1995,18 @@ class GovernedReleaseReissueTests(unittest.TestCase):
             def create(**kw):
                 return {"release_id": kw["release_id_override"], "state": "release_candidate"}
 
-            with patch.object(runner, "revalidate_circuit_breaker"), \
-                 patch.object(runner, "live_runtime", return_value={"revision": SHA_B}), \
+            with patch.object(
+                    runner, "governed_open_breaker_recovery_context",
+                    return_value={"rollback_sha": SHA_B, "profile_id": "provider_identity_and_authority_recovery"},
+                 ), \
+                 patch.object(
+                    runner, "revalidate_circuit_breaker",
+                    side_effect=AssertionError("ordinary breaker revalidation used"),
+                 ), \
+                 patch.object(
+                    runner, "live_runtime",
+                    side_effect=AssertionError("live runtime used for recovery reissue"),
+                 ), \
                  patch.object(runner, "create_record", side_effect=create), \
                  patch.object(runner, "run_preproduction", side_effect=lambda repo, state_root, record: record):
                 result = runner.prepare_release(
