@@ -13,6 +13,7 @@ from connectors.quickbooks.connector import (
     QUICKBOOKS_ACCOUNT_SEARCH,
     QUICKBOOKS_BALANCE_SHEET_READ,
     QUICKBOOKS_COMPANY_READ,
+    QUICKBOOKS_GENERAL_LEDGER_READ,
     QuickBooksConnector,
 )
 from connectors.quickbooks.oauth import QuickBooksOAuthStore, QuickBooksReconnectRequiredError
@@ -200,6 +201,27 @@ def test_report_dates_are_validated_and_forwarded(tmp_path):
                 {"start_date": "2026-10-01", "end_date": "2026-09-30"},
             )
         )
+
+
+def test_general_ledger_read_is_bounded_by_date_and_read_only(tmp_path):
+    connector, _, transport, _ = _build(tmp_path)
+
+    connector.execute(
+        ConnectorRequest(
+            _context(QUICKBOOKS_GENERAL_LEDGER_READ),
+            {"start_date": "2026-09-01", "end_date": "2026-09-30"},
+        )
+    )
+
+    call = transport.calls[-1]
+    assert call["method"] == "GET"
+    assert call["url"].endswith(
+        "/v3/company/1234567890123456/reports/GeneralLedger"
+    )
+    assert call["params"] == {
+        "start_date": "2026-09-01",
+        "end_date": "2026-09-30",
+    }
 
 
 def test_non_aot_organization_fails_before_secret_resolution(tmp_path):
