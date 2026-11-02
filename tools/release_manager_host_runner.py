@@ -5323,7 +5323,8 @@ def governed_open_breaker_recovery_context(
             for problem in profile["drift_problems"]
         ))
         required_files = set(str(value) for value in profile["required_changed_files"])
-        if (actual == expected
+        if (actual
+                and set(actual).issubset(set(expected))
                 and required_files.issubset(changed)
                 and len(changed) <= int(profile["max_changed_files"])):
             matches.append(profile)
