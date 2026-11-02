@@ -5108,8 +5108,13 @@ def prepare_release(
             f"existing release {release_id} is not safely resumable from state {state}"
         )
 
-    live = live_runtime()
-    rollback_sha = exact_sha(str(live["revision"]), "rollback_sha")
+    if recovery_reissue_context is not None:
+        rollback_sha = exact_sha(
+            str(recovery_reissue_context["rollback_sha"]), "rollback_sha"
+        )
+    else:
+        live = live_runtime()
+        rollback_sha = exact_sha(str(live["revision"]), "rollback_sha")
     record = create_record(
         repo=repo,
         state_root=state_root,
