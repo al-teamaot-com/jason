@@ -361,6 +361,13 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             precreate.assert_called_once()
             self.assertEqual(record["precreate_open_breaker_recovery"], recovery)
             self.assertEqual(record["release_candidate"]["candidate_sha"], SHA_A)
+            # Never discard the exact-source freeze exception while building
+            # a record: the signed Teams decision must bind the same declaration
+            # in both the release record and immutable release manifest.
+            self.assertEqual(record["one_transaction_freeze_exception"], declaration)
+            self.assertEqual(record["release_manifest"]["one_transaction_freeze_exception"], declaration)
+            self.assertEqual(record["description"], declaration["purpose"])
+            self.assertIs(record["owner_approval"]["approved"], False)
 
 
     def test_create_record_rejects_required_check_failure(self):
@@ -2365,6 +2372,7 @@ def test_explicit_promotion_reserves_retention_before_breaker_and_deploy():
     calls = []
     handle = object()
     with patch.object(runner, 'acquire_production_transaction_lock', return_value=handle), \
+         patch.object(runner, 'require_pmv3_engineering_quiescent'), \
          patch.object(runner, 'require_current_manual_scope_review'), \
          patch.object(runner, 'require_current_protected_release_source'), \
          patch.object(runner, 'require_host_reconciler_ready'), \
@@ -2382,6 +2390,7 @@ def test_explicit_promotion_missing_root_reconciler_denies_cleanup():
     unlocked = []
     with patch.object(runner, 'acquire_production_transaction_lock', return_value=object()), \
          patch.object(runner, 'release_production_transaction_lock', side_effect=lambda h: unlocked.append(True)), \
+         patch.object(runner, 'require_pmv3_engineering_quiescent'), \
          patch.object(runner, 'require_current_manual_scope_review'), \
          patch.object(runner, 'require_current_protected_release_source'), \
          patch.object(runner, 'require_host_reconciler_ready', side_effect=runner.ReleaseManagerError('root reconciler not ready')), \
@@ -2401,6 +2410,7 @@ def test_explicit_promotion_retention_failure_blocks_mutation():
     import pytest
     calls = []
     with patch.object(runner, 'acquire_production_transaction_lock', return_value=object()), \
+         patch.object(runner, 'require_pmv3_engineering_quiescent'), \
          patch.object(runner, 'require_current_manual_scope_review'), \
          patch.object(runner, 'require_current_protected_release_source'), \
          patch.object(runner, 'require_host_reconciler_ready'), \
