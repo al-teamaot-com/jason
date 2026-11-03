@@ -39,6 +39,12 @@ root helper and protected release controls require a separately authenticated
 exact-SHA authorization and full post-recovery verification. Preserve any failed
 rollback receipts and the OPEN circuit breaker until independently revalidated.
 
+The concurrent historical-unit cleanup work in PR #2158 also edits the root
+reconciler, but implements a distinct rollback-unit planning path. That open PR
+must later rebase and reconcile the pinned health execution boundary against
+protected main; its provider-canary and unit-cleanup changes are not silently
+included in the narrow #2295 proof-execution repair.
+
 ## Source integration reconciliation evidence
 
 - Isolated merge proof: repair PR #2293 head `8f0618e808019ad78fe8f5fb7420fb185ec5f1fc` plus PMV3 queue PR #2280 head `39061f70c522dd2c3dc4d2164c90a9f4fcc791f7` merged without Git conflicts in an **unpublished dry-run worktree**; merged-tree local host tests: **354 passed + five subtests**. No protected `main` merge, no status fabrication, no live runtime or host change.
