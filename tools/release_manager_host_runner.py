@@ -4092,12 +4092,12 @@ def _recovery_preflight_ccc_exception(
     """
     if not isinstance(recovery_context, Mapping):
         return False
-    required_exceptional = {
+    required_base_exceptional = {
         "runtime-source-alignment": "NOT_PROVEN",
-        "governed-provider-boundary-canaries": "FAIL",
     }
     allowed_exceptional = {
-        **required_exceptional,
+        **required_base_exceptional,
+        "governed-provider-boundary-canaries": "FAIL",
         "systemd-failed-units": "FAIL",
         "openclaw-authority-health": "FAIL",
     }
@@ -4106,7 +4106,7 @@ def _recovery_preflight_ccc_exception(
         or recovery_context.get("profile_id") != "provider_identity_and_authority_recovery"
         or recovery_context.get("owner_approval_required") is not True
         or report.get("status") != "FAIL"
-        or any(exceptional.get(key) != value for key, value in required_exceptional.items())
+        or any(exceptional.get(key) != value for key, value in required_base_exceptional.items())
         or any(allowed_exceptional.get(key) != value for key, value in exceptional.items())
     ):
         return False
@@ -4143,6 +4143,22 @@ def _recovery_preflight_ccc_exception(
         if auth_health.get("status") != "FAIL":
             return False
     canary = indexed.get("governed-provider-boundary-canaries") or {}
+    # The provider fault that originally selected this recovery profile may heal
+    # before the authority-integrity services can be repaired. A fresh CCC PASS
+    # for all governed provider canaries narrows the pre-mutation exception; it
+    # must not make the recovery impossible. Admit only when at least one of the
+    # already-reviewed authority-health failures remains and no provider canary
+    # is exceptional. Post-mutation CCC never calls this recovery exception.
+    if canary.get("status") == "PASS":
+        return (
+            "governed-provider-boundary-canaries" not in exceptional
+            and (
+                exceptional.get("systemd-failed-units") == "FAIL"
+                or exceptional.get("openclaw-authority-health") == "FAIL"
+            )
+        )
+    if exceptional.get("governed-provider-boundary-canaries") != "FAIL":
+        return False
     evidence = canary.get("evidence")
     if not isinstance(evidence, Mapping):
         return False
