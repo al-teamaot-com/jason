@@ -199,7 +199,8 @@ def test_free_production_lock_allows_pmv3_pipeline(tmp_path):
     }])
     state = module.controller_run(
         scripts=tmp_path, repo=tmp_path, spool=spool,
-        release_state=release_state, runner=runner, max_passes=2,
+        release_state=release_state, runner=runner,
+        integration_reconciler=idle_integration_queue, max_passes=2,
     )
     assert state["status"] == "complete"
     assert calls["n"] == 1
