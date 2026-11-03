@@ -766,8 +766,9 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 runner,
                 "_deploy_production_locked",
                 side_effect=runner.ReleaseManagerError("forced failure"),
-            ), patch.object(runner, 'require_current_manual_scope_review'), \
-         patch.object(runner, 'require_current_protected_release_source'), \
+            ), patch.object(runner, 'require_pmv3_engineering_quiescent'), \
+               patch.object(runner, 'require_current_manual_scope_review'), \
+               patch.object(runner, 'require_current_protected_release_source'), \
                patch.object(runner, 'require_host_reconciler_ready'), \
                patch.object(runner, 'reconcile_stopped_rollback_retention', return_value=16):
                 with self.assertRaisesRegex(runner.ReleaseManagerError, "forced failure"):
@@ -1045,6 +1046,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 return "sha256:runtime" if value == "jason-runtime:test" else "sha256:mcp"
             with (
                 patch.object(runner, "image_id", side_effect=image),
+                patch.object(runner, "require_pmv3_engineering_quiescent"),
                 patch.object(runner, "require_current_manual_scope_review"),
                 patch.object(runner, "require_current_protected_release_source"),
                 patch.object(runner, "require_host_reconciler_ready"),
@@ -5530,3 +5532,45 @@ def test_legacy_root_stage_a_fails_closed_on_missing_or_invalid_source():
     with patch.object(runner.subprocess, 'check_output', side_effect=runner.subprocess.CalledProcessError(1, ['git'])):
         assert runner.legacy_root_reconciler_stage_a_candidate(Path('/repo'), record) is False
     assert runner.legacy_root_reconciler_stage_a_candidate(Path('/repo'), {}) is False
+
+
+def test_deploy_defers_before_any_mutation_when_pmv3_worker_active(tmp_path):
+    import pytest
+    record = {
+        "release_id": "release-" + SHA_A[:16],
+        "state": "production_eligible",
+        "release_candidate": {"candidate_sha": SHA_A},
+    }
+    lock = object()
+    with (
+        patch.object(runner, "acquire_production_transaction_lock", return_value=lock),
+        patch.object(runner, "release_production_transaction_lock") as release_lock,
+        patch.object(
+            runner, "require_pmv3_engineering_quiescent",
+            side_effect=runner.ReleaseManagerBusy("PMV3 engineering worker is active"),
+        ),
+        patch.object(runner, "restore_stranded_one_transaction_freeze_under_lock") as restore,
+        patch.object(runner, "reconcile_stopped_rollback_retention") as retention,
+        patch.object(runner, "_deploy_production_locked") as deploy,
+    ):
+        with pytest.raises(runner.ReleaseManagerBusy, match="PMV3 engineering worker"):
+            runner.deploy_production(ROOT, tmp_path, record)
+    restore.assert_not_called()
+    retention.assert_not_called()
+    deploy.assert_not_called()
+    release_lock.assert_called_once_with(lock)
+
+
+def test_pmv3_quiescence_accepts_inactive_and_rejects_activating():
+    import pytest
+    with patch.object(
+        runner.subprocess, "run",
+        return_value=subprocess.CompletedProcess([], 0, stdout="inactive\n"),
+    ):
+        runner.require_pmv3_engineering_quiescent()
+    with patch.object(
+        runner.subprocess, "run",
+        return_value=subprocess.CompletedProcess([], 0, stdout="activating\n"),
+    ):
+        with pytest.raises(runner.ReleaseManagerBusy, match="deferred before mutation"):
+            runner.require_pmv3_engineering_quiescent()
