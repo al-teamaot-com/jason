@@ -36,6 +36,10 @@ def test_missing_manual_review_blocks_before_any_mutation(monkeypatch, tmp_path)
                         lambda repo, state, item: (changes.append("locked"), lock)[1])
     monkeypatch.setattr(runner, "release_production_transaction_lock",
                         lambda value: changes.append("unlocked"))
+    # Current PMV3 order checks quiescence inside the acquired release lock.
+    monkeypatch.setattr(runner, "require_pmv3_engineering_quiescent", lambda: None)
+    monkeypatch.setattr(runner, "restore_stranded_one_transaction_freeze_under_lock",
+                        lambda root: None)
     def mutate(*args, **kwargs):
         raise AssertionError("unreviewed release must not modify production")
     monkeypatch.setattr(runner, "reconcile_stopped_rollback_retention", mutate)
@@ -88,11 +92,25 @@ def test_scope_review_for_different_sha_is_rejected(monkeypatch, tmp_path):
 
 
 def test_manual_source_review_never_substitutes_owner_deployment_authorization(monkeypatch, tmp_path):
-    # Source review can be green; the separate Owner freeze is authoritative.
-    monkeypatch.setattr(runner, "require_current_manual_scope_review",
-                        lambda *args: (_ for _ in ()).throw(
-                            AssertionError("freeze must gate before reviewing source")
-                        ))
+    # Verified source/scope is insufficient: the Owner freeze must still deny
+    # production mutation unless an exact signed one-transaction exception exists.
+    observed = []
+    monkeypatch.setattr(runner, "acquire_production_transaction_lock",
+                        lambda *args: observed.append("locked") or object())
+    monkeypatch.setattr(runner, "release_production_transaction_lock",
+                        lambda *args: observed.append("unlocked"))
+    monkeypatch.setattr(runner, "require_pmv3_engineering_quiescent", lambda: None)
+    monkeypatch.setattr(runner, "restore_stranded_one_transaction_freeze_under_lock",
+                        lambda root: None)
+    monkeypatch.setattr(runner, "require_current_manual_scope_review", lambda *a: None)
+    monkeypatch.setattr(runner, "require_current_protected_release_source", lambda *a: None)
+    monkeypatch.setattr(runner, "require_host_reconciler_ready", lambda *a: None)
+
+    def mutate(*args, **kwargs):
+        raise AssertionError("freeze must gate before any production mutation")
+
+    monkeypatch.setattr(runner, "reconcile_stopped_rollback_retention", mutate)
     (tmp_path / "production-deployment-freeze").touch()
     with pytest.raises(runner.ReleaseManagerError, match="owner production deployment freeze"):
         runner.deploy_production(tmp_path, tmp_path, reviewed_record())
+    assert observed == ["locked", "unlocked"]

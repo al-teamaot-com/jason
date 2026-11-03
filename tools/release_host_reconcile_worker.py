@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import importlib.util
 import hashlib
+import fcntl
 import grp
 import json
 import os
 import pwd
 import re
+import sqlite3
 import stat
 import subprocess
 from datetime import datetime, timezone
@@ -56,6 +58,8 @@ CURRENT_LKG_HEALTH_RECOVERY_TIMEOUT_SECONDS = 3650
 CURRENT_LKG_POST_PROOF_RECONCILE_TIMEOUT_SECONDS = 500
 CURRENT_LKG_ARCHIVE_TMP = Path("/srv/jason/archive")
 CURRENT_LKG_FULL_EVIDENCE = Path("/var/lib/jason/openclaw/operational-full-health.json")
+MOBILE_APPROVAL_LEDGER = Path("/var/lib/jason/openclaw/mobile-release-approvals.sqlite3")
+CCC_MATERIAL_REVIEW_ROOT = Path("/var/lib/jason/ccc")
 
 
 class HostReconcileError(RuntimeError):
@@ -407,8 +411,194 @@ def _preflight_candidate_root_policy(source_revision: str) -> str:
     return helper.preview_exact_migration(source_revision, rollback)
 
 
+def _release_transaction_held() -> bool:
+    """True only if a native Release Manager owns an active transaction lock.
+
+    This is a necessary condition, never sufficient approval by itself.
+    Fail closed when the exact advisory lock cannot be independently checked.
+    """
+    path = RELEASE_STATE / "production-transaction.lock"
+    try:
+        fd = os.open(
+            path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+    except OSError:
+        return False
+    try:
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode)
+                or info.st_uid != _host_operator_uid()
+                or info.st_mode & 0o002):
+            return False
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        except OSError:
+            return False
+        else:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return False
+    finally:
+        os.close(fd)
+
+
+def _authenticated_rollback_evidence(
+    candidate: str, rollback: str, record: dict[str, object]
+) -> bool:
+    """Bind root's rollback decision to the authenticated Teams and CCC receipts.
+
+    A mutable release record containing an "approved" boolean is never enough
+    to authorize root host recovery. Independent durable authenticated approval
+    and material-review records must match its immutable manifest byte digest.
+    """
+    owner = record.get("owner_approval") or {}
+    source = str(owner.get("source") or "")
+    prefix = "authenticated_mobile_teams_owner:"
+    if not source.startswith(prefix):
+        return False
+    receipt_id = source[len(prefix):]
+    if not re.fullmatch(r"relapproval-[0-9a-f]{32}", receipt_id):
+        return False
+    manifest = record.get("release_manifest") or {}
+    manifest_digest = hashlib.sha256(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":"),
+                   ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    try:
+        info = MOBILE_APPROVAL_LEDGER.lstat()
+        if (MOBILE_APPROVAL_LEDGER.is_symlink()
+                or not stat.S_ISREG(info.st_mode)
+                or info.st_uid not in {0, _host_operator_uid()}
+                or info.st_mode & 0o002):
+            return False
+        conn = sqlite3.connect(
+            'file:' + MOBILE_APPROVAL_LEDGER.as_posix() + '?mode=ro',
+            uri=True, timeout=2,
+        )
+        try:
+            row = conn.execute(
+                'SELECT payload FROM approval_requests WHERE approval_id=?',
+                (receipt_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return False
+        receipt = json.loads(row[0])
+        meta = receipt.get("metadata") or {}
+        if (receipt.get("status") != "approved"
+                or meta.get("candidate_sha") != candidate
+                or meta.get("rollback_sha") != rollback
+                or meta.get("release_id") != "release-" + candidate[:16]
+                or meta.get("manifest_sha256") != manifest_digest):
+            return False
+        path = CCC_MATERIAL_REVIEW_ROOT / (
+            'material-review-' + candidate[:16] + '.json'
+        )
+        info = path.lstat()
+        if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+                or info.st_uid not in {0, _host_operator_uid()}
+                or info.st_mode & 0o002):
+            return False
+        review = json.loads(path.read_text(encoding='utf-8'))
+        return (
+            review.get('status') == 'approved'
+            and review.get('source_revision') == candidate
+            and review.get('mobile_approval_id') == receipt_id
+            and review.get('release_manifest_sha256') == manifest_digest
+        )
+    except (OSError, ValueError, TypeError, sqlite3.Error):
+        return False
+
+
+def _exact_signed_inflight_lkg_rollback_authorized(
+    source_revision: str, lkg: dict[str, object], breaker: dict[str, object]
+) -> bool:
+    """Allow pre-breaker rollback only inside the exact signed release's lock.
+
+    During a failed promotion, Release Manager restores MCP to the pinned LKG
+    before requesting the host rollback, but opens the circuit breaker only
+    *after* all rollback checks finish. The older test required an already-open
+    breaker, which made the mandatory host rollback unreachable. This exception
+    is not permission for independent or unrelated host reconciliation.
+    """
+    if (breaker.get("state") != "closed"
+            or lkg.get("complete") is not True
+            or lkg.get("revision") != source_revision
+            or not _release_transaction_held()):
+        return False
+    try:
+        candidate = subprocess.check_output(
+            _git("rev-parse", "origin/main"), text=True, timeout=15
+        ).strip().casefold()
+        if not SHA.fullmatch(candidate) or candidate == source_revision:
+            return False
+        record_path = RELEASE_STATE / "records" / (
+            "release-" + candidate[:16] + ".json"
+        )
+        info = record_path.lstat()
+        if (record_path.is_symlink()
+                or not stat.S_ISREG(info.st_mode)
+                or info.st_uid != _host_operator_uid()
+                or info.st_mode & 0o022
+                or info.st_size > 1048576):
+            return False
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        owner = record.get("owner_approval") or {}
+        manifest = record.get("release_manifest") or {}
+        exception = record.get("one_transaction_freeze_exception") or {}
+        previous = record.get("last_known_good_manifest") or {}
+        pre_mutation = record.get("pre_mutation_health") or {}
+        if (
+            record.get("state") != "production"
+            or record.get("risk_profile") != "production_control_core"
+            or (record.get("release_candidate") or {}).get("candidate_sha")
+                != candidate
+            or record.get("rollback_sha") != source_revision
+            or manifest.get("candidate_sha") != candidate
+            or manifest.get("rollback_sha") != source_revision
+            or manifest.get("one_transaction_freeze_exception") != exception
+            or owner.get("approved") is not True
+            or owner.get("candidate_sha") != candidate
+            or not str(owner.get("source") or "").startswith(
+                "authenticated_mobile_teams_owner:relapproval-"
+            )
+            or previous.get("complete") is not True
+            or previous.get("revision") != source_revision
+            or pre_mutation.get("passed") is not True
+            or pre_mutation.get("revision") != source_revision
+            or exception.get("rollback_sha") != source_revision
+            or exception.get("required_recovery_profile_id")
+                != "provider_identity_and_authority_recovery"
+            or exception.get("standing_authority") is not False
+            or exception.get("signed_teams_release_approval_required") is not True
+            or exception.get("restore_freeze_after_transaction") is not True
+            or not _authenticated_rollback_evidence(
+                candidate, source_revision, record
+            )
+        ):
+            return False
+        # The auto-restored one-transaction freeze exception must actually be
+        # active, rather than just advertised in an unprivileged release record.
+        backup = RELEASE_STATE / "production-deployment-freeze.pmv3-one-release-backup"
+        meta = backup.lstat()
+        if (backup.is_symlink() or not stat.S_ISREG(meta.st_mode)
+                or meta.st_uid != _host_operator_uid()
+                or meta.st_mode & 0o022):
+            return False
+        if (RELEASE_STATE / "production-deployment-freeze").exists():
+            return False
+        # _process independently verifies the live MCP is EXACTLY the LKG;
+        # the host may already be candidate or may be only partly updated.
+        return CURRENT.resolve().name.casefold() in {candidate, source_revision}
+    except (OSError, ValueError, TypeError, KeyError, subprocess.SubprocessError):
+        return False
+
+
 def _current_lkg_recovery_authorized(source_revision: str) -> bool:
-    """Allow only exact protected LKG recovery while its breaker is open."""
+    """Allow exact protected LKG health recovery, never a substitute SHA."""
     if source_revision != CURRENT_LKG_RECOVERY_SHA:
         return False
     helper = _trusted_root_policy_helper()
@@ -417,10 +607,12 @@ def _current_lkg_recovery_authorized(source_revision: str) -> bool:
     ))
     breaker = control.get("circuit_breaker") or {}
     lkg = ((control.get("last_known_good") or {}).get("manifest") or {})
-    return (
-        breaker.get("state") == "open"
-        and lkg.get("complete") is True
-        and lkg.get("revision") == source_revision
+    if lkg.get("complete") is not True or lkg.get("revision") != source_revision:
+        return False
+    if breaker.get("state") == "open":
+        return True
+    return _exact_signed_inflight_lkg_rollback_authorized(
+        source_revision, lkg, breaker
     )
 
 

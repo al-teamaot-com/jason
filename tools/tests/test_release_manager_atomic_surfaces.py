@@ -1,5 +1,6 @@
 import importlib.util
 import json
+from contextlib import nullcontext
 import sys
 import tempfile
 from pathlib import Path
@@ -33,6 +34,22 @@ def existing_retention_preflight_is_independently_tested():
     are covered in test_release_manager_host_runner.py.
     """
     with patch.object(runner, "reconcile_stopped_rollback_retention", return_value=16):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def isolated_user_systemd_admission_guard():
+    """Simulate an idle worker and no real systemd runtime in fault injection.
+
+    Worker-active/quiescence and real gate behavior are independently tested by
+    test_release_manager_host_runner and test_pmv3_worker_release_gate.
+    """
+    with (
+        patch.object(runner, "temporary_worker_admission_gate",
+                     side_effect=lambda: nullcontext()),
+        patch.object(runner, "require_pmv3_engineering_quiescent",
+                     return_value=None),
+    ):
         yield
 
 

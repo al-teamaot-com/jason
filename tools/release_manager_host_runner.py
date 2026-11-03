@@ -5234,6 +5234,80 @@ def require_owner_production_deployment_unfrozen(state_root: Path) -> None:
     )
 
 
+@contextmanager
+def temporary_worker_admission_gate():
+    """Block ALL timer/watchdog worker starts throughout native promotion.
+
+    The source-verified release controller owns the exclusive production mutex.
+    Before the old host has been reconciled, its installed watchdog does not
+    yet know about that mutex. A runtime-only systemd ExecCondition in front
+    of the OLD worker closes that bootstrap race. The normal unit, timer, and
+    owner freeze are never edited. This drop-in is removed on all exits.
+    """
+    uid = os.getuid()
+    env = user_systemd_env()
+    runtime = Path(env['XDG_RUNTIME_DIR'])
+    if (runtime.is_symlink() or not runtime.is_dir()
+            or runtime.stat().st_uid != uid):
+        raise ReleaseManagerError('trusted user systemd runtime is unavailable')
+    unit_root = runtime / 'systemd' / 'user'
+    if (unit_root.is_symlink() or not unit_root.is_dir()
+            or unit_root.stat().st_uid != uid):
+        raise ReleaseManagerError('trusted user systemd unit runtime is unavailable')
+    gate = CONTROLLER_SOURCE.parent / 'pmv3_worker_release_gate.py'
+    if (not gate.is_file() or gate.is_symlink()
+            or ' ' in str(gate) or '\n' in str(gate)):
+        raise ReleaseManagerError('exact-source worker admission gate is missing')
+    dropin = unit_root / 'jason-support-repair-worker.service.d'
+    created_dir = False
+    if dropin.exists():
+        if (dropin.is_symlink() or not dropin.is_dir()
+                or dropin.stat().st_uid != uid):
+            raise ReleaseManagerError('existing worker drop-in path is not trusted')
+    else:
+        dropin.mkdir(mode=0o700)
+        created_dir = True
+    guard_file = dropin / '90-pmv3-locked-transaction-admission.conf'
+    if guard_file.exists() or guard_file.is_symlink():
+        raise ReleaseManagerError('PMV3 worker admission guard already exists')
+    configured = False
+
+    def reload_systemd():
+        cmd = subprocess.run(
+            ['systemctl', '--user', 'daemon-reload'],
+            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=env, check=False, timeout=30,
+        )
+        if cmd.returncode:
+            raise ReleaseManagerError(
+                'user systemd worker admission reload failed: '
+                + cmd.stderr[:180]
+            )
+
+    try:
+        fd = os.open(
+            guard_file,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_CLOEXEC', 0),
+            0o600,
+        )
+        with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+            handle.write('[Service]\nExecCondition=/usr/bin/python3 '
+                         + str(gate) + '\n')
+            handle.flush()
+            os.fsync(handle.fileno())
+        configured = True
+        reload_systemd()
+        yield
+    finally:
+        if configured:
+            guard_file.unlink()
+        if created_dir and dropin.is_dir() and not list(dropin.iterdir()):
+            dropin.rmdir()
+        if configured:
+            reload_systemd()
+
+
 def require_pmv3_engineering_quiescent() -> None:
     """Fail before production mutation while the long-running PMV3 worker is active."""
     completed = subprocess.run(
@@ -5270,92 +5344,93 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
     lock = acquire_production_transaction_lock(repo, state_root, record)
     opened_freeze: dict[str, Any] | None = None
     try:
-        # The PMV3 worker can legitimately run for hours. Never enter the
-        # production mutation path and later wait only 180 seconds for it.
-        # Holding the production lock first prevents a new PMV3 pass from
-        # starting; the active-state check handles work that began earlier.
-        require_pmv3_engineering_quiescent()
-        restore_stranded_one_transaction_freeze_under_lock(state_root)
-        require_current_manual_scope_review(repo, state_root, record)
-        require_current_protected_release_source(repo, record)
-        require_host_reconciler_ready(state_root)
-
-        recovery_context = None
-        marker = state_root / PRODUCTION_FREEZE_MARKER
-        freeze_active = marker.exists() or marker.is_symlink()
-        if freeze_active:
-            # A frozen recovery is admitted only when the complete fresh drift
-            # set matches the reviewed recovery profile AND the already signed
-            # Teams release card bound the source-declared one-transaction
-            # freeze purpose, manifest and scope.
+        with temporary_worker_admission_gate():
             try:
-                control = _read_protected_snapshot(
-                    state_root, "production-control-state.json"
-                )
-                drift = _read_protected_snapshot(
-                    state_root, "production-drift.json"
-                )
-                recovery_context = governed_open_breaker_recovery_context(
-                    repo, state_root, record, require_owner_approval=True,
-                    control=control, drift=drift,
-                )
-            except ReleaseManagerError:
+                # The PMV3 worker can legitimately run for hours. Never enter the
+                # production mutation path and later wait only 180 seconds for it.
+                # Holding the production lock first prevents a new PMV3 pass from
+                # starting; the active-state check handles work that began earlier.
+                require_pmv3_engineering_quiescent()
+                restore_stranded_one_transaction_freeze_under_lock(state_root)
+                require_current_manual_scope_review(repo, state_root, record)
+                require_current_protected_release_source(repo, record)
+                require_host_reconciler_ready(state_root)
+
                 recovery_context = None
-            exception_context = (
-                one_transaction_freeze_exception_context(
-                    repo, state_root, record, recovery_context,
-                ) if recovery_context is not None else None
-            )
-            if exception_context is None:
-                require_owner_production_deployment_unfrozen(state_root)
-                raise ReleaseManagerError("production freeze exception evidence is incomplete")
-            opened_freeze = begin_one_transaction_freeze_exception(
-                state_root, exception_context,
-            )
-            # The global freeze was validly lifted for this one transaction;
-            # bounded stopped-container retention may now run.
-            reconcile_stopped_rollback_retention()
-        else:
-            # Ordinary unfrozen promotion preserves the historical ordering:
-            # retention first, then breaker revalidation.
-            reconcile_stopped_rollback_retention()
-            try:
-                revalidate_circuit_breaker(state_root)
-            except ReleaseManagerError as ordinary_breaker_error:
-                try:
-                    control = _read_protected_snapshot(
-                        state_root, "production-control-state.json"
+                marker = state_root / PRODUCTION_FREEZE_MARKER
+                freeze_active = marker.exists() or marker.is_symlink()
+                if freeze_active:
+                    # A frozen recovery is admitted only when the complete fresh drift
+                    # set matches the reviewed recovery profile AND the already signed
+                    # Teams release card bound the source-declared one-transaction
+                    # freeze purpose, manifest and scope.
+                    try:
+                        control = _read_protected_snapshot(
+                            state_root, "production-control-state.json"
+                        )
+                        drift = _read_protected_snapshot(
+                            state_root, "production-drift.json"
+                        )
+                        recovery_context = governed_open_breaker_recovery_context(
+                            repo, state_root, record, require_owner_approval=True,
+                            control=control, drift=drift,
+                        )
+                    except ReleaseManagerError:
+                        recovery_context = None
+                    exception_context = (
+                        one_transaction_freeze_exception_context(
+                            repo, state_root, record, recovery_context,
+                        ) if recovery_context is not None else None
                     )
-                    drift = _read_protected_snapshot(
-                        state_root, "production-drift.json"
+                    if exception_context is None:
+                        require_owner_production_deployment_unfrozen(state_root)
+                        raise ReleaseManagerError("production freeze exception evidence is incomplete")
+                    opened_freeze = begin_one_transaction_freeze_exception(
+                        state_root, exception_context,
                     )
-                    recovery_context = governed_open_breaker_recovery_context(
-                        repo, state_root, record, require_owner_approval=True,
-                        control=control, drift=drift,
-                    )
-                except ReleaseManagerError:
-                    recovery_context = None
-                if recovery_context is None:
-                    raise ordinary_breaker_error
+                    # The global freeze was validly lifted for this one transaction;
+                    # bounded stopped-container retention may now run.
+                    reconcile_stopped_rollback_retention()
+                else:
+                    # Ordinary unfrozen promotion preserves the historical ordering:
+                    # retention first, then breaker revalidation.
+                    reconcile_stopped_rollback_retention()
+                    try:
+                        revalidate_circuit_breaker(state_root)
+                    except ReleaseManagerError as ordinary_breaker_error:
+                        try:
+                            control = _read_protected_snapshot(
+                                state_root, "production-control-state.json"
+                            )
+                            drift = _read_protected_snapshot(
+                                state_root, "production-drift.json"
+                            )
+                            recovery_context = governed_open_breaker_recovery_context(
+                                repo, state_root, record, require_owner_approval=True,
+                                control=control, drift=drift,
+                            )
+                        except ReleaseManagerError:
+                            recovery_context = None
+                        if recovery_context is None:
+                            raise ordinary_breaker_error
 
-        if recovery_context is None:
-            return _deploy_production_locked(repo, state_root, record)
-        return _deploy_production_locked(
-            repo, state_root, record, recovery_context=recovery_context
-        )
-    finally:
-        try:
-            if opened_freeze is not None:
-                try:
-                    latest = load_record(state_root, str(record.get("release_id") or ""))
-                    release_state = str(latest.get("state") or "unknown")
-                except Exception:
-                    release_state = str(record.get("state") or "unknown")
-                restore_one_transaction_freeze_exception(
-                    state_root, opened_freeze, release_state=release_state,
+                if recovery_context is None:
+                    return _deploy_production_locked(repo, state_root, record)
+                return _deploy_production_locked(
+                    repo, state_root, record, recovery_context=recovery_context
                 )
-        finally:
-            release_production_transaction_lock(lock)
+            finally:
+                if opened_freeze is not None:
+                    try:
+                        latest = load_record(state_root, str(record.get("release_id") or ""))
+                        release_state = str(latest.get("state") or "unknown")
+                    except Exception:
+                        release_state = str(record.get("state") or "unknown")
+                    restore_one_transaction_freeze_exception(
+                        state_root, opened_freeze, release_state=release_state,
+                    )
+    finally:
+        release_production_transaction_lock(lock)
 
 
 def prepare_release(

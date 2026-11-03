@@ -3,6 +3,9 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import fcntl
+import os
+import pytest
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
@@ -15,6 +18,84 @@ SPEC = importlib.util.spec_from_file_location(
 module = importlib.util.module_from_spec(SPEC)
 assert SPEC is not None and SPEC.loader is not None
 SPEC.loader.exec_module(module)
+
+
+@pytest.fixture(autouse=True)
+def isolated_release_transaction_lock(tmp_path, monkeypatch):
+    # Unit tests must never depend on or acquire the LIVE production mutex.
+    lock = tmp_path / "production-transaction.lock"
+    lock.touch(mode=0o600)
+    monkeypatch.setattr(module, "PRODUCTION_TRANSACTION_LOCK", lock)
+    return lock
+
+
+def test_selfheal_defers_worker_start_while_production_lock_held(
+    tmp_path, monkeypatch, isolated_release_transaction_lock
+):
+    actions = []
+    monkeypatch.setattr(module, "run", lambda *args, **kwargs: actions.append(args))
+    with isolated_release_transaction_lock.open("rb") as hold:
+        fcntl.flock(hold.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        path = module.queue_support_repair(
+            tmp_path, "abcdef1234567890", ["provider_canary_failure"], {"sample": True}
+        )
+        assert actions == []
+        data = json.loads(path.read_text())
+        assert data["state"] == "repair_required"
+        assert data["worker_activation"].startswith("deferred_production_transaction")
+        fcntl.flock(hold.fileno(), fcntl.LOCK_UN)
+
+
+def test_selfheal_defers_container_restarts_during_production_lock(
+    tmp_path, monkeypatch, isolated_release_transaction_lock
+):
+    called = []
+    monkeypatch.setattr(module, "run", lambda *a, **kw: called.append(a))
+    monkeypatch.setattr(module, "container_running", lambda name: True)
+    with isolated_release_transaction_lock.open("rb") as hold:
+        fcntl.flock(hold.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert module.bounded_recovery(["mcp_status_functional_failure"]) == []
+        assert called == []
+        fcntl.flock(hold.fileno(), fcntl.LOCK_UN)
+
+
+def test_selfheal_fails_closed_when_production_lock_missing(
+    tmp_path, monkeypatch, isolated_release_transaction_lock
+):
+    isolated_release_transaction_lock.unlink()
+    calls = []
+    monkeypatch.setattr(module, "run", lambda *args, **kwargs: calls.append(args))
+    path = module.queue_support_repair(
+        tmp_path, "abcdef1234567890", ["mcp_status_functional_failure"], {}
+    )
+    assert calls == []
+    assert json.loads(path.read_text())["worker_activation"].startswith("deferred_")
+
+
+def test_selfheal_rejects_untrusted_lock_files_without_side_effects(
+    tmp_path, monkeypatch, isolated_release_transaction_lock
+):
+    lock = isolated_release_transaction_lock
+    calls = []
+    monkeypatch.setattr(module, "run", lambda *args, **kwargs: calls.append(args))
+    target = tmp_path / "target.lock"
+    target.touch(mode=0o600)
+    lock.unlink()
+    lock.symlink_to(target)
+    assert module.request_engineering_worker().startswith("deferred_")
+    assert module.bounded_recovery(["container_down:jason-runtime"]) == []
+
+    lock.unlink()
+    lock.touch(mode=0o600)
+    lock.chmod(0o666)
+    assert module.request_engineering_worker().startswith("deferred_")
+    assert module.bounded_recovery(["container_down:jason-runtime"]) == []
+
+    lock.unlink()
+    os.mkfifo(lock, mode=0o600)
+    assert module.request_engineering_worker().startswith("deferred_")
+    assert module.bounded_recovery(["container_down:jason-runtime"]) == []
+    assert calls == []
 
 
 def test_fingerprint_is_order_independent():

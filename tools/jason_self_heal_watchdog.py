@@ -10,12 +10,15 @@ recovery cannot restore full functionality.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
 import re
 import subprocess
 import sqlite3
+import stat
 import statistics
 import urllib.request
 from datetime import datetime, timezone
@@ -29,6 +32,12 @@ DEFAULT_ROOT = Path("/var/lib/jason/openclaw/self-heal")
 HEALTH_URL = "http://127.0.0.1:9467/metrics"
 LOCAL_RECOVERY_CONTAINERS = ("jason-runtime", "jason-mcp-pilot")
 MAX_RECOVERY_ATTEMPTS = 2
+# The signed Release Manager owns an exclusive advisory lock for every
+# production transaction. Self-heal must never admit competing workers or
+# mutate containers while that lock is held. The guard must fail closed.
+PRODUCTION_TRANSACTION_LOCK = Path(
+    "/var/lib/jason/openclaw/release-manager/production-transaction.lock"
+)
 AUTONOMY_ANOMALY_WINDOW = 12
 AUTONOMY_RECENT_WINDOW = 3
 OUTCOME_CONTRACT_DIRNAME = "contracts"
@@ -730,17 +739,76 @@ def fingerprint(failures: list[str]) -> str:
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
 
 
-def bounded_recovery(failures: list[str]) -> list[str]:
-    actions: list[str] = []
-    for name in LOCAL_RECOVERY_CONTAINERS:
-        if f"container_down:{name}" in failures:
-            result = run(["docker", "start", name], timeout=30)
-            actions.append(f"docker start {name}: rc={result.returncode}")
+@contextlib.contextmanager
+def non_disruptive_release_guard():
+    """Hold a shared release lock for an entire recovery or worker-start call.
 
-    if "mcp_status_functional_failure" in failures and container_running("jason-mcp-pilot"):
-        result = run(["docker", "restart", "-t", "10", "jason-mcp-pilot"], timeout=40)
-        actions.append(f"docker restart jason-mcp-pilot: rc={result.returncode}")
-    return actions
+    The Release Manager holds the exclusive lock throughout production deploy
+    and rollback. A missing, unreadable, symlinked, or contended lock denies
+    self-heal mutation; incident evidence is still persisted for later retry.
+    """
+    try:
+        fd = os.open(
+            PRODUCTION_TRANSACTION_LOCK,
+            os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+            | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
+        )
+    except OSError:
+        yield False
+        return
+    locked = False
+    try:
+        try:
+            info = os.fstat(fd)
+        except OSError:
+            yield False
+            return
+        if (not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or info.st_mode & 0o002):
+            yield False
+            return
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            locked = True
+        except OSError:
+            yield False
+            return
+        yield True
+    finally:
+        if locked:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def request_engineering_worker() -> str:
+    """Bound watchdog worker activation to the same production mutex."""
+    with non_disruptive_release_guard() as admitted:
+        if not admitted:
+            return "deferred_production_transaction_or_unavailable_lock"
+        result = run(
+            ["systemctl", "--user", "start", "--no-block",
+             "jason-support-repair-worker.service"],
+            timeout=10,
+        )
+        return ("requested" if result.returncode == 0
+                else "systemd_start_failed_rc_" + str(result.returncode))
+
+
+def bounded_recovery(failures: list[str]) -> list[str]:
+    with non_disruptive_release_guard() as admitted:
+        if not admitted:
+            return []
+        actions: list[str] = []
+        for name in LOCAL_RECOVERY_CONTAINERS:
+            if f"container_down:{name}" in failures:
+                result = run(["docker", "start", name], timeout=30)
+                actions.append(f"docker start {name}: rc={result.returncode}")
+
+        if "mcp_status_functional_failure" in failures and container_running("jason-mcp-pilot"):
+            result = run(["docker", "restart", "-t", "10", "jason-mcp-pilot"], timeout=40)
+            actions.append(f"docker restart jason-mcp-pilot: rc={result.returncode}")
+        return actions
 
 
 def queue_support_repair(root: Path, fp: str, failures: list[str], evidence: Mapping[str, Any]) -> Path:
@@ -760,8 +828,8 @@ def queue_support_repair(root: Path, fp: str, failures: list[str], evidence: Map
         "state": "repair_required",
     }
     path = root / "incidents" / f"{fp}.json"
+    incident["worker_activation"] = request_engineering_worker()
     atomic_json(path, incident)
-    run(["systemctl", "--user", "start", "--no-block", "jason-support-repair-worker.service"], timeout=10)
     return path
 
 
@@ -793,11 +861,13 @@ def queue_resolution_incident(root: Path, incident: Mapping[str, Any], evidence:
         "state": "repair_required",
     }
     path = root / "incidents" / f"{fp}.json"
-    atomic_json(path, payload)
     # Disk capacity is an owner-reviewed host-maintenance decision, not a
     # grant to the engineering worker to remove caches or rollback artifacts.
     if str(incident.get("family")) != "host_storage_capacity":
-        run(["systemctl", "--user", "start", "--no-block", "jason-support-repair-worker.service"], timeout=10)
+        payload["worker_activation"] = request_engineering_worker()
+    else:
+        payload["worker_activation"] = "deferred_owner_storage_approval"
+    atomic_json(path, payload)
     return path
 
 

@@ -5,6 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# Skip (not fail) engineering activation while signed Release Manager owns its lock.
+ExecCondition=/usr/bin/python3 /home/al/.local/lib/jason/pmv3_worker_release_gate.py
 # PMV3 permits up to three bounded governed pipeline passes; each pass retains the existing 65-minute process envelope.
 TimeoutStartSec=200min
 WorkingDirectory=/home/al/.local/lib/jason/engineering-worker-source

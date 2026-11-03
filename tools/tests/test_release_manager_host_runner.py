@@ -1,4 +1,5 @@
 import importlib.util
+import contextlib
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,66 @@ runner_spec.loader.exec_module(runner)
 
 SHA_A = "a" * 40
 SHA_B = "b" * 40
+
+
+# Never allow the giant release-manager unit suite to reload a LIVE user
+# systemd manager. The actual guard is tested separately below with a fake bus.
+REAL_WORKER_ADMISSION_GUARD = runner.temporary_worker_admission_gate
+
+
+# Legacy unittest CI imports this module without pytest installed. The
+# simulated release tests must not contact the live user-systemd bus.
+runner.temporary_worker_admission_gate = lambda: contextlib.nullcontext()
+
+
+def test_native_worker_admission_guard_installs_and_removes_runtime_only_dropin(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+    runtime = tmp_path / 'run'
+    user_unit_root = runtime / 'systemd' / 'user'
+    user_unit_root.mkdir(parents=True)
+    calls = []
+    monkeypatch.setattr(runner, 'user_systemd_env',
+                        lambda: {'XDG_RUNTIME_DIR': str(runtime),
+                                 'DBUS_SESSION_BUS_ADDRESS': 'unit-test:offline'})
+
+    def fake_run(args, **kwargs):
+        assert args == ['systemctl', '--user', 'daemon-reload']
+        assert kwargs['env']['XDG_RUNTIME_DIR'] == str(runtime)
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stderr='')
+
+    monkeypatch.setattr(runner.subprocess, 'run', fake_run)
+    dropin = (user_unit_root / 'jason-support-repair-worker.service.d'
+              / '90-pmv3-locked-transaction-admission.conf')
+    with REAL_WORKER_ADMISSION_GUARD():
+        assert dropin.is_file()
+        content = dropin.read_text()
+        assert '[Service]\nExecCondition=/usr/bin/python3 ' in content
+        assert 'tools/pmv3_worker_release_gate.py' in content
+        assert dropin.stat().st_mode & 0o777 == 0o600
+    assert not dropin.exists()
+    assert len(calls) == 2
+
+
+def test_native_worker_admission_guard_restores_on_deploy_exception(tmp_path, monkeypatch):
+    import pytest
+    from types import SimpleNamespace
+    runtime = tmp_path / 'run'
+    (runtime / 'systemd' / 'user').mkdir(parents=True)
+    monkeypatch.setattr(runner, 'user_systemd_env',
+                        lambda: {'XDG_RUNTIME_DIR':str(runtime)})
+    reloads = []
+    monkeypatch.setattr(runner.subprocess, 'run',
+                        lambda args, **kw: (reloads.append(args),
+                                            SimpleNamespace(returncode=0,stderr=''))[1])
+    with pytest.raises(RuntimeError, match='deployment failed'):
+        with REAL_WORKER_ADMISSION_GUARD():
+            raise RuntimeError('deployment failed')
+    assert not (runtime / 'systemd/user/jason-support-repair-worker.service.d').exists()
+    assert len(reloads) == 2
+
 
 
 class ReleaseManagerHostRunnerTests(unittest.TestCase):
