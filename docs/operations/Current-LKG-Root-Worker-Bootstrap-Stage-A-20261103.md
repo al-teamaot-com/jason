@@ -35,3 +35,14 @@ root migration helper and host reconciler.
 
 This is the two-release bootstrap pattern already required by Project Jason root-migration
 governance; it does not weaken or bypass root policy validation.
+
+## Legacy-root admission rule
+
+The open-breaker compatibility preflight may admit Stage A even when the currently installed
+root reconciler lacks the newer forward-recovery markers **only** when Git proves that the
+exact candidate and exact rollback SHA contain byte-for-byte identical
+`config/production-desired-state.json` blobs. This is intentionally stricter than comparing
+only unit lists. Any desired-state byte difference fails closed and requires a compatible
+installed root worker before production mutation. All ordinary exact-main, LKG, drift,
+preproduction, manual scope, signed Owner/CCC, freeze, rollback, and post-production gates
+remain mandatory.
