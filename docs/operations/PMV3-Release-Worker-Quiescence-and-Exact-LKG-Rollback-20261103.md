@@ -13,6 +13,32 @@ On November 3, 2026, signed production candidate `3e06627de85ace598f959cda12e257
 - The native self-heal watchdog holds a nonblocking shared production lock around its worker-start calls and bounded local Docker recovery. When the exclusive release lock is active, self-heal persists the incident, defers intervention, and retries through existing cadence. No provider bypass or suppressed detector.
 - Root host reconciler retains its exact pinned 1b28 LKG integrity/health recovery. It accepts the rollback **before breaker opening** only when a real production transaction lock is held, root-protected LKG matches the exact requested SHA, the candidate is protected `origin/main`, release state is `production`, and the release's signed Owner approval, source-bound one-transaction freeze exception, immutable manifest, CCC material review, authenticated Teams approval receipt, successful pre-mutation baseline, and actual temporary freeze backup all agree. This does **not** admit ordinary/unauthorized host changes or substitute a different SHA.
 
+## Second recovery blocker: unprivileged LKG proof execution
+
+A subsequent bounded signed rollback request on November 3 reached the trusted root
+reconciler after the engineering worker was safely paused. The root helper refused
+the request with `current-LKG full-integrity recovery did not pass`. Investigation
+confirmed the helper placed its two exact hash-pinned health scripts under the
+root-only candidate script spool (root:root `0750`, child `0700`), then invoked
+them with `runuser -u al`. The operator could not traverse that path, so the
+integrity algorithm never executed. A previously passing health JSON was stale
+and could not substitute for a fresh mandatory proof.
+
+Recovery PR #2295 isolates only the pinned LKG health execution files in a
+root-controlled, group-`jason` readable location under `/usr/local/lib/jason`
+(directory `0750`, files `0640`). The parent and created directory must be
+root-owned, non-symlinked and non-writable by group/others. The existing
+root-only candidate script spool stays inaccessible. Hash pinning, unprivileged
+execution, the complete SQLite integrity/backup/restore algorithm, bounded
+timeout, proof ownership and explicit PASS requirements remain unchanged.
+Disposable-root CI actually executes the materialized script as `al`;
+mocked unit tests alone are not sufficient.
+
+This source change is not deployed merely because CI passes. The installed
+root helper and protected release controls require a separately authenticated
+exact-SHA authorization and full post-recovery verification. Preserve any failed
+rollback receipts and the OPEN circuit breaker until independently revalidated.
+
 ## Source integration reconciliation evidence
 
 - Isolated merge proof: repair PR #2293 head `8f0618e808019ad78fe8f5fb7420fb185ec5f1fc` plus PMV3 queue PR #2280 head `39061f70c522dd2c3dc4d2164c90a9f4fcc791f7` merged without Git conflicts in an **unpublished dry-run worktree**; merged-tree local host tests: **354 passed + five subtests**. No protected `main` merge, no status fabrication, no live runtime or host change.
