@@ -370,8 +370,18 @@ def run_acceptance() -> None:
                 "host_release": "/opt/jason/releases/" + baseline,
                 "release_manager_source_revision": baseline,
                 "desired_state_policy_digest": "sha256:" + ("e" * 64),
+                "mobile_release_approval_policy_digest": "sha256:" + ("f" * 64),
+                "mobile_release_approval_mode": "owner_only_pilot",
                 "scheduled_control_units": [BASE_UNIT],
             }
+            # Keep synthetic LKG evidence synchronized with root policy.
+            root_policy = module_from(
+                GITHUB / "tools/release_control_transition_worker.py",
+                "pm_lab_lkg_policy",
+            )
+            assert set(root_policy.PROTECTED_LKG_FIELDS) <= set(baseline_manifest), (
+                "disposable LKG fixture missing protected fields"
+            )
             control = lab / "control"
             (control / "protected-transitions/requests").mkdir(parents=True)
             (control / "protected-transitions/results").mkdir(parents=True)
