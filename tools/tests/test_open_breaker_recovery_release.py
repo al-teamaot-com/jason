@@ -402,6 +402,7 @@ def test_provider_identity_recovery_accepts_healthy_runtime_after_controlled_rec
     assert context["runtime_health_mode"] == "healthy"
 
 
+# The finite bound must remain explicit even when protected main accumulates reviewed work.
 def test_provider_identity_recovery_whole_main_bound_is_still_finite():
     profile = next(
         item for item in reviewed_recovery_policy()["profiles"]
