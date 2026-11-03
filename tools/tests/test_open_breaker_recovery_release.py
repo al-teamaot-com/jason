@@ -402,14 +402,15 @@ def test_provider_identity_recovery_accepts_healthy_runtime_after_controlled_rec
     assert context["runtime_health_mode"] == "healthy"
 
 
+# The finite bound must remain explicit even when protected main accumulates reviewed work.
 def test_provider_identity_recovery_whole_main_bound_is_still_finite():
     profile = next(
         item for item in reviewed_recovery_policy()["profiles"]
         if item["id"] == "provider_identity_and_authority_recovery"
     )
-    assert profile["max_changed_files"] == 74
+    assert profile["max_changed_files"] == 112
     record = provider_identity_record()
-    while len(record["changed_files"]) < 74:
+    while len(record["changed_files"]) < 112:
         record["changed_files"].append(
             f"docs/recovery-bound-{len(record['changed_files']):02d}.md"
         )
@@ -433,7 +434,7 @@ def test_provider_identity_recovery_whole_main_bound_is_still_finite():
 
 def test_precreate_provider_recovery_accepts_exact_degraded_lkg_without_granting_authority():
     record = provider_identity_record()
-    while len(record["changed_files"]) < 74:
+    while len(record["changed_files"]) < 112:
         record["changed_files"].append(
             f"docs/precreate-reviewed-{len(record['changed_files']):02d}.md"
         )
@@ -459,7 +460,7 @@ def test_precreate_provider_recovery_accepts_exact_degraded_lkg_without_granting
         )
     assert context is not None
     assert context["profile_id"] == "provider_identity_and_authority_recovery"
-    assert context["changed_file_count"] == 74
+    assert context["changed_file_count"] == 112
     assert context["runtime_health_mode"] == "ticket_worker_provider_auth_degraded"
     assert context["owner_approval_granted"] is False
     assert context["production_authority_granted"] is False
@@ -467,7 +468,7 @@ def test_precreate_provider_recovery_accepts_exact_degraded_lkg_without_granting
 
 def test_precreate_provider_recovery_rejects_unrelated_drift_and_over_bound_scope():
     record = provider_identity_record()
-    while len(record["changed_files"]) < 74:
+    while len(record["changed_files"]) < 112:
         record["changed_files"].append(
             f"docs/precreate-reviewed-{len(record['changed_files']):02d}.md"
         )
