@@ -16,7 +16,8 @@ PRODUCTION_LOCK = Path('/var/lib/jason/openclaw/release-manager/production-trans
 
 def admission_allowed(path: Path = PRODUCTION_LOCK) -> bool:
     try:
-        fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0)
+        fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NONBLOCK', 0)
+                     | getattr(os, 'O_NOFOLLOW', 0)
                      | getattr(os, 'O_CLOEXEC', 0))
     except OSError:
         return False

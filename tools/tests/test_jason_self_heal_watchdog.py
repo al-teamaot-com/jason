@@ -72,6 +72,32 @@ def test_selfheal_fails_closed_when_production_lock_missing(
     assert json.loads(path.read_text())["worker_activation"].startswith("deferred_")
 
 
+def test_selfheal_rejects_untrusted_lock_files_without_side_effects(
+    tmp_path, monkeypatch, isolated_release_transaction_lock
+):
+    lock = isolated_release_transaction_lock
+    calls = []
+    monkeypatch.setattr(module, "run", lambda *args, **kwargs: calls.append(args))
+    target = tmp_path / "target.lock"
+    target.touch(mode=0o600)
+    lock.unlink()
+    lock.symlink_to(target)
+    assert module.request_engineering_worker().startswith("deferred_")
+    assert module.bounded_recovery(["container_down:jason-runtime"]) == []
+
+    lock.unlink()
+    lock.touch(mode=0o600)
+    lock.chmod(0o666)
+    assert module.request_engineering_worker().startswith("deferred_")
+    assert module.bounded_recovery(["container_down:jason-runtime"]) == []
+
+    lock.unlink()
+    os.mkfifo(lock, mode=0o600)
+    assert module.request_engineering_worker().startswith("deferred_")
+    assert module.bounded_recovery(["container_down:jason-runtime"]) == []
+    assert calls == []
+
+
 def test_fingerprint_is_order_independent():
     assert module.fingerprint(["b", "a"]) == module.fingerprint(["a", "b"])
 

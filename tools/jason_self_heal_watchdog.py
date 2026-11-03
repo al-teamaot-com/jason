@@ -18,6 +18,7 @@ import os
 import re
 import subprocess
 import sqlite3
+import stat
 import statistics
 import urllib.request
 from datetime import datetime, timezone
@@ -749,13 +750,24 @@ def non_disruptive_release_guard():
     try:
         fd = os.open(
             PRODUCTION_TRANSACTION_LOCK,
-            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
+            os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+            | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0),
         )
     except OSError:
         yield False
         return
     locked = False
     try:
+        try:
+            info = os.fstat(fd)
+        except OSError:
+            yield False
+            return
+        if (not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or info.st_mode & 0o002):
+            yield False
+            return
         try:
             fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
             locked = True
