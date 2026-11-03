@@ -16,6 +16,15 @@ def write(path, value):
     path.write_text(json.dumps(value), encoding="utf-8")
 
 
+
+
+def idle_integration_queue(**kwargs):
+    return {
+        "schema_version": "1.0", "status": "idle", "updated_at": "2026-11-03T00:00:00+00:00",
+        "train": None, "release_lock": None, "queue": [],
+    }
+
+
 def runner_for(spool, snapshots):
     calls = {"n": 0}
     def runner(argv, **kwargs):
@@ -54,7 +63,7 @@ def test_recoverable_work_keeps_running_until_complete(tmp_path):
     runner, calls = runner_for(spool, snapshots)
     state = module.controller_run(
         scripts=tmp_path, repo=tmp_path, spool=spool, release_state=tmp_path,
-        runner=runner, max_passes=4,
+        runner=runner, integration_reconciler=idle_integration_queue, max_passes=4,
     )
     assert state["status"] == "complete"
     assert calls["n"] == 2
@@ -75,7 +84,7 @@ def test_external_gate_stops_without_retry(tmp_path):
     }])
     state = module.controller_run(
         scripts=tmp_path, repo=tmp_path, spool=spool, release_state=tmp_path,
-        runner=runner, max_passes=4,
+        runner=runner, integration_reconciler=idle_integration_queue, max_passes=4,
     )
     assert state["status"] == "waiting_external"
     assert calls["n"] == 1
@@ -97,7 +106,7 @@ def test_unchanged_recoverable_work_is_bounded_not_infinite(tmp_path):
     runner, calls = runner_for(spool, [snap, snap, snap, snap])
     state = module.controller_run(
         scripts=tmp_path, repo=tmp_path, spool=spool, release_state=tmp_path,
-        runner=runner, max_passes=6, unchanged_limit=2,
+        runner=runner, integration_reconciler=idle_integration_queue, max_passes=6, unchanged_limit=2,
     )
     assert state["status"] == "bounded_stall"
     assert state["reason"] == "recoverable_state_not_advancing"
@@ -116,7 +125,7 @@ def test_control_failure_is_hard_failure(tmp_path):
     }])
     state = module.controller_run(
         scripts=tmp_path, repo=tmp_path, spool=spool, release_state=tmp_path,
-        runner=runner,
+        runner=runner, integration_reconciler=idle_integration_queue,
     )
     assert state["status"] == "control_failure"
     assert module.service_exit_code(state) == 1
@@ -130,3 +139,21 @@ def test_controller_cannot_create_or_import_approval():
     assert "decision=" not in lowered
     assert "channel=" not in lowered
     assert "teams_only_approval" in source
+
+
+def test_integration_queue_failure_does_not_stop_development(tmp_path):
+    spool = tmp_path / "spool"
+    runner, calls = runner_for(spool, [{
+        "pipeline": {"status": "healthy", "failed_work_stages": [], "failed_control_stages": []},
+        "supervisor": {"status": "healthy", "reason": None, "category_counts": {},
+                       "disposition_sha256": "ok", "approved_outstanding": 0, "active": 0},
+    }])
+    def broken_queue(**kwargs):
+        raise RuntimeError("queue unavailable")
+    state = module.controller_run(
+        scripts=tmp_path, repo=tmp_path, spool=spool, release_state=tmp_path,
+        runner=runner, integration_reconciler=broken_queue, max_passes=1,
+    )
+    assert state["status"] == "complete"
+    assert state["integration_queue"]["status"] == "control_failure"
+    assert calls["n"] == 1

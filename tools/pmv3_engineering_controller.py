@@ -26,6 +26,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+try:
+    import pmv3_integration_queue as integration_queue
+except ModuleNotFoundError:
+    from tools import pmv3_integration_queue as integration_queue
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -54,6 +59,38 @@ def load_json(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("invalid PMV3 controller evidence")
     return value
+
+
+def reconcile_integration_queue(
+    *,
+    spool: Path,
+    release_state: Path,
+    reconciler: Callable[..., Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Reconcile repository integration without coupling it to development.
+
+    Failure is deliberately fail-closed for merges: the GitHub required status
+    remains pending/missing, while engineering development is allowed to keep
+    running.
+    """
+    try:
+        state = reconciler(
+            api=integration_queue.GhApi(),
+            spool=spool,
+            release_state=release_state,
+            batch_size=max(1, min(10, int(os.environ.get(
+                "JASON_PMV3_INTEGRATION_BATCH_SIZE", "3"
+            )))),
+        )
+        return integration_queue.snapshot(state)
+    except Exception as exc:
+        return {
+            "status": "control_failure",
+            "gate_context": integration_queue.GATE_CONTEXT,
+            "error_type": type(exc).__name__,
+            "reason": str(exc)[:500],
+            "updated_at": now(),
+        }
 
 
 def progress_fingerprint(pipeline: Mapping[str, Any], supervisor: Mapping[str, Any]) -> str:
@@ -150,6 +187,7 @@ def controller_run(
     pipeline_timeout: int = 3900,
     runner: Callable[..., Any] = subprocess.run,
     sleeper: Callable[[float], None] = time.sleep,
+    integration_reconciler: Callable[..., Mapping[str, Any]] = integration_queue.reconcile,
 ) -> dict[str, Any]:
     state_path = spool / "pmv3-engineering-controller-state.json"
     state = {
@@ -160,6 +198,9 @@ def controller_run(
         "passes": [],
         "teams_only_approval": True,
     }
+    state["integration_queue"] = reconcile_integration_queue(
+        spool=spool, release_state=release_state, reconciler=integration_reconciler,
+    )
     atomic_json(state_path, state)
 
     previous_fp = None
@@ -186,6 +227,9 @@ def controller_run(
 
         pipeline = load_json(spool / "engineering-pipeline-state.json")
         supervisor = load_json(spool / "engineering-supervisor-state.json")
+        state["integration_queue"] = reconcile_integration_queue(
+            spool=spool, release_state=release_state, reconciler=integration_reconciler,
+        )
         disposition, reason = classify(pipeline, supervisor)
         fp = progress_fingerprint(pipeline, supervisor)
         if fp == previous_fp:

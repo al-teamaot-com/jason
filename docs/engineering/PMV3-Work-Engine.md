@@ -114,3 +114,18 @@ through `jason_mcp_status()`.
 PMV3 must not import, replace, broaden, or weaken the routine-write client scope,
 onboarding attestation, provider credential, or approval semantics from those
 branches. Later integration must preserve both workstreams.
+## Governed integration and release queue
+
+PMV3 separates concurrent development from serialized production integration. Development branches, pull-request updates, and CI may continue while a production candidate is being built or deployed. Protected `main` integration is controlled by the required GitHub status context `pmv3-integration-gate`.
+
+The integration queue admits only pull requests backed by durable Owner-approved development evidence, or an explicitly governed `pmv3-integration-ready` label. It selects a bounded release train (default maximum three PRs), prefers higher-priority work, and batches only PRs whose changed-file sets do not overlap. Only the currently selected PR receives a successful integration-gate status. Other PRs remain queued with a pending gate; this blocks merge without blocking development or CI.
+
+After the train is merged, PMV3 records the exact resulting `main` SHA as the production candidate and closes the integration gate for all unrelated PRs. The lock remains until the exact candidate becomes the verified Last Known Good production revision. A restart or missing queue state fails closed: if protected `main` differs from verified production, PMV3 reconstructs the release lock from observed state.
+
+A release lock does not grant production authority. Release Manager validation, exact-revision Teams approval, deployment, verification, rollback, and production-freeze rules remain unchanged. A bounded release-recovery PR may advance a locked candidate only when it is durably admitted and explicitly labeled `pmv3-release-recovery`; ordinary development cannot bypass the lock.
+
+Canonical queue states are:
+
+`IDLE -> INTEGRATING -> RELEASE_LOCKED -> (production verified/LKG) -> IDLE`
+
+Development continues in every queue state. Queue-control failure is fail-closed for merges and must not stop development.

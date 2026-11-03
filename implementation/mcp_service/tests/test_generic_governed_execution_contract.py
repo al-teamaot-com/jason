@@ -1335,6 +1335,18 @@ def test_status_surfaces_pmv3_engineering_controller(monkeypatch, tmp_path):
                 },
             ],
             "pass_count": 2,
+            "integration_queue": {
+                "status": "release_locked",
+                "gate_context": "pmv3-integration-gate",
+                "main_sha": "2" * 40,
+                "production_lkg_sha": "1" * 40,
+                "release_lock_active": True,
+                "release_candidate_sha": "2" * 40,
+                "train_id": None,
+                "train_prs": [],
+                "queue_depth": 6,
+                "updated_at": "2026-10-31T17:02:00+00:00",
+            },
         }),
         encoding="utf-8",
     )
@@ -1351,6 +1363,10 @@ def test_status_surfaces_pmv3_engineering_controller(monkeypatch, tmp_path):
     assert pmv3["last_disposition"] == "recoverable"
     assert pmv3["last_progress_sha256"] == "abc123"
     assert pmv3["teams_only_approval"] is True
+    assert pmv3["integration_queue"]["status"] == "release_locked"
+    assert pmv3["integration_queue"]["release_lock_active"] is True
+    assert pmv3["integration_queue"]["release_candidate_sha"] == "2" * 40
+    assert pmv3["integration_queue"]["queue_depth"] == 6
 
 
 def test_status_pmv3_missing_state_is_truthful(monkeypatch, tmp_path):
