@@ -178,3 +178,15 @@ Source selection has been verified by the AOT delegated SharePoint connector: AO
 5. Resolve or clearly preserve the three meter gaps, review customer-name differences such as \`Marcella Operator\` versus \`Marcella Operator LLC\`, clear all required GitHub/release gates, verify exact merged release and rollback SHA, and obtain final owner exact-SHA deployment authorization.
 
 Production KFS/SharePoint functionality has **not** been deployed or verified.
+
+## 2026-11-03 full-fleet copy-count completion
+
+The reusable governed fleet capability now also supports complete period lists, not only top-N rankings. An authorized AOT user may ask for copy counts for the last N days (including the exact request "provide a list of copy counts for the last 30 days; include company, device, color and black and white") without supplying device IDs or an export.
+
+- The conversation layer selects the same provider-neutral `print.fleet.usage.rank` capability with `report_mode=list`, an explicit timezone-aware start/end period, and a fleet-sized bounded limit. Top-N questions retain `report_mode=rank`.
+- KFS device search exposes deterministic `offset`/`next_offset` continuation and no longer treats the default first 100 records as the entire fleet. The provider-neutral `name` selector is now actually enforced against device identity fields rather than being silently ignored.
+- Full-list rendering includes every valid device plus a separate exception row for each managed device whose period count cannot be verified. Missing/reset/inconsistent counters are shown as `N/A` with the evidence-backed reason; they are not estimated or silently omitted.
+- Company labeling remains evidence-bound. Native KFS names are used when present; approved AOT SharePoint copier evidence may enrich exact serial matches through the governed read-only document path. Ambiguous/conflicting mappings fail closed.
+- Scope remains AOT-internal, observe-only. No copier, endpoint, SharePoint, ticket, or provider mutation is introduced.
+
+Acceptance requires full protected CI, current-main reconciliation, provider-backed fleet-count reconciliation, authenticated AOT-user routing, customer-evidence read/deny proof, and PMV3 exact-revision production authorization before deployment.

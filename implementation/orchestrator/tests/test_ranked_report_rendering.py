@@ -35,6 +35,7 @@ def ranked_data():
         "exception_count": 3,
         "coverage_verified": True,
         "complete": False,
+        "report_mode": "rank",
         "top_devices": [
             {
                 "customer": "Unknown (not mapped in KFS)",
@@ -131,3 +132,55 @@ def test_report_requires_read_permission():
     )
     with pytest.raises(PermissionError, match="authorized read"):
         renderer().render(ranked_result(), bad)
+
+
+def test_full_list_mode_shows_meter_exceptions_instead_of_omitting_devices():
+    data = ranked_data()
+    data["report_mode"] = "list"
+    data["exceptions"] = [
+        {
+            "customer": "Example Co",
+            "customer_mapping_verified": True,
+            "printer_id": "ID# 2001",
+            "black_white_pages": None,
+            "color_pages": None,
+            "total_pages": None,
+            "warnings": ["blackWhite: missing meter boundary", "color: missing meter boundary"],
+        },
+        {
+            "customer": "Example Two",
+            "customer_mapping_verified": True,
+            "printer_id": "ID# 2002",
+            "black_white_pages": 15,
+            "color_pages": None,
+            "total_pages": 20,
+            "warnings": ["color: missing meter boundary"],
+        },
+        {
+            "customer": "Example Three",
+            "customer_mapping_verified": True,
+            "printer_id": "ID# 2003",
+            "black_white_pages": None,
+            "color_pages": 5,
+            "total_pages": 5,
+            "warnings": ["blackWhite: missing meter boundary"],
+        },
+    ]
+    intent = ConversationIntent(
+        capability_name="print.fleet.usage.rank",
+        arguments={
+            "start": "2026-10-01T00:00:00-04:00",
+            "end": "2026-10-31T00:00:00-04:00",
+            "limit": "1000",
+            "report_mode": "list",
+            "timezone": "America/New_York",
+            "requested_facts": ("print fleet usage report",),
+        },
+        permission_mode="observe",
+    )
+    answer = renderer().render(ranked_result(data), intent)
+    assert "Devices without verified period counts" in answer
+    assert "| Example Co | ID# 2001 | N/A | N/A |" in answer
+    assert "| Example Two | ID# 2002 | 15 | N/A |" in answer
+    assert "| Example Three | ID# 2003 | N/A | 5 |" in answer
+    assert "3 meter exceptions" in answer

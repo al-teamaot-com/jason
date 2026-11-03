@@ -839,6 +839,39 @@ def _render_governed_ranked_monthly_usage(
         raise ValueError("unmapped fleet device cannot be called complete")
 
     lines = [heading, *table]
+
+    # A full-fleet list must account for devices whose period counters cannot
+    # be calculated. Do not silently omit them merely because they cannot be
+    # ranked. Their missing values and provider-backed reason remain visible.
+    if report_mode == "list" and exceptions:
+        raw_exceptions = data.get("exceptions")
+        if not isinstance(raw_exceptions, (list, tuple)):
+            raise ValueError("fleet usage exceptions must be a bounded list")
+        if len(raw_exceptions) != exceptions:
+            raise ValueError("fleet usage exception rows do not match exception count")
+        lines.extend([
+            "",
+            "Devices without verified period counts",
+            "| Company | Printer ID | B&W pages | Color pages | Reason |",
+            "|---|---|---:|---:|---|",
+        ])
+        for item in raw_exceptions:
+            if not isinstance(item, Mapping):
+                raise ValueError("fleet usage exception row must be a mapping")
+            company = _report_cell(item.get("customer"), fallback="Unknown (not mapped)")
+            printer = _report_cell(item.get("printer_id"), fallback="Unknown device")
+            bw = item.get("black_white_pages")
+            color = item.get("color_pages")
+            bw_text = f"{bw:,}" if type(bw) is int and bw >= 0 else "N/A"
+            color_text = f"{color:,}" if type(color) is int and color >= 0 else "N/A"
+            raw_reasons = item.get("warnings", ())
+            if isinstance(raw_reasons, (list, tuple)):
+                reason = "; ".join(_report_cell(x, fallback="") for x in raw_reasons if x)
+            else:
+                reason = _report_cell(raw_reasons, fallback="")
+            reason = _report_cell(reason, fallback="Meter boundary unavailable")
+            lines.append(f"| {company} | {printer} | {bw_text} | {color_text} | {reason} |")
+
     lines.append(
         f"Fleet coverage: {inventoried:,} inventoried / {reported:,} reported; "
         f"{eligible:,} with valid meter totals; {exceptions:,} meter exceptions."
