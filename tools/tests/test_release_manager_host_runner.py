@@ -5258,6 +5258,7 @@ def test_recovery_ccc_preflight_allows_only_exact_provider_identity_signature():
     assert evidence['recovery_preflight_exception'] is True
 
 
+# Regression: provider recovery may narrow to authority-only failures before deployment.
 def test_recovery_ccc_preflight_allows_healed_provider_with_known_authority_failures():
     report = _provider_identity_recovery_ccc_report()
     canary = next(
