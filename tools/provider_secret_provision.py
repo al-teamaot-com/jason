@@ -113,6 +113,22 @@ PROVIDERS: dict[str, dict[str, object]] = {
             "/opt/jason/bootstrap/secrets/openbao/microsoft-graph-directory-read-approle"
         ),
     },
+    "microsoft_graph_sharepoint": {
+        "logical_name": "microsoft_graph.sharepoint_read",
+        "secret_path": "secret/data/connectors/microsoft-graph/production/sharepoint-read",
+        "fields": (
+            "private_key_pem",
+            "certificate_pem",
+            "certificate_thumbprint",
+            "generation",
+        ),
+        "policy_name": "jason-microsoft-graph-sharepoint-read",
+        "role_name": "jason-microsoft-graph-sharepoint-read",
+        "connector_identity": "microsoft-graph-sharepoint-read",
+        "credential_dir": Path(
+            "/opt/jason/bootstrap/secrets/openbao/microsoft-graph-sharepoint-read-approle"
+        ),
+    },
     "microsoft_graph_mail": {
         "logical_name": "microsoft_graph.mail_read",
         "secret_path": "secret/data/connectors/microsoft-graph/production/mail-read",
@@ -380,7 +396,7 @@ def _collect_microsoft_graph_values() -> dict[str, str]:
 
 
 def collect_values(provider: str) -> dict[str, str]:
-    if provider in {"microsoft_graph", "microsoft_graph_mail"}:
+    if provider in {"microsoft_graph", "microsoft_graph_mail", "microsoft_graph_sharepoint"}:
         return _collect_microsoft_graph_values()
     values: dict[str, str] = {}
     spec = PROVIDERS[provider]
