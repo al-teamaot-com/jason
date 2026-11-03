@@ -485,6 +485,10 @@ def reconcile(
             if ready:
                 api.set_gate(rsha, "success", "PMV3 selected bounded release-recovery PR")
                 merged_sha = api.merge_pull_request(int(recovery["number"]), rsha)
+                api.set_gate(
+                    merged_sha, "success",
+                    "PMV3 integrated selected release-recovery PR; exact candidate locked",
+                )
                 state["release_lock"] = _release_lock(
                     merged_sha, None, reason="release_recovery_candidate_merged"
                 )
@@ -587,6 +591,10 @@ def reconcile(
                         else:
                             api.set_gate(sha, "success", f"PMV3 selected in {train['train_id']}")
                             merged_sha = api.merge_pull_request(number, sha)
+                            api.set_gate(
+                                merged_sha, "success",
+                                f"PMV3 integrated selected PR in {train['train_id']}",
+                            )
                             current["state"] = "merged"
                             current["merge_sha"] = merged_sha
                             train["merged"].append(number)

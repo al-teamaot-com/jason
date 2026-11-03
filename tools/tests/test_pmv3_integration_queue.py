@@ -175,6 +175,8 @@ def test_train_merges_first_ready_pr_then_keeps_train_open(tmp_path):
     api = FakeApi(main_sha=base, prs=[a, b])
     state = queue.reconcile(api=api, spool=spool, release_state=release, batch_size=2)
     assert [x[0] for x in api.merges] == [1]
+    merged_sha = api.merges[0][2]
+    assert any(sha == merged_sha and status == 'success' for sha, status, _ in api.gates)
     assert state['status'] == 'integrating'
     assert state['train'] is not None
     assert state['train']['merged'] == [1]
@@ -224,6 +226,8 @@ def test_explicit_recovery_pr_can_advance_locked_candidate(tmp_path):
     api = FakeApi(main_sha=locked, prs=[recovery])
     state = queue.reconcile(api=api, spool=spool, release_state=release, state_path=state_path)
     assert [x[0] for x in api.merges] == [9]
+    merged_sha = api.merges[0][2]
+    assert any(sha == merged_sha and status == 'success' for sha, status, _ in api.gates)
     assert state['release_lock']['candidate_sha'] == api._main
     assert state['release_lock']['reason'] == 'release_recovery_candidate_merged'
 
