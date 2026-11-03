@@ -34,6 +34,8 @@ def test_opt_in_exact_profile(monkeypatch):
     assert configured_teams_message_send()
 
 
+# Regression: an authority-store/runtime rebuild must recreate the exact
+# profile-approved grant without broadening approval or provider authority.
 def test_enable_seeds_one_exact_approval_bound_grant_only():
     service = authority()
     assert not ensure_authority(service, enabled=False)
