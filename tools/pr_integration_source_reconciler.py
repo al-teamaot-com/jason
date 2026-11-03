@@ -262,7 +262,6 @@ def merge_pr(number: int) -> None:
         "--repo",
         REPO,
         "--merge",
-        "--auto",
     )
 
 

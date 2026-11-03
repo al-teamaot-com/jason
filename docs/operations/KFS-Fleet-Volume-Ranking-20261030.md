@@ -190,8 +190,3 @@ The reusable governed fleet capability now also supports complete period lists, 
 - Scope remains AOT-internal, observe-only. No copier, endpoint, SharePoint, ticket, or provider mutation is introduced.
 
 Acceptance requires full protected CI, current-main reconciliation, provider-backed fleet-count reconciliation, authenticated AOT-user routing, customer-evidence read/deny proof, and PMV3 exact-revision production authorization before deployment.
-
-
-## 2026-11-03 protected integration compatibility
-
-During final source admission, protected main required GitHub auto-merge and rejected an immediate merge even though all required checks passed. The reusable host integration reconciler was corrected to request GitHub's normal \`--auto\` merge path after its existing current-main, required-check and additional-security-check gates pass. Administrator bypass remains prohibited. This is a source-integration compatibility repair only; production authority remains separate.
