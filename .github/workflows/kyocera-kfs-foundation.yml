@@ -8,10 +8,20 @@ on:
       - 'implementation/connectors/connector-catalog.yaml'
       - 'implementation/connectors/tests/test_kyocera_kfs_connector.py'
       - 'implementation/orchestrator/print_capability_catalog.py'
+      - 'implementation/orchestrator/resource_evidence.py'
       - 'implementation/orchestrator/tests/test_print_capability_catalog.py'
+      - 'implementation/orchestrator/tests/test_print_fleet_routing.py'
+      - 'implementation/orchestrator/tests/test_ranked_report_rendering.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/src/jason_runtime/kfs_meter_history.py'
+      - 'implementation/runtime_service/src/jason_runtime/kfs_customer_document_evidence.py'
+      - 'implementation/runtime_service/src/jason_runtime/kfs_customer_document_source.py'
+      - 'implementation/runtime_service/src/jason_runtime/kfs_customer_runtime.py'
       - 'implementation/runtime_service/tests/test_kfs_meter_history.py'
+      - 'implementation/runtime_service/tests/test_kfs_fleet_rank.py'
+      - 'implementation/runtime_service/tests/test_kfs_customer_document_evidence.py'
+      - 'implementation/runtime_service/tests/test_kfs_customer_document_source.py'
+      - 'implementation/runtime_service/tests/test_kfs_customer_runtime.py'
       - 'implementation/runtime_service/pyproject.toml'
       - 'infrastructure/jason-runtime/**'
       - 'infrastructure/kfs-collector/**'
@@ -25,10 +35,20 @@ on:
       - 'implementation/connectors/connector-catalog.yaml'
       - 'implementation/connectors/tests/test_kyocera_kfs_connector.py'
       - 'implementation/orchestrator/print_capability_catalog.py'
+      - 'implementation/orchestrator/resource_evidence.py'
       - 'implementation/orchestrator/tests/test_print_capability_catalog.py'
+      - 'implementation/orchestrator/tests/test_print_fleet_routing.py'
+      - 'implementation/orchestrator/tests/test_ranked_report_rendering.py'
       - 'implementation/runtime_service/src/jason_runtime/composition.py'
       - 'implementation/runtime_service/src/jason_runtime/kfs_meter_history.py'
+      - 'implementation/runtime_service/src/jason_runtime/kfs_customer_document_evidence.py'
+      - 'implementation/runtime_service/src/jason_runtime/kfs_customer_document_source.py'
+      - 'implementation/runtime_service/src/jason_runtime/kfs_customer_runtime.py'
       - 'implementation/runtime_service/tests/test_kfs_meter_history.py'
+      - 'implementation/runtime_service/tests/test_kfs_fleet_rank.py'
+      - 'implementation/runtime_service/tests/test_kfs_customer_document_evidence.py'
+      - 'implementation/runtime_service/tests/test_kfs_customer_document_source.py'
+      - 'implementation/runtime_service/tests/test_kfs_customer_runtime.py'
       - 'implementation/runtime_service/pyproject.toml'
       - 'infrastructure/jason-runtime/**'
       - 'infrastructure/kfs-collector/**'
@@ -46,7 +66,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install pytest
+      - run: python -m pip install pytest 'openpyxl>=3.1,<4'
       - name: Compile KFS governed read boundary
         run: |
           python -m py_compile implementation/connectors/kyocera_kfs/connector.py
@@ -56,7 +76,13 @@ jobs:
         run: |
           python -m pytest implementation/connectors/tests/test_kyocera_kfs_connector.py -q
           python -m pytest implementation/orchestrator/tests/test_print_capability_catalog.py -q
+          python -m pytest implementation/orchestrator/tests/test_print_fleet_routing.py -q
+          python -m pytest implementation/orchestrator/tests/test_ranked_report_rendering.py -q
           python -m pytest implementation/runtime_service/tests/test_kfs_meter_history.py -q
+          python -m pytest implementation/runtime_service/tests/test_kfs_fleet_rank.py -q
+          python -m pytest implementation/runtime_service/tests/test_kfs_customer_document_evidence.py -q
+          python -m pytest implementation/runtime_service/tests/test_kfs_customer_document_source.py -q
+          python -m pytest implementation/runtime_service/tests/test_kfs_customer_runtime.py -q
           python -m pytest tools/tests/test_provider_secret_provision.py -q
       - name: Verify KFS remains credential-safe and fail-closed by default
         run: |
