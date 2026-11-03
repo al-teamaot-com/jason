@@ -1,5 +1,3 @@
-[Reading 40 lines from start (total: 40 lines, 0 remaining)]
-
 # Current LKG authority-health bootstrap recovery — 2026-11-03
 
 ## Incident state

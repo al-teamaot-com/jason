@@ -1,5 +1,3 @@
-[Reading 145 lines from start (total: 145 lines, 0 remaining)]
-
 """P0 #1974: installed root recovery files and policy stage before systemd.
 
 These tests use isolated temporary files, never real systemd or root policy.

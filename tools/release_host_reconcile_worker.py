@@ -1,5 +1,3 @@
-[Reading 772 lines from start (total: 772 lines, 0 remaining)]
-
 #!/usr/bin/env python3
 """Root-owned worker for bounded Jason host release reconciliation."""
 

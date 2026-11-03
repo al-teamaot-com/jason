@@ -1,5 +1,3 @@
-[Reading 628 lines from start (total: 628 lines, 0 remaining)]
-
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
