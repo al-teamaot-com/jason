@@ -5722,6 +5722,48 @@ def installed_root_reconciler_supports_open_breaker_forward_recovery() -> bool:
     return all(marker in text for marker in required)
 
 
+def legacy_root_reconciler_stage_a_candidate(repo: Path, record: Mapping[str, Any]) -> bool:
+    """Permit legacy-root bootstrap only when candidate desired state equals LKG exactly.
+
+    This does not grant release authority. It only recognizes the documented Stage A
+    sequencing case where the old installed root worker has no desired-state change
+    to interpret before it can install the reviewed successor. Every other recovery
+    gate, exact-main binding, Owner approval, CCC, preproduction and closeout check
+    remains mandatory.
+    """
+    try:
+        candidate = exact_sha(
+            str((record.get("release_candidate") or {}).get("candidate_sha") or ""),
+            "candidate_sha",
+        )
+        rollback = exact_sha(str(record.get("rollback_sha") or ""), "rollback_sha")
+        if candidate == rollback:
+            return False
+        blobs = []
+        for revision in (candidate, rollback):
+            blob = subprocess.check_output(
+                [
+                    "git", "-C", str(repo), "show",
+                    revision + ":config/production-desired-state.json",
+                ],
+                stderr=subprocess.DEVNULL,
+                timeout=15,
+            )
+            if not blob or len(blob) > 131072:
+                return False
+            blobs.append(blob)
+        return blobs[0] == blobs[1]
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        ReleaseManagerError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ):
+        return False
+
+
 def governed_open_breaker_recovery_context(
     repo: Path, state_root: Path, record: dict[str, Any], *,
     require_owner_approval: bool,
@@ -5781,7 +5823,8 @@ def governed_open_breaker_recovery_context(
     # that exact forward-recovery contract. Once the breaker is independently
     # closed, the ordinary descendant path remains unchanged.
     if (breaker.get("state") == "open"
-            and not installed_root_reconciler_supports_open_breaker_forward_recovery()):
+            and not installed_root_reconciler_supports_open_breaker_forward_recovery()
+            and not legacy_root_reconciler_stage_a_candidate(repo, record)):
         return None
     try:
         observed = datetime.fromisoformat(str(drift_doc.get("observed_at") or "").replace("Z", "+00:00"))

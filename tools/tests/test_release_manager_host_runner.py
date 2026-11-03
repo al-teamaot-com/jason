@@ -5503,3 +5503,30 @@ def test_live_root_forward_contract_detector_requires_all_reviewed_markers():
         assert runner.installed_root_reconciler_supports_open_breaker_forward_recovery() is True
     with patch.object(runner, 'INSTALLED_ROOT_HOST_RECONCILER', FakePath(complete.replace('PREVIOUS_MIGRATION_FORWARD_DESCENDANT_VERIFIED', ''))):
         assert runner.installed_root_reconciler_supports_open_breaker_forward_recovery() is False
+
+def test_legacy_root_stage_a_requires_exact_desired_state_blob_identity():
+    record = {
+        'release_candidate': {'candidate_sha': SHA_A},
+        'rollback_sha': SHA_B,
+    }
+    identical = b'{"schema_version":"1.0","required_system_units":[]}\n'
+    with patch.object(runner.subprocess, 'check_output', side_effect=[identical, identical]) as checked:
+        assert runner.legacy_root_reconciler_stage_a_candidate(Path('/repo'), record) is True
+    assert checked.call_count == 2
+
+    with patch.object(
+        runner.subprocess,
+        'check_output',
+        side_effect=[identical, identical + b' '],
+    ):
+        assert runner.legacy_root_reconciler_stage_a_candidate(Path('/repo'), record) is False
+
+
+def test_legacy_root_stage_a_fails_closed_on_missing_or_invalid_source():
+    record = {
+        'release_candidate': {'candidate_sha': SHA_A},
+        'rollback_sha': SHA_B,
+    }
+    with patch.object(runner.subprocess, 'check_output', side_effect=runner.subprocess.CalledProcessError(1, ['git'])):
+        assert runner.legacy_root_reconciler_stage_a_candidate(Path('/repo'), record) is False
+    assert runner.legacy_root_reconciler_stage_a_candidate(Path('/repo'), {}) is False
