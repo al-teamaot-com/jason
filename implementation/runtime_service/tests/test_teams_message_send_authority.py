@@ -36,6 +36,7 @@ def test_opt_in_exact_profile(monkeypatch):
 
 # Regression: an authority-store/runtime rebuild must recreate the exact
 # profile-approved grant without broadening approval or provider authority.
+# The recreated grant remains approval-bound; it never grants release authority.
 def test_enable_seeds_one_exact_approval_bound_grant_only():
     service = authority()
     assert not ensure_authority(service, enabled=False)
