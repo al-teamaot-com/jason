@@ -81,6 +81,7 @@ def test_autonomy_work_snapshot_bounds_items_but_counts_full_state(tmp_path, mon
     connection.close()
 
     monkeypatch.setenv("JASON_AUTONOMY_WORKER_DB", str(db))
+    monkeypatch.setenv("JASON_AUTONOMY_STATUS_MAX_SCAN_AGE_SECONDS", "999999999")
     snapshot = server._autonomous_ticket_work_snapshot()
 
     assert snapshot["status"] == "succeeded"
@@ -150,6 +151,7 @@ def test_autonomy_work_snapshot_reports_caught_up_only_with_complete_zero_eligib
         selected=0,
     )
     monkeypatch.setenv("JASON_AUTONOMY_WORKER_DB", str(db))
+    monkeypatch.setenv("JASON_AUTONOMY_STATUS_MAX_SCAN_AGE_SECONDS", "999999999")
 
     snapshot = server._autonomous_ticket_work_snapshot()
 
@@ -178,6 +180,7 @@ def test_autonomy_work_snapshot_reports_stalled_for_eligible_idle_capacity(tmp_p
         selected=0,
     )
     monkeypatch.setenv("JASON_AUTONOMY_WORKER_DB", str(db))
+    monkeypatch.setenv("JASON_AUTONOMY_STATUS_MAX_SCAN_AGE_SECONDS", "999999999")
 
     snapshot = server._autonomous_ticket_work_snapshot()
 
@@ -206,9 +209,131 @@ def test_autonomy_work_snapshot_reports_unknown_without_scan_evidence(tmp_path, 
     connection.commit()
     connection.close()
     monkeypatch.setenv("JASON_AUTONOMY_WORKER_DB", str(db))
+    monkeypatch.setenv("JASON_AUTONOMY_STATUS_MAX_SCAN_AGE_SECONDS", "999999999")
 
     snapshot = server._autonomous_ticket_work_snapshot()
 
     assert snapshot["processing_state"] == "UNKNOWN"
     assert snapshot["scan_evidence_present"] is False
     assert snapshot["eligible_now"] is None
+
+
+def test_autonomy_work_snapshot_reports_waiting_expected_only_after_fresh_zero_eligible_scan(tmp_path, monkeypatch):
+    db = _create_status_db(
+        tmp_path,
+        phase_rows=[
+            (
+                4001,
+                "TWAIT",
+                "offline",
+                "test",
+                "waiting_device_access:claim",
+                "2026-11-03T09:44:00+00:00",
+                "offline",
+            )
+        ],
+        eligible=0,
+        active_slots=2,
+        selected=0,
+    )
+    monkeypatch.setenv("JASON_AUTONOMY_WORKER_DB", str(db))
+    monkeypatch.setenv("JASON_AUTONOMY_STATUS_MAX_SCAN_AGE_SECONDS", "999999999")
+
+    snapshot = server._autonomous_ticket_work_snapshot()
+
+    assert snapshot["processing_state"] == "WAITING_EXPECTED"
+    assert snapshot["eligible_now"] == 0
+    assert snapshot["waiting_count"] == 1
+    assert snapshot["scan_complete"] is True
+
+
+def test_autonomy_work_snapshot_reports_unknown_when_complete_scan_is_stale(tmp_path, monkeypatch):
+    db = _create_status_db(
+        tmp_path,
+        phase_rows=[],
+        eligible=0,
+        active_slots=2,
+        selected=0,
+    )
+    monkeypatch.setenv("JASON_AUTONOMY_WORKER_DB", str(db))
+    monkeypatch.setenv("JASON_AUTONOMY_STATUS_MAX_SCAN_AGE_SECONDS", "120")
+
+    snapshot = server._autonomous_ticket_work_snapshot()
+
+    assert snapshot["processing_state"] == "UNKNOWN"
+    assert snapshot["scan_stale"] is True
+    assert snapshot["scan_complete"] is False
+    assert snapshot["processing_state_reason"] == "latest_complete_scan_is_stale"
+
+
+def test_autonomy_work_snapshot_detects_two_no_progress_cycles(tmp_path, monkeypatch):
+    db = tmp_path / "no-progress.sqlite3"
+    connection = sqlite3.connect(db)
+    connection.execute(
+        """
+        CREATE TABLE autonomy_operational_work(
+            ticket_id INTEGER PRIMARY KEY,
+            ticket_number TEXT,
+            title TEXT,
+            playbook_id TEXT,
+            phase TEXT,
+            updated_at TEXT,
+            last_reason TEXT
+        )
+        """
+    )
+    connection.execute(
+        "INSERT INTO autonomy_operational_work VALUES (?,?,?,?,?,?,?)",
+        (
+            5001,
+            "T5001",
+            "eligible",
+            "test",
+            "diagnosing",
+            "2026-11-03T09:40:00+00:00",
+            "",
+        ),
+    )
+    connection.execute(
+        """
+        CREATE TABLE autonomy_ticket_scan_cycle(
+            cycle_id TEXT PRIMARY KEY,
+            scanned_at TEXT NOT NULL,
+            evaluated INTEGER,
+            eligible INTEGER,
+            active_slots INTEGER,
+            selected INTEGER
+        )
+        """
+    )
+    connection.executemany(
+        "INSERT INTO autonomy_ticket_scan_cycle VALUES (?,?,?,?,?,?)",
+        [
+            ("cycle-1", "2026-11-03T09:43:00+00:00", 1, 1, 0, 0),
+            ("cycle-2", "2026-11-03T09:44:00+00:00", 1, 1, 0, 0),
+        ],
+    )
+    connection.execute(
+        """
+        CREATE TABLE autonomy_ticket_activity(
+            activity_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            occurred_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "INSERT INTO autonomy_ticket_activity(occurred_at) VALUES (?)",
+        ("2026-11-03T09:40:00+00:00",),
+    )
+    connection.commit()
+    connection.close()
+    monkeypatch.setenv("JASON_AUTONOMY_WORKER_DB", str(db))
+    monkeypatch.setenv("JASON_AUTONOMY_STATUS_MAX_SCAN_AGE_SECONDS", "999999999")
+
+    snapshot = server._autonomous_ticket_work_snapshot()
+
+    assert snapshot["processing_state"] == "STALLED"
+    assert snapshot["consecutive_no_progress_cycles"] == 2
+    assert snapshot["processing_state_reason"] == (
+        "actionable_work_has_no_meaningful_progress_for_multiple_cycles"
+    )
