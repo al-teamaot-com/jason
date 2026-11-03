@@ -59,7 +59,11 @@
     "infrastructure/openclaw-operations/systemd/jason-release-host-reconcile.*",
     "tools/install_release_control_transition.py",
     "tools/protected_root_policy_migration.py",
-    "config/production-desired-state.json"
+    "config/production-desired-state.json",
+    "tools/pmv3_worker_release_gate.py",
+    "tools/jason_self_heal_watchdog.py",
+    "tools/install_support_repair_host_worker.py",
+    "infrastructure/openclaw-operations/systemd/user/jason-support-repair-worker.service"
   ],
   "priority": {
     "order": [
