@@ -5781,14 +5781,94 @@ def _autonomous_ticket_work_snapshot() -> dict[str, Any]:
         if connection is not None:
             connection.close()
 
+    active_count = int((counts["active_count"] if counts is not None else None) or 0)
+    waiting_count = int((counts["waiting_count"] if counts is not None else None) or 0)
+    blocked_count = int((counts["blocked_count"] if counts is not None else None) or 0)
+
+    scan = None
+    connection = None
+    try:
+        connection = sqlite3.connect(
+            f"file:{path}?mode=ro",
+            uri=True,
+            timeout=2.0,
+        )
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only = ON")
+        columns = {
+            str(row["name"])
+            for row in connection.execute(
+                "PRAGMA table_info(autonomy_ticket_scan_cycle)"
+            ).fetchall()
+        }
+        required = {"scanned_at", "eligible", "active_slots", "selected"}
+        if required.issubset(columns):
+            optional = [
+                name for name in ("evaluated", "waiting_device", "human_review")
+                if name in columns
+            ]
+            select_columns = ["scanned_at", "eligible", "active_slots", "selected", *optional]
+            row = connection.execute(
+                "SELECT " + ",".join(select_columns)
+                + " FROM autonomy_ticket_scan_cycle ORDER BY scanned_at DESC LIMIT 1"
+            ).fetchone()
+            if row is not None:
+                scan = {name: row[name] for name in select_columns}
+    except (sqlite3.Error, OSError):
+        scan = None
+    finally:
+        if connection is not None:
+            connection.close()
+
+    eligible_now = int((scan or {}).get("eligible") or 0) if scan is not None else None
+    active_slots = int((scan or {}).get("active_slots") or 0) if scan is not None else None
+    selected = int((scan or {}).get("selected") or 0) if scan is not None else None
+    last_successful_scan_at = str((scan or {}).get("scanned_at") or "") if scan is not None else ""
+
+    if scan is None:
+        processing_state = "UNKNOWN"
+        state_reason = "complete_scan_evidence_unavailable"
+    elif eligible_now > 0 and active_count == 0 and active_slots > 0 and selected == 0:
+        processing_state = "STALLED"
+        state_reason = "eligible_work_with_free_capacity_but_no_active_or_selected_work"
+    elif active_count > 0:
+        if blocked_count > 0:
+            processing_state = "DEGRADED"
+            state_reason = "active_processing_with_blocked_work"
+        elif eligible_now > active_count:
+            processing_state = "BACKLOGGED"
+            state_reason = "actionable_work_exceeds_current_active_processing"
+        else:
+            processing_state = "PROCESSING"
+            state_reason = "actionable_work_is_actively_processing"
+    elif eligible_now > 0:
+        processing_state = "STALLED"
+        state_reason = "actionable_work_exists_but_none_is_active"
+    elif blocked_count > 0:
+        processing_state = "BLOCKED"
+        state_reason = "no_actionable_work_selected_but_blocked_work_remains"
+    elif waiting_count > 0:
+        processing_state = "WAITING_EXPECTED"
+        state_reason = "no_actionable_work_now_and_waiting_work_remains"
+    else:
+        processing_state = "CAUGHT_UP"
+        state_reason = "latest_complete_scan_reports_zero_actionable_work"
+
     return {
         "status": "succeeded",
         "items": items,
         "items_bounded": True,
         "item_limit": 5,
-        "active_count": int((counts["active_count"] if counts is not None else None) or 0),
-        "waiting_count": int((counts["waiting_count"] if counts is not None else None) or 0),
-        "blocked_count": int((counts["blocked_count"] if counts is not None else None) or 0),
+        "active_count": active_count,
+        "waiting_count": waiting_count,
+        "blocked_count": blocked_count,
+        "eligible_now": eligible_now,
+        "active_slots": active_slots,
+        "selected_last_scan": selected,
+        "last_successful_scan_at": last_successful_scan_at,
+        "processing_state": processing_state,
+        "processing_state_reason": state_reason,
+        "scan_evidence_present": scan is not None,
     }
 
 
