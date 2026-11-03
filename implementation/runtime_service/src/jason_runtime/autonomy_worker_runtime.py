@@ -440,6 +440,13 @@ class SQLiteOperationalWorkStore:
         updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS autonomy_ticket_worker_heartbeat (
+        singleton_id INTEGER PRIMARY KEY CHECK(singleton_id=1),
+        last_started_at TEXT,
+        last_completed_at TEXT,
+        state TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS autonomy_ticket_scan_cycle (
         cycle_id TEXT PRIMARY KEY,
         scanned_at TEXT NOT NULL,
@@ -797,6 +804,34 @@ class SQLiteOperationalWorkStore:
                 (int(ticket_id),),
             )
 
+    def mark_scan_started(self, *, started_at: str) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO autonomy_ticket_worker_heartbeat(
+                    singleton_id,last_started_at,last_completed_at,state
+                ) VALUES (1,?,NULL,'running')
+                ON CONFLICT(singleton_id) DO UPDATE SET
+                    last_started_at=excluded.last_started_at,
+                    state='running'
+                """,
+                (started_at,),
+            )
+
+    def mark_scan_failed(self, *, finished_at: str) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO autonomy_ticket_worker_heartbeat(
+                    singleton_id,last_started_at,last_completed_at,state
+                ) VALUES (1,?,?, 'failed')
+                ON CONFLICT(singleton_id) DO UPDATE SET
+                    last_completed_at=excluded.last_completed_at,
+                    state='failed'
+                """,
+                (finished_at, finished_at),
+            )
+
     def record_scan(self, snapshot: TicketScanSnapshot) -> None:
         with self._connection:
             self._connection.execute(
@@ -814,6 +849,17 @@ class SQLiteOperationalWorkStore:
                     snapshot.assigned_elsewhere, snapshot.active_slots,
                     snapshot.selected, snapshot.waiting_device, snapshot.human_review,
                 ),
+            )
+            self._connection.execute(
+                """
+                INSERT INTO autonomy_ticket_worker_heartbeat(
+                    singleton_id,last_started_at,last_completed_at,state
+                ) VALUES (1,?,?, 'completed')
+                ON CONFLICT(singleton_id) DO UPDATE SET
+                    last_completed_at=excluded.last_completed_at,
+                    state='completed'
+                """,
+                (snapshot.scanned_at, snapshot.scanned_at),
             )
             self._connection.execute(
                 """
@@ -1182,6 +1228,116 @@ class GovernedAutonomyActionPort:
             promotion_approval_id=promotion.approval_id,
         )
 
+    @staticmethod
+    def _ticket_record_from_output(
+        value: Any,
+        *,
+        ticket_id: int,
+    ) -> Mapping[str, Any] | None:
+        if isinstance(value, Mapping):
+            record = value.get("record")
+            if isinstance(record, Mapping):
+                observed_id = record.get("id")
+                if observed_id is None or str(observed_id) == str(ticket_id):
+                    return record
+            for key in ("items", "tickets"):
+                items = value.get(key)
+                if isinstance(items, Sequence) and not isinstance(items, (str, bytes)):
+                    for item in items:
+                        if isinstance(item, Mapping) and str(item.get("id") or "") == str(ticket_id):
+                            return item
+            for key in ("data", "provider_data", "evidence", "output"):
+                nested = value.get(key)
+                found = GovernedAutonomyActionPort._ticket_record_from_output(
+                    nested,
+                    ticket_id=ticket_id,
+                )
+                if found is not None:
+                    return found
+        elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+            for item in value:
+                found = GovernedAutonomyActionPort._ticket_record_from_output(
+                    item,
+                    ticket_id=ticket_id,
+                )
+                if found is not None:
+                    return found
+        return None
+
+    def _reconcile_consumed_ticket_update(
+        self,
+        request,
+    ) -> Mapping[str, Any] | None:
+        approval_id = str(getattr(request, "approval_id", None) or "").strip()
+        if not approval_id:
+            return None
+        ledger = self.request_factory.execution_ledger
+        evidence = ledger.evidence(approval_id)
+        if not isinstance(evidence, Mapping) or str(evidence.get("state") or "") != "consumed":
+            return None
+        try:
+            plan = json.loads(str(evidence.get("execution_plan_json") or "{}"))
+        except Exception:
+            return None
+        if not isinstance(plan, Mapping):
+            return None
+        if str(plan.get("canonical_capability") or "") != "service.ticket.update":
+            return None
+        expected = plan.get("normalized_payload")
+        if not isinstance(expected, Mapping):
+            return None
+        try:
+            ticket_id = int(expected.get("id"))
+        except (TypeError, ValueError):
+            return None
+        verified_fields = sorted(str(key) for key in expected if str(key) != "id")
+        if not verified_fields:
+            return None
+
+        read_request = self.request_factory.build_observe(
+            capability_name="service.ticket.read",
+            arguments={"ticket_id": ticket_id},
+            client_id=getattr(request, "client_id", None),
+            correlation_id=f"{request.correlation_id}-reconcile",
+            policy_id="autonomous-indeterminate-mutation-reconciliation-v1",
+        )
+        read_result = self.orchestrator.execute(read_request)
+        if getattr(getattr(read_result, "status", None), "value", "") != "succeeded":
+            return None
+        observed = self._ticket_record_from_output(
+            getattr(read_result, "output", None),
+            ticket_id=ticket_id,
+        )
+        if observed is None:
+            return None
+        for key in verified_fields:
+            expected_value = expected.get(key)
+            observed_value = observed.get(key)
+            if expected_value is None:
+                if observed_value is not None:
+                    return None
+                continue
+            if str(observed_value).strip().casefold() != str(expected_value).strip().casefold():
+                return None
+
+        output = {
+            "data": {
+                "jasonVerification": {
+                    "readbackVerified": True,
+                    "ticketId": ticket_id,
+                    "verifiedFields": verified_fields,
+                    "recoveryDisposition": "confirmed_completed",
+                    "recoveredApprovalId": approval_id,
+                }
+            }
+        }
+        ledger.reconcile_consumed_success(
+            request,
+            output=output,
+            reason_code="indeterminate_provider_readback_confirmed",
+        )
+        return output
+
     def execute(
         self,
         scope: PlaybookScope,
@@ -1197,9 +1353,17 @@ class GovernedAutonomyActionPort:
         result = self.orchestrator.execute(request)
         status = getattr(getattr(result, "status", None), "value", "")
         if status != "succeeded":
+            error_code = str(getattr(result, "error_code", None) or "")
+            if (
+                capability == "service.ticket.update"
+                and error_code == "APPROVAL_CONSUMPTION_REJECTED"
+            ):
+                reconciled = self._reconcile_consumed_ticket_update(request)
+                if reconciled is not None:
+                    return reconciled
             raise OperationalAutonomyError(
                 "governed autonomous action failed: "
-                + str(getattr(result, "error_code", None) or getattr(result, "reason_codes", ()))
+                + str(error_code or getattr(result, "reason_codes", ()))
             )
         output = getattr(result, "output", None)
         return dict(output) if isinstance(output, Mapping) else {}
@@ -2154,11 +2318,15 @@ class OperationalAutonomyMaintenance:
         if now < self._next_due:
             return
         self._next_due = now + self.interval_seconds
+        self.store.mark_scan_started(started_at=datetime.now(timezone.utc).isoformat())
         try:
             candidates = tuple(self.queue_source.reconcile_candidates())
         except Exception:
             # Provider/read failures are never authority to mutate or redispatch.
             # A later cadence retry will reconcile again.
+            self.store.mark_scan_failed(
+                finished_at=datetime.now(timezone.utc).isoformat()
+            )
             return
         by_id = {int(item.resource_id): item for item in candidates}
         self._reconcile_orphaned_waiting_device_rows(by_id)
@@ -5783,7 +5951,7 @@ class OperationalAutonomyMaintenance:
             try:
                 software_data = self._read_data(
                     "endpoint.software.search",
-                    {"resource_id": work.device_uid, "page_size": 250},
+                    {"resource_id": work.device_uid},
                 )
                 raw_software = software_data.get("items")
                 if isinstance(raw_software, Sequence) and not isinstance(
@@ -5821,10 +5989,57 @@ class OperationalAutonomyMaintenance:
         rows: list[tuple[str, str, bool]] = []
         for kb_digits in kbs:
             kb = f"KB{kb_digits}"
-            patch_data = self._read_data(
-                "endpoint.patch.search",
-                {"resource_id": work.device_uid, "kb": kb},
-            )
+            try:
+                patch_data = self._read_data(
+                    "endpoint.patch.search",
+                    {"resource_id": work.device_uid, "kb": kb},
+                )
+            except OperationalAutonomyError as exc:
+                if "INVALID_CAPABILITY_ARGUMENTS" not in str(exc):
+                    raise
+                # Request-construction drift is not a provider failure. Correct
+                # the selector deterministically against the endpoint-only
+                # collection form of the same governed capability, then perform
+                # the exact KB match locally. Never switch providers/capabilities.
+                patch_data = self._read_data(
+                    "endpoint.patch.search",
+                    {"resource_id": work.device_uid},
+                )
+                raw_items = patch_data.get("items")
+                if raw_items is None:
+                    raw_items = patch_data.get("patches")
+                if not isinstance(raw_items, Sequence) or isinstance(
+                    raw_items, (str, bytes)
+                ):
+                    raw_items = ()
+                kb_digits_lower = kb[2:].casefold()
+                matched = []
+                for patch_item in raw_items:
+                    if not isinstance(patch_item, Mapping):
+                        continue
+                    values = (
+                        patch_item.get("kbArticleId"),
+                        patch_item.get("kb"),
+                        patch_item.get("title"),
+                    )
+                    normalized_values = [str(value or "").casefold() for value in values]
+                    if (
+                        kb.casefold() in normalized_values
+                        or kb_digits_lower in normalized_values
+                        or any(kb.casefold() in value for value in normalized_values)
+                    ):
+                        matched.append(dict(patch_item))
+                patch_data = dict(patch_data)
+                patch_data["items"] = matched
+                patch_data["patches"] = matched
+                self._audit_diagnostic(
+                    "vulscan_patch_selector_corrected",
+                    {
+                        "ticket_number": work.ticket_number,
+                        "kb": kb,
+                        "device_uid": work.device_uid,
+                    },
+                )
             items = patch_data.get("items")
             if items is None:
                 items = patch_data.get("patches")

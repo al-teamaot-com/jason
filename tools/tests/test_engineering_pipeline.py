@@ -44,8 +44,9 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(state["status"], "healthy")
         self.assertEqual([c[0] for c in self.calls], [
             "support_repair_host_worker", "todo_engineering_intake",
-            "owner_approved_development_worker", "todo_release_bridge",
-            "engineering_supervisor", "release_breaker_recovery_manager",
+            "owner_approved_development_worker", "pr_integration_source_reconciler",
+            "todo_release_bridge", "engineering_supervisor",
+            "release_breaker_recovery_manager",
         ])
         self.assertEqual(self.state_file(), state)
         self.assertTrue(all(c["status"] == "succeeded" for c in state["stages"].values()))
@@ -209,8 +210,9 @@ class PipelineTests(unittest.TestCase):
     def test_support_failure_blocks_new_admission_but_reconciles_release(self):
         state = self.execute(failed={"support_repair_host_worker"})
         self.assertEqual([c[0] for c in self.calls], [
-            "support_repair_host_worker", "todo_release_bridge",
-            "engineering_supervisor", "release_breaker_recovery_manager",
+            "support_repair_host_worker", "pr_integration_source_reconciler",
+            "todo_release_bridge", "engineering_supervisor",
+            "release_breaker_recovery_manager",
         ])
         self.assertEqual(state["status"], "degraded")
         self.assertEqual(state["stages"]["todo_intake"]["status"], "skipped_dependency")
@@ -222,8 +224,9 @@ class PipelineTests(unittest.TestCase):
         state = self.execute(failed={"todo_engineering_intake"})
         self.assertEqual([c[0] for c in self.calls], [
             "support_repair_host_worker", "todo_engineering_intake",
-            "owner_approved_development_worker", "todo_release_bridge",
-            "engineering_supervisor", "release_breaker_recovery_manager",
+            "owner_approved_development_worker", "pr_integration_source_reconciler",
+            "todo_release_bridge", "engineering_supervisor",
+            "release_breaker_recovery_manager",
         ])
         self.assertEqual(state["status"], "degraded")
         self.assertEqual(state["stages"]["development"]["status"], "succeeded")
@@ -251,6 +254,22 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(bridge[bridge.index("--release-state")+1], str(self.base / "releases"))
         recovery = next(call[1] for call in self.calls if call[0] == "release_breaker_recovery_manager")
         self.assertEqual(recovery[recovery.index("--release-state")+1], str(self.base / "releases"))
+
+    def test_pr_integration_runs_without_repo_or_spool_arguments(self):
+        self.execute()
+        integration = next(
+            call[1] for call in self.calls
+            if call[0] == "pr_integration_source_reconciler"
+        )
+        self.assertEqual(len(integration), 2)
+
+    def test_integration_failure_is_durable_but_not_production_breaker(self):
+        state = self.execute(failed={"pr_integration_source_reconciler"})
+        self.assertEqual(state["status"], "degraded")
+        self.assertEqual(state["failure_domain"], "engineering_operations")
+        self.assertIn("integration", state["failed_work_stages"])
+        self.assertEqual(pipeline.service_exit_code(state), 0)
+        self.assertEqual(state["stages"]["release_bridge"]["status"], "succeeded")
 
     def test_durable_report_restricts_permissions(self):
         self.execute(failed={"todo_engineering_intake"})

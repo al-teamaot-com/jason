@@ -5379,3 +5379,30 @@ def test_eligible_release_record_prefers_latest_valid_retry(tmp_path):
     rid, record = runner._eligible_release_record_for_sha(root, sha)
     assert rid == base + '-retry-2'
     assert record['state'] == 'production_eligible'
+
+
+def test_live_provider_recovery_profile_binds_current_reliability_repair():
+    policy = __import__("json").loads(
+        (ROOT / "config/open-breaker-recovery-policy.json").read_text()
+    )
+    profile = next(
+        item for item in policy["profiles"]
+        if item["id"] == "provider_identity_and_authority_recovery"
+    )
+    required = set(profile["required_changed_files"])
+    assert profile["max_changed_files"] == 40
+    assert {
+        "implementation/orchestrator/governed_execution_ledger.py",
+        "implementation/runtime_service/src/jason_runtime/autonomy_worker_runtime.py",
+        "implementation/runtime_service/src/jason_runtime/autonomy_worker_supervisor.py",
+        "implementation/runtime_service/src/jason_runtime/composition.py",
+        "implementation/runtime_service/src/jason_runtime/teams_message_send.py",
+        "tools/engineering_pipeline.py",
+        "tools/reconcile_production_host_services.sh",
+        "tools/release_manager_host_runner.py",
+    }.issubset(required)
+    assert not {
+        "tools/openbao_identity_lifecycle.py",
+        "tools/openbao_identity_lifecycle_worker.py",
+        "tools/install_openbao_identity_lifecycle.py",
+    } & required
