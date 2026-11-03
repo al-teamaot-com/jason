@@ -230,6 +230,40 @@ def test_explicit_recovery_pr_can_advance_locked_candidate(tmp_path):
     assert any(sha == merged_sha and status == 'success' for sha, status, _ in api.gates)
     assert state['release_lock']['candidate_sha'] == api._main
     assert state['release_lock']['reason'] == 'release_recovery_candidate_merged'
+    assert state['main_sha'] == merged_sha
+    assert state['queue'] == []
+    assert state['metrics']['admitted_open'] == 0
+
+
+def test_recovery_merge_checkpoints_locked_candidate_before_status_api_failure(tmp_path):
+    spool, release = tmp_path / 'spool', tmp_path / 'release'
+    write_approved(spool, 9)
+    locked = '2' * 40
+    write_lkg(release, '1' * 40)
+    state_path = spool / 'pmv3-integration-queue-state.json'
+    state_path.write_text(json.dumps({
+        **queue.empty_state(),
+        'release_lock': {'active': True, 'candidate_sha': locked, 'locked_at': queue.now()},
+    }))
+
+    class InterruptAfterMerge(FakeApi):
+        def set_gate(self, sha, status, description):
+            if sha == self._main and self.merges:
+                raise RuntimeError('simulated GitHub status API outage after successful merge')
+            super().set_gate(sha, status, description)
+
+    api = InterruptAfterMerge(
+        main_sha=locked,
+        prs=[pr(9, '9' * 40, labels=[queue.RECOVERY_LABEL])],
+    )
+    with pytest.raises(RuntimeError, match='status API outage'):
+        queue.reconcile(api=api, spool=spool, release_state=release, state_path=state_path)
+    assert len(api.merges) == 1
+    checkpoint = queue.load_state(state_path)
+    assert checkpoint['status'] == 'release_locked'
+    assert checkpoint['main_sha'] == api._main
+    assert checkpoint['release_lock']['candidate_sha'] == api._main
+    assert checkpoint['queue'] == []
 
 
 def test_checks_ready_excludes_gate_from_required_contexts():

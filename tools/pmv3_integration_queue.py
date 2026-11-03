@@ -485,10 +485,10 @@ def reconcile(
             if ready:
                 api.set_gate(rsha, "success", "PMV3 selected bounded release-recovery PR")
                 merged_sha = api.merge_pull_request(int(recovery["number"]), rsha)
-                api.set_gate(
-                    merged_sha, "success",
-                    "PMV3 integrated selected release-recovery PR; exact candidate locked",
-                )
+                # GitHub's merge is already durable. Checkpoint the NEW protected
+                # candidate before making further status API calls: a network or
+                # status-write failure must not leave an obsolete release lock.
+                state["main_sha"] = merged_sha
                 state["release_lock"] = _release_lock(
                     merged_sha, None, reason="release_recovery_candidate_merged"
                 )
@@ -499,6 +499,19 @@ def reconcile(
                     "candidate_sha": merged_sha,
                     "at": now(),
                 }
+                state["queue"] = [
+                    item for item in state["queue"]
+                    if int(item.get("pr_number") or 0) != int(recovery["number"])
+                ]
+                admitted_open = [
+                    item for item in admitted_open
+                    if int(item.get("number") or 0) != int(recovery["number"])
+                ]
+                atomic_json(state_path, state)
+                api.set_gate(
+                    merged_sha, "success",
+                    "PMV3 integrated selected release-recovery PR; exact candidate locked",
+                )
                 _set_all_pending(api, [pr for pr in prs if int(pr.get("number") or 0) != int(recovery["number"])],
                                  "PMV3 release candidate locked; development continues")
             else:
