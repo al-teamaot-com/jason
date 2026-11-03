@@ -5449,3 +5449,49 @@ def test_live_provider_recovery_profile_binds_current_reliability_repair():
         "tools/openbao_identity_lifecycle_worker.py",
         "tools/install_openbao_identity_lifecycle.py",
     } & required
+
+
+def test_open_breaker_recovery_preflight_requires_live_root_forward_contract():
+    control = {
+        'circuit_breaker': {
+            'state': 'open',
+            'source': 'production_drift_watchdog',
+            'reason': 'continuous_production_drift_detected',
+        }
+    }
+    drift = {'schema_version': '1.0', 'status': 'drift_detected'}
+    with patch.object(
+        runner,
+        'installed_root_reconciler_supports_open_breaker_forward_recovery',
+        return_value=False,
+    ):
+        assert runner.governed_open_breaker_recovery_context(
+            Path('/unused'), Path('/unused'), {},
+            require_owner_approval=False, control=control, drift=drift,
+        ) is None
+
+
+def test_live_root_forward_contract_detector_requires_all_reviewed_markers():
+    class FakePath:
+        def __init__(self, text):
+            self.text = text
+        def lstat(self):
+            class Info:
+                st_mode = 0o100755
+                st_uid = 0
+                st_size = 4096
+            return Info()
+        def is_symlink(self):
+            return False
+        def read_text(self, encoding='utf-8'):
+            return self.text
+    complete = '\n'.join((
+        'def _forward_recovery_release_authorized(',
+        'PREVIOUS_MIGRATION_FORWARD_DESCENDANT_VERIFIED',
+        'authenticated_mobile_teams_owner:relapproval-',
+        'provider_identity_and_authority_recovery',
+    ))
+    with patch.object(runner, 'INSTALLED_ROOT_HOST_RECONCILER', FakePath(complete)):
+        assert runner.installed_root_reconciler_supports_open_breaker_forward_recovery() is True
+    with patch.object(runner, 'INSTALLED_ROOT_HOST_RECONCILER', FakePath(complete.replace('PREVIOUS_MIGRATION_FORWARD_DESCENDANT_VERIFIED', ''))):
+        assert runner.installed_root_reconciler_supports_open_breaker_forward_recovery() is False

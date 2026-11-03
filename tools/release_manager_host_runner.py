@@ -5689,6 +5689,36 @@ def _drift_problem_identities(drift: Mapping[str, Any]) -> tuple[tuple[str, str]
     return tuple(sorted(result))
 
 
+INSTALLED_ROOT_HOST_RECONCILER = Path("/usr/local/lib/jason/release_host_reconcile_worker.py")
+
+
+def installed_root_reconciler_supports_open_breaker_forward_recovery() -> bool:
+    """Fail closed unless the live root worker can authorize an exact forward recovery.
+
+    This is only a pre-mutation compatibility check. It grants no authority; the
+    root worker still independently verifies exact release/Owner/root-policy
+    evidence. A closed breaker does not need this special forward path.
+    """
+    try:
+        info = INSTALLED_ROOT_HOST_RECONCILER.lstat()
+        if (INSTALLED_ROOT_HOST_RECONCILER.is_symlink()
+                or not stat.S_ISREG(info.st_mode)
+                or info.st_uid != 0
+                or info.st_mode & 0o022
+                or info.st_size > 1048576):
+            return False
+        text = INSTALLED_ROOT_HOST_RECONCILER.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+    required = (
+        "def _forward_recovery_release_authorized(",
+        "PREVIOUS_MIGRATION_FORWARD_DESCENDANT_VERIFIED",
+        "authenticated_mobile_teams_owner:relapproval-",
+        "provider_identity_and_authority_recovery",
+    )
+    return all(marker in text for marker in required)
+
+
 def governed_open_breaker_recovery_context(
     repo: Path, state_root: Path, record: dict[str, Any], *,
     require_owner_approval: bool,
@@ -5741,6 +5771,14 @@ def governed_open_breaker_recovery_context(
         )
     )
     if not (ordinary_open_breaker or clean_provider_breaker):
+        return None
+    # An open-breaker forward release reaches the root host reconciler before
+    # candidate host source can install a newer root worker. Refuse the release
+    # before runtime/MCP mutation if the installed root boundary cannot verify
+    # that exact forward-recovery contract. Once the breaker is independently
+    # closed, the ordinary descendant path remains unchanged.
+    if (breaker.get("state") == "open"
+            and not installed_root_reconciler_supports_open_breaker_forward_recovery()):
         return None
     try:
         observed = datetime.fromisoformat(str(drift_doc.get("observed_at") or "").replace("Z", "+00:00"))
