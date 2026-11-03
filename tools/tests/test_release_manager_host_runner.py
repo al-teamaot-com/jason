@@ -361,6 +361,13 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             precreate.assert_called_once()
             self.assertEqual(record["precreate_open_breaker_recovery"], recovery)
             self.assertEqual(record["release_candidate"]["candidate_sha"], SHA_A)
+            # Never discard the exact-source freeze exception while building
+            # a record: the signed Teams decision must bind the same declaration
+            # in both the release record and immutable release manifest.
+            self.assertEqual(record["one_transaction_freeze_exception"], declaration)
+            self.assertEqual(record["release_manifest"]["one_transaction_freeze_exception"], declaration)
+            self.assertEqual(record["description"], declaration["purpose"])
+            self.assertIs(record["owner_approval"]["approved"], False)
 
 
     def test_create_record_rejects_required_check_failure(self):
