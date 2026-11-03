@@ -342,6 +342,30 @@ def test_deny_never_produces_release_or_ccc_authority(tmp_path):
     assert not (opts["ccc_root"] / "material-review.json").exists()
 
 
+def test_superseded_signed_approval_is_terminal_without_authority_materialization(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True,
+    )
+    assert flow.handle(**args)["approval_status"] == "approved"
+    calls = []
+    opts["approve_release"] = lambda *_args, **_kwargs: calls.append(1)
+    opts["protected_main_sha"] = "f" * 40
+
+    assert consume_mobile_release_decisions(**opts) == 1
+    assert calls == []
+    assert not (opts["ccc_root"] / "material-review.json").exists()
+    marker = (
+        opts["state_root"] / "mobile-release-decisions-processed"
+        / (request.approval_id + ".json")
+    )
+    evidence = json.loads(marker.read_text())
+    assert evidence["candidate_sha"] == SHA
+    assert evidence["protected_main_sha"] == "f" * 40
+    assert evidence["disposition"] == "superseded_before_authority_materialization"
+    assert evidence["authority_mutated"] is False
+    assert consume_mobile_release_decisions(**opts) == 0
+
+
 def test_changed_release_blocks_consumption_even_after_authentic_click(tmp_path):
     flow, repo, release_path, request, args, opts, identities, bindings = fixture(tmp_path)
     flow.handle(**args)

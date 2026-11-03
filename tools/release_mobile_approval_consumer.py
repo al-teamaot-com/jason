@@ -159,6 +159,7 @@ def _private_atomic(path: Path, doc: dict) -> None:
 def consume_mobile_release_decisions(
     *, repo: Path, state_root: Path,
     approve_release: Callable,
+    protected_main_sha: str | None = None,
     database: Path = DEFAULT_MOBILE_DB,
     policy_file: Path = DEFAULT_POLICY,
     ccc_root: Path = DEFAULT_CCC_ROOT,
@@ -445,6 +446,30 @@ def consume_mobile_release_decisions(
         )
         if candidate.review_only != review_only:
             raise PermissionError("CCC-only Teams decision changed release approval state")
+        if protected_main_sha is not None:
+            if not re_full_sha(protected_main_sha):
+                raise PermissionError("protected main SHA is invalid")
+            if candidate.candidate_sha != protected_main_sha:
+                # Preserve the authenticated signed decision as terminal audit
+                # evidence, but never materialize CCC or owner release authority
+                # for a candidate superseded before the host consumer ran.
+                if not reconstructing_processed:
+                    _private_atomic(marker, {
+                        "schema_version": "1.0",
+                        "approval_id": approval_id,
+                        "release_id": candidate.release_id,
+                        "candidate_sha": candidate.candidate_sha,
+                        "manifest_sha256": candidate.manifest_sha256,
+                        "mobile_policy_sha256": policy.policy_sha256,
+                        "signed_evidence_sha256": evidence_sha,
+                        "decision": "approve",
+                        "disposition": "superseded_before_authority_materialization",
+                        "authority_mutated": False,
+                        "protected_main_sha": protected_main_sha,
+                        "processed_at": datetime.now(timezone.utc).isoformat(),
+                    })
+                completed += 1
+                continue
         renewal_nonce = request.metadata.get("renewal_nonce")
         renewed_from = request.metadata.get("renewed_from_approval_id")
         if renewal_nonce is not None or renewed_from is not None:

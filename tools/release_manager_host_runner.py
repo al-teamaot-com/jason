@@ -6048,6 +6048,7 @@ def _approval_only_on_stable_production(repo: Path, state_root: Path) -> bool:
     try:
         consume_mobile_release_decisions(
             repo=repo, state_root=state_root, approve_release=approve_release,
+            protected_main_sha=main_sha,
         )
     except MobileReleaseEvidenceBusy:
         print("RELEASE_APPROVAL_ONLY=SIGNED_OWNER_EVIDENCE_BUSY", flush=True)
