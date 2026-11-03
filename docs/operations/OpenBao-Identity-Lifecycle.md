@@ -75,6 +75,27 @@ Current provider credentials are individual Docker bind-mounted files. Atomic re
 
 Routine rotation alone does not restart Jason containers. During the source-reviewed `provider_identity_and_authority_recovery` release profile, however, the governed root host transaction performs bootstrap/rotation only after exact signed Teams approval, then restarts only `jason-runtime` and `jason-mcp-pilot` so Docker remounts the replacement identity. It requires exact candidate revisions, healthy runtime, running MCP, a fresh Autotask governed provider-canary PASS, and successful DNSFilter reconciliation before the ordinary production drift guard is allowed to pass. Any failure follows normal release rollback.
 
+## Mandatory helper bootstrap phase
+
+The first production rollout is split to preserve the installed root worker's
+fail-closed ordering boundary.
+
+**Stage A** ships the reviewed lifecycle libraries, request commands, root
+migration helper, PMV3/ticket recovery changes, and other release code while
+keeping `jason-openbao-identity-lifecycle.timer` and
+`jason-openbao-identity-lifecycle.service` out of
+`config/production-desired-state.json`. Host reconciliation uses
+`install_openbao_identity_lifecycle.py --stage-only` to install the immutable
+libraries and request commands but does not copy, enable, or start the systemd
+units. This allows the existing root preflight to admit the release with no new
+unit delta and installs the newer reviewed root migration helper through normal
+host reconciliation.
+
+**Stage B** is a later independently reviewed exact-SHA release that adds only
+the lifecycle timer/service declarations. It may proceed only after Stage A is
+production-verified and the newer migration helper is the trusted installed
+root helper.
+
 ## Production unit activation contract
 
 The lifecycle worker is a root-owned scheduled control surface. Its first

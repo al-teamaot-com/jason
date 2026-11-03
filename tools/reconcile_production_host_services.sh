@@ -798,8 +798,34 @@ fi
 step_pass root_release_transition_install
 echo "JASON_ROOT_RELEASE_TRANSITION_RECONCILIATION=PASS"
 
-step_start openbao_identity_lifecycle_install
-/usr/bin/python3 "$RELEASE_DIR/tools/install_openbao_identity_lifecycle.py"
+OPENBAO_IDENTITY_LIFECYCLE_TIMER="jason-openbao-identity-lifecycle.timer"
+OPENBAO_IDENTITY_LIFECYCLE_SERVICE="jason-openbao-identity-lifecycle.service"
+OPENBAO_IDENTITY_LIFECYCLE_DECLARED="$(/usr/bin/python3 - "$RELEASE_DIR/config/production-desired-state.json" "$OPENBAO_IDENTITY_LIFECYCLE_TIMER" "$OPENBAO_IDENTITY_LIFECYCLE_SERVICE" <<'PY2'
+import json, sys
+from pathlib import Path
+policy=json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+timer=sys.argv[2]
+service=sys.argv[3]
+required=set(policy.get("required_system_units") or [])
+allowed=set(policy.get("allowed_system_units") or [])
+print("yes" if timer in required and service in allowed else "no")
+PY2
+)"
+if [ "$OPENBAO_IDENTITY_LIFECYCLE_DECLARED" = "yes" ]; then
+  step_start openbao_identity_lifecycle_install
+  /usr/bin/python3 "$RELEASE_DIR/tools/install_openbao_identity_lifecycle.py"
+  if [ "$(systemctl is-active "$OPENBAO_IDENTITY_LIFECYCLE_TIMER" 2>/dev/null || true)" != "active" ]; then
+    echo "ERROR: OpenBao identity lifecycle timer is not active after production install" >&2
+    exit 9
+  fi
+  step_pass openbao_identity_lifecycle_install
+  echo "JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=PASS"
+else
+  step_start openbao_identity_lifecycle_stage
+  /usr/bin/python3 "$RELEASE_DIR/tools/install_openbao_identity_lifecycle.py" --stage-only
+  step_pass openbao_identity_lifecycle_stage
+  echo "JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=DEFERRED_BOOTSTRAP"
+fi
 cmp -s "$RELEASE_DIR/tools/provider_secret_provision.py" /usr/local/lib/jason/provider_secret_provision.py || {
   echo "ERROR: installed provider secret provisioning library differs from production source" >&2
   exit 9
@@ -812,12 +838,6 @@ cmp -s "$RELEASE_DIR/tools/openbao_identity_lifecycle_worker.py" /usr/local/lib/
   echo "ERROR: installed OpenBao identity lifecycle worker differs from production source" >&2
   exit 9
 }
-if [ "$(systemctl is-active jason-openbao-identity-lifecycle.timer 2>/dev/null || true)" != "active" ]; then
-  echo "ERROR: OpenBao identity lifecycle timer is not active after production install" >&2
-  exit 9
-fi
-step_pass openbao_identity_lifecycle_install
-echo "JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=PASS"
 
 if [ "$RECOVERY_PROFILE" = "provider_identity_and_authority_recovery" ]; then
   step_start provider_identity_release_recovery

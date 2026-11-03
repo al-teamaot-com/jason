@@ -11,7 +11,7 @@ BASE = Path(__file__).resolve().parents[1]
 ROOT = Path('/var/lib/jason/openclaw/identity-lifecycle')
 
 
-def install() -> None:
+def install(*, stage_only: bool = False) -> None:
     if os.geteuid() != 0:
         raise PermissionError('root install required')
     al = pwd.getpwnam('al')
@@ -51,6 +51,10 @@ def install() -> None:
         os.chown(command, 0, 0)
         os.chmod(command, 0o755)
 
+    if stage_only:
+        print('OPENBAO_IDENTITY_LIFECYCLE_STAGE_ONLY=PASS')
+        return
+
     units = Path('/etc/systemd/system')
     for suffix in ('service', 'timer'):
         name = 'jason-openbao-identity-lifecycle.' + suffix
@@ -66,4 +70,10 @@ def install() -> None:
 
 
 if __name__ == '__main__':
-    install()
+    import sys
+    if sys.argv[1:] == ['--stage-only']:
+        install(stage_only=True)
+    elif not sys.argv[1:]:
+        install()
+    else:
+        raise SystemExit('usage: install_openbao_identity_lifecycle.py [--stage-only]')
