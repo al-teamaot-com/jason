@@ -154,6 +154,15 @@ fallback**, not a routine requirement.
    decision, tampered/unsigned gateway evidence, changed policy digest, changed
    diff/manifest, superseded commit and failed preproduction all deny without
    authorization or provider writes.
+
+A fully authenticated **Approve** receipt for a superseded commit is preserved as
+terminal audit evidence only after the host independently verifies the signature,
+owner identity, exact release record, manifest, policy, and original card subject,
+and proves the candidate no longer equals protected `main`. The consumer records a
+private processed disposition `superseded_protected_main` with
+`authority_mutated=false`; it must not create CCC material review or release owner
+authority. Failure to prove current protected `main` remains fail-closed and leaves
+the signed decision unprocessed for later investigation.
 3. Restart and crash-after-record handling cannot mint a second decision or
    authorize a different SHA. No transient network/authentication failure
    becomes a positive approval.
