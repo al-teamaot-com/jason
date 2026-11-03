@@ -13,6 +13,12 @@ On November 3, 2026, signed production candidate `3e06627de85ace598f959cda12e257
 - The native self-heal watchdog holds a nonblocking shared production lock around its worker-start calls and bounded local Docker recovery. When the exclusive release lock is active, self-heal persists the incident, defers intervention, and retries through existing cadence. No provider bypass or suppressed detector.
 - Root host reconciler retains its exact pinned 1b28 LKG integrity/health recovery. It accepts the rollback **before breaker opening** only when a real production transaction lock is held, root-protected LKG matches the exact requested SHA, the candidate is protected `origin/main`, release state is `production`, and the release's signed Owner approval, source-bound one-transaction freeze exception, immutable manifest, CCC material review, authenticated Teams approval receipt, successful pre-mutation baseline, and actual temporary freeze backup all agree. This does **not** admit ordinary/unauthorized host changes or substitute a different SHA.
 
+## Source integration reconciliation evidence
+
+- Isolated merge proof: repair PR #2293 head `8f0618e808019ad78fe8f5fb7420fb185ec5f1fc` plus PMV3 queue PR #2280 head `39061f70c522dd2c3dc4d2164c90a9f4fcc791f7` merged without Git conflicts in an **unpublished dry-run worktree**; merged-tree local host tests: **354 passed + five subtests**. No protected `main` merge, no status fabrication, no live runtime or host change.
+- Additional active same-file branches **#2279** (superseded signed Teams approval queue) and **#2156** (manual release pinning after unrelated commits) were reviewed for ownership of distinct Release Manager functions. Preserve both decisions during subsequent source integration; neither transfers an old signature to new SHA nor bypasses protected-current-main checks.
+- Protected CI's `Validate Production Manager V2`, `SEC-007 Security Regressions`, `Validate OpenClaw Operations`, `P0 Owner Autotask Production Read Acceptance`, and other checks passed on repair head `8f0618e80...`. `Validate Jason` implementation overlap requires the exact review of #2279/#2156 recorded on PR #2293, then a new full protected CI run. Documentation source and tests are not proof of production fitness.
+
 ## Required verification before any production deployment
 
 1. Protected PR CI, unit/regression and source risk-classification checks pass. Confirm no unrelated worktree changes and reviewer approval of the root/Release Manager/installer changes.
