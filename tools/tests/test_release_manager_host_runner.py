@@ -1508,6 +1508,49 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
             self.assertFalse(create_record.call_args.kwargs["owner_approved"])
             preprod.assert_called_once()
 
+    def test_prepare_release_admits_fresh_reviewed_open_breaker_recovery(self):
+        with tempfile.TemporaryDirectory() as td:
+            state_root = Path(td)
+            recovery = {
+                "profile_id": "provider_identity_and_authority_recovery",
+                "candidate_sha": SHA_A,
+                "rollback_sha": SHA_B,
+                "alignment": {
+                    "runtime_revision": SHA_B,
+                    "mcp_revision": SHA_B,
+                    "host_revision": SHA_B,
+                },
+            }
+            created = {
+                "release_id": runner.record_id(SHA_A),
+                "state": "release_candidate",
+                "release_candidate": {"candidate_sha": SHA_A},
+            }
+            with (
+                patch.object(runner, "reconcile_stopped_rollback_retention"),
+                patch.object(
+                    runner,
+                    "prepare_open_breaker_recovery_alignment",
+                    return_value=recovery,
+                ) as recovery_check,
+                patch.object(runner, "revalidate_circuit_breaker") as breaker,
+                patch.object(runner, "live_runtime") as live,
+                patch.object(runner, "create_record", return_value=created) as create_record,
+                patch.object(
+                    runner,
+                    "run_preproduction",
+                    return_value={**created, "state": "production_eligible"},
+                ),
+            ):
+                result = runner.prepare_release(
+                    ROOT, state_root, SHA_A, "release_blocker"
+                )
+            self.assertEqual(result["state"], "production_eligible")
+            recovery_check.assert_called_once()
+            breaker.assert_not_called()
+            live.assert_not_called()
+            self.assertEqual(create_record.call_args.kwargs["rollback_sha"], SHA_B)
+
     def test_prepare_release_is_idempotent_after_production_eligible(self):
         with tempfile.TemporaryDirectory() as td:
             state_root = Path(td)

@@ -1693,6 +1693,59 @@ def precreate_open_breaker_recovery_alignment(
     }
 
 
+def prepare_open_breaker_recovery_alignment(
+    repo: Path,
+    state_root: Path,
+    *,
+    candidate_sha: str,
+    change_class: str,
+) -> dict[str, Any] | None:
+    """Prove a fresh recovery candidate may be prepared while drift keeps the breaker open.
+
+    This grants no production authority and does not mutate breaker state. It only
+    lets release preparation reach create_record(), which independently repeats
+    the exact-candidate recovery checks before building/preproduction.
+    """
+    if change_class != "release_blocker":
+        return None
+    candidate_sha = exact_sha(candidate_sha, "candidate_sha")
+    try:
+        control = _read_protected_snapshot(state_root, "production-control-state.json")
+    except (OSError, ValueError, TypeError, ReleaseManagerError):
+        return None
+    breaker = control.get("circuit_breaker") or {}
+    lkg = (control.get("last_known_good") or {}).get("manifest") or {}
+    if (
+        not isinstance(breaker, Mapping)
+        or breaker.get("state") != "open"
+        or breaker.get("source") != "production_drift_watchdog"
+        or breaker.get("reason") != "continuous_production_drift_detected"
+        or not isinstance(lkg, Mapping)
+        or lkg.get("complete") is not True
+    ):
+        return None
+    try:
+        rollback_sha = exact_sha(str(lkg.get("revision") or ""), "rollback_sha")
+        files = changed_files(repo, rollback_sha, candidate_sha)
+        risk_profile = classify_change_risk(change_class, files)
+        freeze_exception = declared_one_transaction_freeze_exception(
+            repo, candidate_sha, expected_rollback_sha=rollback_sha,
+        )
+    except (OSError, ValueError, TypeError, ReleaseManagerError):
+        return None
+    if freeze_exception is None or risk_profile != "production_control_core":
+        return None
+    return precreate_open_breaker_recovery_alignment(
+        repo,
+        state_root,
+        candidate_sha=candidate_sha,
+        rollback_sha=rollback_sha,
+        change_class=change_class,
+        risk_profile=risk_profile,
+        files=files,
+    )
+
+
 def live_runtime() -> dict[str, Any]:
     raw = json.loads(output(["docker", "inspect", "jason-runtime"]))[0]
     labels = raw.get("Config", {}).get("Labels") or {}
@@ -5308,7 +5361,15 @@ def prepare_release(
             recovery_reissue_context = governed_open_breaker_recovery_context(
                 repo, state_root, original, require_owner_approval=False,
             )
-    if recovery_reissue_context is None:
+    fresh_recovery_context = None
+    if not reissue_rolled_back:
+        fresh_recovery_context = prepare_open_breaker_recovery_alignment(
+            repo,
+            state_root,
+            candidate_sha=candidate_sha,
+            change_class=change_class,
+        )
+    if recovery_reissue_context is None and fresh_recovery_context is None:
         revalidate_circuit_breaker(state_root)
     if reissue_rolled_back:
         assert original is not None
@@ -5377,6 +5438,10 @@ def prepare_release(
     if recovery_reissue_context is not None:
         rollback_sha = exact_sha(
             str(recovery_reissue_context["rollback_sha"]), "rollback_sha"
+        )
+    elif fresh_recovery_context is not None:
+        rollback_sha = exact_sha(
+            str(fresh_recovery_context["rollback_sha"]), "rollback_sha"
         )
     else:
         live = live_runtime()
