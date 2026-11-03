@@ -139,7 +139,8 @@ count, scan timestamp/age, pages traversed and provider/evaluated counts when
 available, worker heartbeat state, last meaningful ticket activity, and
 consecutive no-progress cycles. These fields exist so an operator can
 deterministically tell the difference between "nothing to do" and "unable to do
-the work."
+the work." This distinction is a production-acceptance invariant tracked by
+autonomous ticket reliability issue #770, not a dashboard-only presentation rule.
 
 ## Crash and duplicate-action handling
 
