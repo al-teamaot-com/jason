@@ -58,6 +58,11 @@ CURRENT_LKG_HEALTH_RECOVERY_TIMEOUT_SECONDS = 3650
 CURRENT_LKG_POST_PROOF_RECONCILE_TIMEOUT_SECONDS = 500
 CURRENT_LKG_ARCHIVE_TMP = Path("/srv/jason/archive")
 CURRENT_LKG_FULL_EVIDENCE = Path("/var/lib/jason/openclaw/operational-full-health.json")
+# The immutable health proofs run as al, not root. The root-only candidate
+# script spool is intentionally inaccessible to al; materialize ONLY these two
+# hash-verified health files into a separate root-controlled, group-readable
+# execution directory. Never grant group access to the candidate script spool.
+CURRENT_LKG_EXEC_ROOT = Path("/usr/local/lib/jason/lkg-health-" + CURRENT_LKG_RECOVERY_SHA)
 MOBILE_APPROVAL_LEDGER = Path("/var/lib/jason/openclaw/mobile-release-approvals.sqlite3")
 CCC_MATERIAL_REVIEW_ROOT = Path("/var/lib/jason/ccc")
 
@@ -633,15 +638,39 @@ def _trusted_current_lkg_archive_tmp() -> None:
         raise HostReconcileError("current-LKG recovery archive path is not trusted")
 
 
+def _trusted_current_lkg_execution_dir() -> tuple[Path, int]:
+    """Allow only root-written proof code readable to the unprivileged worker.
+
+    The other candidate scripts remain under their existing root-only spool.
+    The execution directory itself must never be writable by the operator,
+    group, or others; the source hash pins and PASS checks are unchanged.
+    """
+    root = CURRENT_LKG_EXEC_ROOT
+    parent = root.parent
+    try:
+        info = parent.lstat()
+        if (parent.is_symlink() or not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != 0 or info.st_mode & 0o022):
+            raise HostReconcileError("LKG health executable parent is untrusted")
+        group = grp.getgrnam("jason").gr_gid
+        root.mkdir(mode=0o750, exist_ok=True)
+        info = root.lstat()
+        if (root.is_symlink() or not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != 0 or info.st_mode & 0o022):
+            raise HostReconcileError("LKG health executable directory is untrusted")
+        os.chown(root, 0, group)
+        os.chmod(root, 0o750)
+    except (OSError, KeyError) as exc:
+        raise HostReconcileError("trusted LKG health executable directory unavailable") from exc
+    return root, group
+
+
 def _materialize_current_lkg_health_recovery(source_revision: str) -> Path:
     """Pin exact LKG health code; change only the obsolete wrapper timeout."""
     if not _current_lkg_recovery_authorized(source_revision):
         raise HostReconcileError("current-LKG health recovery is not authorized")
     _trusted_current_lkg_archive_tmp()
-    root = CANDIDATE_SCRIPTS / ("lkg-health-" + source_revision)
-    root.mkdir(parents=True, exist_ok=True)
-    os.chown(root, 0, 0)
-    os.chmod(root, 0o700)
+    root, group = _trusted_current_lkg_execution_dir()
     blobs = {
         "openclaw_authority_health_snapshot.py": CURRENT_LKG_HEALTH_WRAPPER_SHA256,
         "openclaw_authority_operational_health.py": CURRENT_LKG_HEALTH_TOOL_SHA256,
@@ -667,8 +696,8 @@ def _materialize_current_lkg_health_recovery(source_revision: str) -> Path:
         target = root / name
         temp = target.with_suffix(".py.tmp")
         temp.write_text(body, encoding="utf-8")
-        os.chown(temp, 0, 0)
-        os.chmod(temp, 0o700)
+        os.chown(temp, 0, group)
+        os.chmod(temp, 0o640)
         os.replace(temp, target)
         materialized[name] = target
     return materialized["openclaw_authority_health_snapshot.py"]
