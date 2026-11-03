@@ -15,6 +15,7 @@ The controller stops only when:
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -175,6 +176,44 @@ def run_pipeline(
     return int(result.returncode)
 
 
+def production_transaction_active(release_state: Path) -> bool:
+    """Return True only while Release Manager holds the production mutex."""
+    path = release_state / "production-transaction.lock"
+    if not path.exists():
+        return False
+    try:
+        handle = path.open("r", encoding="utf-8")
+    except OSError:
+        # A present but unreadable coordination primitive is not safe to ignore.
+        return True
+    try:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        finally:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+        return False
+    finally:
+        handle.close()
+
+
+def _defer_for_production_transaction(state: dict[str, Any], state_path: Path) -> dict[str, Any]:
+    state["status"] = "deferred"
+    state["reason"] = "production_transaction_active"
+    state.setdefault("integration_queue", {
+        "schema_version": "1.0", "status": "deferred",
+        "reason": "production_transaction_active", "queue": [],
+    })
+    state["finished_at"] = now()
+    state["pass_count"] = len(state["passes"])
+    atomic_json(state_path, state)
+    return state
+
+
 def controller_run(
     *,
     scripts: Path,
@@ -198,6 +237,11 @@ def controller_run(
         "passes": [],
         "teams_only_approval": True,
     }
+    # Check the production lock BEFORE touching the integration queue. Queue
+    # reconciliation can perform governed source integration and must not run
+    # while Release Manager owns the same production transaction mutex.
+    if production_transaction_active(release_state):
+        return _defer_for_production_transaction(state, state_path)
     state["integration_queue"] = reconcile_integration_queue(
         spool=spool, release_state=release_state, reconciler=integration_reconciler,
     )
@@ -207,6 +251,8 @@ def controller_run(
     unchanged = 0
 
     for pass_number in range(1, max(1, int(max_passes)) + 1):
+        if production_transaction_active(release_state):
+            return _defer_for_production_transaction(state, state_path)
         try:
             return_code = run_pipeline(
                 scripts=scripts, repo=repo, spool=spool,
@@ -227,6 +273,17 @@ def controller_run(
 
         pipeline = load_json(spool / "engineering-pipeline-state.json")
         supervisor = load_json(spool / "engineering-supervisor-state.json")
+        # A production transaction may begin while an already-started
+        # engineering pass runs. Record that pass, but do not reconcile the
+        # integration queue after the production lock was acquired.
+        if production_transaction_active(release_state):
+            state["passes"].append({
+                "pass": pass_number, "pipeline_return_code": return_code,
+                "disposition": "deferred",
+                "reason": "production_transaction_active",
+                "checked_at": now(),
+            })
+            return _defer_for_production_transaction(state, state_path)
         state["integration_queue"] = reconcile_integration_queue(
             spool=spool, release_state=release_state, reconciler=integration_reconciler,
         )

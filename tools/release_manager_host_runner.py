@@ -5234,6 +5234,35 @@ def require_owner_production_deployment_unfrozen(state_root: Path) -> None:
     )
 
 
+def require_pmv3_engineering_quiescent() -> None:
+    """Fail before production mutation while the long-running PMV3 worker is active."""
+    completed = subprocess.run(
+        [
+            "systemctl", "--user", "show", "jason-support-repair-worker.service",
+            "-p", "ActiveState", "--value",
+        ],
+        env=user_systemd_env(),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+        timeout=15,
+    )
+    if completed.returncode != 0:
+        raise ReleaseManagerError(
+            "PMV3 engineering worker state cannot be verified before production mutation"
+        )
+    state = completed.stdout.strip()
+    if state in {"active", "activating", "reloading", "deactivating"}:
+        raise ReleaseManagerBusy(
+            "PMV3 engineering worker is active; production promotion deferred before mutation"
+        )
+    if state not in {"inactive", "failed"}:
+        raise ReleaseManagerError(
+            "PMV3 engineering worker returned unsupported ActiveState: " + state[:80]
+        )
+
+
 def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
     # Freeze evaluation is serialized under the same production transaction
     # lock. This permits one exact signed recovery exception without creating a
@@ -5241,6 +5270,11 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
     lock = acquire_production_transaction_lock(repo, state_root, record)
     opened_freeze: dict[str, Any] | None = None
     try:
+        # The PMV3 worker can legitimately run for hours. Never enter the
+        # production mutation path and later wait only 180 seconds for it.
+        # Holding the production lock first prevents a new PMV3 pass from
+        # starting; the active-state check handles work that began earlier.
+        require_pmv3_engineering_quiescent()
         restore_stranded_one_transaction_freeze_under_lock(state_root)
         require_current_manual_scope_review(repo, state_root, record)
         require_current_protected_release_source(repo, record)
@@ -5376,6 +5410,9 @@ def prepare_release(
         ):
             recovery_reissue_context = governed_open_breaker_recovery_context(
                 repo, state_root, original, require_owner_approval=False,
+                allowed_record_states=frozenset({
+                    "failed", "rolled_back", "production_eligible",
+                }),
             )
     fresh_recovery_context = None
     if not reissue_rolled_back:
@@ -5689,6 +5726,78 @@ def _drift_problem_identities(drift: Mapping[str, Any]) -> tuple[tuple[str, str]
     return tuple(sorted(result))
 
 
+INSTALLED_ROOT_HOST_RECONCILER = Path("/usr/local/lib/jason/release_host_reconcile_worker.py")
+
+
+def installed_root_reconciler_supports_open_breaker_forward_recovery() -> bool:
+    """Fail closed unless the live root worker can authorize an exact forward recovery.
+
+    This is only a pre-mutation compatibility check. It grants no authority; the
+    root worker still independently verifies exact release/Owner/root-policy
+    evidence. A closed breaker does not need this special forward path.
+    """
+    try:
+        info = INSTALLED_ROOT_HOST_RECONCILER.lstat()
+        if (INSTALLED_ROOT_HOST_RECONCILER.is_symlink()
+                or not stat.S_ISREG(info.st_mode)
+                or info.st_uid != 0
+                or info.st_mode & 0o022
+                or info.st_size > 1048576):
+            return False
+        text = INSTALLED_ROOT_HOST_RECONCILER.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+    required = (
+        "def _forward_recovery_release_authorized(",
+        "PREVIOUS_MIGRATION_FORWARD_DESCENDANT_VERIFIED",
+        "authenticated_mobile_teams_owner:relapproval-",
+        "provider_identity_and_authority_recovery",
+    )
+    return all(marker in text for marker in required)
+
+
+def legacy_root_reconciler_stage_a_candidate(repo: Path, record: Mapping[str, Any]) -> bool:
+    """Permit legacy-root bootstrap only when candidate desired state equals LKG exactly.
+
+    This does not grant release authority. It only recognizes the documented Stage A
+    sequencing case where the old installed root worker has no desired-state change
+    to interpret before it can install the reviewed successor. Every other recovery
+    gate, exact-main binding, Owner approval, CCC, preproduction and closeout check
+    remains mandatory.
+    """
+    try:
+        candidate = exact_sha(
+            str((record.get("release_candidate") or {}).get("candidate_sha") or ""),
+            "candidate_sha",
+        )
+        rollback = exact_sha(str(record.get("rollback_sha") or ""), "rollback_sha")
+        if candidate == rollback:
+            return False
+        blobs = []
+        for revision in (candidate, rollback):
+            blob = subprocess.check_output(
+                [
+                    "git", "-C", str(repo), "show",
+                    revision + ":config/production-desired-state.json",
+                ],
+                stderr=subprocess.DEVNULL,
+                timeout=15,
+            )
+            if not blob or len(blob) > 131072:
+                return False
+            blobs.append(blob)
+        return blobs[0] == blobs[1]
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        ReleaseManagerError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ):
+        return False
+
+
 def governed_open_breaker_recovery_context(
     repo: Path, state_root: Path, record: dict[str, Any], *,
     require_owner_approval: bool,
@@ -5741,6 +5850,15 @@ def governed_open_breaker_recovery_context(
         )
     )
     if not (ordinary_open_breaker or clean_provider_breaker):
+        return None
+    # An open-breaker forward release reaches the root host reconciler before
+    # candidate host source can install a newer root worker. Refuse the release
+    # before runtime/MCP mutation if the installed root boundary cannot verify
+    # that exact forward-recovery contract. Once the breaker is independently
+    # closed, the ordinary descendant path remains unchanged.
+    if (breaker.get("state") == "open"
+            and not installed_root_reconciler_supports_open_breaker_forward_recovery()
+            and not legacy_root_reconciler_stage_a_candidate(repo, record)):
         return None
     try:
         observed = datetime.fromisoformat(str(drift_doc.get("observed_at") or "").replace("Z", "+00:00"))

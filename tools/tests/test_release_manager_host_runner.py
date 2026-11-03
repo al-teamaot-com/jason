@@ -766,8 +766,9 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 runner,
                 "_deploy_production_locked",
                 side_effect=runner.ReleaseManagerError("forced failure"),
-            ), patch.object(runner, 'require_current_manual_scope_review'), \
-         patch.object(runner, 'require_current_protected_release_source'), \
+            ), patch.object(runner, 'require_pmv3_engineering_quiescent'), \
+               patch.object(runner, 'require_current_manual_scope_review'), \
+               patch.object(runner, 'require_current_protected_release_source'), \
                patch.object(runner, 'require_host_reconciler_ready'), \
                patch.object(runner, 'reconcile_stopped_rollback_retention', return_value=16):
                 with self.assertRaisesRegex(runner.ReleaseManagerError, "forced failure"):
@@ -1045,6 +1046,7 @@ class ReleaseManagerHostRunnerTests(unittest.TestCase):
                 return "sha256:runtime" if value == "jason-runtime:test" else "sha256:mcp"
             with (
                 patch.object(runner, "image_id", side_effect=image),
+                patch.object(runner, "require_pmv3_engineering_quiescent"),
                 patch.object(runner, "require_current_manual_scope_review"),
                 patch.object(runner, "require_current_protected_release_source"),
                 patch.object(runner, "require_host_reconciler_ready"),
@@ -2163,7 +2165,7 @@ class GovernedReleaseReissueTests(unittest.TestCase):
             declaration_sha = "sha256:" + "d" * 64
             original = {
                 "release_id": base,
-                "state": "production_eligible",
+                "state": "failed",
                 "rollback_sha": SHA_B,
                 "manual_scope_review": {"scope_sha256": scope_sha},
                 "one_transaction_freeze_exception": {
@@ -2198,9 +2200,17 @@ class GovernedReleaseReissueTests(unittest.TestCase):
             def create(**kw):
                 return {"release_id": kw["release_id_override"], "state": "release_candidate"}
 
+            def recovery_context(*args, **kwargs):
+                self.assertEqual(args[2]["state"], "failed")
+                self.assertEqual(
+                    kwargs.get("allowed_record_states"),
+                    frozenset({"failed", "rolled_back", "production_eligible"}),
+                )
+                return {"rollback_sha": SHA_B, "profile_id": "provider_identity_and_authority_recovery"}
+
             with patch.object(
                     runner, "governed_open_breaker_recovery_context",
-                    return_value={"rollback_sha": SHA_B, "profile_id": "provider_identity_and_authority_recovery"},
+                    side_effect=recovery_context,
                  ), \
                  patch.object(
                     runner, "revalidate_circuit_breaker",
@@ -2355,6 +2365,7 @@ def test_explicit_promotion_reserves_retention_before_breaker_and_deploy():
     calls = []
     handle = object()
     with patch.object(runner, 'acquire_production_transaction_lock', return_value=handle), \
+         patch.object(runner, 'require_pmv3_engineering_quiescent'), \
          patch.object(runner, 'require_current_manual_scope_review'), \
          patch.object(runner, 'require_current_protected_release_source'), \
          patch.object(runner, 'require_host_reconciler_ready'), \
@@ -2372,6 +2383,7 @@ def test_explicit_promotion_missing_root_reconciler_denies_cleanup():
     unlocked = []
     with patch.object(runner, 'acquire_production_transaction_lock', return_value=object()), \
          patch.object(runner, 'release_production_transaction_lock', side_effect=lambda h: unlocked.append(True)), \
+         patch.object(runner, 'require_pmv3_engineering_quiescent'), \
          patch.object(runner, 'require_current_manual_scope_review'), \
          patch.object(runner, 'require_current_protected_release_source'), \
          patch.object(runner, 'require_host_reconciler_ready', side_effect=runner.ReleaseManagerError('root reconciler not ready')), \
@@ -2391,6 +2403,7 @@ def test_explicit_promotion_retention_failure_blocks_mutation():
     import pytest
     calls = []
     with patch.object(runner, 'acquire_production_transaction_lock', return_value=object()), \
+         patch.object(runner, 'require_pmv3_engineering_quiescent'), \
          patch.object(runner, 'require_current_manual_scope_review'), \
          patch.object(runner, 'require_current_protected_release_source'), \
          patch.object(runner, 'require_host_reconciler_ready'), \
@@ -5449,3 +5462,118 @@ def test_live_provider_recovery_profile_binds_current_reliability_repair():
         "tools/openbao_identity_lifecycle_worker.py",
         "tools/install_openbao_identity_lifecycle.py",
     } & required
+
+
+def test_open_breaker_recovery_preflight_requires_live_root_forward_contract():
+    control = {
+        'circuit_breaker': {
+            'state': 'open',
+            'source': 'production_drift_watchdog',
+            'reason': 'continuous_production_drift_detected',
+        }
+    }
+    drift = {'schema_version': '1.0', 'status': 'drift_detected'}
+    with patch.object(
+        runner,
+        'installed_root_reconciler_supports_open_breaker_forward_recovery',
+        return_value=False,
+    ):
+        assert runner.governed_open_breaker_recovery_context(
+            Path('/unused'), Path('/unused'), {},
+            require_owner_approval=False, control=control, drift=drift,
+        ) is None
+
+
+def test_live_root_forward_contract_detector_requires_all_reviewed_markers():
+    class FakePath:
+        def __init__(self, text):
+            self.text = text
+        def lstat(self):
+            class Info:
+                st_mode = 0o100755
+                st_uid = 0
+                st_size = 4096
+            return Info()
+        def is_symlink(self):
+            return False
+        def read_text(self, encoding='utf-8'):
+            return self.text
+    complete = '\n'.join((
+        'def _forward_recovery_release_authorized(',
+        'PREVIOUS_MIGRATION_FORWARD_DESCENDANT_VERIFIED',
+        'authenticated_mobile_teams_owner:relapproval-',
+        'provider_identity_and_authority_recovery',
+    ))
+    with patch.object(runner, 'INSTALLED_ROOT_HOST_RECONCILER', FakePath(complete)):
+        assert runner.installed_root_reconciler_supports_open_breaker_forward_recovery() is True
+    with patch.object(runner, 'INSTALLED_ROOT_HOST_RECONCILER', FakePath(complete.replace('PREVIOUS_MIGRATION_FORWARD_DESCENDANT_VERIFIED', ''))):
+        assert runner.installed_root_reconciler_supports_open_breaker_forward_recovery() is False
+
+def test_legacy_root_stage_a_requires_exact_desired_state_blob_identity():
+    record = {
+        'release_candidate': {'candidate_sha': SHA_A},
+        'rollback_sha': SHA_B,
+    }
+    identical = b'{"schema_version":"1.0","required_system_units":[]}\n'
+    with patch.object(runner.subprocess, 'check_output', side_effect=[identical, identical]) as checked:
+        assert runner.legacy_root_reconciler_stage_a_candidate(Path('/repo'), record) is True
+    assert checked.call_count == 2
+
+    with patch.object(
+        runner.subprocess,
+        'check_output',
+        side_effect=[identical, identical + b' '],
+    ):
+        assert runner.legacy_root_reconciler_stage_a_candidate(Path('/repo'), record) is False
+
+
+def test_legacy_root_stage_a_fails_closed_on_missing_or_invalid_source():
+    record = {
+        'release_candidate': {'candidate_sha': SHA_A},
+        'rollback_sha': SHA_B,
+    }
+    with patch.object(runner.subprocess, 'check_output', side_effect=runner.subprocess.CalledProcessError(1, ['git'])):
+        assert runner.legacy_root_reconciler_stage_a_candidate(Path('/repo'), record) is False
+    assert runner.legacy_root_reconciler_stage_a_candidate(Path('/repo'), {}) is False
+
+
+def test_deploy_defers_before_any_mutation_when_pmv3_worker_active(tmp_path):
+    import pytest
+    record = {
+        "release_id": "release-" + SHA_A[:16],
+        "state": "production_eligible",
+        "release_candidate": {"candidate_sha": SHA_A},
+    }
+    lock = object()
+    with (
+        patch.object(runner, "acquire_production_transaction_lock", return_value=lock),
+        patch.object(runner, "release_production_transaction_lock") as release_lock,
+        patch.object(
+            runner, "require_pmv3_engineering_quiescent",
+            side_effect=runner.ReleaseManagerBusy("PMV3 engineering worker is active"),
+        ),
+        patch.object(runner, "restore_stranded_one_transaction_freeze_under_lock") as restore,
+        patch.object(runner, "reconcile_stopped_rollback_retention") as retention,
+        patch.object(runner, "_deploy_production_locked") as deploy,
+    ):
+        with pytest.raises(runner.ReleaseManagerBusy, match="PMV3 engineering worker"):
+            runner.deploy_production(ROOT, tmp_path, record)
+    restore.assert_not_called()
+    retention.assert_not_called()
+    deploy.assert_not_called()
+    release_lock.assert_called_once_with(lock)
+
+
+def test_pmv3_quiescence_accepts_inactive_and_rejects_activating():
+    import pytest
+    with patch.object(
+        runner.subprocess, "run",
+        return_value=subprocess.CompletedProcess([], 0, stdout="inactive\n"),
+    ):
+        runner.require_pmv3_engineering_quiescent()
+    with patch.object(
+        runner.subprocess, "run",
+        return_value=subprocess.CompletedProcess([], 0, stdout="activating\n"),
+    ):
+        with pytest.raises(runner.ReleaseManagerBusy, match="deferred before mutation"):
+            runner.require_pmv3_engineering_quiescent()
