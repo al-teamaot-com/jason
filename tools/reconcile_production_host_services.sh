@@ -613,6 +613,7 @@ for worker in \
   todo_release_bridge.py \
   operational_acceptance_reader.py \
   release_manager_gate.py \
+  pmv3_worker_release_gate.py \
   change_integration_gate.py \
   documentation_impact_gate.py; do
   cmp -s "$ENGINEERING_SOURCE_REPO/tools/$worker" "/home/al/.local/lib/jason/$worker" || {

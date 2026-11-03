@@ -78,6 +78,8 @@ class InstallSupportRepairHostWorkerTests(unittest.TestCase):
         self.assertIn("_copy(pmv3_controller, install_root", installer)
         self.assertIn("_copy(supervisor_runner, install_root", installer)
         self.assertIn("_copy(breaker_recovery_runner, install_root", installer)
+        self.assertIn("_copy(worker_release_gate, install_root", installer)
+        self.assertIn("pmv3_worker_release_gate.py", service)
         self.assertIn("_copy(evidence_module, install_root", installer)
         self.assertIn("_copy(change_integration_gate, install_root", installer)
         self.assertIn("_copy(documentation_impact_gate, install_root", installer)

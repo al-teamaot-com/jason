@@ -625,3 +625,185 @@ def test_current_lkg_recovery_time_budget_is_bounded_below_root_worker_ceiling()
     assert worker._host_reconcile_timeout(worker.CURRENT_LKG_RECOVERY_SHA) == 500
     assert worker.CURRENT_LKG_HEALTH_RECOVERY_TIMEOUT_SECONDS + 500 < 4500
     assert worker._host_reconcile_timeout(worker.LEGACY_LKG_SHA) == 410
+
+
+def test_current_lkg_rollback_during_signed_inflight_release_is_exact_and_bounded(
+    tmp_path, monkeypatch
+):
+    """A signed release may restore its protected LKG BEFORE the breaker opens.
+
+    The root reconciler must reject arbitrary source, missing lock, missing
+    one-time freeze backup, absent approval, and stale/failed release records.
+    """
+    import fcntl
+    import importlib.util
+    import json
+    import sqlite3
+    import hashlib
+    import os
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    src = ROOT / 'tools' / 'release_host_reconcile_worker.py'
+    spec = importlib.util.spec_from_file_location('jason_exact_inflight_rollback_test', src)
+    w = importlib.util.module_from_spec(spec)
+    assert spec is not None and spec.loader is not None
+    spec.loader.exec_module(w)
+    old = w.CURRENT_LKG_RECOVERY_SHA
+    candidate = 'a' * 40
+    approval_id = 'relapproval-' + '9' * 32
+    state = tmp_path / 'state'
+    (state / 'records').mkdir(parents=True)
+    lock = state / 'production-transaction.lock'
+    lock.touch(mode=0o600)
+    backup = state / 'production-deployment-freeze.pmv3-one-release-backup'
+    backup.write_text('preserved frozen owner marker\n')
+    backup.chmod(0o600)
+    release = state / 'records' / ('release-' + candidate[:16] + '.json')
+    manifest = {
+        'candidate_sha': candidate,
+        'rollback_sha': old,
+        'one_transaction_freeze_exception': {
+            'rollback_sha': old,
+            'required_recovery_profile_id': 'provider_identity_and_authority_recovery',
+            'standing_authority': False,
+            'signed_teams_release_approval_required': True,
+            'restore_freeze_after_transaction': True,
+        },
+    }
+    record = {
+        'state': 'production',
+        'risk_profile': 'production_control_core',
+        'release_candidate': {'candidate_sha': candidate},
+        'rollback_sha': old,
+        'release_manifest': manifest,
+        'one_transaction_freeze_exception': manifest['one_transaction_freeze_exception'],
+        'owner_approval': {
+            'approved': True, 'candidate_sha': candidate,
+            'source': 'authenticated_mobile_teams_owner:' + approval_id,
+        },
+        'last_known_good_manifest': {'revision': old, 'complete': True},
+        'pre_mutation_health': {'revision': old, 'passed': True},
+    }
+    release.write_text(json.dumps(record))
+    release.chmod(0o600)
+    digest = hashlib.sha256(json.dumps(
+        manifest, sort_keys=True, separators=(',', ':'), ensure_ascii=False
+    ).encode()).hexdigest()
+    approval_db = tmp_path / 'mobile-release-approvals.sqlite3'
+    con = sqlite3.connect(approval_db)
+    con.execute('CREATE TABLE approval_requests (approval_id TEXT, payload TEXT)')
+    approved_receipt = {'status': 'approved', 'metadata': {
+        'candidate_sha': candidate, 'rollback_sha': old,
+        'release_id': 'release-' + candidate[:16], 'manifest_sha256': digest
+    }}
+    con.execute('INSERT INTO approval_requests VALUES (?, ?)',
+                (approval_id, json.dumps(approved_receipt)))
+    con.commit()
+    con.close()
+    approval_db.chmod(0o600)
+    ccc = tmp_path / 'ccc'
+    ccc.mkdir()
+    review = ccc / ('material-review-' + candidate[:16] + '.json')
+    review.write_text(json.dumps({
+        'status':'approved', 'source_revision':candidate,
+        'mobile_approval_id':approval_id, 'release_manifest_sha256':digest,
+    }))
+    review.chmod(0o600)
+    monkeypatch.setattr(w, 'MOBILE_APPROVAL_LEDGER', approval_db)
+    monkeypatch.setattr(w, 'CCC_MATERIAL_REVIEW_ROOT', ccc)
+    hosts = tmp_path / 'hosts'
+    hosts.mkdir()
+    (hosts / candidate).mkdir()
+    live = tmp_path / 'current'
+    live.symlink_to(hosts / candidate)
+    monkeypatch.setattr(w, 'CURRENT', live)
+    monkeypatch.setattr(w, 'RELEASE_STATE', state)
+    monkeypatch.setattr(w, '_host_operator_uid', lambda: os.getuid())
+    monkeypatch.setattr(w.subprocess, 'check_output', lambda *args, **kwargs: candidate)
+    lkg = {'revision': old, 'complete': True}
+    breaker = {'state': 'closed'}
+    # Without a held transaction, an approved record is insufficient.
+    assert not w._exact_signed_inflight_lkg_rollback_authorized(old, lkg, breaker)
+    with lock.open('rb') as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            assert w._exact_signed_inflight_lkg_rollback_authorized(old, lkg, breaker)
+            assert not w._exact_signed_inflight_lkg_rollback_authorized('b' * 40, lkg, breaker)
+            assert not w._exact_signed_inflight_lkg_rollback_authorized(old, lkg, {'state':'open'})
+            assert not w._exact_signed_inflight_lkg_rollback_authorized(old, {'revision':old,'complete':False}, breaker)
+            for field, value in [('state', 'failed'), ('risk_profile','normal')]:
+                altered = dict(record);altered[field] = value
+                release.write_text(json.dumps(altered))
+                assert not w._exact_signed_inflight_lkg_rollback_authorized(old, lkg, breaker)
+            altered = dict(record)
+            altered['owner_approval'] = dict(record['owner_approval'], approved=False)
+            release.write_text(json.dumps(altered))
+            assert not w._exact_signed_inflight_lkg_rollback_authorized(old,lkg,breaker)
+            release.write_text(json.dumps(record))
+            # Receipt or CCC drift cannot be explained away by a mutable
+            # release record: both are required to match the exact manifest.
+            review.write_text(json.dumps({
+                'status':'approved', 'source_revision':candidate,
+                'mobile_approval_id':approval_id,
+                'release_manifest_sha256':'0' * 64,
+            }))
+            assert not w._exact_signed_inflight_lkg_rollback_authorized(old,lkg,breaker)
+            review.write_text(json.dumps({
+                'status':'approved', 'source_revision':candidate,
+                'mobile_approval_id':approval_id,
+                'release_manifest_sha256':digest,
+            }))
+            con = sqlite3.connect(approval_db)
+            con.execute('UPDATE approval_requests SET payload=? WHERE approval_id=?',
+                        (json.dumps(dict(approved_receipt, status='denied')), approval_id))
+            con.commit()
+            con.close()
+            assert not w._exact_signed_inflight_lkg_rollback_authorized(old,lkg,breaker)
+            con = sqlite3.connect(approval_db)
+            con.execute('UPDATE approval_requests SET payload=? WHERE approval_id=?',
+                        (json.dumps(approved_receipt), approval_id))
+            con.commit()
+            con.close()
+            backup.unlink()
+            assert not w._exact_signed_inflight_lkg_rollback_authorized(old,lkg,breaker)
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def test_current_lkg_root_recovery_retains_open_breaker_path_without_transaction(
+    tmp_path, monkeypatch
+):
+    import importlib.util
+    import json
+    from types import SimpleNamespace
+    source = ROOT / 'tools' / 'release_host_reconcile_worker.py'
+    spec = importlib.util.spec_from_file_location('jason_rollback_open_breaker_test', source)
+    w = importlib.util.module_from_spec(spec)
+    assert spec is not None and spec.loader is not None
+    spec.loader.exec_module(w)
+    root = tmp_path / 'root'
+    root.mkdir()
+    control = root / 'production-control-state.json'
+    sha = w.CURRENT_LKG_RECOVERY_SHA
+    control.write_text(json.dumps({
+        'last_known_good': {'manifest': {'revision':sha, 'complete':True}},
+        'circuit_breaker': {'state':'open'}
+    }))
+    helper = SimpleNamespace(ROOT=root, _root_only=lambda p: p, _json=lambda p: json.loads(p.read_text()))
+    monkeypatch.setattr(w, '_trusted_root_policy_helper',lambda: helper)
+    assert w._current_lkg_recovery_authorized(sha)
+    assert not w._current_lkg_recovery_authorized('c'*40)
+    control.write_text(json.dumps({
+        'last_known_good': {'manifest': {'revision': 'd'*40, 'complete':True}},
+        'circuit_breaker': {'state':'open'}
+    }))
+    assert not w._current_lkg_recovery_authorized(sha)
+
+
+def test_host_reconciler_requires_installed_worker_gate_alignment():
+    shell = (ROOT / 'tools/reconcile_production_host_services.sh').read_text()
+    assert '  pmv3_worker_release_gate.py \
+' in shell
+    assert 'installed worker differs from production source' in shell
+    assert shell.index('step_start protected_root_policy_stage') < shell.index('step_start user_worker_reconciliation')
