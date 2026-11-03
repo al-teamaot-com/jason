@@ -2163,7 +2163,7 @@ class GovernedReleaseReissueTests(unittest.TestCase):
             declaration_sha = "sha256:" + "d" * 64
             original = {
                 "release_id": base,
-                "state": "production_eligible",
+                "state": "failed",
                 "rollback_sha": SHA_B,
                 "manual_scope_review": {"scope_sha256": scope_sha},
                 "one_transaction_freeze_exception": {
@@ -2198,9 +2198,17 @@ class GovernedReleaseReissueTests(unittest.TestCase):
             def create(**kw):
                 return {"release_id": kw["release_id_override"], "state": "release_candidate"}
 
+            def recovery_context(*args, **kwargs):
+                self.assertEqual(args[2]["state"], "failed")
+                self.assertEqual(
+                    kwargs.get("allowed_record_states"),
+                    frozenset({"failed", "rolled_back", "production_eligible"}),
+                )
+                return {"rollback_sha": SHA_B, "profile_id": "provider_identity_and_authority_recovery"}
+
             with patch.object(
                     runner, "governed_open_breaker_recovery_context",
-                    return_value={"rollback_sha": SHA_B, "profile_id": "provider_identity_and_authority_recovery"},
+                    side_effect=recovery_context,
                  ), \
                  patch.object(
                     runner, "revalidate_circuit_breaker",
