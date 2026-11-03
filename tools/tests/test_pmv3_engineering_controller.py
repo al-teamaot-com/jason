@@ -1,4 +1,5 @@
 import importlib.util
+import fcntl
 import json
 import subprocess
 import sys
@@ -130,3 +131,47 @@ def test_controller_cannot_create_or_import_approval():
     assert "decision=" not in lowered
     assert "channel=" not in lowered
     assert "teams_only_approval" in source
+
+
+def test_production_transaction_defers_pmv3_before_pipeline(tmp_path):
+    spool = tmp_path / "spool"
+    release_state = tmp_path / "release"
+    release_state.mkdir()
+    lock_path = release_state / "production-transaction.lock"
+    lock_path.write_text("{}\n", encoding="utf-8")
+    handle = lock_path.open("r+", encoding="utf-8")
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    try:
+        def must_not_run(*args, **kwargs):
+            raise AssertionError("pipeline must not run during production transaction")
+        state = module.controller_run(
+            scripts=tmp_path, repo=tmp_path, spool=spool,
+            release_state=release_state, runner=must_not_run, max_passes=3,
+        )
+    finally:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
+    assert state["status"] == "deferred"
+    assert state["reason"] == "production_transaction_active"
+    assert state["pass_count"] == 0
+    assert module.service_exit_code(state) == 0
+
+
+def test_free_production_lock_allows_pmv3_pipeline(tmp_path):
+    spool = tmp_path / "spool"
+    release_state = tmp_path / "release"
+    release_state.mkdir()
+    (release_state / "production-transaction.lock").write_text("\n", encoding="utf-8")
+    runner, calls = runner_for(spool, [{
+        "pipeline": {"status": "healthy", "failed_work_stages": [], "failed_control_stages": []},
+        "supervisor": {
+            "status": "healthy", "reason": None, "category_counts": {},
+            "disposition_sha256": "ok", "approved_outstanding": 0, "active": 0,
+        },
+    }])
+    state = module.controller_run(
+        scripts=tmp_path, repo=tmp_path, spool=spool,
+        release_state=release_state, runner=runner, max_passes=2,
+    )
+    assert state["status"] == "complete"
+    assert calls["n"] == 1
