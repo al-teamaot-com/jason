@@ -5258,6 +5258,48 @@ def test_recovery_ccc_preflight_allows_only_exact_provider_identity_signature():
     assert evidence['recovery_preflight_exception'] is True
 
 
+# Regression: provider recovery may narrow to authority-only failures before deployment.
+def test_recovery_ccc_preflight_allows_healed_provider_with_known_authority_failures():
+    report = _provider_identity_recovery_ccc_report()
+    canary = next(
+        x for x in report['checks']
+        if x['check_id'] == 'governed-provider-boundary-canaries'
+    )
+    canary['status'] = 'PASS'
+    canary['evidence'] = {
+        'expected_canary_count': 8,
+        'failures': [],
+        'results': [{'name': 'autotask', 'status': 'denied'}],
+    }
+    evidence = runner.verify_release_ccc_report(
+        report, candidate_sha=SHA_A, runtime_sha=SHA_B,
+        before_mutation=True,
+        recovery_context=_provider_identity_recovery_context(),
+    )
+    assert evidence['status'] == 'FAIL'
+    assert evidence['mode'] == 'approved_provider_identity_recovery_preflight'
+    assert evidence['recovery_preflight_exception'] is True
+
+
+def test_recovery_ccc_preflight_healed_provider_still_rejects_unrelated_unit():
+    import pytest
+    report = _provider_identity_recovery_ccc_report()
+    canary = next(
+        x for x in report['checks']
+        if x['check_id'] == 'governed-provider-boundary-canaries'
+    )
+    canary['status'] = 'PASS'
+    canary['evidence'] = {'expected_canary_count': 8, 'failures': [], 'results': []}
+    systemd = next(x for x in report['checks'] if x['check_id'] == 'systemd-failed-units')
+    systemd['evidence']['failed_units'].append('jason-unrelated.service loaded failed failed')
+    with pytest.raises(runner.ReleaseManagerError, match='pre-mutation CCC denied'):
+        runner.verify_release_ccc_report(
+            report, candidate_sha=SHA_A, runtime_sha=SHA_B,
+            before_mutation=True,
+            recovery_context=_provider_identity_recovery_context(),
+        )
+
+
 def test_recovery_ccc_preflight_allows_healed_optional_authority_failures():
     report = _provider_identity_recovery_ccc_report()
     for row in report['checks']:
