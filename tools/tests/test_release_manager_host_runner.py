@@ -1,5 +1,4 @@
 import importlib.util
-import pytest
 import contextlib
 import subprocess
 import sys
@@ -34,11 +33,9 @@ SHA_B = "b" * 40
 REAL_WORKER_ADMISSION_GUARD = runner.temporary_worker_admission_gate
 
 
-@pytest.fixture(autouse=True)
-def isolate_release_worker_admission_side_effect(monkeypatch):
-    monkeypatch.setattr(
-        runner, 'temporary_worker_admission_gate', lambda: contextlib.nullcontext()
-    )
+# Legacy unittest CI imports this module without pytest installed. The
+# simulated release tests must not contact the live user-systemd bus.
+runner.temporary_worker_admission_gate = lambda: contextlib.nullcontext()
 
 
 def test_native_worker_admission_guard_installs_and_removes_runtime_only_dropin(
@@ -73,6 +70,7 @@ def test_native_worker_admission_guard_installs_and_removes_runtime_only_dropin(
 
 
 def test_native_worker_admission_guard_restores_on_deploy_exception(tmp_path, monkeypatch):
+    import pytest
     from types import SimpleNamespace
     runtime = tmp_path / 'run'
     (runtime / 'systemd' / 'user').mkdir(parents=True)
