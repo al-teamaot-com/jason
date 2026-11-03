@@ -15,6 +15,10 @@
         {
           "kind": "failed_system_unit",
           "unit": "jason-openclaw-authority-health.service"
+        },
+        {
+          "kind": "failed_system_unit",
+          "unit": "jason-ccc.service"
         }
       ],
       "required_changed_files": [

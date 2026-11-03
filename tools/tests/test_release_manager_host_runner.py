@@ -5338,3 +5338,18 @@ def test_eligible_release_record_prefers_latest_valid_retry(tmp_path):
     rid, record = runner._eligible_release_record_for_sha(root, sha)
     assert rid == base + '-retry-2'
     assert record['state'] == 'production_eligible'
+
+
+def test_authority_integrity_recovery_profile_explicitly_allows_known_ccc_failure():
+    import json
+    policy = json.loads((ROOT / "config" / "open-breaker-recovery-policy.json").read_text())
+    profile = next(item for item in policy["profiles"] if item["id"] == "authority_integrity_timeout")
+    assert profile["max_changed_files"] == 18
+    assert {"kind": "failed_system_unit", "unit": "jason-ccc.service"} in profile["drift_problems"]
+    assert {"kind": "failed_system_unit", "unit": "jason-openclaw-authority-full-integrity.service"} in profile["drift_problems"]
+    assert {"kind": "failed_system_unit", "unit": "jason-openclaw-authority-health.service"} in profile["drift_problems"]
+    assert set(profile["required_changed_files"]) == {
+        "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-full-integrity.service",
+        "tools/openclaw_authority_health_snapshot.py",
+        "tools/openclaw_authority_operational_health.py",
+    }
