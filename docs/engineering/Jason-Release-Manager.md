@@ -51,7 +51,7 @@ Before a release is admitted:
 1. resolve exact candidate SHA;
 2. resolve exact current healthy production SHA as rollback SHA;
 3. verify candidate is reachable from protected `origin/main`;
-   At **promotion time**, the exact candidate SHA must additionally equal the latest independently fetched protected `main` HEAD and descend from the live verified rollback baseline. This applies to manual and automatic releases. A previously approved/pre-production-verified candidate that has been superseded is rejected **before production mutation** and must be reprepared and reapproved from current protected source. No active development checkout or unmerged worktree is rewritten to satisfy this gate.
+   At **promotion time**, automatic selection requires the candidate to equal independently fetched protected `main` HEAD. An explicit manually invoked `promote` may use an older SHA-pinned, preproduction-verified candidate only if it is a protected-main ancestor, descends from the independently verified live rollback baseline, and every newer protected commit is checked for candidate-file and production-control overlap. Any overlap, missing Git evidence, invalid policy, or changed release-control file blocks promotion. The pinned candidate still requires its unchanged exact-SHA approval, scope receipt, artifact integrity, full pre-mutation verification, and rollback readiness. No active development checkout or unmerged worktree is rewritten to satisfy this gate.
 4. verify required protected GitHub checks;
 5. record changed files;
 6. classify protected-core impact;

@@ -37,6 +37,31 @@ def test_stale_prepared_candidate_rejected_even_if_owner_approved(monkeypatch, t
     ancestry.assert_not_called()
 
 
+def test_pinned_manual_candidate_requires_independent_conflict_verification(monkeypatch, tmp_path):
+    monkeypatch.setattr(runner, "authoritative_auto_promotion_head", lambda repo: SHA_B)
+    checked = []
+    import manual_release_scope
+    monkeypatch.setattr(manual_release_scope, "verify_pinned_candidate_against_main",
+                        lambda repo, baseline, candidate, current_main: checked.append(
+                            (baseline, candidate, current_main)))
+    monkeypatch.setattr(runner.subprocess, "run",
+                        lambda *args, **kw: subprocess.CompletedProcess(args, 0))
+    runner.require_current_protected_release_source(
+        tmp_path, record(), allow_pinned_manual=True)
+    assert checked == [(SHA_B, SHA_A, SHA_B)]
+
+
+def test_pinned_manual_conflict_fails_closed(monkeypatch, tmp_path):
+    monkeypatch.setattr(runner, "authoritative_auto_promotion_head", lambda repo: SHA_B)
+    import manual_release_scope
+    def blocked(*args, **kwargs):
+        raise manual_release_scope.ScopeBlocked("newer protected control changed")
+    monkeypatch.setattr(manual_release_scope, "verify_pinned_candidate_against_main", blocked)
+    with pytest.raises(runner.ReleaseManagerError, match="newer protected"):
+        runner.require_current_protected_release_source(
+            tmp_path, record(), allow_pinned_manual=True)
+
+
 def test_non_descendant_candidate_cannot_replace_current_production(monkeypatch, tmp_path):
     monkeypatch.setattr(runner, "authoritative_auto_promotion_head", lambda repo: SHA_A)
     monkeypatch.setattr(runner.subprocess, "run", lambda *a, **kw: subprocess.CompletedProcess([], 1))
