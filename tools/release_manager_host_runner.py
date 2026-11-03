@@ -5376,6 +5376,9 @@ def prepare_release(
         ):
             recovery_reissue_context = governed_open_breaker_recovery_context(
                 repo, state_root, original, require_owner_approval=False,
+                allowed_record_states=frozenset({
+                    "failed", "rolled_back", "production_eligible",
+                }),
             )
     fresh_recovery_context = None
     if not reissue_rolled_back:
