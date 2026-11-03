@@ -106,6 +106,21 @@ class HostIntegrationReconcilerTests(unittest.TestCase):
             host.native_update_branch = original_update
             host.merge_pr = original_merge
 
+
+    def test_merge_uses_protected_auto_merge_not_admin_bypass(self):
+        calls = []
+        original_run = host.run
+        try:
+            host.run = lambda *args, **kwargs: calls.append(args) or ""
+            host.merge_pr(2177)
+            self.assertEqual(
+                calls,
+                [("gh", "pr", "merge", "2177", "--repo", host.REPO, "--merge", "--auto")],
+            )
+            self.assertNotIn("--admin", calls[0])
+        finally:
+            host.run = original_run
+
     def test_green_current_pr_merges(self):
         calls = []
         original_read = host.read_pr
