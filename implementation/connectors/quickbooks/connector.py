@@ -34,7 +34,6 @@ QUICKBOOKS_INVOICE_SEARCH = "quickbooks.invoice.search"
 QUICKBOOKS_BILL_SEARCH = "quickbooks.bill.search"
 QUICKBOOKS_PROFIT_LOSS_READ = "quickbooks.report.profit_loss.read"
 QUICKBOOKS_BALANCE_SHEET_READ = "quickbooks.report.balance_sheet.read"
-QUICKBOOKS_GENERAL_LEDGER_READ = "quickbooks.report.general_ledger.read"
 
 _CAPABILITY_OPERATIONS = {
     QUICKBOOKS_COMPANY_READ: ("company", None),
@@ -45,7 +44,6 @@ _CAPABILITY_OPERATIONS = {
     QUICKBOOKS_BILL_SEARCH: ("query", "Bill"),
     QUICKBOOKS_PROFIT_LOSS_READ: ("report", "ProfitAndLoss"),
     QUICKBOOKS_BALANCE_SHEET_READ: ("report", "BalanceSheet"),
-    QUICKBOOKS_GENERAL_LEDGER_READ: ("report", "GeneralLedger"),
 }
 
 _QUERY_ARGUMENTS = frozenset({"start_position", "max_results"})

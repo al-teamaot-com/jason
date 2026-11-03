@@ -97,43 +97,6 @@ def test_reviewed_exact_four_declarations_and_original_root_extras_preserved(mon
     assert receipt.exists() and json.loads(receipt.read_text())["phase"] == "restored"
 
 
-def test_openbao_identity_lifecycle_exact_pair_stages_then_applies(monkeypatch, tmp_path):
-    previous = source()
-    candidate = source()
-    for field, units in m.APPROVED_OPENBAO_IDENTITY_LIFECYCLE_DELTA.items():
-        candidate[field] += sorted(units)
-    policy, original, _ = configure(
-        monkeypatch, tmp_path, policy=previous, candidate=candidate, old=previous
-    )
-
-    assert m.preview_exact_migration(CANDIDATE, BASE) == "OWNER_CCC_REVIEWED_DELTA_ONLY"
-    assert policy.read_bytes() == original
-    assert m.stage_for_candidate(CANDIDATE, BASE) == "STAGED_ALLOWED_ONLY"
-
-    staged = json.loads(policy.read_text())
-    assert "jason-openbao-identity-lifecycle.timer" in staged["allowed_system_units"]
-    assert "jason-openbao-identity-lifecycle.timer" not in staged["required_system_units"]
-    assert "jason-openbao-identity-lifecycle.service" in staged["allowed_system_units"]
-
-    assert m.apply_for_candidate(CANDIDATE, BASE) == "APPLIED_REQUIRED_AFTER_HEALTH"
-    applied = json.loads(policy.read_text())
-    assert "jason-openbao-identity-lifecycle.timer" in applied["required_system_units"]
-    assert "jason-openbao-identity-lifecycle.service" in applied["allowed_system_units"]
-    assert m.restore_for_baseline(BASE) == "RESTORED"
-    assert policy.read_bytes() == original
-
-
-def test_openbao_identity_plan_cannot_be_combined_with_another_plan(monkeypatch, tmp_path):
-    candidate = source(new=True)
-    for field, units in m.APPROVED_OPENBAO_IDENTITY_LIFECYCLE_DELTA.items():
-        candidate[field] += sorted(units)
-    policy, original, _ = configure(monkeypatch, tmp_path, candidate=candidate)
-    with pytest.raises(m.MigrationRefused, match="unapproved desired-state unit delta"):
-        m.stage_for_candidate(CANDIDATE, BASE)
-    assert policy.read_bytes() == original
-    assert not m.ACTIVE.exists()
-
-
 def test_wrong_rollback_or_tampered_protected_policy_does_not_restore(monkeypatch, tmp_path):
     policy, before, _ = configure(monkeypatch, tmp_path)
     assert m.stage_for_candidate(CANDIDATE, BASE) == "STAGED_ALLOWED_ONLY"

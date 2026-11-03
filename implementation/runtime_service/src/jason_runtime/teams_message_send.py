@@ -5,7 +5,6 @@ from datetime import datetime
 from pathlib import Path
 from urllib.request import Request, urlopen
 from kernel.capabilities import CapabilityApproval, CapabilityDefinition, CapabilityEvidence, CapabilityLifecycle, CapabilityRisk, CapabilityStewardship, IdempotencyBehavior
-from kernel.identity_authority import AuthorityGrant, PermissionMode
 from kernel.execution_deadline import bounded_execution_timeout
 from kernel.execution_providers import ExecutionProvider, ProviderApproval, ProviderFeatures, ProviderHealth, ProviderLifecycle, ProviderLimits, ProviderStewardship, ProviderType
 from orchestrator.execution_plan import ExecutionPlan, PreparedExecutionPlan, normalize_provider_relative_path
@@ -14,41 +13,6 @@ from orchestrator.service import InvocationResult
 CAPABILITY="communication.teams.message.send"
 PROVIDER="microsoft_teams_gateway"
 PROFILE="owner-proactive-v1"
-PROFILE_ENV="JASON_TEAMS_MESSAGE_SEND_MCP_PROFILE"
-EXECUTE_GRANT_ID="grant-aot-human-teams-message-send-v1"
-
-
-def configured_teams_message_send() -> bool:
-    return os.getenv(PROFILE_ENV, "").strip().casefold() == PROFILE
-
-
-def ensure_authority(identity_authority, *, enabled: bool) -> bool:
-    """Persist exact AOT human authority whenever the Teams send profile is enabled.
-
-    This restores the proven governed outbound path after runtime/authority-store
-    rebuilds without granting provider bypass or production-deployment authority.
-    Each send remains bound to the exact capability and still requires the
-    capability's existing owner approval policy.
-    """
-    if not enabled:
-        return False
-    grant = AuthorityGrant(
-        grant_id=EXECUTE_GRANT_ID,
-        subject_id="organization:aot",
-        capability=CAPABILITY,
-        organization_id="aot",
-        client_id=None,
-        permission=PermissionMode.EXECUTE,
-        approval_required=True,
-        status="active",
-    )
-    existing = identity_authority.grants.get(grant.grant_id)
-    if existing is None:
-        identity_authority.grants.put(grant)
-        return True
-    if existing != grant:
-        raise RuntimeError("Teams message send grant conflicts with immutable policy")
-    return False
 
 @dataclass(frozen=True, slots=True)
 class _PreparedTeamsMessageSend:
@@ -217,7 +181,7 @@ def register_foundation(*,capabilities,providers,now:datetime):
     capabilities.register(cap)
     provider=ExecutionProvider(provider_id=PROVIDER,display_name="Jason Microsoft Teams Gateway",provider_type=ProviderType.EXTERNAL_CONNECTOR,lifecycle_status=ProviderLifecycle.PLANNED,health_status=ProviderHealth.UNKNOWN,approval_status=ProviderApproval.PILOT,execution_modes=frozenset({"deterministic"}),capabilities=frozenset({CAPABILITY}),supported_classifications=frozenset({"internal"}),regions=frozenset(),limits=ProviderLimits(maximum_concurrent_executions=1,maximum_requests_per_minute=30,maximum_execution_seconds=30),features=ProviderFeatures(structured_output=True),pricing_profile_id="zero-cost-foundation",stewardship=ProviderStewardship(technology_steward="technology-steward",business_justification="Use the existing direct Teams gateway for outbound Jason messages.",review_interval_days=30,last_reviewed_at=now,retirement_criteria=("Gateway tenant containment fails.",),vendor_change_sources=("Microsoft Agents SDK",),operational_owner="AOT IT Operations",approval_owner="AOT Owner"),created_at=now,metadata={"write_capability":"true"})
     providers.register(provider)
-    if configured_teams_message_send():
+    if os.getenv("JASON_TEAMS_MESSAGE_SEND_MCP_PROFILE","").strip().casefold()==PROFILE:
         capabilities.set_lifecycle(capability_name=CAPABILITY,version="1.0",lifecycle_status=CapabilityLifecycle.ACTIVE)
         providers.set_approval(provider_id=PROVIDER,approval_status=ProviderApproval.APPROVED); providers.set_health(provider_id=PROVIDER,health_status=ProviderHealth.HEALTHY); providers.set_lifecycle(provider_id=PROVIDER,lifecycle_status=ProviderLifecycle.AVAILABLE)
 

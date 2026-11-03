@@ -30,7 +30,7 @@ from jason_runtime.playbook_autonomy_review import TeamsGatewayPlaybookApprovalS
 from jason_runtime.owner_release_approval_containment import read_release_approval_containment
 
 SHA = re.compile(r"^[0-9a-f]{40}$")
-RELEASE_ID = re.compile(r"^release-[0-9a-f]{16}(?:-retry-[1-9][0-9]{0,2})?$")
+RELEASE_ID = re.compile(r"^release-[0-9a-f]{16}$")
 CAPABILITY = "release.production.approve"
 REQUEST_PREFIX = "relapproval-"
 RISK_LEVELS = frozenset({"normal", "production_repair", "production_control_core", "schema_or_contract"})
@@ -43,12 +43,6 @@ def canonical_bytes(value: Any) -> bytes:
 
 def digest(value: Any) -> str:
     return hashlib.sha256(canonical_bytes(value)).hexdigest()
-
-def release_id_matches_candidate(release_id: str, candidate_sha: str) -> bool:
-    if not SHA.fullmatch(candidate_sha):
-        return False
-    base = "release-" + candidate_sha[:16]
-    return re.fullmatch(re.escape(base) + r"(?:-retry-[1-9][0-9]{0,2})?", release_id) is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,7 +201,7 @@ def create_mobile_release_request(evidence: ExactRelease, policy: MobileReleaseP
         raise ValueError("mobile approval clock must be timezone-aware")
     if evidence.risk_profile not in policy.allowed_risk_profiles:
         raise PermissionError("release risk is not authorized for mobile pilot")
-    if not release_id_matches_candidate(evidence.release_id, evidence.candidate_sha):
+    if not SHA.fullmatch(evidence.candidate_sha) or evidence.release_id != "release-" + evidence.candidate_sha[:16]:
         raise PermissionError("mobile approval release identity does not match exact SHA")
     shown = ", ".join(evidence.affected_files[:7]) or "(no files)"
     if len(evidence.affected_files) > 7:
@@ -646,15 +640,8 @@ class MobileReleaseApprovalMaintenance:
             raise PermissionError("Teams release policy changed without the reviewed runtime activation")
         paths = tuple(sorted((self.state_root / "mobile-release-offers").glob("release-*.json"),
                              key=lambda p: p.stat().st_mtime, reverse=True))[:20]
-        existing_subjects = {
-            (
-                request.metadata.get("release_id"),
-                request.metadata.get("candidate_sha"),
-                request.metadata.get("rollback_sha"),
-                request.metadata.get("manifest_sha256"),
-                request.metadata.get("owner_policy_sha256"),
-                request.metadata.get("review_only") is True,
-            )
+        existing_ids = {
+            request.metadata.get("release_id")
             for request in self.requests.list_all()
             if request.capability == CAPABILITY
         }
@@ -730,7 +717,7 @@ class MobileReleaseApprovalMaintenance:
                 if (offer.get("schema_version") != "1.0"
                         or offer.get("release_id") != path.stem
                         or not SHA.fullmatch(str(offer.get("candidate_sha") or ""))
-                        or not release_id_matches_candidate(str(offer.get("release_id") or ""), str(offer.get("candidate_sha") or ""))
+                        or offer.get("release_id") != "release-" + offer["candidate_sha"][:16]
                         or offer.get("protected_main_sha") != offer["candidate_sha"]
                         or offered.tzinfo is None
                         or not 0 <= (now - offered).total_seconds() <= 900):
@@ -741,18 +728,9 @@ class MobileReleaseApprovalMaintenance:
                     and offered <= containment.released_at):
                 # An offer created before/during a hold may not be revived.
                 continue
-            offer_subject = (
-                offer.get("release_id"),
-                offer.get("candidate_sha"),
-                offer.get("live_rollback_sha"),
-                offer.get("manifest_sha256"),
-                policy.policy_sha256,
-                offer.get("review_only") is True,
-            )
-            if offer_subject in existing_subjects:
-                # The same immutable approval subject is one-shot even after a
-                # terminal decision. A changed manifest/policy/review mode is a
-                # different subject and receives a distinct approval_id/card.
+            if path.stem in existing_ids:
+                # Terminal cards are never silently reissued. A fresh review
+                # requires a separately recorded owner/release request.
                 continue
             try:
                 evidence = read_eligible_release(

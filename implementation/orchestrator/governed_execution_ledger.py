@@ -104,19 +104,6 @@ class SQLiteGovernedExecutionLedger:
             row=c.execute("SELECT * FROM governed_action_approvals WHERE action_fingerprint=?", (fp,)).fetchone()
             if row is not None:
                 exp=datetime.fromisoformat(row['expires_at'])
-                state=str(row['state'] or '')
-                # A consumed approval represents an indeterminate provider mutation
-                # until durable completion evidence exists. Never expire/delete that
-                # claim merely to mint a fresh approval for the same action: doing so
-                # could duplicate a provider side effect. Return the original binding
-                # so the orchestrator fails closed and the caller can reconcile the
-                # exact provider state through the governed recovery path.
-                if state == 'consumed':
-                    c.commit()
-                    return ApprovalReservation(
-                        row['approval_id'], fp, row['idempotency_key'],
-                        row['request_id'], False, exp,
-                    )
                 if exp > now:
                     c.commit(); return ApprovalReservation(row['approval_id'], fp, row['idempotency_key'], row['request_id'], False, exp)
                 c.execute("DELETE FROM governed_action_approvals WHERE action_fingerprint=?", (fp,))
@@ -250,82 +237,6 @@ class SQLiteGovernedExecutionLedger:
                 "UPDATE governed_action_approvals SET state='failed',completed_at=?,failure_reason=? WHERE approval_id=? AND state='consumed'",
                 (datetime.now(timezone.utc).isoformat(), reason, request.approval_id),
             )
-
-    def reconcile_consumed_success(
-        self,
-        request: OrchestrationRequest,
-        *,
-        output: Mapping[str, Any],
-        reason_code: str = "indeterminate_provider_readback_confirmed",
-    ) -> None:
-        """Close one consumed approval only after independent provider readback.
-
-        This is intentionally narrower than resetting or retrying an approval.
-        It preserves the original execution-plan binding and marks the existing
-        consumed claim successful only when the caller has already proven the
-        authorized provider state through a governed read.
-        """
-        if not request.approval_id:
-            raise PermissionError("approval_id is required for consumed reconciliation")
-        fp = intent_fingerprint(
-            principal_id=request.principal_id,
-            organization_id=request.organization_id,
-            client_id=request.client_id,
-            capability_name=request.capability_name,
-            arguments=request.arguments,
-        )
-        now = datetime.now(timezone.utc).isoformat()
-        with self._connect() as c:
-            c.execute("BEGIN IMMEDIATE")
-            row = c.execute(
-                "SELECT * FROM governed_action_approvals WHERE approval_id=?",
-                (request.approval_id,),
-            ).fetchone()
-            if row is None:
-                raise PermissionError("approval is not registered for governed execution")
-            stored_intent = str(row["intent_fingerprint"] or row["action_fingerprint"] or "")
-            if stored_intent != fp:
-                raise PermissionError("approval arguments do not match approved intent fingerprint")
-            if row["idempotency_key"] != request.idempotency_key:
-                raise PermissionError("idempotency key does not match approval")
-            if str(row["state"] or "") == "succeeded":
-                c.commit()
-                return
-            if str(row["state"] or "") != "consumed":
-                raise PermissionError("approval is not in indeterminate consumed state")
-            provider_id = None
-            try:
-                plan = json.loads(str(row["execution_plan_json"] or "{}"))
-                if isinstance(plan, Mapping):
-                    provider_id = plan.get("selected_provider_id")
-            except Exception:
-                provider_id = None
-            payload = {
-                "execution_id": str(row["execution_id"] or request.execution_id),
-                "correlation_id": str(row["correlation_id"] or request.correlation_id),
-                "capability_name": request.capability_name,
-                "status": "succeeded",
-                "stage": "completed",
-                "reason_codes": [reason_code],
-                "output": dict(output),
-                "artifact_references": [],
-                "attempts": 1,
-                "provider_id": provider_id,
-                "error_code": None,
-            }
-            c.execute(
-                "UPDATE governed_action_approvals "
-                "SET state='succeeded',result_json=?,completed_at=?,failure_reason=NULL "
-                "WHERE approval_id=? AND state='consumed'",
-                (
-                    json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str),
-                    now,
-                    request.approval_id,
-                ),
-            )
-            if c.total_changes != 1:
-                raise PermissionError("approval reconciliation state mismatch")
-            c.commit()
 
     def evidence(self, approval_id: str) -> dict[str, Any] | None:
         with self._connect() as c:

@@ -82,9 +82,7 @@ When a full CCC run is due, the runner verifies at minimum:
 
 Configured material paths cause an out-of-cycle CCC run even when the monthly cadence has not expired. If a material change is present, CCC requires `/var/lib/jason/ccc/material-review.json` to approve the **exact current source SHA**. A prior review cannot authorize a later revision.
 
-For a PMV3 production release, the Owner's single explicit exact-SHA production approval is also the human CCC material review **when it is bound to the same current recorded release scope**. Release Manager materializes that same decision into the canonical CCC review file and a per-SHA audit record. This is a human-authority handoff only: it does not convert CCC to PASS, waive any technical CCC check, waive drift/rollback/health requirements, or authorize any later SHA.
-
-The standalone review recorder remains available for non-release CCC review workflows:
+The owner-review record is created explicitly with:
 
 ```bash
 python3 tools/record_ccc_material_review.py \

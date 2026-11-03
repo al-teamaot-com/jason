@@ -34,7 +34,6 @@ ACCOUNTING_INVOICE_SEARCH = "accounting.invoice.search"
 ACCOUNTING_BILL_SEARCH = "accounting.bill.search"
 ACCOUNTING_PROFIT_LOSS_READ = "accounting.report.profitloss.read"
 ACCOUNTING_BALANCE_SHEET_READ = "accounting.report.balancesheet.read"
-ACCOUNTING_GENERAL_LEDGER_READ = "accounting.report.generalledger.read"
 
 QUICKBOOKS_CAPABILITIES = frozenset(
     {
@@ -46,7 +45,6 @@ QUICKBOOKS_CAPABILITIES = frozenset(
         ACCOUNTING_BILL_SEARCH,
         ACCOUNTING_PROFIT_LOSS_READ,
         ACCOUNTING_BALANCE_SHEET_READ,
-        ACCOUNTING_GENERAL_LEDGER_READ,
     }
 )
 
@@ -210,16 +208,6 @@ def quickbooks_capabilities(now: datetime) -> tuple[CapabilityDefinition, ...]:
             operation="read",
             selector_keys="start_date,end_date",
             fact_hints="balance sheet assets liabilities equity",
-        ),
-        _read_capability(
-            now=now,
-            name=ACCOUNTING_GENERAL_LEDGER_READ,
-            display_name="Read General Ledger Report",
-            purpose="Read bounded posted QuickBooks ledger activity for reconciliation and financial review.",
-            resource_types="accounting_ledger",
-            operation="read",
-            selector_keys="start_date,end_date",
-            fact_hints="general ledger posted transactions bank reconciliation checks deposits transfers expenses",
         ),
     )
 

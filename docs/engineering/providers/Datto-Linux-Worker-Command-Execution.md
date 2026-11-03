@@ -101,26 +101,6 @@ ready, install software on the endpoint, make shell standing-safe, or authorize
 disruptive actions. Each generic Linux shell job needs exact per-run approval
 and same-job provider output evidence before any subsequent provisioning.
 
-### Exact split-baseline normalization during governed release
-
-A prior partial migration can leave both production planes on the same verified
-rollback revision while one plane explicitly carries the source-approved worker
-UID and the other explicitly carries an empty value. That split state is
-invalid for normal execution and remains denied.
-
-Release Manager may normalize only that exact historical shape during a
-subsequently Owner-approved exact-SHA release when the immutable **candidate
-source and rollback source independently validate the same non-empty enrollment
-UID**. The live values must be exactly the pair `{"", approved_uid}`; missing
-variables, two different non-empty UIDs, an enrollment absent from either
-source, or any other ambiguity still fails closed.
-
-Normalization is performed only by the serialized Release Manager. Operators
-must not manually inject the environment variable or directly restart a
-container to bypass this check. The canonical approved UID becomes the rollback
-binding as well, so a failed forward deployment restores both planes to the
-same source-authorized state.
-
 ### Concurrent engineering coordination
 
 Reviewed open finance PR #692: it modifies release scripts/installer/controller
@@ -155,5 +135,3 @@ argument and passes certification. Do not modify origin/main or CCC reports
 to impersonate the candidate. Recording a review is not equal to certification.
 
 Integration coordination: #692 and #1331 are independent open finance and recovery workstreams. This change retains their governance boundaries and does not alter either branch.
-
-Concurrent release-manager overlaps #2153, #2156, and #2158 were reviewed during this normalization change; their timer, pinned-manual, rollback, and Autotask-canary work is orthogonal to the worker-enrollment source contract.

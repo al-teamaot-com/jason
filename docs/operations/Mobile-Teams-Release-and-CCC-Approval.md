@@ -124,27 +124,6 @@ a per-SHA named review. Existing manual `approve` and
 `record_ccc_material_review.py` commands remain an authenticated **break-glass
 fallback**, not a routine requirement.
 
-## Redundant signed decision after an explicit exact-SHA owner grant
-
-An exact release may already have a valid `explicit_owner_instruction` approval
-when a previously issued full-release Teams card later produces a valid signed
-Approve decision for the **same candidate SHA and immutable manifest**. The host
-consumer treats that later decision as redundant audit evidence only:
-
-- it does not replace or relabel the existing explicit owner authority;
-- it does not call `approve_release()` again;
-- it does not create a CCC material-review artifact;
-- it writes a replay-protected processed marker identifying the redundant signed
-  decision and records `authority_mutated=false`;
-- candidate-SHA or manifest mismatch still fails closed.
-
-This rule applies only to a redundant **full-release** decision. A separately
-issued `review_only` CCC material-review decision remains independently
-actionable and continues through its existing signed-evidence validation path.
-This prevents the five-minute Release Manager service from failing merely
-because two independently valid owner channels refer to the same exact release,
-without allowing either channel to broaden or inherit authority.
-
 ## Initial limits and production dependencies
 
 - The pilot applies to exact normal-risk release owner approval **only**.
