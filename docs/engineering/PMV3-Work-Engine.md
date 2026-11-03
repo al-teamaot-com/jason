@@ -119,6 +119,29 @@ passes and does not grant additional work or release authority.
 state so current continuation status can be verified through governed surfaces
 without SSH.
 
+PMV3 also projects the autonomous ticket worker's durable evidence into
+`pmv3_engineering.ticket_processing`. A raw `active_count=0` is never treated
+as proof that Jason is caught up. The canonical status distinguishes
+`CAUGHT_UP`, `PROCESSING`, `WAITING_EXPECTED`, `BACKLOGGED`, `STALLED`,
+`BLOCKED`, `DEGRADED`, and `UNKNOWN`.
+
+`CAUGHT_UP` requires a fresh completed intake scan reporting zero actionable
+eligible work and no remaining waiting, blocked, unsupported, governance-blocked,
+or human-review work. Missing or stale scan evidence fails closed as `UNKNOWN`.
+Actionable work with free capacity and no selected/active work is `STALLED`.
+Two consecutive fresh scan cycles with actionable work and no durable ticket
+activity/selection are also `STALLED`. A fresh zero-eligible scan with
+recognized waiting work is `WAITING_EXPECTED`, while blocked or unsupported
+residual work is surfaced separately rather than being mislabeled as caught up.
+
+The status surface includes the latest eligible count, active capacity, selected
+count, scan timestamp/age, pages traversed and provider/evaluated counts when
+available, worker heartbeat state, last meaningful ticket activity, and
+consecutive no-progress cycles. These fields exist so an operator can
+deterministically tell the difference between "nothing to do" and "unable to do
+the work." This distinction is a production-acceptance invariant tracked by
+autonomous ticket reliability issue #770, not a dashboard-only presentation rule.
+
 ## Crash and duplicate-action handling
 
 The generic PMV3 work engine checkpoints an execution claim before invoking a

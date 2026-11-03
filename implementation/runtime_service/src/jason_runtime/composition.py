@@ -300,6 +300,8 @@ from .datto_powershell_read import (
 from .teams_message_send import (
     CAPABILITY as TEAMS_MESSAGE_SEND,
     build_invoker as build_teams_message_send_invoker,
+    configured_teams_message_send,
+    ensure_authority as ensure_teams_message_send_authority,
     register_foundation as register_teams_message_send_foundation,
 )
 from .pm_v2_runtime import (
@@ -1607,6 +1609,9 @@ def build_runtime_application(settings: RuntimeSettings, *, maintenance_profile:
     ensure_aot_technician_read_authority(identity_authority)
     ensure_aot_routine_autotask_write_authority(
         identity_authority, enabled=routine_autotask_write_enabled,
+    )
+    ensure_teams_message_send_authority(
+        identity_authority, enabled=configured_teams_message_send(),
     )
     ensure_meter_history_read_authority(
         identity_authority,
