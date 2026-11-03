@@ -5234,6 +5234,35 @@ def require_owner_production_deployment_unfrozen(state_root: Path) -> None:
     )
 
 
+def require_pmv3_engineering_quiescent() -> None:
+    """Fail before production mutation while the long-running PMV3 worker is active."""
+    completed = subprocess.run(
+        [
+            "systemctl", "--user", "show", "jason-support-repair-worker.service",
+            "-p", "ActiveState", "--value",
+        ],
+        env=user_systemd_env(),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+        timeout=15,
+    )
+    if completed.returncode != 0:
+        raise ReleaseManagerError(
+            "PMV3 engineering worker state cannot be verified before production mutation"
+        )
+    state = completed.stdout.strip()
+    if state in {"active", "activating", "reloading", "deactivating"}:
+        raise ReleaseManagerBusy(
+            "PMV3 engineering worker is active; production promotion deferred before mutation"
+        )
+    if state not in {"inactive", "failed"}:
+        raise ReleaseManagerError(
+            "PMV3 engineering worker returned unsupported ActiveState: " + state[:80]
+        )
+
+
 def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> dict[str, Any]:
     # Freeze evaluation is serialized under the same production transaction
     # lock. This permits one exact signed recovery exception without creating a
@@ -5241,6 +5270,11 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
     lock = acquire_production_transaction_lock(repo, state_root, record)
     opened_freeze: dict[str, Any] | None = None
     try:
+        # The PMV3 worker can legitimately run for hours. Never enter the
+        # production mutation path and later wait only 180 seconds for it.
+        # Holding the production lock first prevents a new PMV3 pass from
+        # starting; the active-state check handles work that began earlier.
+        require_pmv3_engineering_quiescent()
         restore_stranded_one_transaction_freeze_under_lock(state_root)
         require_current_manual_scope_review(repo, state_root, record)
         require_current_protected_release_source(repo, record)

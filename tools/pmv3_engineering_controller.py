@@ -15,6 +15,7 @@ The controller stops only when:
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -138,6 +139,40 @@ def run_pipeline(
     return int(result.returncode)
 
 
+def production_transaction_active(release_state: Path) -> bool:
+    """Return True only while Release Manager holds the production mutex."""
+    path = release_state / "production-transaction.lock"
+    if not path.exists():
+        return False
+    try:
+        handle = path.open("r", encoding="utf-8")
+    except OSError:
+        # A present but unreadable coordination primitive is not safe to ignore.
+        return True
+    try:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        finally:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+        return False
+    finally:
+        handle.close()
+
+
+def _defer_for_production_transaction(state: dict[str, Any], state_path: Path) -> dict[str, Any]:
+    state["status"] = "deferred"
+    state["reason"] = "production_transaction_active"
+    state["finished_at"] = now()
+    state["pass_count"] = len(state["passes"])
+    atomic_json(state_path, state)
+    return state
+
+
 def controller_run(
     *,
     scripts: Path,
@@ -165,7 +200,15 @@ def controller_run(
     previous_fp = None
     unchanged = 0
 
+    # Production has priority over engineering. A new PMV3 timer invocation
+    # must become a clean no-op while Release Manager owns the production
+    # mutex, and a multi-pass controller must re-check before every pass.
+    if production_transaction_active(release_state):
+        return _defer_for_production_transaction(state, state_path)
+
     for pass_number in range(1, max(1, int(max_passes)) + 1):
+        if production_transaction_active(release_state):
+            return _defer_for_production_transaction(state, state_path)
         try:
             return_code = run_pipeline(
                 scripts=scripts, repo=repo, spool=spool,
