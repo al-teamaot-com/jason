@@ -23,6 +23,60 @@ Make Jason's **existing foundational functions reliable** before expanding autom
 8. **Verification or rollback.** Verify new runtime/MCP/host/controller/image/unit identities, health and fresh independent CCC/drift. Repeat the same authorized foundational ticket canary **after promotion** with a fixed window and exact-ticket read; run feature-specific checks. If any mandatory gate fails, initiate native known-good rollback, verify restored identities and foundational read behavior, keep the circuit breaker OPEN if unresolved, and report exact evidence. A healthy HTTP status alone is not acceptance.
 9. **Closeout and observability.** Persist immutable source IDs, read-canary summary (never customer content), pre/post results, approvals, independent manifests, rollback readiness, deployment and functional verification, any warning and follow-up. Mark production acceptance only with all required evidence and zero unresolved critical defect.
 
+### Root-governed cleanup for pre-manifest historical rollbacks
+
+The existing immutable host release reconciler is the only authorized unit
+cleanup path. If a protected exact LKG predates
+`production-desired-state.json`, the root worker compares canonical unit
+definitions in that exact immutable release against the currently installed
+candidate's reviewed manifest, for both system and user units. Only an
+independently verified LKG may use this compatibility mode.
+
+The root helper preflights both scopes before any mutation, requires a
+byte-identical installed candidate unit and correct ownership, rejects
+untrusted symlinks and bulk removals, and stores a private root-owned
+per-request backup before disabling/removing a candidate-only unit. No
+unrelated services or customer endpoints may be touched. A failed/uncertain
+cleanup must block release verification and keep protected recovery active.
+Historical release files are never modified or patched in place.
+
+A green isolated test does **not** prove the live historical rollback.
+The complete cleanup, service health, protected policy, old/new controller,
+and source-manifest readback remain part of the separately authorized
+production acceptance gate.
+
+### Mandatory authenticated Autotask canary for every release (source candidate)
+
+The native release transaction must verify the same genuine AOT-authorized
+requester's ticket count, complete bounded pagination and exact ticket read
+**before the first production mutation and again after the complete
+runtime/MCP/host/controller cutover**. This is mandatory even for a change
+unrelated to Autotask, not conditional on changing the read activation profile.
+The postflight also requires activated catalog-specific generic reads:
+v11/v13 Projects; v13 dynamic ActionTypes. The baseline can be an older
+immutable MCP release whose historical single-call BEFORE probe contains
+only ticket reads; its preflight must still prove real ticket behavior, and
+unobserved generic reads must never be reported as verified. A genuine failure
+must block promotion before any mutation or trigger native LKG rollback after
+cutover. A test fixture, HTTP status, service-only identity or stale
+receipt cannot satisfy either gate.
+
+Both phases use distinct nonce-bound, exact-candidate-sha sessions. The
+single MCP canary tool supports both phases; the provider release identity
+and permitted read path remain unchanged. Verify that the pre/post created
+window digest and SHA-salted authenticated principal digest agree; raw ticket
+contents, ticket IDs and human identity do not belong in release receipts.
+Only a verified preflight from the same exact candidate may be replaced by
+the postflight intent. Unknown profile, missing consent, absent authenticated
+AOT operator, expired/mismatched proof or no authorized provider result
+remains **BLOCKED**, never silently downgraded to a synthetic canary.
+
+**Operational limitation:** The pre/post acceptance requires a genuine
+authenticated requester using Jason's ordinary read capability. This source
+change does not grant unattended service-provider rights or invent a
+technician identity. Preproduction tests can prove control flow and negative
+cases but cannot substitute for a later owner-authorized live acceptance.
+
 ## Phase-1 operating constraints
 
 - The existing **incident hold** continues to block unattended promotion; do not remove it during the freeze.
@@ -32,6 +86,24 @@ Make Jason's **existing foundational functions reliable** before expanding autom
 - One change/release transaction at a time. Keep unrelated development unmodified. A blocked release does **not** excuse skipping tests or editing production directly.
 - Release Manager's own controller changes are production-control-core and require staged N→N+1 evidence; no live controller semantics changing mid-transaction.
 - Continue monitoring existing production services and ticket work; stopping **deployments** does not mean stopping normal customer support.
+
+### Release-specific scheduled-control verification
+
+Production Manager evaluates the required user/system **control timers for the
+exact immutable SHA being read**, not against the currently installed
+controller's newest timer list. A release with a valid desired-state manifest
+uses its own required-unit declarations. A historical pre-manifest release
+uses only canonical timer definitions present in that same immutable release.
+Malformed or missing immutable evidence is a hard failure.
+
+An extra active control timer belonging to a later release (for example,
+`jason-production-drift-watchdog.timer` after rollback to an older baseline)
+is **release drift**, not a reason to demand that the historical release
+adopt the newer timer. PM must fail verification rather than silently stop,
+disable, uninstall or suppress the timer. Only the existing guarded root
+host-unit reconciliation may remove candidate-only units; successful cleanup
+must be separately evidenced by exact release and health readback. The source
+unit tests are not a substitute for that production acceptance.
 
 ## Acceptance tests before closing #1078
 
