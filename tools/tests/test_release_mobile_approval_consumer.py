@@ -398,6 +398,63 @@ def test_crash_after_exact_owner_record_restores_only_verified_marker(tmp_path):
     assert json.loads(marker.read_text())["recovery"] == "previous_exact_owner_approval_verified"
 
 
+def test_redundant_signed_full_release_decision_preserves_explicit_owner_grant(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True,
+    )
+    flow.handle(**args)
+    release = json.loads(release_path.read_text(encoding="utf-8"))
+    release["owner_approval"] = {
+        "approved": True,
+        "candidate_sha": SHA,
+        "source": "explicit_owner_instruction",
+        "recorded_at": NOW.isoformat(),
+    }
+    release_path.write_text(json.dumps(release), encoding="utf-8")
+    opts["approve_release"] = lambda *_args, **_kwargs: pytest.fail(
+        "redundant signed decision must not replace explicit owner authority"
+    )
+
+    assert consume_mobile_release_decisions(**opts) == 0
+
+    after = json.loads(release_path.read_text(encoding="utf-8"))
+    assert after["owner_approval"]["source"] == "explicit_owner_instruction"
+    marker = (
+        opts["state_root"]
+        / "mobile-release-decisions-processed"
+        / (request.approval_id + ".json")
+    )
+    evidence = json.loads(marker.read_text(encoding="utf-8"))
+    assert evidence["recovery"] == (
+        "redundant_signed_teams_decision_preserved_explicit_owner_approval"
+    )
+    assert evidence["authority_mutated"] is False
+    assert not (
+        opts["ccc_root"] / ("material-review-" + SHA[:16] + ".json")
+    ).exists()
+
+
+def test_redundant_signed_decision_rejects_mismatched_explicit_owner_grant(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True,
+    )
+    flow.handle(**args)
+    release = json.loads(release_path.read_text(encoding="utf-8"))
+    release["owner_approval"] = {
+        "approved": True,
+        "candidate_sha": "a" * 40,
+        "source": "explicit_owner_instruction",
+        "recorded_at": NOW.isoformat(),
+    }
+    release_path.write_text(json.dumps(release), encoding="utf-8")
+    opts["approve_release"] = lambda *_args, **_kwargs: pytest.fail(
+        "mismatched explicit owner grant must not be consumed"
+    )
+
+    with pytest.raises(PermissionError, match="does not match"):
+        consume_mobile_release_decisions(**opts)
+
+
 def test_actual_delivered_card_signed_click_and_independent_host_attestation(tmp_path):
     """Prove real worker's delivery ledger mutation cannot cause a Teams 403.
 
@@ -851,3 +908,106 @@ def test_renewal_host_consumer_rejects_modified_private_owner_intent(tmp_path):
     with pytest.raises(PermissionError, match="renewal"):
         consume_mobile_release_decisions(**opts)
     assert not (opts["ccc_root"] / "material-review.json").exists()
+
+def test_processed_exact_decision_reconstructs_recreated_release_without_rewriting_marker(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True,
+    )
+    assert flow.handle(**args)["approval_status"] == "approved"
+
+    def materialize(_repo, _root, *, release_id, candidate_sha, source):
+        record = json.loads(release_path.read_text())
+        record["owner_approval"] = {
+            "approved": True,
+            "candidate_sha": candidate_sha,
+            "source": source,
+            "recorded_at": NOW.isoformat(),
+        }
+        release_path.write_text(json.dumps(record))
+
+    opts["approve_release"] = materialize
+    assert consume_mobile_release_decisions(**opts) == 1
+    marker = (
+        opts["state_root"] / "mobile-release-decisions-processed"
+        / (request.approval_id + ".json")
+    )
+    marker_before = marker.read_bytes()
+    approved = json.loads(release_path.read_text())
+    assert approved["owner_approval"]["approved"] is True
+
+    # Simulate exact candidate record recreation after the signed decision was
+    # already processed. The immutable manifest/candidate remain unchanged.
+    recreated = dict(approved)
+    recreated["state"] = "production_eligible"
+    marker_doc = json.loads(marker.read_text())
+    recreated["created_at"] = (
+        datetime.fromisoformat(marker_doc["processed_at"]) + timedelta(seconds=1)
+    ).isoformat()
+    recreated["owner_approval"] = {
+        "approved": False, "candidate_sha": None, "source": None, "recorded_at": None,
+    }
+    release_path.write_text(json.dumps(recreated))
+
+    calls = []
+
+    def reconstruct(_repo, _root, *, release_id, candidate_sha, source):
+        calls.append((release_id, candidate_sha, source))
+        record = json.loads(release_path.read_text())
+        record["owner_approval"] = {
+            "approved": True,
+            "candidate_sha": candidate_sha,
+            "source": source,
+            "recorded_at": NOW.isoformat(),
+        }
+        release_path.write_text(json.dumps(record))
+
+    opts["approve_release"] = reconstruct
+    assert consume_mobile_release_decisions(**opts) == 1
+    assert calls == [(
+        RID, SHA, "authenticated_mobile_teams_owner:" + request.approval_id,
+    )]
+    assert marker.read_bytes() == marker_before
+    recovered = json.loads(release_path.read_text())
+    assert recovered["owner_approval"]["approved"] is True
+    assert recovered["owner_approval"]["candidate_sha"] == SHA
+
+
+def test_processed_decision_does_not_reconstruct_changed_manifest(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(
+        tmp_path, reviewed=True,
+    )
+    assert flow.handle(**args)["approval_status"] == "approved"
+
+    def materialize(_repo, _root, *, release_id, candidate_sha, source):
+        record = json.loads(release_path.read_text())
+        record["owner_approval"] = {
+            "approved": True,
+            "candidate_sha": candidate_sha,
+            "source": source,
+            "recorded_at": NOW.isoformat(),
+        }
+        release_path.write_text(json.dumps(record))
+
+    opts["approve_release"] = materialize
+    assert consume_mobile_release_decisions(**opts) == 1
+
+    recreated = json.loads(release_path.read_text())
+    recreated["state"] = "production_eligible"
+    marker = (
+        opts["state_root"] / "mobile-release-decisions-processed"
+        / (request.approval_id + ".json")
+    )
+    marker_doc = json.loads(marker.read_text())
+    recreated["created_at"] = (
+        datetime.fromisoformat(marker_doc["processed_at"]) + timedelta(seconds=1)
+    ).isoformat()
+    recreated["owner_approval"] = {
+        "approved": False, "candidate_sha": None, "source": None, "recorded_at": None,
+    }
+    recreated["release_manifest"]["changed_files"].append("changed-after-owner-review.py")
+    release_path.write_text(json.dumps(recreated))
+    opts["approve_release"] = lambda *_args, **_kwargs: pytest.fail(
+        "changed release must not reconstruct owner authority"
+    )
+    assert consume_mobile_release_decisions(**opts) == 0
+    assert json.loads(release_path.read_text())["owner_approval"]["approved"] is False
