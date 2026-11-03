@@ -98,8 +98,12 @@ development/production management cadence.
 4. The normal host Release Manager alone independently re-verifies the saved
    gateway signature and registered machine identity, current owner binding,
    accepted one-use SQLite receipt, decision-time expiry, exact owner policy
-   digest, untouched original manifest, rollback and artifact digests. Only
-   after this independent replay-safe verification does it materialize:
+   digest, untouched original manifest, rollback and artifact digests. This
+   independence is a separation-of-verification-path requirement, **not a
+   second-human-review requirement**. The Release Manager must perform these
+   checks autonomously after the Owner's exact-SHA approval; lack of another
+   technician or reviewer is not a blocker. Only after this independent
+   replay-safe verification does it materialize:
    - the exact owner CCC *material review* (not a CCC check outcome), and
    - the exact release's owner approval via the existing
      `approve_release()` function, preserving main/immutable artifact checks.
