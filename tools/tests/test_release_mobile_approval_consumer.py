@@ -173,6 +173,7 @@ def fixture(tmp_path, *, approve=True, reviewed=False, card_selection_override=N
     opts = dict(
         repo=tmp_path, state_root=root, database=path, policy_file=policy_path, ccc_root=ccc,
         bindings_db=bindings_db, authority_db=authority_db, trusted_keys=registry,
+        protected_main_sha_reader=lambda _repo: SHA,
     )
     return flow, repo, release_path, request, args, opts, identities, bindings
 
@@ -226,6 +227,44 @@ def test_canonical_entra_owner_alias_host_consumer_fails_closed_on_binding_misma
         consume_mobile_release_decisions(**opts)
     assert not (opts["ccc_root"] / "material-review.json").exists()
 
+
+
+def test_superseded_signed_owner_decision_is_terminal_audit_evidence_not_authority(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(tmp_path)
+    assert flow.handle(**args)["approval_status"] == "approved"
+    current_main = "b" * 40
+    opts["protected_main_sha_reader"] = lambda _repo: current_main
+    calls = []
+    opts["approve_release"] = lambda *_args, **_kwargs: calls.append((_args, _kwargs))
+
+    assert consume_mobile_release_decisions(**opts) == 1
+    assert calls == []
+    record = json.loads(release_path.read_text(encoding="utf-8"))
+    assert record["owner_approval"]["approved"] is False
+    assert not (opts["ccc_root"] / "material-review.json").exists()
+    marker = opts["state_root"] / "mobile-release-decisions-processed" / (request.approval_id + ".json")
+    stored = json.loads(marker.read_text(encoding="utf-8"))
+    assert stored["candidate_sha"] == SHA
+    assert stored["protected_main_sha"] == current_main
+    assert stored["disposition"] == "superseded_protected_main"
+    assert stored["authority_mutated"] is False
+    assert stored["signed_evidence_sha256"]
+    assert consume_mobile_release_decisions(**opts) == 0
+
+
+def test_superseded_disposition_fails_closed_when_protected_main_cannot_be_proven(tmp_path):
+    flow, repo, release_path, request, args, opts, identities, bindings = fixture(tmp_path)
+    assert flow.handle(**args)["approval_status"] == "approved"
+    def unavailable(_repo):
+        raise PermissionError("protected main unavailable")
+    opts["protected_main_sha_reader"] = unavailable
+    opts["approve_release"] = lambda *_args, **_kwargs: pytest.fail("must not transfer authority")
+    with pytest.raises(PermissionError, match="protected main unavailable"):
+        consume_mobile_release_decisions(**opts)
+    marker = opts["state_root"] / "mobile-release-decisions-processed" / (request.approval_id + ".json")
+    assert not marker.exists()
+    record = json.loads(release_path.read_text(encoding="utf-8"))
+    assert record["owner_approval"]["approved"] is False
 
 def test_signed_owner_decision_issues_exact_ccc_and_release_then_idempotent(tmp_path):
     flow, repo, release_path, request, args, opts, identities, bindings = fixture(tmp_path)
