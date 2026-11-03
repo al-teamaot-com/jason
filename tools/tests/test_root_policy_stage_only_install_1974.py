@@ -1,3 +1,5 @@
+[Reading 145 lines from start (total: 145 lines, 0 remaining)]
+
 """P0 #1974: installed root recovery files and policy stage before systemd.
 
 These tests use isolated temporary files, never real systemd or root policy.
@@ -53,10 +55,17 @@ def test_stage_only_installs_exact_rollback_files_before_reviewed_policy(
     fake_migration = SimpleNamespace(
         ROOT=config,
         SHA=re.compile(r"[0-9a-f]{40}\Z"),
+        UNIT_FIELDS=(
+            "required_system_units", "allowed_system_units",
+            "required_user_units", "allowed_user_units",
+        ),
         _json=lambda data: json.loads(data),
         _root_only=lambda p: json.dumps(control).encode(),
         _source_policy=lambda sha: {
             "required_system_units": [NEW_TIMER] if sha == NEW_SHA else [],
+            "allowed_system_units": [],
+            "required_user_units": [],
+            "allowed_user_units": [],
         },
         stage_for_candidate=stage,
     )
@@ -93,12 +102,21 @@ def test_stage_only_does_not_mutate_root_policy_for_no_new_required_timer(
     fake = SimpleNamespace(
         ROOT=tmp_path,
         SHA=re.compile(r"[0-9a-f]{40}\Z"),
+        UNIT_FIELDS=(
+            "required_system_units", "allowed_system_units",
+            "required_user_units", "allowed_user_units",
+        ),
         _json=json.loads,
         _root_only=lambda p: json.dumps({
             "schema_version": "1.0",
             "last_known_good": {"manifest": {"revision": OLD_SHA}},
         }).encode(),
-        _source_policy=lambda sha: {"required_system_units": []},
+        _source_policy=lambda sha: {
+            "required_system_units": [],
+            "allowed_system_units": [],
+            "required_user_units": [],
+            "allowed_user_units": [],
+        },
         stage_for_candidate=lambda *args: checks.append(args),
     )
     monkeypatch.setitem(sys.modules, "protected_root_policy_migration", fake)
@@ -127,3 +145,5 @@ def test_script_stage_precedes_any_candidate_specific_unit_write():
     src = (ROOT / "tools" / "protected_root_policy_migration.py").read_text()
     assert "STAGED_DELTA" in src and "stage_for_candidate" in src
     assert "prepare_rollback" in src and "complete_rollback" in src
+
+[executed on device: Jason (f92c7382-d6c7-4981-b42d-52faf8089dfb)]
