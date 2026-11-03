@@ -145,5 +145,3 @@ def test_script_stage_precedes_any_candidate_specific_unit_write():
     src = (ROOT / "tools" / "protected_root_policy_migration.py").read_text()
     assert "STAGED_DELTA" in src and "stage_for_candidate" in src
     assert "prepare_rollback" in src and "complete_rollback" in src
-
-[executed on device: Jason (f92c7382-d6c7-4981-b42d-52faf8089dfb)]

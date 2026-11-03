@@ -40,5 +40,3 @@ The compatibility health run is bounded to 3,650 seconds. The subsequent host re
 Focused host-reconciler tests cover exact historical source pinning, timeout-only transformation, controlled temporary path, mandatory PASS evidence, and finite recovery budgets. Adjacent host reconciliation, protected root-policy migration, atomic rollback surfaces, root-policy fault paths, and root breaker revalidation suites are also required before integration.
 
 This is source-only recovery engineering. It must not be copied directly into the live root boundary or used to bypass protected source integration, exact-revision release authorization, or PMV3 production controls.
-
-[executed on device: Jason (f92c7382-d6c7-4981-b42d-52faf8089dfb)]

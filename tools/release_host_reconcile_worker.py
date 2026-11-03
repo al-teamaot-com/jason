@@ -772,5 +772,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-[executed on device: Jason (f92c7382-d6c7-4981-b42d-52faf8089dfb)]

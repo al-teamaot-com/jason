@@ -627,5 +627,3 @@ def test_current_lkg_recovery_time_budget_is_bounded_below_root_worker_ceiling()
     assert worker._host_reconcile_timeout(worker.CURRENT_LKG_RECOVERY_SHA) == 500
     assert worker.CURRENT_LKG_HEALTH_RECOVERY_TIMEOUT_SECONDS + 500 < 4500
     assert worker._host_reconcile_timeout(worker.LEGACY_LKG_SHA) == 410
-
-[executed on device: Jason (f92c7382-d6c7-4981-b42d-52faf8089dfb)]
