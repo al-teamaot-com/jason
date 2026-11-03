@@ -6,7 +6,7 @@
       "id": "provider_identity_and_authority_recovery",
       "change_class": "release_blocker",
       "risk_profile": "production_control_core",
-      "max_changed_files": 12,
+      "max_changed_files": 13,
       "drift_problems": [
         {
           "kind": "failed_system_unit",
@@ -24,7 +24,8 @@
       "required_changed_files": [
         "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-full-integrity.service",
         "tools/openclaw_authority_health_snapshot.py",
-        "tools/openclaw_authority_operational_health.py"
+        "tools/openclaw_authority_operational_health.py",
+        "tools/release_manager_host_runner.py"
       ],
       "runtime_health": {
         "mode": "healthy"
