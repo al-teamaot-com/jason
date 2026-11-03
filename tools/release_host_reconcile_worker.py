@@ -1,3 +1,5 @@
+[Reading 772 lines from start (total: 772 lines, 0 remaining)]
+
 #!/usr/bin/env python3
 """Root-owned worker for bounded Jason host release reconciliation."""
 
@@ -42,6 +44,20 @@ LEGACY_HOST_SCRIPT_SHA256 = "d8bf41dfe824b8eb01ae192386907a6657f09c245aa24630659
 LEGACY_HEALTH_FROM = 'timeout --signal=TERM --kill-after=5s 240s systemctl start "$unit"'
 LEGACY_HEALTH_TO = 'timeout --signal=TERM --kill-after=5s 300s systemctl start "$unit"'
 HOST_RECONCILE_LEGACY_ROLLBACK_TIMEOUT_SECONDS = 410
+# Exact current-LKG bootstrap recovery. The immutable LKG full-integrity wrapper
+# predates current DB growth and now times out at 1800s. Recovery may materialize
+# ONLY these pinned LKG blobs, extend only that wrapper timeout to 3600s, and
+# redirect Python tempfile work to the existing controlled archive volume. The
+# integrity/backup/restore algorithm and PASS requirements remain unchanged.
+CURRENT_LKG_RECOVERY_SHA = "1b28ddc9863aee563755cb57599cf211ee82ac19"
+CURRENT_LKG_HEALTH_WRAPPER_SHA256 = "bbd7aede51986a5caefb5c99ed64b420786fc9b1f8e1aca69e12f65782dbbb56"
+CURRENT_LKG_HEALTH_TOOL_SHA256 = "f5c7c47db4c62268acfb9cb72bcc63d47b3e5378cbcf2839ad620b430c32425a"
+CURRENT_LKG_HEALTH_TIMEOUT_FROM = "SOURCE_HEALTH_TIMEOUT_SECONDS = 1800"
+CURRENT_LKG_HEALTH_TIMEOUT_TO = "SOURCE_HEALTH_TIMEOUT_SECONDS = 3600"
+CURRENT_LKG_HEALTH_RECOVERY_TIMEOUT_SECONDS = 3650
+CURRENT_LKG_POST_PROOF_RECONCILE_TIMEOUT_SECONDS = 500
+CURRENT_LKG_ARCHIVE_TMP = Path("/srv/jason/archive")
+CURRENT_LKG_FULL_EVIDENCE = Path("/var/lib/jason/openclaw/operational-full-health.json")
 
 
 class HostReconcileError(RuntimeError):
@@ -393,6 +409,129 @@ def _preflight_candidate_root_policy(source_revision: str) -> str:
     return helper.preview_exact_migration(source_revision, rollback)
 
 
+def _current_lkg_recovery_authorized(source_revision: str) -> bool:
+    """Allow only exact protected LKG recovery while its breaker is open."""
+    if source_revision != CURRENT_LKG_RECOVERY_SHA:
+        return False
+    helper = _trusted_root_policy_helper()
+    control = helper._json(helper._root_only(
+        helper.ROOT / "production-control-state.json"
+    ))
+    breaker = control.get("circuit_breaker") or {}
+    lkg = ((control.get("last_known_good") or {}).get("manifest") or {})
+    return (
+        breaker.get("state") == "open"
+        and lkg.get("complete") is True
+        and lkg.get("revision") == source_revision
+    )
+
+
+def _trusted_current_lkg_archive_tmp() -> None:
+    try:
+        info = CURRENT_LKG_ARCHIVE_TMP.lstat()
+    except OSError as exc:
+        raise HostReconcileError("current-LKG recovery archive path unavailable") from exc
+    al = pwd.getpwnam("al")
+    jason_gid = grp.getgrnam("jason").gr_gid
+    if (
+        CURRENT_LKG_ARCHIVE_TMP.is_symlink()
+        or not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != al.pw_uid
+        or info.st_gid != jason_gid
+        or stat.S_IMODE(info.st_mode) != 0o2770
+    ):
+        raise HostReconcileError("current-LKG recovery archive path is not trusted")
+
+
+def _materialize_current_lkg_health_recovery(source_revision: str) -> Path:
+    """Pin exact LKG health code; change only the obsolete wrapper timeout."""
+    if not _current_lkg_recovery_authorized(source_revision):
+        raise HostReconcileError("current-LKG health recovery is not authorized")
+    _trusted_current_lkg_archive_tmp()
+    root = CANDIDATE_SCRIPTS / ("lkg-health-" + source_revision)
+    root.mkdir(parents=True, exist_ok=True)
+    os.chown(root, 0, 0)
+    os.chmod(root, 0o700)
+    blobs = {
+        "openclaw_authority_health_snapshot.py": CURRENT_LKG_HEALTH_WRAPPER_SHA256,
+        "openclaw_authority_operational_health.py": CURRENT_LKG_HEALTH_TOOL_SHA256,
+    }
+    materialized = {}
+    for name, expected in blobs.items():
+        try:
+            body = subprocess.check_output(
+                _git("show", f"{source_revision}:tools/{name}"),
+                text=True, timeout=15,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise HostReconcileError("pinned current-LKG health source unavailable") from exc
+        if hashlib.sha256(body.encode("utf-8")).hexdigest() != expected:
+            raise HostReconcileError("pinned current-LKG health source identity mismatch")
+        if name == "openclaw_authority_health_snapshot.py":
+            if body.count(CURRENT_LKG_HEALTH_TIMEOUT_FROM) != 1:
+                raise HostReconcileError("pinned current-LKG health timeout identity mismatch")
+            body = body.replace(
+                CURRENT_LKG_HEALTH_TIMEOUT_FROM,
+                CURRENT_LKG_HEALTH_TIMEOUT_TO,
+            )
+        target = root / name
+        temp = target.with_suffix(".py.tmp")
+        temp.write_text(body, encoding="utf-8")
+        os.chown(temp, 0, 0)
+        os.chmod(temp, 0o700)
+        os.replace(temp, target)
+        materialized[name] = target
+    return materialized["openclaw_authority_health_snapshot.py"]
+
+
+def _run_current_lkg_health_recovery(source_revision: str) -> str:
+    """Regenerate mandatory PASS proof without changing the health algorithm."""
+    wrapper = _materialize_current_lkg_health_recovery(source_revision)
+    al = pwd.getpwnam("al")
+    env = os.environ.copy()
+    env["TMPDIR"] = str(CURRENT_LKG_ARCHIVE_TMP)
+    completed = subprocess.run(
+        [
+            "/usr/sbin/runuser", "-u", "al", "--",
+            "/usr/bin/python3", str(wrapper),
+            "--output", str(CURRENT_LKG_FULL_EVIDENCE),
+        ],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        check=False, timeout=CURRENT_LKG_HEALTH_RECOVERY_TIMEOUT_SECONDS,
+        env=env,
+    )
+    if completed.returncode != 0:
+        raise HostReconcileError(
+            "current-LKG full-integrity recovery did not pass"
+        )
+    try:
+        info = CURRENT_LKG_FULL_EVIDENCE.lstat()
+        report = json.loads(CURRENT_LKG_FULL_EVIDENCE.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError) as exc:
+        raise HostReconcileError("current-LKG full-integrity evidence unavailable") from exc
+    if (
+        CURRENT_LKG_FULL_EVIDENCE.is_symlink()
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_uid != al.pw_uid
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or report.get("status") != "pass"
+        or report.get("snapshot_source_exit_code") != 0
+        or report.get("provider_contacted") is not False
+        or report.get("provider_credentials_used") is not False
+        or report.get("failures") != []
+    ):
+        raise HostReconcileError("current-LKG full-integrity evidence did not prove PASS")
+    return "CURRENT_LKG_FULL_INTEGRITY_RECOVERY=PASS"
+
+
+def _host_reconcile_timeout(source_revision: str) -> int:
+    if source_revision == LEGACY_LKG_SHA:
+        return HOST_RECONCILE_LEGACY_ROLLBACK_TIMEOUT_SECONDS
+    if source_revision == CURRENT_LKG_RECOVERY_SHA:
+        return CURRENT_LKG_POST_PROOF_RECONCILE_TIMEOUT_SECONDS
+    return HOST_RECONCILE_TIMEOUT_SECONDS
+
+
 def _candidate_reconcile_script(source_revision: str) -> Path:
     """Materialize the exact candidate reconciliation script from protected Git evidence."""
     CANDIDATE_SCRIPTS.mkdir(parents=True, exist_ok=True)
@@ -499,6 +638,9 @@ def _process(path: Path) -> None:
         # but root's independent recovery overlay did not declare them.
         policy_preflight = _preflight_candidate_root_policy(source_revision)
 
+        if source_revision == CURRENT_LKG_RECOVERY_SHA:
+            _run_current_lkg_health_recovery(source_revision)
+
         script = _candidate_reconcile_script(source_revision)
         if not script.is_file():
             raise HostReconcileError("candidate host reconciliation script is missing")
@@ -532,9 +674,7 @@ def _process(path: Path) -> None:
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
-                timeout=(HOST_RECONCILE_LEGACY_ROLLBACK_TIMEOUT_SECONDS
-                         if source_revision == LEGACY_LKG_SHA
-                         else HOST_RECONCILE_TIMEOUT_SECONDS),
+                timeout=_host_reconcile_timeout(source_revision),
                 env=script_env,
             )
         except subprocess.TimeoutExpired as exc:
@@ -544,9 +684,7 @@ def _process(path: Path) -> None:
             detail = str(output).strip()
             raise HostReconcileError(
                 "candidate host reconciliation script exceeded "
-                + str(HOST_RECONCILE_LEGACY_ROLLBACK_TIMEOUT_SECONDS
-                      if source_revision == LEGACY_LKG_SHA
-                      else HOST_RECONCILE_TIMEOUT_SECONDS) + "s"
+                + str(_host_reconcile_timeout(source_revision)) + "s"
                 + (": " + detail[-3000:] if detail else "")
             ) from exc
         except subprocess.CalledProcessError as exc:

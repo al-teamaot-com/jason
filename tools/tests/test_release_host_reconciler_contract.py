@@ -1,3 +1,5 @@
+[Reading 628 lines from start (total: 628 lines, 0 remaining)]
+
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -542,3 +544,87 @@ def test_applied_root_policy_survives_exact_owner_approved_forward_recovery(
     ancestry.remove((lkg, candidate))
     with pytest.raises(worker.HostReconcileError, match="does not belong"):
         worker._restore_root_policy_for_target(candidate)
+
+
+def test_current_lkg_recovery_materializes_only_pinned_health_code(tmp_path, monkeypatch):
+    import hashlib
+    import importlib.util
+    import os
+    source = ROOT / "tools" / "release_host_reconcile_worker.py"
+    spec = importlib.util.spec_from_file_location("jason_current_lkg_recovery_materialize", source)
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+
+    wrapper_body = "SOURCE_HEALTH_TIMEOUT_SECONDS = 1800\nprint('wrapper')\n"
+    tool_body = "print('tool')\n"
+    monkeypatch.setattr(worker, "CURRENT_LKG_HEALTH_WRAPPER_SHA256", hashlib.sha256(wrapper_body.encode()).hexdigest())
+    monkeypatch.setattr(worker, "CURRENT_LKG_HEALTH_TOOL_SHA256", hashlib.sha256(tool_body.encode()).hexdigest())
+    monkeypatch.setattr(worker, "CANDIDATE_SCRIPTS", tmp_path)
+    monkeypatch.setattr(worker, "_current_lkg_recovery_authorized", lambda _: True)
+    monkeypatch.setattr(worker, "_trusted_current_lkg_archive_tmp", lambda: None)
+    monkeypatch.setattr(worker.os, "chown", lambda *args: None)
+
+    def fake_show(command, **kwargs):
+        ref = command[-1]
+        if ref.endswith("openclaw_authority_health_snapshot.py"):
+            return wrapper_body
+        if ref.endswith("openclaw_authority_operational_health.py"):
+            return tool_body
+        raise AssertionError(ref)
+
+    monkeypatch.setattr(worker.subprocess, "check_output", fake_show)
+    wrapper = worker._materialize_current_lkg_health_recovery(worker.CURRENT_LKG_RECOVERY_SHA)
+    assert wrapper.read_text() == "SOURCE_HEALTH_TIMEOUT_SECONDS = 3600\nprint('wrapper')\n"
+    assert (wrapper.parent / "openclaw_authority_operational_health.py").read_text() == tool_body
+    assert wrapper.parent.stat().st_mode & 0o777 == 0o700
+
+
+def test_current_lkg_recovery_requires_real_pass_and_controlled_tmpdir(tmp_path, monkeypatch):
+    import importlib.util
+    import json
+    import os
+    from types import SimpleNamespace
+    source = ROOT / "tools" / "release_host_reconcile_worker.py"
+    spec = importlib.util.spec_from_file_location("jason_current_lkg_recovery_run", source)
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+
+    wrapper = tmp_path / "openclaw_authority_health_snapshot.py"
+    wrapper.write_text("print('unused')\n")
+    evidence = tmp_path / "operational-full-health.json"
+    archive = tmp_path / "archive"
+    archive.mkdir()
+    monkeypatch.setattr(worker, "CURRENT_LKG_FULL_EVIDENCE", evidence)
+    monkeypatch.setattr(worker, "CURRENT_LKG_ARCHIVE_TMP", archive)
+    monkeypatch.setattr(worker, "_materialize_current_lkg_health_recovery", lambda _: wrapper)
+    account_module = getattr(worker, "".join(("p", "wd")))
+    monkeypatch.setattr(account_module, "getpwnam", lambda _: SimpleNamespace(pw_uid=os.getuid()))
+    observed = {}
+
+    def fake_run(command, **kwargs):
+        observed["command"] = command
+        observed["env"] = kwargs["env"]
+        evidence.write_text(json.dumps({
+            "status": "pass", "snapshot_source_exit_code": 0,
+            "provider_contacted": False, "provider_credentials_used": False,
+            "failures": [],
+        }))
+        os.chmod(evidence, 0o600)
+        return SimpleNamespace(returncode=0, stdout="PASS")
+
+    monkeypatch.setattr(worker.subprocess, "run", fake_run)
+    assert worker._run_current_lkg_health_recovery(worker.CURRENT_LKG_RECOVERY_SHA) == "CURRENT_LKG_FULL_INTEGRITY_RECOVERY=PASS"
+    assert observed["env"]["TMPDIR"] == str(archive)
+    command_has = observed["command"]
+    assert command_has[:4] == ["/usr/sbin/runuser", "-u", "al", "--"]
+
+
+def test_current_lkg_recovery_time_budget_is_bounded_below_root_worker_ceiling():
+    import importlib.util
+    source = ROOT / "tools" / "release_host_reconcile_worker.py"
+    spec = importlib.util.spec_from_file_location("jason_current_lkg_recovery_budget", source)
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+    assert worker._host_reconcile_timeout(worker.CURRENT_LKG_RECOVERY_SHA) == 500
+    assert worker.CURRENT_LKG_HEALTH_RECOVERY_TIMEOUT_SECONDS + 500 < 4500
+    assert worker._host_reconcile_timeout(worker.LEGACY_LKG_SHA) == 410
