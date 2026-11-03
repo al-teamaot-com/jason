@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 import sqlite3
 import stat
+import subprocess
 import sys
 import tempfile
 import uuid
@@ -130,6 +131,27 @@ def _install_repo_modules(repo: Path) -> None:
             sys.path.insert(0, root)
 
 
+def _protected_main_sha(repo: Path) -> str:
+    """Return the exact current protected main SHA or fail closed.
+
+    Superseded signed Teams decisions are non-authoritative only when the host
+    independently proves their candidate is no longer protected main. Network
+    or source ambiguity must never become permission to discard a decision.
+    """
+    completed = subprocess.run(
+        ["git", "-C", str(repo), "ls-remote", "origin", "refs/heads/main"],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        timeout=30, check=False,
+    )
+    if completed.returncode != 0:
+        raise PermissionError("protected main revision unavailable for signed decision disposition")
+    parts = completed.stdout.strip().split()
+    if (len(parts) != 2 or parts[1] != "refs/heads/main"
+            or re.fullmatch(r"[0-9a-f]{40}", parts[0]) is None):
+        raise PermissionError("protected main revision is not one exact SHA")
+    return parts[0]
+
+
 def _private_atomic(path: Path, doc: dict) -> None:
     """Write only 0600 regular files. Never follow a user-substituted symlink."""
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -165,6 +187,7 @@ def consume_mobile_release_decisions(
     bindings_db: Path = DEFAULT_BINDINGS,
     authority_db: Path = DEFAULT_AUTHORITY,
     trusted_keys: Path = DEFAULT_TRUSTED_KEYS,
+    protected_main_sha_reader: Callable[[Path], str] = _protected_main_sha,
 ) -> int:
     """Reauthenticate signed evidence, then record exact CCC and owner approval.
 
@@ -491,6 +514,33 @@ def consume_mobile_release_decisions(
                 or request.request_id != expected.request_id
                 or request.correlation_id != expected.correlation_id):
             raise PermissionError("mobile release policy or exact reviewed manifest changed")
+
+        # A fully authenticated historic decision for a release that is no
+        # longer protected main is terminal audit evidence, not release
+        # authority. Preserve the signed ledger and write a private processed
+        # disposition only after exact release/manifest/request reconstruction.
+        # Never create CCC material review or owner approval for the stale SHA.
+        protected_main_sha = protected_main_sha_reader(repo)
+        if candidate.candidate_sha != protected_main_sha:
+            read_release_approval_containment(state_root).require_request_eligible(
+                request.requested_at
+            )
+            _private_atomic(marker, {
+                "schema_version": "1.0",
+                "approval_id": approval_id,
+                "release_id": candidate.release_id,
+                "candidate_sha": candidate.candidate_sha,
+                "manifest_sha256": candidate.manifest_sha256,
+                "mobile_policy_sha256": policy.policy_sha256,
+                "signed_evidence_sha256": evidence_sha,
+                "decision": "approve",
+                "disposition": "superseded_protected_main",
+                "protected_main_sha": protected_main_sha,
+                "authority_mutated": False,
+                "processed_at": datetime.now(timezone.utc).isoformat(),
+            })
+            completed += 1
+            continue
 
         # Cross-process race guard immediately before CCC/release state writes.
         # A hold activated while evidence was being verified must still win.
