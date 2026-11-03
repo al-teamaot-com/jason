@@ -53,9 +53,8 @@ For support diagnostics, the shared HTTP transport may capture only the allowlis
 - `accounting.bill.search`
 - `accounting.report.profitloss.read`
 - `accounting.report.balancesheet.read`
-- `accounting.report.generalledger.read`
 
-Search operations use fixed server-authored QuickBooks entity queries with bounded paging. Report reads use fixed server-selected report endpoints with bounded date selectors. The General Ledger read exposes the posted-book side of reconciliation using accounting activity already recorded in QuickBooks; the separately obtained bank statement remains the bank-side evidence. Pending QuickBooks bank-feed transactions are not treated as available accounting evidence. Raw caller-authored query text is prohibited.
+Search operations use fixed server-authored QuickBooks entity queries with bounded paging. Raw caller-authored query text is prohibited.
 
 ## Authorization and information release
 

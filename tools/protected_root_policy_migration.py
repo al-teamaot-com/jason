@@ -67,26 +67,10 @@ APPROVED_PM_V2_SHADOW_DELTA = {
     "required_user_units": frozenset(),
     "allowed_user_units": frozenset({"jason-pm-v2-shadow.service"}),
 }
-# OpenBao identity lifecycle is a root-owned scheduled control surface. Its
-# first production declaration is limited to this exact timer/service pair.
-# The generic migration machinery stages the timer as ALLOWED before unit
-# installation, then promotes it to REQUIRED only after host verification.
-# No other system/user unit can inherit authority from this plan.
-APPROVED_OPENBAO_IDENTITY_LIFECYCLE_DELTA = {
-    "required_system_units": frozenset(
-        {"jason-openbao-identity-lifecycle.timer"}
-    ),
-    "allowed_system_units": frozenset(
-        {"jason-openbao-identity-lifecycle.service"}
-    ),
-    "required_user_units": frozenset(),
-    "allowed_user_units": frozenset(),
-}
 APPROVED_PLANS = (
     APPROVED_DELTA,
     APPROVED_HELD_OFFER_DELTA,
     APPROVED_PM_V2_SHADOW_DELTA,
-    APPROVED_OPENBAO_IDENTITY_LIFECYCLE_DELTA,
 )
 
 

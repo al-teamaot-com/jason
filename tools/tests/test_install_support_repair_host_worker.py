@@ -52,15 +52,14 @@ class InstallSupportRepairHostWorkerTests(unittest.TestCase):
         sys.modules[spec.name] = module
         spec.loader.exec_module(module)
         self.assertEqual([stage.name for stage in module.STAGES], [
-            "support_repair", "todo_intake", "development", "integration",
-            "release_bridge", "engineering_supervisor", "release_breaker_recovery",
+            "support_repair", "todo_intake", "development", "release_bridge",
+            "engineering_supervisor", "release_breaker_recovery",
         ])
         self.assertEqual(module.STAGES[1].requires, ("support_repair",))
         self.assertEqual(module.STAGES[2].requires, ("support_repair",))
         self.assertEqual(module.STAGES[3].requires, ())
         self.assertEqual(module.STAGES[4].requires, ())
         self.assertEqual(module.STAGES[5].requires, ())
-        self.assertEqual(module.STAGES[6].requires, ())
 
     def test_engineering_service_uses_immutable_installed_source(self):
         service = (

@@ -57,11 +57,14 @@ def approved_diagnostic_uid(repo: Path) -> str:
     return uid
 
 
-def _live_diagnostic_bindings(
-    output: Callable[[list[str]], str],
-) -> tuple[list[str], list[bool]]:
-    values: list[str] = []
-    present: list[bool] = []
+def live_diagnostic_uid(output: Callable[[list[str]], str]) -> str:
+    """Verify both Docker planes, tolerating only explicitly disabled legacy scope.
+
+    A missing live variable is compatible with an *explicitly empty* value in
+    the other plane; absent-on-both, duplicates, and any real UID mismatch fail.
+    """
+    values = []
+    present = []
     for container in ("jason-runtime", "jason-mcp-pilot"):
         entries = json.loads(output([
             "docker", "inspect", container, "--format", "{{json .Config.Env}}",
@@ -74,48 +77,14 @@ def _live_diagnostic_bindings(
             raise WorkerEnrollmentError("worker enrollment environment missing or duplicated")
         values.append(matching[0] if matching else "")
         present.append(bool(matching))
+    # The pre-enrollment runtime image may omit the field entirely while
+    # MCP explicitly records an empty value. Both mean *no* enrollment.
+    # Require at least one explicit empty value so a missing integration in
+    # both planes cannot silently masquerade as a valid disabled policy.
     if not any(present):
         raise WorkerEnrollmentError("worker enrollment environment missing or duplicated")
-    return values, present
-
-
-def live_diagnostic_uid(output: Callable[[list[str]], str]) -> str:
-    """Verify both Docker planes, tolerating only explicitly disabled legacy scope.
-
-    A missing live variable is compatible with an *explicitly empty* value in
-    the other plane; absent-on-both, duplicates, and any real UID mismatch fail.
-    """
-    values, present = _live_diagnostic_bindings(output)
     if values[0] != values[1]:
         if not all(present):
             raise WorkerEnrollmentError("worker enrollment environment missing or duplicated")
         raise WorkerEnrollmentError("MCP/runtime worker enrollment differs")
     return values[0]
-
-
-def release_baseline_uid(
-    output: Callable[[list[str]], str], *,
-    candidate_uid: str,
-    rollback_uid: str,
-) -> str:
-    """Return a canonical rollback binding for an exact governed release.
-
-    One historical partial-migration shape is recoverable: both live planes
-    explicitly define the variable, one is empty, and the other contains the
-    exact non-empty UID independently approved by both candidate and rollback
-    source. No other missing, conflicting, or cross-source enrollment is
-    normalized.
-    """
-    values, present = _live_diagnostic_bindings(output)
-    if values[0] == values[1]:
-        return values[0]
-    if (
-        all(present)
-        and candidate_uid
-        and candidate_uid == rollback_uid
-        and set(values) == {"", candidate_uid}
-    ):
-        return candidate_uid
-    if not all(present):
-        raise WorkerEnrollmentError("worker enrollment environment missing or duplicated")
-    raise WorkerEnrollmentError("MCP/runtime worker enrollment differs")

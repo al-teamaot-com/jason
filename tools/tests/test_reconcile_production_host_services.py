@@ -451,15 +451,15 @@ def test_exporter_activation_queues_nonblocking_start_and_waits_for_real_port_ow
     assert text.index('ensure_owned_exporter "$unit"') < text.index('if [ "$(systemctl is-active "$unit")" != "active" ]')
 
 
-def test_authority_health_refreshes_full_proof_only_when_existing_evidence_is_not_current_pass():
+def test_authority_health_is_lightweight_and_full_proof_deferred_out_of_reconciliation():
     text = RECONCILE.read_text(encoding="utf-8")
     root_worker = (REPO_ROOT / "tools/release_host_reconcile_worker.py").read_text(encoding="utf-8")
     manager = (REPO_ROOT / "tools/release_manager_host_runner.py").read_text(encoding="utf-8")
     fast = (REPO_ROOT / "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-health.service").read_text(encoding="utf-8")
     full = (REPO_ROOT / "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-full-integrity.service").read_text(encoding="utf-8")
     timer = (REPO_ROOT / "infrastructure/openclaw-operations/systemd/jason-openclaw-authority-full-integrity.timer").read_text(encoding="utf-8")
-    assert "HOST_RECONCILE_TIMEOUT_SECONDS = 4200" in root_worker
-    assert "timeout_seconds: float = 4440.0" in manager
+    assert "HOST_RECONCILE_TIMEOUT_SECONDS = 360" in root_worker
+    assert "timeout_seconds: float = 420.0" in manager
     assert "openclaw_authority_fast_health.py" in fast
     assert "openclaw_authority_health_snapshot.py" not in fast
     assert "openclaw_authority_health_snapshot.py" in full
@@ -471,27 +471,7 @@ def test_authority_health_refreshes_full_proof_only_when_existing_evidence_is_no
     assert 'if [ "$unit" = "jason-openclaw-authority-health.service" ]; then' in text
     assert "jason-openclaw-authority-full-integrity.service" in text
     assert "jason-openclaw-authority-full-integrity.timer" in text
-    assert 'ensure_authority_full_integrity_proof' in text
-    assert 'JASON_AUTHORITY_FULL_INTEGRITY=EXISTING_RECENT_PASS' in text
-    assert 'JASON_AUTHORITY_FULL_INTEGRITY=RUN_REPAIRED_PROOF' in text
-    assert 'JASON_AUTHORITY_FULL_INTEGRITY=WAIT_EXISTING_JOB' in text
-    assert 'systemctl start "$CURRENT_UNIT"' in text
-    assert text.index('ensure_authority_full_integrity_proof') < text.index('for unit in "${MAINTENANCE_SERVICES[@]}"; do')
     assert '120s systemctl start "$unit"' in text
-
-
-def test_boot_recovery_is_installed_from_exact_immutable_release_without_forcing_service_run() -> None:
-    text = RECONCILE.read_text(encoding="utf-8")
-    assert 'step_start boot_recovery_install' in text
-    assert 'install -o root -g root -m 0750 "$BOOT_RECOVERY_SCRIPT" /usr/local/sbin/jason-boot-recovery' in text
-    assert 'install -o root -g root -m 0644 "$BOOT_RECOVERY_SERVICE" /etc/systemd/system/jason-boot-recovery.service' in text
-    assert 'install -o root -g root -m 0644 "$BOOT_RECOVERY_TIMER" /etc/systemd/system/jason-boot-recovery.timer' in text
-    assert 'cmp -s "$BOOT_RECOVERY_SCRIPT" /usr/local/sbin/jason-boot-recovery' in text
-    assert 'systemctl enable jason-boot-recovery.service jason-boot-recovery.timer' in text
-    assert 'systemctl start jason-boot-recovery.timer' in text
-    assert 'systemctl start jason-boot-recovery.service' not in text
-    assert 'JASON_BOOT_RECOVERY_INSTALL=PASS' in text
-    assert text.index('step_start boot_recovery_install') < text.index('step_start root_release_transition_install')
 
 
 def test_pm_v2_shadow_is_installed_only_inside_governed_host_reconciliation() -> None:
