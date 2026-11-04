@@ -306,7 +306,16 @@ def test_observability_is_not_a_release_blocker() -> None:
     assert 'install_observability_assurance.sh' not in text
     assert 'step_start production_drift_guard' in text
     assert 'JASON_RECOVERY_NATIVE_HEALTH=PASS' in text
+    assert 'GRAFANA_REVALIDATION_DEADLINE' not in text
     assert 'install_ccc_scheduler.sh' not in text
+    assert 'production_drift_guard.py' in text
+
+
+def test_documentation_publication_does_not_block_production_ci() -> None:
+    workflow = (REPO_ROOT / '.github/workflows/validate.yml').read_text(encoding='utf-8')
+    assert 'documentation_impact_gate.py --event' not in workflow
+    assert 'run: mkdocs build --strict' not in workflow
+    assert 'run: mkdocs build' in workflow
 
 
 def test_unmanaged_toner_exporter_is_removed_during_production_reconciliation() -> None:
