@@ -585,6 +585,7 @@ class SQLiteOperationalWorkStore:
         self._connection.execute("PRAGMA journal_mode=WAL")
         self._connection.execute("PRAGMA synchronous=FULL")
         self._connection.executescript(self._SCHEMA)
+        self._migrate_ticket_worker_heartbeat()
         columns = {
             str(row["name"])
             for row in self._connection.execute(
@@ -803,6 +804,60 @@ class SQLiteOperationalWorkStore:
                 "DELETE FROM autonomy_operational_work WHERE ticket_id=?",
                 (int(ticket_id),),
             )
+
+    def _migrate_ticket_worker_heartbeat(self) -> None:
+        """Upgrade the pre-supervisor heartbeat without losing old evidence.
+
+        Older databases have (singleton_id, heartbeat_at, phase, cycle_id).
+        CREATE TABLE IF NOT EXISTS does not change that layout, and new worker
+        writes then fail indefinitely. Rename that table once, preserving its
+        entire row, and create the new scan-specific heartbeat shape. Do not
+        pretend an old reconciliation heartbeat is a completed ticket scan.
+        """
+        connection = self._connection
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            columns = {
+                str(row["name"])
+                for row in connection.execute(
+                    "PRAGMA table_info(autonomy_ticket_worker_heartbeat)"
+                ).fetchall()
+            }
+            expected = {
+                "singleton_id", "last_started_at", "last_completed_at", "state"
+            }
+            legacy = {"singleton_id", "heartbeat_at", "phase", "cycle_id"}
+            if columns == expected:
+                connection.execute("COMMIT")
+                return
+            if columns != legacy:
+                raise OperationalAutonomyError(
+                    "ticket worker heartbeat schema is unrecognized; "
+                    "migration requires technician review"
+                )
+            archived = connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' "
+                "AND name='autonomy_ticket_worker_heartbeat_legacy_v1'"
+            ).fetchone()
+            if archived is not None:
+                raise OperationalAutonomyError(
+                    "legacy ticket heartbeat archive exists; refusing overwrite"
+                )
+            connection.execute(
+                "ALTER TABLE autonomy_ticket_worker_heartbeat "
+                "RENAME TO autonomy_ticket_worker_heartbeat_legacy_v1"
+            )
+            connection.execute(
+                "CREATE TABLE autonomy_ticket_worker_heartbeat ("
+                "singleton_id INTEGER PRIMARY KEY CHECK(singleton_id=1),"
+                "last_started_at TEXT,"
+                "last_completed_at TEXT,"
+                "state TEXT NOT NULL)"
+            )
+            connection.execute("COMMIT")
+        except BaseException:
+            connection.execute("ROLLBACK")
+            raise
 
     def mark_scan_started(self, *, started_at: str) -> None:
         with self._connection:
