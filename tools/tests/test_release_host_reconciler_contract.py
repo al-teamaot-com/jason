@@ -557,10 +557,14 @@ def test_current_lkg_recovery_materializes_only_pinned_health_code(tmp_path, mon
     tool_body = "print('tool')\n"
     monkeypatch.setattr(worker, "CURRENT_LKG_HEALTH_WRAPPER_SHA256", hashlib.sha256(wrapper_body.encode()).hexdigest())
     monkeypatch.setattr(worker, "CURRENT_LKG_HEALTH_TOOL_SHA256", hashlib.sha256(tool_body.encode()).hexdigest())
-    monkeypatch.setattr(worker, "CANDIDATE_SCRIPTS", tmp_path)
+    monkeypatch.setattr(worker, "CURRENT_LKG_EXEC_ROOT", tmp_path / "root-controlled-health")
     monkeypatch.setattr(worker, "_current_lkg_recovery_authorized", lambda _: True)
     monkeypatch.setattr(worker, "_trusted_current_lkg_archive_tmp", lambda: None)
     monkeypatch.setattr(worker.os, "chown", lambda *args: None)
+    # The production helper checks real root ownership; this unit test has no
+    # root privilege and supplies only an isolated, owner-trusted temp fixture.
+    monkeypatch.setattr(worker, "_trusted_current_lkg_execution_dir",
+                        lambda: (tmp_path, os.getgid()))
 
     def fake_show(command, **kwargs):
         ref = command[-1]
@@ -575,6 +579,55 @@ def test_current_lkg_recovery_materializes_only_pinned_health_code(tmp_path, mon
     assert wrapper.read_text() == "SOURCE_HEALTH_TIMEOUT_SECONDS = 3600\nprint('wrapper')\n"
     assert (wrapper.parent / "openclaw_authority_operational_health.py").read_text() == tool_body
     assert wrapper.parent.stat().st_mode & 0o777 == 0o700
+    assert wrapper.stat().st_mode & 0o777 == 0o640
+    assert (wrapper.parent / "openclaw_authority_operational_health.py").stat().st_mode & 0o777 == 0o640
+
+
+def test_current_lkg_exec_dir_rejects_untrusted_or_symlinked_paths(tmp_path, monkeypatch):
+    import importlib.util
+    import pytest
+    import os
+    import stat
+    from types import SimpleNamespace
+    source = ROOT / "tools" / "release_host_reconcile_worker.py"
+    spec = importlib.util.spec_from_file_location("jason_lkg_exec_dir_trust_test", source)
+    worker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(worker)
+
+    parent = tmp_path / "root-managed"
+    parent.mkdir(mode=0o755)
+    root = parent / "lkg-health-test"
+    monkeypatch.setattr(worker, "CURRENT_LKG_EXEC_ROOT", root)
+    monkeypatch.setattr(worker.grp, "getgrnam", lambda _: SimpleNamespace(gr_gid=os.getgid()))
+    monkeypatch.setattr(worker.os, "chown", lambda *args: None)
+    real_lstat = type(parent).lstat
+
+    def root_owned_lstat(path):
+        info = real_lstat(path)
+        if path in {parent, root}:
+            return SimpleNamespace(st_uid=0, st_mode=info.st_mode)
+        return info
+
+    monkeypatch.setattr(type(parent), "lstat", root_owned_lstat)
+    observed, group = worker._trusted_current_lkg_execution_dir()
+    assert observed == root
+    assert group == os.getgid()
+    assert stat.S_IMODE(root.stat().st_mode) == 0o750
+
+    # A malicious symlink inside a trusted parent is never followed.
+    root.rmdir()
+    target = tmp_path / "unsafe-target"
+    target.mkdir()
+    root.symlink_to(target, target_is_directory=True)
+    with pytest.raises(worker.HostReconcileError, match="untrusted"):
+        worker._trusted_current_lkg_execution_dir()
+
+    # No re-permissioning of a writable or non-root-owned existing directory.
+    root.unlink()
+    root.mkdir(mode=0o770)
+    root.chmod(0o770)
+    with pytest.raises(worker.HostReconcileError, match="untrusted"):
+        worker._trusted_current_lkg_execution_dir()
 
 
 def test_current_lkg_recovery_requires_real_pass_and_controlled_tmpdir(tmp_path, monkeypatch):
