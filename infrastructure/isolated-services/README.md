@@ -50,3 +50,7 @@ Do not copy these units or gate manually onto the Jason production host.
 
 
 **Reuse existing independent publishers:** Jason already has a governed documentation reconciliation service and provider-health canary timer. The new Documentation and Provider Health workers are advisory consumers of those authoritative outputs, not competing documentation merge or provider-probe writers. Preserve those existing units unless a separately authorized manifest replaces them.
+
+## Ticket-processing continuity is a deployment NO-GO
+
+The independent worker lanes must remain disabled until the release's `ticket_continuity_release_gate` has fresh, governed evidence for ticket intake, Autotask queue routing, notes, device association, claims/retries, alert-ticket handling, and notifications. Require controlled test-ticket read/write verification, no duplicate ticket actions, and two independent post-cutover observations. Do not shut down the existing ticket runtime, bypass existing authorization, or treat read-only success as proof of ticket lifecycle functionality. Any missing, stale, or failed receipt stops the cutover and invokes the authorized rollback path.
