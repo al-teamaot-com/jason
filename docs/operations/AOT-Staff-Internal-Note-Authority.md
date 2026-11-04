@@ -48,3 +48,7 @@ Internal-note visibility metadata is not enough to ensure no customer notificati
 ## Rollback
 
 With PM-controlled release and approved restart, unset `JASON_AOT_STAFF_INTERNAL_NOTE_PROFILE` and verify the matcher denies new note actions even if the exact grant remains stored. Revoke the stored grant through governed authority administration if necessary. Do not modify other grants, PMv3.1 or the routine RW profile.
+
+## Integration coordination — 2026-11-04
+
+The active draft PR was compared with other open changes to `composition.py`: #2282 and #2177 (KFS copier/SharePoint evidence), #2178 (Datto patch reads), #2125 and #2128 (routine Autotask RW registration), and #2126 (Windows Time JSON shadow). Those patches add separate import/configuration/invoker lines, while this branch adds a separate note-only authority import and grant seed. Preserve all changes during release reconciliation; do not merge this branch over those changes or alter PMv3.1. See the PR's `Integration coordination:` acknowledgement for the reviewed overlaps.
