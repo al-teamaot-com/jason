@@ -5,11 +5,13 @@ on:
     paths:
       - 'implementation/mcp_service/src/jason_mcp/server.py'
       - 'implementation/mcp_service/tests/test_datto_job_output_paging.py'
+      - 'implementation/mcp_service/tests/test_datto_job_output_preproduction.py'
       - '.github/workflows/drmm-job-output-paging.yml'
   push:
     paths:
       - 'implementation/mcp_service/src/jason_mcp/server.py'
       - 'implementation/mcp_service/tests/test_datto_job_output_paging.py'
+      - 'implementation/mcp_service/tests/test_datto_job_output_preproduction.py'
       - '.github/workflows/drmm-job-output-paging.yml'
 
 permissions:
@@ -32,7 +34,7 @@ jobs:
           python -m pip install ./implementation ./implementation/connectors/openclaw ./implementation/runtime_service ./implementation/mcp_service
       - name: Compile guarded output and tests
         run: |
-          python -m py_compile implementation/mcp_service/src/jason_mcp/server.py implementation/mcp_service/tests/test_datto_job_output_paging.py
+          python -m py_compile implementation/mcp_service/src/jason_mcp/server.py implementation/mcp_service/tests/test_datto_job_output_paging.py implementation/mcp_service/tests/test_datto_job_output_preproduction.py
       - name: Verify bounded read pagination and authority regression
         run: |
-          python -m pytest -q implementation/mcp_service/tests/test_datto_job_output_paging.py implementation/mcp_service/tests/test_governed_read_failure_contract.py
+          python -m pytest -q implementation/mcp_service/tests/test_datto_job_output_paging.py implementation/mcp_service/tests/test_datto_job_output_preproduction.py implementation/mcp_service/tests/test_governed_read_failure_contract.py
