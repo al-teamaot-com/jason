@@ -95,6 +95,30 @@ def classify(phase: str, reason: str, *, lane: str) -> tuple[str, str]:
     return "needs_triage", "inspect_bounded_state_evidence"
 
 
+def classify_record(
+    phase: str, reason: str, record: Mapping[str, Any], *, lane: str,
+) -> tuple[str, str]:
+    """Do not call an exhausted native worker retry an executable recovery.
+
+    A successful diagnostic handoff is not authority to retry the original
+    reasoning request. The existing governed Support issue must be repaired
+    and independently verified before native development re-admission.
+    """
+    category, next_action = classify(phase, reason, lane=lane)
+    if (lane != "development" or phase != "blocked"
+            or record.get("blocker_class") != "internal_retry_exhausted"
+            or category in {"external_dependency", "dependency_hold", "human_authority"}):
+        return category, next_action
+
+    handoff = record.get("recovery_handoff_intake")
+    support_id = str(record.get("recovery_support_issue_raised") or "")
+    if (isinstance(handoff, Mapping)
+            and handoff.get("status") == "awaiting_governed_repair"
+            and re.fullmatch(r"SUPPORT-DEV-[1-9][0-9]*", support_id)):
+        return "governed_repair_handoff", "advance_existing_governed_support_repair"
+    return "needs_triage", "complete_native_exhausted_recovery_handoff"
+
+
 def build_snapshot(spool: Path, prior: Mapping[str, Any] | None = None) -> dict[str, Any]:
     for required in ("state.json", "development-state.json", "todo-intake-state.json"):
         if not (spool / required).is_file():
@@ -119,23 +143,34 @@ def build_snapshot(spool: Path, prior: Mapping[str, Any] | None = None) -> dict[
             if lane == "support" and identifier in no_longer_open:
                 continue
             phase = str(record.get("phase") or "unknown")[:55]
-            category, next_action = classify(phase, str(record.get("reason") or ""), lane=lane)
+            category, next_action = classify_record(
+                phase, str(record.get("reason") or ""), record, lane=lane,
+            )
             if category == "complete":
                 continue
             progress = {
                 field: str(record.get(field) or "")
                 for field in ("phase", "reasoning_request_id", "pr_number",
                               "merge_sha", "acceptance_request_id",
-                              "evidence_turn_count", "source_context_recovery_request_id")
+                              "evidence_turn_count", "source_context_recovery_request_id",
+                              "blocker_class", "recovery_handoff_id",
+                              "recovery_support_issue_raised")
             }
+            handoff = record.get("recovery_handoff_intake")
+            progress["handoff_status"] = (
+                str(handoff.get("status") or "") if isinstance(handoff, Mapping) else ""
+            )
             progress_digest = hashlib.sha256(
                 json.dumps(progress, sort_keys=True).encode("utf-8")
             ).hexdigest()[:16]
-            objects.append({
+            item = {
                 "id": identifier, "lane": lane, "phase": phase,
                 "category": category, "next_action": next_action,
                 "progress_sha256": progress_digest,
-            })
+            }
+            if category == "governed_repair_handoff":
+                item["related_support_item"] = str(record["recovery_support_issue_raised"])
+            objects.append(item)
 
     conflicts = intake.get("identity_conflicts") or {}
     if not isinstance(conflicts, Mapping):
@@ -188,8 +223,10 @@ def build_snapshot(spool: Path, prior: Mapping[str, Any] | None = None) -> dict[
     outstanding = int((intake.get("downstream_commitments") or {}).get("outstanding_count") or 0)
     capacity = int(intake.get("engineering_capacity") or 0)
     stalled = outstanding > 0 and active == 0 and capacity > 0
+    # Unclassified triage and exhausted repair handoffs are NOT evidence
+    # that the current worker has another safe retry available.
     internal = sum(counts.get(name, 0) for name in (
-        "recoverable_source", "recoverable_transport", "recoverable_validation", "needs_triage"))
+        "recoverable_source", "recoverable_transport", "recoverable_validation"))
     blocker = ("internal_recovery_needed" if stalled and internal
                else "external_or_governed_gate" if stalled or conflicts else None)
     return {

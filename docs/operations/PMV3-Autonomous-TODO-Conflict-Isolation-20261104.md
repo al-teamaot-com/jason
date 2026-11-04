@@ -35,6 +35,29 @@ queue or invent broader authority to resolve a conflicting source identity.
   `human_authority` category. It cannot characterize such a conflict as a
   healthy empty queue or turn the conflict into a recoverable provider write.
 
+## Stop misleading recovery cycles on exhausted handoffs
+
+The same production investigation found owner-approved development records
+already at `internal_retry_exhausted` with durable
+`recovery_handoff_intake.status = awaiting_governed_repair` and existing
+`SUPPORT-DEV-...` issues. Examples include DEV-1196 (#1586) and DEV-1444
+(#1450). The native development worker deliberately prohibits another
+unverified retry; the supervisor incorrectly counted their old HTTP transport
+errors as immediate `recoverable_transport` progress.
+
+The supervisor now classifies an exhausted record with a verified existing
+handoff as `governed_repair_handoff`, with the original SUPPORT-DEV ID
+preserved for follow-up. Exhausted records lacking a valid handoff remain
+`needs_triage` rather than gaining retry authority. Neither category can
+trigger the PMV3 controller's automatic recoverable-pass loop by itself.
+Unknown triage is not a verified executable recovery action.
+
+This is scheduling and evidence accuracy, **not completion** of the
+governed repair handoff. Do not retry failed reasoning requests without the
+worker's independent same-schema transport proof, source/test evidence and
+applicable authorizations. Existing release locks and provider/owner policy
+remain controlling.
+
 ## Acceptance / monitoring
 
 Source tests cover divergent and identical duplicate handling, more than two
