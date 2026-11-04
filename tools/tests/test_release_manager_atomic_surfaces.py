@@ -168,6 +168,9 @@ def atomic_release_sandbox(monkeypatch, tmp_path):
         ),
     )
     monkeypatch.setattr(runner, "verify_candidate_on_main", lambda *a: None)
+    # Fault-injection tests use synthetic SHAs and must never fetch Git.
+    # Exact root-source fail-closed behavior is covered in the host runner suite.
+    monkeypatch.setattr(runner, "ensure_managed_host_source_revision", lambda *a: None)
     monkeypatch.setattr(runner, "require_current_protected_release_source", lambda *a: None)
     monkeypatch.setattr(runner, "require_current_manual_scope_review", lambda *a: None)
     monkeypatch.setattr(runner, "run_release_ccc_gate",
