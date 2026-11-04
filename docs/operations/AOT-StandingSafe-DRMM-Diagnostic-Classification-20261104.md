@@ -53,3 +53,13 @@ No production code, Datto component, registry, approval identity or endpoint con
 ## Documentation impact
 
 Architecture: retains Central Orchestrator and Owner authority. Capability contract: adds exactly reviewed passive diagnostic identity exemption, not a generic provider-read escalation. Operations and security: this guide and regression tests. System Registry: unchanged. Release and rollback: governed PMV3.1 only.
+
+## Concurrent change coordination (2026-11-04)
+
+The exact server.py patches in #2158 (release ticket-read canary), #2125 and
+stacked #2128 (client/onboarding write argument scope), and #2304 (paged Datto
+job-output reads) were reviewed. This change is localized to the later,
+post-canonicalization passive diagnostic exemption. It must be reconciled and
+retested after any of those PRs merge; the current main baseline is not
+permission to overwrite another workstream. Isolated preproduction CI exercises
+the three no-approval cases and fail-closed scenarios using a temporary ledger.
