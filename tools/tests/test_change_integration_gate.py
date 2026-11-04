@@ -1,3 +1,5 @@
+import sys
+import json
 import importlib.util
 import io
 import urllib.error
@@ -98,3 +100,39 @@ class ChangeIntegrationGateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_main_requires_pmv3_stabilization_label(monkeypatch, tmp_path):
+    event = {
+        "repository": {"full_name": "al-teamaot-com/jason"},
+        "pull_request": {
+            "number": 9999,
+            "base": {"ref": "main"},
+            "body": "Integration coordination: none",
+            "labels": [],
+        },
+    }
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps(event), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["change_integration_gate.py", "--event", str(event_path)])
+    assert gate.main() == 2
+
+
+def test_main_allows_pmv3_stabilization_label(monkeypatch, tmp_path):
+    event = {
+        "repository": {"full_name": "al-teamaot-com/jason"},
+        "pull_request": {
+            "number": 9999,
+            "base": {"ref": "main"},
+            "body": "Integration coordination: none",
+            "labels": [{"name": "pmv3-stabilization"}],
+        },
+    }
+    event_path = tmp_path / "event.json"
+    event_path.write_text(json.dumps(event), encoding="utf-8")
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setattr(sys, "argv", ["change_integration_gate.py", "--event", str(event_path)])
+    monkeypatch.setattr(gate, "ensure_current_base", lambda _base: None)
+    monkeypatch.setattr(gate, "changed_files", lambda _base: set())
+    monkeypatch.setattr(gate, "active_overlap_check", lambda **_kwargs: [])
+    assert gate.main() == 0

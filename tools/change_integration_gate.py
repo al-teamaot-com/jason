@@ -37,6 +37,7 @@ ACK_PATTERN = re.compile(
     r"(?im)^\s*(?:-\s*)?Integration coordination\s*:\s*(?P<value>.+?)\s*$"
 )
 PR_NUMBER_PATTERN = re.compile(r"#(\d+)")
+MAINLINE_ADMISSION_LABEL = "pmv3-stabilization"
 
 
 def run(*args: str) -> str:
@@ -239,6 +240,14 @@ def main() -> int:
     current_pr = int(pr["number"])
     base_ref = str(pr["base"]["ref"])
     body = str(pr.get("body") or "")
+    labels = {str(item.get("name", "")) for item in (pr.get("labels") or [])}
+    if base_ref == "main" and MAINLINE_ADMISSION_LABEL not in labels:
+        print(
+            f"change-integration: PR #{current_pr} targets main but is not admitted "
+            f"to the PMV3 stabilization train; add label {MAINLINE_ADMISSION_LABEL!r}",
+            file=sys.stderr,
+        )
+        return 2
     token = os.environ.get("GITHUB_TOKEN", "")
     if not token:
         print("change-integration: GITHUB_TOKEN is required for PR overlap checks", file=sys.stderr)
