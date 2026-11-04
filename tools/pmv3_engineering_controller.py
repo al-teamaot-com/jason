@@ -27,6 +27,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+try:
+    import pmv3_integration_queue as integration_queue
+except ModuleNotFoundError:
+    from tools import pmv3_integration_queue as integration_queue
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -55,6 +60,38 @@ def load_json(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("invalid PMV3 controller evidence")
     return value
+
+
+def reconcile_integration_queue(
+    *,
+    spool: Path,
+    release_state: Path,
+    reconciler: Callable[..., Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Reconcile repository integration without coupling it to development.
+
+    Failure is deliberately fail-closed for merges: the GitHub required status
+    remains pending/missing, while engineering development is allowed to keep
+    running.
+    """
+    try:
+        state = reconciler(
+            api=integration_queue.GhApi(),
+            spool=spool,
+            release_state=release_state,
+            batch_size=max(1, min(10, int(os.environ.get(
+                "JASON_PMV3_INTEGRATION_BATCH_SIZE", "3"
+            )))),
+        )
+        return integration_queue.snapshot(state)
+    except Exception as exc:
+        return {
+            "status": "control_failure",
+            "gate_context": integration_queue.GATE_CONTEXT,
+            "error_type": type(exc).__name__,
+            "reason": str(exc)[:500],
+            "updated_at": now(),
+        }
 
 
 def progress_fingerprint(pipeline: Mapping[str, Any], supervisor: Mapping[str, Any]) -> str:
@@ -167,6 +204,10 @@ def production_transaction_active(release_state: Path) -> bool:
 def _defer_for_production_transaction(state: dict[str, Any], state_path: Path) -> dict[str, Any]:
     state["status"] = "deferred"
     state["reason"] = "production_transaction_active"
+    state.setdefault("integration_queue", {
+        "schema_version": "1.0", "status": "deferred",
+        "reason": "production_transaction_active", "queue": [],
+    })
     state["finished_at"] = now()
     state["pass_count"] = len(state["passes"])
     atomic_json(state_path, state)
@@ -185,6 +226,7 @@ def controller_run(
     pipeline_timeout: int = 3900,
     runner: Callable[..., Any] = subprocess.run,
     sleeper: Callable[[float], None] = time.sleep,
+    integration_reconciler: Callable[..., Mapping[str, Any]] = integration_queue.reconcile,
 ) -> dict[str, Any]:
     state_path = spool / "pmv3-engineering-controller-state.json"
     state = {
@@ -195,16 +237,18 @@ def controller_run(
         "passes": [],
         "teams_only_approval": True,
     }
+    # Check the production lock BEFORE touching the integration queue. Queue
+    # reconciliation can perform governed source integration and must not run
+    # while Release Manager owns the same production transaction mutex.
+    if production_transaction_active(release_state):
+        return _defer_for_production_transaction(state, state_path)
+    state["integration_queue"] = reconcile_integration_queue(
+        spool=spool, release_state=release_state, reconciler=integration_reconciler,
+    )
     atomic_json(state_path, state)
 
     previous_fp = None
     unchanged = 0
-
-    # Production has priority over engineering. A new PMV3 timer invocation
-    # must become a clean no-op while Release Manager owns the production
-    # mutex, and a multi-pass controller must re-check before every pass.
-    if production_transaction_active(release_state):
-        return _defer_for_production_transaction(state, state_path)
 
     for pass_number in range(1, max(1, int(max_passes)) + 1):
         if production_transaction_active(release_state):
@@ -229,6 +273,20 @@ def controller_run(
 
         pipeline = load_json(spool / "engineering-pipeline-state.json")
         supervisor = load_json(spool / "engineering-supervisor-state.json")
+        # A production transaction may begin while an already-started
+        # engineering pass runs. Record that pass, but do not reconcile the
+        # integration queue after the production lock was acquired.
+        if production_transaction_active(release_state):
+            state["passes"].append({
+                "pass": pass_number, "pipeline_return_code": return_code,
+                "disposition": "deferred",
+                "reason": "production_transaction_active",
+                "checked_at": now(),
+            })
+            return _defer_for_production_transaction(state, state_path)
+        state["integration_queue"] = reconcile_integration_queue(
+            spool=spool, release_state=release_state, reconciler=integration_reconciler,
+        )
         disposition, reason = classify(pipeline, supervisor)
         fp = progress_fingerprint(pipeline, supervisor)
         if fp == previous_fp:

@@ -6292,6 +6292,20 @@ def _pmv3_engineering_snapshot() -> dict[str, object]:
     passes = payload.get("passes")
     passes = passes if isinstance(passes, list) else []
     last_pass = passes[-1] if passes and isinstance(passes[-1], Mapping) else {}
+    raw_queue = payload.get("integration_queue")
+    if isinstance(raw_queue, Mapping):
+        integration_queue = {
+            key: raw_queue.get(key)
+            for key in (
+                "status", "gate_context", "main_sha", "production_lkg_sha",
+                "release_lock_active", "release_candidate_sha", "train_id",
+                "train_prs", "queue_depth", "last_action", "updated_at",
+                "error_type", "reason",
+            )
+            if key in raw_queue
+        }
+    else:
+        integration_queue = {"status": "unavailable", "reason": "pmv3_integration_queue_state_missing"}
     return {
         "status": str(payload.get("status") or "unknown"),
         "reason": str(payload.get("reason") or ""),
@@ -6302,6 +6316,7 @@ def _pmv3_engineering_snapshot() -> dict[str, object]:
         "last_progress_sha256": str(last_pass.get("progress_sha256") or ""),
         "unchanged_passes": int(last_pass.get("unchanged_passes") or 0),
         "teams_only_approval": payload.get("teams_only_approval") is True,
+        "integration_queue": integration_queue,
     }
 
 
