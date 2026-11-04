@@ -43,6 +43,28 @@ OBSOLETE_UNITS = (
 )
 
 
+def test_openbao_lifecycle_reconciliation_requires_exact_declared_sources() -> None:
+    text = RECONCILE.read_text(encoding="utf-8")
+    installer = REPO_ROOT / "tools/install_openbao_identity_lifecycle.py"
+    associated = (
+        "provider_secret_provision.py",
+        "openbao_identity_lifecycle.py",
+        "openbao_identity_lifecycle_worker.py",
+    )
+    if not installer.exists():
+        # This release retired the lifecycle sources; the host must not
+        # attempt an absent installer or silently inherit obsolete units.
+        assert all(not (REPO_ROOT / "tools" / name).exists() for name in associated[1:])
+        assert (REPO_ROOT / "tools" / associated[0]).is_file()
+        assert 'if [ -f "$RELEASE_DIR/tools/install_openbao_identity_lifecycle.py" ]; then' in text
+        assert 'JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=NOT_DECLARED' in text
+        assert 'obsolete OpenBao lifecycle unit requires governed retirement' in text
+        assert 'provider identity recovery requires a declared OpenBao lifecycle' in text
+    else:
+        assert all((REPO_ROOT / "tools" / name).is_file() for name in associated)
+    assert 'JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=PASS' in text
+
+
 def test_canonical_host_units_use_immutable_release_path() -> None:
     for unit in EXPORTER_UNITS:
         path = REPO_ROOT / "infrastructure" / "showcase" / "systemd" / unit

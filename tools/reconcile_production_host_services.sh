@@ -800,25 +800,45 @@ step_pass root_release_transition_install
 echo "JASON_ROOT_RELEASE_TRANSITION_RECONCILIATION=PASS"
 
 step_start openbao_identity_lifecycle_install
-/usr/bin/python3 "$RELEASE_DIR/tools/install_openbao_identity_lifecycle.py"
-cmp -s "$RELEASE_DIR/tools/provider_secret_provision.py" /usr/local/lib/jason/provider_secret_provision.py || {
-  echo "ERROR: installed provider secret provisioning library differs from production source" >&2
-  exit 9
-}
-cmp -s "$RELEASE_DIR/tools/openbao_identity_lifecycle.py" /usr/local/lib/jason/openbao_identity_lifecycle.py || {
-  echo "ERROR: installed OpenBao identity lifecycle library differs from production source" >&2
-  exit 9
-}
-cmp -s "$RELEASE_DIR/tools/openbao_identity_lifecycle_worker.py" /usr/local/lib/jason/openbao_identity_lifecycle_worker.py || {
-  echo "ERROR: installed OpenBao identity lifecycle worker differs from production source" >&2
-  exit 9
-}
-if [ "$(systemctl is-active jason-openbao-identity-lifecycle.timer 2>/dev/null || true)" != "active" ]; then
-  echo "ERROR: OpenBao identity lifecycle timer is not active after production install" >&2
-  exit 9
+# The exact release may intentionally retire the lifecycle service. Never
+# invoke an installer absent from that release or silently strand an old unit.
+if [ -f "$RELEASE_DIR/tools/install_openbao_identity_lifecycle.py" ]; then
+  for required in provider_secret_provision.py openbao_identity_lifecycle.py openbao_identity_lifecycle_worker.py; do
+    if [ ! -f "$RELEASE_DIR/tools/$required" ]; then
+      echo "ERROR: OpenBao identity lifecycle source is incomplete" >&2
+      exit 9
+    fi
+  done
+  /usr/bin/python3 "$RELEASE_DIR/tools/install_openbao_identity_lifecycle.py"
+  for required in provider_secret_provision.py openbao_identity_lifecycle.py openbao_identity_lifecycle_worker.py; do
+    cmp -s "$RELEASE_DIR/tools/$required" "/usr/local/lib/jason/$required" || {
+      echo "ERROR: installed OpenBao lifecycle source differs from release" >&2
+      exit 9
+    }
+  done
+  if [ "$(systemctl is-active jason-openbao-identity-lifecycle.timer 2>/dev/null || true)" != "active" ]; then
+    echo "ERROR: declared OpenBao lifecycle timer is not active" >&2
+    exit 9
+  fi
+  echo "JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=PASS"
+else
+  for removed in openbao_identity_lifecycle.py openbao_identity_lifecycle_worker.py; do
+    if [ -e "$RELEASE_DIR/tools/$removed" ]; then
+      echo "ERROR: partially retired OpenBao lifecycle release source" >&2
+      exit 9
+    fi
+  done
+  if systemctl list-unit-files jason-openbao-identity-lifecycle.timer --no-legend --no-pager 2>/dev/null | grep -q 'jason-openbao-identity-lifecycle.timer'; then
+    echo "ERROR: obsolete OpenBao lifecycle unit requires governed retirement" >&2
+    exit 9
+  fi
+  if [ "$RECOVERY_PROFILE" = "provider_identity_and_authority_recovery" ]; then
+    echo "ERROR: provider identity recovery requires a declared OpenBao lifecycle" >&2
+    exit 9
+  fi
+  echo "JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=NOT_DECLARED"
 fi
 step_pass openbao_identity_lifecycle_install
-echo "JASON_OPENBAO_IDENTITY_LIFECYCLE_RECONCILIATION=PASS"
 
 if [ "$RECOVERY_PROFILE" = "provider_identity_and_authority_recovery" ]; then
   step_start provider_identity_release_recovery
