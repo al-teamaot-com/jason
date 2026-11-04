@@ -20,6 +20,6 @@ def test_retired_exception_does_not_disable_freeze_marker_gate(tmp_path):
     marker.write_text('{"status":"active","scope":"manual-and-automatic-production-promotions"}\n')
     marker.chmod(0o600)
     import pytest
-    with pytest.raises(runner.ReleaseManagerError, match='production deployment is frozen'):
+    with pytest.raises(runner.ReleaseManagerError, match='owner production deployment freeze is active'):
         runner.require_owner_production_deployment_unfrozen(tmp_path)
     assert marker.exists()
