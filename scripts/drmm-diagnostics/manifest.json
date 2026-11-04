@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "execution": "Windows PowerShell 5.1, SYSTEM, noninteractive",
+  "read_only": true,
+  "default_enrollment": "not_enabled",
+  "components": [
+    {
+      "name": "AOT - Windows Diagnostic Snapshot [WIN]",
+      "artifact": "components/windows-snapshot.ps1",
+      "sha256": "1bf4d0e8bf34ee1e15903b7ab16a95b27cdf795dda04a422ef16fc7dc8ac459b",
+      "approximate_max_runtime_seconds": 120,
+      "datto_component_uid": null,
+      "observed_provider_execution": false
+    },
+    {
+      "name": "AOT - Disk Space Analysis [WIN]",
+      "artifact": "components/disk-space-analysis.ps1",
+      "sha256": "937e6d6ad5c1d861cbb66979697581cb2d6f9e75323afbf78ed88d9c51338864",
+      "approximate_max_runtime_seconds": 150,
+      "datto_component_uid": null,
+      "observed_provider_execution": false
+    },
+    {
+      "name": "AOT - Network and DNS Diagnostics [WIN]",
+      "artifact": "components/network-dns.ps1",
+      "sha256": "6dd17b76b337f0499190b1cf4c92c8065252e962aba7f07c84f3de123894c56a",
+      "approximate_max_runtime_seconds": 120,
+      "datto_component_uid": null,
+      "observed_provider_execution": false
+    }
+  ]
+}
