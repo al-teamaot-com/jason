@@ -59,3 +59,37 @@ no prior approval may be silently rebound.
 ### Concurrent code-review coordination
 
 Before integrating this correction, compare the separate release-manager PRs #2279 (approval-only reconciliation), #2158 and #2153 (deployment and host-unit verification), and #2156 (production freeze, root admission, and rollback). Their current patches do not touch the new `owner_unfreeze_release` decision branch directly, but their shared release-manager surfaces require fresh integration and frozen-production regression checks. Recording this coordination does not approve or merge those PRs.
+
+### 2026-11-04 production-safety correction: the direct unfreeze is one transaction only
+
+The distinct direct Owner `unfreeze-release` step **records an authorized-pending
+receipt without deleting or altering the active production freeze marker**. This
+changes the earlier proposed behavior because leaving production unfrozen after
+a stand-alone CLI operation violates the Governance Handbook's completion
+standard. The receipt is bound to the exact candidate SHA, current native
+scope digest, verified rollback SHA, original signed Teams deployment source,
+and byte identity of the existing freeze marker. It has a fifteen-minute
+acceptance window; expired, missing, mismatched, malformed, already consumed,
+symlinked or changed receipts fail closed.
+
+The **native production transaction** remains the sole place where the marker
+may be temporarily removed. While holding the existing production transaction
+lock, PMV3 revalidates all existing protected-main, host, rollback, scope and
+admission checks; requires the normal circuit breaker to be CLOSED (no
+unreviewed open-breaker bypass), checks the exact pending receipt digest again,
+and uses the existing one-transaction freeze-backup and journal flow. The
+transaction restores the original marker byte-for-byte and then marks the
+explicit receipt consumed. The existing interrupted-transaction restoration
+path now recognizes the distinct explicit Owner receipt as well, so a crash
+cannot leave the marker removed or grant standing authority. Repeat or retry
+requires a new exact Owner decision and new eligible release identity; no
+silent token reuse.
+
+Successful local source tests prove pending-state preservation, source and
+freeze digest integrity, scope/rollback mismatch rejection, stale evidence
+rejection, protected transaction restore, receipt consumption and stranded
+transaction recovery. Those tests are preproduction evidence only. This change
+must still be separately admitted and merged via protected PMV3 integration,
+validated at an immutable new source SHA, authorized for that exact revision
+and scope, deployed and verified. Do not execute a worktree controller script
+against the existing production freeze or ticket runtime.

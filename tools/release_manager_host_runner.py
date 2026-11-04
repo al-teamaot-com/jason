@@ -457,7 +457,10 @@ def restore_stranded_one_transaction_freeze_under_lock(state_root: Path) -> None
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             continue
         if (doc.get("schema_version") == "2.0"
-                and doc.get("authorization") == "signed_teams_one_transaction_unfreeze"
+                and doc.get("authorization") in {
+                    "signed_teams_one_transaction_unfreeze",
+                    "explicit_owner_one_transaction_unfreeze",
+                }
                 and doc.get("freeze_restored") is False
                 and doc.get("status") in {"authorized_pending", "unfrozen_active"}):
             active.append((path, doc))
@@ -499,6 +502,28 @@ def begin_one_transaction_freeze_exception(
     state_root: Path, context: Mapping[str, Any],
 ) -> dict[str, Any]:
     snapshot = _freeze_marker_snapshot(state_root)
+    if context.get("authorization") == "explicit_owner_one_transaction_unfreeze":
+        # Revalidate the precise preauthorized receipt while the native
+        # production transaction lock is held; do not permit a changed source
+        # or freeze marker between context construction and marker removal.
+        proof = state_root / "owner-explicit-unfreeze-receipts" / (
+            str(context["release_id"]) + ".json")
+        info = proof.lstat()
+        raw = proof.read_bytes()
+        if (proof.is_symlink() or not stat.S_ISREG(info.st_mode)
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_uid != os.geteuid() or info.st_gid != os.getegid()
+                or len(raw) > 8192
+                or "sha256:" + hashlib.sha256(raw).hexdigest()
+                    != context.get("explicit_unfreeze_receipt_sha256")):
+            raise ReleaseManagerError("explicit Owner unfreeze receipt changed before transaction")
+        source = json.loads(raw)
+        if (source.get("status") != "authorized_pending"
+                or source.get("freeze_sha256_before") != snapshot["sha256"]
+                or source.get("candidate_sha") != context.get("candidate_sha")
+                or source.get("rollback_sha") != context.get("rollback_sha")
+                or source.get("scope_sha256") != context.get("scope_sha256")):
+            raise ReleaseManagerError("explicit Owner unfreeze authorization mismatch")
     marker = state_root / PRODUCTION_FREEZE_MARKER
     backup = state_root / PRODUCTION_FREEZE_BACKUP
     if backup.exists() or backup.is_symlink():
@@ -515,10 +540,16 @@ def begin_one_transaction_freeze_exception(
     receipt_path = _freeze_receipt_path(state_root, str(context["release_id"]))
     if receipt_path.exists() or receipt_path.is_symlink():
         raise ReleaseManagerError("one-release freeze exception receipt already exists")
-    approval_id = str(context["owner_approval_source"]).split(":", 1)[1]
+    approval_id = str(context["owner_approval_source"]).split(":", 1)[-1]
+    authorization = str(context.get("authorization") or "signed_teams_one_transaction_unfreeze")
+    if authorization not in {"signed_teams_one_transaction_unfreeze",
+                             "explicit_owner_one_transaction_unfreeze"}:
+        raise ReleaseManagerError("unsupported one-transaction freeze authorization")
     receipt = {
         "schema_version": "2.0",
-        "authorization": "signed_teams_one_transaction_unfreeze",
+        "authorization": authorization,
+        **({"explicit_unfreeze_receipt_sha256": context["explicit_unfreeze_receipt_sha256"]}
+           if authorization == "explicit_owner_one_transaction_unfreeze" else {}),
         "approval_id": approval_id,
         "release_id": str(context["release_id"]),
         "candidate_sha": str(context["candidate_sha"]),
@@ -648,6 +679,21 @@ def restore_one_transaction_freeze_exception(
     receipt["status"] = "deployment_returned"
     receipt["completed_at"] = now()
     atomic_json(receipt_path, receipt)
+    if receipt.get("authorization") == "explicit_owner_one_transaction_unfreeze":
+        source_receipt = state_root / "owner-explicit-unfreeze-receipts" / (
+            str(receipt["release_id"]) + ".json")
+        raw_source = source_receipt.read_bytes()
+        if ("sha256:" + hashlib.sha256(raw_source).hexdigest()
+                != receipt.get("explicit_unfreeze_receipt_sha256")):
+            raise ReleaseManagerError("explicit Owner unfreeze receipt drift after freeze restoration")
+        original = json.loads(raw_source)
+        if original.get("status") != "authorized_pending":
+            raise ReleaseManagerError("explicit Owner unfreeze receipt was already consumed")
+        original["status"] = "consumed"
+        original["completed_at"] = now()
+        original["freeze_restored"] = True
+        original["freeze_sha256_after"] = restored["sha256"]
+        atomic_json(source_receipt, original)
 
 
 def write_owner_notification_event(
@@ -5120,26 +5166,95 @@ def owner_unfreeze_release(
         existing = json.loads(receipt_path.read_text(encoding="utf-8"))
         if any(existing.get(k) != v for k, v in expected.items()):
             raise ReleaseManagerError("existing owner unfreeze receipt conflicts with exact release")
-        if not marker.exists():
+        if (marker.exists() and existing.get("status") == "authorized_pending"
+                and existing.get("freeze_remains_active") is True
+                and existing.get("restore_freeze_after_transaction") is True):
             return existing
-        raise ReleaseManagerError("owner unfreeze receipt exists while freeze marker remains active")
-    receipt = {**expected, "recorded_at": now(), "status": "authorized_pending"}
-    atomic_json(receipt_path, receipt)
-    try:
-        marker.unlink()
-    except BaseException:
-        receipt["status"] = "marker_removal_failed"
-        receipt["failed_at"] = now()
-        atomic_json(receipt_path, receipt)
-        raise
-    receipt["status"] = "unfrozen"
-    receipt["unfrozen_at"] = now()
+        raise ReleaseManagerError("owner unfreeze receipt is not a safely pending exact release")
+    # Recording the separate Owner decision does NOT unfreeze production.
+    # The release transaction will validate and consume this exact receipt,
+    # unfreeze under the production lock, and restore the original freeze in
+    # its finally block (or the existing stranded-transaction recovery path).
+    receipt = {**expected, "recorded_at": now(), "status": "authorized_pending",
+               "freeze_remains_active": True, "restore_freeze_after_transaction": True}
     atomic_json(receipt_path, receipt)
     record.setdefault("history", []).append(
-        {"at": now(), "state": "production_eligible", "gate": "owner_exact_sha_unfreeze_recorded"}
+        {"at": now(), "state": "production_eligible", "gate": "owner_exact_sha_unfreeze_pending_transaction"}
     )
     save_record(state_root, record)
     return receipt
+
+
+def explicit_owner_one_transaction_freeze_context(
+    state_root: Path, record: Mapping[str, Any], *, max_age_seconds: int = 900,
+) -> dict[str, Any] | None:
+    """Admit a recently recorded distinct Owner decision, never a standing waiver.
+
+    Called inside the native production transaction lock after source/health
+    checks. A pending authorization cannot remove the freeze on its own.
+    """
+    if str(record.get("state") or "") != "production_eligible":
+        return None
+    candidate = str((record.get("release_candidate") or {}).get("candidate_sha") or "")
+    rollback = str(record.get("rollback_sha") or "")
+    scope = (record.get("manual_scope_review") or {}).get("scope_sha256")
+    release_id = str(record.get("release_id") or "")
+    owner = record.get("owner_approval") or {}
+    source = str(owner.get("source") or "")
+    if (not SHA.fullmatch(candidate) or not SHA.fullmatch(rollback)
+            or not isinstance(scope, str) or not re.fullmatch(r"[0-9a-f]{64}", scope)
+            or release_id != record_id(candidate)
+            or owner.get("approved") is not True or owner.get("candidate_sha") != candidate
+            or not (source == "explicit_owner_instruction" or re.fullmatch(
+                r"authenticated_mobile_teams_owner:relapproval-[0-9a-f]{32}", source))):
+        return None
+    path = state_root / "owner-explicit-unfreeze-receipts" / (release_id + ".json")
+    try:
+        info = path.lstat()
+        if (path.is_symlink() or not stat.S_ISREG(info.st_mode)
+                or stat.S_IMODE(info.st_mode) != 0o600
+                or info.st_uid != os.geteuid() or info.st_gid != os.getegid()
+                or not 1 <= info.st_size <= 8192):
+            return None
+        raw = path.read_bytes()
+        receipt = json.loads(raw)
+        marker = _freeze_marker_snapshot(state_root)
+        recorded_at = datetime.fromisoformat(str(receipt.get("recorded_at") or "").replace("Z", "+00:00"))
+        at = datetime.now(timezone.utc)
+        if recorded_at.tzinfo is None:
+            return None
+        age = (at - recorded_at.astimezone(timezone.utc)).total_seconds()
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError, ReleaseManagerError):
+        return None
+    if (not 0 <= age <= max_age_seconds
+            or receipt.get("schema_version") != "1.0"
+            or receipt.get("authorization") != "explicit_exact_sha_owner_unfreeze"
+            or receipt.get("release_id") != release_id
+            or receipt.get("candidate_sha") != candidate
+            or receipt.get("rollback_sha") != rollback
+            or receipt.get("scope_sha256") != scope
+            or receipt.get("prior_release_approval_source") != source
+            or receipt.get("owner_approval_source") != "explicit_owner_instruction"
+            or receipt.get("status") != "authorized_pending"
+            or receipt.get("freeze_remains_active") is not True
+            or receipt.get("restore_freeze_after_transaction") is not True
+            or receipt.get("standing_authority") is not False
+            or receipt.get("automatic_publish_authority") is not False
+            or receipt.get("freeze_sha256_before") != marker["sha256"]):
+        return None
+    return {
+        "authorization": "explicit_owner_one_transaction_unfreeze",
+        "release_id": release_id,
+        "candidate_sha": candidate, "rollback_sha": rollback,
+        "scope_sha256": scope,
+        "recovery_profile_id": "explicit_exact_sha_owner_unfreeze",
+        "declaration_sha256": "sha256:" + hashlib.sha256(raw).hexdigest(),
+        "explicit_unfreeze_receipt_sha256": "sha256:" + hashlib.sha256(raw).hexdigest(),
+        "owner_approval_source": source,
+        "restore_freeze_after_transaction": True,
+        "standing_authority": False,
+    }
+
 
 
 def manual_release_scope_review(
@@ -5404,6 +5519,14 @@ def deploy_production(repo: Path, state_root: Path, record: dict[str, Any]) -> d
                             repo, state_root, record, recovery_context,
                         ) if recovery_context is not None else None
                     )
+                    if exception_context is None and recovery_context is None:
+                        # A separate direct Owner decision can admit only a
+                        # breaker-CLOSED normal deployment, not an open-breaker
+                        # recovery exception or an indefinite global unfreeze.
+                        revalidate_circuit_breaker(state_root)
+                        exception_context = explicit_owner_one_transaction_freeze_context(
+                            state_root, record,
+                        )
                     if exception_context is None:
                         require_owner_production_deployment_unfrozen(state_root)
                         raise ReleaseManagerError("production freeze exception evidence is incomplete")
