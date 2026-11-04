@@ -102,11 +102,11 @@ def test_dependency_conflict_allows_independent_work():
     assert result["status"]=="clear"
 
 def test_rollback_readiness_requires_complete_verified_manifest():
-    assert rollback.evaluate({"rollback_sha":"a","runtime_image":"r","mcp_image":"m","host_release":"h","verified":True})["status"]=="ready"
+    assert rollback.evaluate({"rollback_sha":"a","runtime_image":"r","mcp_image":"m","host_release":"h","verified":True})["status"]=="manifest_reported_verified"
     assert rollback.evaluate({"rollback_sha":"a","verified":True})["status"]=="not_ready"
 
 def test_operational_acceptance_requires_all_checks():
-    assert acceptance.evaluate([{"name":"smoke","status":"pass"},{"name":"health","status":"healthy"}])["status"]=="accepted"
+    assert acceptance.evaluate([{"name":"smoke","status":"pass"},{"name":"health","status":"healthy"}])["status"]=="checks_reported_passing"
     assert acceptance.evaluate([{"name":"smoke","status":"fail"}])["status"]=="failed"
 
 ledger = load("isolated_service_ledger")
@@ -156,3 +156,26 @@ def test_ledger_cannot_consume_symlink_as_evidence(tmp_path):
     (tmp_path/"docs.json").symlink_to(target)
     cfg={"services":[{"name":"documentation_assurance","state_file":"docs.json","max_age_seconds":60,"required":False}]}
     assert ledger.build(cfg,tmp_path,now=NOW)["entries"][0]["freshness"]=="invalid"
+
+def test_supervisor_never_green_for_unknown_pending_or_stale():
+    rows=[{'name':name,'required':False,'freshness':'fresh','service_status':status}
+          for name,status in [('docs','review_required'),('todo','stale'),
+                              ('tests','refresh_required'),('deps','unknown'),
+                              ('acceptance','pending')]]
+    result=supervisor.classify({'entries':rows})
+    assert result['status']=='degraded'
+    assert result['service_count']==5
+    assert len(result['warnings'])==5
+    assert result['problems']==[]
+
+
+def test_supervisor_required_unsafe_state_blocks():
+    rows=[{'name':'rollback_readiness','required':True,'freshness':'fresh','service_status':'blocked'}]
+    result=supervisor.classify({'entries':rows})
+    assert result['status']=='blocked'
+    assert result['problems']==[{'service':'rollback_readiness','reason':'status_blocked'}]
+
+
+def test_supervisor_invalid_entries_fail_closed():
+    assert supervisor.classify({'entries':None})['status']=='blocked'
+    assert supervisor.classify({'entries':[None]})['status']=='blocked'

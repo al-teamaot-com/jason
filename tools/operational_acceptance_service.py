@@ -14,7 +14,7 @@ def evaluate(checks:list[dict[str,Any]])->dict[str,Any]:
   name=str(c.get('name') or 'unnamed'); status=str(c.get('status') or 'unknown').lower()
   if status not in {'pass','passed','ok','healthy','succeeded'}:
    (unknown if status in {'','unknown','pending'} else failed).append(name)
- status='accepted' if checks and not failed and not unknown else ('failed' if failed else 'pending')
+ status='checks_reported_passing' if checks and not failed and not unknown else ('failed' if failed else 'pending')
  return {"status":status,"failed":failed,"unknown":unknown,"check_count":len(checks)}
 def main()->int:
  p=argparse.ArgumentParser();p.add_argument('--input',type=Path,required=True);p.add_argument('--output',type=Path,required=True);a=p.parse_args();src=load_json(a.input)

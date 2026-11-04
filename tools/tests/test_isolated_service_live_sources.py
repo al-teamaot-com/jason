@@ -158,3 +158,87 @@ def test_independent_worker_runs_are_idempotent_and_do_not_claim_todos(tmp_path)
     assert todo.read_text()==json.dumps({"updated_at":json.loads(todo.read_text())["updated_at"],
         "items":{"TODO-X":{"phase":"waiting_development_start","reason":"worker record missing"}}})
     assert len(list(state.glob("*.json")))==1
+
+
+def test_protected_readback_requires_fresh_complete_aligned_lkg():
+    manifest={"complete":True,"revision":"a"*40,"runtime_revision":"a"*40,
+       "mcp_revision":"a"*40,"host_revision":"a"*40,
+       "release_manager_source_revision":"a"*40,
+       "runtime_image_id":"sha256:"+"b"*64,"mcp_image_id":"sha256:"+"c"*64,
+       "scheduled_control_units":{"example.timer":"active"}}
+    control={"schema_version":"1.0","updated_at":NOW.isoformat(),
+       "last_known_good":{"manifest":manifest},"circuit_breaker":{"state":"closed"}}
+    drift={"schema_version":"1.0","observed_at":NOW.isoformat(),"status":"pass","problems":[]}
+    result=sources.rollback_protected_readback(control,drift,now=NOW)
+    assert result["status"]=="evidence_present"
+    assert result["rollback_sha"]=="a"*40
+    control["circuit_breaker"]["state"]="open"
+    assert sources.rollback_protected_readback(control,drift,now=NOW)["status"]=="blocked"
+    control["circuit_breaker"]["state"]="closed"
+    drift["status"]="drift_detected"
+    assert sources.rollback_protected_readback(control,drift,now=NOW)["status"]=="blocked"
+    drift["status"]="pass"
+    control["updated_at"]=(NOW-timedelta(minutes=4)).isoformat()
+    assert sources.rollback_protected_readback(control,drift,now=NOW)["status"]=="stale"
+    control["updated_at"]=NOW.isoformat()
+    manifest["runtime_revision"]="d"*40
+    assert sources.rollback_protected_readback(control,drift,now=NOW)["status"]=="unknown"
+
+
+def test_root_readback_uses_publication_mtime_not_last_state_change():
+    import os
+    stamp=NOW-timedelta(hours=3)
+    base_manifest={"complete":True,"revision":"a"*40,"runtime_revision":"a"*40,
+        "mcp_revision":"a"*40,"host_revision":"a"*40,"release_manager_source_revision":"a"*40,
+        "runtime_image_id":"sha256:"+"b"*64,"mcp_image_id":"sha256:"+"c"*64,
+        "scheduled_control_units":{"example.timer":"active"}}
+    control={"schema_version":"1.0","updated_at":stamp.isoformat(),
+        "last_known_good":{"manifest":base_manifest},"circuit_breaker":{"state":"closed"}}
+    drift={"schema_version":"1.0","observed_at":NOW.isoformat(),"status":"pass","problems":[]}
+    result=sources.rollback_protected_readback(control,drift,now=NOW,
+        control_published_at=NOW,drift_published_at=NOW)
+    assert result["status"]=="evidence_present"
+    result=sources.rollback_protected_readback(control,drift,now=NOW,
+        control_published_at=NOW-timedelta(minutes=4),drift_published_at=NOW)
+    assert result["status"]=="stale"
+
+
+def test_bounded_json_with_mtime_returns_same_inode_publication(tmp_path):
+    p=tmp_path/"published.json"
+    p.write_text('{"status":"pass"}')
+    pub=NOW-timedelta(seconds=5)
+    import os
+    os.utime(p,(pub.timestamp(),pub.timestamp()))
+    obj,digest,mtime=sources.bounded_json_with_mtime(p)
+    assert obj["status"]=="pass"
+    assert abs((mtime-pub).total_seconds())<0.01
+
+
+def test_documentation_review_remains_pending_after_no_change_pass(tmp_path):
+    import subprocess
+    from tools import documentation_assurance_service as docs
+    repo=tmp_path/"repo";repo.mkdir()
+    def git(*args):
+        result=subprocess.run(["git",*args],cwd=repo,capture_output=True,text=True,timeout=10,check=True)
+        return result.stdout.strip()
+    git("init","-q")
+    git("config","user.name","Test Engineer")
+    git("config","user.email","test@example.invalid")
+    (repo/"tools").mkdir();(repo/"docs").mkdir()
+    (repo/"README.md").write_text("baseline")
+    git("add","README.md");git("commit","-qm","initial")
+    base=git("rev-parse","HEAD")
+    (repo/"tools"/"worker.py").write_text("print('test')\n")
+    (repo/"docs"/"worker.md").write_text("Needs content review\n")
+    git("add","tools/worker.py","docs/worker.md")
+    git("commit","-qm","change and docs")
+    git("update-ref","refs/remotes/origin/main",git("rev-parse","HEAD"))
+    state=tmp_path/"documentation.json"
+    first=docs.scan(repo,state,base=base,head="origin/main")
+    second=docs.scan(repo,state,head="origin/main")
+    assert first["status"]=="review_required"
+    assert second["status"]=="review_required"
+    assert first["pending_review_count"]==second["pending_review_count"]==1
+    assert second["reason"]=="pending_unverified_documentation_review"
+    assert second["changed_paths"]==[]
+    assert second["pending_reviews"][0]["head_sha"]==first["head_sha"]

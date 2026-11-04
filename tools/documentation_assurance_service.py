@@ -74,6 +74,30 @@ def scan(repo: Path, state_path: Path, base: str | None = None, head: str = "HEA
     else:
         base_sha = git(repo, "rev-parse", f"{head_sha}^1")
     paths = changed_paths(repo, base_sha, head_sha)
+    findings = classify(paths)
+    # Preserve unresolved documentation findings across no-change passes.
+    # No branch movement or later pass can silently certify content accuracy.
+    pending = previous.get("pending_reviews", [])
+    if not isinstance(pending, list) or len(pending) > 100 or any(
+            not isinstance(entry, dict) or not isinstance(entry.get("head_sha"), str)
+            or entry.get("status") not in {"attention", "review_required"}
+            for entry in pending):
+        raise ValueError("invalid durable documentation review state")
+    if findings["status"] in {"attention", "review_required"} and not any(
+            entry["head_sha"] == head_sha for entry in pending):
+        pending.append({
+            "head_sha": head_sha,
+            "status": findings["status"],
+            "reason": findings["reason"],
+            "material_paths": findings["material_paths"][:60],
+            "documentation_paths": findings["documentation_paths"][:60],
+            "first_observed_at": now_iso(),
+        })
+    if findings["status"] == "current" and pending:
+        findings["status"] = ("attention" if any(
+            entry["status"] == "attention" for entry in pending) else "review_required")
+        findings["reason"] = "pending_unverified_documentation_review"
+        findings["requires_documentation_review"] = True
     result = {
         "schema_version": "1.0",
         "service": "documentation_assurance",
@@ -82,7 +106,9 @@ def scan(repo: Path, state_path: Path, base: str | None = None, head: str = "HEA
         "head_sha": head_sha,
         "last_scanned_sha": head_sha,
         "changed_paths": paths,
-        **classify(paths),
+        "pending_reviews": pending,
+        "pending_review_count": len(pending),
+        **findings,
     }
     atomic_json(state_path, result)
     return result

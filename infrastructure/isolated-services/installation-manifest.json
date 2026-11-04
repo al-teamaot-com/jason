@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0",
+  "status": "source_only_not_installed",
+  "production_deployment_authorized": false,
+  "release_manager_required": true,
+  "default_enable_all_new_units": false,
+  "source_revision_binding": "exact_merged_protected_main_sha_required_at_release_build",
+  "rollback": "complete_immutable_host_units_and_service_sources_required",
+  "required_companion_sources": [
+    "tools/isolated_service_common.py",
+    "tools/isolated_service_live_sources.py",
+    "tools/isolated_service_github_sources.py",
+    "tools/isolated_service_shadow.py",
+    "tools/isolated_service_ledger.py",
+    "tools/isolated_service_supervisor.py",
+    "tools/documentation_assurance_service.py",
+    "tools/provider_health_monitor_service.py",
+    "tools/test_evidence_collection_service.py",
+    "tools/work_reconciliation_service.py",
+    "tools/dependency_conflict_service.py",
+    "tools/source_baseline_monitor_service.py",
+    "tools/rollback_readiness_service.py",
+    "tools/operational_acceptance_service.py",
+    "tools/pmv3_worker_release_gate.py"
+  ],
+  "unit_sources": [
+    "infrastructure/isolated-services/jason-isolated-shadow@.service",
+    "infrastructure/isolated-services/jason-isolated-shadow@.timer",
+    "infrastructure/isolated-services/jason-independent-support.service",
+    "infrastructure/isolated-services/jason-independent-support.timer",
+    "infrastructure/isolated-services/jason-independent-todo-intake.service",
+    "infrastructure/isolated-services/jason-independent-todo-intake.timer",
+    "infrastructure/isolated-services/jason-independent-development.service",
+    "infrastructure/isolated-services/jason-independent-development.timer",
+    "infrastructure/isolated-services/jason-independent-supervisor.service",
+    "infrastructure/isolated-services/jason-independent-supervisor.timer"
+  ],
+  "expected_initial_units": "all_disabled_until_explicit_migration_phase",
+  "owner_pause_preservation": "old_monolithic_worker_start_condition_must_remain_until_replacement_lanes_verified",
+  "production_safety_invariants": [
+    "owner_exact_sha_teams_authorization",
+    "single_production_transaction",
+    "immutable_complete_last_known_good_rollback",
+    "protected_root_readback",
+    "drift_and_circuit_breaker",
+    "independent_operational_acceptance"
+  ]
+}

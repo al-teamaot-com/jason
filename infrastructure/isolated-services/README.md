@@ -26,3 +26,27 @@ before their results can be used beyond advisory `unknown`/`pending` state.
 
 A separate ledger and supervisor can be run after independent service samples;
 no global PMV3 gate is installed by this design.
+
+## Independently scheduled native engineering lanes (source only)
+
+Four additional user-service/timer pairs are staged for `support`, `todo-intake`,
+`development`, and `supervisor`. They call **the existing governed worker
+entrypoints** and use their native approved-work, support-first, bounded-claim,
+recovery and evidence rules. They do not create a second engineering queue.
+Each instance has its own timer/failure domain and must pass the existing
+`pmv3_worker_release_gate.py` production-transaction admission check. These
+units require the durable old-controller owner-pause receipt to be present;
+they cannot start alongside a resumed old monolithic controller.
+
+The read-only inspection on November 4 found that the production-transaction
+gate exists in source but is not present at the prospective installed path.
+The unit templates therefore explicitly require that source to be installed
+by the governed immutable release. The full companion-source and unit inventory
+is in `installation-manifest.json`. All new units remain **disabled** unless
+and until exact-SHA production authorization, host rollback, production safety,
+worker-capacity/concurrency acceptance and migration checks pass.
+
+Do not copy these units or gate manually onto the Jason production host.
+
+
+**Reuse existing independent publishers:** Jason already has a governed documentation reconciliation service and provider-health canary timer. The new Documentation and Provider Health workers are advisory consumers of those authoritative outputs, not competing documentation merge or provider-probe writers. Preserve those existing units unless a separately authorized manifest replaces them.

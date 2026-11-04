@@ -45,8 +45,8 @@ def source_age(value: Any, now: datetime, ttl: int) -> tuple[int | None, bool]:
     return seconds, seconds <= ttl
 
 
-def bounded_json(path: Path) -> tuple[dict[str, Any], str]:
-    """Reject symlinks, non-regular files, oversized files, and ambiguous JSON."""
+def bounded_json_with_mtime(path: Path) -> tuple[dict[str, Any], str, datetime]:
+    """Read one regular-file inode and its publisher mtime without following links."""
     fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
     try:
         info = os.fstat(fd)
@@ -59,9 +59,14 @@ def bounded_json(path: Path) -> tuple[dict[str, Any], str]:
         value = json.loads(data)
         if not isinstance(value, dict):
             raise ValueError("source JSON must be an object")
-        return value, hashlib.sha256(data).hexdigest()
+        return value, hashlib.sha256(data).hexdigest(), datetime.fromtimestamp(info.st_mtime, timezone.utc)
     finally:
         os.close(fd)
+
+
+def bounded_json(path: Path) -> tuple[dict[str, Any], str]:
+    value, digest, _ = bounded_json_with_mtime(path)
+    return value, digest
 
 
 def provider_canaries(source: dict[str, Any], *, now: datetime, max_age_seconds: int = 900) -> dict[str, Any]:
@@ -113,3 +118,54 @@ def todo_commitments(source: dict[str, Any], *, now: datetime, max_age_seconds: 
     else:
         result["reason"] = "existing_commitment_ledger"
     return result
+
+
+def rollback_protected_readback(control: dict[str, Any], drift: dict[str, Any], *,
+                                now: datetime, max_age_seconds: int = 90,
+                                control_published_at: datetime | None = None,
+                                drift_published_at: datetime | None = None) -> dict[str, Any]:
+    """Assess existing root-published readbacks without opening protected files.
+
+    This is advisory only. The native Release Manager remains the sole authority
+    for breaker state, rollback execution, and production acceptance.
+    """
+    import re
+    if control.get("schema_version") != "1.0" or drift.get("schema_version") != "1.0":
+        return {"status": "unknown", "reason": "invalid_release_readback_schema"}
+    # The root publisher refreshes file mtime on every readback cycle; the
+    # control's updated_at is the last breaker change, not publication time.
+    control_clock = control_published_at.isoformat() if control_published_at else control.get("updated_at")
+    drift_clock = drift_published_at.isoformat() if drift_published_at else drift.get("observed_at")
+    control_age, control_fresh = source_age(control_clock, now, max_age_seconds)
+    drift_age, drift_fresh = source_age(drift_clock, now, max_age_seconds)
+    if not (control_fresh and drift_fresh):
+        return {"status": "stale", "reason": "protected_readback_not_fresh",
+                "control_age_seconds": control_age, "drift_age_seconds": drift_age}
+    lkg = control.get("last_known_good")
+    manifest = lkg.get("manifest") if isinstance(lkg, dict) else None
+    if not isinstance(manifest, dict):
+        return {"status": "unknown", "reason": "last_known_good_manifest_missing"}
+    revision = manifest.get("revision")
+    if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        return {"status": "unknown", "reason": "invalid_last_known_good_sha"}
+    aligned = all(manifest.get(name) == revision for name in
+                  ("runtime_revision", "mcp_revision", "host_revision", "release_manager_source_revision"))
+    complete = (manifest.get("complete") is True and aligned and
+                all(isinstance(manifest.get(key), str) and manifest[key].startswith("sha256:")
+                    for key in ("runtime_image_id", "mcp_image_id")) and
+                isinstance(manifest.get("scheduled_control_units"), dict))
+    breaker = control.get("circuit_breaker")
+    breaker_state = str(breaker.get("state") or "unknown") if isinstance(breaker, dict) else "unknown"
+    drift_status = str(drift.get("status") or "unknown")
+    problems = drift.get("problems") if isinstance(drift.get("problems"), list) else []
+    if not complete:
+        status, reason = "unknown", "last_known_good_manifest_incomplete_or_unaligned"
+    elif breaker_state != "closed" or drift_status != "pass":
+        status, reason = "blocked", "native_release_safety_hold"
+    else:
+        status, reason = "evidence_present", "fresh_protected_readback_and_complete_lkg"
+    return {"status": status, "reason": reason, "rollback_sha": revision,
+            "last_known_good_complete": complete, "circuit_breaker_state": breaker_state,
+            "production_drift_status": drift_status, "drift_problem_count": len(problems),
+            "control_age_seconds": control_age, "drift_age_seconds": drift_age,
+            "advisory_only": True}

@@ -23,7 +23,7 @@ ProtectControlGroups=true
 RestrictSUIDSGID=true
 TimeoutStartSec=120
 Environment=PYTHONDONTWRITEBYTECODE=1
-ExecStart=/usr/bin/python3 /usr/local/lib/jason/isolated_service_shadow.py --service %i --repo /home/al/projects/jason --state-root /var/lib/jason-isolated-services --provider-source /var/lib/jason/provider-health-canaries.json --todo-source /var/lib/jason/openclaw/support-repair/todo-release-state.json
+ExecStart=/usr/bin/python3 /usr/local/lib/jason/isolated_service_shadow.py --service %i --repo /home/al/projects/jason --state-root /var/lib/jason-isolated-services --provider-source /var/lib/jason/provider-health-canaries.json --todo-source /var/lib/jason/openclaw/support-repair/todo-release-state.json --control-readback-source /var/lib/jason/openclaw/release-manager/protected-readback/production-control-state.json --drift-readback-source /var/lib/jason/openclaw/release-manager/protected-readback/production-drift.json
 
 # Source-only artifact. Do not install or enable until admitted through the
 # existing exact-SHA Production Manager release process.

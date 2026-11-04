@@ -103,3 +103,79 @@ No isolated record can authorize or trigger production deployment. In this branc
 6. Only then remove duplicated PMV3 code and scheduling. Do not remove production safety/authorization controls or override a held production transaction.
 
 The systemd template units in `infrastructure/isolated-services/` are **not installed**; their deployment must be in an immutable Release Manager manifest and independently authorized for the exact candidate SHA.
+
+
+### Approved protected-readback input (rollback readiness)
+
+The independent rollback observer now reads **only** root-published snapshots at:
+
+- `/var/lib/jason/openclaw/release-manager/protected-readback/production-control-state.json`
+- `/var/lib/jason/openclaw/release-manager/protected-readback/production-drift.json`
+
+The underlying root-owned `production-control-state.json` and `production-drift.json` are never opened or modified by the service. Its bounded regular-file reader rejects symlinks and oversized/non-JSON files, records exact source SHA-256 digests, and performs the same 90-second freshness model as the native Release Manager: **publisher file mtime**, not the older `control.updated_at` breaker-change timestamp. The service checks LKG manifest completeness, release identity alignment, breaker state, and drift status. It reports only `evidence_present`, `blocked`, `unknown` or `stale`, never grants rollback/deployment authority, and never closes a breaker.
+
+This distinction was verified against current operational readback behavior. After the owner-approved PMV3 pause, the old timer was kept active while a user-level systemd `ConditionPathExists` guard blocks its engineering service starts. Native drift returned to PASS without disabling release safety. Breaker recovery continues exclusively through its existing proof-and-readmission policy (three distinct fresh root PASS observations, cooldown and bounded root verification), not by modifying protected state.
+
+
+## Existing independent publishers: reuse, do not duplicate
+
+A fresh host inventory established that Jason already has independently scheduled native publishers:
+
+| Existing producer | Cadence observed | Migration decision |
+|---|---|---|
+| `jason-documentation-reconciliation.service/.timer` | Noon and midnight | **Reuse** for approved documentation PR/readiness updates; the independent Documentation Assurance service detects unresolved source-to-doc gaps and consumes the existing publisher's verified receipts. Do not create a second documentation writer or an alternate branch merge route. |
+| `jason-provider-health-canary.service/.timer` | Periodic | **Reuse** the existing read-only provider probes; the new Provider Health service normalizes their signed/observed health, freshness and error classification. Do not create a second credential-bearing provider probe framework. |
+| Native Release Manager root readback and drift controls | Continuous | **Keep protected**. Independent Rollback Readiness reads root-published copies only; it cannot open root files, reset breaker, or execute rollback. |
+| Existing support/owner-approved/TODO native workers | Formerly chained in PMV3 | **Separate scheduling only after governed cutover**, retain exact same entrypoints and their existing scope/claim/approval logic. |
+
+These reuse decisions matter: a new writer for documentation or a new provider-check scheduler would add the very overlapping control planes that this project is intended to eliminate.
+
+## Native engineering lane cutover acceptance
+
+The source-only templates `jason-independent-{support,todo-intake,development,supervisor}.{service,timer}` call existing native worker implementations. Their live installation is **not authorized** by source tests alone. The immutable release package must include all companion scripts, particularly `pmv3_worker_release_gate.py` (present in source but not yet installed at the proposed path), and the exact unit inventory in `infrastructure/isolated-services/installation-manifest.json`.
+
+Prove during preproduction and governed cutover:
+
+- All lanes run as unprivileged `al`, never root, with bounded filesystem writes and no expanded provider authority.
+- No two processes claim the same support/TODO item, create duplicate PRs, or duplicate external actions; claim/capacity/support-first evidence uses the existing native ledger.
+- A held production transaction mutex prevents lane execution without a failed service; no new lane starts while the old monolithic engine is active.
+- Each service restart/failure is isolated; one failed docs/provider/engineering lane cannot cause an unrelated production circuit-breaker event.
+- Source/test/health evidence remains bound to the exact intended merged SHA, and the existing protected release controls continue independently.
+- The old timer stays in LKG-expected `active` state but its guard refuses starts until the replacement is deployed and independently verified. Removing the guard and changing last-known-good unit expectations requires a separately governed, rollback-ready release.
+
+The service-splitting PR is currently **source-only**, not a certified production candidate. A passing PR diff/CI does not replace production Manager's exact SHA, source scope, provider-backed operational acceptance, breaker and rollback checks, or Teams authorization.
+
+
+## Reproducible isolated-service preproduction acceptance
+
+`python3 tools/ci/isolated_service_preproduction_lab.py` constructs a disposable Git
+repository and sanitized fixture provider/TODO/test/dependency/rollback/acceptance
+snapshots, then runs all eight isolated services as independent one-shot Python
+processes through two complete cycles. It verifies durable documentation review
+retention, actual provider failure isolation, stable TODO classification, exact
+source-SHA absence remaining unknown, expected preproduction classification,
+unchanged fixture source digests, and exactly ten stable service/ledger/supervisor
+records. No provider calls, service deployment, GitHub mutations, approval grants,
+or production state writes occur. The dedicated GitHub CI workflow preserves a
+JSON acceptance receipt as an artifact. This lab is **not** equivalent to a
+production release or a provider-backed operational acceptance.
+
+The independent native engineering support, TODO-intake, development and
+supervisor timer/service templates are staged source-only. They call existing
+worker entrypoints and retain the existing production-transaction admission
+check; their installer must include the admission helper in its immutable host
+manifest. Their current deployment status remains **not installed/disabled**.
+
+
+### Advisory acceptance terminology
+
+A standalone untrusted rollback manifest can only report
+`manifest_reported_verified`; it is **not** a verified rollback or production
+readiness. Passing standalone check records can only report
+`checks_reported_passing`; they are **not** proof of independent production
+operational acceptance. The protected root-published readback adapter validates
+actual LKG identity, drift and breaker state and reports `evidence_present`
+only as a nonauthorizing observation. The native Release Manager continues to
+own rollback readiness, exact-source admission, deployment, and final
+operational acceptance. No output of these shadow services may mint owner
+approval or close an Autotask/production work item independently.
